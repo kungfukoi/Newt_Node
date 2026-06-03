@@ -3,6 +3,7 @@ import { systemApi, workflowApi } from "./api/newtApi.js";
 import {
   buildWorkflowDocument,
   ensureWritableWorkflowHandle,
+  isAbsoluteWorkflowFilePath,
   workflowDisplayPath,
   workflowFileNameForProject,
   writeWorkflowFileHandle
@@ -170,6 +171,37 @@ export function useWorkflowPersistence({
     return true;
   }
 
+  async function saveProjectToKnownFilePath(filePath) {
+    const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
+    const id = projectId || createNodeId("workflow");
+    const fileName = String(filePath || "").split(/[\\/]/).filter(Boolean).pop() || localWorkflowFileName || workflowFileNameForProject(cleanProjectName);
+    const workflow = currentWorkflowDocument({
+      id,
+      name: cleanProjectName,
+      fileName
+    });
+
+    setSaveStatus("Saving workflow...");
+    const { response, data } = await systemApi.saveWorkflowFile({
+      filePath,
+      workflow
+    });
+    if (!response.ok) {
+      throw new Error(data.error || "Could not save workflow JSON.");
+    }
+
+    const savedWorkflow = data || workflow;
+    const savedPath = workflowDisplayPath(savedWorkflow, filePath);
+    setProjectId(savedWorkflow.id || id);
+    setProjectName(savedWorkflow.name || workflow.name);
+    setSavedProjectName(savedWorkflow.name || workflow.name);
+    setLocalWorkflowFileName(savedWorkflow.fileName || fileName);
+    setWorkflowFilePath(savedPath);
+    markWorkflowClean({ projectName: savedWorkflow.name || workflow.name });
+    setSaveStatus(`Saved ${savedPath}`);
+    return true;
+  }
+
   async function saveProjectAsLocalFile() {
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
 
@@ -265,6 +297,16 @@ export function useWorkflowPersistence({
         try {
           setSaveStatus("Saving local workflow...");
           await saveProjectToLocalHandle(localWorkflowHandleRef.current);
+        } catch (error) {
+          setSaveStatus(error.message || "Could not save workflow JSON.");
+          return false;
+        }
+        return true;
+      }
+
+      if (!projectPackagePath && isAbsoluteWorkflowFilePath(workflowFilePath)) {
+        try {
+          await saveProjectToKnownFilePath(workflowFilePath);
         } catch (error) {
           setSaveStatus(error.message || "Could not save workflow JSON.");
           return false;

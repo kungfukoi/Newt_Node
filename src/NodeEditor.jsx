@@ -807,7 +807,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath]);
+  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, workflowFilePath]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -7053,51 +7053,6 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
   const wanSegmentCount = Math.max(1, Math.min(8, Math.round(Number(node.data.transitionWanSegmentCount || 3))));
   const wanSelectedSegment = Math.max(1, Math.min(wanSegmentCount, Math.round(Number(node.data.transitionWanSelectedSegment || 1))));
   const loras = transitionWanLoraItemsForData(node.data);
-  const [dragState, setDragState] = React.useState(null);
-  const keyframeKeys = keyframeItems.map((item) => item.key);
-  const keyframeKeySignature = keyframeKeys.join("\n");
-
-  React.useEffect(() => {
-    if (dragState?.key && !keyframeKeys.includes(dragState.key)) setDragState(null);
-  }, [dragState?.key, keyframeKeySignature]);
-
-  function moveKeyframe(draggedKey, targetKey) {
-    if (!draggedKey || !targetKey || draggedKey === targetKey) return;
-    const fromIndex = keyframeKeys.indexOf(draggedKey);
-    const toIndex = keyframeKeys.indexOf(targetKey);
-    if (fromIndex < 0 || toIndex < 0) return;
-    onUpdate(node.id, { transitionKeyframeOrder: moveArrayItem(keyframeKeys, fromIndex, toIndex) });
-  }
-
-  function keyframeKeyAtPoint(event) {
-    const element = typeof document === "undefined" ? null : document.elementFromPoint(event.clientX, event.clientY);
-    return element?.closest?.("[data-transition-keyframe-key]")?.dataset?.transitionKeyframeKey || "";
-  }
-
-  function startKeyframeDrag(event, key) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    setDragState({ key, pointerId: event.pointerId });
-  }
-
-  function finishKeyframeDrag(event) {
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const targetKey = keyframeKeyAtPoint(event);
-    moveKeyframe(dragState.key, targetKey);
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    setDragState(null);
-  }
-
-  function cancelKeyframeDrag(event) {
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    event.stopPropagation();
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    setDragState(null);
-  }
 
   function updateLora(index, patch) {
     const nextLoras = loras.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item));
@@ -7151,12 +7106,8 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
             {keyframeItems.map((item, index) => (
               <div
                 key={item.key}
-                className={`transition-keyframe-thumb ${dragState?.key === item.key ? "dragging" : ""}`}
+                className="transition-keyframe-thumb"
                 role="listitem"
-                data-transition-keyframe-key={item.key}
-                onPointerDown={(event) => startKeyframeDrag(event, item.key)}
-                onPointerUp={finishKeyframeDrag}
-                onPointerCancel={cancelKeyframeDrag}
                 title={`${ordinalLabel(index + 1)} keyframe: ${item.label}`}
               >
                 <img src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
@@ -9608,13 +9559,6 @@ function connectedSummary(items = [], fallback) {
   if (!items.length) return fallback;
   if (items.length === 1) return sourceLabel(items[0].source);
   return `${items.length} connected`;
-}
-
-function moveArrayItem(items = [], fromIndex, toIndex) {
-  const nextItems = [...items];
-  const [item] = nextItems.splice(fromIndex, 1);
-  nextItems.splice(toIndex, 0, item);
-  return nextItems;
 }
 
 function ordinalLabel(value) {

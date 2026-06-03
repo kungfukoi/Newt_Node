@@ -247,6 +247,7 @@ registerCoreRoutes(app, {
   selectLoraFileWithDialog,
   selectWorkflowFileWithDialog,
   readWorkflowFromFilePath,
+  saveWorkflowToFilePath,
   buildHealthPayload,
   timedApi,
   buildStorageDiagnostics,
@@ -4989,6 +4990,45 @@ async function readWorkflowFromFilePath(filePath) {
       graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
     })
   );
+}
+
+async function saveWorkflowToFilePath(filePath, workflow) {
+  const workflowFilePath = normalizeWorkflowPackagePath(filePath);
+  if (!workflowFilePath || path.extname(workflowFilePath).toLowerCase() !== ".json") {
+    const error = new Error("Workflow save target must be a JSON file path.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (!workflow?.graph || !Array.isArray(workflow.graph.nodes) || !Array.isArray(workflow.graph.edges)) {
+    const error = new Error("That JSON file is not a NewtNode workflow.");
+    error.status = 400;
+    throw error;
+  }
+
+  const workflowDirectory = path.dirname(workflowFilePath);
+  if (!existsSync(workflowDirectory)) {
+    const error = new Error("Workflow folder is not accessible.");
+    error.status = 400;
+    throw error;
+  }
+
+  const workflowFileName = path.basename(workflowFilePath);
+  const workflowData = {
+    ...workflow,
+    fileName: workflowFileName,
+    updatedAt: workflow.updatedAt || new Date().toISOString()
+  };
+  delete workflowData.filePath;
+  delete workflowData.workflowFilePath;
+  delete workflowData.fullPath;
+  delete workflowData.path;
+
+  await writeJsonAtomic(workflowFilePath, workflowData);
+  return {
+    ...workflowData,
+    filePath: workflowFilePath
+  };
 }
 
 function workflowShouldRegisterOpenedPackage(workflow, packagePath) {

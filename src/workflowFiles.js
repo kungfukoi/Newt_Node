@@ -51,6 +51,11 @@ export function workflowDisplayPath(project = {}, fallback = "") {
   return firstNonEmptyString(workflow.filePath, workflow.workflowFilePath, workflow.fullPath, workflow.path, workflow.fileName, fallback);
 }
 
+export function isAbsoluteWorkflowFilePath(value) {
+  const filePath = String(value || "").trim();
+  return Boolean(filePath && (/^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\") || filePath.startsWith("/")));
+}
+
 export async function ensureWritableWorkflowHandle(handle) {
   if (!handle?.queryPermission || !handle?.requestPermission) return true;
   const options = { mode: "readwrite" };

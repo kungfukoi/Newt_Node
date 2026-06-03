@@ -236,6 +236,10 @@ export const systemApi = {
 
   openWorkflowFile(body, label = "Open workflow") {
     return fetchJsonApi("/api/system/open-workflow-file", jsonBody(body), label);
+  },
+
+  saveWorkflowFile(body, label = "Save workflow") {
+    return fetchJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
   }
 };
 

@@ -8,6 +8,7 @@ export function registerCoreRoutes(
     selectLoraFileWithDialog,
     selectWorkflowFileWithDialog,
     readWorkflowFromFilePath,
+    saveWorkflowToFilePath,
     buildHealthPayload,
     timedApi,
     buildStorageDiagnostics,
@@ -69,6 +70,15 @@ export function registerCoreRoutes(
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
       res.status(status).json({ error: error.message || "Workflow selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+    }
+  });
+
+  app.post("/api/system/save-workflow-file", async (req, res) => {
+    try {
+      const workflow = await saveWorkflowToFilePath(req.body.filePath, req.body.workflow || req.body);
+      res.json(workflow);
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.message || "Workflow save failed." });
     }
   });
 

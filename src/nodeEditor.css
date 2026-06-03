@@ -3891,18 +3891,7 @@ video.newtnode-video-fallback {
   border-radius: 7px;
   outline: 0;
   background: rgba(0, 0, 0, 0.34);
-  cursor: grab;
-  touch-action: none;
   user-select: none;
-}
-
-.transition-keyframe-thumb:active {
-  cursor: grabbing;
-}
-
-.transition-keyframe-thumb.dragging {
-  border-color: rgba(221, 198, 49, 0.82);
-  opacity: 0.48;
 }
 
 .transition-keyframe-thumb:hover,
