@@ -230,6 +230,10 @@ export const systemApi = {
     return fetchJsonApi("/api/system/select-folder", jsonBody(body), "Folder picker");
   },
 
+  selectLoraFile(body) {
+    return fetchJsonApi("/api/system/select-lora-file", jsonBody(body), "LoRA file picker");
+  },
+
   openWorkflowFile(body, label = "Open workflow") {
     return fetchJsonApi("/api/system/open-workflow-file", jsonBody(body), label);
   }

@@ -151,8 +151,16 @@ export const utilityVideoModelNames = {
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID Matte",
   compositeVideo: "Composite Video",
+  transitionBuilder: "Transition Builder",
   wanVaceMaskToVideo: "Wan VACE Mask-to-Video",
   wanVaceInpainting: "Wan VACE 14B Inpainting",
+  wan22A14bT2v: "Wan 2.2 A14B LoRA Text-to-Video",
+  wan22A14bI2v: "Wan 2.2 A14B LoRA Image-to-Video",
+  wan21T2vLora: "Wan 2.1 14B LoRA Text-to-Video",
+  wan21I2vLora: "Wan 2.1 14B LoRA Image-to-Video",
+  wan22VaceDepth: "Wan 2.2 VACE Fun A14B Depth",
+  wan22VacePose: "Wan 2.2 VACE Fun A14B Pose",
+  wan22VaceInpainting: "Wan 2.2 VACE Fun A14B Inpainting",
   sam3Video: "SAM 3 Video",
   voidVideoInpainting: "VOID Video Inpainting",
   birefnetVideo: "BiRefNet Video",
@@ -201,10 +209,26 @@ export const colorIdMatteVideoOutputOptions = [
   ["webm", "WebM mask"],
   ["mov", "ProRes mask"]
 ];
+export const transitionBuilderMaskStyleOptions = ["wipe", "reverse wipe", "center wipe", "white", "black"];
+export const transitionBuilderOutputOptions = ["mp4", "mov"];
+export const transitionBuilderEasingOptions = ["linear", "ease in", "ease out", "ease in/out"];
+export const wan21T2vLoraResolutionOptions = ["480p", "580p", "720p"];
+export const wan21I2vLoraResolutionOptions = ["480p", "720p"];
+export const wan21T2vLoraAspectRatioOptions = ["16:9", "9:16"];
+export const wan21I2vLoraAspectRatioOptions = ["auto", "16:9", "9:16", "1:1"];
+export const wan22A14bResolutionOptions = ["480p", "580p", "720p"];
+export const wan22A14bT2vAspectRatioOptions = ["16:9", "9:16", "1:1"];
+export const wan22A14bI2vAspectRatioOptions = ["auto", "16:9", "9:16", "1:1"];
+export const wan22A14bAccelerationOptions = ["regular", "none"];
+export const wan22A14bInterpolatorOptions = ["none", "film", "rife"];
 export const wanVaceResolutionOptions = ["480p", "580p", "720p"];
 export const wanVaceAspectRatioOptions = ["auto", "16:9", "9:16"];
+export const wanVaceInpaintingResolutionOptions = ["auto", "240p", "360p", "480p", "580p", "720p"];
+export const wanVaceInpaintingAspectRatioOptions = ["auto", "16:9", "1:1", "9:16"];
 export const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 export const wanVaceAccelerationOptions = ["regular", "low", "none"];
+export const wanVaceInterpolatorOptions = ["film", "rife"];
+export const wanVaceTransparencyOptions = ["content_aware", "white", "black"];
 
 export const utilityModelDescriptions = {
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
@@ -214,12 +238,20 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
   [utilityImageModelNames.sam3Image]: "Segments prompted objects in an image and returns the masked result.",
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
-  [utilityVideoModelNames.wanFunControl]: "Uses a control video, optional reference image, and prompt to guide a new video.",
+  [utilityVideoModelNames.wanFunControl]: "Legacy Wan Fun Control alias. New runs route to Wan 2.2 VACE Fun A14B Depth.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
   [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
+  [utilityVideoModelNames.transitionBuilder]: "Builds local transition guides or generates stitched Wan 2.2 LoRA transition segments from keyframes and matte timing.",
   [utilityVideoModelNames.wanVaceMaskToVideo]: "Uses Fal Wan VACE to create a prompted video from a reference image inside a connected mask video.",
   [utilityVideoModelNames.wanVaceInpainting]: "Uses Fal Wan VACE 14B with source video, mask video, prompt, and optional reference images for masked video generation.",
+  [utilityVideoModelNames.wan22A14bT2v]: "Uses Fal Wan 2.2 A14B text-to-video with optional LoRA weights, frame interpolation, guidance, and quality controls.",
+  [utilityVideoModelNames.wan22A14bI2v]: "Uses Fal Wan 2.2 A14B image-to-video with optional LoRA weights from a connected start image and optional end image.",
+  [utilityVideoModelNames.wan21T2vLora]: "Uses Fal Wan 2.1 14B text-to-video with optional LoRA weights.",
+  [utilityVideoModelNames.wan21I2vLora]: "Uses Fal Wan 2.1 14B image-to-video with optional LoRA weights from a connected reference image.",
+  [utilityVideoModelNames.wan22VaceDepth]: "Uses Fal Wan 2.2 VACE Fun A14B Depth for prompted video generation from a source or precomputed depth video.",
+  [utilityVideoModelNames.wan22VacePose]: "Uses Fal Wan 2.2 VACE Fun A14B Pose for prompted video generation from a source or precomputed pose video.",
+  [utilityVideoModelNames.wan22VaceInpainting]: "Uses Fal Wan 2.2 VACE Fun A14B for prompted masked video generation with optional first/last frames and references.",
   [utilityVideoModelNames.sam3Video]: "Segments prompted objects through a video and returns a mask video.",
   [utilityVideoModelNames.voidVideoInpainting]: "Removes an object from a video and inpaints the affected background over time.",
   [utilityVideoModelNames.birefnetVideo]: "Removes a video background with BiRefNet and can optionally return the mask video.",

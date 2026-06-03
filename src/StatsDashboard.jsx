@@ -43,6 +43,36 @@ const defaultPricing = {
     wanFunControl: {
       costPerSecond: 0.1
     },
+    wan22A14bLora: {
+      costPerSecond: 0.1
+    },
+    wan21Lora: {
+      costPerVideo: 0.75
+    },
+    wanVaceInpainting: {
+      costPerSecond480p: 0.04,
+      costPerSecond580p: 0.06,
+      costPerSecond720p: 0.08,
+      billingFps: 16
+    },
+    wan22VaceInpainting: {
+      costPerSecond480p: 0.04,
+      costPerSecond580p: 0.06,
+      costPerSecond720p: 0.08,
+      billingFps: 16
+    },
+    wan22VaceDepth: {
+      costPerSecond480p: 0.04,
+      costPerSecond580p: 0.06,
+      costPerSecond720p: 0.08,
+      billingFps: 16
+    },
+    wan22VacePose: {
+      costPerSecond480p: 0.04,
+      costPerSecond580p: 0.06,
+      costPerSecond720p: 0.08,
+      billingFps: 16
+    },
     voidVideoInpainting: {
       baseCost: 0.05,
       pass2Cost: 0.05,
@@ -539,6 +569,19 @@ function estimateItemCost(item, mediaType, pricing) {
     return (billingFrames / 16) * utilityPricing.costPerSecond;
   }
 
+  if (isWan22A14bLoraModel(modelKey)) {
+    return estimateWan22A14bLoraStatsCost(item, settings, pricing);
+  }
+
+  if (isWan21LoraModel(modelKey)) {
+    const utilityPricing = pricing.utility?.wan21Lora || defaultPricing.utility.wan21Lora;
+    return utilityPricing.costPerVideo;
+  }
+
+  if (modelKey.includes("wan-vace") || modelKey.includes("wan-22-vace") || modelKey.includes("wan vace") || modelKey.includes("wan 2.2 vace")) {
+    return estimateWanVaceStatsCost(item, settings, pricing);
+  }
+
   if (modelKey.includes("void") || modelKey.includes("video inpainting")) {
     return estimateVoidStatsCost(settings, pricing);
   }
@@ -691,6 +734,58 @@ function estimateVoidStatsCost(settings, pricing) {
     (settings.enablePass2Refinement ? utilityPricing.pass2Cost : 0) +
     (Number(settings.maskVideoCount || 0) > 0 ? 0 : utilityPricing.sam3QuadMaskCost)
   );
+}
+
+function isWan22A14bLoraModel(modelKey) {
+  return (
+    modelKey.includes("wan") &&
+    (modelKey.includes("2.2") || modelKey.includes("v2.2") || modelKey.includes("22")) &&
+    modelKey.includes("a14b") &&
+    modelKey.includes("lora")
+  );
+}
+
+function isWan21LoraModel(modelKey) {
+  return (
+    ((modelKey.includes("wan") && (modelKey.includes("2.1") || modelKey.includes("21"))) || modelKey.includes("wan-t2v") || modelKey.includes("wan-i2v")) &&
+    modelKey.includes("lora")
+  );
+}
+
+function estimateWan22A14bLoraStatsCost(item, settings, pricing) {
+  const utilityPricing = pricing.utility?.wan22A14bLora || defaultPricing.utility.wan22A14bLora;
+  const duration = Number(item.remoteVideo?.duration || settings.duration || settings.durationSeconds || 0);
+  if (Number.isFinite(duration) && duration > 0) return duration * utilityPricing.costPerSecond;
+
+  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.frames || item.remoteVideo?.frame_count || item.remoteVideo?.frameCount || settings.numFrames || 0);
+  const fps = Number(item.remoteVideo?.fps || settings.fps || 0);
+  if (Number.isFinite(frames) && frames > 0 && Number.isFinite(fps) && fps > 0) {
+    return (frames / fps) * utilityPricing.costPerSecond;
+  }
+
+  return null;
+}
+
+function estimateWanVaceStatsCost(item, settings, pricing) {
+  const modelKey = String(item.modelName || item.endpoint || settings.model || "").toLowerCase();
+  const utilityPricing = modelKey.includes("2.2")
+    ? modelKey.includes("pose")
+      ? pricing.utility?.wan22VacePose || pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VacePose
+      : modelKey.includes("depth")
+        ? pricing.utility?.wan22VaceDepth || pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VaceDepth
+        : pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VaceInpainting
+    : pricing.utility?.wanVaceInpainting || defaultPricing.utility.wanVaceInpainting;
+  const resolution = String(settings.resolution || item.cost?.billingResolution || item.cost?.resolution || "480p").toLowerCase();
+  const unitRate =
+    resolution === "720p"
+      ? utilityPricing.costPerSecond720p
+      : resolution === "580p"
+        ? utilityPricing.costPerSecond580p
+        : utilityPricing.costPerSecond480p;
+  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.frames || item.remoteVideo?.frame_count || settings.numFrames || item.cost?.billingFrames || 0);
+  const secondsFromFrames = Number.isFinite(frames) && frames > 0 ? frames / (utilityPricing.billingFps || 16) : 0;
+  const seconds = secondsFromFrames || Number(item.remoteVideo?.duration || item.cost?.durationSeconds || item.cost?.units || 0);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * unitRate : null;
 }
 
 function estimateHunyuan3DStatsCost(settings, pricing) {

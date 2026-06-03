@@ -34,7 +34,7 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, historyApi, nodeApi } from "./api/newtApi.js";
+import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -140,6 +140,9 @@ import {
   topazUpscalerBillingTierOptions,
   topazUpscalerFpsOptions,
   topazUpscalerModelOptions,
+  transitionBuilderEasingOptions,
+  transitionBuilderMaskStyleOptions,
+  transitionBuilderOutputOptions,
   typePresetNames,
   typePresetPrompts,
   utilityImageModelNames,
@@ -151,10 +154,23 @@ import {
   wan27ReferenceAspectRatioOptions,
   wan27ReferenceDurationOptions,
   wan27ReferenceResolutionOptions,
+  wan21I2vLoraAspectRatioOptions,
+  wan21I2vLoraResolutionOptions,
+  wan21T2vLoraAspectRatioOptions,
+  wan21T2vLoraResolutionOptions,
+  wan22A14bAccelerationOptions,
+  wan22A14bI2vAspectRatioOptions,
+  wan22A14bInterpolatorOptions,
+  wan22A14bResolutionOptions,
+  wan22A14bT2vAspectRatioOptions,
   wanVaceAccelerationOptions,
   wanVaceAspectRatioOptions,
+  wanVaceInpaintingAspectRatioOptions,
+  wanVaceInpaintingResolutionOptions,
+  wanVaceInterpolatorOptions,
   wanVaceResolutionOptions,
-  wanVaceSamplerOptions
+  wanVaceSamplerOptions,
+  wanVaceTransparencyOptions
 } from "./modelOptions.js";
 import {
   clamp,
@@ -1310,13 +1326,20 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
             })()
           : node
       );
-      const updatedNodes = shouldUpdateConnectedPreviews ? syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current) : nextNodes;
+      let updatedNodes = nextNodes;
+      if (shouldUpdateConnectedPreviews) {
+        try {
+          updatedNodes = syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current);
+        } catch (error) {
+          console.warn("Could not sync connected preview nodes after result update:", error);
+        }
+      }
       nodesRef.current = updatedNodes;
       return updatedNodes;
     });
 
     if (nextUtilityData && ("utilityMode" in patch || "utilityImageModel" in patch || "utilityVideoModel" in patch)) {
-      const activePorts = new Set(utilityInputPortIds(nextUtilityData.utilityMode, nextUtilityData.utilityImageModel, nextUtilityData.utilityVideoModel));
+      const activePorts = new Set(utilityInputPortIds(nextUtilityData.utilityMode, nextUtilityData.utilityImageModel, nextUtilityData.utilityVideoModel, nextUtilityData));
       setEdges((current) =>
         current.filter((edge) => {
           const staleOutput = "utilityMode" in patch && edge.from.nodeId === nodeId;
@@ -2499,7 +2522,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   function autoConnectionOutputKind(source, from) {
     if (source.type === "camera") return from.port === "cameraOut" ? "camera" : "image";
     if (source.type === "composer") return "image";
-    if (source.type === "utility") return utilityOutputType(source);
+    if (source.type === "utility") return utilityOutputType(source, from.port);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
@@ -2580,7 +2603,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
 
     if (source.type === "utility") {
-      if (utilityOutputType(source) === "video") {
+      if (utilityOutputType(source, from.port) === "video") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
@@ -2646,7 +2669,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     if (target?.type === "model3d" && isModel3DImageInputPort(to.port)) {
       if (source.type === "camera") return from.port === "imageOut" ? "" : "3D image input accepts Camera image output";
       if (source.type === "composer") return from.port === "imageOut" ? "" : "3D image input accepts Composer frame output";
-      if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
+      if (source.type === "utility") return utilityOutputType(source, from.port) === "image" ? "" : "3D image input accepts image outputs";
       if (["image", "imageModel", "transfer"].includes(source.type)) return "";
       return "3D image input accepts image outputs";
     }
@@ -5108,9 +5131,15 @@ function NodeBody({
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
     const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
     const isCompositeVideo = isUtilityCompositeVideoModel(utilityVideoModel);
+    const isTransitionBuilder = isUtilityTransitionBuilderModel(utilityVideoModel);
+    const isWan22A14bVideo = isUtilityWan22A14bModel(utilityVideoModel);
+    const isWan22A14bI2vVideo = isUtilityWan22A14bI2vModel(utilityVideoModel);
+    const isWan21LoraVideo = isUtilityWan21LoraModel(utilityVideoModel);
+    const isWan21LoraI2vVideo = isUtilityWan21I2vLoraModel(utilityVideoModel);
     const isWanVaceMaskToVideo = isUtilityWanVaceMaskToVideoModel(utilityVideoModel);
     const isWanVaceInpaintingVideo = isUtilityWanVaceInpaintingModel(utilityVideoModel);
-    const isWanVaceVideo = isWanVaceMaskToVideo || isWanVaceInpaintingVideo;
+    const isWan22VaceControlVideo = isUtilityWan22VaceControlModel(utilityVideoModel);
+    const isWanVaceVideo = isWanVaceMaskToVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo;
     const isBytedanceUpscaler = isUtilityBytedanceUpscalerModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
@@ -5121,17 +5150,24 @@ function NodeBody({
       label: utilityOutputMediaType === "video" ? "Video output" : "Image output",
       color: utilityOutputMediaType === "video" ? portColors.video : portColors.image
     };
+    const controlVideoOutputPort = config.output.find((port) => port.id === "controlVideoOut");
+    const maskVideoOutputPort = config.output.find((port) => port.id === "maskVideoOut");
+    const generatedVideoOutputPort = config.output.find((port) => port.id === "generatedVideoOut");
+    const guideStartOutputPort = config.output.find((port) => port.id === "guideStartOut");
+    const guideEndOutputPort = config.output.find((port) => port.id === "guideEndOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
+    const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
     const collapsedPorts = isVideoMode
-      ? utilityInputPortIds("video", utilityImageModel, utilityVideoModel)
+      ? activeUtilityInputPortIds
           .map((portId) => config.input.find((port) => port.id === portId))
           .filter(Boolean)
-      : utilityInputPortIds("image", utilityImageModel, utilityVideoModel)
+      : activeUtilityInputPortIds
           .map((portId) => config.input.find((port) => port.id === portId))
           .filter(Boolean);
     const resultType = node.data.resultType || utilityOutputMediaType;
-    const hasRequiredReferenceVideo = isWanVaceMaskToVideo ? true : Boolean(incoming.referenceVideoIn?.length);
+    const hasReferenceVideoInput = activeUtilityInputPortIds.includes("referenceVideoIn");
+    const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length);
     const canRun = isVideoMode
       ? hasRequiredReferenceVideo &&
         (isBirefnetVideo ||
@@ -5139,11 +5175,16 @@ function NodeBody({
           isExtractFrameVideo ||
           isColorIdMatteVideo ||
           isCompositeVideo ||
+          isTransitionBuilder ||
           isWanVaceMaskToVideo ||
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
         (!isCompositeVideo || Boolean(incoming.maskVideoIn?.length) && (incoming.referenceVideoIn?.length || 0) >= 2) &&
+        (!isTransitionBuilder || Boolean(incoming.referenceVideoIn?.length) || Boolean(incoming.referenceImageIn?.length)) &&
+        (!isTransitionBuilder || !node.data.transitionGenerateWan || Boolean(promptValue.trim())) &&
+        (!isWan22A14bI2vVideo || Boolean(incoming.referenceImageIn?.length)) &&
+        (!isWan21LoraI2vVideo || Boolean(incoming.referenceImageIn?.length)) &&
         (!isWanVaceInpaintingVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim())) &&
         (!isWanVaceMaskToVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(incoming.referenceImageIn?.length) && Boolean(promptValue.trim()))
       : isStillFrame
@@ -5164,15 +5205,23 @@ function NodeBody({
                   ? "Run Color Matte"
                   : isCompositeVideo
                     ? "Composite Video"
-                    : isWanVaceMaskToVideo
-                      ? "Run Mask-to-Video"
-                      : isWanVaceInpaintingVideo
+                    : isTransitionBuilder
+                      ? node.data.transitionGenerateWan
+                        ? "Generate Transition"
+                        : "Build Transition"
+                      : isWanVaceMaskToVideo
+                        ? "Run Mask-to-Video"
+                      : isWan22A14bVideo
+                        ? "Run Wan 2.2"
+                      : isWan21LoraVideo
+                        ? "Run Wan 2.1"
+                      : isWanVaceInpaintingVideo || isWan22VaceControlVideo
                         ? "Run Wan VACE"
                       : isBytedanceUpscaler
                         ? "Run Bytedance Upscale"
                         : isTopazUpscaler
                           ? "Run Topaz Upscale"
-                          : "Run Wan Fun Control"
+                          : "Run Utility Video"
       : isColorIdMatte
         ? "Run Color Matte"
         : isSam3Image
@@ -5191,12 +5240,14 @@ function NodeBody({
       ? "Base + Layer"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isVideoUpscaler
+        : isTransitionBuilder
+          ? "Source Video"
+        : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
           ? "Video"
           : isVoidVideo
             ? "Source Video"
             : "Control Video";
-    const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo ? "Optional video" : "Add video";
+    const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo || isTransitionBuilder ? "Optional video" : "Add video";
 
     function setMode(nextMode) {
       if (mode === nextMode) return;
@@ -5240,7 +5291,23 @@ function NodeBody({
           error={node.data.error}
           onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
         />
-        <OutputPortRow node={node} port={utilityOutputPort} label={utilityOutputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        {isTransitionBuilder ? (
+          <>
+            {node.data.transitionGenerateWan && (
+              <OutputPortRow node={node} port={generatedVideoOutputPort} label="Generated Transition" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            )}
+            <OutputPortRow node={node} port={controlVideoOutputPort} label="Control Video" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            <OutputPortRow node={node} port={maskVideoOutputPort} label="Mask Video" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            {node.data.transitionWanSchedulerEnabled && (
+              <>
+                <OutputPortRow node={node} port={guideStartOutputPort} label="Guide Start" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+                <OutputPortRow node={node} port={guideEndOutputPort} label="Guide End" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+              </>
+            )}
+          </>
+        ) : (
+          <OutputPortRow node={node} port={utilityOutputPort} label={utilityOutputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        )}
         {!settingsOpen && (
           <div className="model-input-port-stack utility-input-port-stack" aria-label="Utility inputs">
             {collapsedPorts.filter(Boolean).map((port) => (
@@ -5256,7 +5323,7 @@ function NodeBody({
             ))}
           </div>
         )}
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !canRun}>
+        <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun}>
           {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
@@ -5264,8 +5331,18 @@ function NodeBody({
           {isVideoMode ? (
             <>
               <NodeRow label="Model">
-                <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, { utilityVideoModel: event.target.value, resultUrl: "", resultItems: [], resultType: utilityVideoOutputType(event.target.value), error: "" })}>
-                  <option>{utilityVideoModelNames.wanFunControl}</option>
+                <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, utilityVideoModelSelectionPatch(event.target.value))}>
+                  <option>{utilityVideoModelNames.wan22A14bT2v}</option>
+                  <option>{utilityVideoModelNames.wan22A14bI2v}</option>
+                  <option>{utilityVideoModelNames.wan21T2vLora}</option>
+                  <option>{utilityVideoModelNames.wan21I2vLora}</option>
+                  <option>{utilityVideoModelNames.wan22VaceDepth}</option>
+                  <option>{utilityVideoModelNames.wan22VacePose}</option>
+                  <option>{utilityVideoModelNames.transitionBuilder}</option>
+                  <option>{utilityVideoModelNames.wanVaceMaskToVideo}</option>
+                  <option>{utilityVideoModelNames.wan22VaceInpainting}</option>
+                  {utilityVideoModel === utilityVideoModelNames.wanVaceInpainting && <option hidden>{utilityVideoModelNames.wanVaceInpainting}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.wanFunControl && <option hidden>{utilityVideoModelNames.wanFunControl}</option>}
                   <option>{utilityVideoModelNames.extractFrame}</option>
                   <option>{utilityVideoModelNames.colorIdMatte}</option>
                   <option>{utilityVideoModelNames.compositeVideo}</option>
@@ -5277,12 +5354,12 @@ function NodeBody({
                   <option>{utilityVideoModelNames.sam3Video}</option>
                 </select>
               </NodeRow>
-              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoUpscaler && (
+              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -5293,9 +5370,11 @@ function NodeBody({
                   </select>
                 </NodeRow>
               )}
-              <NodeRow label={referenceVideoLabel} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
-              </NodeRow>
+              {hasReferenceVideoInput && (
+                <NodeRow label={referenceVideoLabel} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
+                </NodeRow>
+              )}
               {isSam3Video ? (
                 <NodeRow label="Threshold">
                   <input type="number" min="0" max="1" step="0.05" value={node.data.sam3VideoDetectionThreshold ?? 0.5} onChange={(event) => onUpdate(node.id, { sam3VideoDetectionThreshold: event.target.value })} />
@@ -5316,6 +5395,43 @@ function NodeBody({
                 </React.Suspense>
               ) : isCompositeVideo ? (
                 <CompositeVideoControls incoming={incoming} maskVideoPort={maskVideoPort} settingsOpen={settingsOpen} node={node} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+              ) : isTransitionBuilder ? (
+                <TransitionBuilderControls
+                  incoming={incoming}
+                  promptPort={promptPort}
+                  promptValue={promptValue}
+                  promptConnected={promptConnected}
+                  referenceImagePort={referenceImagePort}
+                  maskVideoPort={maskVideoPort}
+                  settingsOpen={settingsOpen}
+                  node={node}
+                  onUpdate={onUpdate}
+                  onConnectStart={onConnectStart}
+                  onDisconnectInput={onDisconnectInput}
+                  connectedPortKeys={connectedPortKeys}
+                />
+              ) : isWan22A14bVideo ? (
+                <Wan22A14bControls
+                  incoming={incoming}
+                  referenceImagePort={referenceImagePort}
+                  settingsOpen={settingsOpen}
+                  node={node}
+                  onUpdate={onUpdate}
+                  onConnectStart={onConnectStart}
+                  onDisconnectInput={onDisconnectInput}
+                  connectedPortKeys={connectedPortKeys}
+                />
+              ) : isWan21LoraVideo ? (
+                <Wan21LoraControls
+                  incoming={incoming}
+                  referenceImagePort={referenceImagePort}
+                  settingsOpen={settingsOpen}
+                  node={node}
+                  onUpdate={onUpdate}
+                  onConnectStart={onConnectStart}
+                  onDisconnectInput={onDisconnectInput}
+                  connectedPortKeys={connectedPortKeys}
+                />
               ) : isWanVaceVideo ? (
                 <WanVaceInpaintingControls
                   incoming={incoming}
@@ -6421,25 +6537,369 @@ function CompositeVideoControls({ incoming, maskVideoPort, settingsOpen, node, o
   );
 }
 
+function Wan22A14bControls({ incoming, referenceImagePort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const isImageToVideo = isUtilityWan22A14bI2vModel(node.data.utilityVideoModel);
+  const referenceImageConnected = Boolean(incoming.referenceImageIn?.length);
+  const aspectRatioOptions = isImageToVideo ? wan22A14bI2vAspectRatioOptions : wan22A14bT2vAspectRatioOptions;
+  const loras = wan22A14bLoraItemsForData(node.data);
+
+  function updateLora(index, patch) {
+    const nextLoras = loras.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item));
+    onUpdate(node.id, { wan22A14bLoras: nextLoras });
+  }
+
+  function addLora() {
+    onUpdate(node.id, { wan22A14bLoras: [...loras, emptyWanLoraItem()] });
+  }
+
+  function removeLora(index) {
+    const nextLoras = loras.length <= 1 ? [emptyWanLoraItem()] : loras.filter((_item, itemIndex) => itemIndex !== index);
+    onUpdate(node.id, { wan22A14bLoras: nextLoras });
+  }
+
+  async function pickLoraFile(index) {
+    try {
+      const { response, data } = await systemApi.selectLoraFile({
+        title: "Choose Wan LoRA weights",
+        defaultPath: loras[index]?.path || ""
+      });
+      if (!response.ok) {
+        if (data?.canceled) return;
+        throw new Error(data?.error || "Could not choose a LoRA file.");
+      }
+      if (data?.path) updateLora(index, { path: data.path });
+    } catch (error) {
+      onUpdate(node.id, { error: error.message || "Could not choose a LoRA file." });
+    }
+  }
+
+  return (
+    <>
+      {isImageToVideo && (
+        <NodeRow label="Start / End" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <button className={referenceImageConnected ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Add images")}</button>
+        </NodeRow>
+      )}
+      <NodeRow label="Negative">
+        <textarea value={node.data.wan22A14bNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { wan22A14bNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+      </NodeRow>
+      <NodeRow label="Resolution">
+        <select value={node.data.wan22A14bResolution || "720p"} onChange={(event) => onUpdate(node.id, { wan22A14bResolution: event.target.value })}>
+          {wan22A14bResolutionOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Aspect">
+        <select value={node.data.wan22A14bAspectRatio || (isImageToVideo ? "auto" : "16:9")} onChange={(event) => onUpdate(node.id, { wan22A14bAspectRatio: event.target.value })}>
+          {aspectRatioOptions.map((option) => (
+            <option key={option} value={option}>
+              {option === "auto" ? "Auto" : option}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Frames">
+        <input type="number" min="17" max="161" value={node.data.wan22A14bNumFrames || 81} onChange={(event) => onUpdate(node.id, { wan22A14bNumFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="FPS">
+        <input type="number" min="4" max="60" value={node.data.wan22A14bFps || 16} onChange={(event) => onUpdate(node.id, { wan22A14bFps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Steps">
+        <input type="number" min="1" max="60" value={node.data.wan22A14bNumInferenceSteps || 27} onChange={(event) => onUpdate(node.id, { wan22A14bNumInferenceSteps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Guidance">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.wan22A14bGuidanceScale || 3.5} onChange={(event) => onUpdate(node.id, { wan22A14bGuidanceScale: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Guidance 2">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.wan22A14bGuidanceScale2 || (isImageToVideo ? 3.5 : 4)} onChange={(event) => onUpdate(node.id, { wan22A14bGuidanceScale2: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Shift">
+        <input type="number" min="1" max="10" step="0.1" value={node.data.wan22A14bShift || 5} onChange={(event) => onUpdate(node.id, { wan22A14bShift: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Acceleration">
+        <select value={node.data.wan22A14bAcceleration || "regular"} onChange={(event) => onUpdate(node.id, { wan22A14bAcceleration: event.target.value })}>
+          {wan22A14bAccelerationOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Interpolator">
+        <select value={node.data.wan22A14bInterpolatorModel || "film"} onChange={(event) => onUpdate(node.id, { wan22A14bInterpolatorModel: event.target.value })}>
+          {wan22A14bInterpolatorOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Interp Frames">
+        <input type="number" min="0" max="4" value={node.data.wan22A14bNumInterpolatedFrames ?? 1} onChange={(event) => onUpdate(node.id, { wan22A14bNumInterpolatedFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Adjust FPS">
+        <button className={`node-toggle ${node.data.wan22A14bAdjustFpsForInterpolation !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan22A14bAdjustFpsForInterpolation: node.data.wan22A14bAdjustFpsForInterpolation === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Prompt Expand">
+        <button className={`node-toggle ${node.data.wan22A14bEnablePromptExpansion ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan22A14bEnablePromptExpansion: !node.data.wan22A14bEnablePromptExpansion })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Safety">
+        <button className={`node-toggle ${node.data.wan22A14bEnableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan22A14bEnableSafetyChecker: node.data.wan22A14bEnableSafetyChecker === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Output Safety">
+        <button className={`node-toggle ${node.data.wan22A14bEnableOutputSafetyChecker ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan22A14bEnableOutputSafetyChecker: !node.data.wan22A14bEnableOutputSafetyChecker })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Quality">
+        <select value={node.data.wan22A14bVideoQuality || "high"} onChange={(event) => onUpdate(node.id, { wan22A14bVideoQuality: event.target.value })}>
+          {["low", "medium", "high", "maximum"].map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Write Mode">
+        <select value={node.data.wan22A14bVideoWriteMode || "balanced"} onChange={(event) => onUpdate(node.id, { wan22A14bVideoWriteMode: event.target.value })}>
+          {["fast", "balanced", "small"].map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Reverse">
+        <button className={`node-toggle ${node.data.wan22A14bReverseVideo ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan22A14bReverseVideo: !node.data.wan22A14bReverseVideo })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="LoRA">
+        <div className="utility-lora-stack">
+          {loras.map((lora, index) => (
+            <div className="utility-lora-slot" key={index}>
+              <div className="utility-lora-slot-header">
+                <span>{`LoRA ${index + 1}`}</span>
+                <span className="utility-lora-slot-actions">
+                  <button type="button" className="utility-lora-icon-button" onClick={() => pickLoraFile(index)} title="Choose local LoRA file" aria-label="Choose local LoRA file">
+                    <FolderOpen size={13} />
+                  </button>
+                  <button type="button" className="utility-lora-icon-button" onClick={() => removeLora(index)} title={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"} aria-label={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"}>
+                    <Trash2 size={13} />
+                  </button>
+                </span>
+              </div>
+              {lora.path ? (
+                <span className="utility-lora-file-name" title={lora.path}>
+                  {shortLoraFileName(lora.path)}
+                </span>
+              ) : null}
+              <div className="inline-two-fields">
+                <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
+                <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+              </div>
+            </div>
+          ))}
+          <button type="button" className="utility-lora-add-button" onClick={addLora}>
+            <Plus size={13} />
+            <span>Add LoRA</span>
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Seed">
+        <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+      </NodeRow>
+    </>
+  );
+}
+
+function Wan21LoraControls({ incoming, referenceImagePort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const isImageToVideo = isUtilityWan21I2vLoraModel(node.data.utilityVideoModel);
+  const referenceImageConnected = Boolean(incoming.referenceImageIn?.length);
+  const resolutionOptions = isImageToVideo ? wan21I2vLoraResolutionOptions : wan21T2vLoraResolutionOptions;
+  const aspectRatioOptions = isImageToVideo ? wan21I2vLoraAspectRatioOptions : wan21T2vLoraAspectRatioOptions;
+  const loras = wan21LoraItemsForData(node.data);
+
+  function updateLora(index, patch) {
+    const nextLoras = loras.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item));
+    onUpdate(node.id, { wan21Loras: nextLoras });
+  }
+
+  function addLora() {
+    onUpdate(node.id, { wan21Loras: [...loras, emptyWan21LoraItem()] });
+  }
+
+  function removeLora(index) {
+    const nextLoras = loras.length <= 1 ? [emptyWan21LoraItem()] : loras.filter((_item, itemIndex) => itemIndex !== index);
+    onUpdate(node.id, { wan21Loras: nextLoras });
+  }
+
+  async function pickLoraFile(index) {
+    try {
+      const { response, data } = await systemApi.selectLoraFile({
+        title: "Choose Wan LoRA weights",
+        defaultPath: loras[index]?.path || ""
+      });
+      if (!response.ok) {
+        if (data?.canceled) return;
+        throw new Error(data?.error || "Could not choose a LoRA file.");
+      }
+      if (data?.path) updateLora(index, { path: data.path });
+    } catch (error) {
+      onUpdate(node.id, { error: error.message || "Could not choose a LoRA file." });
+    }
+  }
+
+  return (
+    <>
+      {isImageToVideo && (
+        <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <button className={referenceImageConnected ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Add image")}</button>
+        </NodeRow>
+      )}
+      <NodeRow label="Negative">
+        <textarea value={node.data.wan21LoraNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { wan21LoraNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+      </NodeRow>
+      <NodeRow label="Resolution">
+        <select value={node.data.wan21LoraResolution || (isImageToVideo ? "720p" : "480p")} onChange={(event) => onUpdate(node.id, { wan21LoraResolution: event.target.value })}>
+          {resolutionOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Aspect">
+        <select value={node.data.wan21LoraAspectRatio || "16:9"} onChange={(event) => onUpdate(node.id, { wan21LoraAspectRatio: event.target.value })}>
+          {aspectRatioOptions.map((option) => (
+            <option key={option} value={option}>
+              {option === "auto" ? "Auto" : option}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Frames">
+        <input type="number" min="81" max="100" value={node.data.wan21LoraNumFrames || 81} onChange={(event) => onUpdate(node.id, { wan21LoraNumFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="FPS">
+        <input type="number" min="5" max="24" value={node.data.wan21LoraFps || 16} onChange={(event) => onUpdate(node.id, { wan21LoraFps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Steps">
+        <input type="number" min="1" max="60" value={node.data.wan21LoraNumInferenceSteps || 30} onChange={(event) => onUpdate(node.id, { wan21LoraNumInferenceSteps: event.target.value })} />
+      </NodeRow>
+      {isImageToVideo && (
+        <>
+          <NodeRow label="Guidance">
+            <input type="number" min="0" max="20" step="0.1" value={node.data.wan21LoraGuideScale || 5} onChange={(event) => onUpdate(node.id, { wan21LoraGuideScale: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Shift">
+            <input type="number" min="0" max="20" step="0.1" value={node.data.wan21LoraShift || 5} onChange={(event) => onUpdate(node.id, { wan21LoraShift: event.target.value })} />
+          </NodeRow>
+        </>
+      )}
+      <NodeRow label="Prompt Expand">
+        <button className={`node-toggle ${node.data.wan21LoraEnablePromptExpansion ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan21LoraEnablePromptExpansion: !node.data.wan21LoraEnablePromptExpansion })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Turbo">
+        <button className={`node-toggle ${node.data.wan21LoraTurboMode !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan21LoraTurboMode: node.data.wan21LoraTurboMode === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Reverse">
+        <button className={`node-toggle ${node.data.wan21LoraReverseVideo ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan21LoraReverseVideo: !node.data.wan21LoraReverseVideo })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Safety">
+        <button className={`node-toggle ${node.data.wan21LoraEnableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wan21LoraEnableSafetyChecker: node.data.wan21LoraEnableSafetyChecker === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="LoRA">
+        <div className="utility-lora-stack">
+          {loras.map((lora, index) => (
+            <div className="utility-lora-slot" key={index}>
+              <div className="utility-lora-slot-header">
+                <span>{`LoRA ${index + 1}`}</span>
+                <span className="utility-lora-slot-actions">
+                  <button type="button" className="utility-lora-icon-button" onClick={() => pickLoraFile(index)} title="Choose local LoRA file" aria-label="Choose local LoRA file">
+                    <FolderOpen size={13} />
+                  </button>
+                  <button type="button" className="utility-lora-icon-button" onClick={() => removeLora(index)} title={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"} aria-label={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"}>
+                    <Trash2 size={13} />
+                  </button>
+                </span>
+              </div>
+              {lora.path ? (
+                <span className="utility-lora-file-name" title={lora.path}>
+                  {shortLoraFileName(lora.path)}
+                </span>
+              ) : null}
+              <div className="inline-two-fields">
+                <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
+                <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+              </div>
+            </div>
+          ))}
+          <button type="button" className="utility-lora-add-button" onClick={addLora}>
+            <Plus size={13} />
+            <span>Add LoRA</span>
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Seed">
+        <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+      </NodeRow>
+    </>
+  );
+}
+
+function shortLoraFileName(filePath) {
+  const rawPath = String(filePath || "").trim();
+  if (!rawPath) return "";
+  try {
+    const parsedUrl = new URL(rawPath);
+    return parsedUrl.pathname.split(/[\\/]/).filter(Boolean).pop() || rawPath;
+  } catch {
+    return rawPath.split(/[\\/]/).filter(Boolean).pop() || rawPath;
+  }
+}
+
 function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const referenceImageConnected = Boolean(incoming.referenceImageIn?.length);
   const maskConnected = Boolean(incoming.maskVideoIn?.length);
   const isMaskToVideo = isUtilityWanVaceMaskToVideoModel(node.data.utilityVideoModel);
+  const isWan22Control = isUtilityWan22VaceControlModel(node.data.utilityVideoModel);
+  const isWan22 = isUtilityWan22VaceInpaintingModel(node.data.utilityVideoModel) || isWan22Control;
+  const resolutionOptions = isMaskToVideo ? wanVaceResolutionOptions : wanVaceInpaintingResolutionOptions;
+  const aspectRatioOptions = isMaskToVideo ? wanVaceAspectRatioOptions : wanVaceInpaintingAspectRatioOptions;
 
   return (
     <>
-      <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-        <button className={referenceImageConnected ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional image")}</button>
+      <NodeRow label={isWan22 ? "Frames / Refs" : "Reference Image"} inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={referenceImageConnected ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, isWan22 ? "Optional frames" : "Optional image")}</button>
       </NodeRow>
-      <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
-      </NodeRow>
+      {isWan22 && (
+        <NodeRow label="First / Last">
+          <button className={`node-toggle ${node.data.wanVaceUseReferenceFrames !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceUseReferenceFrames: node.data.wanVaceUseReferenceFrames === false })}>
+            <span />
+          </button>
+        </NodeRow>
+      )}
+      {isWan22Control ? (
+        <NodeRow label="Control">
+          <div className="utility-mini-note">Use Preprocess for ordinary source footage. Turn it off when the input video is already a depth or pose control map.</div>
+        </NodeRow>
+      ) : (
+        <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
+        </NodeRow>
+      )}
       <NodeRow label="Negative">
         <textarea value={node.data.wanVaceNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { wanVaceNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
       </NodeRow>
       <NodeRow label="Resolution">
         <select value={node.data.wanVaceResolution || "720p"} onChange={(event) => onUpdate(node.id, { wanVaceResolution: event.target.value })}>
-          {wanVaceResolutionOptions.map((option) => (
+          {resolutionOptions.map((option) => (
             <option key={option} value={option}>
               {option === "auto" ? "Auto" : option}
             </option>
@@ -6448,7 +6908,7 @@ function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort
       </NodeRow>
       <NodeRow label="Aspect">
         <select value={node.data.wanVaceAspectRatio || "auto"} onChange={(event) => onUpdate(node.id, { wanVaceAspectRatio: event.target.value })}>
-          {wanVaceAspectRatioOptions.map((option) => (
+          {aspectRatioOptions.map((option) => (
             <option key={option} value={option}>
               {option === "auto" ? "Auto" : option}
             </option>
@@ -6462,7 +6922,7 @@ function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort
       </NodeRow>
       {node.data.wanVaceMatchInputNumFrames === false && (
         <NodeRow label="Frames">
-          <input type="number" min="81" max="100" value={node.data.wanVaceNumFrames || 81} onChange={(event) => onUpdate(node.id, { wanVaceNumFrames: event.target.value })} />
+          <input type="number" min="81" max={isMaskToVideo ? "100" : "241"} value={node.data.wanVaceNumFrames || 81} onChange={(event) => onUpdate(node.id, { wanVaceNumFrames: event.target.value })} />
         </NodeRow>
       )}
       <NodeRow label="Match FPS">
@@ -6472,7 +6932,7 @@ function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort
       </NodeRow>
       {node.data.wanVaceMatchInputFps === false && (
         <NodeRow label="FPS">
-          <input type="number" min="5" max="24" value={node.data.wanVaceFps || 16} onChange={(event) => onUpdate(node.id, { wanVaceFps: event.target.value })} />
+          <input type="number" min="5" max={isMaskToVideo ? "24" : "30"} value={node.data.wanVaceFps || 16} onChange={(event) => onUpdate(node.id, { wanVaceFps: event.target.value })} />
         </NodeRow>
       )}
       <NodeRow label="Steps">
@@ -6538,6 +6998,322 @@ function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort
           </NodeRow>
           <NodeRow label="Interp Frames">
             <input type="number" min="0" step="1" value={node.data.wanVaceNumInterpolatedFrames || 0} onChange={(event) => onUpdate(node.id, { wanVaceNumInterpolatedFrames: event.target.value })} />
+          </NodeRow>
+          {isWan22 && (
+            <>
+              <NodeRow label="Interp Model">
+                <select value={node.data.wanVaceInterpolatorModel || "film"} onChange={(event) => onUpdate(node.id, { wanVaceInterpolatorModel: event.target.value })}>
+                  {wanVaceInterpolatorOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </NodeRow>
+              <NodeRow label="Temporal Down">
+                <input type="number" min="0" max="16" step="1" value={node.data.wanVaceTemporalDownsampleFactor || 0} onChange={(event) => onUpdate(node.id, { wanVaceTemporalDownsampleFactor: event.target.value })} />
+              </NodeRow>
+              <NodeRow label="Auto Down">
+                <button className={`node-toggle ${node.data.wanVaceEnableAutoDownsample ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceEnableAutoDownsample: !node.data.wanVaceEnableAutoDownsample })}>
+                  <span />
+                </button>
+              </NodeRow>
+              {node.data.wanVaceEnableAutoDownsample && (
+                <NodeRow label="Min FPS">
+                  <input type="number" min="1" max="30" step="1" value={node.data.wanVaceAutoDownsampleMinFps || 15} onChange={(event) => onUpdate(node.id, { wanVaceAutoDownsampleMinFps: event.target.value })} />
+                </NodeRow>
+              )}
+              <NodeRow label="Transparency">
+                <select value={node.data.wanVaceTransparencyMode || "content_aware"} onChange={(event) => onUpdate(node.id, { wanVaceTransparencyMode: event.target.value })}>
+                  {wanVaceTransparencyOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </NodeRow>
+            </>
+          )}
+        </>
+      )}
+      <NodeRow label="Seed">
+        <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+      </NodeRow>
+    </>
+  );
+}
+
+function TransitionBuilderControls({ incoming, promptPort, promptValue, promptConnected, referenceImagePort, maskVideoPort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const keyframeItems = transitionBuilderKeyframeItemsForNode(node, incoming.referenceImageIn);
+  const keyframeCount = keyframeItems.length;
+  const maskConnected = Boolean(incoming.maskVideoIn?.length);
+  const frameCount = Math.max(9, Math.min(241, Math.round(Number(node.data.transitionFrameCount || 57))));
+  const transitionStartFrame = Math.max(0, Math.min(frameCount - 1, Math.round(Number(node.data.transitionStartFrame || 0))));
+  const transitionDurationFrames = Math.max(1, Math.min(frameCount - transitionStartFrame, Math.round(Number(node.data.transitionDurationFrames || frameCount - transitionStartFrame))));
+  const generateWan = Boolean(node.data.transitionGenerateWan);
+  const wanSchedulerEnabled = Boolean(node.data.transitionWanSchedulerEnabled);
+  const wanSegmentCount = Math.max(1, Math.min(8, Math.round(Number(node.data.transitionWanSegmentCount || 3))));
+  const wanSelectedSegment = Math.max(1, Math.min(wanSegmentCount, Math.round(Number(node.data.transitionWanSelectedSegment || 1))));
+  const loras = transitionWanLoraItemsForData(node.data);
+  const [dragState, setDragState] = React.useState(null);
+  const keyframeKeys = keyframeItems.map((item) => item.key);
+  const keyframeKeySignature = keyframeKeys.join("\n");
+
+  React.useEffect(() => {
+    if (dragState?.key && !keyframeKeys.includes(dragState.key)) setDragState(null);
+  }, [dragState?.key, keyframeKeySignature]);
+
+  function moveKeyframe(draggedKey, targetKey) {
+    if (!draggedKey || !targetKey || draggedKey === targetKey) return;
+    const fromIndex = keyframeKeys.indexOf(draggedKey);
+    const toIndex = keyframeKeys.indexOf(targetKey);
+    if (fromIndex < 0 || toIndex < 0) return;
+    onUpdate(node.id, { transitionKeyframeOrder: moveArrayItem(keyframeKeys, fromIndex, toIndex) });
+  }
+
+  function keyframeKeyAtPoint(event) {
+    const element = typeof document === "undefined" ? null : document.elementFromPoint(event.clientX, event.clientY);
+    return element?.closest?.("[data-transition-keyframe-key]")?.dataset?.transitionKeyframeKey || "";
+  }
+
+  function startKeyframeDrag(event, key) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragState({ key, pointerId: event.pointerId });
+  }
+
+  function finishKeyframeDrag(event) {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const targetKey = keyframeKeyAtPoint(event);
+    moveKeyframe(dragState.key, targetKey);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDragState(null);
+  }
+
+  function cancelKeyframeDrag(event) {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDragState(null);
+  }
+
+  function updateLora(index, patch) {
+    const nextLoras = loras.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item));
+    onUpdate(node.id, { transitionWanLoras: nextLoras });
+  }
+
+  function addLora() {
+    onUpdate(node.id, { transitionWanLoras: [...loras, emptyWanLoraItem()] });
+  }
+
+  function removeLora(index) {
+    const nextLoras = loras.length <= 1 ? [emptyWanLoraItem()] : loras.filter((_item, itemIndex) => itemIndex !== index);
+    onUpdate(node.id, { transitionWanLoras: nextLoras });
+  }
+
+  async function pickLoraFile(index) {
+    try {
+      const { response, data } = await systemApi.selectLoraFile({
+        title: "Choose Wan LoRA weights",
+        defaultPath: loras[index]?.path || ""
+      });
+      if (!response.ok) {
+        if (data?.canceled) return;
+        throw new Error(data?.error || "Could not choose a LoRA file.");
+      }
+      if (data?.path) updateLora(index, { path: data.path });
+    } catch (error) {
+      onUpdate(node.id, { error: error.message || "Could not choose a LoRA file." });
+    }
+  }
+
+  return (
+    <>
+      <NodeRow label="Mode">
+        <select value={generateWan ? "generate" : "build"} onChange={(event) => onUpdate(node.id, { transitionGenerateWan: event.target.value === "generate", transitionWanSchedulerEnabled: event.target.value === "generate" ? true : node.data.transitionWanSchedulerEnabled })}>
+          <option value="build">Build Guides</option>
+          <option value="generate">Generate Wan</option>
+        </select>
+      </NodeRow>
+      {generateWan && (
+        <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
+        </NodeRow>
+      )}
+      <NodeRow label="Keyframes" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={keyframeCount ? "connected-field" : ""}>{`Add Images ( ${keyframeCount} )`}</button>
+      </NodeRow>
+      {keyframeItems.length > 0 && (
+        <NodeRow label="Order">
+          <div className="transition-keyframe-sheet" role="list" aria-label="Transition keyframe order">
+            {keyframeItems.map((item, index) => (
+              <div
+                key={item.key}
+                className={`transition-keyframe-thumb ${dragState?.key === item.key ? "dragging" : ""}`}
+                role="listitem"
+                data-transition-keyframe-key={item.key}
+                onPointerDown={(event) => startKeyframeDrag(event, item.key)}
+                onPointerUp={finishKeyframeDrag}
+                onPointerCancel={cancelKeyframeDrag}
+                title={`${ordinalLabel(index + 1)} keyframe: ${item.label}`}
+              >
+                <img src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <span>{ordinalLabel(index + 1)}</span>
+              </div>
+            ))}
+          </div>
+        </NodeRow>
+      )}
+      <NodeRow label="Mask Source" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Optional mask")}</button>
+      </NodeRow>
+      <NodeRow label="Frames">
+        <input type="number" min="9" max="241" step="4" value={node.data.transitionFrameCount || 57} onChange={(event) => onUpdate(node.id, { transitionFrameCount: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="FPS">
+        <input type="number" min="5" max="30" value={node.data.transitionFps || 16} onChange={(event) => onUpdate(node.id, { transitionFps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Size">
+        <select value={node.data.transitionSize || "512"} onChange={(event) => onUpdate(node.id, { transitionSize: event.target.value })}>
+          <option value="512">512</option>
+          <option value="720">720</option>
+          <option value="1024">1024</option>
+        </select>
+      </NodeRow>
+      <NodeRow label="Overlap">
+        <input type="number" min="0" max="32" value={node.data.transitionOverlapFrames || 9} onChange={(event) => onUpdate(node.id, { transitionOverlapFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Start Frame">
+        <input type="number" min="0" max={Math.max(0, frameCount - 1)} value={transitionStartFrame} onChange={(event) => onUpdate(node.id, { transitionStartFrame: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Transition">
+        <input type="number" min="1" max={Math.max(1, frameCount - transitionStartFrame)} value={transitionDurationFrames} onChange={(event) => onUpdate(node.id, { transitionDurationFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Easing">
+        <select value={node.data.transitionEasing || "linear"} onChange={(event) => onUpdate(node.id, { transitionEasing: event.target.value })}>
+          {transitionBuilderEasingOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Mask Style">
+        <select value={node.data.transitionMaskStyle || "wipe"} onChange={(event) => onUpdate(node.id, { transitionMaskStyle: event.target.value })}>
+          {transitionBuilderMaskStyleOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Softness">
+        <input type="number" min="0" max="24" step="1" value={node.data.transitionMaskSoftness || 6} onChange={(event) => onUpdate(node.id, { transitionMaskSoftness: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Format">
+        <select value={node.data.transitionOutputFormat || "mp4"} onChange={(event) => onUpdate(node.id, { transitionOutputFormat: event.target.value })}>
+          {transitionBuilderOutputOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      {!generateWan && (
+        <NodeRow label="Wan Guides">
+          <button className={`node-toggle ${wanSchedulerEnabled ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { transitionWanSchedulerEnabled: !wanSchedulerEnabled })}>
+            <span />
+          </button>
+        </NodeRow>
+      )}
+      {(wanSchedulerEnabled || generateWan) && (
+        <>
+          <NodeRow label="Segments">
+            <input type="number" min="1" max="8" step="1" value={wanSegmentCount} onChange={(event) => onUpdate(node.id, { transitionWanSegmentCount: event.target.value })} />
+          </NodeRow>
+          {!generateWan && (
+            <NodeRow label="Active Seg">
+              <input type="number" min="1" max={wanSegmentCount} step="1" value={wanSelectedSegment} onChange={(event) => onUpdate(node.id, { transitionWanSelectedSegment: event.target.value })} />
+            </NodeRow>
+          )}
+        </>
+      )}
+      {generateWan && (
+        <>
+          <NodeRow label="Wan Frames">
+            <input type="number" min="17" max="161" value={node.data.transitionWanNumFrames || 81} onChange={(event) => onUpdate(node.id, { transitionWanNumFrames: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Wan FPS">
+            <input type="number" min="4" max="60" value={node.data.transitionWanFps || 16} onChange={(event) => onUpdate(node.id, { transitionWanFps: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Resolution">
+            <select value={node.data.transitionWanResolution || "720p"} onChange={(event) => onUpdate(node.id, { transitionWanResolution: event.target.value })}>
+              {wan22A14bResolutionOptions.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </select>
+          </NodeRow>
+          <NodeRow label="Aspect">
+            <select value={node.data.transitionWanAspectRatio || "auto"} onChange={(event) => onUpdate(node.id, { transitionWanAspectRatio: event.target.value })}>
+              {wan22A14bI2vAspectRatioOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === "auto" ? "Auto" : option}
+                </option>
+              ))}
+            </select>
+          </NodeRow>
+          <NodeRow label="Steps">
+            <input type="number" min="1" max="60" value={node.data.transitionWanNumInferenceSteps || 27} onChange={(event) => onUpdate(node.id, { transitionWanNumInferenceSteps: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Guidance">
+            <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Guidance 2">
+            <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale2 || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale2: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Shift">
+            <input type="number" min="1" max="10" step="0.1" value={node.data.transitionWanShift || 5} onChange={(event) => onUpdate(node.id, { transitionWanShift: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Negative">
+            <textarea value={node.data.transitionWanNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { transitionWanNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+          </NodeRow>
+          <NodeRow label="Seed Mode">
+            <select value={node.data.transitionWanSeedMode || "increment"} onChange={(event) => onUpdate(node.id, { transitionWanSeedMode: event.target.value })}>
+              <option value="increment">Increment</option>
+              <option value="same">Same</option>
+              <option value="random">Random</option>
+            </select>
+          </NodeRow>
+          <NodeRow label="LoRA">
+            <div className="utility-lora-stack">
+              {loras.map((lora, index) => (
+                <div className="utility-lora-slot" key={index}>
+                  <div className="utility-lora-slot-header">
+                    <span>{`LoRA ${index + 1}`}</span>
+                    <span className="utility-lora-slot-actions">
+                      <button type="button" className="utility-lora-icon-button" onClick={() => pickLoraFile(index)} title="Choose local LoRA file" aria-label="Choose local LoRA file">
+                        <FolderOpen size={13} />
+                      </button>
+                      <button type="button" className="utility-lora-icon-button" onClick={() => removeLora(index)} title={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"} aria-label={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"}>
+                        <Trash2 size={13} />
+                      </button>
+                    </span>
+                  </div>
+                  {lora.path ? (
+                    <span className="utility-lora-file-name" title={lora.path}>
+                      {shortLoraFileName(lora.path)}
+                    </span>
+                  ) : null}
+                  <div className="inline-two-fields">
+                    <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
+                    <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="utility-lora-add-button" onClick={addLora}>
+                <Plus size={13} />
+                <span>Add LoRA</span>
+              </button>
+            </div>
+          </NodeRow>
+          <NodeRow label="Seed">
+            <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
           </NodeRow>
         </>
       )}
@@ -6777,7 +7553,14 @@ function getNodeConfig(type) {
         { id: "referenceVideoIn", label: "Control Video", color: portColors.video },
         { id: "maskVideoIn", label: "Mask Video", color: portColors.video }
       ],
-      output: [{ id: "utilityOut", label: "Output", color: portColors.image }]
+      output: [
+        { id: "utilityOut", label: "Output", color: portColors.image },
+        { id: "generatedVideoOut", label: "Generated Transition", color: portColors.video },
+        { id: "controlVideoOut", label: "Control Video", color: portColors.video },
+        { id: "maskVideoOut", label: "Mask Video", color: portColors.video },
+        { id: "guideStartOut", label: "Guide Start", color: portColors.image },
+        { id: "guideEndOut", label: "Guide End", color: portColors.image }
+      ]
     },
     video: {
       icon: Video,
@@ -6908,7 +7691,7 @@ function createDefaultNodeData(type, label, count) {
       utilityMode: "video",
       model: videoModelNames.wanFunControl,
       utilityImageModel: utilityImageModelNames.dwpose,
-      utilityVideoModel: utilityVideoModelNames.wanFunControl,
+      utilityVideoModel: utilityVideoModelNames.wan22VaceDepth,
       stillFrameTime: 0,
       dwposeDrawMode: "body-pose",
       patinaMaps: patinaMapOptions.map((option) => option.id),
@@ -6930,6 +7713,14 @@ function createDefaultNodeData(type, label, count) {
       compositeMaskBlur: 0,
       compositeMaskExpand: 0,
       compositeOutputFormat: "mp4",
+      transitionFrameCount: 57,
+      transitionFps: 16,
+      transitionSize: "512",
+      transitionOverlapFrames: 9,
+      transitionMaskStyle: "wipe",
+      transitionMaskSoftness: 6,
+      transitionOutputFormat: "mp4",
+      transitionKeyframeOrder: [],
       wanVaceNegativePrompt: "",
       wanVaceMatchInputNumFrames: true,
       wanVaceNumFrames: 81,
@@ -6948,6 +7739,45 @@ function createDefaultNodeData(type, label, count) {
       wanVaceVideoQuality: "high",
       wanVaceVideoWriteMode: "balanced",
       wanVaceNumInterpolatedFrames: 0,
+      wanVaceUseReferenceFrames: true,
+      wanVaceTemporalDownsampleFactor: 0,
+      wanVaceEnableAutoDownsample: false,
+      wanVaceAutoDownsampleMinFps: 15,
+      wanVaceInterpolatorModel: "film",
+      wanVaceTransparencyMode: "content_aware",
+      wan22A14bNegativePrompt: "",
+      wan22A14bResolution: "720p",
+      wan22A14bAspectRatio: "16:9",
+      wan22A14bNumFrames: 81,
+      wan22A14bFps: 16,
+      wan22A14bNumInferenceSteps: 27,
+      wan22A14bGuidanceScale: 3.5,
+      wan22A14bGuidanceScale2: 4,
+      wan22A14bShift: 5,
+      wan22A14bEnableSafetyChecker: true,
+      wan22A14bEnableOutputSafetyChecker: false,
+      wan22A14bEnablePromptExpansion: false,
+      wan22A14bAcceleration: "regular",
+      wan22A14bInterpolatorModel: "film",
+      wan22A14bNumInterpolatedFrames: 1,
+      wan22A14bAdjustFpsForInterpolation: true,
+      wan22A14bVideoQuality: "high",
+      wan22A14bVideoWriteMode: "balanced",
+      wan22A14bReverseVideo: false,
+      wan22A14bLoras: [emptyWanLoraItem()],
+      wan21LoraNegativePrompt: "",
+      wan21LoraResolution: "480p",
+      wan21LoraAspectRatio: "16:9",
+      wan21LoraNumFrames: 81,
+      wan21LoraFps: 16,
+      wan21LoraNumInferenceSteps: 30,
+      wan21LoraGuideScale: 5,
+      wan21LoraShift: 5,
+      wan21LoraEnableSafetyChecker: true,
+      wan21LoraEnablePromptExpansion: true,
+      wan21LoraTurboMode: true,
+      wan21LoraReverseVideo: false,
+      wan21Loras: [emptyWan21LoraItem()],
       sam3VideoDetectionThreshold: 0.5,
       prompt: "",
       batchCount: "1",
@@ -7200,6 +8030,11 @@ function isUtilityCompositeVideoModel(model) {
   return normalized.includes("composite");
 }
 
+function isUtilityTransitionBuilderModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("transition") && normalized.includes("builder");
+}
+
 function isUtilityWanVaceMaskToVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("vace") && normalized.includes("mask");
@@ -7208,6 +8043,56 @@ function isUtilityWanVaceMaskToVideoModel(model) {
 function isUtilityWanVaceInpaintingModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("vace") && normalized.includes("inpaint");
+}
+
+function isUtilityWan22VaceInpaintingModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return isUtilityWanVaceInpaintingModel(normalized) && (normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22"));
+}
+
+function isUtilityWan22VaceDepthModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("vace") && normalized.includes("depth") && (normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22"));
+}
+
+function isUtilityWan22VacePoseModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("vace") && normalized.includes("pose") && (normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22"));
+}
+
+function isUtilityWan22VaceControlModel(model) {
+  return isUtilityWan22VaceDepthModel(model) || isUtilityWan22VacePoseModel(model);
+}
+
+function isUtilityWan22A14bModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  const isWan22 = normalized.includes("wan") && (normalized.includes("2.2") || normalized.includes("22"));
+  return isWan22 && (normalized.includes("a14b") || normalized.includes("14b")) && !normalized.includes("vace");
+}
+
+function isUtilityWan22A14bI2vModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return isUtilityWan22A14bModel(normalized) && (normalized.includes("image") || normalized.includes("i2v"));
+}
+
+function isUtilityWan22A14bT2vModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return isUtilityWan22A14bModel(normalized) && (normalized.includes("text") || normalized.includes("t2v") || !isUtilityWan22A14bI2vModel(normalized));
+}
+
+function isUtilityWan21LoraModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("wan") && (normalized.includes("2.1") || normalized.includes("21")) && normalized.includes("lora");
+}
+
+function isUtilityWan21I2vLoraModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return isUtilityWan21LoraModel(normalized) && (normalized.includes("image") || normalized.includes("i2v"));
+}
+
+function isUtilityWan21T2vLoraModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return isUtilityWan21LoraModel(normalized) && (normalized.includes("text") || normalized.includes("t2v") || !isUtilityWan21I2vLoraModel(normalized));
 }
 
 function isUtilityStillFrameModel(model) {
@@ -7264,16 +8149,132 @@ function utilityMode(node) {
   return node?.data?.utilityMode === "image" ? "image" : "video";
 }
 
-function utilityOutputType(node) {
+function utilityOutputType(node, portId = "") {
+  if (isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) {
+    return ["guideStartOut", "guideEndOut"].includes(portId) ? "image" : "video";
+  }
   if (utilityMode(node) === "video" && isUtilityExtractFrameVideoModel(node?.data?.utilityVideoModel)) return "image";
   return utilityMode(node);
 }
 
 function utilityResultType(node) {
+  if (isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) return "video";
   return node?.data?.resultType || utilityMode(node);
 }
 
-function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wanFunControl) {
+function utilityVideoModelSelectionPatch(model) {
+  const patch = {
+    utilityVideoModel: model,
+    resultUrl: "",
+    resultItems: [],
+    resultType: utilityVideoOutputType(model),
+    error: ""
+  };
+
+  if (isUtilityWan22VaceInpaintingModel(model) || isUtilityWan22VaceControlModel(model)) {
+    return {
+      ...patch,
+      wanVaceResolution: "auto",
+      wanVaceAspectRatio: "auto",
+      wanVacePreprocess: isUtilityWan22VaceControlModel(model),
+      wanVaceUseReferenceFrames: true,
+      wanVaceTemporalDownsampleFactor: 0,
+      wanVaceEnableAutoDownsample: false,
+      wanVaceAutoDownsampleMinFps: 15,
+      wanVaceInterpolatorModel: "film",
+      wanVaceTransparencyMode: "content_aware"
+    };
+  }
+
+  if (isUtilityWan22A14bModel(model)) {
+    return {
+      ...patch,
+      wan22A14bNegativePrompt: "",
+      wan22A14bResolution: "720p",
+      wan22A14bAspectRatio: isUtilityWan22A14bI2vModel(model) ? "auto" : "16:9",
+      wan22A14bNumFrames: 81,
+      wan22A14bFps: 16,
+      wan22A14bNumInferenceSteps: 27,
+      wan22A14bGuidanceScale: 3.5,
+      wan22A14bGuidanceScale2: isUtilityWan22A14bI2vModel(model) ? 3.5 : 4,
+      wan22A14bShift: 5,
+      wan22A14bEnableSafetyChecker: true,
+      wan22A14bEnableOutputSafetyChecker: false,
+      wan22A14bEnablePromptExpansion: false,
+      wan22A14bAcceleration: "regular",
+      wan22A14bInterpolatorModel: "film",
+      wan22A14bNumInterpolatedFrames: 1,
+      wan22A14bAdjustFpsForInterpolation: true,
+      wan22A14bVideoQuality: "high",
+      wan22A14bVideoWriteMode: "balanced",
+      wan22A14bReverseVideo: false,
+      wan22A14bLoras: [emptyWanLoraItem()]
+    };
+  }
+
+  if (isUtilityWan21LoraModel(model)) {
+    return {
+      ...patch,
+      wan21LoraResolution: isUtilityWan21I2vLoraModel(model) ? "720p" : "480p",
+      wan21LoraAspectRatio: "16:9",
+      wan21LoraNumFrames: 81,
+      wan21LoraFps: 16,
+      wan21LoraNumInferenceSteps: 30,
+      wan21LoraGuideScale: 5,
+      wan21LoraShift: 5,
+      wan21LoraEnableSafetyChecker: true,
+      wan21LoraEnablePromptExpansion: !isUtilityWan21I2vLoraModel(model),
+      wan21LoraTurboMode: true,
+      wan21LoraReverseVideo: false,
+      wan21Loras: [emptyWanLoraItem()]
+    };
+  }
+
+  if (isUtilityTransitionBuilderModel(model)) {
+    return {
+      ...patch,
+      transitionFrameCount: 57,
+      transitionFps: 16,
+      transitionSize: "512",
+      transitionOverlapFrames: 9,
+      transitionStartFrame: 0,
+      transitionDurationFrames: 57,
+      transitionEasing: "linear",
+      transitionMaskStyle: "wipe",
+      transitionMaskSoftness: 6,
+      transitionOutputFormat: "mp4",
+      transitionKeyframeOrder: [],
+      transitionWanSchedulerEnabled: false,
+      transitionGenerateWan: false,
+      transitionWanSegmentCount: 3,
+      transitionWanSelectedSegment: 1,
+      transitionWanNegativePrompt: "",
+      transitionWanNumFrames: 81,
+      transitionWanFps: 16,
+      transitionWanResolution: "720p",
+      transitionWanAspectRatio: "auto",
+      transitionWanNumInferenceSteps: 27,
+      transitionWanGuidanceScale: 3.5,
+      transitionWanGuidanceScale2: 3.5,
+      transitionWanShift: 5,
+      transitionWanAcceleration: "regular",
+      transitionWanInterpolatorModel: "film",
+      transitionWanNumInterpolatedFrames: 1,
+      transitionWanAdjustFpsForInterpolation: true,
+      transitionWanVideoQuality: "high",
+      transitionWanVideoWriteMode: "balanced",
+      transitionWanEnableSafetyChecker: true,
+      transitionWanEnableOutputSafetyChecker: false,
+      transitionWanEnablePromptExpansion: false,
+      transitionWanSeedMode: "increment",
+      transitionWanLoras: [emptyWanLoraItem()]
+    };
+  }
+
+  return patch;
+}
+
+function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wan22VaceDepth, data = {}) {
   if (mode === "image") {
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
@@ -7284,6 +8285,14 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityCompositeVideoModel(videoModel)) return ["referenceVideoIn", "maskVideoIn"];
+  if (isUtilityTransitionBuilderModel(videoModel)) return data?.transitionGenerateWan
+    ? ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"]
+    : ["referenceImageIn", "referenceVideoIn", "maskVideoIn"];
+  if (isUtilityWan22A14bI2vModel(videoModel)) return ["promptIn", "referenceImageIn"];
+  if (isUtilityWan22A14bT2vModel(videoModel)) return ["promptIn"];
+  if (isUtilityWan21I2vLoraModel(videoModel)) return ["promptIn", "referenceImageIn"];
+  if (isUtilityWan21T2vLoraModel(videoModel)) return ["promptIn"];
+  if (isUtilityWan22VaceControlModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn"];
   if (isUtilityWanVaceMaskToVideoModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
   if (isUtilityWanVaceInpaintingModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
   if (isUtilityVideoUpscalerModel(videoModel)) return ["referenceVideoIn"];
@@ -7306,15 +8315,34 @@ function normalizedUtilityVideoModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
   if (normalized.includes("composite")) return utilityVideoModelNames.compositeVideo;
-  if (normalized.includes("vace") || (normalized.includes("wan") && (normalized.includes("mask") || normalized.includes("inpaint")))) return utilityVideoModelNames.wanFunControl;
+  if (normalized.includes("transition") && normalized.includes("builder")) return utilityVideoModelNames.transitionBuilder;
+  if (isUtilityWan22A14bI2vModel(normalized)) return utilityVideoModelNames.wan22A14bI2v;
+  if (isUtilityWan22A14bT2vModel(normalized)) return utilityVideoModelNames.wan22A14bT2v;
+  if (isUtilityWan21I2vLoraModel(normalized)) return utilityVideoModelNames.wan21I2vLora;
+  if (isUtilityWan21T2vLoraModel(normalized)) return utilityVideoModelNames.wan21T2vLora;
+  if (normalized.includes("wan fun control")) return utilityVideoModelNames.wan22VaceDepth;
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace") && normalized.includes("depth")) {
+    return utilityVideoModelNames.wan22VaceDepth;
+  }
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace") && normalized.includes("pose")) {
+    return utilityVideoModelNames.wan22VacePose;
+  }
+  if (normalized.includes("vace") && normalized.includes("mask")) return utilityVideoModelNames.wanVaceMaskToVideo;
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace")) {
+    return utilityVideoModelNames.wan22VaceInpainting;
+  }
+  if (normalized.includes("vace") && normalized.includes("inpaint")) return utilityVideoModelNames.wanVaceInpainting;
+  if (normalized.includes("vace")) return utilityVideoModelNames.wanVaceMaskToVideo;
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
   if (isUtilityExtractFrameVideoModel(normalized)) return utilityVideoModelNames.extractFrame;
   if (normalized.includes("bytedance") && normalized.includes("upscal")) return utilityVideoModelNames.bytedanceUpscaler;
   if (normalized.includes("topaz")) return utilityVideoModelNames.topazUpscaler;
+  if (normalized.includes("wan") && normalized.includes("mask")) return utilityVideoModelNames.wanVaceMaskToVideo;
+  if (normalized.includes("wan") && normalized.includes("inpaint")) return utilityVideoModelNames.wanVaceInpainting;
   if (normalized.includes("void") || normalized.includes("inpaint")) return utilityVideoModelNames.voidVideoInpainting;
-  return utilityVideoModelNames.wanFunControl;
+  return utilityVideoModelNames.wan22VaceDepth;
 }
 
 function utilityVideoOutputType(model) {
@@ -7325,6 +8353,37 @@ function utilityModelDescription(model) {
   return utilityModelDescriptions[model] || "Utility preprocessing model.";
 }
 
+function emptyWanLoraItem() {
+  return { path: "", weightName: "", scale: "1" };
+}
+
+function emptyWan21LoraItem() {
+  return emptyWanLoraItem();
+}
+
+function wanLoraItemsForDataItems(rawItems = []) {
+  const normalizedItems = rawItems
+    .map((item) => ({
+      path: String(item?.path || ""),
+      weightName: String(item?.weightName || item?.weight_name || ""),
+      scale: item?.scale === undefined || item?.scale === null || item?.scale === "" ? "1" : String(item.scale)
+    }))
+    .slice(0, 8);
+  return normalizedItems.length ? normalizedItems : [emptyWanLoraItem()];
+}
+
+function wan22A14bLoraItemsForData(data = {}) {
+  return wanLoraItemsForDataItems(Array.isArray(data.wan22A14bLoras) ? data.wan22A14bLoras : []);
+}
+
+function wan21LoraItemsForData(data = {}) {
+  return wanLoraItemsForDataItems(Array.isArray(data.wan21Loras) ? data.wan21Loras : []);
+}
+
+function transitionWanLoraItemsForData(data = {}) {
+  return wanLoraItemsForDataItems(Array.isArray(data.transitionWanLoras) ? data.transitionWanLoras : []);
+}
+
 function patinaMapsForData(data = {}) {
   const selectedMaps = Array.isArray(data.patinaMaps) ? data.patinaMaps : patinaMapOptions.map((option) => option.id);
   const validMaps = selectedMaps.filter((mapId) => patinaMapOptions.some((option) => option.id === mapId));
@@ -7333,7 +8392,7 @@ function patinaMapsForData(data = {}) {
 
 function visiblePortIdsForNode(node) {
   if (node?.type === "utility") {
-    return [...utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel), "utilityOut"];
+    return [...utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data), ...utilityOutputPortIdsForNode(node)];
   }
 
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
@@ -7346,14 +8405,24 @@ function inputPortIdsForNode(node) {
 
 function activeInputPortIdsForNode(node) {
   if (node?.type === "utility") {
-    return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel);
+    return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data);
   }
 
   return inputPortIdsForNode(node);
 }
 
 function outputPortIdsForNode(node) {
+  if (node?.type === "utility") return utilityOutputPortIdsForNode(node);
   return (getNodeConfig(node?.type)?.output || []).map((port) => port.id);
+}
+
+function utilityOutputPortIdsForNode(node) {
+  if (!isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) return ["utilityOut"];
+  const ports = [];
+  if (node?.data?.transitionGenerateWan) ports.push("generatedVideoOut");
+  ports.push("controlVideoOut", "maskVideoOut");
+  if (node?.data?.transitionWanSchedulerEnabled || node?.data?.transitionGenerateWan) ports.push("guideStartOut", "guideEndOut");
+  return ports;
 }
 
 function composerCharacterInputPortIdsForNode(node) {
@@ -7504,18 +8573,57 @@ function connectedText(items = []) {
 }
 
 function connectedAssetUrls(items = []) {
-  return items.map(({ source }) => source.data.resultUrl).filter(Boolean);
+  return items.map(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port)).filter(Boolean);
+}
+
+function transitionBuilderKeyframeUrlsForNode(node, items = []) {
+  return transitionBuilderKeyframeItemsForNode(node, items).map((item) => item.url);
+}
+
+function transitionBuilderKeyframeItemsForNode(node, items = []) {
+  const order = Array.isArray(node?.data?.transitionKeyframeOrder) ? node.data.transitionKeyframeOrder.map(String) : [];
+  return orderedTransitionKeyframeItems(items, order);
+}
+
+function orderedTransitionKeyframeItems(items = [], order = []) {
+  const orderRank = new Map(order.map((key, index) => [String(key), index]));
+  const orderOffset = order.length;
+
+  return items
+    .map((item, index) => {
+      const url = sourceResultUrlForPort(item.source, item.edge?.from?.port);
+      if (!url) return null;
+      const key = transitionKeyframeInputKey(item, index);
+      return {
+        key,
+        url,
+        label: sourceResultLabelForPort(item.source, item.edge?.from?.port) || sourceLabel(item.source),
+        originalIndex: index
+      };
+    })
+    .filter(Boolean)
+    .sort((first, second) => {
+      const firstRank = orderRank.has(first.key) ? orderRank.get(first.key) : orderOffset + first.originalIndex;
+      const secondRank = orderRank.has(second.key) ? orderRank.get(second.key) : orderOffset + second.originalIndex;
+      return firstRank - secondRank;
+    });
+}
+
+function transitionKeyframeInputKey(item, index = 0) {
+  const edgeId = String(item?.edge?.id || "").trim();
+  if (edgeId) return edgeId;
+  return [item?.source?.id || "source", item?.edge?.from?.port || "out", index].join(":");
 }
 
 function connectedAssetItems(items = []) {
   return items
-    .map(({ source }) => {
-      const url = source.data.resultUrl;
+    .map(({ source, edge }) => {
+      const url = sourceResultUrlForPort(source, edge?.from?.port);
       if (!url) return null;
       return {
         url,
-        type: previewMediaType(source, { from: { port: "" }, to: { port: "" } }),
-        label: sourceLabel(source)
+        type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+        label: sourceResultLabelForPort(source, edge?.from?.port) || sourceLabel(source)
       };
     })
     .filter(Boolean);
@@ -7523,8 +8631,53 @@ function connectedAssetItems(items = []) {
 
 function connectedAssetLabels(items = []) {
   return items
-    .filter(({ source }) => source.data.resultUrl)
-    .map(({ source }) => source.data.title || sourceLabel(source));
+    .filter(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port))
+    .map(({ source, edge }) => sourceResultLabelForPort(source, edge?.from?.port) || source.data.title || sourceLabel(source));
+}
+
+function sourceResultItemsForPort(source, portId = "", type = "") {
+  if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    const item = transitionBuilderResultItemForPort(source, portId);
+    return item?.url ? [item] : [];
+  }
+
+  return normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, type);
+}
+
+function sourceResultUrlForPort(source, portId = "") {
+  if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    const item = transitionBuilderResultItemForPort(source, portId);
+    if (item?.url) return item.url;
+  }
+
+  return source?.data?.resultUrl || "";
+}
+
+function sourceResultLabelForPort(source, portId = "") {
+  if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    return transitionBuilderResultItemForPort(source, portId)?.label || "";
+  }
+
+  return "";
+}
+
+function transitionBuilderResultItemForPort(source, portId = "") {
+  const items = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, "video");
+  if (!items.length) return null;
+  if (portId === "generatedVideoOut") {
+    return items.find((item) => /generated transition/i.test(item.label || "")) || items[0] || null;
+  }
+  if (portId === "guideStartOut" || portId === "guideEndOut") {
+    const guideItems = items.filter((item) => (item.type || "").toLowerCase() === "image" || /^guide\s+\d+/i.test(item.label || ""));
+    if (!guideItems.length) return null;
+    const segmentCount = Math.max(1, Math.min(8, Math.round(Number(source?.data?.transitionWanSegmentCount || Math.max(1, guideItems.length - 1)))));
+    const selectedSegment = Math.max(1, Math.min(segmentCount, Math.round(Number(source?.data?.transitionWanSelectedSegment || 1))));
+    const guideIndex = selectedSegment - 1 + (portId === "guideEndOut" ? 1 : 0);
+    return guideItems[guideIndex] || guideItems.at(-1) || null;
+  }
+  const labelMatch = portId === "maskVideoOut" ? /mask/i : /control/i;
+  const fallbackIndex = portId === "maskVideoOut" ? 1 : 0;
+  return items.find((item) => labelMatch.test(item.label || "")) || items[fallbackIndex] || items[0] || null;
 }
 
 function connectedCharacterReferences(items = []) {
@@ -7912,8 +9065,11 @@ async function runVideoModelGeneration({ node, prompt, incoming, projectId, proj
 }
 
 async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, projectName, workflowContext, index }) {
-  const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wanFunControl);
+  const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wan22VaceDepth);
   const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
+  const referenceImageUrls = isUtilityTransitionBuilderModel(model)
+    ? transitionBuilderKeyframeUrlsForNode(node, incoming.referenceImageIn)
+    : connectedAssetUrls(incoming.referenceImageIn);
   const { response, data } = await nodeApi.utilityVideo(buildUtilityVideoRequest({
     node,
     prompt,
@@ -7921,7 +9077,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
     workflowContext,
     projectId,
     projectName,
-    referenceImageUrls: connectedAssetUrls(incoming.referenceImageIn),
+    referenceImageUrls,
     referenceVideoUrls: connectedAssetUrls(incoming.referenceVideoIn),
     maskVideoUrls: connectedAssetUrls(incoming.maskVideoIn),
     colorIdMatte: {
@@ -7958,7 +9114,7 @@ function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
-      const resultItems = normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
+      const resultItems = sourceResultItemsForPort(source, edge?.from?.port, sourceType);
       if (!resultItems.length) return null;
       const sourceName = source.type === "camera" && edge.from.port === "imageOut" ? "Camera image" : sourceLabel(source);
       const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
@@ -7974,7 +9130,11 @@ function connectedPreviewSources(items = []) {
           sourceResultIndex: index,
           sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
           type: item.type || sourceType,
-          label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
+          label: source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
+            ? item.label || sourceName
+            : allItems.length > 1
+              ? `${sourceName} ${index + 1}`
+              : sourceName
         }))
       };
     })
@@ -8030,7 +9190,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 }
 
 function previewMediaType(source, edge) {
-  if (source.type === "utility") return utilityResultType(source);
+  if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
@@ -8450,6 +9610,20 @@ function connectedSummary(items = [], fallback) {
   return `${items.length} connected`;
 }
 
+function moveArrayItem(items = [], fromIndex, toIndex) {
+  const nextItems = [...items];
+  const [item] = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, item);
+  return nextItems;
+}
+
+function ordinalLabel(value) {
+  const number = Math.max(1, Math.round(Number(value) || 1));
+  const remainder = number % 100;
+  const suffix = remainder >= 11 && remainder <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[number % 10] || "th";
+  return `${number}${suffix}`;
+}
+
 function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
@@ -8754,6 +9928,11 @@ function normalizeCharacterSheetVariants(data = {}) {
 function normalizeUtilityData(data = {}) {
   const utilityModeValue = data.utilityMode === "image" ? "image" : "video";
   const utilityVideoModel = normalizedUtilityVideoModelName(data.utilityVideoModel);
+  const wanVaceResolutionChoices = isUtilityWanVaceMaskToVideoModel(utilityVideoModel) ? wanVaceResolutionOptions : wanVaceInpaintingResolutionOptions;
+  const wanVaceAspectRatioChoices = isUtilityWanVaceMaskToVideoModel(utilityVideoModel) ? wanVaceAspectRatioOptions : wanVaceInpaintingAspectRatioOptions;
+  const wan21LoraResolutionChoices = isUtilityWan21I2vLoraModel(utilityVideoModel) ? wan21I2vLoraResolutionOptions : wan21T2vLoraResolutionOptions;
+  const wan21LoraAspectRatioChoices = isUtilityWan21I2vLoraModel(utilityVideoModel) ? wan21I2vLoraAspectRatioOptions : wan21T2vLoraAspectRatioOptions;
+  const wan22A14bAspectRatioChoices = isUtilityWan22A14bI2vModel(utilityVideoModel) ? wan22A14bI2vAspectRatioOptions : wan22A14bT2vAspectRatioOptions;
   return {
     ...data,
     title: data.title || "Utility",
@@ -8782,24 +9961,98 @@ function normalizeUtilityData(data = {}) {
     compositeMaskBlur: colorIdMatteBlur(data.compositeMaskBlur),
     compositeMaskExpand: colorIdMatteExpand(data.compositeMaskExpand),
     compositeOutputFormat: normalizeChoice(data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
+    transitionFrameCount: Math.max(9, Math.min(241, Math.round(Number(data.transitionFrameCount || 57)))),
+    transitionFps: Math.max(5, Math.min(30, Math.round(Number(data.transitionFps || 16)))),
+    transitionSize: normalizeChoice(String(data.transitionSize || "512"), ["512", "720", "1024"], "512"),
+    transitionOverlapFrames: Math.max(0, Math.min(32, Math.round(Number(data.transitionOverlapFrames || 9)))),
+    transitionStartFrame: Math.max(0, Math.min(240, Math.round(Number(data.transitionStartFrame || 0)))),
+    transitionDurationFrames: Math.max(1, Math.min(241, Math.round(Number(data.transitionDurationFrames || data.transitionFrameCount || 57)))),
+    transitionEasing: normalizeChoice(data.transitionEasing, transitionBuilderEasingOptions, "linear"),
+    transitionMaskStyle: normalizeChoice(data.transitionMaskStyle, transitionBuilderMaskStyleOptions, "wipe"),
+    transitionMaskSoftness: Math.max(0, Math.min(24, Math.round(Number(data.transitionMaskSoftness || 6)))),
+    transitionOutputFormat: normalizeChoice(data.transitionOutputFormat, transitionBuilderOutputOptions, "mp4"),
+    transitionKeyframeOrder: Array.isArray(data.transitionKeyframeOrder) ? data.transitionKeyframeOrder.map(String).filter(Boolean).slice(0, 64) : [],
+    transitionGenerateWan: Boolean(data.transitionGenerateWan),
+    transitionWanSchedulerEnabled: Boolean(data.transitionWanSchedulerEnabled),
+    transitionWanSegmentCount: Math.max(1, Math.min(8, Math.round(Number(data.transitionWanSegmentCount || 3)))),
+    transitionWanSelectedSegment: Math.max(1, Math.min(8, Math.round(Number(data.transitionWanSelectedSegment || 1)))),
+    transitionWanNegativePrompt: String(data.transitionWanNegativePrompt || ""),
+    transitionWanResolution: normalizeChoice(data.transitionWanResolution, wan22A14bResolutionOptions, "720p"),
+    transitionWanAspectRatio: normalizeChoice(data.transitionWanAspectRatio, wan22A14bI2vAspectRatioOptions, "auto"),
+    transitionWanNumFrames: Math.max(17, Math.min(161, Math.round(Number(data.transitionWanNumFrames || 81)))),
+    transitionWanFps: Math.max(4, Math.min(60, Math.round(Number(data.transitionWanFps || 16)))),
+    transitionWanNumInferenceSteps: Math.max(1, Math.min(60, Math.round(Number(data.transitionWanNumInferenceSteps || 27)))),
+    transitionWanGuidanceScale: data.transitionWanGuidanceScale || 3.5,
+    transitionWanGuidanceScale2: data.transitionWanGuidanceScale2 || 3.5,
+    transitionWanShift: data.transitionWanShift || 5,
+    transitionWanAcceleration: normalizeChoice(data.transitionWanAcceleration, wan22A14bAccelerationOptions, "regular"),
+    transitionWanInterpolatorModel: normalizeChoice(data.transitionWanInterpolatorModel, wan22A14bInterpolatorOptions, "film"),
+    transitionWanNumInterpolatedFrames: Math.max(0, Math.min(4, Math.round(Number(data.transitionWanNumInterpolatedFrames ?? 1)))),
+    transitionWanAdjustFpsForInterpolation: data.transitionWanAdjustFpsForInterpolation !== false,
+    transitionWanVideoQuality: normalizeChoice(data.transitionWanVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    transitionWanVideoWriteMode: normalizeChoice(data.transitionWanVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    transitionWanEnableSafetyChecker: data.transitionWanEnableSafetyChecker !== false,
+    transitionWanEnableOutputSafetyChecker: Boolean(data.transitionWanEnableOutputSafetyChecker),
+    transitionWanEnablePromptExpansion: Boolean(data.transitionWanEnablePromptExpansion),
+    transitionWanSeedMode: normalizeChoice(data.transitionWanSeedMode, ["increment", "same", "random"], "increment"),
+    transitionWanLoras: transitionWanLoraItemsForData(data),
     wanVaceNegativePrompt: String(data.wanVaceNegativePrompt || ""),
     wanVaceMatchInputNumFrames: data.wanVaceMatchInputNumFrames !== false,
     wanVaceNumFrames: data.wanVaceNumFrames || 81,
     wanVaceMatchInputFps: data.wanVaceMatchInputFps !== false,
     wanVaceFps: data.wanVaceFps || 16,
-    wanVaceResolution: normalizeChoice(data.wanVaceResolution, wanVaceResolutionOptions, "720p"),
-    wanVaceAspectRatio: normalizeChoice(data.wanVaceAspectRatio, wanVaceAspectRatioOptions, "auto"),
+    wanVaceResolution: normalizeChoice(data.wanVaceResolution, wanVaceResolutionChoices, isUtilityWan22VaceInpaintingModel(utilityVideoModel) || isUtilityWan22VaceControlModel(utilityVideoModel) ? "auto" : "720p"),
+    wanVaceAspectRatio: normalizeChoice(data.wanVaceAspectRatio, wanVaceAspectRatioChoices, "auto"),
     wanVaceNumInferenceSteps: data.wanVaceNumInferenceSteps || 30,
     wanVaceGuidanceScale: data.wanVaceGuidanceScale || 5,
     wanVaceSampler: normalizeChoice(data.wanVaceSampler, wanVaceSamplerOptions, "unipc"),
     wanVaceShift: data.wanVaceShift || 5,
     wanVaceEnableSafetyChecker: data.wanVaceEnableSafetyChecker !== false,
     wanVaceEnablePromptExpansion: Boolean(data.wanVaceEnablePromptExpansion),
-    wanVacePreprocess: Boolean(data.wanVacePreprocess),
+    wanVacePreprocess: isUtilityWan22VaceControlModel(utilityVideoModel) ? data.wanVacePreprocess !== false : Boolean(data.wanVacePreprocess),
     wanVaceAcceleration: normalizeChoice(data.wanVaceAcceleration, wanVaceAccelerationOptions, "regular"),
     wanVaceVideoQuality: normalizeChoice(data.wanVaceVideoQuality, ["low", "medium", "high", "maximum"], "high"),
     wanVaceVideoWriteMode: normalizeChoice(data.wanVaceVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
     wanVaceNumInterpolatedFrames: Math.max(0, Math.round(Number(data.wanVaceNumInterpolatedFrames || 0))),
+    wanVaceUseReferenceFrames: data.wanVaceUseReferenceFrames !== false,
+    wanVaceTemporalDownsampleFactor: Math.max(0, Math.round(Number(data.wanVaceTemporalDownsampleFactor || 0))),
+    wanVaceEnableAutoDownsample: Boolean(data.wanVaceEnableAutoDownsample),
+    wanVaceAutoDownsampleMinFps: data.wanVaceAutoDownsampleMinFps || 15,
+    wanVaceInterpolatorModel: normalizeChoice(data.wanVaceInterpolatorModel, wanVaceInterpolatorOptions, "film"),
+    wanVaceTransparencyMode: normalizeChoice(data.wanVaceTransparencyMode, wanVaceTransparencyOptions, "content_aware"),
+    wan22A14bNegativePrompt: String(data.wan22A14bNegativePrompt || ""),
+    wan22A14bResolution: normalizeChoice(data.wan22A14bResolution, wan22A14bResolutionOptions, "720p"),
+    wan22A14bAspectRatio: normalizeChoice(data.wan22A14bAspectRatio, wan22A14bAspectRatioChoices, isUtilityWan22A14bI2vModel(utilityVideoModel) ? "auto" : "16:9"),
+    wan22A14bNumFrames: Math.max(17, Math.min(161, Math.round(Number(data.wan22A14bNumFrames || 81)))),
+    wan22A14bFps: Math.max(4, Math.min(60, Math.round(Number(data.wan22A14bFps || 16)))),
+    wan22A14bNumInferenceSteps: Math.max(1, Math.min(60, Math.round(Number(data.wan22A14bNumInferenceSteps || 27)))),
+    wan22A14bGuidanceScale: data.wan22A14bGuidanceScale || 3.5,
+    wan22A14bGuidanceScale2: data.wan22A14bGuidanceScale2 || (isUtilityWan22A14bI2vModel(utilityVideoModel) ? 3.5 : 4),
+    wan22A14bShift: data.wan22A14bShift || 5,
+    wan22A14bEnableSafetyChecker: data.wan22A14bEnableSafetyChecker !== false,
+    wan22A14bEnableOutputSafetyChecker: Boolean(data.wan22A14bEnableOutputSafetyChecker),
+    wan22A14bEnablePromptExpansion: Boolean(data.wan22A14bEnablePromptExpansion),
+    wan22A14bAcceleration: normalizeChoice(data.wan22A14bAcceleration, wan22A14bAccelerationOptions, "regular"),
+    wan22A14bInterpolatorModel: normalizeChoice(data.wan22A14bInterpolatorModel, wan22A14bInterpolatorOptions, "film"),
+    wan22A14bNumInterpolatedFrames: Math.max(0, Math.min(4, Math.round(Number(data.wan22A14bNumInterpolatedFrames ?? 1)))),
+    wan22A14bAdjustFpsForInterpolation: data.wan22A14bAdjustFpsForInterpolation !== false,
+    wan22A14bVideoQuality: normalizeChoice(data.wan22A14bVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    wan22A14bVideoWriteMode: normalizeChoice(data.wan22A14bVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    wan22A14bReverseVideo: Boolean(data.wan22A14bReverseVideo),
+    wan22A14bLoras: wan22A14bLoraItemsForData(data),
+    wan21LoraNegativePrompt: String(data.wan21LoraNegativePrompt || ""),
+    wan21LoraResolution: normalizeChoice(data.wan21LoraResolution, wan21LoraResolutionChoices, isUtilityWan21I2vLoraModel(utilityVideoModel) ? "720p" : "480p"),
+    wan21LoraAspectRatio: normalizeChoice(data.wan21LoraAspectRatio, wan21LoraAspectRatioChoices, "16:9"),
+    wan21LoraNumFrames: Math.max(81, Math.min(100, Math.round(Number(data.wan21LoraNumFrames || 81)))),
+    wan21LoraFps: Math.max(5, Math.min(24, Math.round(Number(data.wan21LoraFps || 16)))),
+    wan21LoraNumInferenceSteps: Math.max(1, Math.min(60, Math.round(Number(data.wan21LoraNumInferenceSteps || 30)))),
+    wan21LoraGuideScale: data.wan21LoraGuideScale || 5,
+    wan21LoraShift: data.wan21LoraShift || 5,
+    wan21LoraEnableSafetyChecker: data.wan21LoraEnableSafetyChecker !== false,
+    wan21LoraEnablePromptExpansion: Boolean(data.wan21LoraEnablePromptExpansion),
+    wan21LoraTurboMode: data.wan21LoraTurboMode !== false,
+    wan21LoraReverseVideo: Boolean(data.wan21LoraReverseVideo),
+    wan21Loras: wan21LoraItemsForData(data),
     stillFrameTime: data.stillFrameTime ?? 0,
     sam3VideoDetectionThreshold: data.sam3VideoDetectionThreshold ?? 0.5,
     extractFrameTime: data.extractFrameTime ?? 0,
@@ -8956,7 +10209,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     nextEdge.to.port = "frontImageIn";
   }
 
-  if (target?.type === "utility" && !utilityInputPortIds(target.data?.utilityMode, target.data?.utilityImageModel, target.data?.utilityVideoModel).includes(nextEdge.to.port)) {
+  if (target?.type === "utility" && !utilityInputPortIds(target.data?.utilityMode, target.data?.utilityImageModel, target.data?.utilityVideoModel, target.data).includes(nextEdge.to.port)) {
     return null;
   }
 
@@ -8983,8 +10236,12 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "utility") {
-    nextEdge.from.port = "utilityOut";
-    nextEdge.color = utilityOutputType(source) === "video" ? portColors.video : portColors.image;
+    if (isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+      if (!utilityOutputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "controlVideoOut";
+    } else {
+      nextEdge.from.port = "utilityOut";
+    }
+    nextEdge.color = utilityOutputType(source, nextEdge.from.port) === "video" ? portColors.video : portColors.image;
   }
 
   if (source.type === "composer") {

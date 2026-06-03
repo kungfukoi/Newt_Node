@@ -5,6 +5,7 @@ export function registerCoreRoutes(
     resolveLocalAssetPath,
     workflowPackagePublicPath,
     selectFolderWithDialog,
+    selectLoraFileWithDialog,
     selectWorkflowFileWithDialog,
     readWorkflowFromFilePath,
     buildHealthPayload,
@@ -41,6 +42,19 @@ export function registerCoreRoutes(
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
       res.status(status).json({ error: error.message || "Folder selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+    }
+  });
+
+  app.post("/api/system/select-lora-file", async (req, res) => {
+    try {
+      const selectedPath = await selectLoraFileWithDialog({
+        title: String(req.body.title || "Choose LoRA file"),
+        defaultPath: String(req.body.defaultPath || "")
+      });
+      res.json({ path: selectedPath });
+    } catch (error) {
+      const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
+      res.status(status).json({ error: error.message || "LoRA file selection failed.", canceled: error.code === "DIALOG_CANCELED" });
     }
   });
 

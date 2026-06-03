@@ -83,6 +83,9 @@ const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
 const wanFunControlCostPerSecond = 0.1;
 const wan27ReferenceVideoCostPerSecond = Number(process.env.WAN_2_7_REFERENCE_VIDEO_COST_PER_SECOND || 0.1);
+const wan22A14bLoraI2vEndpoint = "fal-ai/wan/v2.2-a14b/image-to-video/lora";
+const wan22A14bLoraCostPerSecond = Number(process.env.WAN_22_A14B_LORA_COST_PER_SECOND || 0.1);
+const wan21LoraCostPerVideo = Number(process.env.WAN_21_LORA_COST_PER_VIDEO || 0.75);
 const wanVaceCostPerSecond = {
   "480p": 0.04,
   "580p": 0.06,
@@ -241,6 +244,7 @@ registerCoreRoutes(app, {
   resolveLocalAssetPath,
   workflowPackagePublicPath,
   selectFolderWithDialog,
+  selectLoraFileWithDialog,
   selectWorkflowFileWithDialog,
   readWorkflowFromFilePath,
   buildHealthPayload,
@@ -270,8 +274,16 @@ function buildHealthPayload() {
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
+      transitionBuilder: true,
+      wan22A14bT2v: true,
+      wan22A14bI2v: true,
+      wan21T2vLora: true,
+      wan21I2vLora: true,
       wanVaceMaskToVideo: true,
       wanVaceInpainting: true,
+      wan22VaceDepth: true,
+      wan22VacePose: true,
+      wan22VaceInpainting: true,
       composerFrame: true,
       composerPoses: true,
       apiJsonErrors: true,
@@ -764,6 +776,14 @@ app.get("/api/stats", async (_req, res) => {
           costPerSecond: wanFunControlCostPerSecond,
           currency: "USD"
         },
+        wan22A14bLora: {
+          costPerSecond: wan22A14bLoraCostPerSecond,
+          currency: "USD"
+        },
+        wan21Lora: {
+          costPerVideo: wan21LoraCostPerVideo,
+          currency: "USD"
+        },
         wanVaceMaskToVideo: {
           costPerSecond480p: wanVaceCostPerSecond["480p"],
           costPerSecond580p: wanVaceCostPerSecond["580p"],
@@ -772,6 +792,27 @@ app.get("/api/stats", async (_req, res) => {
           currency: "USD"
         },
         wanVaceInpainting: {
+          costPerSecond480p: wanVaceCostPerSecond["480p"],
+          costPerSecond580p: wanVaceCostPerSecond["580p"],
+          costPerSecond720p: wanVaceCostPerSecond["720p"],
+          billingFps: 16,
+          currency: "USD"
+        },
+        wan22VaceInpainting: {
+          costPerSecond480p: wanVaceCostPerSecond["480p"],
+          costPerSecond580p: wanVaceCostPerSecond["580p"],
+          costPerSecond720p: wanVaceCostPerSecond["720p"],
+          billingFps: 16,
+          currency: "USD"
+        },
+        wan22VaceDepth: {
+          costPerSecond480p: wanVaceCostPerSecond["480p"],
+          costPerSecond580p: wanVaceCostPerSecond["580p"],
+          costPerSecond720p: wanVaceCostPerSecond["720p"],
+          billingFps: 16,
+          currency: "USD"
+        },
+        wan22VacePose: {
           costPerSecond480p: wanVaceCostPerSecond["480p"],
           costPerSecond580p: wanVaceCostPerSecond["580p"],
           costPerSecond720p: wanVaceCostPerSecond["720p"],
@@ -2078,6 +2119,15 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "local-transition-builder") {
+      return runTransitionBuilderUtilityVideo(req, res, {
+        referenceImageUrls,
+        referenceVideoUrls,
+        maskVideoUrls,
+        selectedVideoModel
+      });
+    }
+
     if (!process.env.FAL_KEY) {
       return res.status(400).json({ error: "Missing FAL_KEY in .env." });
     }
@@ -2102,6 +2152,22 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "fal-wan-22-a14b") {
+      return runWan22A14bUtility(req, res, {
+        prompt,
+        referenceImageUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-21-lora") {
+      return runWan21LoraUtility(req, res, {
+        prompt,
+        referenceImageUrls,
+        selectedVideoModel
+      });
+    }
+
     if (selectedVideoModel.provider === "fal-wan-vace-mask-to-video") {
       return runWanVaceMaskToVideoUtility(req, res, {
         prompt,
@@ -2113,6 +2179,25 @@ app.post("/api/node/utility-video", async (req, res) => {
     }
 
     if (selectedVideoModel.provider === "fal-wan-vace-inpainting") {
+      return runWanVaceInpaintingUtility(req, res, {
+        prompt,
+        referenceImageUrls,
+        referenceVideoUrls,
+        maskVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-22-vace-control") {
+      return runWan22VaceControlUtility(req, res, {
+        prompt,
+        referenceImageUrls,
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-22-vace-inpainting") {
       return runWanVaceInpaintingUtility(req, res, {
         prompt,
         referenceImageUrls,
@@ -2147,14 +2232,6 @@ app.post("/api/node/utility-video", async (req, res) => {
       return runTopazVideoUpscaler(req, res, {
         referenceVideoUrls,
         selectedVideoModel
-      });
-    }
-
-    if (selectedVideoModel.provider === "fal-wan-fun-control") {
-      return runWanFunControlVideo(req, res, {
-        prompt,
-        referenceImageUrls,
-        referenceVideoUrls
       });
     }
 
@@ -2293,6 +2370,22 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
   );
 }
 
+async function runTransitionBuilderUtilityVideo(req, res, { referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
+  if (!referenceImageUrls.length && !referenceVideoUrls.length) {
+    return res.status(400).json({ error: "Transition Builder requires connected keyframes or a source video." });
+  }
+
+  return res.json(
+    await createTransitionBuilderResult({
+      body: req.body,
+      referenceImageUrls,
+      sourceVideoUrl: firstLocalOutput(referenceVideoUrls),
+      maskVideoUrl: firstLocalOutput(maskVideoUrls),
+      selectedVideoModel
+    })
+  );
+}
+
 app.post("/api/node/generate-video", async (req, res) => {
   try {
     if (!process.env.FAL_KEY) {
@@ -2310,11 +2403,12 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
     }
 
-    if (selectedVideoModel.provider === "fal-wan-fun-control") {
-      return runWanFunControlVideo(req, res, {
+    if (selectedVideoModel.provider === "fal-wan-22-vace-control") {
+      return runWan22VaceControlUtility(req, res, {
         prompt,
         referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
-        referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : []
+        referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [],
+        selectedVideoModel
       });
     }
 
@@ -2902,98 +2996,6 @@ async function runLumaRay2Video(req, res, { prompt, startFrameUrls, endFrameUrls
   });
 }
 
-async function runWanFunControlVideo(req, res, { prompt, referenceImageUrls, referenceVideoUrls }) {
-  const controlVideoUrl = firstLocalOutput(referenceVideoUrls);
-  if (!controlVideoUrl) {
-    return res.status(400).json({ error: "Wan Fun Control requires a connected control video." });
-  }
-
-  const options = req.body.wanFunControl || {};
-  const endpoint = "fal-ai/wan-fun-control";
-  const matchInputNumFrames = options.matchInputNumFrames !== false;
-  const matchInputFps = options.matchInputFps !== false;
-  const preprocessVideo = options.preprocessVideo !== false;
-  const input = {
-    prompt,
-    control_video_url: await uploadLocalOutputToFal(controlVideoUrl),
-    preprocess_video: preprocessVideo,
-    preprocess_type: normalizeChoice(options.preprocessType, ["depth", "pose"], "depth"),
-    match_input_num_frames: matchInputNumFrames,
-    match_input_fps: matchInputFps,
-    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 27),
-    guidance_scale: clampNumber(options.guidanceScale, 0, 20, 6),
-    shift: clampNumber(options.shift, 0, 20, 5)
-  };
-  const seed = optionalInteger(options.seed);
-  const referenceImageUrl = firstLocalOutput(referenceImageUrls);
-
-  if (!matchInputNumFrames) input.num_frames = clampInteger(options.numFrames, 1, 241, 81);
-  if (!matchInputFps) input.fps = clampInteger(options.fps, 1, 60, 16);
-  if (seed !== undefined) input.seed = seed;
-  if (referenceImageUrl) input.reference_image_url = await uploadLocalOutputToFal(referenceImageUrl);
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = result?.data?.video;
-
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, "wan-fun-control");
-  const cost = estimateWanFunControlCost({
-    endpoint,
-    matchInputNumFrames,
-    numFrames: input.num_frames,
-    matchInputFps,
-    fps: input.fps
-  });
-  await appendHistory({
-    id: result.requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider: "fal.ai",
-    modelName: "Wan Fun Control",
-    endpoint,
-    mode: "Wan Fun Control video to video",
-    prompt,
-    submittedPrompt: prompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
-      preprocessVideo,
-      preprocessType: input.preprocess_type,
-      matchInputNumFrames,
-      numFrames: input.num_frames || null,
-      matchInputFps,
-      fps: input.fps || null,
-      numInferenceSteps: input.num_inference_steps,
-      guidanceScale: input.guidance_scale,
-      shift: input.shift,
-      controlVideoCount: 1,
-      referenceImageCount: referenceImageUrl ? 1 : 0,
-      seed: result?.data?.seed ?? input.seed ?? null
-    },
-    cost,
-    remoteVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
-
-  return res.json({
-    requestId: result.requestId,
-    seed: result?.data?.seed ?? input.seed,
-    endpoint,
-    modelName: "Wan Fun Control",
-    cost,
-    video: {
-      ...remoteVideo,
-      localUrl: output.publicPath,
-      fileName: output.fileName
-    }
-  });
-}
-
 async function runWan27ReferenceVideo(req, res, { prompt, referenceImageUrls, referenceVideoUrls, selectedVideoModel }) {
   const options = req.body.wan27Reference || {};
   const endpoint = selectedVideoModel.id;
@@ -3182,6 +3184,289 @@ async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoU
   });
 }
 
+async function runWan22A14bUtility(req, res, { prompt, referenceImageUrls, selectedVideoModel }) {
+  const options = req.body.wan22A14b || {};
+  const endpoint = selectedVideoModel.id;
+  const isImageToVideo = selectedVideoModel.mode === "image-to-video";
+  const startImageUrl = firstLocalOutput(referenceImageUrls);
+  const endImageUrl = firstLocalOutput(referenceImageUrls.slice(1));
+
+  if (isImageToVideo && !startImageUrl) {
+    return res.status(400).json({ error: `${selectedVideoModel.displayName} requires a connected start image.` });
+  }
+
+  const aspectRatioOptions = isImageToVideo ? ["auto", "16:9", "9:16", "1:1"] : ["16:9", "9:16", "1:1"];
+  const loras = await normalizeWanLoraWeights(options.loras);
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    num_frames: clampInteger(options.numFrames, 17, 161, 81),
+    frames_per_second: clampInteger(options.fps, 4, 60, 16),
+    resolution: normalizeChoice(options.resolution, ["480p", "580p", "720p"], "720p"),
+    aspect_ratio: normalizeChoice(options.aspectRatio, aspectRatioOptions, isImageToVideo ? "auto" : "16:9"),
+    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 27),
+    enable_safety_checker: options.enableSafetyChecker !== false,
+    enable_output_safety_checker: Boolean(options.enableOutputSafetyChecker),
+    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
+    acceleration: normalizeChoice(options.acceleration, ["regular", "none"], "regular"),
+    guidance_scale: clampNumber(options.guidanceScale, 0, 20, 3.5),
+    guidance_scale_2: clampNumber(options.guidanceScale2, 0, 20, isImageToVideo ? 3.5 : 4),
+    shift: clampNumber(options.shift, 1, 10, 5),
+    interpolator_model: normalizeChoice(options.interpolatorModel, ["none", "film", "rife"], "film"),
+    num_interpolated_frames: clampInteger(options.numInterpolatedFrames, 0, 4, 1),
+    adjust_fps_for_interpolation: options.adjustFpsForInterpolation !== false,
+    video_quality: normalizeChoice(options.videoQuality, ["low", "medium", "high", "maximum"], "high"),
+    video_write_mode: normalizeChoice(options.videoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    loras,
+    reverse_video: Boolean(options.reverseVideo)
+  };
+  const seed = optionalInteger(options.seed);
+  if (seed !== undefined) input.seed = seed;
+  if (isImageToVideo) {
+    input.image_url = await uploadLocalOutputToFal(startImageUrl);
+    if (endImageUrl) input.end_image_url = await uploadLocalOutputToFal(endImageUrl);
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: `Fal returned no ${selectedVideoModel.displayName} video URL.`, raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, isImageToVideo ? "wan-22-a14b-i2v" : "wan-22-a14b-t2v");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWan22A14bLoraCost({
+    endpoint,
+    outputVideo,
+    numFrames: input.num_frames,
+    fps: input.frames_per_second
+  });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: `Wan 2.2 A14B LoRA ${isImageToVideo ? "image-to-video" : "text-to-video"}`,
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      mode: selectedVideoModel.mode,
+      negativePrompt: input.negative_prompt,
+      numFrames: input.num_frames,
+      fps: input.frames_per_second,
+      resolution: input.resolution,
+      aspectRatio: input.aspect_ratio,
+      numInferenceSteps: input.num_inference_steps,
+      guidanceScale: input.guidance_scale,
+      guidanceScale2: input.guidance_scale_2,
+      shift: input.shift,
+      enableSafetyChecker: input.enable_safety_checker,
+      enableOutputSafetyChecker: input.enable_output_safety_checker,
+      enablePromptExpansion: input.enable_prompt_expansion,
+      acceleration: input.acceleration,
+      interpolatorModel: input.interpolator_model,
+      numInterpolatedFrames: input.num_interpolated_frames,
+      adjustFpsForInterpolation: input.adjust_fps_for_interpolation,
+      videoQuality: input.video_quality,
+      videoWriteMode: input.video_write_mode,
+      reverseVideo: input.reverse_video,
+      loraCount: loras.length,
+      loras,
+      referenceImageCount: isImageToVideo ? (endImageUrl ? 2 : 1) : 0,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    seed: result?.data?.seed ?? input.seed,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function runWan21LoraUtility(req, res, { prompt, referenceImageUrls, selectedVideoModel }) {
+  const options = req.body.wan21Lora || {};
+  const endpoint = selectedVideoModel.id;
+  const isImageToVideo = selectedVideoModel.mode === "image-to-video";
+  const imageUrl = firstLocalOutput(referenceImageUrls);
+
+  if (isImageToVideo && !imageUrl) {
+    return res.status(400).json({ error: `${selectedVideoModel.displayName} requires a connected reference image.` });
+  }
+
+  const resolutionOptions = isImageToVideo ? ["480p", "720p"] : ["480p", "580p", "720p"];
+  const aspectRatioOptions = isImageToVideo ? ["auto", "16:9", "9:16", "1:1"] : ["16:9", "9:16"];
+  const loras = await normalizeWanLoraWeights(options.loras);
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    num_frames: clampInteger(options.numFrames, 81, 100, 81),
+    frames_per_second: clampInteger(options.fps, 5, 24, 16),
+    resolution: normalizeChoice(options.resolution, resolutionOptions, isImageToVideo ? "720p" : "480p"),
+    aspect_ratio: normalizeChoice(options.aspectRatio, aspectRatioOptions, "16:9"),
+    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 30),
+    enable_safety_checker: options.enableSafetyChecker !== false,
+    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
+    turbo_mode: options.turboMode !== false,
+    loras,
+    reverse_video: Boolean(options.reverseVideo)
+  };
+  const seed = optionalInteger(options.seed);
+  if (seed !== undefined) input.seed = seed;
+  if (isImageToVideo) {
+    input.image_url = await uploadLocalOutputToFal(imageUrl);
+    input.guide_scale = clampNumber(options.guideScale, 0, 20, 5);
+    input.shift = clampNumber(options.shift, 0, 20, 5);
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: `Fal returned no ${selectedVideoModel.displayName} video URL.`, raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, isImageToVideo ? "wan-21-i2v-lora" : "wan-21-t2v-lora");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWan21LoraCost({ endpoint });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: `Wan 2.1 14B LoRA ${isImageToVideo ? "image-to-video" : "text-to-video"}`,
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      mode: selectedVideoModel.mode,
+      negativePrompt: input.negative_prompt,
+      numFrames: input.num_frames,
+      fps: input.frames_per_second,
+      resolution: input.resolution,
+      aspectRatio: input.aspect_ratio,
+      numInferenceSteps: input.num_inference_steps,
+      guideScale: input.guide_scale ?? null,
+      shift: input.shift ?? null,
+      enableSafetyChecker: input.enable_safety_checker,
+      enablePromptExpansion: input.enable_prompt_expansion,
+      turboMode: input.turbo_mode,
+      reverseVideo: input.reverse_video,
+      loraCount: loras.length,
+      loras,
+      referenceImageCount: isImageToVideo ? 1 : 0,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    seed: result?.data?.seed ?? input.seed,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function normalizeWanLoraWeights(items = []) {
+  if (!Array.isArray(items)) return [];
+  const weights = [];
+
+  for (const item of items) {
+    const pathValue = String(item?.path || "").trim();
+    if (!pathValue) continue;
+    const weightName = String(item?.weightName || item?.weight_name || "").trim();
+    const weight = {
+      path: await resolveWanLoraWeightPath(pathValue),
+      scale: clampNumber(item?.scale, 0, 2, 1)
+    };
+    if (weightName) weight.weight_name = weightName;
+    weights.push(weight);
+    if (weights.length >= 8) break;
+  }
+
+  return weights;
+}
+
+async function resolveWanLoraWeightPath(value) {
+  const raw = String(value || "").trim();
+  const localPath = localLoraFilePath(raw);
+  if (!localPath) return raw;
+
+  const extension = path.extname(localPath).toLowerCase();
+  if (![".safetensors", ".pt", ".ckpt", ".bin"].includes(extension)) {
+    throw new Error("Local LoRA files must use .safetensors, .pt, .ckpt, or .bin.");
+  }
+
+  let metadata;
+  try {
+    metadata = await stat(localPath);
+  } catch {
+    throw new Error(`Local LoRA file is not accessible: ${localPath}`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`Local LoRA path is not a file: ${localPath}`);
+  }
+
+  return uploadLocalLoraFileToFal(localPath);
+}
+
+function localLoraFilePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.toLowerCase().startsWith("file://")) {
+    try {
+      return fileURLToPath(raw);
+    } catch {
+      return "";
+    }
+  }
+
+  return path.isAbsolute(raw) ? raw : "";
+}
+
+async function uploadLocalLoraFileToFal(filePath) {
+  const buffer = await readFile(filePath);
+  const falFile = new File([buffer], path.basename(filePath), {
+    type: "application/octet-stream"
+  });
+
+  return fal.storage.upload(falFile);
+}
+
 async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
   const maskVideoUrl = firstLocalOutput(maskVideoUrls);
   if (!maskVideoUrl) {
@@ -3311,11 +3596,16 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
 
   const endpoint = selectedVideoModel.id;
   const options = req.body.wanVaceInpainting || {};
+  const isWan22VaceInpainting = selectedVideoModel.provider === "fal-wan-22-vace-inpainting";
   const matchInputNumFrames = options.matchInputNumFrames !== false;
   const matchInputFps = options.matchInputFps !== false;
   const resolution = normalizeChoice(options.resolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto");
   const aspectRatio = normalizeChoice(options.aspectRatio, ["auto", "16:9", "1:1", "9:16"], "auto");
-  const refImageUrls = await Promise.all(referenceImageUrls.slice(0, 4).map((url) => uploadLocalOutputToFal(url)));
+  const useReferenceFrames = isWan22VaceInpainting && options.useReferenceFrames !== false;
+  const firstFrameUrl = useReferenceFrames ? referenceImageUrls[0] : "";
+  const lastFrameUrl = useReferenceFrames ? referenceImageUrls[1] : "";
+  const referenceOnlyImageUrls = useReferenceFrames ? referenceImageUrls.slice(2, 6) : referenceImageUrls.slice(0, 4);
+  const refImageUrls = await Promise.all(referenceOnlyImageUrls.map((url) => uploadLocalOutputToFal(url)));
   const input = {
     prompt,
     negative_prompt: String(options.negativePrompt || ""),
@@ -3340,6 +3630,15 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     return_frames_zip: false
   };
   if (refImageUrls.length) input.ref_image_urls = refImageUrls;
+  if (isWan22VaceInpainting) {
+    if (firstFrameUrl) input.first_frame_url = await uploadLocalOutputToFal(firstFrameUrl);
+    if (lastFrameUrl) input.last_frame_url = await uploadLocalOutputToFal(lastFrameUrl);
+    input.temporal_downsample_factor = clampInteger(options.temporalDownsampleFactor, 0, 16, 0);
+    input.enable_auto_downsample = Boolean(options.enableAutoDownsample);
+    input.auto_downsample_min_fps = clampNumber(options.autoDownsampleMinFps, 1, 30, 15);
+    input.interpolator_model = normalizeChoice(options.interpolatorModel, ["film", "rife"], "film");
+    input.transparency_mode = normalizeChoice(options.transparencyMode, ["content_aware", "white", "black"], "content_aware");
+  }
   const seed = optionalInteger(options.seed);
   if (!matchInputNumFrames) input.num_frames = clampInteger(options.numFrames, 81, 241, 81);
   if (!matchInputFps) input.frames_per_second = clampInteger(options.fps, 5, 30, 16);
@@ -3370,7 +3669,7 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     provider: "fal.ai",
     modelName: selectedVideoModel.displayName,
     endpoint,
-    mode: "Wan VACE inpainting",
+    mode: isWan22VaceInpainting ? "Wan 2.2 VACE Fun A14B inpainting" : "Wan VACE inpainting",
     prompt,
     submittedPrompt: prompt,
     project: projectFromBody(req.body),
@@ -3395,6 +3694,14 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
       videoQuality: input.video_quality,
       videoWriteMode: input.video_write_mode,
       numInterpolatedFrames: input.num_interpolated_frames,
+      useReferenceFrames,
+      firstFrameReference: Boolean(input.first_frame_url),
+      lastFrameReference: Boolean(input.last_frame_url),
+      temporalDownsampleFactor: input.temporal_downsample_factor ?? null,
+      enableAutoDownsample: input.enable_auto_downsample ?? null,
+      autoDownsampleMinFps: input.auto_downsample_min_fps ?? null,
+      interpolatorModel: input.interpolator_model || null,
+      transparencyMode: input.transparency_mode || null,
       seed: result?.data?.seed ?? input.seed ?? null
     },
     cost,
@@ -3412,7 +3719,146 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     cost,
     video: {
       ...outputVideo,
-      label: "Wan VACE",
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function runWan22VaceControlUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: `${selectedVideoModel.displayName} requires a connected source video.` });
+  }
+
+  const legacyWanFunOptions = req.body.wanFunControl || null;
+  const options = req.body.wanVaceControl || req.body.wanVaceInpainting || legacyWanFunOptions || {};
+  const usingLegacyWanFunOptions = Boolean(legacyWanFunOptions && !req.body.wanVaceControl && !req.body.wanVaceInpainting);
+  const controlType = usingLegacyWanFunOptions ? normalizeChoice(options.preprocessType, ["depth", "pose"], "depth") : selectedVideoModel.controlType === "pose" ? "pose" : "depth";
+  const endpoint = usingLegacyWanFunOptions ? `fal-ai/wan-22-vace-fun-a14b/${controlType}` : selectedVideoModel.id;
+  const controlLabel = controlType === "pose" ? "Pose" : "Depth";
+  const matchInputNumFrames = options.matchInputNumFrames !== false;
+  const matchInputFps = options.matchInputFps !== false;
+  const resolution = normalizeChoice(options.resolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto");
+  const aspectRatio = normalizeChoice(options.aspectRatio, ["auto", "16:9", "1:1", "9:16"], "auto");
+  const useReferenceFrames = usingLegacyWanFunOptions ? false : options.useReferenceFrames !== false;
+  const firstFrameUrl = useReferenceFrames ? referenceImageUrls[0] : "";
+  const lastFrameUrl = useReferenceFrames ? referenceImageUrls[1] : "";
+  const referenceOnlyImageUrls = useReferenceFrames ? referenceImageUrls.slice(2, 6) : referenceImageUrls.slice(0, 4);
+  const refImageUrls = await Promise.all(referenceOnlyImageUrls.map((url) => uploadLocalOutputToFal(url)));
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    match_input_num_frames: matchInputNumFrames,
+    match_input_frames_per_second: matchInputFps,
+    resolution,
+    aspect_ratio: aspectRatio,
+    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 30),
+    guidance_scale: clampNumber(options.guidanceScale, 0, 20, 5),
+    sampler: normalizeChoice(options.sampler, ["unipc", "dpm++", "euler"], "unipc"),
+    shift: clampNumber(options.shift, 0, 20, 5),
+    video_url: await uploadLocalOutputToFal(videoUrl),
+    enable_safety_checker: options.enableSafetyChecker !== false,
+    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
+    preprocess: usingLegacyWanFunOptions ? options.preprocessVideo !== false : options.preprocess !== false,
+    acceleration: normalizeChoice(options.acceleration, ["none", "low", "regular"], "regular"),
+    video_quality: normalizeChoice(options.videoQuality, ["low", "medium", "high", "maximum"], "high"),
+    video_write_mode: normalizeChoice(options.videoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    num_interpolated_frames: Math.max(0, Math.round(Number(options.numInterpolatedFrames || 0))),
+    temporal_downsample_factor: clampInteger(options.temporalDownsampleFactor, 0, 16, 0),
+    enable_auto_downsample: Boolean(options.enableAutoDownsample),
+    auto_downsample_min_fps: clampNumber(options.autoDownsampleMinFps, 1, 30, 15),
+    interpolator_model: normalizeChoice(options.interpolatorModel, ["film", "rife"], "film"),
+    sync_mode: false,
+    transparency_mode: normalizeChoice(options.transparencyMode, ["content_aware", "white", "black"], "content_aware"),
+    return_frames_zip: false
+  };
+  if (refImageUrls.length) input.ref_image_urls = refImageUrls;
+  if (firstFrameUrl) input.first_frame_url = await uploadLocalOutputToFal(firstFrameUrl);
+  if (lastFrameUrl) input.last_frame_url = await uploadLocalOutputToFal(lastFrameUrl);
+  const seed = optionalInteger(options.seed);
+  if (!matchInputNumFrames) input.num_frames = clampInteger(options.numFrames, 81, 241, 81);
+  if (!matchInputFps) input.frames_per_second = clampInteger(options.fps, 5, 30, 16);
+  if (seed !== undefined) input.seed = seed;
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: `Fal returned no ${selectedVideoModel.displayName} video URL.`, raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, `wan-22-vace-${controlType}`);
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWanVaceInpaintingCost({
+    endpoint,
+    resolution,
+    outputVideo,
+    matchInputNumFrames,
+    numFrames: input.num_frames,
+    matchInputFps,
+    fps: input.frames_per_second
+  });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: `Wan 2.2 VACE Fun A14B ${controlLabel}`,
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      controlType,
+      matchInputNumFrames,
+      numFrames: input.num_frames || null,
+      matchInputFps,
+      fps: input.frames_per_second || null,
+      resolution,
+      aspectRatio,
+      numInferenceSteps: input.num_inference_steps,
+      guidanceScale: input.guidance_scale,
+      sampler: input.sampler,
+      shift: input.shift,
+      referenceImageCount: refImageUrls.length,
+      sourceVideoCount: 1,
+      enableSafetyChecker: input.enable_safety_checker,
+      enablePromptExpansion: input.enable_prompt_expansion,
+      preprocess: input.preprocess,
+      acceleration: input.acceleration,
+      videoQuality: input.video_quality,
+      videoWriteMode: input.video_write_mode,
+      numInterpolatedFrames: input.num_interpolated_frames,
+      useReferenceFrames,
+      firstFrameReference: Boolean(input.first_frame_url),
+      lastFrameReference: Boolean(input.last_frame_url),
+      temporalDownsampleFactor: input.temporal_downsample_factor,
+      enableAutoDownsample: input.enable_auto_downsample,
+      autoDownsampleMinFps: input.auto_downsample_min_fps,
+      interpolatorModel: input.interpolator_model,
+      transparencyMode: input.transparency_mode,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    seed: result?.data?.seed ?? input.seed,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
       localUrl: output.publicPath,
       fileName: output.fileName
     }
@@ -4492,6 +4938,18 @@ async function selectWorkflowFileWithDialog({ title = "Open NewtNode workflow", 
   return selectWorkflowFileWithLinuxDialog({ title, defaultPath });
 }
 
+async function selectLoraFileWithDialog({ title = "Choose LoRA file", defaultPath = "" } = {}) {
+  if (process.platform === "win32") {
+    return selectLoraFileWithWindowsDialog({ title, defaultPath });
+  }
+
+  if (process.platform === "darwin") {
+    return selectLoraFileWithMacDialog({ title, defaultPath });
+  }
+
+  return selectLoraFileWithLinuxDialog({ title, defaultPath });
+}
+
 async function readWorkflowFromFilePath(filePath) {
   const workflowFilePath = normalizeWorkflowPackagePath(filePath);
   if (!workflowFilePath || !existsSync(workflowFilePath)) {
@@ -4746,6 +5204,39 @@ exit 2
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
 }
 
+async function selectLoraFileWithWindowsDialog({ title, defaultPath }) {
+  const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = ${powershellStringLiteral(title)}
+$dialog.Filter = 'LoRA weights (*.safetensors;*.pt;*.ckpt;*.bin)|*.safetensors;*.pt;*.ckpt;*.bin|SafeTensors (*.safetensors)|*.safetensors|All files (*.*)|*.*'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+$selectedPath = ${powershellStringLiteral(selectedPath)}
+
+if ($selectedPath) {
+  if (Test-Path -LiteralPath $selectedPath -PathType Leaf) {
+    $dialog.InitialDirectory = [System.IO.Path]::GetDirectoryName($selectedPath)
+    $dialog.FileName = [System.IO.Path]::GetFileName($selectedPath)
+  } elseif (Test-Path -LiteralPath $selectedPath -PathType Container) {
+    $dialog.InitialDirectory = $selectedPath
+  }
+}
+
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+  Write-Output $dialog.FileName
+  exit 0
+}
+exit 2
+`;
+
+  return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+}
+
 function powershellStringLiteral(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
 }
@@ -4779,6 +5270,15 @@ async function selectWorkflowFileWithMacDialog({ title, defaultPath }) {
   return runFileDialogCommand("osascript", ["-e", script]);
 }
 
+async function selectLoraFileWithMacDialog({ title, defaultPath }) {
+  const selectedFile = existingFilePath(defaultPath);
+  const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  const script = selectedDirectory
+    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} default location POSIX file ${JSON.stringify(selectedDirectory)})`
+    : `POSIX path of (choose file with prompt ${JSON.stringify(title)})`;
+  return runFileDialogCommand("osascript", ["-e", script]);
+}
+
 async function selectWorkflowFileWithLinuxDialog({ title, defaultPath }) {
   const selectedFile = existingFilePath(defaultPath);
   const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
@@ -4793,6 +5293,28 @@ async function selectWorkflowFileWithLinuxDialog({ title, defaultPath }) {
   } catch (error) {
     if (error.code === "DIALOG_CANCELED") throw error;
     return runFileDialogCommand("kdialog", ["--getopenfilename", selectedDirectory || rootDir, "*.json|JSON files"]);
+  }
+}
+
+async function selectLoraFileWithLinuxDialog({ title, defaultPath }) {
+  const selectedFile = existingFilePath(defaultPath);
+  const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  try {
+    const args = [
+      "--file-selection",
+      `--title=${title}`,
+      "--file-filter=LoRA weights | *.safetensors *.pt *.ckpt *.bin",
+      "--file-filter=All files | *"
+    ];
+    if (selectedFile) {
+      args.push(`--filename=${selectedFile}`);
+    } else if (selectedDirectory) {
+      args.push(`--filename=${selectedDirectory}${path.sep}`);
+    }
+    return await runFileDialogCommand("zenity", args);
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED") throw error;
+    return runFileDialogCommand("kdialog", ["--getopenfilename", selectedDirectory || rootDir, "*.safetensors *.pt *.ckpt *.bin|LoRA weights"]);
   }
 }
 
@@ -5802,6 +6324,744 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
   }
 }
 
+async function createTransitionBuilderResult({ body, referenceImageUrls = [], sourceVideoUrl = "", maskVideoUrl = "", selectedVideoModel = null }) {
+  const outputPaths = [];
+  const requestId = randomUUID();
+
+  try {
+    const options = normalizedTransitionBuilderOptions(body.transitionBuilder);
+    const keyframeAssets = [];
+    for (const imageUrl of referenceImageUrls.slice(0, 12)) {
+      keyframeAssets.push(await resolveLocalAssetPathFromUrl(imageUrl));
+    }
+
+    const sourceVideo = sourceVideoUrl ? await resolveLocalAssetPathFromUrl(sourceVideoUrl) : null;
+    if (!keyframeAssets.length && !sourceVideo) {
+      const error = new Error("Transition Builder requires connected keyframes or a source video.");
+      error.status = 400;
+      throw error;
+    }
+
+    const maskVideo = maskVideoUrl ? await resolveLocalAssetPathFromUrl(maskVideoUrl) : null;
+    if (options.wanSchedulerEnabled && keyframeAssets.length < 2) {
+      const error = new Error("Wan guide scheduling requires at least two connected keyframes.");
+      error.status = 400;
+      throw error;
+    }
+
+    const extension = videoOutputExtension(options.outputFormat);
+    const controlOutput = await createManagedAssetTarget({ body }, "transition-control-video", extension, workflowPackageOutputDirName);
+    const maskOutput = await createManagedAssetTarget({ body }, "transition-mask-video", extension, workflowPackageOutputDirName);
+    const guideOutputs = [];
+    if (options.wanSchedulerEnabled) {
+      for (let index = 0; index <= options.wanSegmentCount; index += 1) {
+        guideOutputs.push(await createManagedAssetTarget({ body }, `transition-guide-${String(index + 1).padStart(2, "0")}`, "png", workflowPackageOutputDirName));
+      }
+    }
+    outputPaths.push(controlOutput.filePath, maskOutput.filePath, ...guideOutputs.map((output) => output.filePath));
+
+    await createTransitionMaskVideoWithFfmpeg({
+      maskVideoPath: maskVideo?.filePath || "",
+      outputPath: maskOutput.filePath,
+      width: options.width,
+      height: options.height,
+      fps: options.fps,
+      frameCount: options.frameCount,
+      maskStyle: options.maskStyle,
+      maskSoftness: options.maskSoftness,
+      transitionStartFrame: options.transitionStartFrame,
+      transitionDurationFrames: options.transitionDurationFrames,
+      transitionEasing: options.transitionEasing,
+      outputFormat: options.outputFormat
+    });
+
+    await createTransitionControlVideoWithFfmpeg({
+      imagePaths: keyframeAssets.map((asset) => asset.filePath),
+      sourceVideoPath: sourceVideo?.filePath || "",
+      maskVideoPath: maskOutput.filePath,
+      outputPath: controlOutput.filePath,
+      width: options.width,
+      height: options.height,
+      fps: options.fps,
+      frameCount: options.frameCount,
+      overlapFrames: options.overlapFrames,
+      outputFormat: options.outputFormat
+    });
+
+    const guideFrameIndexes = guideOutputs.length
+      ? await createTransitionGuideImagesWithFfmpeg({
+          sourceVideoPath: controlOutput.filePath,
+          outputTargets: guideOutputs,
+          fps: options.fps,
+          frameCount: options.frameCount,
+          segmentCount: options.wanSegmentCount
+        })
+      : [];
+
+    const [controlStats, maskStats, controlMetadata, maskMetadata, guideStats] = await Promise.all([
+      stat(controlOutput.filePath),
+      stat(maskOutput.filePath),
+      probeVideoFile(controlOutput.filePath),
+      probeVideoFile(maskOutput.filePath),
+      Promise.all(guideOutputs.map((output) => stat(output.filePath)))
+    ]);
+    const text = options.generateWan
+      ? `Transition Builder generated Wan transition: ${options.wanSegmentCount} segments from ${options.frameCount} guide frames.`
+      : options.wanSchedulerEnabled
+        ? `Transition Builder clips: ${options.frameCount} frames at ${options.fps} fps; ${options.wanSegmentCount} Wan guide segments.`
+        : `Transition Builder clips: ${options.frameCount} frames at ${options.fps} fps.`;
+    const localCost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 2,
+      unit: "local transition clip",
+      mediaType: "video",
+      pricingBasis: "Local ffmpeg VACE transition control and mask clip generation",
+      pricingSource: "local-transition-builder"
+    };
+    const videos = [
+      enrichVideoMetadata(
+        {
+          type: "video",
+          label: "Control Video",
+          localUrl: controlOutput.publicPath,
+          fileName: controlOutput.fileName,
+          mimeType: videoOutputMimeType(options.outputFormat)
+        },
+        controlMetadata
+      ),
+      enrichVideoMetadata(
+        {
+          type: "video",
+          label: "Mask Video",
+          localUrl: maskOutput.publicPath,
+          fileName: maskOutput.fileName,
+          mimeType: videoOutputMimeType(options.outputFormat)
+        },
+        maskMetadata
+      )
+    ];
+    const guideImages = guideOutputs.map((output, index) => ({
+      type: "image",
+      label: `Guide ${String(index + 1).padStart(2, "0")}`,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: "image/png",
+      frameIndex: guideFrameIndexes[index] ?? null,
+      width: options.width,
+      height: options.height
+    }));
+    const wanGuideSegments = buildTransitionWanGuideSegments(guideImages);
+    const generated = options.generateWan
+      ? await createGeneratedWanTransition({
+          body,
+          prompt: body.prompt,
+          guideImages,
+          options,
+          outputPaths
+        })
+      : null;
+    const primaryVideo = generated?.video || videos[0];
+    const resultItems = [
+      ...(generated?.video ? [generated.video] : []),
+      ...videos,
+      ...(generated?.segmentVideos || []),
+      ...guideImages
+    ];
+    const cost = generated?.cost || localCost;
+    const outputBytes =
+      controlStats.size +
+      maskStats.size +
+      guideStats.reduce((total, item) => total + item.size, 0) +
+      (generated?.outputBytes || 0);
+
+    await appendHistory({
+      id: requestId,
+      createdAt: new Date().toISOString(),
+      mediaType: "video",
+      provider: generated ? "fal.ai" : "local",
+      modelName: selectedVideoModel?.displayName || "Transition Builder",
+      endpoint: generated?.endpoint || selectedVideoModel?.id || "local/transition-builder",
+      mode: generated ? "Wan 2.2 LoRA transition generator" : "VACE transition builder",
+      prompt: generated?.prompt || text,
+      submittedPrompt: generated?.prompt || text,
+      project: projectFromBody(body),
+      node: nodeFromBody(body),
+      settings: {
+        model: selectedVideoModel?.displayName || "Transition Builder",
+        referenceImageCount: keyframeAssets.length,
+        sourceVideoUrl: sourceVideoUrl || null,
+        maskVideoUrl: maskVideoUrl || null,
+        frameCount: options.frameCount,
+        fps: options.fps,
+        width: options.width,
+        height: options.height,
+        duration: options.duration,
+        overlapFrames: options.overlapFrames,
+        transitionStartFrame: options.transitionStartFrame,
+        transitionDurationFrames: options.transitionDurationFrames,
+        transitionEasing: options.transitionEasing,
+        maskStyle: options.maskStyle,
+        maskSoftness: options.maskSoftness,
+        outputFormat: options.outputFormat,
+        wanSchedulerEnabled: options.wanSchedulerEnabled,
+        generateWan: options.generateWan,
+        wanSegmentCount: options.wanSegmentCount,
+        wanSelectedSegment: options.wanSelectedSegment,
+        wanGeneration: generated?.settings || null,
+        wanGuideSegments,
+        controlOutputUrl: controlOutput.publicPath,
+        maskOutputUrl: maskOutput.publicPath,
+        generatedOutputUrl: generated?.video?.localUrl || null,
+        guideOutputUrls: guideImages.map((image) => image.localUrl),
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localVideo: primaryVideo.localUrl,
+      localVideos: resultItems.filter((item) => item.type === "video").map((video) => video.localUrl).filter(Boolean),
+      localImages: guideImages.map((image) => image.localUrl).filter(Boolean),
+      outputFileName: primaryVideo.fileName,
+      outputFileNames: resultItems.map((item) => item.fileName).filter(Boolean),
+      outputLabels: resultItems.map((item) => item.label).filter(Boolean),
+      outputBytes,
+      text
+    });
+
+    return {
+      requestId,
+      endpoint: selectedVideoModel?.id || "local/transition-builder",
+      modelName: selectedVideoModel?.displayName || "Transition Builder",
+      text,
+      cost,
+      video: primaryVideo,
+      videos: resultItems.filter((item) => item.type === "video"),
+      images: guideImages,
+      resultItems
+    };
+  } catch (error) {
+    await Promise.all(outputPaths.map((outputPath) => rm(outputPath, { force: true }).catch(() => {})));
+    throw error;
+  }
+}
+
+async function createGeneratedWanTransition({ body, prompt, guideImages = [], options, outputPaths }) {
+  const cleanPrompt = String(prompt || "").trim();
+  if (!cleanPrompt) {
+    const error = new Error("Generate Wan Transition requires a prompt.");
+    error.status = 400;
+    throw error;
+  }
+  if (!process.env.FAL_KEY) {
+    const error = new Error("Generate Wan Transition requires FAL_KEY in .env.");
+    error.status = 400;
+    throw error;
+  }
+  if (guideImages.length < 2) {
+    const error = new Error("Generate Wan Transition requires at least two guide images.");
+    error.status = 400;
+    throw error;
+  }
+
+  const endpoint = wan22A14bLoraI2vEndpoint;
+  const loras = await normalizeWanLoraWeights(options.wan.loras);
+  const uploadedGuideUrls = await Promise.all(guideImages.map((image) => uploadLocalOutputToFal(image.localUrl)));
+  const segmentVideos = [];
+  const segmentCosts = [];
+  const segmentPaths = [];
+
+  for (let index = 0; index < guideImages.length - 1; index += 1) {
+    const input = transitionWanSegmentInput({
+      prompt: cleanPrompt,
+      options: options.wan,
+      loras,
+      startImageUrl: uploadedGuideUrls[index],
+      endImageUrl: uploadedGuideUrls[index + 1],
+      segmentIndex: index
+    });
+    const result = await subscribeFal(endpoint, { input, logs: true });
+    const remoteVideo = normalizeFalFile(result?.data?.video);
+    if (!remoteVideo?.url) {
+      const error = new Error(`Fal returned no Wan transition segment ${index + 1} video URL.`);
+      error.status = 502;
+      error.raw = result?.data;
+      throw error;
+    }
+
+    const output = await downloadVideo({ body }, remoteVideo.url, `transition-wan-segment-${String(index + 1).padStart(2, "0")}`);
+    outputPaths.push(output.filePath);
+    segmentPaths.push(output.filePath);
+    const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+    const cost = estimateWan22A14bLoraCost({
+      endpoint,
+      outputVideo,
+      numFrames: input.num_frames,
+      fps: input.frames_per_second
+    });
+    segmentCosts.push(cost);
+    segmentVideos.push({
+      ...outputVideo,
+      type: "video",
+      label: `Wan Segment ${String(index + 1).padStart(2, "0")}`,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: "video/mp4",
+      segmentIndex: index + 1,
+      seed: result?.data?.seed ?? input.seed ?? null,
+      bytes: output.bytes
+    });
+  }
+
+  const finalOutput = await createManagedAssetTarget({ body }, "transition-wan-generated", videoOutputExtension(options.outputFormat), workflowPackageOutputDirName);
+  outputPaths.push(finalOutput.filePath);
+  await stitchTransitionWanSegmentsWithFfmpeg({
+    segmentPaths,
+    outputPath: finalOutput.filePath,
+    outputFormat: options.outputFormat
+  });
+
+  const [finalStats, finalMetadata] = await Promise.all([
+    stat(finalOutput.filePath),
+    probeVideoFile(finalOutput.filePath)
+  ]);
+  const video = enrichVideoMetadata(
+    {
+      type: "video",
+      label: "Generated Transition",
+      localUrl: finalOutput.publicPath,
+      fileName: finalOutput.fileName,
+      mimeType: videoOutputMimeType(options.outputFormat)
+    },
+    finalMetadata
+  );
+
+  return {
+    endpoint,
+    prompt: cleanPrompt,
+    video,
+    segmentVideos,
+    cost: aggregateTransitionWanCost(segmentCosts, endpoint),
+    outputBytes: finalStats.size + segmentVideos.reduce((total, videoItem) => total + Number(videoItem.bytes || 0), 0),
+    settings: {
+      endpoint,
+      prompt: cleanPrompt,
+      loraCount: loras.length,
+      loras,
+      segmentCount: segmentVideos.length,
+      numFrames: options.wan.numFrames,
+      fps: options.wan.fps,
+      resolution: options.wan.resolution,
+      aspectRatio: options.wan.aspectRatio,
+      numInferenceSteps: options.wan.numInferenceSteps,
+      guidanceScale: options.wan.guidanceScale,
+      guidanceScale2: options.wan.guidanceScale2,
+      shift: options.wan.shift,
+      acceleration: options.wan.acceleration,
+      interpolatorModel: options.wan.interpolatorModel,
+      numInterpolatedFrames: options.wan.numInterpolatedFrames,
+      adjustFpsForInterpolation: options.wan.adjustFpsForInterpolation,
+      videoQuality: options.wan.videoQuality,
+      videoWriteMode: options.wan.videoWriteMode,
+      seedMode: options.wan.seedMode,
+      seed: options.wan.seed ?? null
+    }
+  };
+}
+
+function transitionWanSegmentInput({ prompt, options, loras, startImageUrl, endImageUrl, segmentIndex }) {
+  const input = {
+    prompt,
+    negative_prompt: options.negativePrompt,
+    image_url: startImageUrl,
+    end_image_url: endImageUrl,
+    num_frames: options.numFrames,
+    frames_per_second: options.fps,
+    resolution: options.resolution,
+    aspect_ratio: options.aspectRatio,
+    num_inference_steps: options.numInferenceSteps,
+    enable_safety_checker: options.enableSafetyChecker,
+    enable_output_safety_checker: options.enableOutputSafetyChecker,
+    enable_prompt_expansion: options.enablePromptExpansion,
+    acceleration: options.acceleration,
+    guidance_scale: options.guidanceScale,
+    guidance_scale_2: options.guidanceScale2,
+    shift: options.shift,
+    interpolator_model: options.interpolatorModel,
+    num_interpolated_frames: options.numInterpolatedFrames,
+    adjust_fps_for_interpolation: options.adjustFpsForInterpolation,
+    video_quality: options.videoQuality,
+    video_write_mode: options.videoWriteMode,
+    loras,
+    reverse_video: false
+  };
+  const seed = transitionWanSegmentSeed(options.seed, options.seedMode, segmentIndex);
+  if (seed !== undefined) input.seed = seed;
+  return input;
+}
+
+function transitionWanSegmentSeed(seed, seedMode, segmentIndex) {
+  const baseSeed = optionalInteger(seed);
+  if (baseSeed === undefined || seedMode === "random") return undefined;
+  return seedMode === "same" ? baseSeed : baseSeed + segmentIndex;
+}
+
+function aggregateTransitionWanCost(segmentCosts = [], endpoint) {
+  const amountValues = segmentCosts.map((cost) => positiveNumber(cost?.amountUsd));
+  const unitValues = segmentCosts.map((cost) => positiveNumber(cost?.units));
+  const amountUsd = amountValues.every((value) => value !== null)
+    ? roundCurrency(amountValues.reduce((total, value) => total + value, 0))
+    : null;
+  const units = unitValues.every((value) => value !== null)
+    ? roundUsageUnits(unitValues.reduce((total, value) => total + value, 0))
+    : null;
+
+  return estimateFalVideoUtilityCost({
+    endpoint,
+    amountUsd,
+    unitRateUsd: wan22A14bLoraCostPerSecond,
+    units,
+    unit: "video second",
+    pricingBasis: amountUsd !== null
+      ? "Wan 2.2 A14B LoRA scheduled transition segment estimate; local guide and stitch steps are $0"
+      : "Wan 2.2 A14B LoRA scheduled transition segment estimate; local duration/frame count unavailable",
+    pricingSource: "fal-model-page-2026-06-03"
+  });
+}
+
+async function stitchTransitionWanSegmentsWithFfmpeg({ segmentPaths = [], outputPath, outputFormat }) {
+  if (!segmentPaths.length) {
+    const error = new Error("Wan transition stitching requires at least one generated segment.");
+    error.status = 400;
+    throw error;
+  }
+
+  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+  segmentPaths.forEach((segmentPath) => args.push("-i", segmentPath));
+  const filterInputs = segmentPaths.map((_, index) => `[${index}:v]setpts=PTS-STARTPTS,format=yuv420p[v${index}]`).join(";");
+  const concatInputs = segmentPaths.map((_, index) => `[v${index}]`).join("");
+  args.push(
+    "-filter_complex",
+    `${filterInputs};${concatInputs}concat=n=${segmentPaths.length}:v=1:a=0[out]`,
+    "-map",
+    "[out]",
+    "-an"
+  );
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Wan transition stitch", 600000);
+}
+
+function buildTransitionWanGuideSegments(guideImages = []) {
+  const segments = [];
+  for (let index = 0; index < guideImages.length - 1; index += 1) {
+    segments.push({
+      index: index + 1,
+      startImageUrl: guideImages[index].localUrl,
+      endImageUrl: guideImages[index + 1].localUrl,
+      startFrameIndex: guideImages[index].frameIndex ?? null,
+      endFrameIndex: guideImages[index + 1].frameIndex ?? null
+    });
+  }
+  return segments;
+}
+
+async function createTransitionGuideImagesWithFfmpeg({ sourceVideoPath, outputTargets = [], fps, frameCount, segmentCount }) {
+  const frameIndexes = transitionGuideFrameIndexes(frameCount, segmentCount);
+  await Promise.all(
+    outputTargets.map((target, index) =>
+      extractVideoFrameWithFfmpeg({
+        sourcePath: sourceVideoPath,
+        outputPath: target.filePath,
+        frameTime: (frameIndexes[index] || 0) / fps,
+        format: "png"
+      })
+    )
+  );
+  return frameIndexes;
+}
+
+function transitionGuideFrameIndexes(frameCount, segmentCount) {
+  const guides = Math.max(2, Math.round(Number(segmentCount || 1)) + 1);
+  const lastFrame = Math.max(0, Math.round(Number(frameCount || 1)) - 1);
+  return Array.from({ length: guides }, (_, index) => Math.min(lastFrame, Math.round((lastFrame * index) / Math.max(1, guides - 1))));
+}
+
+async function createTransitionControlVideoWithFfmpeg({ imagePaths = [], sourceVideoPath = "", maskVideoPath = "", outputPath, width, height, fps, frameCount, overlapFrames, outputFormat }) {
+  const duration = frameCount / fps;
+  const selectedImages = imagePaths.slice(0, Math.min(12, frameCount));
+  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+
+  if (selectedImages.length >= 2 && maskVideoPath) {
+    const firstImage = selectedImages[0];
+    const secondImage = selectedImages[selectedImages.length - 1];
+    const filter = [
+      `[0:v]${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS[base]`,
+      `[1:v]${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS[layer]`,
+      `[2:v]${transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness: 0 })}[mask]`,
+      "[layer][mask]alphamerge[layer_alpha]",
+      "[base][layer_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
+    ].join(";");
+
+    args.push(
+      "-loop",
+      "1",
+      "-framerate",
+      String(fps),
+      "-t",
+      formatFfmpegSeconds(duration),
+      "-i",
+      firstImage,
+      "-loop",
+      "1",
+      "-framerate",
+      String(fps),
+      "-t",
+      formatFfmpegSeconds(duration),
+      "-i",
+      secondImage,
+      "-stream_loop",
+      "-1",
+      "-i",
+      maskVideoPath,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[out]",
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  } else if (selectedImages.length === 1) {
+    args.push(
+      "-loop",
+      "1",
+      "-framerate",
+      String(fps),
+      "-t",
+      formatFfmpegSeconds(duration),
+      "-i",
+      selectedImages[0],
+      "-map",
+      "0:v:0",
+      "-vf",
+      `${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS`,
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  } else if (selectedImages.length > 1) {
+    const maxFadeFrames = Math.max(0, Math.floor((frameCount - 1) / Math.max(1, selectedImages.length - 1)));
+    const fadeFrames = Math.min(Math.max(0, overlapFrames), maxFadeFrames);
+    const fadeDuration = fadeFrames / fps;
+    const segmentDuration = fadeDuration > 0
+      ? (duration + fadeDuration * (selectedImages.length - 1)) / selectedImages.length
+      : duration / selectedImages.length;
+    const filters = selectedImages.map((_, index) => `[${index}:v]${transitionBuilderClipFilter({ width, height, fps })}[v${index}]`);
+
+    selectedImages.forEach((imagePath) => {
+      args.push("-loop", "1", "-framerate", String(fps), "-t", formatFfmpegSeconds(segmentDuration), "-i", imagePath);
+    });
+
+    if (fadeDuration > 0) {
+      let previousLabel = "v0";
+      for (let index = 1; index < selectedImages.length; index += 1) {
+        const nextLabel = index === selectedImages.length - 1 ? "xfaded" : `x${index}`;
+        const offset = index * (segmentDuration - fadeDuration);
+        filters.push(`[${previousLabel}][v${index}]xfade=transition=fade:duration=${formatFfmpegSeconds(fadeDuration)}:offset=${formatFfmpegSeconds(offset)}[${nextLabel}]`);
+        previousLabel = nextLabel;
+      }
+    } else {
+      filters.push(`${selectedImages.map((_, index) => `[v${index}]`).join("")}concat=n=${selectedImages.length}:v=1:a=0[xfaded]`);
+    }
+
+    filters.push(`[xfaded]trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS,format=yuv420p[out]`);
+    args.push("-filter_complex", filters.join(";"), "-map", "[out]", "-an", "-frames:v", String(frameCount));
+  } else if (sourceVideoPath) {
+    args.push(
+      "-stream_loop",
+      "-1",
+      "-i",
+      sourceVideoPath,
+      "-map",
+      "0:v:0",
+      "-vf",
+      `${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS`,
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  } else {
+    const error = new Error("Transition Builder requires at least one keyframe or source video.");
+    error.status = 400;
+    throw error;
+  }
+
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Transition control video", 600000);
+}
+
+async function createTransitionMaskVideoWithFfmpeg({ maskVideoPath = "", outputPath, width, height, fps, frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing, outputFormat }) {
+  const duration = frameCount / fps;
+  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+
+  if (maskVideoPath) {
+    args.push(
+      "-stream_loop",
+      "-1",
+      "-i",
+      maskVideoPath,
+      "-map",
+      "0:v:0",
+      "-vf",
+      transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness }),
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  } else if (maskStyle === "white" || maskStyle === "black") {
+    args.push(
+      "-f",
+      "lavfi",
+      "-i",
+      `color=c=${maskStyle}:s=${width}x${height}:r=${fps}:d=${formatFfmpegSeconds(duration)}`,
+      "-map",
+      "0:v:0",
+      "-vf",
+      transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }),
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  } else {
+    args.push(
+      "-f",
+      "lavfi",
+      "-i",
+      `nullsrc=size=${width}x${height}:rate=${fps}:duration=${formatFfmpegSeconds(duration)}`,
+      "-map",
+      "0:v:0",
+      "-vf",
+      transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }),
+      "-an",
+      "-frames:v",
+      String(frameCount)
+    );
+  }
+
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Transition mask video", 600000);
+}
+
+function normalizedTransitionBuilderOptions(options = {}) {
+  const frameCount = clampInteger(options.frameCount, 9, 241, 57);
+  const fps = clampInteger(options.fps, 5, 30, 16);
+  const size = ensureEven(clampInteger(options.size, 256, 2048, 512));
+  const outputFormat = normalizeChoice(String(options.outputFormat || "mp4").toLowerCase(), ["mp4", "mov"], "mp4");
+  const transitionStartFrame = clampInteger(options.transitionStartFrame, 0, frameCount - 1, 0);
+  const transitionDurationFrames = clampInteger(options.transitionDurationFrames, 1, frameCount - transitionStartFrame, frameCount - transitionStartFrame);
+  const wanSegmentCount = clampInteger(options.wanSegmentCount, 1, 8, 3);
+  const generateWan = Boolean(options.generateWan);
+
+  return {
+    frameCount,
+    fps,
+    width: size,
+    height: size,
+    duration: frameCount / fps,
+    overlapFrames: Math.min(frameCount - 1, clampInteger(options.overlapFrames, 0, 32, 9)),
+    transitionStartFrame,
+    transitionDurationFrames,
+    transitionEasing: normalizeChoice(options.transitionEasing, ["linear", "ease in", "ease out", "ease in/out"], "linear"),
+    maskStyle: normalizeChoice(options.maskStyle, ["wipe", "reverse wipe", "center wipe", "white", "black"], "wipe"),
+    maskSoftness: clampNumber(options.maskSoftness, 0, 24, 6),
+    outputFormat,
+    generateWan,
+    wanSchedulerEnabled: Boolean(options.wanSchedulerEnabled || generateWan),
+    wanSegmentCount,
+    wanSelectedSegment: clampInteger(options.wanSelectedSegment, 1, wanSegmentCount, 1),
+    wan: normalizedTransitionWanOptions(options)
+  };
+}
+
+function normalizedTransitionWanOptions(options = {}) {
+  return {
+    negativePrompt: String(options.wanNegativePrompt || ""),
+    numFrames: clampInteger(options.wanNumFrames, 17, 161, 81),
+    fps: clampInteger(options.wanFps, 4, 60, 16),
+    resolution: normalizeChoice(options.wanResolution, ["480p", "580p", "720p"], "720p"),
+    aspectRatio: normalizeChoice(options.wanAspectRatio, ["auto", "16:9", "9:16", "1:1"], "auto"),
+    numInferenceSteps: clampInteger(options.wanNumInferenceSteps, 1, 60, 27),
+    guidanceScale: clampNumber(options.wanGuidanceScale, 0, 20, 3.5),
+    guidanceScale2: clampNumber(options.wanGuidanceScale2, 0, 20, 3.5),
+    shift: clampNumber(options.wanShift, 1, 10, 5),
+    acceleration: normalizeChoice(options.wanAcceleration, ["regular", "none"], "regular"),
+    interpolatorModel: normalizeChoice(options.wanInterpolatorModel, ["none", "film", "rife"], "film"),
+    numInterpolatedFrames: clampInteger(options.wanNumInterpolatedFrames, 0, 4, 1),
+    adjustFpsForInterpolation: options.wanAdjustFpsForInterpolation !== false,
+    videoQuality: normalizeChoice(options.wanVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    videoWriteMode: normalizeChoice(options.wanVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    enableSafetyChecker: options.wanEnableSafetyChecker !== false,
+    enableOutputSafetyChecker: Boolean(options.wanEnableOutputSafetyChecker),
+    enablePromptExpansion: Boolean(options.wanEnablePromptExpansion),
+    seedMode: normalizeChoice(options.wanSeedMode, ["increment", "same", "random"], "increment"),
+    seed: options.seed,
+    loras: Array.isArray(options.wanLoras) ? options.wanLoras : []
+  };
+}
+
+function transitionBuilderClipFilter({ width, height, fps }) {
+  return [
+    `fps=${fps}`,
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=bicubic`,
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+    "setsar=1",
+    "format=yuv420p"
+  ].join(",");
+}
+
+function transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness }) {
+  const filters = [
+    `fps=${fps}`,
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=bicubic`,
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+    "format=gray",
+    `trim=duration=${formatFfmpegSeconds(duration)}`,
+    "setpts=PTS-STARTPTS"
+  ];
+  if (maskSoftness > 0) filters.push(`boxblur=${maskSoftness}:1`);
+  filters.push("format=yuv420p");
+  return filters.join(",");
+}
+
+function transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }) {
+  const filters = [];
+  if (maskStyle === "wipe" || maskStyle === "reverse wipe" || maskStyle === "center wipe") {
+    filters.push(`geq=lum='${transitionBuilderMaskExpression(maskStyle, frameCount, transitionStartFrame, transitionDurationFrames, transitionEasing)}':cb=128:cr=128`);
+  }
+  filters.push("format=gray");
+  if (maskSoftness > 0) filters.push(`boxblur=${maskSoftness}:1`);
+  filters.push("format=yuv420p");
+  return filters.join(",");
+}
+
+function transitionBuilderMaskExpression(maskStyle, frameCount, transitionStartFrame = 0, transitionDurationFrames = frameCount, transitionEasing = "linear") {
+  const start = Math.max(0, Math.round(Number(transitionStartFrame) || 0));
+  const denominator = Math.max(1, Math.round(Number(transitionDurationFrames) || frameCount) - 1);
+  const progress = transitionBuilderEasedProgressExpression(`min(max((N-${start})/${denominator},0),1)`, transitionEasing);
+  if (maskStyle === "reverse wipe") return `255*gte(X/W,1-${progress})`;
+  if (maskStyle === "center wipe") return `255*lte(abs(X-W/2)/(W/2),${progress})`;
+  return `255*lte(X/W,${progress})`;
+}
+
+function transitionBuilderEasedProgressExpression(progressExpression, easing) {
+  if (easing === "ease in") return `pow(${progressExpression},2)`;
+  if (easing === "ease out") return `(1-pow(1-${progressExpression},2))`;
+  if (easing === "ease in/out") return `if(lt(${progressExpression},0.5),2*pow(${progressExpression},2),1-pow(-2*${progressExpression}+2,2)/2)`;
+  return progressExpression;
+}
+
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {
   const args = [
     "-hide_banner",
@@ -6297,16 +7557,29 @@ function historyMetadataSummary(item = {}) {
     localImage: item.localImage || "",
     localImages: Array.isArray(item.localImages) ? item.localImages : [],
     localVideo: item.localVideo || "",
-    localVideos: Array.isArray(item.localVideos) ? item.localVideos : [],
+    localVideos: historyLocalVideos(item),
     localAudio: item.localAudio || "",
     localAudios: Array.isArray(item.localAudios) ? item.localAudios : [],
     localModel: item.localModel || "",
     localModels: Array.isArray(item.localModels) ? item.localModels : [],
     outputFileName: item.outputFileName || "",
+    outputFileNames: Array.isArray(item.outputFileNames) ? item.outputFileNames : [],
+    outputLabels: Array.isArray(item.outputLabels) ? item.outputLabels : [],
     cost: item.cost || null,
     duration: item.duration || item.durationSeconds || "",
     seed: item.seed || ""
   };
+}
+
+function historyLocalVideos(item = {}) {
+  const videos = Array.isArray(item.localVideos) ? item.localVideos.filter(Boolean) : [];
+  if (videos.length) return videos;
+
+  const value = [item.modelName, item.endpoint, item.mode].map((part) => String(part || "").toLowerCase()).join(" ");
+  if (!value.includes("transition builder") && !value.includes("local/transition-builder")) return [];
+
+  const settings = item.settings || {};
+  return [settings.controlOutputUrl, settings.maskOutputUrl].filter(Boolean);
 }
 
 function pageHistorySummaries(items, req) {
@@ -6760,27 +8033,41 @@ function roundUsageUnits(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
 }
 
-function estimateWanFunControlCost({ endpoint, matchInputNumFrames, numFrames, matchInputFps, fps }) {
-  const billingFrames = matchInputNumFrames ? 81 : numFrames;
-  const seconds = billingFrames / 16;
-  const unitRateUsd = wanFunControlCostPerSecond;
+function estimateWan22A14bLoraCost({ endpoint, outputVideo, numFrames, fps }) {
+  const seconds = wan22A14bLoraBillingSeconds(outputVideo, numFrames, fps);
 
-  return {
-    amountUsd: roundCurrency(seconds * unitRateUsd),
-    currency: "USD",
-    unitRateUsd,
-    units: seconds,
-    unit: "video second",
-    mediaType: "video",
-    pricingBasis: "fal.ai Wan Fun Control per-video-second pricing estimate at 16 fps",
-    pricingSource: "fal-model-page-2026-05-11",
+  return estimateFalVideoUtilityCost({
     endpoint,
-    matchInputNumFrames,
-    billingFrames,
-    numFrames: numFrames || null,
-    matchInputFps,
-    fps: fps || null
-  };
+    amountUsd: seconds ? roundCurrency(seconds * wan22A14bLoraCostPerSecond) : null,
+    unitRateUsd: wan22A14bLoraCostPerSecond,
+    units: seconds ? roundUsageUnits(seconds) : null,
+    unit: "video second",
+    pricingBasis: seconds
+      ? "Wan 2.2 A14B LoRA fal.ai per-video-second estimate"
+      : "Wan 2.2 A14B LoRA fal.ai per-video-second estimate; local duration/frame count unavailable",
+    pricingSource: "fal-model-page-2026-06-03"
+  });
+}
+
+function wan22A14bLoraBillingSeconds(outputVideo = {}, numFrames, fps) {
+  const duration = positiveNumber(outputVideo?.duration);
+  if (duration) return duration;
+
+  const frames = positiveNumber(outputVideo?.num_frames || outputVideo?.frames || outputVideo?.frame_count || outputVideo?.frameCount || numFrames);
+  const framesPerSecond = positiveNumber(outputVideo?.fps || fps);
+  return frames && framesPerSecond ? frames / framesPerSecond : null;
+}
+
+function estimateWan21LoraCost({ endpoint }) {
+  return estimateFalVideoUtilityCost({
+    endpoint,
+    amountUsd: wan21LoraCostPerVideo,
+    unitRateUsd: wan21LoraCostPerVideo,
+    units: 1,
+    unit: "video",
+    pricingBasis: "Wan 2.1 14B LoRA fal.ai per-video estimate",
+    pricingSource: "fal-model-page-2026-06-03"
+  });
 }
 
 function estimateWanVaceInpaintingCost({ endpoint, resolution, outputVideo, matchInputNumFrames, numFrames, matchInputFps, fps }) {
@@ -7740,6 +9027,15 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
+  if (normalized.includes("transition") && normalized.includes("builder")) {
+    return {
+      provider: "local-transition-builder",
+      displayName: "Transition Builder",
+      id: "local/transition-builder",
+      requiresPrompt: false
+    };
+  }
+
   if (normalized.includes("extract") || normalized.includes("current frame") || normalized.includes("video frame")) {
     return {
       provider: "local-extract-frame",
@@ -7794,6 +9090,87 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
+  const isWan21Lora = normalized.includes("wan") && (normalized.includes("2.1") || normalized.includes("21")) && normalized.includes("lora");
+  if (isWan21Lora && (normalized.includes("image") || normalized.includes("i2v"))) {
+    return {
+      provider: "fal-wan-21-lora",
+      displayName: "Wan 2.1 14B LoRA Image-to-Video",
+      id: "fal-ai/wan-i2v-lora",
+      mode: "image-to-video",
+      requiresPrompt: true
+    };
+  }
+
+  if (isWan21Lora) {
+    return {
+      provider: "fal-wan-21-lora",
+      displayName: "Wan 2.1 14B LoRA Text-to-Video",
+      id: "fal-ai/wan-t2v-lora",
+      mode: "text-to-video",
+      requiresPrompt: true
+    };
+  }
+
+  const isWan22Base = normalized.includes("wan") && (normalized.includes("2.2") || normalized.includes("22")) && !normalized.includes("vace");
+  if (isWan22Base && (normalized.includes("image") || normalized.includes("i2v"))) {
+    return {
+      provider: "fal-wan-22-a14b",
+      displayName: "Wan 2.2 A14B LoRA Image-to-Video",
+      id: "fal-ai/wan/v2.2-a14b/image-to-video/lora",
+      mode: "image-to-video",
+      requiresPrompt: true
+    };
+  }
+
+  if (isWan22Base && (normalized.includes("a14b") || normalized.includes("14b") || normalized.includes("text") || normalized.includes("t2v"))) {
+    return {
+      provider: "fal-wan-22-a14b",
+      displayName: "Wan 2.2 A14B LoRA Text-to-Video",
+      id: "fal-ai/wan/v2.2-a14b/text-to-video/lora",
+      mode: "text-to-video",
+      requiresPrompt: true
+    };
+  }
+
+  if (normalized.includes("wan fun control")) {
+    return {
+      provider: "fal-wan-22-vace-control",
+      displayName: "Wan 2.2 VACE Fun A14B Depth",
+      id: "fal-ai/wan-22-vace-fun-a14b/depth",
+      controlType: "depth",
+      requiresPrompt: true
+    };
+  }
+
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace") && normalized.includes("depth")) {
+    return {
+      provider: "fal-wan-22-vace-control",
+      displayName: "Wan 2.2 VACE Fun A14B Depth",
+      id: "fal-ai/wan-22-vace-fun-a14b/depth",
+      controlType: "depth",
+      requiresPrompt: true
+    };
+  }
+
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace") && normalized.includes("pose")) {
+    return {
+      provider: "fal-wan-22-vace-control",
+      displayName: "Wan 2.2 VACE Fun A14B Pose",
+      id: "fal-ai/wan-22-vace-fun-a14b/pose",
+      controlType: "pose",
+      requiresPrompt: true
+    };
+  }
+
+  if ((normalized.includes("wan 2.2") || normalized.includes("wan2.2") || normalized.includes("wan 22") || normalized.includes("wan-22")) && normalized.includes("vace")) {
+    return {
+      provider: "fal-wan-22-vace-inpainting",
+      displayName: "Wan 2.2 VACE Fun A14B Inpainting",
+      id: "fal-ai/wan-22-vace-fun-a14b/inpainting",
+      requiresPrompt: true
+    };
+  }
+
   if (normalized.includes("vace") && normalized.includes("inpainting") && !normalized.includes("mask")) {
     return {
       provider: "fal-wan-vace-inpainting",
@@ -7822,10 +9199,10 @@ function resolveUtilityVideoModel(model) {
   }
 
   return {
-    provider: "fal-wan-fun-control",
-    displayName: "Wan Fun Control",
-    id: "fal-ai/wan-fun-control",
-    speed: "wan",
+    provider: "fal-wan-22-vace-control",
+    displayName: "Wan 2.2 VACE Fun A14B Depth",
+    id: "fal-ai/wan-22-vace-fun-a14b/depth",
+    controlType: "depth",
     requiresPrompt: true
   };
 }
@@ -7888,10 +9265,11 @@ function resolveVideoModel(model) {
 
   if (normalized.includes("wan")) {
     return {
-      provider: "fal-wan-fun-control",
-      displayName: "Wan Fun Control",
-      id: "fal-ai/wan-fun-control",
-      speed: "wan"
+      provider: "fal-wan-22-vace-control",
+      displayName: "Wan 2.2 VACE Fun A14B Depth",
+      id: "fal-ai/wan-22-vace-fun-a14b/depth",
+      controlType: "depth",
+      speed: "wan-2.2-vace-depth"
     };
   }
 

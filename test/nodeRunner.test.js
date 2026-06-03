@@ -7,6 +7,7 @@ import {
   rejectedRunResults,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
+import { buildUtilityVideoRequest } from "../src/nodeRunners/videoModels.js";
 
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [
@@ -65,4 +66,262 @@ test("result helpers aggregate successful and failed batch results", () => {
   const state = appendedNodeResultState([{ url: "/outputs/old.png" }], [{ url: "/outputs/new.png" }], "image");
   assert.equal(state.firstNewIndex, 1);
   assert.deepEqual(state.resultItems.map((item) => item.type), ["image", "image"]);
+});
+
+test("buildUtilityVideoRequest preserves Wan VACE transition settings", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-1",
+      data: {
+        title: "Utility",
+        wanVaceUseReferenceFrames: true,
+        wanVaceTemporalDownsampleFactor: 2,
+        wanVaceEnableAutoDownsample: true,
+        wanVaceAutoDownsampleMinFps: 12,
+        wanVaceInterpolatorModel: "rife",
+        wanVaceTransparencyMode: "white",
+        seed: "123"
+      }
+    },
+    prompt: "motion morph",
+    model: "Wan 2.2 VACE Inpainting",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/a.png", "/uploads/b.png"],
+    referenceVideoUrls: ["/uploads/source.mp4"],
+    maskVideoUrls: ["/uploads/mask.mp4"]
+  });
+
+  assert.equal(request.wanVaceInpainting.useReferenceFrames, true);
+  assert.equal(request.wanVaceInpainting.temporalDownsampleFactor, 2);
+  assert.equal(request.wanVaceInpainting.enableAutoDownsample, true);
+  assert.equal(request.wanVaceInpainting.autoDownsampleMinFps, 12);
+  assert.equal(request.wanVaceInpainting.interpolatorModel, "rife");
+  assert.equal(request.wanVaceInpainting.transparencyMode, "white");
+  assert.equal(request.wanVaceInpainting.seed, "123");
+});
+
+test("buildUtilityVideoRequest sends Wan 2.2 VACE control settings", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-control",
+      data: {
+        title: "Utility",
+        utilityVideoModel: "Wan 2.2 VACE Fun A14B Depth",
+        wanVaceResolution: "auto",
+        wanVaceAspectRatio: "auto",
+        wanVacePreprocess: true,
+        wanVaceUseReferenceFrames: true,
+        wanVaceTemporalDownsampleFactor: 3,
+        wanVaceEnableAutoDownsample: true,
+        wanVaceAutoDownsampleMinFps: 10,
+        seed: "456"
+      }
+    },
+    prompt: "guided motion",
+    model: "Wan 2.2 VACE Fun A14B Depth",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/first.png", "/uploads/last.png"],
+    referenceVideoUrls: ["/uploads/source.mp4"],
+    maskVideoUrls: []
+  });
+
+  assert.equal(request.wanVaceControl.resolution, "auto");
+  assert.equal(request.wanVaceControl.aspectRatio, "auto");
+  assert.equal(request.wanVaceControl.preprocess, true);
+  assert.equal(request.wanVaceControl.useReferenceFrames, true);
+  assert.equal(request.wanVaceControl.temporalDownsampleFactor, 3);
+  assert.equal(request.wanVaceControl.enableAutoDownsample, true);
+  assert.equal(request.wanVaceControl.autoDownsampleMinFps, 10);
+  assert.equal(request.wanVaceControl.seed, "456");
+});
+
+test("buildUtilityVideoRequest sends Wan 2.1 LoRA settings", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wan21",
+      data: {
+        title: "Utility",
+        utilityVideoModel: "Wan 2.1 14B LoRA Image-to-Video",
+        wan21LoraNegativePrompt: "blur",
+        wan21LoraResolution: "720p",
+        wan21LoraAspectRatio: "auto",
+        wan21LoraNumFrames: 81,
+        wan21LoraFps: 16,
+        wan21LoraNumInferenceSteps: 30,
+        wan21LoraGuideScale: 6,
+        wan21LoraShift: 4,
+        wan21LoraEnableSafetyChecker: true,
+        wan21LoraEnablePromptExpansion: false,
+        wan21LoraTurboMode: true,
+        wan21LoraReverseVideo: true,
+        wan21Loras: [
+          { path: "https://huggingface.co/org/model/resolve/main/lora.safetensors", weightName: "lora.safetensors", scale: "0.8" },
+          { path: "", weightName: "", scale: "1" }
+        ],
+        seed: "789"
+      }
+    },
+    prompt: "stylized motion",
+    model: "Wan 2.1 14B LoRA Image-to-Video",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/start.png"],
+    referenceVideoUrls: [],
+    maskVideoUrls: []
+  });
+
+  assert.equal(request.wan21Lora.negativePrompt, "blur");
+  assert.equal(request.wan21Lora.resolution, "720p");
+  assert.equal(request.wan21Lora.aspectRatio, "auto");
+  assert.equal(request.wan21Lora.guideScale, 6);
+  assert.equal(request.wan21Lora.shift, 4);
+  assert.equal(request.wan21Lora.reverseVideo, true);
+  assert.equal(request.wan21Lora.loras.length, 2);
+  assert.equal(request.wan21Lora.loras[0].path, "https://huggingface.co/org/model/resolve/main/lora.safetensors");
+  assert.equal(request.wan21Lora.loras[0].weightName, "lora.safetensors");
+  assert.equal(request.wan21Lora.loras[0].scale, "0.8");
+  assert.equal(request.wan21Lora.seed, "789");
+});
+
+test("buildUtilityVideoRequest sends Wan 2.2 A14B LoRA settings", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wan22",
+      data: {
+        title: "Utility",
+        utilityVideoModel: "Wan 2.2 A14B LoRA Image-to-Video",
+        wan22A14bNegativePrompt: "low detail",
+        wan22A14bResolution: "720p",
+        wan22A14bAspectRatio: "auto",
+        wan22A14bNumFrames: 81,
+        wan22A14bFps: 16,
+        wan22A14bNumInferenceSteps: 27,
+        wan22A14bGuidanceScale: 3.5,
+        wan22A14bGuidanceScale2: 4,
+        wan22A14bShift: 5,
+        wan22A14bEnableSafetyChecker: true,
+        wan22A14bEnableOutputSafetyChecker: true,
+        wan22A14bEnablePromptExpansion: false,
+        wan22A14bAcceleration: "regular",
+        wan22A14bInterpolatorModel: "film",
+        wan22A14bNumInterpolatedFrames: 1,
+        wan22A14bAdjustFpsForInterpolation: true,
+        wan22A14bVideoQuality: "maximum",
+        wan22A14bVideoWriteMode: "small",
+        wan22A14bReverseVideo: true,
+        wan22A14bLoras: [
+          { path: "C:\\models\\wan22\\motion.safetensors", weightName: "motion.safetensors", scale: "1.2" },
+          { path: "", weightName: "", scale: "1" }
+        ],
+        seed: "2468"
+      }
+    },
+    prompt: "ink morph",
+    model: "Wan 2.2 A14B LoRA Image-to-Video",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/start.png", "/uploads/end.png"],
+    referenceVideoUrls: [],
+    maskVideoUrls: []
+  });
+
+  assert.equal(request.wan22A14b.negativePrompt, "low detail");
+  assert.equal(request.wan22A14b.resolution, "720p");
+  assert.equal(request.wan22A14b.aspectRatio, "auto");
+  assert.equal(request.wan22A14b.guidanceScale, 3.5);
+  assert.equal(request.wan22A14b.guidanceScale2, 4);
+  assert.equal(request.wan22A14b.shift, 5);
+  assert.equal(request.wan22A14b.enableOutputSafetyChecker, true);
+  assert.equal(request.wan22A14b.interpolatorModel, "film");
+  assert.equal(request.wan22A14b.numInterpolatedFrames, 1);
+  assert.equal(request.wan22A14b.adjustFpsForInterpolation, true);
+  assert.equal(request.wan22A14b.videoQuality, "maximum");
+  assert.equal(request.wan22A14b.videoWriteMode, "small");
+  assert.equal(request.wan22A14b.reverseVideo, true);
+  assert.equal(request.wan22A14b.loras.length, 2);
+  assert.equal(request.wan22A14b.loras[0].path, "C:\\models\\wan22\\motion.safetensors");
+  assert.equal(request.wan22A14b.loras[0].weightName, "motion.safetensors");
+  assert.equal(request.wan22A14b.loras[0].scale, "1.2");
+  assert.equal(request.wan22A14b.seed, "2468");
+});
+
+test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-transition",
+      data: {
+        title: "Transition",
+        transitionFrameCount: 57,
+        transitionFps: 16,
+        transitionSize: "512",
+        transitionOverlapFrames: 9,
+        transitionStartFrame: 12,
+        transitionDurationFrames: 36,
+        transitionEasing: "ease in/out",
+        transitionMaskStyle: "center wipe",
+        transitionMaskSoftness: 4,
+        transitionOutputFormat: "mov",
+        transitionGenerateWan: true,
+        transitionWanSchedulerEnabled: true,
+        transitionWanSegmentCount: 4,
+        transitionWanSelectedSegment: 2,
+        transitionWanNegativePrompt: "blurry",
+        transitionWanNumFrames: 41,
+        transitionWanFps: 12,
+        transitionWanResolution: "580p",
+        transitionWanAspectRatio: "auto",
+        transitionWanNumInferenceSteps: 20,
+        transitionWanGuidanceScale: 3.25,
+        transitionWanGuidanceScale2: 3.75,
+        transitionWanShift: 4.5,
+        transitionWanSeedMode: "same",
+        transitionWanLoras: [
+          { path: "C:\\models\\wan\\motion.safetensors", weightName: "motion", scale: "1.1" }
+        ],
+        seed: "777"
+      }
+    },
+    prompt: "",
+    model: "Transition Builder",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/a.png", "/uploads/b.png"],
+    referenceVideoUrls: [],
+    maskVideoUrls: []
+  });
+
+  assert.equal(request.transitionBuilder.frameCount, 57);
+  assert.equal(request.transitionBuilder.fps, 16);
+  assert.equal(request.transitionBuilder.size, "512");
+  assert.equal(request.transitionBuilder.overlapFrames, 9);
+  assert.equal(request.transitionBuilder.transitionStartFrame, 12);
+  assert.equal(request.transitionBuilder.transitionDurationFrames, 36);
+  assert.equal(request.transitionBuilder.transitionEasing, "ease in/out");
+  assert.equal(request.transitionBuilder.maskStyle, "center wipe");
+  assert.equal(request.transitionBuilder.maskSoftness, 4);
+  assert.equal(request.transitionBuilder.outputFormat, "mov");
+  assert.equal(request.transitionBuilder.generateWan, true);
+  assert.equal(request.transitionBuilder.wanSchedulerEnabled, true);
+  assert.equal(request.transitionBuilder.wanSegmentCount, 4);
+  assert.equal(request.transitionBuilder.wanSelectedSegment, 2);
+  assert.equal(request.transitionBuilder.wanNegativePrompt, "blurry");
+  assert.equal(request.transitionBuilder.wanNumFrames, 41);
+  assert.equal(request.transitionBuilder.wanFps, 12);
+  assert.equal(request.transitionBuilder.wanResolution, "580p");
+  assert.equal(request.transitionBuilder.wanAspectRatio, "auto");
+  assert.equal(request.transitionBuilder.wanNumInferenceSteps, 20);
+  assert.equal(request.transitionBuilder.wanGuidanceScale, 3.25);
+  assert.equal(request.transitionBuilder.wanGuidanceScale2, 3.75);
+  assert.equal(request.transitionBuilder.wanShift, 4.5);
+  assert.equal(request.transitionBuilder.wanSeedMode, "same");
+  assert.equal(request.transitionBuilder.wanLoras.length, 1);
+  assert.equal(request.transitionBuilder.wanLoras[0].path, "C:\\models\\wan\\motion.safetensors");
+  assert.equal(request.transitionBuilder.seed, "777");
 });

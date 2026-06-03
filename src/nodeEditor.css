@@ -3541,8 +3541,12 @@ video.newtnode-video-fallback {
 }
 
 .run-node-button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.7;
+}
+
+.run-node-button.running:disabled {
+  cursor: wait;
 }
 
 .node-row {
@@ -3842,7 +3846,9 @@ video.newtnode-video-fallback {
 .node-row > .inline-two-fields,
 .node-row > .color-id-slider,
 .node-row > .color-id-preset-row,
-.node-row > .color-id-selected {
+.node-row > .color-id-selected,
+.node-row > .utility-lora-stack,
+.node-row > .transition-keyframe-sheet {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -3866,6 +3872,66 @@ video.newtnode-video-fallback {
 .color-id-preset-row button:hover {
   color: #f4f0e8;
   background: rgba(221, 198, 49, 0.14);
+}
+
+.transition-keyframe-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+.transition-keyframe-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  outline: 0;
+  background: rgba(0, 0, 0, 0.34);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.transition-keyframe-thumb:active {
+  cursor: grabbing;
+}
+
+.transition-keyframe-thumb.dragging {
+  border-color: rgba(221, 198, 49, 0.82);
+  opacity: 0.48;
+}
+
+.transition-keyframe-thumb:hover,
+.transition-keyframe-thumb:focus-visible {
+  border-color: rgba(221, 198, 49, 0.58);
+  box-shadow: 0 0 0 1px rgba(221, 198, 49, 0.2);
+}
+
+.transition-keyframe-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.transition-keyframe-thumb span {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  min-width: 20px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  color: #111;
+  background: rgba(221, 198, 49, 0.92);
+  font-size: 10px;
+  font-weight: 860;
+  line-height: 1;
+  text-align: center;
 }
 
 .color-id-matte-list {
@@ -3911,6 +3977,87 @@ video.newtnode-video-fallback {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.utility-lora-stack {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+.utility-lora-slot {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.utility-lora-slot input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.utility-lora-file-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(244, 240, 232, 0.72);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.utility-lora-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  color: rgba(244, 240, 232, 0.66);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.utility-lora-slot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.utility-lora-icon-button,
+.utility-lora-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  border-radius: 6px;
+  color: rgba(244, 240, 232, 0.62);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.utility-lora-icon-button {
+  width: 24px;
+  padding: 0;
+}
+
+.utility-lora-add-button {
+  justify-self: start;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.utility-lora-icon-button:hover,
+.utility-lora-add-button:hover {
+  color: #fff;
+  background: rgba(221, 198, 49, 0.16);
 }
 
 .color-id-slider,

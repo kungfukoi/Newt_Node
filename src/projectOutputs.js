@@ -42,8 +42,8 @@ export function buildProjectOutputItems({
           id: `history:${item.id || historyIndex}:${urlIndex}`,
           url,
           type,
-          label: item.node?.title || item.modelName || `${capitalizeMediaType(type)} output`,
-          fileName: urlIndex === 0 ? item.outputFileName || fileNameFromLocalUrl(url) : fileNameFromLocalUrl(url),
+          label: historyOutputLabel(item, type, urlIndex),
+          fileName: historyOutputFileName(item, url, urlIndex),
           mimeType: mimeForOutputItem({ url, type }),
           createdAt: item.createdAt || ""
         });
@@ -80,6 +80,29 @@ function historyProjectMatches(item, projectId, projectName) {
   if (cleanProjectId) return project.id === cleanProjectId;
   if (!genericNames.has(cleanProjectName)) return project.name === cleanProjectName && project.id !== "node-workspace";
   return false;
+}
+
+function historyOutputLabel(item, type, urlIndex) {
+  if (Array.isArray(item.outputLabels) && item.outputLabels[urlIndex]) return item.outputLabels[urlIndex];
+  if (isTransitionBuilderHistoryItem(item)) {
+    if (urlIndex === 0) return "Control Video";
+    if (urlIndex === 1) return "Mask Video";
+    return `Guide ${String(urlIndex - 1).padStart(2, "0")}`;
+  }
+
+  const label = item.node?.title || item.modelName || `${capitalizeMediaType(type)} output`;
+  return urlIndex > 0 ? `${label} ${urlIndex + 1}` : label;
+}
+
+function historyOutputFileName(item, url, urlIndex) {
+  if (Array.isArray(item.outputFileNames) && item.outputFileNames[urlIndex]) return item.outputFileNames[urlIndex];
+  if (urlIndex === 0 && item.outputFileName) return item.outputFileName;
+  return fileNameFromLocalUrl(url);
+}
+
+function isTransitionBuilderHistoryItem(item = {}) {
+  const value = [item.modelName, item.endpoint, item.mode].map((part) => String(part || "").toLowerCase()).join(" ");
+  return value.includes("transition builder") || value.includes("local/transition-builder");
 }
 
 function historyOutputUrls(item) {
