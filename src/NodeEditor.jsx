@@ -547,6 +547,7 @@ const maxZoom = 1.9;
 const viewportZoomStep = 1.16;
 const wheelZoomDeltaPerStep = 100;
 const wheelLineDeltaScale = 40;
+const trackpadZoomDeltaThreshold = 100;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const namedColorPalette = [
@@ -2237,6 +2238,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     return rawDelta;
   }
 
+  function isLikelyTrackpadZoom(event, wheelDelta) {
+    if (event.deltaMode !== 0) return false;
+    return Math.abs(wheelDelta) < trackpadZoomDeltaThreshold || !Number.isInteger(wheelDelta);
+  }
+
   function handleCanvasWheel(event) {
     if (!event.ctrlKey && !event.metaKey) {
       const wardrobeScroller = event.target.closest(".character-thumb-strip");
@@ -2280,6 +2286,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     if (event.ctrlKey || event.metaKey || event.altKey) {
       const wheelDelta = normalizedWheelZoomDelta(event);
       if (wheelDelta) {
+        if (isLikelyTrackpadZoom(event, wheelDelta)) {
+          wheelZoomDeltaRef.current = 0;
+          zoomViewportAtPoint(pointer, Math.exp(-wheelDelta * 0.006));
+          return;
+        }
+
         wheelZoomDeltaRef.current += wheelDelta;
         const zoomSteps = Math.trunc(wheelZoomDeltaRef.current / wheelZoomDeltaPerStep);
         if (zoomSteps) {
@@ -5334,26 +5346,26 @@ function NodeBody({
             <>
               <NodeRow label="Model">
                 <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, utilityVideoModelSelectionPatch(event.target.value))}>
-                  <option>{utilityVideoModelNames.wan22A14bT2v}</option>
-                  <option>{utilityVideoModelNames.wan22A14bI2v}</option>
-                  <option>{utilityVideoModelNames.wan21T2vLora}</option>
-                  <option>{utilityVideoModelNames.wan21I2vLora}</option>
-                  <option>{utilityVideoModelNames.wan22VaceDepth}</option>
-                  <option>{utilityVideoModelNames.wan22VacePose}</option>
-                  <option>{utilityVideoModelNames.transitionBuilder}</option>
-                  <option>{utilityVideoModelNames.wanVaceMaskToVideo}</option>
-                  <option>{utilityVideoModelNames.wan22VaceInpainting}</option>
-                  {utilityVideoModel === utilityVideoModelNames.wanVaceInpainting && <option hidden>{utilityVideoModelNames.wanVaceInpainting}</option>}
-                  {utilityVideoModel === utilityVideoModelNames.wanFunControl && <option hidden>{utilityVideoModelNames.wanFunControl}</option>}
-                  <option>{utilityVideoModelNames.extractFrame}</option>
-                  <option>{utilityVideoModelNames.colorIdMatte}</option>
-                  <option>{utilityVideoModelNames.compositeVideo}</option>
-                  <option>{utilityVideoModelNames.voidVideoInpainting}</option>
                   <option>{utilityVideoModelNames.birefnetVideo}</option>
-                  <option>{utilityVideoModelNames.rifeVideo}</option>
                   <option>{utilityVideoModelNames.bytedanceUpscaler}</option>
-                  <option>{utilityVideoModelNames.topazUpscaler}</option>
+                  <option>{utilityVideoModelNames.colorIdMatte}</option>
+                  <option>{utilityVideoModelNames.extractFrame}</option>
+                  <option>{utilityVideoModelNames.rifeVideo}</option>
                   <option>{utilityVideoModelNames.sam3Video}</option>
+                  <option>{utilityVideoModelNames.topazUpscaler}</option>
+                  <option>{utilityVideoModelNames.transitionBuilder}</option>
+                  <option>{utilityVideoModelNames.voidVideoInpainting}</option>
+                  <option>{utilityVideoModelNames.wan22A14bI2v}</option>
+                  <option>{utilityVideoModelNames.wan22A14bT2v}</option>
+                  <option>{utilityVideoModelNames.wan22VaceDepth}</option>
+                  <option>{utilityVideoModelNames.wan22VaceInpainting}</option>
+                  <option>{utilityVideoModelNames.wan22VacePose}</option>
+                  {utilityVideoModel === utilityVideoModelNames.wanVaceInpainting && <option hidden>{utilityVideoModelNames.wanVaceInpainting}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.wanVaceMaskToVideo && <option hidden>{utilityVideoModelNames.wanVaceMaskToVideo}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.wanFunControl && <option hidden>{utilityVideoModelNames.wanFunControl}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.wan21T2vLora && <option hidden>{utilityVideoModelNames.wan21T2vLora}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.wan21I2vLora && <option hidden>{utilityVideoModelNames.wan21I2vLora}</option>}
+                  {utilityVideoModel === utilityVideoModelNames.compositeVideo && <option hidden>{utilityVideoModelNames.compositeVideo}</option>}
                 </select>
               </NodeRow>
               {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isTransitionBuilder && !isVideoUpscaler && (
