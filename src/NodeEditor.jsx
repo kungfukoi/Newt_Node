@@ -544,6 +544,9 @@ const initialEdges = [
 
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
+const viewportZoomStep = 1.16;
+const wheelZoomDeltaPerStep = 100;
+const wheelLineDeltaScale = 40;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const namedColorPalette = [
@@ -571,6 +574,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const clipboardRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
   const outputHistoryLoadedRef = React.useRef(false);
+  const wheelZoomDeltaRef = React.useRef(0);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, normalizeEditorGraph }), []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
@@ -755,13 +759,13 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
       if (commandKey && (key === "=" || key === "+")) {
         event.preventDefault();
-        zoomViewportAtCanvasCenter(1.16);
+        zoomViewportAtCanvasCenter(viewportZoomStep);
         return;
       }
 
       if (commandKey && key === "-") {
         event.preventDefault();
-        zoomViewportAtCanvasCenter(1 / 1.16);
+        zoomViewportAtCanvasCenter(1 / viewportZoomStep);
         return;
       }
 
@@ -2225,6 +2229,14 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     setContextMenu(null);
   }
 
+  function normalizedWheelZoomDelta(event) {
+    const rawDelta = event.deltaY || event.deltaX;
+    if (!rawDelta) return 0;
+    if (event.deltaMode === 1) return rawDelta * wheelLineDeltaScale;
+    if (event.deltaMode === 2) return rawDelta * wheelZoomDeltaPerStep;
+    return rawDelta;
+  }
+
   function handleCanvasWheel(event) {
     if (!event.ctrlKey && !event.metaKey) {
       const wardrobeScroller = event.target.closest(".character-thumb-strip");
@@ -2266,7 +2278,15 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     };
 
     if (event.ctrlKey || event.metaKey || event.altKey) {
-      zoomViewportAtPoint(pointer, Math.exp(-event.deltaY * 0.006));
+      const wheelDelta = normalizedWheelZoomDelta(event);
+      if (wheelDelta) {
+        wheelZoomDeltaRef.current += wheelDelta;
+        const zoomSteps = Math.trunc(wheelZoomDeltaRef.current / wheelZoomDeltaPerStep);
+        if (zoomSteps) {
+          wheelZoomDeltaRef.current -= zoomSteps * wheelZoomDeltaPerStep;
+          zoomViewportAtPoint(pointer, Math.pow(viewportZoomStep, -zoomSteps));
+        }
+      }
       return;
     }
 
@@ -3362,13 +3382,13 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / 1.16)} title="Zoom out" aria-label="Zoom out">
+          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / viewportZoomStep)} title="Zoom out" aria-label="Zoom out">
             <Minus size={14} />
           </button>
           <button type="button" onClick={resetViewportZoom} title="Reset zoom" aria-label="Reset zoom" className="zoom-readout">
             {Math.round(viewport.scale * 100)}%
           </button>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1.16)} title="Zoom in" aria-label="Zoom in">
+          <button type="button" onClick={() => zoomViewportAtCanvasCenter(viewportZoomStep)} title="Zoom in" aria-label="Zoom in">
             <Plus size={14} />
           </button>
         </div>
