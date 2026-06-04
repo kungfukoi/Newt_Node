@@ -140,9 +140,6 @@ import {
   topazUpscalerBillingTierOptions,
   topazUpscalerFpsOptions,
   topazUpscalerModelOptions,
-  transitionBuilderEasingOptions,
-  transitionBuilderMaskStyleOptions,
-  transitionBuilderOutputOptions,
   typePresetNames,
   typePresetPrompts,
   utilityImageModelNames,
@@ -5153,8 +5150,6 @@ function NodeBody({
     const controlVideoOutputPort = config.output.find((port) => port.id === "controlVideoOut");
     const maskVideoOutputPort = config.output.find((port) => port.id === "maskVideoOut");
     const generatedVideoOutputPort = config.output.find((port) => port.id === "generatedVideoOut");
-    const guideStartOutputPort = config.output.find((port) => port.id === "guideStartOut");
-    const guideEndOutputPort = config.output.find((port) => port.id === "guideEndOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
@@ -5181,8 +5176,7 @@ function NodeBody({
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
         (!isCompositeVideo || Boolean(incoming.maskVideoIn?.length) && (incoming.referenceVideoIn?.length || 0) >= 2) &&
-        (!isTransitionBuilder || Boolean(incoming.referenceVideoIn?.length) || Boolean(incoming.referenceImageIn?.length)) &&
-        (!isTransitionBuilder || !node.data.transitionGenerateWan || Boolean(promptValue.trim())) &&
+        (!isTransitionBuilder || (incoming.referenceImageIn?.length || 0) >= 2 && Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim())) &&
         (!isWan22A14bI2vVideo || Boolean(incoming.referenceImageIn?.length)) &&
         (!isWan21LoraI2vVideo || Boolean(incoming.referenceImageIn?.length)) &&
         (!isWanVaceInpaintingVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim())) &&
@@ -5206,9 +5200,7 @@ function NodeBody({
                   : isCompositeVideo
                     ? "Composite Video"
                     : isTransitionBuilder
-                      ? node.data.transitionGenerateWan
-                        ? "Generate Transition"
-                        : "Build Transition"
+                      ? "Generate Morph"
                       : isWanVaceMaskToVideo
                         ? "Run Mask-to-Video"
                       : isWan22A14bVideo
@@ -5240,14 +5232,12 @@ function NodeBody({
       ? "Base + Layer"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isTransitionBuilder
-          ? "Source Video"
         : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
           ? "Video"
           : isVoidVideo
             ? "Source Video"
             : "Control Video";
-    const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo || isTransitionBuilder ? "Optional video" : "Add video";
+    const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo ? "Optional video" : "Add video";
 
     function setMode(nextMode) {
       if (mode === nextMode) return;
@@ -5293,17 +5283,9 @@ function NodeBody({
         />
         {isTransitionBuilder ? (
           <>
-            {node.data.transitionGenerateWan && (
-              <OutputPortRow node={node} port={generatedVideoOutputPort} label="Generated Transition" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-            )}
-            <OutputPortRow node={node} port={controlVideoOutputPort} label="Control Video" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-            <OutputPortRow node={node} port={maskVideoOutputPort} label="Mask Video" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-            {node.data.transitionWanSchedulerEnabled && (
-              <>
-                <OutputPortRow node={node} port={guideStartOutputPort} label="Guide Start" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-                <OutputPortRow node={node} port={guideEndOutputPort} label="Guide End" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-              </>
-            )}
+            <OutputPortRow node={node} port={generatedVideoOutputPort} label="Mask-Influenced Morph" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            <OutputPortRow node={node} port={controlVideoOutputPort} label="Raw LoRA Morph" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            <OutputPortRow node={node} port={maskVideoOutputPort} label="Influence Mask" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
           </>
         ) : (
           <OutputPortRow node={node} port={utilityOutputPort} label={utilityOutputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
@@ -6695,7 +6677,7 @@ function Wan22A14bControls({ incoming, referenceImagePort, settingsOpen, node, o
               ) : null}
               <div className="inline-two-fields">
                 <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
-                <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+                <input type="number" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
               </div>
             </div>
           ))}
@@ -6836,7 +6818,7 @@ function Wan21LoraControls({ incoming, referenceImagePort, settingsOpen, node, o
               ) : null}
               <div className="inline-two-fields">
                 <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
-                <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+                <input type="number" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
               </div>
             </div>
           ))}
@@ -7045,13 +7027,6 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
   const keyframeItems = transitionBuilderKeyframeItemsForNode(node, incoming.referenceImageIn);
   const keyframeCount = keyframeItems.length;
   const maskConnected = Boolean(incoming.maskVideoIn?.length);
-  const frameCount = Math.max(9, Math.min(241, Math.round(Number(node.data.transitionFrameCount || 57))));
-  const transitionStartFrame = Math.max(0, Math.min(frameCount - 1, Math.round(Number(node.data.transitionStartFrame || 0))));
-  const transitionDurationFrames = Math.max(1, Math.min(frameCount - transitionStartFrame, Math.round(Number(node.data.transitionDurationFrames || frameCount - transitionStartFrame))));
-  const generateWan = Boolean(node.data.transitionGenerateWan);
-  const wanSchedulerEnabled = Boolean(node.data.transitionWanSchedulerEnabled);
-  const wanSegmentCount = Math.max(1, Math.min(8, Math.round(Number(node.data.transitionWanSegmentCount || 3))));
-  const wanSelectedSegment = Math.max(1, Math.min(wanSegmentCount, Math.round(Number(node.data.transitionWanSelectedSegment || 1))));
   const loras = transitionWanLoraItemsForData(node.data);
 
   function updateLora(index, patch) {
@@ -7086,17 +7061,9 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
 
   return (
     <>
-      <NodeRow label="Mode">
-        <select value={generateWan ? "generate" : "build"} onChange={(event) => onUpdate(node.id, { transitionGenerateWan: event.target.value === "generate", transitionWanSchedulerEnabled: event.target.value === "generate" ? true : node.data.transitionWanSchedulerEnabled })}>
-          <option value="build">Build Guides</option>
-          <option value="generate">Generate Wan</option>
-        </select>
+      <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
       </NodeRow>
-      {generateWan && (
-        <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-          <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
-        </NodeRow>
-      )}
       <NodeRow label="Keyframes" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
         <button className={keyframeCount ? "connected-field" : ""}>{`Add Images ( ${keyframeCount} )`}</button>
       </NodeRow>
@@ -7117,157 +7084,108 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
           </div>
         </NodeRow>
       )}
-      <NodeRow label="Mask Source" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Optional mask")}</button>
+      <NodeRow label="Influence Mask" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
       </NodeRow>
-      <NodeRow label="Frames">
-        <input type="number" min="9" max="241" step="4" value={node.data.transitionFrameCount || 57} onChange={(event) => onUpdate(node.id, { transitionFrameCount: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="FPS">
-        <input type="number" min="5" max="30" value={node.data.transitionFps || 16} onChange={(event) => onUpdate(node.id, { transitionFps: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Size">
-        <select value={node.data.transitionSize || "512"} onChange={(event) => onUpdate(node.id, { transitionSize: event.target.value })}>
-          <option value="512">512</option>
-          <option value="720">720</option>
-          <option value="1024">1024</option>
-        </select>
-      </NodeRow>
-      <NodeRow label="Overlap">
-        <input type="number" min="0" max="32" value={node.data.transitionOverlapFrames || 9} onChange={(event) => onUpdate(node.id, { transitionOverlapFrames: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Start Frame">
-        <input type="number" min="0" max={Math.max(0, frameCount - 1)} value={transitionStartFrame} onChange={(event) => onUpdate(node.id, { transitionStartFrame: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Transition">
-        <input type="number" min="1" max={Math.max(1, frameCount - transitionStartFrame)} value={transitionDurationFrames} onChange={(event) => onUpdate(node.id, { transitionDurationFrames: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Easing">
-        <select value={node.data.transitionEasing || "linear"} onChange={(event) => onUpdate(node.id, { transitionEasing: event.target.value })}>
-          {transitionBuilderEasingOptions.map((option) => (
-            <option key={option}>{option}</option>
-          ))}
-        </select>
-      </NodeRow>
-      <NodeRow label="Mask Style">
-        <select value={node.data.transitionMaskStyle || "wipe"} onChange={(event) => onUpdate(node.id, { transitionMaskStyle: event.target.value })}>
-          {transitionBuilderMaskStyleOptions.map((option) => (
-            <option key={option}>{option}</option>
-          ))}
-        </select>
-      </NodeRow>
-      <NodeRow label="Softness">
+      <NodeRow label="Mask Softness">
         <input type="number" min="0" max="24" step="1" value={node.data.transitionMaskSoftness || 6} onChange={(event) => onUpdate(node.id, { transitionMaskSoftness: event.target.value })} />
       </NodeRow>
-      <NodeRow label="Format">
-        <select value={node.data.transitionOutputFormat || "mp4"} onChange={(event) => onUpdate(node.id, { transitionOutputFormat: event.target.value })}>
-          {transitionBuilderOutputOptions.map((option) => (
+      <NodeRow label="Wan Frames">
+        <input type="number" min="17" max="161" value={node.data.transitionWanNumFrames || 81} onChange={(event) => onUpdate(node.id, { transitionWanNumFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Wan FPS">
+        <input type="number" min="4" max="60" value={node.data.transitionWanFps || 16} onChange={(event) => onUpdate(node.id, { transitionWanFps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Wan Resolution">
+        <select value={node.data.transitionWanResolution || "720p"} onChange={(event) => onUpdate(node.id, { transitionWanResolution: event.target.value })}>
+          {wan22A14bResolutionOptions.map((option) => (
             <option key={option}>{option}</option>
           ))}
         </select>
       </NodeRow>
-      {!generateWan && (
-        <NodeRow label="Wan Guides">
-          <button className={`node-toggle ${wanSchedulerEnabled ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { transitionWanSchedulerEnabled: !wanSchedulerEnabled })}>
-            <span />
-          </button>
-        </NodeRow>
-      )}
-      {(wanSchedulerEnabled || generateWan) && (
-        <>
-          <NodeRow label="Segments">
-            <input type="number" min="1" max="8" step="1" value={wanSegmentCount} onChange={(event) => onUpdate(node.id, { transitionWanSegmentCount: event.target.value })} />
-          </NodeRow>
-          {!generateWan && (
-            <NodeRow label="Active Seg">
-              <input type="number" min="1" max={wanSegmentCount} step="1" value={wanSelectedSegment} onChange={(event) => onUpdate(node.id, { transitionWanSelectedSegment: event.target.value })} />
-            </NodeRow>
-          )}
-        </>
-      )}
-      {generateWan && (
-        <>
-          <NodeRow label="Wan Frames">
-            <input type="number" min="17" max="161" value={node.data.transitionWanNumFrames || 81} onChange={(event) => onUpdate(node.id, { transitionWanNumFrames: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Wan FPS">
-            <input type="number" min="4" max="60" value={node.data.transitionWanFps || 16} onChange={(event) => onUpdate(node.id, { transitionWanFps: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Resolution">
-            <select value={node.data.transitionWanResolution || "720p"} onChange={(event) => onUpdate(node.id, { transitionWanResolution: event.target.value })}>
-              {wan22A14bResolutionOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </NodeRow>
-          <NodeRow label="Aspect">
-            <select value={node.data.transitionWanAspectRatio || "auto"} onChange={(event) => onUpdate(node.id, { transitionWanAspectRatio: event.target.value })}>
-              {wan22A14bI2vAspectRatioOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option === "auto" ? "Auto" : option}
-                </option>
-              ))}
-            </select>
-          </NodeRow>
-          <NodeRow label="Steps">
-            <input type="number" min="1" max="60" value={node.data.transitionWanNumInferenceSteps || 27} onChange={(event) => onUpdate(node.id, { transitionWanNumInferenceSteps: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Guidance">
-            <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Guidance 2">
-            <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale2 || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale2: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Shift">
-            <input type="number" min="1" max="10" step="0.1" value={node.data.transitionWanShift || 5} onChange={(event) => onUpdate(node.id, { transitionWanShift: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Negative">
-            <textarea value={node.data.transitionWanNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { transitionWanNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
-          </NodeRow>
-          <NodeRow label="Seed Mode">
-            <select value={node.data.transitionWanSeedMode || "increment"} onChange={(event) => onUpdate(node.id, { transitionWanSeedMode: event.target.value })}>
-              <option value="increment">Increment</option>
-              <option value="same">Same</option>
-              <option value="random">Random</option>
-            </select>
-          </NodeRow>
-          <NodeRow label="LoRA">
-            <div className="utility-lora-stack">
-              {loras.map((lora, index) => (
-                <div className="utility-lora-slot" key={index}>
-                  <div className="utility-lora-slot-header">
-                    <span>{`LoRA ${index + 1}`}</span>
-                    <span className="utility-lora-slot-actions">
-                      <button type="button" className="utility-lora-icon-button" onClick={() => pickLoraFile(index)} title="Choose local LoRA file" aria-label="Choose local LoRA file">
-                        <FolderOpen size={13} />
-                      </button>
-                      <button type="button" className="utility-lora-icon-button" onClick={() => removeLora(index)} title={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"} aria-label={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"}>
-                        <Trash2 size={13} />
-                      </button>
-                    </span>
-                  </div>
-                  {lora.path ? (
-                    <span className="utility-lora-file-name" title={lora.path}>
-                      {shortLoraFileName(lora.path)}
-                    </span>
-                  ) : null}
-                  <div className="inline-two-fields">
-                    <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
-                    <input type="number" min="0" max="2" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
-                  </div>
-                </div>
-              ))}
-              <button type="button" className="utility-lora-add-button" onClick={addLora}>
-                <Plus size={13} />
-                <span>Add LoRA</span>
-              </button>
+      <NodeRow label="Wan Aspect">
+        <select value={node.data.transitionWanAspectRatio || "auto"} onChange={(event) => onUpdate(node.id, { transitionWanAspectRatio: event.target.value })}>
+          {wan22A14bI2vAspectRatioOptions.map((option) => (
+            <option key={option} value={option}>
+              {option === "auto" ? "Auto" : option}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Wan Steps">
+        <input type="number" min="1" max="60" value={node.data.transitionWanNumInferenceSteps || 27} onChange={(event) => onUpdate(node.id, { transitionWanNumInferenceSteps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Wan Guidance">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Wan Guidance 2">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.transitionWanGuidanceScale2 || 3.5} onChange={(event) => onUpdate(node.id, { transitionWanGuidanceScale2: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Wan Shift">
+        <input type="number" min="1" max="10" step="0.1" value={node.data.transitionWanShift || 5} onChange={(event) => onUpdate(node.id, { transitionWanShift: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Negative">
+        <textarea value={node.data.transitionWanNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { transitionWanNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+      </NodeRow>
+      <NodeRow label="LoRA">
+        <div className="utility-lora-stack">
+          {loras.map((lora, index) => (
+            <div className="utility-lora-slot" key={index}>
+              <div className="utility-lora-slot-header">
+                <span>{`LoRA ${index + 1}`}</span>
+                <span className="utility-lora-slot-actions">
+                  <button type="button" className="utility-lora-icon-button" onClick={() => pickLoraFile(index)} title="Choose local LoRA file" aria-label="Choose local LoRA file">
+                    <FolderOpen size={13} />
+                  </button>
+                  <button type="button" className="utility-lora-icon-button" onClick={() => removeLora(index)} title={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"} aria-label={loras.length <= 1 ? "Clear LoRA" : "Remove LoRA"}>
+                    <Trash2 size={13} />
+                  </button>
+                </span>
+              </div>
+              {lora.path ? (
+                <span className="utility-lora-file-name" title={lora.path}>
+                  {shortLoraFileName(lora.path)}
+                </span>
+              ) : null}
+              <div className="inline-two-fields">
+                <input value={lora.weightName} onChange={(event) => updateLora(index, { weightName: event.target.value })} placeholder="Weight name" />
+                <input type="number" step="0.05" value={lora.scale} onChange={(event) => updateLora(index, { scale: event.target.value })} placeholder="Scale" />
+              </div>
             </div>
-          </NodeRow>
-          <NodeRow label="Seed">
-            <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
-          </NodeRow>
-        </>
-      )}
+          ))}
+          <button type="button" className="utility-lora-add-button" onClick={addLora}>
+            <Plus size={13} />
+            <span>Add LoRA</span>
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Refine Steps">
+        <input type="number" min="1" max="60" value={node.data.transitionVaceNumInferenceSteps || 30} onChange={(event) => onUpdate(node.id, { transitionVaceNumInferenceSteps: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Refine Guidance">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.transitionVaceGuidanceScale || 5} onChange={(event) => onUpdate(node.id, { transitionVaceGuidanceScale: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Refine Sampler">
+        <select value={node.data.transitionVaceSampler || "unipc"} onChange={(event) => onUpdate(node.id, { transitionVaceSampler: event.target.value })}>
+          {wanVaceSamplerOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Refine Shift">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.transitionVaceShift || 5} onChange={(event) => onUpdate(node.id, { transitionVaceShift: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Refine Quality">
+        <select value={node.data.transitionVaceVideoQuality || "high"} onChange={(event) => onUpdate(node.id, { transitionVaceVideoQuality: event.target.value })}>
+          <option>low</option>
+          <option>medium</option>
+          <option>high</option>
+          <option>maximum</option>
+        </select>
+      </NodeRow>
+      <NodeRow label="Seed">
+        <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+      </NodeRow>
     </>
   );
 }
@@ -7506,11 +7424,9 @@ function getNodeConfig(type) {
       ],
       output: [
         { id: "utilityOut", label: "Output", color: portColors.image },
-        { id: "generatedVideoOut", label: "Generated Transition", color: portColors.video },
-        { id: "controlVideoOut", label: "Control Video", color: portColors.video },
-        { id: "maskVideoOut", label: "Mask Video", color: portColors.video },
-        { id: "guideStartOut", label: "Guide Start", color: portColors.image },
-        { id: "guideEndOut", label: "Guide End", color: portColors.image }
+        { id: "generatedVideoOut", label: "Mask-Influenced Morph", color: portColors.video },
+        { id: "controlVideoOut", label: "Raw LoRA Morph", color: portColors.video },
+        { id: "maskVideoOut", label: "Influence Mask", color: portColors.video }
       ]
     },
     video: {
@@ -7664,14 +7580,27 @@ function createDefaultNodeData(type, label, count) {
       compositeMaskBlur: 0,
       compositeMaskExpand: 0,
       compositeOutputFormat: "mp4",
-      transitionFrameCount: 57,
-      transitionFps: 16,
-      transitionSize: "512",
-      transitionOverlapFrames: 9,
-      transitionMaskStyle: "wipe",
       transitionMaskSoftness: 6,
-      transitionOutputFormat: "mp4",
       transitionKeyframeOrder: [],
+      transitionVaceNegativePrompt: "",
+      transitionVaceResolution: "auto",
+      transitionVaceAspectRatio: "auto",
+      transitionVaceNumInferenceSteps: 30,
+      transitionVaceGuidanceScale: 5,
+      transitionVaceSampler: "unipc",
+      transitionVaceShift: 5,
+      transitionVaceEnableSafetyChecker: true,
+      transitionVaceEnablePromptExpansion: false,
+      transitionVacePreprocess: false,
+      transitionVaceAcceleration: "regular",
+      transitionVaceVideoQuality: "high",
+      transitionVaceVideoWriteMode: "balanced",
+      transitionVaceNumInterpolatedFrames: 0,
+      transitionVaceTemporalDownsampleFactor: 0,
+      transitionVaceEnableAutoDownsample: false,
+      transitionVaceAutoDownsampleMinFps: 15,
+      transitionVaceInterpolatorModel: "film",
+      transitionVaceTransparencyMode: "content_aware",
       wanVaceNegativePrompt: "",
       wanVaceMatchInputNumFrames: true,
       wanVaceNumFrames: 81,
@@ -8102,7 +8031,7 @@ function utilityMode(node) {
 
 function utilityOutputType(node, portId = "") {
   if (isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) {
-    return ["guideStartOut", "guideEndOut"].includes(portId) ? "image" : "video";
+    return "video";
   }
   if (utilityMode(node) === "video" && isUtilityExtractFrameVideoModel(node?.data?.utilityVideoModel)) return "image";
   return utilityMode(node);
@@ -8184,21 +8113,8 @@ function utilityVideoModelSelectionPatch(model) {
   if (isUtilityTransitionBuilderModel(model)) {
     return {
       ...patch,
-      transitionFrameCount: 57,
-      transitionFps: 16,
-      transitionSize: "512",
-      transitionOverlapFrames: 9,
-      transitionStartFrame: 0,
-      transitionDurationFrames: 57,
-      transitionEasing: "linear",
-      transitionMaskStyle: "wipe",
       transitionMaskSoftness: 6,
-      transitionOutputFormat: "mp4",
       transitionKeyframeOrder: [],
-      transitionWanSchedulerEnabled: false,
-      transitionGenerateWan: false,
-      transitionWanSegmentCount: 3,
-      transitionWanSelectedSegment: 1,
       transitionWanNegativePrompt: "",
       transitionWanNumFrames: 81,
       transitionWanFps: 16,
@@ -8217,8 +8133,26 @@ function utilityVideoModelSelectionPatch(model) {
       transitionWanEnableSafetyChecker: true,
       transitionWanEnableOutputSafetyChecker: false,
       transitionWanEnablePromptExpansion: false,
-      transitionWanSeedMode: "increment",
-      transitionWanLoras: [emptyWanLoraItem()]
+      transitionWanLoras: [emptyWanLoraItem()],
+      transitionVaceNegativePrompt: "",
+      transitionVaceResolution: "auto",
+      transitionVaceAspectRatio: "auto",
+      transitionVaceNumInferenceSteps: 30,
+      transitionVaceGuidanceScale: 5,
+      transitionVaceSampler: "unipc",
+      transitionVaceShift: 5,
+      transitionVaceEnableSafetyChecker: true,
+      transitionVaceEnablePromptExpansion: false,
+      transitionVacePreprocess: false,
+      transitionVaceAcceleration: "regular",
+      transitionVaceVideoQuality: "high",
+      transitionVaceVideoWriteMode: "balanced",
+      transitionVaceNumInterpolatedFrames: 0,
+      transitionVaceTemporalDownsampleFactor: 0,
+      transitionVaceEnableAutoDownsample: false,
+      transitionVaceAutoDownsampleMinFps: 15,
+      transitionVaceInterpolatorModel: "film",
+      transitionVaceTransparencyMode: "content_aware"
     };
   }
 
@@ -8236,9 +8170,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityCompositeVideoModel(videoModel)) return ["referenceVideoIn", "maskVideoIn"];
-  if (isUtilityTransitionBuilderModel(videoModel)) return data?.transitionGenerateWan
-    ? ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"]
-    : ["referenceImageIn", "referenceVideoIn", "maskVideoIn"];
+  if (isUtilityTransitionBuilderModel(videoModel)) return ["promptIn", "referenceImageIn", "maskVideoIn"];
   if (isUtilityWan22A14bI2vModel(videoModel)) return ["promptIn", "referenceImageIn"];
   if (isUtilityWan22A14bT2vModel(videoModel)) return ["promptIn"];
   if (isUtilityWan21I2vLoraModel(videoModel)) return ["promptIn", "referenceImageIn"];
@@ -8369,11 +8301,7 @@ function outputPortIdsForNode(node) {
 
 function utilityOutputPortIdsForNode(node) {
   if (!isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) return ["utilityOut"];
-  const ports = [];
-  if (node?.data?.transitionGenerateWan) ports.push("generatedVideoOut");
-  ports.push("controlVideoOut", "maskVideoOut");
-  if (node?.data?.transitionWanSchedulerEnabled || node?.data?.transitionGenerateWan) ports.push("guideStartOut", "guideEndOut");
-  return ports;
+  return ["generatedVideoOut", "controlVideoOut", "maskVideoOut"];
 }
 
 function composerCharacterInputPortIdsForNode(node) {
@@ -8616,18 +8544,10 @@ function transitionBuilderResultItemForPort(source, portId = "") {
   const items = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, "video");
   if (!items.length) return null;
   if (portId === "generatedVideoOut") {
-    return items.find((item) => /generated transition/i.test(item.label || "")) || items[0] || null;
+    return items.find((item) => /mask-influenced|refined|generated/i.test(item.label || "")) || items[0] || null;
   }
-  if (portId === "guideStartOut" || portId === "guideEndOut") {
-    const guideItems = items.filter((item) => (item.type || "").toLowerCase() === "image" || /^guide\s+\d+/i.test(item.label || ""));
-    if (!guideItems.length) return null;
-    const segmentCount = Math.max(1, Math.min(8, Math.round(Number(source?.data?.transitionWanSegmentCount || Math.max(1, guideItems.length - 1)))));
-    const selectedSegment = Math.max(1, Math.min(segmentCount, Math.round(Number(source?.data?.transitionWanSelectedSegment || 1))));
-    const guideIndex = selectedSegment - 1 + (portId === "guideEndOut" ? 1 : 0);
-    return guideItems[guideIndex] || guideItems.at(-1) || null;
-  }
-  const labelMatch = portId === "maskVideoOut" ? /mask/i : /control/i;
-  const fallbackIndex = portId === "maskVideoOut" ? 1 : 0;
+  const labelMatch = portId === "maskVideoOut" ? /influence\s*mask|mask/i : /raw|lora/i;
+  const fallbackIndex = portId === "maskVideoOut" ? 2 : 1;
   return items.find((item) => labelMatch.test(item.label || "")) || items[fallbackIndex] || items[0] || null;
 }
 
@@ -9905,21 +9825,8 @@ function normalizeUtilityData(data = {}) {
     compositeMaskBlur: colorIdMatteBlur(data.compositeMaskBlur),
     compositeMaskExpand: colorIdMatteExpand(data.compositeMaskExpand),
     compositeOutputFormat: normalizeChoice(data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
-    transitionFrameCount: Math.max(9, Math.min(241, Math.round(Number(data.transitionFrameCount || 57)))),
-    transitionFps: Math.max(5, Math.min(30, Math.round(Number(data.transitionFps || 16)))),
-    transitionSize: normalizeChoice(String(data.transitionSize || "512"), ["512", "720", "1024"], "512"),
-    transitionOverlapFrames: Math.max(0, Math.min(32, Math.round(Number(data.transitionOverlapFrames || 9)))),
-    transitionStartFrame: Math.max(0, Math.min(240, Math.round(Number(data.transitionStartFrame || 0)))),
-    transitionDurationFrames: Math.max(1, Math.min(241, Math.round(Number(data.transitionDurationFrames || data.transitionFrameCount || 57)))),
-    transitionEasing: normalizeChoice(data.transitionEasing, transitionBuilderEasingOptions, "linear"),
-    transitionMaskStyle: normalizeChoice(data.transitionMaskStyle, transitionBuilderMaskStyleOptions, "wipe"),
     transitionMaskSoftness: Math.max(0, Math.min(24, Math.round(Number(data.transitionMaskSoftness || 6)))),
-    transitionOutputFormat: normalizeChoice(data.transitionOutputFormat, transitionBuilderOutputOptions, "mp4"),
     transitionKeyframeOrder: Array.isArray(data.transitionKeyframeOrder) ? data.transitionKeyframeOrder.map(String).filter(Boolean).slice(0, 64) : [],
-    transitionGenerateWan: Boolean(data.transitionGenerateWan),
-    transitionWanSchedulerEnabled: Boolean(data.transitionWanSchedulerEnabled),
-    transitionWanSegmentCount: Math.max(1, Math.min(8, Math.round(Number(data.transitionWanSegmentCount || 3)))),
-    transitionWanSelectedSegment: Math.max(1, Math.min(8, Math.round(Number(data.transitionWanSelectedSegment || 1)))),
     transitionWanNegativePrompt: String(data.transitionWanNegativePrompt || ""),
     transitionWanResolution: normalizeChoice(data.transitionWanResolution, wan22A14bResolutionOptions, "720p"),
     transitionWanAspectRatio: normalizeChoice(data.transitionWanAspectRatio, wan22A14bI2vAspectRatioOptions, "auto"),
@@ -9938,8 +9845,26 @@ function normalizeUtilityData(data = {}) {
     transitionWanEnableSafetyChecker: data.transitionWanEnableSafetyChecker !== false,
     transitionWanEnableOutputSafetyChecker: Boolean(data.transitionWanEnableOutputSafetyChecker),
     transitionWanEnablePromptExpansion: Boolean(data.transitionWanEnablePromptExpansion),
-    transitionWanSeedMode: normalizeChoice(data.transitionWanSeedMode, ["increment", "same", "random"], "increment"),
     transitionWanLoras: transitionWanLoraItemsForData(data),
+    transitionVaceNegativePrompt: String(data.transitionVaceNegativePrompt || ""),
+    transitionVaceResolution: normalizeChoice(data.transitionVaceResolution, wanVaceInpaintingResolutionOptions, "auto"),
+    transitionVaceAspectRatio: normalizeChoice(data.transitionVaceAspectRatio, wanVaceInpaintingAspectRatioOptions, "auto"),
+    transitionVaceNumInferenceSteps: Math.max(1, Math.min(60, Math.round(Number(data.transitionVaceNumInferenceSteps || 30)))),
+    transitionVaceGuidanceScale: data.transitionVaceGuidanceScale || 5,
+    transitionVaceSampler: normalizeChoice(data.transitionVaceSampler, wanVaceSamplerOptions, "unipc"),
+    transitionVaceShift: data.transitionVaceShift || 5,
+    transitionVaceEnableSafetyChecker: data.transitionVaceEnableSafetyChecker !== false,
+    transitionVaceEnablePromptExpansion: Boolean(data.transitionVaceEnablePromptExpansion),
+    transitionVacePreprocess: Boolean(data.transitionVacePreprocess),
+    transitionVaceAcceleration: normalizeChoice(data.transitionVaceAcceleration, wanVaceAccelerationOptions, "regular"),
+    transitionVaceVideoQuality: normalizeChoice(data.transitionVaceVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    transitionVaceVideoWriteMode: normalizeChoice(data.transitionVaceVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    transitionVaceNumInterpolatedFrames: Math.max(0, Math.round(Number(data.transitionVaceNumInterpolatedFrames || 0))),
+    transitionVaceTemporalDownsampleFactor: Math.max(0, Math.round(Number(data.transitionVaceTemporalDownsampleFactor || 0))),
+    transitionVaceEnableAutoDownsample: Boolean(data.transitionVaceEnableAutoDownsample),
+    transitionVaceAutoDownsampleMinFps: Math.max(1, Math.min(30, Number(data.transitionVaceAutoDownsampleMinFps || 15))),
+    transitionVaceInterpolatorModel: normalizeChoice(data.transitionVaceInterpolatorModel, wanVaceInterpolatorOptions, "film"),
+    transitionVaceTransparencyMode: normalizeChoice(data.transitionVaceTransparencyMode, wanVaceTransparencyOptions, "content_aware"),
     wanVaceNegativePrompt: String(data.wanVaceNegativePrompt || ""),
     wanVaceMatchInputNumFrames: data.wanVaceMatchInputNumFrames !== false,
     wanVaceNumFrames: data.wanVaceNumFrames || 81,
@@ -10181,7 +10106,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (source.type === "utility") {
     if (isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
-      if (!utilityOutputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "controlVideoOut";
+      if (!utilityOutputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "generatedVideoOut";
     } else {
       nextEdge.from.port = "utilityOut";
     }

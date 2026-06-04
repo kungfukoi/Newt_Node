@@ -85,9 +85,10 @@ function historyProjectMatches(item, projectId, projectName) {
 function historyOutputLabel(item, type, urlIndex) {
   if (Array.isArray(item.outputLabels) && item.outputLabels[urlIndex]) return item.outputLabels[urlIndex];
   if (isTransitionBuilderHistoryItem(item)) {
-    if (urlIndex === 0) return "Control Video";
-    if (urlIndex === 1) return "Mask Video";
-    return `Guide ${String(urlIndex - 1).padStart(2, "0")}`;
+    if (urlIndex === 0) return "Mask-Influenced Morph";
+    if (urlIndex === 1) return "Raw LoRA Morph";
+    if (urlIndex === 2) return "Influence Mask";
+    return `Transition Output ${urlIndex + 1}`;
   }
 
   const label = item.node?.title || item.modelName || `${capitalizeMediaType(type)} output`;

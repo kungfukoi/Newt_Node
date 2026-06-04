@@ -209,9 +209,6 @@ export const colorIdMatteVideoOutputOptions = [
   ["webm", "WebM mask"],
   ["mov", "ProRes mask"]
 ];
-export const transitionBuilderMaskStyleOptions = ["wipe", "reverse wipe", "center wipe", "white", "black"];
-export const transitionBuilderOutputOptions = ["mp4", "mov"];
-export const transitionBuilderEasingOptions = ["linear", "ease in", "ease out", "ease in/out"];
 export const wan21T2vLoraResolutionOptions = ["480p", "580p", "720p"];
 export const wan21I2vLoraResolutionOptions = ["480p", "720p"];
 export const wan21T2vLoraAspectRatioOptions = ["16:9", "9:16"];
@@ -242,7 +239,7 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
   [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
-  [utilityVideoModelNames.transitionBuilder]: "Builds local transition guides or generates stitched Wan 2.2 LoRA transition segments from keyframes and matte timing.",
+  [utilityVideoModelNames.transitionBuilder]: "Generates a Wan 2.2 LoRA morph from two keyframes, then refines it with a black and white matte as image-influence guidance.",
   [utilityVideoModelNames.wanVaceMaskToVideo]: "Uses Fal Wan VACE to create a prompted video from a reference image inside a connected mask video.",
   [utilityVideoModelNames.wanVaceInpainting]: "Uses Fal Wan VACE 14B with source video, mask video, prompt, and optional reference images for masked video generation.",
   [utilityVideoModelNames.wan22A14bT2v]: "Uses Fal Wan 2.2 A14B text-to-video with optional LoRA weights, frame interpolation, guidance, and quality controls.",

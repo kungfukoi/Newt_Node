@@ -2371,16 +2371,15 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
   );
 }
 
-async function runTransitionBuilderUtilityVideo(req, res, { referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
-  if (!referenceImageUrls.length && !referenceVideoUrls.length) {
-    return res.status(400).json({ error: "Transition Builder requires connected keyframes or a source video." });
+async function runTransitionBuilderUtilityVideo(req, res, { referenceImageUrls, maskVideoUrls, selectedVideoModel }) {
+  if (referenceImageUrls.length < 2) {
+    return res.status(400).json({ error: "Transition Builder requires two connected keyframe images." });
   }
 
   return res.json(
     await createTransitionBuilderResult({
       body: req.body,
       referenceImageUrls,
-      sourceVideoUrl: firstLocalOutput(referenceVideoUrls),
       maskVideoUrl: firstLocalOutput(maskVideoUrls),
       selectedVideoModel
     })
@@ -3411,7 +3410,7 @@ async function normalizeWanLoraWeights(items = []) {
     const weightName = String(item?.weightName || item?.weight_name || "").trim();
     const weight = {
       path: await resolveWanLoraWeightPath(pathValue),
-      scale: clampNumber(item?.scale, 0, 2, 1)
+      scale: optionalNumber(item?.scale) ?? 1
     };
     if (weightName) weight.weight_name = weightName;
     weights.push(weight);
@@ -6364,204 +6363,225 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
   }
 }
 
-async function createTransitionBuilderResult({ body, referenceImageUrls = [], sourceVideoUrl = "", maskVideoUrl = "", selectedVideoModel = null }) {
+async function createTransitionBuilderResult({ body, referenceImageUrls = [], maskVideoUrl = "", selectedVideoModel = null }) {
   const outputPaths = [];
   const requestId = randomUUID();
 
   try {
     const options = normalizedTransitionBuilderOptions(body.transitionBuilder);
-    const keyframeAssets = [];
-    for (const imageUrl of referenceImageUrls.slice(0, 12)) {
-      keyframeAssets.push(await resolveLocalAssetPathFromUrl(imageUrl));
+    const cleanPrompt = String(body.prompt || "").trim();
+    const startImageUrl = firstLocalOutput(referenceImageUrls);
+    const endImageUrl = firstLocalOutput(referenceImageUrls.slice(1));
+    if (!startImageUrl || !endImageUrl) {
+      const error = new Error("Transition Builder requires two connected keyframe images.");
+      error.status = 400;
+      throw error;
     }
-
-    const sourceVideo = sourceVideoUrl ? await resolveLocalAssetPathFromUrl(sourceVideoUrl) : null;
-    if (!keyframeAssets.length && !sourceVideo) {
-      const error = new Error("Transition Builder requires connected keyframes or a source video.");
+    if (!maskVideoUrl) {
+      const error = new Error("Transition Builder requires a connected black and white influence mask video.");
+      error.status = 400;
+      throw error;
+    }
+    if (!cleanPrompt) {
+      const error = new Error("Transition Builder requires a morph prompt.");
+      error.status = 400;
+      throw error;
+    }
+    if (!process.env.FAL_KEY) {
+      const error = new Error("Transition Builder requires FAL_KEY in .env.");
       error.status = 400;
       throw error;
     }
 
-    const maskVideo = maskVideoUrl ? await resolveLocalAssetPathFromUrl(maskVideoUrl) : null;
-    if (options.wanSchedulerEnabled && keyframeAssets.length < 2) {
-      const error = new Error("Wan guide scheduling requires at least two connected keyframes.");
-      error.status = 400;
-      throw error;
-    }
-
-    const extension = videoOutputExtension(options.outputFormat);
-    const controlOutput = await createManagedAssetTarget({ body }, "transition-control-video", extension, workflowPackageOutputDirName);
-    const maskOutput = await createManagedAssetTarget({ body }, "transition-mask-video", extension, workflowPackageOutputDirName);
-    const guideOutputs = [];
-    if (options.wanSchedulerEnabled) {
-      for (let index = 0; index <= options.wanSegmentCount; index += 1) {
-        guideOutputs.push(await createManagedAssetTarget({ body }, `transition-guide-${String(index + 1).padStart(2, "0")}`, "png", workflowPackageOutputDirName));
-      }
-    }
-    outputPaths.push(controlOutput.filePath, maskOutput.filePath, ...guideOutputs.map((output) => output.filePath));
-
-    await createTransitionMaskVideoWithFfmpeg({
-      maskVideoPath: maskVideo?.filePath || "",
-      outputPath: maskOutput.filePath,
-      width: options.width,
-      height: options.height,
-      fps: options.fps,
-      frameCount: options.frameCount,
-      maskStyle: options.maskStyle,
-      maskSoftness: options.maskSoftness,
-      transitionStartFrame: options.transitionStartFrame,
-      transitionDurationFrames: options.transitionDurationFrames,
-      transitionEasing: options.transitionEasing,
-      outputFormat: options.outputFormat
-    });
-
-    await createTransitionControlVideoWithFfmpeg({
-      imagePaths: keyframeAssets.map((asset) => asset.filePath),
-      sourceVideoPath: sourceVideo?.filePath || "",
-      maskVideoPath: maskOutput.filePath,
-      outputPath: controlOutput.filePath,
-      width: options.width,
-      height: options.height,
-      fps: options.fps,
-      frameCount: options.frameCount,
-      overlapFrames: options.overlapFrames,
-      outputFormat: options.outputFormat
-    });
-
-    const guideFrameIndexes = guideOutputs.length
-      ? await createTransitionGuideImagesWithFfmpeg({
-          sourceVideoPath: controlOutput.filePath,
-          outputTargets: guideOutputs,
-          fps: options.fps,
-          frameCount: options.frameCount,
-          segmentCount: options.wanSegmentCount
-        })
-      : [];
-
-    const [controlStats, maskStats, controlMetadata, maskMetadata, guideStats] = await Promise.all([
-      stat(controlOutput.filePath),
-      stat(maskOutput.filePath),
-      probeVideoFile(controlOutput.filePath),
-      probeVideoFile(maskOutput.filePath),
-      Promise.all(guideOutputs.map((output) => stat(output.filePath)))
+    const maskVideo = await resolveLocalAssetPathFromUrl(maskVideoUrl);
+    const endpoint = wan22A14bLoraI2vEndpoint;
+    const loras = await normalizeWanLoraWeights(options.wan.loras);
+    const [uploadedStartImageUrl, uploadedEndImageUrl] = await Promise.all([
+      uploadLocalOutputToFal(startImageUrl),
+      uploadLocalOutputToFal(endImageUrl)
     ]);
-    const text = options.generateWan
-      ? `Transition Builder generated Wan transition: ${options.wanSegmentCount} segments from ${options.frameCount} guide frames.`
-      : options.wanSchedulerEnabled
-        ? `Transition Builder clips: ${options.frameCount} frames at ${options.fps} fps; ${options.wanSegmentCount} Wan guide segments.`
-        : `Transition Builder clips: ${options.frameCount} frames at ${options.fps} fps.`;
-    const localCost = {
-      amountUsd: 0,
-      currency: "USD",
-      unitRateUsd: 0,
-      units: 2,
-      unit: "local transition clip",
-      mediaType: "video",
-      pricingBasis: "Local ffmpeg VACE transition control and mask clip generation",
-      pricingSource: "local-transition-builder"
-    };
-    const videos = [
-      enrichVideoMetadata(
-        {
-          type: "video",
-          label: "Control Video",
-          localUrl: controlOutput.publicPath,
-          fileName: controlOutput.fileName,
-          mimeType: videoOutputMimeType(options.outputFormat)
-        },
-        controlMetadata
-      ),
-      enrichVideoMetadata(
-        {
-          type: "video",
-          label: "Mask Video",
-          localUrl: maskOutput.publicPath,
-          fileName: maskOutput.fileName,
-          mimeType: videoOutputMimeType(options.outputFormat)
-        },
-        maskMetadata
-      )
-    ];
-    const guideImages = guideOutputs.map((output, index) => ({
-      type: "image",
-      label: `Guide ${String(index + 1).padStart(2, "0")}`,
-      localUrl: output.publicPath,
-      fileName: output.fileName,
-      mimeType: "image/png",
-      frameIndex: guideFrameIndexes[index] ?? null,
-      width: options.width,
-      height: options.height
-    }));
-    const wanGuideSegments = buildTransitionWanGuideSegments(guideImages);
-    const generated = options.generateWan
-      ? await createGeneratedWanTransition({
-          body,
-          prompt: body.prompt,
-          guideImages,
-          options,
-          outputPaths
-        })
-      : null;
-    const primaryVideo = generated?.video || videos[0];
-    const resultItems = [
-      ...(generated?.video ? [generated.video] : []),
-      ...videos,
-      ...(generated?.segmentVideos || []),
-      ...guideImages
-    ];
-    const cost = generated?.cost || localCost;
-    const outputBytes =
-      controlStats.size +
-      maskStats.size +
-      guideStats.reduce((total, item) => total + item.size, 0) +
-      (generated?.outputBytes || 0);
+
+    const rawInput = transitionWanMorphInput({
+      prompt: cleanPrompt,
+      options: options.wan,
+      loras,
+      startImageUrl: uploadedStartImageUrl,
+      endImageUrl: uploadedEndImageUrl
+    });
+    const rawResult = await subscribeFal(endpoint, { input: rawInput, logs: true });
+    const rawRemoteVideo = normalizeFalFile(rawResult?.data?.video);
+    if (!rawRemoteVideo?.url) {
+      const error = new Error("Fal returned no raw Wan LoRA morph video URL.");
+      error.status = 502;
+      error.raw = rawResult?.data;
+      throw error;
+    }
+
+    const rawOutput = await downloadVideo({ body }, rawRemoteVideo.url, "transition-raw-lora-morph");
+    outputPaths.push(rawOutput.filePath);
+    const rawMetadata = await probeVideoFile(rawOutput.filePath);
+    const rawVideo = enrichVideoMetadata(
+      {
+        ...rawRemoteVideo,
+        type: "video",
+        label: "Raw LoRA Morph",
+        localUrl: rawOutput.publicPath,
+        fileName: rawOutput.fileName,
+        mimeType: "video/mp4",
+        seed: rawResult?.data?.seed ?? rawInput.seed ?? null
+      },
+      rawMetadata
+    );
+    const rawCost = estimateWan22A14bLoraCost({
+      endpoint,
+      outputVideo: rawVideo,
+      numFrames: rawInput.num_frames,
+      fps: rawInput.frames_per_second
+    });
+
+    const maskOutput = await createManagedAssetTarget({ body }, "transition-influence-mask", "mp4", workflowPackageOutputDirName);
+    outputPaths.push(maskOutput.filePath);
+    const maskWidth = ensureEven(rawMetadata.width || 512);
+    const maskHeight = ensureEven(rawMetadata.height || 512);
+    const maskFps = Math.max(5, Math.min(60, Math.round(rawMetadata.fps || rawInput.frames_per_second || 16)));
+    const maskFrameCount = Math.max(1, Math.round(rawMetadata.num_frames || rawInput.num_frames || 81));
+    await createTransitionMaskVideoWithFfmpeg({
+      maskVideoPath: maskVideo.filePath,
+      outputPath: maskOutput.filePath,
+      width: maskWidth,
+      height: maskHeight,
+      fps: maskFps,
+      frameCount: maskFrameCount,
+      maskSoftness: options.maskSoftness,
+      outputFormat: "mp4"
+    });
+    const [maskStats, maskMetadata] = await Promise.all([
+      stat(maskOutput.filePath),
+      probeVideoFile(maskOutput.filePath)
+    ]);
+    const maskVideoItem = enrichVideoMetadata(
+      {
+        type: "video",
+        label: "Influence Mask",
+        localUrl: maskOutput.publicPath,
+        fileName: maskOutput.fileName,
+        mimeType: "video/mp4"
+      },
+      maskMetadata
+    );
+
+    const vaceEndpoint = "fal-ai/wan-22-vace-fun-a14b/inpainting";
+    const vaceInput = transitionVaceInfluenceInput({
+      prompt: cleanPrompt,
+      options: options.vace,
+      rawVideoUrl: await uploadLocalOutputToFal(rawOutput.publicPath),
+      maskVideoUrl: await uploadLocalOutputToFal(maskOutput.publicPath),
+      startImageUrl: uploadedStartImageUrl,
+      endImageUrl: uploadedEndImageUrl
+    });
+    const refinedResult = await subscribeFal(vaceEndpoint, { input: vaceInput, logs: true });
+    const refinedRemoteVideo = normalizeFalFile(refinedResult?.data?.video);
+    if (!refinedRemoteVideo?.url) {
+      const error = new Error("Fal returned no mask-influenced VACE morph video URL.");
+      error.status = 502;
+      error.raw = refinedResult?.data;
+      throw error;
+    }
+
+    const refinedOutput = await downloadVideo({ body }, refinedRemoteVideo.url, "transition-mask-influenced-morph");
+    outputPaths.push(refinedOutput.filePath);
+    const refinedMetadata = await probeVideoFile(refinedOutput.filePath);
+    const refinedVideo = enrichVideoMetadata(
+      {
+        ...refinedRemoteVideo,
+        type: "video",
+        label: "Mask-Influenced Morph",
+        localUrl: refinedOutput.publicPath,
+        fileName: refinedOutput.fileName,
+        mimeType: "video/mp4",
+        seed: refinedResult?.data?.seed ?? vaceInput.seed ?? null
+      },
+      refinedMetadata
+    );
+    const refinedCost = estimateWanVaceInpaintingCost({
+      endpoint: vaceEndpoint,
+      resolution: vaceInput.resolution,
+      outputVideo: refinedVideo,
+      matchInputNumFrames: vaceInput.match_input_num_frames,
+      numFrames: vaceInput.num_frames,
+      matchInputFps: vaceInput.match_input_frames_per_second,
+      fps: vaceInput.frames_per_second
+    });
+    const cost = aggregateTransitionBuilderCost([rawCost, refinedCost]);
+    const resultItems = [refinedVideo, rawVideo, maskVideoItem];
+    const text = "Transition Builder generated a two-pass influence-mask morph.";
+    const outputBytes = refinedOutput.bytes + rawOutput.bytes + maskStats.size;
 
     await appendHistory({
       id: requestId,
       createdAt: new Date().toISOString(),
       mediaType: "video",
-      provider: generated ? "fal.ai" : "local",
+      provider: "fal.ai",
       modelName: selectedVideoModel?.displayName || "Transition Builder",
-      endpoint: generated?.endpoint || selectedVideoModel?.id || "local/transition-builder",
-      mode: generated ? "Wan 2.2 LoRA transition generator" : "VACE transition builder",
-      prompt: generated?.prompt || text,
-      submittedPrompt: generated?.prompt || text,
+      endpoint: selectedVideoModel?.id || "local/transition-builder",
+      mode: "Wan 2.2 LoRA influence-mask morph",
+      prompt: cleanPrompt,
+      submittedPrompt: cleanPrompt,
       project: projectFromBody(body),
       node: nodeFromBody(body),
       settings: {
         model: selectedVideoModel?.displayName || "Transition Builder",
-        referenceImageCount: keyframeAssets.length,
-        sourceVideoUrl: sourceVideoUrl || null,
+        referenceImageCount: 2,
         maskVideoUrl: maskVideoUrl || null,
-        frameCount: options.frameCount,
-        fps: options.fps,
-        width: options.width,
-        height: options.height,
-        duration: options.duration,
-        overlapFrames: options.overlapFrames,
-        transitionStartFrame: options.transitionStartFrame,
-        transitionDurationFrames: options.transitionDurationFrames,
-        transitionEasing: options.transitionEasing,
-        maskStyle: options.maskStyle,
         maskSoftness: options.maskSoftness,
-        outputFormat: options.outputFormat,
-        wanSchedulerEnabled: options.wanSchedulerEnabled,
-        generateWan: options.generateWan,
-        wanSegmentCount: options.wanSegmentCount,
-        wanSelectedSegment: options.wanSelectedSegment,
-        wanGeneration: generated?.settings || null,
-        wanGuideSegments,
-        controlOutputUrl: controlOutput.publicPath,
+        rawEndpoint: endpoint,
+        refineEndpoint: vaceEndpoint,
+        rawOutputUrl: rawOutput.publicPath,
+        refinedOutputUrl: refinedOutput.publicPath,
         maskOutputUrl: maskOutput.publicPath,
-        generatedOutputUrl: generated?.video?.localUrl || null,
-        guideOutputUrls: guideImages.map((image) => image.localUrl),
+        rawGeneration: {
+          negativePrompt: rawInput.negative_prompt,
+          numFrames: rawInput.num_frames,
+          fps: rawInput.frames_per_second,
+          resolution: rawInput.resolution,
+          aspectRatio: rawInput.aspect_ratio,
+          numInferenceSteps: rawInput.num_inference_steps,
+          guidanceScale: rawInput.guidance_scale,
+          guidanceScale2: rawInput.guidance_scale_2,
+          shift: rawInput.shift,
+          acceleration: rawInput.acceleration,
+          interpolatorModel: rawInput.interpolator_model,
+          numInterpolatedFrames: rawInput.num_interpolated_frames,
+          adjustFpsForInterpolation: rawInput.adjust_fps_for_interpolation,
+          videoQuality: rawInput.video_quality,
+          videoWriteMode: rawInput.video_write_mode,
+          loraCount: loras.length,
+          loras,
+          seed: rawResult?.data?.seed ?? rawInput.seed ?? null
+        },
+        refineGeneration: {
+          negativePrompt: vaceInput.negative_prompt,
+          resolution: vaceInput.resolution,
+          aspectRatio: vaceInput.aspect_ratio,
+          numInferenceSteps: vaceInput.num_inference_steps,
+          guidanceScale: vaceInput.guidance_scale,
+          sampler: vaceInput.sampler,
+          shift: vaceInput.shift,
+          acceleration: vaceInput.acceleration,
+          videoQuality: vaceInput.video_quality,
+          videoWriteMode: vaceInput.video_write_mode,
+          numInterpolatedFrames: vaceInput.num_interpolated_frames,
+          interpolatorModel: vaceInput.interpolator_model,
+          transparencyMode: vaceInput.transparency_mode,
+          seed: refinedResult?.data?.seed ?? vaceInput.seed ?? null
+        },
         ffmpeg: path.basename(ffmpegBinaryPath)
       },
       cost,
-      localVideo: primaryVideo.localUrl,
+      localVideo: refinedVideo.localUrl,
       localVideos: resultItems.filter((item) => item.type === "video").map((video) => video.localUrl).filter(Boolean),
-      localImages: guideImages.map((image) => image.localUrl).filter(Boolean),
-      outputFileName: primaryVideo.fileName,
+      localImages: [],
+      outputFileName: refinedVideo.fileName,
       outputFileNames: resultItems.map((item) => item.fileName).filter(Boolean),
       outputLabels: resultItems.map((item) => item.label).filter(Boolean),
       outputBytes,
@@ -6574,9 +6594,9 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], so
       modelName: selectedVideoModel?.displayName || "Transition Builder",
       text,
       cost,
-      video: primaryVideo,
+      video: refinedVideo,
       videos: resultItems.filter((item) => item.type === "video"),
-      images: guideImages,
+      images: [],
       resultItems
     };
   } catch (error) {
@@ -6585,130 +6605,7 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], so
   }
 }
 
-async function createGeneratedWanTransition({ body, prompt, guideImages = [], options, outputPaths }) {
-  const cleanPrompt = String(prompt || "").trim();
-  if (!cleanPrompt) {
-    const error = new Error("Generate Wan Transition requires a prompt.");
-    error.status = 400;
-    throw error;
-  }
-  if (!process.env.FAL_KEY) {
-    const error = new Error("Generate Wan Transition requires FAL_KEY in .env.");
-    error.status = 400;
-    throw error;
-  }
-  if (guideImages.length < 2) {
-    const error = new Error("Generate Wan Transition requires at least two guide images.");
-    error.status = 400;
-    throw error;
-  }
-
-  const endpoint = wan22A14bLoraI2vEndpoint;
-  const loras = await normalizeWanLoraWeights(options.wan.loras);
-  const uploadedGuideUrls = await Promise.all(guideImages.map((image) => uploadLocalOutputToFal(image.localUrl)));
-  const segmentVideos = [];
-  const segmentCosts = [];
-  const segmentPaths = [];
-
-  for (let index = 0; index < guideImages.length - 1; index += 1) {
-    const input = transitionWanSegmentInput({
-      prompt: cleanPrompt,
-      options: options.wan,
-      loras,
-      startImageUrl: uploadedGuideUrls[index],
-      endImageUrl: uploadedGuideUrls[index + 1],
-      segmentIndex: index
-    });
-    const result = await subscribeFal(endpoint, { input, logs: true });
-    const remoteVideo = normalizeFalFile(result?.data?.video);
-    if (!remoteVideo?.url) {
-      const error = new Error(`Fal returned no Wan transition segment ${index + 1} video URL.`);
-      error.status = 502;
-      error.raw = result?.data;
-      throw error;
-    }
-
-    const output = await downloadVideo({ body }, remoteVideo.url, `transition-wan-segment-${String(index + 1).padStart(2, "0")}`);
-    outputPaths.push(output.filePath);
-    segmentPaths.push(output.filePath);
-    const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-    const cost = estimateWan22A14bLoraCost({
-      endpoint,
-      outputVideo,
-      numFrames: input.num_frames,
-      fps: input.frames_per_second
-    });
-    segmentCosts.push(cost);
-    segmentVideos.push({
-      ...outputVideo,
-      type: "video",
-      label: `Wan Segment ${String(index + 1).padStart(2, "0")}`,
-      localUrl: output.publicPath,
-      fileName: output.fileName,
-      mimeType: "video/mp4",
-      segmentIndex: index + 1,
-      seed: result?.data?.seed ?? input.seed ?? null,
-      bytes: output.bytes
-    });
-  }
-
-  const finalOutput = await createManagedAssetTarget({ body }, "transition-wan-generated", videoOutputExtension(options.outputFormat), workflowPackageOutputDirName);
-  outputPaths.push(finalOutput.filePath);
-  await stitchTransitionWanSegmentsWithFfmpeg({
-    segmentPaths,
-    outputPath: finalOutput.filePath,
-    outputFormat: options.outputFormat
-  });
-
-  const [finalStats, finalMetadata] = await Promise.all([
-    stat(finalOutput.filePath),
-    probeVideoFile(finalOutput.filePath)
-  ]);
-  const video = enrichVideoMetadata(
-    {
-      type: "video",
-      label: "Generated Transition",
-      localUrl: finalOutput.publicPath,
-      fileName: finalOutput.fileName,
-      mimeType: videoOutputMimeType(options.outputFormat)
-    },
-    finalMetadata
-  );
-
-  return {
-    endpoint,
-    prompt: cleanPrompt,
-    video,
-    segmentVideos,
-    cost: aggregateTransitionWanCost(segmentCosts, endpoint),
-    outputBytes: finalStats.size + segmentVideos.reduce((total, videoItem) => total + Number(videoItem.bytes || 0), 0),
-    settings: {
-      endpoint,
-      prompt: cleanPrompt,
-      loraCount: loras.length,
-      loras,
-      segmentCount: segmentVideos.length,
-      numFrames: options.wan.numFrames,
-      fps: options.wan.fps,
-      resolution: options.wan.resolution,
-      aspectRatio: options.wan.aspectRatio,
-      numInferenceSteps: options.wan.numInferenceSteps,
-      guidanceScale: options.wan.guidanceScale,
-      guidanceScale2: options.wan.guidanceScale2,
-      shift: options.wan.shift,
-      acceleration: options.wan.acceleration,
-      interpolatorModel: options.wan.interpolatorModel,
-      numInterpolatedFrames: options.wan.numInterpolatedFrames,
-      adjustFpsForInterpolation: options.wan.adjustFpsForInterpolation,
-      videoQuality: options.wan.videoQuality,
-      videoWriteMode: options.wan.videoWriteMode,
-      seedMode: options.wan.seedMode,
-      seed: options.wan.seed ?? null
-    }
-  };
-}
-
-function transitionWanSegmentInput({ prompt, options, loras, startImageUrl, endImageUrl, segmentIndex }) {
+function transitionWanMorphInput({ prompt, options, loras, startImageUrl, endImageUrl }) {
   const input = {
     prompt,
     negative_prompt: options.negativePrompt,
@@ -6734,20 +6631,51 @@ function transitionWanSegmentInput({ prompt, options, loras, startImageUrl, endI
     loras,
     reverse_video: false
   };
-  const seed = transitionWanSegmentSeed(options.seed, options.seedMode, segmentIndex);
+  const seed = optionalInteger(options.seed);
   if (seed !== undefined) input.seed = seed;
   return input;
 }
 
-function transitionWanSegmentSeed(seed, seedMode, segmentIndex) {
-  const baseSeed = optionalInteger(seed);
-  if (baseSeed === undefined || seedMode === "random") return undefined;
-  return seedMode === "same" ? baseSeed : baseSeed + segmentIndex;
+function transitionVaceInfluenceInput({ prompt, options, rawVideoUrl, maskVideoUrl, startImageUrl, endImageUrl }) {
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    match_input_num_frames: true,
+    match_input_frames_per_second: true,
+    resolution: options.resolution,
+    aspect_ratio: options.aspectRatio,
+    num_inference_steps: options.numInferenceSteps,
+    guidance_scale: options.guidanceScale,
+    sampler: options.sampler,
+    shift: options.shift,
+    video_url: rawVideoUrl,
+    mask_video_url: maskVideoUrl,
+    ref_image_urls: [startImageUrl, endImageUrl],
+    first_frame_url: startImageUrl,
+    last_frame_url: endImageUrl,
+    enable_safety_checker: options.enableSafetyChecker,
+    enable_prompt_expansion: options.enablePromptExpansion,
+    preprocess: options.preprocess,
+    acceleration: options.acceleration,
+    video_quality: options.videoQuality,
+    video_write_mode: options.videoWriteMode,
+    num_interpolated_frames: options.numInterpolatedFrames,
+    temporal_downsample_factor: options.temporalDownsampleFactor,
+    enable_auto_downsample: options.enableAutoDownsample,
+    auto_downsample_min_fps: options.autoDownsampleMinFps,
+    interpolator_model: options.interpolatorModel,
+    sync_mode: false,
+    transparency_mode: options.transparencyMode,
+    return_frames_zip: false
+  };
+  const seed = optionalInteger(options.seed);
+  if (seed !== undefined) input.seed = seed;
+  return input;
 }
 
-function aggregateTransitionWanCost(segmentCosts = [], endpoint) {
-  const amountValues = segmentCosts.map((cost) => positiveNumber(cost?.amountUsd));
-  const unitValues = segmentCosts.map((cost) => positiveNumber(cost?.units));
+function aggregateTransitionBuilderCost(costs = []) {
+  const amountValues = costs.map((cost) => positiveNumber(cost?.amountUsd));
+  const unitValues = costs.map((cost) => positiveNumber(cost?.units));
   const amountUsd = amountValues.every((value) => value !== null)
     ? roundCurrency(amountValues.reduce((total, value) => total + value, 0))
     : null;
@@ -6756,238 +6684,40 @@ function aggregateTransitionWanCost(segmentCosts = [], endpoint) {
     : null;
 
   return estimateFalVideoUtilityCost({
-    endpoint,
+    endpoint: "local/transition-builder",
     amountUsd,
-    unitRateUsd: wan22A14bLoraCostPerSecond,
+    unitRateUsd: null,
     units,
     unit: "video second",
     pricingBasis: amountUsd !== null
-      ? "Wan 2.2 A14B LoRA scheduled transition segment estimate; local guide and stitch steps are $0"
-      : "Wan 2.2 A14B LoRA scheduled transition segment estimate; local duration/frame count unavailable",
-    pricingSource: "fal-model-page-2026-06-03"
+      ? "Transition Builder estimate for Wan 2.2 A14B LoRA morph plus Wan 2.2 VACE mask influence refinement"
+      : "Transition Builder estimate; one or more pass durations were unavailable",
+    pricingSource: "fal-model-pages-2026-06-03"
   });
 }
 
-async function stitchTransitionWanSegmentsWithFfmpeg({ segmentPaths = [], outputPath, outputFormat }) {
-  if (!segmentPaths.length) {
-    const error = new Error("Wan transition stitching requires at least one generated segment.");
+async function createTransitionMaskVideoWithFfmpeg({ maskVideoPath = "", outputPath, width, height, fps, frameCount, maskSoftness, outputFormat }) {
+  const duration = frameCount / fps;
+  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+
+  if (!maskVideoPath) {
+    const error = new Error("Transition Builder requires a connected black and white influence mask video.");
     error.status = 400;
     throw error;
   }
-
-  const args = ["-hide_banner", "-loglevel", "error", "-y"];
-  segmentPaths.forEach((segmentPath) => args.push("-i", segmentPath));
-  const filterInputs = segmentPaths.map((_, index) => `[${index}:v]setpts=PTS-STARTPTS,format=yuv420p[v${index}]`).join(";");
-  const concatInputs = segmentPaths.map((_, index) => `[v${index}]`).join("");
   args.push(
-    "-filter_complex",
-    `${filterInputs};${concatInputs}concat=n=${segmentPaths.length}:v=1:a=0[out]`,
+    "-stream_loop",
+    "-1",
+    "-i",
+    maskVideoPath,
     "-map",
-    "[out]",
-    "-an"
+    "0:v:0",
+    "-vf",
+    transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness }),
+    "-an",
+    "-frames:v",
+    String(frameCount)
   );
-  addVideoEncoderArgs(args, outputFormat);
-  args.push(outputPath);
-  await runFfmpeg(args, "Wan transition stitch", 600000);
-}
-
-function buildTransitionWanGuideSegments(guideImages = []) {
-  const segments = [];
-  for (let index = 0; index < guideImages.length - 1; index += 1) {
-    segments.push({
-      index: index + 1,
-      startImageUrl: guideImages[index].localUrl,
-      endImageUrl: guideImages[index + 1].localUrl,
-      startFrameIndex: guideImages[index].frameIndex ?? null,
-      endFrameIndex: guideImages[index + 1].frameIndex ?? null
-    });
-  }
-  return segments;
-}
-
-async function createTransitionGuideImagesWithFfmpeg({ sourceVideoPath, outputTargets = [], fps, frameCount, segmentCount }) {
-  const frameIndexes = transitionGuideFrameIndexes(frameCount, segmentCount);
-  await Promise.all(
-    outputTargets.map((target, index) =>
-      extractVideoFrameWithFfmpeg({
-        sourcePath: sourceVideoPath,
-        outputPath: target.filePath,
-        frameTime: (frameIndexes[index] || 0) / fps,
-        format: "png"
-      })
-    )
-  );
-  return frameIndexes;
-}
-
-function transitionGuideFrameIndexes(frameCount, segmentCount) {
-  const guides = Math.max(2, Math.round(Number(segmentCount || 1)) + 1);
-  const lastFrame = Math.max(0, Math.round(Number(frameCount || 1)) - 1);
-  return Array.from({ length: guides }, (_, index) => Math.min(lastFrame, Math.round((lastFrame * index) / Math.max(1, guides - 1))));
-}
-
-async function createTransitionControlVideoWithFfmpeg({ imagePaths = [], sourceVideoPath = "", maskVideoPath = "", outputPath, width, height, fps, frameCount, overlapFrames, outputFormat }) {
-  const duration = frameCount / fps;
-  const selectedImages = imagePaths.slice(0, Math.min(12, frameCount));
-  const args = ["-hide_banner", "-loglevel", "error", "-y"];
-
-  if (selectedImages.length >= 2 && maskVideoPath) {
-    const firstImage = selectedImages[0];
-    const secondImage = selectedImages[selectedImages.length - 1];
-    const filter = [
-      `[0:v]${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS[base]`,
-      `[1:v]${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS[layer]`,
-      `[2:v]${transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness: 0 })}[mask]`,
-      "[layer][mask]alphamerge[layer_alpha]",
-      "[base][layer_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
-    ].join(";");
-
-    args.push(
-      "-loop",
-      "1",
-      "-framerate",
-      String(fps),
-      "-t",
-      formatFfmpegSeconds(duration),
-      "-i",
-      firstImage,
-      "-loop",
-      "1",
-      "-framerate",
-      String(fps),
-      "-t",
-      formatFfmpegSeconds(duration),
-      "-i",
-      secondImage,
-      "-stream_loop",
-      "-1",
-      "-i",
-      maskVideoPath,
-      "-filter_complex",
-      filter,
-      "-map",
-      "[out]",
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  } else if (selectedImages.length === 1) {
-    args.push(
-      "-loop",
-      "1",
-      "-framerate",
-      String(fps),
-      "-t",
-      formatFfmpegSeconds(duration),
-      "-i",
-      selectedImages[0],
-      "-map",
-      "0:v:0",
-      "-vf",
-      `${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS`,
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  } else if (selectedImages.length > 1) {
-    const maxFadeFrames = Math.max(0, Math.floor((frameCount - 1) / Math.max(1, selectedImages.length - 1)));
-    const fadeFrames = Math.min(Math.max(0, overlapFrames), maxFadeFrames);
-    const fadeDuration = fadeFrames / fps;
-    const segmentDuration = fadeDuration > 0
-      ? (duration + fadeDuration * (selectedImages.length - 1)) / selectedImages.length
-      : duration / selectedImages.length;
-    const filters = selectedImages.map((_, index) => `[${index}:v]${transitionBuilderClipFilter({ width, height, fps })}[v${index}]`);
-
-    selectedImages.forEach((imagePath) => {
-      args.push("-loop", "1", "-framerate", String(fps), "-t", formatFfmpegSeconds(segmentDuration), "-i", imagePath);
-    });
-
-    if (fadeDuration > 0) {
-      let previousLabel = "v0";
-      for (let index = 1; index < selectedImages.length; index += 1) {
-        const nextLabel = index === selectedImages.length - 1 ? "xfaded" : `x${index}`;
-        const offset = index * (segmentDuration - fadeDuration);
-        filters.push(`[${previousLabel}][v${index}]xfade=transition=fade:duration=${formatFfmpegSeconds(fadeDuration)}:offset=${formatFfmpegSeconds(offset)}[${nextLabel}]`);
-        previousLabel = nextLabel;
-      }
-    } else {
-      filters.push(`${selectedImages.map((_, index) => `[v${index}]`).join("")}concat=n=${selectedImages.length}:v=1:a=0[xfaded]`);
-    }
-
-    filters.push(`[xfaded]trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS,format=yuv420p[out]`);
-    args.push("-filter_complex", filters.join(";"), "-map", "[out]", "-an", "-frames:v", String(frameCount));
-  } else if (sourceVideoPath) {
-    args.push(
-      "-stream_loop",
-      "-1",
-      "-i",
-      sourceVideoPath,
-      "-map",
-      "0:v:0",
-      "-vf",
-      `${transitionBuilderClipFilter({ width, height, fps })},trim=duration=${formatFfmpegSeconds(duration)},setpts=PTS-STARTPTS`,
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  } else {
-    const error = new Error("Transition Builder requires at least one keyframe or source video.");
-    error.status = 400;
-    throw error;
-  }
-
-  addVideoEncoderArgs(args, outputFormat);
-  args.push(outputPath);
-  await runFfmpeg(args, "Transition control video", 600000);
-}
-
-async function createTransitionMaskVideoWithFfmpeg({ maskVideoPath = "", outputPath, width, height, fps, frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing, outputFormat }) {
-  const duration = frameCount / fps;
-  const args = ["-hide_banner", "-loglevel", "error", "-y"];
-
-  if (maskVideoPath) {
-    args.push(
-      "-stream_loop",
-      "-1",
-      "-i",
-      maskVideoPath,
-      "-map",
-      "0:v:0",
-      "-vf",
-      transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness }),
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  } else if (maskStyle === "white" || maskStyle === "black") {
-    args.push(
-      "-f",
-      "lavfi",
-      "-i",
-      `color=c=${maskStyle}:s=${width}x${height}:r=${fps}:d=${formatFfmpegSeconds(duration)}`,
-      "-map",
-      "0:v:0",
-      "-vf",
-      transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }),
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  } else {
-    args.push(
-      "-f",
-      "lavfi",
-      "-i",
-      `nullsrc=size=${width}x${height}:rate=${fps}:duration=${formatFfmpegSeconds(duration)}`,
-      "-map",
-      "0:v:0",
-      "-vf",
-      transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }),
-      "-an",
-      "-frames:v",
-      String(frameCount)
-    );
-  }
 
   addVideoEncoderArgs(args, outputFormat);
   args.push(outputPath);
@@ -6995,33 +6725,10 @@ async function createTransitionMaskVideoWithFfmpeg({ maskVideoPath = "", outputP
 }
 
 function normalizedTransitionBuilderOptions(options = {}) {
-  const frameCount = clampInteger(options.frameCount, 9, 241, 57);
-  const fps = clampInteger(options.fps, 5, 30, 16);
-  const size = ensureEven(clampInteger(options.size, 256, 2048, 512));
-  const outputFormat = normalizeChoice(String(options.outputFormat || "mp4").toLowerCase(), ["mp4", "mov"], "mp4");
-  const transitionStartFrame = clampInteger(options.transitionStartFrame, 0, frameCount - 1, 0);
-  const transitionDurationFrames = clampInteger(options.transitionDurationFrames, 1, frameCount - transitionStartFrame, frameCount - transitionStartFrame);
-  const wanSegmentCount = clampInteger(options.wanSegmentCount, 1, 8, 3);
-  const generateWan = Boolean(options.generateWan);
-
   return {
-    frameCount,
-    fps,
-    width: size,
-    height: size,
-    duration: frameCount / fps,
-    overlapFrames: Math.min(frameCount - 1, clampInteger(options.overlapFrames, 0, 32, 9)),
-    transitionStartFrame,
-    transitionDurationFrames,
-    transitionEasing: normalizeChoice(options.transitionEasing, ["linear", "ease in", "ease out", "ease in/out"], "linear"),
-    maskStyle: normalizeChoice(options.maskStyle, ["wipe", "reverse wipe", "center wipe", "white", "black"], "wipe"),
     maskSoftness: clampNumber(options.maskSoftness, 0, 24, 6),
-    outputFormat,
-    generateWan,
-    wanSchedulerEnabled: Boolean(options.wanSchedulerEnabled || generateWan),
-    wanSegmentCount,
-    wanSelectedSegment: clampInteger(options.wanSelectedSegment, 1, wanSegmentCount, 1),
-    wan: normalizedTransitionWanOptions(options)
+    wan: normalizedTransitionWanOptions(options),
+    vace: normalizedTransitionVaceOptions(options)
   };
 }
 
@@ -7045,20 +6752,34 @@ function normalizedTransitionWanOptions(options = {}) {
     enableSafetyChecker: options.wanEnableSafetyChecker !== false,
     enableOutputSafetyChecker: Boolean(options.wanEnableOutputSafetyChecker),
     enablePromptExpansion: Boolean(options.wanEnablePromptExpansion),
-    seedMode: normalizeChoice(options.wanSeedMode, ["increment", "same", "random"], "increment"),
     seed: options.seed,
     loras: Array.isArray(options.wanLoras) ? options.wanLoras : []
   };
 }
 
-function transitionBuilderClipFilter({ width, height, fps }) {
-  return [
-    `fps=${fps}`,
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=bicubic`,
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
-    "setsar=1",
-    "format=yuv420p"
-  ].join(",");
+function normalizedTransitionVaceOptions(options = {}) {
+  return {
+    negativePrompt: String(options.vaceNegativePrompt || options.wanNegativePrompt || ""),
+    resolution: normalizeChoice(options.vaceResolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto"),
+    aspectRatio: normalizeChoice(options.vaceAspectRatio, ["auto", "16:9", "1:1", "9:16"], "auto"),
+    numInferenceSteps: clampInteger(options.vaceNumInferenceSteps, 1, 60, 30),
+    guidanceScale: clampNumber(options.vaceGuidanceScale, 0, 20, 5),
+    sampler: normalizeChoice(options.vaceSampler, ["unipc", "dpm++", "euler"], "unipc"),
+    shift: clampNumber(options.vaceShift, 0, 20, 5),
+    enableSafetyChecker: options.vaceEnableSafetyChecker !== false,
+    enablePromptExpansion: Boolean(options.vaceEnablePromptExpansion),
+    preprocess: Boolean(options.vacePreprocess),
+    acceleration: normalizeChoice(options.vaceAcceleration, ["none", "low", "regular"], "regular"),
+    videoQuality: normalizeChoice(options.vaceVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    videoWriteMode: normalizeChoice(options.vaceVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    numInterpolatedFrames: Math.max(0, Math.round(Number(options.vaceNumInterpolatedFrames || 0))),
+    temporalDownsampleFactor: clampInteger(options.vaceTemporalDownsampleFactor, 0, 16, 0),
+    enableAutoDownsample: Boolean(options.vaceEnableAutoDownsample),
+    autoDownsampleMinFps: clampNumber(options.vaceAutoDownsampleMinFps, 1, 30, 15),
+    interpolatorModel: normalizeChoice(options.vaceInterpolatorModel, ["film", "rife"], "film"),
+    transparencyMode: normalizeChoice(options.vaceTransparencyMode, ["content_aware", "white", "black"], "content_aware"),
+    seed: options.seed
+  };
 }
 
 function transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskSoftness }) {
@@ -7073,33 +6794,6 @@ function transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskS
   if (maskSoftness > 0) filters.push(`boxblur=${maskSoftness}:1`);
   filters.push("format=yuv420p");
   return filters.join(",");
-}
-
-function transitionBuilderGeneratedMaskFilter({ frameCount, maskStyle, maskSoftness, transitionStartFrame, transitionDurationFrames, transitionEasing }) {
-  const filters = [];
-  if (maskStyle === "wipe" || maskStyle === "reverse wipe" || maskStyle === "center wipe") {
-    filters.push(`geq=lum='${transitionBuilderMaskExpression(maskStyle, frameCount, transitionStartFrame, transitionDurationFrames, transitionEasing)}':cb=128:cr=128`);
-  }
-  filters.push("format=gray");
-  if (maskSoftness > 0) filters.push(`boxblur=${maskSoftness}:1`);
-  filters.push("format=yuv420p");
-  return filters.join(",");
-}
-
-function transitionBuilderMaskExpression(maskStyle, frameCount, transitionStartFrame = 0, transitionDurationFrames = frameCount, transitionEasing = "linear") {
-  const start = Math.max(0, Math.round(Number(transitionStartFrame) || 0));
-  const denominator = Math.max(1, Math.round(Number(transitionDurationFrames) || frameCount) - 1);
-  const progress = transitionBuilderEasedProgressExpression(`min(max((N-${start})/${denominator},0),1)`, transitionEasing);
-  if (maskStyle === "reverse wipe") return `255*gte(X/W,1-${progress})`;
-  if (maskStyle === "center wipe") return `255*lte(abs(X-W/2)/(W/2),${progress})`;
-  return `255*lte(X/W,${progress})`;
-}
-
-function transitionBuilderEasedProgressExpression(progressExpression, easing) {
-  if (easing === "ease in") return `pow(${progressExpression},2)`;
-  if (easing === "ease out") return `(1-pow(1-${progressExpression},2))`;
-  if (easing === "ease in/out") return `if(lt(${progressExpression},0.5),2*pow(${progressExpression},2),1-pow(-2*${progressExpression}+2,2)/2)`;
-  return progressExpression;
 }
 
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {

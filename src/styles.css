@@ -93,6 +93,10 @@ button {
   color: rgba(240, 200, 59, 0.94);
 }
 
+.topbar-status.workflow-saving .topbar-status-state {
+  color: rgba(86, 159, 255, 0.96);
+}
+
 .topbar-status-path {
   min-width: 0;
   overflow: hidden;

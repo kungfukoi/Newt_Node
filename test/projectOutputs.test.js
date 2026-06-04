@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildProjectOutputItems } from "../src/projectOutputs.js";
 
-test("buildProjectOutputItems includes both Transition Builder history outputs", () => {
-  const controlUrl = "/workflow-assets/project/outputs/transition-control-video.mp4";
-  const maskUrl = "/workflow-assets/project/outputs/transition-mask-video.mp4";
-  const guideUrl = "/workflow-assets/project/outputs/transition-guide-01.png";
+test("buildProjectOutputItems includes Transition Builder history influence outputs", () => {
+  const refinedUrl = "/workflow-assets/project/outputs/transition-mask-influenced-morph.mp4";
+  const rawUrl = "/workflow-assets/project/outputs/transition-raw-lora-morph.mp4";
+  const maskUrl = "/workflow-assets/project/outputs/transition-influence-mask.mp4";
   const outputs = buildProjectOutputItems({
     nodes: [],
     history: [
@@ -14,13 +14,12 @@ test("buildProjectOutputItems includes both Transition Builder history outputs",
         createdAt: "2026-06-02T19:35:44.003Z",
         mediaType: "video",
         modelName: "Transition Builder",
-        mode: "VACE transition builder",
+        mode: "Wan 2.2 LoRA influence-mask morph",
         project: { id: "project", name: "Project" },
-        localVideo: controlUrl,
-        localVideos: [controlUrl, maskUrl],
-        localImages: [guideUrl],
-        outputFileName: "transition-control-video.mp4",
-        outputFileNames: ["transition-control-video.mp4", "transition-mask-video.mp4", "transition-guide-01.png"]
+        localVideo: refinedUrl,
+        localVideos: [refinedUrl, rawUrl, maskUrl],
+        outputFileName: "transition-mask-influenced-morph.mp4",
+        outputFileNames: ["transition-mask-influenced-morph.mp4", "transition-raw-lora-morph.mp4", "transition-influence-mask.mp4"]
       }
     ],
     projectId: "project",
@@ -29,15 +28,15 @@ test("buildProjectOutputItems includes both Transition Builder history outputs",
     titleFallback: () => "Node"
   });
 
-  assert.deepEqual(outputs.map((item) => item.url), [controlUrl, maskUrl, guideUrl]);
-  assert.deepEqual(outputs.map((item) => item.label), ["Control Video", "Mask Video", "Guide 01"]);
-  assert.deepEqual(outputs.map((item) => item.fileName), ["transition-control-video.mp4", "transition-mask-video.mp4", "transition-guide-01.png"]);
+  assert.deepEqual(outputs.map((item) => item.url), [refinedUrl, rawUrl, maskUrl]);
+  assert.deepEqual(outputs.map((item) => item.label), ["Mask-Influenced Morph", "Raw LoRA Morph", "Influence Mask"]);
+  assert.deepEqual(outputs.map((item) => item.fileName), ["transition-mask-influenced-morph.mp4", "transition-raw-lora-morph.mp4", "transition-influence-mask.mp4"]);
 });
 
-test("buildProjectOutputItems includes both live Transition Builder node outputs", () => {
-  const controlUrl = "/workflow-assets/project/outputs/live-control.mp4";
-  const maskUrl = "/workflow-assets/project/outputs/live-mask.mp4";
-  const guideUrl = "/workflow-assets/project/outputs/live-guide-01.png";
+test("buildProjectOutputItems includes live Transition Builder influence outputs", () => {
+  const refinedUrl = "/workflow-assets/project/outputs/live-mask-influenced.mp4";
+  const rawUrl = "/workflow-assets/project/outputs/live-raw-lora.mp4";
+  const maskUrl = "/workflow-assets/project/outputs/live-influence-mask.mp4";
   const outputs = buildProjectOutputItems({
     nodes: [
       {
@@ -45,11 +44,11 @@ test("buildProjectOutputItems includes both live Transition Builder node outputs
         type: "utility",
         data: {
           title: "Transition Builder",
-          resultUrl: controlUrl,
+          resultUrl: refinedUrl,
           resultItems: [
-            { url: controlUrl, type: "video", label: "Control Video", fileName: "live-control.mp4" },
-            { url: maskUrl, type: "video", label: "Mask Video", fileName: "live-mask.mp4" },
-            { url: guideUrl, type: "image", label: "Guide 01", fileName: "live-guide-01.png" }
+            { url: refinedUrl, type: "video", label: "Mask-Influenced Morph", fileName: "live-mask-influenced.mp4" },
+            { url: rawUrl, type: "video", label: "Raw LoRA Morph", fileName: "live-raw-lora.mp4" },
+            { url: maskUrl, type: "video", label: "Influence Mask", fileName: "live-influence-mask.mp4" }
           ]
         }
       }
@@ -61,14 +60,14 @@ test("buildProjectOutputItems includes both live Transition Builder node outputs
     titleFallback: () => "Node"
   });
 
-  assert.deepEqual(outputs.map((item) => item.url), [controlUrl, maskUrl, guideUrl]);
-  assert.deepEqual(outputs.map((item) => item.label), ["Control Video", "Mask Video", "Guide 01"]);
+  assert.deepEqual(outputs.map((item) => item.url), [refinedUrl, rawUrl, maskUrl]);
+  assert.deepEqual(outputs.map((item) => item.label), ["Mask-Influenced Morph", "Raw LoRA Morph", "Influence Mask"]);
 });
 
-test("buildProjectOutputItems uses Transition Builder generated output labels", () => {
-  const generatedUrl = "/workflow-assets/project/outputs/generated.mp4";
-  const controlUrl = "/workflow-assets/project/outputs/control.mp4";
-  const guideUrl = "/workflow-assets/project/outputs/guide-01.png";
+test("buildProjectOutputItems uses Transition Builder persisted output labels", () => {
+  const refinedUrl = "/workflow-assets/project/outputs/generated.mp4";
+  const rawUrl = "/workflow-assets/project/outputs/raw.mp4";
+  const maskUrl = "/workflow-assets/project/outputs/mask.mp4";
   const outputs = buildProjectOutputItems({
     nodes: [],
     history: [
@@ -77,12 +76,11 @@ test("buildProjectOutputItems uses Transition Builder generated output labels", 
         createdAt: "2026-06-03T19:35:44.003Z",
         mediaType: "video",
         modelName: "Transition Builder",
-        mode: "Wan 2.2 LoRA transition generator",
+        mode: "Wan 2.2 LoRA influence-mask morph",
         project: { id: "project", name: "Project" },
-        localVideo: generatedUrl,
-        localVideos: [generatedUrl, controlUrl],
-        localImages: [guideUrl],
-        outputLabels: ["Generated Transition", "Control Video", "Guide 01"]
+        localVideo: refinedUrl,
+        localVideos: [refinedUrl, rawUrl, maskUrl],
+        outputLabels: ["Final Morph", "Diagnostic Raw", "Normalized Mask"]
       }
     ],
     projectId: "project",
@@ -91,6 +89,6 @@ test("buildProjectOutputItems uses Transition Builder generated output labels", 
     titleFallback: () => "Node"
   });
 
-  assert.deepEqual(outputs.map((item) => item.url), [generatedUrl, controlUrl, guideUrl]);
-  assert.deepEqual(outputs.map((item) => item.label), ["Generated Transition", "Control Video", "Guide 01"]);
+  assert.deepEqual(outputs.map((item) => item.url), [refinedUrl, rawUrl, maskUrl]);
+  assert.deepEqual(outputs.map((item) => item.label), ["Final Morph", "Diagnostic Raw", "Normalized Mask"]);
 });

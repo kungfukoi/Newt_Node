@@ -257,20 +257,7 @@ test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
       id: "utility-transition",
       data: {
         title: "Transition",
-        transitionFrameCount: 57,
-        transitionFps: 16,
-        transitionSize: "512",
-        transitionOverlapFrames: 9,
-        transitionStartFrame: 12,
-        transitionDurationFrames: 36,
-        transitionEasing: "ease in/out",
-        transitionMaskStyle: "center wipe",
         transitionMaskSoftness: 4,
-        transitionOutputFormat: "mov",
-        transitionGenerateWan: true,
-        transitionWanSchedulerEnabled: true,
-        transitionWanSegmentCount: 4,
-        transitionWanSelectedSegment: 2,
         transitionWanNegativePrompt: "blurry",
         transitionWanNumFrames: 41,
         transitionWanFps: 12,
@@ -280,10 +267,28 @@ test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
         transitionWanGuidanceScale: 3.25,
         transitionWanGuidanceScale2: 3.75,
         transitionWanShift: 4.5,
-        transitionWanSeedMode: "same",
         transitionWanLoras: [
           { path: "C:\\models\\wan\\motion.safetensors", weightName: "motion", scale: "1.1" }
         ],
+        transitionVaceNegativePrompt: "flat composite",
+        transitionVaceResolution: "480p",
+        transitionVaceAspectRatio: "16:9",
+        transitionVaceNumInferenceSteps: 24,
+        transitionVaceGuidanceScale: 6.5,
+        transitionVaceSampler: "euler",
+        transitionVaceShift: 4,
+        transitionVaceEnableSafetyChecker: false,
+        transitionVaceEnablePromptExpansion: true,
+        transitionVacePreprocess: true,
+        transitionVaceAcceleration: "low",
+        transitionVaceVideoQuality: "maximum",
+        transitionVaceVideoWriteMode: "small",
+        transitionVaceNumInterpolatedFrames: 1,
+        transitionVaceTemporalDownsampleFactor: 2,
+        transitionVaceEnableAutoDownsample: true,
+        transitionVaceAutoDownsampleMinFps: 10,
+        transitionVaceInterpolatorModel: "rife",
+        transitionVaceTransparencyMode: "white",
         seed: "777"
       }
     },
@@ -294,23 +299,10 @@ test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
     projectName: "Project",
     referenceImageUrls: ["/uploads/a.png", "/uploads/b.png"],
     referenceVideoUrls: [],
-    maskVideoUrls: []
+    maskVideoUrls: ["/uploads/matte.mp4"]
   });
 
-  assert.equal(request.transitionBuilder.frameCount, 57);
-  assert.equal(request.transitionBuilder.fps, 16);
-  assert.equal(request.transitionBuilder.size, "512");
-  assert.equal(request.transitionBuilder.overlapFrames, 9);
-  assert.equal(request.transitionBuilder.transitionStartFrame, 12);
-  assert.equal(request.transitionBuilder.transitionDurationFrames, 36);
-  assert.equal(request.transitionBuilder.transitionEasing, "ease in/out");
-  assert.equal(request.transitionBuilder.maskStyle, "center wipe");
   assert.equal(request.transitionBuilder.maskSoftness, 4);
-  assert.equal(request.transitionBuilder.outputFormat, "mov");
-  assert.equal(request.transitionBuilder.generateWan, true);
-  assert.equal(request.transitionBuilder.wanSchedulerEnabled, true);
-  assert.equal(request.transitionBuilder.wanSegmentCount, 4);
-  assert.equal(request.transitionBuilder.wanSelectedSegment, 2);
   assert.equal(request.transitionBuilder.wanNegativePrompt, "blurry");
   assert.equal(request.transitionBuilder.wanNumFrames, 41);
   assert.equal(request.transitionBuilder.wanFps, 12);
@@ -320,8 +312,29 @@ test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
   assert.equal(request.transitionBuilder.wanGuidanceScale, 3.25);
   assert.equal(request.transitionBuilder.wanGuidanceScale2, 3.75);
   assert.equal(request.transitionBuilder.wanShift, 4.5);
-  assert.equal(request.transitionBuilder.wanSeedMode, "same");
   assert.equal(request.transitionBuilder.wanLoras.length, 1);
   assert.equal(request.transitionBuilder.wanLoras[0].path, "C:\\models\\wan\\motion.safetensors");
+  assert.equal(request.transitionBuilder.vaceNegativePrompt, "flat composite");
+  assert.equal(request.transitionBuilder.vaceResolution, "480p");
+  assert.equal(request.transitionBuilder.vaceAspectRatio, "16:9");
+  assert.equal(request.transitionBuilder.vaceNumInferenceSteps, 24);
+  assert.equal(request.transitionBuilder.vaceGuidanceScale, 6.5);
+  assert.equal(request.transitionBuilder.vaceSampler, "euler");
+  assert.equal(request.transitionBuilder.vaceShift, 4);
+  assert.equal(request.transitionBuilder.vaceEnableSafetyChecker, false);
+  assert.equal(request.transitionBuilder.vaceEnablePromptExpansion, true);
+  assert.equal(request.transitionBuilder.vacePreprocess, true);
+  assert.equal(request.transitionBuilder.vaceAcceleration, "low");
+  assert.equal(request.transitionBuilder.vaceVideoQuality, "maximum");
+  assert.equal(request.transitionBuilder.vaceVideoWriteMode, "small");
+  assert.equal(request.transitionBuilder.vaceNumInterpolatedFrames, 1);
+  assert.equal(request.transitionBuilder.vaceTemporalDownsampleFactor, 2);
+  assert.equal(request.transitionBuilder.vaceEnableAutoDownsample, true);
+  assert.equal(request.transitionBuilder.vaceAutoDownsampleMinFps, 10);
+  assert.equal(request.transitionBuilder.vaceInterpolatorModel, "rife");
+  assert.equal(request.transitionBuilder.vaceTransparencyMode, "white");
   assert.equal(request.transitionBuilder.seed, "777");
+  assert.equal(request.transitionBuilder.frameCount, undefined);
+  assert.equal(request.transitionBuilder.maskStyle, undefined);
+  assert.equal(request.transitionBuilder.wanSchedulerEnabled, undefined);
 });

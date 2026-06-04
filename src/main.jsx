@@ -46,19 +46,23 @@ const SettingsPage = React.lazy(() => import("./SettingsPage.jsx"));
 
 
 function normalizeNodeStatus(status) {
-  if (!status) return { title: "", message: "", workflowPath: "", workflowState: "" };
-  if (typeof status === "string") return { title: status, message: status, workflowPath: "", workflowState: "" };
+  if (!status) return { title: "", message: "", workflowPath: "", workflowState: "", workflowStateLabel: "" };
+  if (typeof status === "string") return { title: status, message: status, workflowPath: "", workflowState: "", workflowStateLabel: "" };
 
   const message = String(status.message || "").trim();
   const workflowPath = String(status.workflowPath || "").trim();
-  const workflowState = status.workflowState === "unsaved" ? "unsaved" : status.workflowState === "saved" ? "saved" : "";
-  const title = workflowPath ? `${workflowState === "unsaved" ? "Unsaved" : "Saved"} ${workflowPath}${message ? ` - ${message}` : ""}` : message;
+  const workflowState =
+    status.workflowState === "saving" ? "saving" : status.workflowState === "unsaved" ? "unsaved" : status.workflowState === "saved" ? "saved" : "";
+  const workflowStateLabel = workflowState === "saving" ? "Saving..." : workflowState === "unsaved" ? "Unsaved" : workflowState === "saved" ? "Saved" : "";
+  const statusMessage = message && message !== workflowStateLabel ? ` - ${message}` : "";
+  const title = workflowPath ? `${workflowStateLabel || "Workflow"} ${workflowPath}${statusMessage}` : message;
 
   return {
     title,
     message,
     workflowPath,
-    workflowState
+    workflowState,
+    workflowStateLabel
   };
 }
 
@@ -410,7 +414,7 @@ function App() {
           <div className={`topbar-status ${nodeStatusInfo.workflowState ? `workflow-${nodeStatusInfo.workflowState}` : ""}`} role="status" title={nodeStatusInfo.title}>
             {nodeStatusInfo.workflowPath ? (
               <>
-                <span className="topbar-status-state">{nodeStatusInfo.workflowState === "unsaved" ? "Unsaved" : "Saved"}</span>
+                <span className="topbar-status-state">{nodeStatusInfo.workflowStateLabel}</span>
                 <span className="topbar-status-path">{nodeStatusInfo.workflowPath}</span>
               </>
             ) : (
