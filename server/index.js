@@ -926,7 +926,8 @@ app.get("/api/saved-workflows/:fileName", async (req, res) => {
 app.post("/api/saved-workflows", async (req, res) => {
   await timedApi("workflows:save", async () => {
     try {
-      const workflows = await readSavedWorkflows({ includeAll: true });
+      await migrateLegacyNodeProjectsToSavedWorkflows();
+      const workflows = await readSavedWorkflowSummaryFiles();
       const now = new Date().toISOString();
       const id = String(req.body.id || randomUUID()).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
@@ -953,6 +954,7 @@ app.post("/api/saved-workflows", async (req, res) => {
       const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
       const registeredWorkflow = await writeWorkflowFile(savedWorkflow);
       res.json(registeredWorkflow);
+      scheduleWorkflowIndexRebuild();
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: error.message || "Could not save workflow." });
@@ -5830,6 +5832,30 @@ async function rebuildWorkflowIndex(_source = null) {
   return items;
 }
 
+function scheduleWorkflowIndexRebuild() {
+  setTimeout(() => {
+    const startedAt = Date.now();
+    rebuildWorkflowIndex()
+      .then(() => {
+        console.log(JSON.stringify({
+          event: "background_task",
+          operation: "workflows:index-rebuild",
+          ok: true,
+          elapsedMs: Date.now() - startedAt
+        }));
+      })
+      .catch((error) => {
+        console.warn(JSON.stringify({
+          event: "background_task",
+          operation: "workflows:index-rebuild",
+          ok: false,
+          elapsedMs: Date.now() - startedAt,
+          error: error?.message || "unknown error"
+        }));
+      });
+  }, 0);
+}
+
 async function readRecentWorkflowSummaries() {
   const recentFileNames = await readRecentWorkflowFileNames();
   const summaries = await readSavedWorkflowSummaryFiles({ fileNames: recentFileNames });
@@ -5977,7 +6003,6 @@ async function writeWorkflowFile(workflow) {
   };
   await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
   await addRecentWorkflowFileName(registryWorkflow.fileName);
-  await rebuildWorkflowIndex().catch(() => {});
   return {
     ...registryWorkflow,
     filePath: workflowFilePathForDisplay(registryWorkflow, registryWorkflow.fileName)

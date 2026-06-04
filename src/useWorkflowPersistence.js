@@ -97,6 +97,49 @@ export function useWorkflowPersistence({
     }
   }
 
+  function projectListKey(project = {}) {
+    return [project.id, project.registryFileName, project.fileName].map((value) => String(value || "").trim()).filter(Boolean);
+  }
+
+  function projectListItemsMatch(first = {}, second = {}) {
+    const firstKeys = projectListKey(first);
+    const secondKeys = new Set(projectListKey(second));
+    return firstKeys.some((key) => secondKeys.has(key));
+  }
+
+  function workflowProjectSummary(project = {}) {
+    const graph = project.graph || {};
+    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const groups = Array.isArray(graph.groups) ? graph.groups : [];
+    const fileName = project.fileName || project.registryFileName || "";
+
+    return {
+      id: project.id || fileName,
+      name: project.name || "Untitled node project",
+      fileName,
+      registryFileName: project.registryFileName || fileName,
+      filePath: project.filePath || workflowDisplayPath(project),
+      createdAt: project.createdAt || "",
+      updatedAt: project.updatedAt || "",
+      app: project.app || "NewtNode",
+      version: project.version || 1,
+      packagePath: project.packagePath || project.package?.rootPath || "",
+      package: project.package || null,
+      graphStats: {
+        nodes: nodes.length,
+        edges: edges.length,
+        groups: groups.length
+      },
+      file: project.file || { size: 0, mtimeMs: 0 }
+    };
+  }
+
+  function upsertProject(project) {
+    const summary = workflowProjectSummary(project);
+    setProjects((current) => [summary, ...current.filter((item) => !projectListItemsMatch(item, summary))]);
+  }
+
   function currentWorkflowDocument({ id = projectId || createNodeId("workflow"), name = projectName, fileName = null, createdAt = null } = {}) {
     return buildWorkflowDocument({
       id,
@@ -238,7 +281,7 @@ export function useWorkflowPersistence({
       const savedPath = workflowDisplayPath(project);
       setWorkflowFilePath(savedPath);
       setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
-      await loadProjects();
+      upsertProject(project);
       let cleanNodes = nodes;
       let cleanEdges = edges;
       let cleanGroups = groups;
