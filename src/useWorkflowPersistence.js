@@ -111,6 +111,16 @@ export function useWorkflowPersistence({
     });
   }
 
+  function workflowFileNameFromPath(filePath) {
+    return String(filePath || "").trim().split(/[\\/]/).filter(Boolean).pop() || "";
+  }
+
+  function isWritableWorkflowJsonPath(filePath) {
+    const cleanPath = String(filePath || "").trim();
+    if (!/\.json$/i.test(cleanPath)) return false;
+    return /^[a-z]:[\\/]/i.test(cleanPath) || cleanPath.startsWith("\\\\") || cleanPath.startsWith("/") || cleanPath.startsWith("\\");
+  }
+
   function markWorkflowClean(overrides = {}) {
     setCleanWorkflowFingerprint(
       workflowStateFingerprint({
@@ -258,6 +268,42 @@ export function useWorkflowPersistence({
     }
   }
 
+  async function saveProjectToWorkflowFilePath(filePath) {
+    const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
+    const id = projectId || createNodeId("workflow");
+    const fileName = workflowFileNameFromPath(filePath) || localWorkflowFileName || workflowFileNameForProject(cleanProjectName);
+    const workflow = currentWorkflowDocument({
+      id,
+      name: cleanProjectName,
+      fileName
+    });
+
+    setSaveStatus("Saving...");
+    const { response, data } = await systemApi.saveWorkflowFile({
+      filePath,
+      workflow
+    });
+    if (!response.ok) {
+      throw new Error(data.error || "Could not save workflow JSON.");
+    }
+
+    const savedWorkflow = data || workflow;
+    const nextPackagePath = savedWorkflow.packagePath || savedWorkflow.package?.rootPath || projectPackagePath || "";
+    const savedPath = workflowDisplayPath(savedWorkflow, filePath);
+    setProjectId(savedWorkflow.id || id);
+    setProjectName(savedWorkflow.name || workflow.name);
+    setSavedProjectName(savedWorkflow.name || workflow.name);
+    setLocalWorkflowFileName(savedWorkflow.fileName || fileName);
+    setProjectPackagePath(nextPackagePath);
+    setWorkflowFilePath(savedPath || filePath);
+    markWorkflowClean({
+      projectName: savedWorkflow.name || workflow.name,
+      projectPackagePath: nextPackagePath
+    });
+    setSaveStatus(`Saved ${savedPath || filePath}`);
+    return true;
+  }
+
   async function saveProject() {
     if (saveInFlightRef.current) return saveInFlightRef.current;
 
@@ -271,6 +317,15 @@ export function useWorkflowPersistence({
           return false;
         }
         return true;
+      }
+
+      if (isWritableWorkflowJsonPath(workflowFilePath)) {
+        try {
+          return await saveProjectToWorkflowFilePath(workflowFilePath);
+        } catch (error) {
+          setSaveStatus(error.message || "Could not save workflow JSON.");
+          return false;
+        }
       }
 
       return saveProjectToSavedWorkflows();

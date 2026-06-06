@@ -314,6 +314,14 @@ export function buildUtilityVideoRequest({
       fps: node.data.rifeFps || 24,
       loop: Boolean(node.data.rifeLoop)
     },
+    depthAnythingVideo: {
+      model: node.data.depthAnythingVideoModel || "VDA-Large",
+      colormap: node.data.depthAnythingVideoColormap || "grayscale",
+      resolution: node.data.depthAnythingVideoResolution || "auto",
+      maxFrames: node.data.depthAnythingVideoMaxFrames ?? "",
+      outputFps: node.data.depthAnythingVideoOutputFps ?? "",
+      sideBySide: Boolean(node.data.depthAnythingVideoSideBySide)
+    },
     bytedanceVideoUpscaler: {
       targetResolution: node.data.bytedanceUpscalerTargetResolution || "1080p",
       targetFps: node.data.bytedanceUpscalerTargetFps || "30fps",

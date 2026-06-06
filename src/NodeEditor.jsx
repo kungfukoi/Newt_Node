@@ -109,6 +109,9 @@ import {
   bytedanceUpscalerPresetOptions,
   bytedanceUpscalerResolutionOptions,
   bytedanceUpscalerTierOptions,
+  depthAnythingVideoColormapOptions,
+  depthAnythingVideoModelOptions,
+  depthAnythingVideoResolutionOptions,
   characterTraitOptions,
   colorIdMatteVideoOutputOptions,
   happyHorseDurationOptions,
@@ -547,7 +550,9 @@ const maxZoom = 1.9;
 const viewportZoomStep = 1.16;
 const wheelZoomDeltaPerStep = 100;
 const wheelLineDeltaScale = 40;
-const trackpadZoomDeltaThreshold = 100;
+const trackpadZoomDeltaThreshold = 8;
+const mouseWheelZoomResetMs = 180;
+const mouseWheelZoomStepCooldownMs = 70;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const namedColorPalette = [
@@ -575,7 +580,10 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const clipboardRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
   const outputHistoryLoadedRef = React.useRef(false);
-  const wheelZoomDeltaRef = React.useRef(0);
+  const mouseWheelZoomAccumulatorRef = React.useRef(0);
+  const mouseWheelZoomDirectionRef = React.useRef(0);
+  const mouseWheelZoomLastEventAtRef = React.useRef(0);
+  const mouseWheelZoomLastStepAtRef = React.useRef(0);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, normalizeEditorGraph }), []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
@@ -2240,7 +2248,30 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   function isLikelyTrackpadZoom(event, wheelDelta) {
     if (event.deltaMode !== 0) return false;
-    return Math.abs(wheelDelta) < trackpadZoomDeltaThreshold || !Number.isInteger(wheelDelta);
+    return Math.abs(event.deltaX || 0) > 0 || Math.abs(wheelDelta) <= trackpadZoomDeltaThreshold;
+  }
+
+  function discreteMouseWheelZoomStep(event, wheelDelta) {
+    const direction = wheelDelta > 0 ? 1 : -1;
+    const timestamp = Number.isFinite(event.timeStamp) ? event.timeStamp : performance.now();
+    const lastDirection = mouseWheelZoomDirectionRef.current;
+    const lastEventAt = mouseWheelZoomLastEventAtRef.current;
+    const directionChanged = lastDirection !== 0 && lastDirection !== direction;
+    const resetGesture = directionChanged || !lastEventAt || timestamp - lastEventAt > mouseWheelZoomResetMs;
+
+    if (resetGesture) mouseWheelZoomAccumulatorRef.current = 0;
+    mouseWheelZoomDirectionRef.current = direction;
+    mouseWheelZoomLastEventAtRef.current = timestamp;
+    mouseWheelZoomAccumulatorRef.current += Math.abs(wheelDelta);
+
+    if (mouseWheelZoomAccumulatorRef.current < wheelZoomDeltaPerStep) return 0;
+    mouseWheelZoomAccumulatorRef.current = 0;
+
+    const lastStepAt = mouseWheelZoomLastStepAtRef.current;
+    if (!directionChanged && lastStepAt && timestamp - lastStepAt < mouseWheelZoomStepCooldownMs) return 0;
+
+    mouseWheelZoomLastStepAtRef.current = timestamp;
+    return direction;
   }
 
   function handleCanvasWheel(event) {
@@ -2287,17 +2318,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       const wheelDelta = normalizedWheelZoomDelta(event);
       if (wheelDelta) {
         if (isLikelyTrackpadZoom(event, wheelDelta)) {
-          wheelZoomDeltaRef.current = 0;
           zoomViewportAtPoint(pointer, Math.exp(-wheelDelta * 0.006));
           return;
         }
 
-        wheelZoomDeltaRef.current += wheelDelta;
-        const zoomSteps = Math.trunc(wheelZoomDeltaRef.current / wheelZoomDeltaPerStep);
-        if (zoomSteps) {
-          wheelZoomDeltaRef.current -= zoomSteps * wheelZoomDeltaPerStep;
-          zoomViewportAtPoint(pointer, Math.pow(viewportZoomStep, -zoomSteps));
-        }
+        const zoomStep = discreteMouseWheelZoomStep(event, wheelDelta);
+        if (zoomStep) zoomViewportAtCanvasCenter(Math.pow(viewportZoomStep, -zoomStep));
       }
       return;
     }
@@ -5209,6 +5235,7 @@ function NodeBody({
     const isSam3Video = isUtilitySam3VideoModel(utilityVideoModel);
     const isVoidVideo = isUtilityVoidVideoModel(utilityVideoModel);
     const isBirefnetVideo = isUtilityBirefnetVideoModel(utilityVideoModel);
+    const isDepthAnythingVideo = isUtilityDepthAnythingVideoModel(utilityVideoModel);
     const isRifeVideo = isUtilityRifeVideoModel(utilityVideoModel);
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
     const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
@@ -5269,6 +5296,7 @@ function NodeBody({
     const canRun = isVideoMode
       ? hasRequiredReferenceVideo &&
         (isBirefnetVideo ||
+          isDepthAnythingVideo ||
           isRifeVideo ||
           isExtractFrameVideo ||
           isColorIdMatteVideo ||
@@ -5296,31 +5324,33 @@ function NodeBody({
           ? "Run VOID"
           : isBirefnetVideo
             ? "Run BiRefNet Video"
-            : isRifeVideo
-              ? "Run RIFE"
-              : isExtractFrameVideo
-                ? "Extract Frame"
-                : isColorIdMatteVideo
-                  ? "Run Color Matte"
-                  : isCompositeVideo
-                    ? "Composite Video"
-                    : isVideoStitch
-                      ? "Run WanWarp"
-                      : isTransitionBuilder
-                        ? "Build Segment"
-                        : isWanVaceMaskToVideo
-                          ? "Run Mask-to-Video"
-                        : isWan22A14bVideo
-                          ? "Run Wan 2.2"
-                        : isWan21LoraVideo
-                          ? "Run Wan 2.1"
-                        : isWanVaceInpaintingVideo || isWan22VaceControlVideo
-                          ? "Run Wan VACE"
-                        : isBytedanceUpscaler
-                          ? "Run Bytedance Upscale"
-                          : isTopazUpscaler
-                            ? "Run Topaz Upscale"
-                            : "Run Utility Video"
+            : isDepthAnythingVideo
+              ? "Run Depth Video"
+              : isRifeVideo
+                ? "Run RIFE"
+                : isExtractFrameVideo
+                  ? "Extract Frame"
+                  : isColorIdMatteVideo
+                    ? "Run Color Matte"
+                    : isCompositeVideo
+                      ? "Composite Video"
+                      : isVideoStitch
+                        ? "Run WanWarp"
+                        : isTransitionBuilder
+                          ? "Build Segment"
+                          : isWanVaceMaskToVideo
+                            ? "Run Mask-to-Video"
+                          : isWan22A14bVideo
+                            ? "Run Wan 2.2"
+                          : isWan21LoraVideo
+                            ? "Run Wan 2.1"
+                          : isWanVaceInpaintingVideo || isWan22VaceControlVideo
+                            ? "Run Wan VACE"
+                          : isBytedanceUpscaler
+                            ? "Run Bytedance Upscale"
+                            : isTopazUpscaler
+                              ? "Run Topaz Upscale"
+                              : "Run Utility Video"
       : isColorIdMatte
         ? "Run Color Matte"
         : isSam3Image
@@ -5341,7 +5371,7 @@ function NodeBody({
         ? "WanSegments"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
+        : isSam3Video || isBirefnetVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
           ? "Video"
           : isVoidVideo
             ? "Source Video"
@@ -5425,6 +5455,7 @@ function NodeBody({
                   <option>{utilityVideoModelNames.birefnetVideo}</option>
                   <option>{utilityVideoModelNames.bytedanceUpscaler}</option>
                   <option>{utilityVideoModelNames.colorIdMatte}</option>
+                  <option>{utilityVideoModelNames.depthAnythingVideo}</option>
                   <option>{utilityVideoModelNames.extractFrame}</option>
                   <option>{utilityVideoModelNames.rifeVideo}</option>
                   <option>{utilityVideoModelNames.sam3Video}</option>
@@ -5445,12 +5476,12 @@ function NodeBody({
                   {utilityVideoModel === utilityVideoModelNames.compositeVideo && <option hidden>{utilityVideoModelNames.compositeVideo}</option>}
                 </select>
               </NodeRow>
-              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
+              {!isBirefnetVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -5604,6 +5635,41 @@ function NodeBody({
                   )}
                   <NodeRow label="Loop">
                     <button className={`node-toggle ${node.data.rifeLoop ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { rifeLoop: !node.data.rifeLoop })}>
+                      <span />
+                    </button>
+                  </NodeRow>
+                </>
+              ) : isDepthAnythingVideo ? (
+                <>
+                  <NodeRow label="Depth Model">
+                    <select value={node.data.depthAnythingVideoModel || "VDA-Large"} onChange={(event) => onUpdate(node.id, { depthAnythingVideoModel: event.target.value })}>
+                      {depthAnythingVideoModelOptions.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </NodeRow>
+                  <NodeRow label="Colormap">
+                    <select value={node.data.depthAnythingVideoColormap || "grayscale"} onChange={(event) => onUpdate(node.id, { depthAnythingVideoColormap: event.target.value })}>
+                      {depthAnythingVideoColormapOptions.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </NodeRow>
+                  <NodeRow label="Resolution">
+                    <select value={node.data.depthAnythingVideoResolution || "auto"} onChange={(event) => onUpdate(node.id, { depthAnythingVideoResolution: event.target.value })}>
+                      {depthAnythingVideoResolutionOptions.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </NodeRow>
+                  <NodeRow label="Max Frames">
+                    <input type="number" min="1" max="1800" value={node.data.depthAnythingVideoMaxFrames ?? ""} onChange={(event) => onUpdate(node.id, { depthAnythingVideoMaxFrames: event.target.value })} placeholder="Auto" />
+                  </NodeRow>
+                  <NodeRow label="Output FPS">
+                    <input type="number" min="1" max="120" step="0.1" value={node.data.depthAnythingVideoOutputFps ?? ""} onChange={(event) => onUpdate(node.id, { depthAnythingVideoOutputFps: event.target.value })} placeholder="Source" />
+                  </NodeRow>
+                  <NodeRow label="Side by Side">
+                    <button className={`node-toggle ${node.data.depthAnythingVideoSideBySide ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { depthAnythingVideoSideBySide: !node.data.depthAnythingVideoSideBySide })}>
                       <span />
                     </button>
                   </NodeRow>
@@ -7954,6 +8020,12 @@ function createDefaultNodeData(type, label, count) {
       rifeUseCalculatedFps: true,
       rifeFps: 24,
       rifeLoop: false,
+      depthAnythingVideoModel: "VDA-Large",
+      depthAnythingVideoColormap: "grayscale",
+      depthAnythingVideoResolution: "auto",
+      depthAnythingVideoMaxFrames: "",
+      depthAnythingVideoOutputFps: "",
+      depthAnythingVideoSideBySide: false,
       bytedanceUpscalerTargetResolution: "1080p",
       bytedanceUpscalerTargetFps: "30fps",
       bytedanceUpscalerPreset: "general",
@@ -8285,6 +8357,11 @@ function isUtilityBirefnetVideoModel(model) {
   return String(model || "").toLowerCase().includes("birefnet");
 }
 
+function isUtilityDepthAnythingVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("depth") && normalized.includes("anything") && normalized.includes("video");
+}
+
 function isUtilityRifeVideoModel(model) {
   return String(model || "").toLowerCase().includes("rife");
 }
@@ -8478,6 +8555,18 @@ function utilityVideoModelSelectionPatch(model) {
     };
   }
 
+  if (isUtilityDepthAnythingVideoModel(model)) {
+    return {
+      ...patch,
+      depthAnythingVideoModel: "VDA-Large",
+      depthAnythingVideoColormap: "grayscale",
+      depthAnythingVideoResolution: "auto",
+      depthAnythingVideoMaxFrames: "",
+      depthAnythingVideoOutputFps: "",
+      depthAnythingVideoSideBySide: false
+    };
+  }
+
   return patch;
 }
 
@@ -8488,6 +8577,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   }
 
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
+  if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
@@ -8542,6 +8632,7 @@ function normalizedUtilityVideoModelName(model) {
   if (normalized.includes("vace")) return utilityVideoModelNames.wanVaceMaskToVideo;
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
+  if (isUtilityDepthAnythingVideoModel(normalized)) return utilityVideoModelNames.depthAnythingVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
   if (isUtilityExtractFrameVideoModel(normalized)) return utilityVideoModelNames.extractFrame;
   if (normalized.includes("bytedance") && normalized.includes("upscal")) return utilityVideoModelNames.bytedanceUpscaler;
@@ -10433,6 +10524,12 @@ function normalizeUtilityData(data = {}) {
     rifeUseCalculatedFps: data.rifeUseCalculatedFps !== false,
     rifeFps: data.rifeFps || 24,
     rifeLoop: Boolean(data.rifeLoop),
+    depthAnythingVideoModel: normalizeChoice(data.depthAnythingVideoModel, depthAnythingVideoModelOptions, "VDA-Large"),
+    depthAnythingVideoColormap: normalizeChoice(data.depthAnythingVideoColormap, depthAnythingVideoColormapOptions, "grayscale"),
+    depthAnythingVideoResolution: normalizeChoice(data.depthAnythingVideoResolution, depthAnythingVideoResolutionOptions, "auto"),
+    depthAnythingVideoMaxFrames: data.depthAnythingVideoMaxFrames ?? "",
+    depthAnythingVideoOutputFps: data.depthAnythingVideoOutputFps ?? "",
+    depthAnythingVideoSideBySide: Boolean(data.depthAnythingVideoSideBySide),
     bytedanceUpscalerTargetResolution: data.bytedanceUpscalerTargetResolution || "1080p",
     bytedanceUpscalerTargetFps: data.bytedanceUpscalerTargetFps || "30fps",
     bytedanceUpscalerPreset: data.bytedanceUpscalerPreset || "general",

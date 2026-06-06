@@ -109,6 +109,7 @@ const topazUpscalerCostPerSecond = {
   "720p-1080p": 0.02,
   "above-1080p": 0.08
 };
+const depthAnythingVideoCostPerSecond = Number(process.env.DEPTH_ANYTHING_VIDEO_COST_PER_SECOND || 0.04);
 const dwposeCostPerComputeSecond = 0.0006;
 const patinaBaseCost = 0.01;
 const patinaMapCostPerMegapixel = 0.01;
@@ -123,6 +124,9 @@ const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
+const depthAnythingVideoModelOptions = ["VDA-Small", "VDA-Base", "VDA-Large"];
+const depthAnythingVideoColormapOptions = ["grayscale", "turbo", "inferno", "magma", "viridis"];
+const depthAnythingVideoResolutionOptions = ["auto", "360p", "480p", "720p", "1080p"];
 const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 const bytedanceUpscalerResolutionOptions = ["1080p", "2k", "4k"];
 const bytedanceUpscalerFpsOptions = ["30fps", "60fps"];
@@ -864,6 +868,10 @@ app.get("/api/stats", async (_req, res) => {
         },
         depthAnything: {
           costPerComputeSecond: 0,
+          currency: "USD"
+        },
+        depthAnythingVideo: {
+          costPerSecond: depthAnythingVideoCostPerSecond,
           currency: "USD"
         },
         birefnet: {
@@ -2234,6 +2242,13 @@ app.post("/api/node/utility-video", async (req, res) => {
 
     if (selectedVideoModel.provider === "fal-birefnet-video") {
       return runBirefnetUtilityVideo(req, res, {
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-depth-anything-video") {
+      return runDepthAnythingUtilityVideo(req, res, {
         referenceVideoUrls,
         selectedVideoModel
       });
@@ -4076,6 +4091,103 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
       localUrl: output.publicPath,
       fileName: output.fileName
     }))
+  });
+}
+
+async function runDepthAnythingUtilityVideo(req, res, { referenceVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: "Depth Anything Video requires a connected video." });
+  }
+
+  const endpoint = selectedVideoModel.id;
+  const options = req.body.depthAnythingVideo || {};
+  const maxFrames = optionalInteger(options.maxFrames);
+  const outputFps = optionalNumber(options.outputFps);
+  const input = {
+    video_url: await uploadLocalOutputToFal(videoUrl),
+    model: normalizeChoice(options.model, depthAnythingVideoModelOptions, "VDA-Large"),
+    colormap: normalizeChoice(options.colormap, depthAnythingVideoColormapOptions, "grayscale"),
+    resolution: normalizeChoice(options.resolution, depthAnythingVideoResolutionOptions, "auto"),
+    side_by_side: Boolean(options.sideBySide),
+    include_raw_depths: false
+  };
+  if (maxFrames !== undefined) input.max_frames = Math.min(1800, Math.max(1, maxFrames));
+  if (outputFps !== undefined) input.output_fps = Math.min(120, Math.max(1, outputFps));
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video) || findFalMediaFile(result?.data, "video/");
+
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Depth Anything Video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, "depth-anything-video");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const durationSeconds = positiveNumber(outputVideo.duration) || positiveNumber(result?.data?.duration);
+  const cost = estimateFalVideoUtilityCost({
+    endpoint,
+    amountUsd: durationSeconds ? roundCurrency(durationSeconds * depthAnythingVideoCostPerSecond) : null,
+    unitRateUsd: depthAnythingVideoCostPerSecond,
+    units: durationSeconds,
+    unit: "video second",
+    pricingBasis: durationSeconds
+      ? "Depth Anything Video fal.ai estimate at $0.04 per second of video"
+      : "Depth Anything Video fal.ai per-second estimate; duration unavailable",
+    pricingSource: "fal-model-page-2026-06-05"
+  });
+  const text = [
+    "Depth Anything Video",
+    input.model,
+    input.colormap,
+    input.resolution,
+    input.max_frames ? `${input.max_frames} max frames` : "",
+    input.output_fps ? `${input.output_fps} fps` : "",
+    input.side_by_side ? "side-by-side" : ""
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Depth Anything video depth preprocessor",
+    prompt: text,
+    submittedPrompt: text,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: input.model,
+      colormap: input.colormap,
+      resolution: input.resolution,
+      maxFrames: input.max_frames || null,
+      outputFps: input.output_fps || null,
+      sideBySide: input.side_by_side,
+      durationSeconds: durationSeconds || null,
+      sourceVideoCount: 1
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
   });
 }
 
@@ -9136,6 +9248,15 @@ function resolveUtilityVideoModel(model) {
       displayName: "SAM 3 Video",
       id: "fal-ai/sam-3/video",
       requiresPrompt: true
+    };
+  }
+
+  if (normalized.includes("depth") && normalized.includes("anything") && normalized.includes("video")) {
+    return {
+      provider: "fal-depth-anything-video",
+      displayName: "Depth Anything Video",
+      id: "fal-ai/depth-anything-video",
+      requiresPrompt: false
     };
   }
 

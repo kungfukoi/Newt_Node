@@ -53,6 +53,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Draft persistence | `src/useNodeEditorDraft.js` | Browser draft loading, snapshotting, and debounced local draft writes live here. |
 | Workflow files/session/state | `src/workflowFiles.js`, `src/workflowSession.js`, `src/workflowPreferences.js`, `src/workflowContext.js`, `src/workflowState.js` | File document shape, display paths, package/request context, picker preferences, graph cloning/remapping/fingerprints, deduping, and stale runtime cleanup live here. |
 | Backend route registration | `server/index.js`, `server/routes/*` | `server/index.js` owns shared app setup and existing route implementations. New low-coupling route groups should register through `server/routes/*` and receive explicit dependencies from `index.js`. |
+| Local custom workflow engines | `server/<workflow-name>/*` | ComfyUI or other local workflow-specific engines live in a focused server folder with tracked templates, manifest metadata, prompt patching, queue/poll logic, managed output copying, and history recording. Keep provider-specific graph patching out of browser code. |
 
 When adding a new feature, put pure helpers in one of these modules or create a similarly focused module. `NodeEditor.jsx` should coordinate React state, node rendering, event handlers, and node-specific orchestration, not become the home for reusable algorithms.
 
@@ -240,6 +241,105 @@ Local API routes should live in the smallest backend owner that fits the route. 
 - Normalize Fal file responses with `normalizeFalFile` and fallback search helpers where useful.
 - Keep request fields aligned with the provider's current API schema.
 - Keep response payloads small and predictable: `image`, `video`, `model`, `thumbnail`, `cost`, `seed`, `text`, as appropriate.
+
+## ComfyUI Custom Workflow API Standards
+
+Some Newt features are local custom workflow integrations rather than direct hosted model calls. WanWarp is the current reference implementation: Newt presents a purpose-built node interface, then the backend patches and runs a locked ComfyUI API workflow.
+
+Use this pattern for future ComfyUI-backed custom builds.
+
+- Store each integration in a focused server folder such as `server/wanwarp/`.
+- Track the Comfy API prompt templates in `server/<integration>/templates/`. These are source fixtures, not runtime output. Keep large generated media and local Comfy output folders out of git.
+- Include template metadata when useful, such as `templates/manifest.json`, so required models, custom nodes, output node ids, and workflow purpose are discoverable.
+- Keep all Comfy-specific patching server-side. Browser code should submit normalized node settings and local asset URLs, never raw Comfy graph internals or machine-local paths.
+- Use a single backend engine module to own template loading, prompt patching, Comfy queueing, polling, output copying, result shaping, and history append.
+- The backend should talk to ComfyUI through its local HTTP API: check availability with `/system_stats`, upload still images through `/upload/image`, queue prompts with `/prompt`, and poll completion through `/history/<prompt_id>`. `/queue` is useful for diagnostics and monitors, but normal runs should rely on prompt history.
+- Default Comfy URL should be environment-configurable. WanWarp uses `WANWARP_COMFY_URL`, defaulting to `http://127.0.0.1:8188`.
+- Long local renders must use a generous server-side timeout and should be environment-configurable. WanWarp uses `WANWARP_COMFY_TIMEOUT_MS`, with a long default suitable for multi-segment local video renders.
+- Timeout errors must include enough context to debug, especially the Comfy `prompt_id`, and should say the render may still be running in Comfy.
+- When a workflow is queued, record the Comfy `prompt_id` in history settings.
+- If Comfy returns `status_str: "error"`, surface Comfy's exception message and attach raw status where possible.
+- If Comfy returns success but expected output nodes are missing, return a clear 502-style error and include raw outputs for debugging.
+
+WanWarp reference map:
+
+| Surface | Current files |
+| --- | --- |
+| Comfy engine | `server/wanwarp/engine.js` |
+| Locked API templates | `server/wanwarp/templates/creator-locked-full.json`, `server/wanwarp/templates/creator-locked-seg-a.json` |
+| Template metadata | `server/wanwarp/templates/manifest.json` |
+| Backend route integration | `/api/node/utility-video` path in `server/index.js` |
+| Browser request shape | `src/nodeRunners/videoModels.js` and the utility runner path in `src/NodeEditor.jsx` |
+| User-facing model labels | `src/modelOptions.js` |
+| Result and preview support | `src/components/MediaViews.jsx`, `src/components/NodePorts.jsx`, and shared result helpers |
+| Standards/history docs | `docs/node-standards.md`, `docs/latent-wan-transition-handoff.md` |
+
+### Template Patching
+
+- Treat exported Comfy API JSON as an immutable template. Load and clone it per run before editing.
+- Patch by stable node ids, and keep those ids documented in code or manifest comments when they are part of the public integration contract.
+- Patch only the fields Newt intentionally controls. Preserve creator defaults for the rest of the workflow.
+- Sanitize Comfy widget values before queueing. Exported Comfy JSON can contain UI index values where the API expects strings. WanWarp normalizes Shark sampler schedulers, sampler cfg, denoise, step values, and ImageScale methods before submitting.
+- Prefer structured JSON patching over string manipulation. Use `JSON.stringify(path)` only for Comfy nodes that explicitly expect quoted path strings, such as some VHS path loaders.
+- Avoid hard-coding Windows path separators in template data. Resolve local asset paths with server helpers and Node `path` APIs.
+- Do not bypass compile or custom-node behavior by deleting nodes unless that is part of the locked workflow contract. If a workflow requires bypassing compile nodes, document the reason and keep the template aligned with the known-good Comfy graph.
+
+### Assets And Outputs
+
+- Resolve Newt local URLs through existing asset helpers. Packaged `/workflow-assets/<workflow-id>/...`, unpackaged `/uploads/...`, and `/outputs/...` URLs must all work.
+- Upload still images to Comfy rather than passing Newt URLs directly into Comfy image loaders.
+- For video inputs consumed by Comfy path-loader nodes, resolve to validated local filesystem paths server-side.
+- Never return Comfy's raw output path to the browser. Copy Comfy outputs into Newt managed assets first.
+- Generated outputs must honor the current workflow package: package runs write to `/workflow-assets/<workflow-id>/outputs/...`; unpackaged runs write to `/outputs/<workflow-name>/...`.
+- Return normal Newt result items for user-visible media: final outputs as `video` or `image`, with labels, local URLs, file names, mime types, metadata, and seeds where available.
+- If a custom workflow produces diagnostic or segment outputs, copy those into managed assets too and return them as additional `resultItems`.
+
+### Node Contract Pattern
+
+WanWarp establishes a useful pattern for complex Comfy workflows that are easier to edit as several Newt nodes but should run as one locked Comfy graph.
+
+- Use lightweight config nodes when the user needs repeated editable segments. WanSegment is config-only: it validates connected media and prompt/settings, then emits a `wanSegment` result item carrying the normalized segment payload.
+- Use one executor node for global workflow execution. WanWarp receives connected WanSegment outputs and runs the full locked Comfy workflow.
+- Keep user-facing node names clear even if older internal code names remain during migration. In the current app, `WanSegment` replaces the old Transition Builder concept and `WanWarp` replaces the old Video Stitch concept.
+- Config outputs may use a non-media internal type, such as `wanSegment`, when they are graph instructions rather than playable media. Shared preview/result code must explicitly understand that shape.
+- Still expose playable media from segment nodes when a full workflow finishes. WanWarp copies Segment A/B/C/D outputs back into the connected WanSegment previews while keeping the segment config output available for chaining.
+- Make ports intuitive by media role: segment config/handoff outputs should use the image/config color expected by the target port, while actual segment video outputs should stay green.
+- `Run All` must respect dependency order: segment nodes prepare config first, then the executor node runs the single Comfy workflow.
+- If the locked Comfy workflow supports only a bounded topology, expose that honestly. WanWarp currently standardizes on A, B, C, and optional D loop behavior that matches the creator workflow.
+
+### Exposed Controls
+
+- Expose stable controls that map to intentional template patch points. Do not expose every Comfy widget by default.
+- Preserve creator defaults as the default Newt values unless the product intentionally changes the workflow.
+- Group global workflow controls on the executor node. WanWarp owns frames, fps, size, output format, CRF, sampler steps, LoRA strengths, tail trim, and blend.
+- Group segment-specific controls on segment nodes. WanSegment owns prompt, negative prompt, conditioning strength, VACE schedule, VACE reference strengths, seed, start/end keyframes, motion map, and depth video.
+- For paired sampler controls, keep `steps_to_run` no greater than total `steps`.
+- For video encoding, expose CRF as an output quality/file-size control and document that it cannot fix generation noise.
+- For LoRA strength controls, use the workflow's real model split names. WanWarp exposes Distill HIGH/LOW and Motion HIGH/LOW strengths because the template has separate HIGH and LOW model LoRA loaders.
+- Keep handoff/overlap controls named in user language. WanWarp exposes `Tail Trim` and `Blend` to match the creator workflow's boundary handling.
+
+### History, Cost, And Diagnostics
+
+- Record local Comfy runs as `provider: "local-comfyui"`.
+- Record cost as `$0` only because the run is local and Newt is not paying a hosted provider. Do not imply the user's GPU time is free in user-facing copy.
+- History settings should include the selected model name, Comfy URL, Comfy prompt id, output node ids, workflow/template name, segment roles, loop setting, width, height, fps, frame length, render length, exposed quality controls, and input asset URLs.
+- Include all copied output URLs, file names, labels, and bytes in history.
+- Keep raw Comfy status/output objects out of normal history, but attach them to thrown errors when useful.
+
+### Verification For Comfy Integrations
+
+For code-only changes to a Comfy integration, run the normal verification checklist plus server syntax checks for the focused engine module.
+
+For behavior changes that touch template patching, node wiring, or output handling, also run a local Comfy smoke test:
+
+- Confirm Comfy is reachable at the configured URL.
+- Run a small known-good workflow through Newt, not only directly in Comfy.
+- Confirm `/history/<prompt_id>` reaches success.
+- Confirm final outputs are copied into Newt managed assets.
+- Confirm segment or auxiliary outputs appear on the correct nodes.
+- Confirm history records the Comfy prompt id and local output URLs.
+- Confirm a packaged workflow uses `/workflow-assets/<workflow-id>/outputs/...` paths.
+- Confirm timeout behavior does not mark a still-running Comfy render as a failed completed run.
 
 ## Cost And Stats Standards
 

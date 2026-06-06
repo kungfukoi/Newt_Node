@@ -151,6 +151,7 @@ export const utilityVideoModelNames = {
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID Matte",
   compositeVideo: "Composite Video",
+  depthAnythingVideo: "Depth Anything Video",
   videoStitch: "WanWarp",
   transitionBuilder: "WanSegment",
   wanVaceMaskToVideo: "Wan VACE Mask-to-Video",
@@ -172,6 +173,9 @@ export const utilityVideoModelNames = {
 
 export const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 export const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
+export const depthAnythingVideoModelOptions = ["VDA-Small", "VDA-Base", "VDA-Large"];
+export const depthAnythingVideoColormapOptions = ["grayscale", "turbo", "inferno", "magma", "viridis"];
+export const depthAnythingVideoResolutionOptions = ["auto", "360p", "480p", "720p", "1080p"];
 export const bytedanceUpscalerResolutionOptions = ["1080p", "2k", "4k"];
 export const bytedanceUpscalerFpsOptions = ["30fps", "60fps"];
 export const bytedanceUpscalerPresetOptions = ["general", "ugc", "short_series", "aigc", "old_film"];
@@ -240,6 +244,7 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
   [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
+  [utilityVideoModelNames.depthAnythingVideo]: "Creates a temporally consistent depth-map video from a connected source video with Video Depth Anything.",
   [utilityVideoModelNames.videoStitch]: "Runs the locked creator ComfyUI WanWarp workflow from connected WanSegment configs.",
   [utilityVideoModelNames.transitionBuilder]: "Defines one WanWarp segment: keyframe, prompt, schedule, and optional motion/depth sources.",
   [utilityVideoModelNames.wanVaceMaskToVideo]: "Uses Fal Wan VACE to create a prompted video from a reference image inside a connected mask video.",

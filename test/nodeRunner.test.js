@@ -391,3 +391,33 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
   assert.equal(request.videoStitch.motionLoraLow, 0.35);
   assert.equal(request.videoStitch.crf, 8);
 });
+
+test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-depth-video",
+      data: {
+        title: "Depth Anything Video",
+        depthAnythingVideoModel: "VDA-Base",
+        depthAnythingVideoColormap: "turbo",
+        depthAnythingVideoResolution: "720p",
+        depthAnythingVideoMaxFrames: "120",
+        depthAnythingVideoOutputFps: "24",
+        depthAnythingVideoSideBySide: true
+      }
+    },
+    prompt: "",
+    model: "Depth Anything Video",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceVideoUrls: ["/outputs/source.mp4"]
+  });
+
+  assert.equal(request.depthAnythingVideo.model, "VDA-Base");
+  assert.equal(request.depthAnythingVideo.colormap, "turbo");
+  assert.equal(request.depthAnythingVideo.resolution, "720p");
+  assert.equal(request.depthAnythingVideo.maxFrames, "120");
+  assert.equal(request.depthAnythingVideo.outputFps, "24");
+  assert.equal(request.depthAnythingVideo.sideBySide, true);
+});
