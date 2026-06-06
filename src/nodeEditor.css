@@ -1131,6 +1131,10 @@
   font-weight: 760;
 }
 
+.output-row.align-right {
+  justify-content: flex-end;
+}
+
 .node-body {
   padding: 12px 22px 22px;
 }
@@ -3363,6 +3367,19 @@ video.newtnode-video-fallback {
   background: #000;
 }
 
+.wansegment-result {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 88px;
+  color: #f1e14b;
+  border: 1px solid rgba(241, 225, 75, 0.28);
+  border-radius: 8px;
+  background: rgba(241, 225, 75, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .videoModel .result-item video,
 .utility .result-item video {
   max-height: 335px;
@@ -3698,6 +3715,45 @@ video.newtnode-video-fallback {
   color: rgba(244, 240, 232, 0.62);
   text-align: left;
   padding: 0 10px;
+}
+
+.node-row > .wanwarp-frame-thumb-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  overflow: hidden;
+  padding: 4px;
+  text-align: center;
+}
+
+.node-row > .wanwarp-frame-thumb-button.has-thumb {
+  border: 1px solid rgba(221, 198, 49, 0.24);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.wanwarp-frame-thumb-button img {
+  display: block;
+  width: 100%;
+  height: 58px;
+  border-radius: 5px;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.wanwarp-frame-thumb-button span {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  min-width: 18px;
+  padding: 2px 5px;
+  border-radius: 6px;
+  color: #111;
+  background: rgba(221, 198, 49, 0.92);
+  font-size: 10px;
+  font-weight: 860;
+  line-height: 1;
 }
 
 .node-row > input[type="range"] {

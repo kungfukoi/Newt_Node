@@ -70,19 +70,28 @@ export function buildUtilityVideoRequest({
   workflowContext,
   projectId,
   projectName,
+  startFrameUrls = [],
+  endFrameUrls = [],
   referenceImageUrls = [],
   referenceVideoUrls = [],
+  startFrameVideoUrls = [],
   maskVideoUrls = [],
+  wanWarpSegments = [],
   colorIdMatte,
   compositeVideo,
+  videoStitch,
   voidNumFrames
 }) {
   return {
     prompt,
     model,
+    startFrameUrls,
+    endFrameUrls,
     referenceImageUrls,
     referenceVideoUrls,
+    startFrameVideoUrls,
     maskVideoUrls,
+    wanWarpSegments,
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,
       format: node.data.extractFrameFormat || "png"
@@ -104,10 +113,19 @@ export function buildUtilityVideoRequest({
     },
     colorIdMatte,
     compositeVideo,
+    videoStitch,
     transitionBuilder: {
       maskSoftness: node.data.transitionMaskSoftness || 6,
+      width: node.data.transitionWidth || 512,
+      height: node.data.transitionHeight || 512,
+      length: node.data.transitionWanNumFrames || 57,
+      conditioningStrength: node.data.transitionConditioningStrength ?? 0.6,
+      strengthSchedule: node.data.transitionVaceStrengthSchedule || "0.90, 0.64#10, 0.80, 1.00, 0.64#2",
+      vaceRefStrengthFirst: node.data.transitionVaceRefStrengthFirst ?? 1,
+      vaceRefStrengthSecond: node.data.transitionVaceRefStrengthSecond ?? 0.6,
+      handoffFrames: node.data.transitionHandoffFrames ?? 8,
       wanNegativePrompt: node.data.transitionWanNegativePrompt || node.data.wan22A14bNegativePrompt || "",
-      wanNumFrames: node.data.transitionWanNumFrames || node.data.wan22A14bNumFrames || 81,
+      wanNumFrames: node.data.transitionWanNumFrames || node.data.wan22A14bNumFrames || 57,
       wanFps: node.data.transitionWanFps || node.data.wan22A14bFps || 16,
       wanResolution: node.data.transitionWanResolution || node.data.wan22A14bResolution || "720p",
       wanAspectRatio: node.data.transitionWanAspectRatio || node.data.wan22A14bAspectRatio || "auto",
@@ -338,6 +356,7 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
     return data.resultItems
       .filter((item) => item?.localUrl || item?.url)
       .map((item, itemIndex) => ({
+        ...item,
         url: item.localUrl || item.url,
         type: item.type || "video",
         label: item.label || `${data.modelName || "Result"} ${itemIndex + 1}`,

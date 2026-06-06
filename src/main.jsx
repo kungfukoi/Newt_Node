@@ -44,6 +44,43 @@ const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
 const SettingsPage = React.lazy(() => import("./SettingsPage.jsx"));
 
+class WorkspaceErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidUpdate(previousProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  retry = () => {
+    this.setState({ error: null });
+    this.props.onRetry?.();
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="status-panel error workspace-error-panel" role="alert">
+          <span className="status-icon"><X size={18} /></span>
+          <span>{this.props.label || "Workspace"} failed to load.</span>
+          <small>{this.state.error?.message || "Unknown error"}</small>
+          <button type="button" onClick={this.retry}>Retry</button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 
 function normalizeNodeStatus(status) {
   if (!status) return { title: "", message: "", workflowPath: "", workflowState: "", workflowStateLabel: "" };
@@ -98,6 +135,7 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = React.useState("image");
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
+  const [nodeWorkspaceRetryKey, setNodeWorkspaceRetryKey] = React.useState(0);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
 
   React.useEffect(() => {
@@ -656,9 +694,11 @@ function App() {
 
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
-          <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
-          </React.Suspense>
+          <WorkspaceErrorBoundary label="Nodes" resetKey={nodeWorkspaceRetryKey} onRetry={() => setNodeWorkspaceRetryKey((value) => value + 1)}>
+            <React.Suspense key={nodeWorkspaceRetryKey} fallback={<WorkspaceFallback label="Loading nodes" />}>
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
+            </React.Suspense>
+          </WorkspaceErrorBoundary>
         </div>
       )}
     </main>

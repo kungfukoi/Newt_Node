@@ -1,0 +1,64 @@
+{
+  "name": "WanFlow",
+  "status": "locked-local-engine",
+  "workflow_json": "D:\\_AI\\Comfyui_1_0_4\\ComfyUI\\user\\default\\workflows\\260415-wan22animdiff-07_rev1_FULL-WORKFLOW-CREATOR-EXACT-OUR-IMAGES-PROMPTS.json",
+  "api_prompts": {
+    "segment_a": "C:\\dev\\comfy_api_prompt_creator_locked_seg_a.json",
+    "full_stitch": "C:\\dev\\comfy_api_prompt_creator_locked_full.json",
+    "repo_full_stitch": "server\\wanwarp\\templates\\creator-locked-full.json"
+  },
+  "runtime_patches": {
+    "bypass_torch_compile_nodes": [
+      2275,
+      2276
+    ],
+    "save_output": true,
+    "default_filename_prefix": "codex-debug"
+  },
+  "controls": {
+    "maps": {
+      "depth_video_path_node": 2653,
+      "bw_video_path_node": 2969
+    },
+    "images": {
+      "image_a_node": 3021,
+      "image_b_segment_a_node": 3022,
+      "image_b_segment_b_node": 3638,
+      "image_b_segment_c_node": 3754
+    },
+    "positive_prompts": {
+      "segment_a_node": 2564,
+      "segment_b_node": 3647,
+      "segment_c_node": 3785,
+      "segment_d_node": 3864
+    },
+    "negative_prompts": {
+      "segment_a_node": 3038,
+      "segment_b_node": 3631,
+      "segment_c_node": 3721,
+      "segment_d_node": 3865
+    },
+    "conditioning_strength": {
+      "segment_a_node": 2732,
+      "segment_b_node": 3633,
+      "segment_c_node": 3723,
+      "segment_d_node": 3869
+    },
+    "vace_strength_schedule": {
+      "segment_a_node": 2739,
+      "segment_b_node": 3646,
+      "segment_c_node": 3786,
+      "segment_d_node": 3866
+    },
+    "seeds": {
+      "segment_a_node": 2703,
+      "segment_b_node": 3635,
+      "segment_c_node": 3791,
+      "segment_d_node": 3867
+    },
+    "outputs": {
+      "segment_a_video_combine_node": 2590,
+      "full_stitch_video_combine_node": 3138
+    }
+  }
+}

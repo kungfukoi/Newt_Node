@@ -199,7 +199,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   }
 
   function downloadActiveItem() {
-    if (!activeItem?.url) return;
+    if (!activeItem?.url || activeItem.type === "wanSegment") return;
     const link = document.createElement("a");
     link.href = activeItem.url;
     link.download = resultDownloadFileName(activeItem);
@@ -214,10 +214,18 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
             {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} onError={useNewtNodeImageFallback} />}
             {activeItem.type === "video" && <video src={activeItem.url} controls loop onError={useNewtNodeVideoFallback} />}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
+            {activeItem.type === "wanSegment" && (
+              <div className="wansegment-result">
+                <Film size={18} />
+                <span>{activeItem.label || "WanSegment"}</span>
+              </div>
+            )}
           </div>
-          <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
-            <Download size={14} />
-          </button>
+          {activeItem.type !== "wanSegment" && (
+            <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
+              <Download size={14} />
+            </button>
+          )}
           {items.length > 1 && (
             <div className="result-cycle-controls" onPointerDown={(event) => event.stopPropagation()}>
               <button type="button" onClick={() => selectOffset(-1)} title="Previous generation">

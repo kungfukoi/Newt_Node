@@ -17,6 +17,7 @@ import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -275,7 +276,9 @@ function buildHealthPayload() {
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
+      videoStitch: true,
       transitionBuilder: true,
+      wanWarp: true,
       wan22A14bT2v: true,
       wan22A14bI2v: true,
       wan21T2vLora: true,
@@ -2094,9 +2097,19 @@ app.post("/api/node/utility-video", async (req, res) => {
   try {
     const selectedVideoModel = resolveUtilityVideoModel(req.body.model);
     const prompt = String(req.body.prompt || "").trim();
+    const startFrameUrls = Array.isArray(req.body.startFrameUrls) ? req.body.startFrameUrls.filter(isLocalAssetUrl) : [];
+    const endFrameUrls = Array.isArray(req.body.endFrameUrls) ? req.body.endFrameUrls.filter(isLocalAssetUrl) : [];
     const referenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [];
     const referenceVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [];
+    const startFrameVideoUrls = Array.isArray(req.body.startFrameVideoUrls) ? req.body.startFrameVideoUrls.filter(isLocalAssetUrl) : [];
     const maskVideoUrls = Array.isArray(req.body.maskVideoUrls) ? req.body.maskVideoUrls.filter(isLocalAssetUrl) : [];
+    const wanWarpSegments = normalizeWanWarpSegmentPayloads(
+      Array.isArray(req.body.wanWarpSegments)
+        ? req.body.wanWarpSegments
+        : Array.isArray(req.body.videoStitch?.wanWarpSegments)
+          ? req.body.videoStitch.wanWarpSegments
+          : []
+    );
 
     if (selectedVideoModel.provider === "local-extract-frame") {
       return runExtractFrameUtilityVideo(req, res, {
@@ -2120,10 +2133,21 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "local-video-stitch") {
+      return runVideoStitchUtilityVideo(req, res, {
+        referenceVideoUrls,
+        wanWarpSegments,
+        selectedVideoModel
+      });
+    }
+
     if (selectedVideoModel.provider === "local-transition-builder") {
       return runTransitionBuilderUtilityVideo(req, res, {
+        startFrameUrls,
+        endFrameUrls,
         referenceImageUrls,
         referenceVideoUrls,
+        startFrameVideoUrls,
         maskVideoUrls,
         selectedVideoModel
       });
@@ -2371,16 +2395,98 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
   );
 }
 
-async function runTransitionBuilderUtilityVideo(req, res, { referenceImageUrls, maskVideoUrls, selectedVideoModel }) {
-  if (referenceImageUrls.length < 2) {
-    return res.status(400).json({ error: "Transition Builder requires two connected keyframe images." });
+function normalizeWanWarpSegmentPayloads(value = []) {
+  const roleOrder = ["A", "B", "C", "D"];
+  const normalized = [];
+  const usedRoles = new Set();
+
+  value.forEach((item, index) => {
+    if (!item || typeof item !== "object") return;
+    const requestedRole = String(item.role || "").trim().toUpperCase();
+    const role = roleOrder.includes(requestedRole) && !usedRoles.has(requestedRole)
+      ? requestedRole
+      : roleOrder.find((candidate) => !usedRoles.has(candidate)) || "D";
+    usedRoles.add(role);
+    normalized.push({
+      role,
+      order: Number.isFinite(Number(item.order)) ? Number(item.order) : index,
+      sourceNodeId: String(item.sourceNodeId || ""),
+      sourceTitle: String(item.sourceTitle || ""),
+      prompt: String(item.prompt || ""),
+      negativePrompt: String(item.negativePrompt || ""),
+      startImageUrl: isLocalAssetUrl(item.startImageUrl) ? item.startImageUrl : "",
+      endImageUrl: isLocalAssetUrl(item.endImageUrl) ? item.endImageUrl : "",
+      motionVideoUrl: isLocalAssetUrl(item.motionVideoUrl) ? item.motionVideoUrl : "",
+      depthVideoUrl: isLocalAssetUrl(item.depthVideoUrl) ? item.depthVideoUrl : "",
+      conditioningStrength: item.conditioningStrength,
+      strengthSchedule: item.strengthSchedule,
+      vaceRefStrengthFirst: item.vaceRefStrengthFirst,
+      vaceRefStrengthSecond: item.vaceRefStrengthSecond,
+      seed: item.seed
+    });
+  });
+
+  return normalized.sort((first, second) => roleOrder.indexOf(first.role) - roleOrder.indexOf(second.role) || first.order - second.order);
+}
+
+async function runVideoStitchUtilityVideo(req, res, { referenceVideoUrls, wanWarpSegments = [], selectedVideoModel = null }) {
+  if (wanWarpSegments.length) {
+    return res.json(
+      await createWanWarpFullWorkflowResult({
+        body: req.body,
+        segments: wanWarpSegments,
+        selectedVideoModel,
+        helpers: {
+          firstLocalOutput,
+          resolveLocalAssetPathFromUrl,
+          createManagedAssetTarget,
+          workflowPackageOutputDirName,
+          probeVideoFile,
+          enrichVideoMetadata,
+          appendHistory,
+          projectFromBody,
+          nodeFromBody
+        }
+      })
+    );
   }
+
+  // TODO legacy cleanup: this is the pre-WanWarp utility path for raw rendered video concatenation.
+  if (!referenceVideoUrls.length) {
+    return res.status(400).json({ error: "WanWarp requires connected WanSegment outputs." });
+  }
+
+  return res.json(
+    await createVideoStitchResult({
+      body: req.body,
+      videoUrls: referenceVideoUrls
+    })
+  );
+}
+
+async function runTransitionBuilderUtilityVideo(req, res, { startFrameUrls, endFrameUrls, referenceImageUrls, referenceVideoUrls, startFrameVideoUrls, maskVideoUrls, selectedVideoModel }) {
+  const startImageUrl = firstLocalOutput(startFrameUrls);
+  const startFramesUrl = firstLocalOutput(startFrameVideoUrls);
+  const endImageUrl = firstLocalOutput(endFrameUrls) || firstLocalOutput(startImageUrl ? referenceImageUrls.slice(1) : referenceImageUrls);
+  if (!startImageUrl && !startFramesUrl) {
+    return res.status(400).json({ error: "WanWarp requires a Start image or Start handoff clip." });
+  }
+  if (!endImageUrl) {
+    return res.status(400).json({ error: "WanWarp requires a connected End keyframe image." });
+  }
+
+  const motionVideoUrl = firstLocalOutput(referenceVideoUrls);
+  const depthVideoUrl = firstLocalOutput(maskVideoUrls);
 
   return res.json(
     await createTransitionBuilderResult({
       body: req.body,
       referenceImageUrls,
-      maskVideoUrl: firstLocalOutput(maskVideoUrls),
+      startImageUrl,
+      startFramesUrl,
+      endImageUrl,
+      maskVideoUrl: motionVideoUrl,
+      depthVideoUrl,
       selectedVideoModel
     })
   );
@@ -6149,6 +6255,49 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
   }
 }
 
+async function createVideoFrameOutputFromFile({ body, sourcePath, kind = "video-frame", frameTime = 0 }) {
+  const output = await createManagedAssetTarget({ body }, kind, ".png", workflowPackageOutputDirName);
+  await extractVideoFrameWithFfmpeg({
+    sourcePath,
+    outputPath: output.filePath,
+    frameTime,
+    format: "png"
+  });
+  const outputStats = await stat(output.filePath);
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    filePath: output.filePath,
+    mimeType: "image/png",
+    bytes: outputStats.size
+  };
+}
+
+async function createVideoClipOutputFromFile({ body, sourcePath, kind = "video-clip", startFrame = 0, frameCount = 1, fps = 16, outputFormat = "mp4" }) {
+  const format = normalizeVideoOutputFormat(outputFormat);
+  const output = await createManagedAssetTarget({ body }, kind, videoOutputExtension(format), workflowPackageOutputDirName);
+  await extractVideoClipWithFfmpeg({
+    sourcePath,
+    outputPath: output.filePath,
+    startFrame,
+    frameCount,
+    fps,
+    outputFormat: format
+  });
+  const [outputStats, metadata] = await Promise.all([
+    stat(output.filePath),
+    probeVideoFile(output.filePath)
+  ]);
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    filePath: output.filePath,
+    mimeType: videoOutputMimeType(format),
+    bytes: outputStats.size,
+    metadata
+  };
+}
+
 async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
   const outputPaths = [];
   try {
@@ -6363,7 +6512,144 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
   }
 }
 
-async function createTransitionBuilderResult({ body, referenceImageUrls = [], maskVideoUrl = "", selectedVideoModel = null }) {
+async function createVideoStitchResult({ body, videoUrls = [] }) {
+  let outputPath = "";
+  try {
+    const options = body.videoStitch && typeof body.videoStitch === "object" ? body.videoStitch : {};
+    const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
+    const loop = Boolean(options.loop);
+    const resolvedVideos = [];
+
+    for (const videoUrl of videoUrls) {
+      const source = await resolveLocalAssetPathFromUrl(videoUrl);
+      resolvedVideos.push({
+        url: videoUrl,
+        filePath: source.filePath,
+        metadata: await probeVideoFile(source.filePath)
+      });
+    }
+
+    if (!resolvedVideos.length) {
+      const error = new Error("Video Stitch requires at least one connected segment video.");
+      error.status = 400;
+      throw error;
+    }
+
+    const stitchedVideos = loop ? [...resolvedVideos, resolvedVideos[0]] : resolvedVideos;
+    const firstMetadata = resolvedVideos[0].metadata || {};
+    const targetWidth = Math.max(2, Math.round(Number(firstMetadata.width || 0)) || 512);
+    const targetHeight = Math.max(2, Math.round(Number(firstMetadata.height || 0)) || 512);
+    const targetFps = positiveNumber(firstMetadata.fps) || 16;
+    const output = await createManagedAssetTarget({ body }, "video-stitch", videoOutputExtension(outputFormat), workflowPackageOutputDirName);
+    outputPath = output.filePath;
+
+    await stitchVideosWithFfmpeg({
+      sourcePaths: stitchedVideos.map((video) => video.filePath),
+      outputPath,
+      targetWidth,
+      targetHeight,
+      targetFps,
+      outputFormat
+    });
+
+    const outputStats = await stat(outputPath);
+    const outputMetadata = await probeVideoFile(outputPath);
+    const localUrl = output.publicPath;
+    const text = loop ? "Stitched video sequence with loop repeat." : "Stitched video sequence.";
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: stitchedVideos.length,
+      unit: "local segment",
+      mediaType: "video",
+      pricingBasis: "Local ffmpeg video stitch",
+      pricingSource: "local-video-stitch"
+    };
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "video",
+      provider: "local",
+      modelName: "Video Stitch",
+      endpoint: "local/video-stitch",
+      mode: "Video segment stitch",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(body),
+      node: nodeFromBody(body),
+      settings: {
+        model: "Video Stitch",
+        videoUrls,
+        loop,
+        outputFormat,
+        sourceCount: resolvedVideos.length,
+        stitchedCount: stitchedVideos.length,
+        width: outputMetadata.width || targetWidth,
+        height: outputMetadata.height || targetHeight,
+        fps: outputMetadata.fps || targetFps,
+        duration: outputMetadata.duration || null,
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localVideo: localUrl,
+      outputFileName: output.fileName,
+      outputBytes: outputStats.size,
+      text
+    });
+
+    const video = enrichVideoMetadata(
+      {
+        label: "Stitched Video",
+        localUrl,
+        fileName: output.fileName,
+        mimeType: videoOutputMimeType(outputFormat)
+      },
+      outputMetadata
+    );
+
+    return {
+      modelName: "Video Stitch",
+      text,
+      cost,
+      video,
+      videos: [video]
+    };
+  } catch (error) {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function createTransitionBuilderResult({ body, referenceImageUrls = [], startImageUrl = "", startFramesUrl = "", endImageUrl = "", maskVideoUrl = "", depthVideoUrl = "", selectedVideoModel = null }) {
+  // TODO legacy cleanup: old per-node WanWarp render path. New WanSegment nodes only emit config; WanWarp runs the full creator prompt.
+  return createWanWarpComfyResult({
+    body,
+    referenceImageUrls,
+    startImageUrl,
+    startFramesUrl,
+    endImageUrl,
+    maskVideoUrl,
+    depthVideoUrl,
+    selectedVideoModel,
+    helpers: {
+      firstLocalOutput,
+      resolveLocalAssetPathFromUrl,
+      createManagedAssetTarget,
+      workflowPackageOutputDirName,
+      probeVideoFile,
+      createVideoFrameOutputFromFile,
+      createVideoClipOutputFromFile,
+      enrichVideoMetadata,
+      appendHistory,
+      projectFromBody,
+      nodeFromBody
+    }
+  });
+}
+
+async function createLegacyTransitionBuilderResult({ body, referenceImageUrls = [], maskVideoUrl = "", selectedVideoModel = null }) {
   const outputPaths = [];
   const requestId = randomUUID();
 
@@ -6373,22 +6659,22 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], ma
     const startImageUrl = firstLocalOutput(referenceImageUrls);
     const endImageUrl = firstLocalOutput(referenceImageUrls.slice(1));
     if (!startImageUrl || !endImageUrl) {
-      const error = new Error("Transition Builder requires two connected keyframe images.");
+      const error = new Error("WanWarp requires two connected keyframe images.");
       error.status = 400;
       throw error;
     }
     if (!maskVideoUrl) {
-      const error = new Error("Transition Builder requires a connected black and white influence mask video.");
+      const error = new Error("WanWarp requires a connected black and white influence mask video.");
       error.status = 400;
       throw error;
     }
     if (!cleanPrompt) {
-      const error = new Error("Transition Builder requires a morph prompt.");
+      const error = new Error("WanWarp requires a morph prompt.");
       error.status = 400;
       throw error;
     }
     if (!process.env.FAL_KEY) {
-      const error = new Error("Transition Builder requires FAL_KEY in .env.");
+      const error = new Error("WanWarp requires FAL_KEY in .env.");
       error.status = 400;
       throw error;
     }
@@ -6514,7 +6800,7 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], ma
     });
     const cost = aggregateTransitionBuilderCost([rawCost, refinedCost]);
     const resultItems = [refinedVideo, rawVideo, maskVideoItem];
-    const text = "Transition Builder generated a two-pass influence-mask morph.";
+    const text = "WanWarp generated a two-pass influence-mask morph.";
     const outputBytes = refinedOutput.bytes + rawOutput.bytes + maskStats.size;
 
     await appendHistory({
@@ -6522,7 +6808,7 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], ma
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: "fal.ai",
-      modelName: selectedVideoModel?.displayName || "Transition Builder",
+      modelName: selectedVideoModel?.displayName || "WanWarp",
       endpoint: selectedVideoModel?.id || "local/transition-builder",
       mode: "Wan 2.2 LoRA influence-mask morph",
       prompt: cleanPrompt,
@@ -6530,7 +6816,7 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], ma
       project: projectFromBody(body),
       node: nodeFromBody(body),
       settings: {
-        model: selectedVideoModel?.displayName || "Transition Builder",
+        model: selectedVideoModel?.displayName || "WanWarp",
         referenceImageCount: 2,
         maskVideoUrl: maskVideoUrl || null,
         maskSoftness: options.maskSoftness,
@@ -6591,7 +6877,7 @@ async function createTransitionBuilderResult({ body, referenceImageUrls = [], ma
     return {
       requestId,
       endpoint: selectedVideoModel?.id || "local/transition-builder",
-      modelName: selectedVideoModel?.displayName || "Transition Builder",
+      modelName: selectedVideoModel?.displayName || "WanWarp",
       text,
       cost,
       video: refinedVideo,
@@ -6690,8 +6976,8 @@ function aggregateTransitionBuilderCost(costs = []) {
     units,
     unit: "video second",
     pricingBasis: amountUsd !== null
-      ? "Transition Builder estimate for Wan 2.2 A14B LoRA morph plus Wan 2.2 VACE mask influence refinement"
-      : "Transition Builder estimate; one or more pass durations were unavailable",
+      ? "WanWarp estimate for Wan 2.2 A14B LoRA morph plus Wan 2.2 VACE mask influence refinement"
+      : "WanWarp estimate; one or more pass durations were unavailable",
     pricingSource: "fal-model-pages-2026-06-03"
   });
 }
@@ -6701,7 +6987,7 @@ async function createTransitionMaskVideoWithFfmpeg({ maskVideoPath = "", outputP
   const args = ["-hide_banner", "-loglevel", "error", "-y"];
 
   if (!maskVideoPath) {
-    const error = new Error("Transition Builder requires a connected black and white influence mask video.");
+    const error = new Error("WanWarp requires a connected black and white influence mask video.");
     error.status = 400;
     throw error;
   }
@@ -6821,6 +7107,34 @@ async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, 
   await runFfmpeg(args, "Extract frame");
 }
 
+async function extractVideoClipWithFfmpeg({ sourcePath, outputPath, startFrame = 0, frameCount = 1, fps = 16, outputFormat = "mp4" }) {
+  const start = Math.max(0, Math.round(Number(startFrame) || 0));
+  const count = Math.max(1, Math.round(Number(frameCount) || 1));
+  const targetFps = Math.max(1, Math.min(120, Number(fps) || 16));
+  const filter = [
+    `trim=start_frame=${start}:end_frame=${start + count}`,
+    "setpts=PTS-STARTPTS",
+    `fps=${targetFps}`,
+    "format=yuv420p"
+  ].join(",");
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    filter,
+    "-an"
+  ];
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Extract video clip", 600000);
+}
+
 async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selectedColor, tolerance, invert, blur, expand, startTime, endTime, outputFormat }) {
   const filter = colorIdVideoMatteFilter({ selectedColor, tolerance, invert, blur, expand, startTime, endTime });
   const args = [
@@ -6879,6 +7193,34 @@ async function compositeVideoWithFfmpeg({ basePath, layerPath, maskPath, outputP
   addVideoEncoderArgs(args, outputFormat);
   args.push("-c:a", "aac", outputPath);
   await runFfmpeg(args, "Composite video", 600000);
+}
+
+async function stitchVideosWithFfmpeg({ sourcePaths, outputPath, targetWidth, targetHeight, targetFps, outputFormat }) {
+  const width = Math.max(2, Math.round(Number(targetWidth || 0)) || 512);
+  const height = Math.max(2, Math.round(Number(targetHeight || 0)) || 512);
+  const fps = Math.max(1, Math.min(120, Number(targetFps) || 16));
+  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+  sourcePaths.forEach((sourcePath) => {
+    args.push("-i", sourcePath);
+  });
+
+  const filterParts = sourcePaths.map((_, index) => {
+    return [
+      `[${index}:v]setpts=PTS-STARTPTS`,
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=bicubic`,
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      `fps=${fps}`,
+      "setsar=1",
+      `format=yuv420p[v${index}]`
+    ].join(",");
+  });
+  const concatInputs = sourcePaths.map((_, index) => `[v${index}]`).join("");
+  const filter = [...filterParts, `${concatInputs}concat=n=${sourcePaths.length}:v=1:a=0[out]`].join(";");
+
+  args.push("-filter_complex", filter, "-map", "[out]", "-an");
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Video stitch", 600000);
 }
 
 async function padVideoWithFfmpeg({ sourcePath, outputPath, targetWidth, targetHeight }) {
@@ -7310,7 +7652,7 @@ function historyLocalVideos(item = {}) {
   if (videos.length) return videos;
 
   const value = [item.modelName, item.endpoint, item.mode].map((part) => String(part || "").toLowerCase()).join(" ");
-  if (!value.includes("transition builder") && !value.includes("local/transition-builder")) return [];
+  if (!value.includes("wanwarp") && !value.includes("transition builder") && !value.includes("local/transition-builder")) return [];
 
   const settings = item.settings || {};
   return [settings.controlOutputUrl, settings.maskOutputUrl].filter(Boolean);
@@ -8761,10 +9103,19 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
-  if (normalized.includes("transition") && normalized.includes("builder")) {
+  if (normalized.includes("wanwarp") || normalized.includes("stitch") || normalized.includes("sequence")) {
+    return {
+      provider: "local-video-stitch",
+      displayName: "WanWarp",
+      id: "local/video-stitch",
+      requiresPrompt: false
+    };
+  }
+
+  if (normalized.includes("wansegment") || (normalized.includes("transition") && normalized.includes("builder"))) {
     return {
       provider: "local-transition-builder",
-      displayName: "Transition Builder",
+      displayName: "WanSegment",
       id: "local/transition-builder",
       requiresPrompt: false
     };

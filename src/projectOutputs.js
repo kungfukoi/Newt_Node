@@ -103,7 +103,7 @@ function historyOutputFileName(item, url, urlIndex) {
 
 function isTransitionBuilderHistoryItem(item = {}) {
   const value = [item.modelName, item.endpoint, item.mode].map((part) => String(part || "").toLowerCase()).join(" ");
-  return value.includes("transition builder") || value.includes("local/transition-builder");
+  return value.includes("wanwarp") || value.includes("transition builder") || value.includes("local/transition-builder");
 }
 
 function historyOutputUrls(item) {

@@ -338,3 +338,56 @@ test("buildUtilityVideoRequest preserves Transition Builder settings", () => {
   assert.equal(request.transitionBuilder.maskStyle, undefined);
   assert.equal(request.transitionBuilder.wanSchedulerEnabled, undefined);
 });
+
+test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
+  const wanWarpSegments = [
+    {
+      role: "A",
+      prompt: "morph",
+      startImageUrl: "/uploads/a.png",
+      endImageUrl: "/uploads/b.png",
+      motionVideoUrl: "/uploads/motion.mp4",
+      depthVideoUrl: "/uploads/depth.mp4"
+    }
+  ];
+  const videoStitch = {
+    loop: true,
+    outputFormat: "mp4",
+    keyTrimFrames: 5,
+    blendFrames: 4,
+    samplerSteps: 6,
+    samplerStepsToRun: 3,
+    distillLoraHigh: 1.8,
+    distillLoraLow: 0.9,
+    motionLoraHigh: 1.2,
+    motionLoraLow: 0.35,
+    crf: 8,
+    wanWarpSegments
+  };
+
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wanwarp",
+      data: {
+        title: "WanWarp"
+      }
+    },
+    prompt: "",
+    model: "WanWarp",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceVideoUrls: [],
+    wanWarpSegments,
+    videoStitch
+  });
+
+  assert.deepEqual(request.wanWarpSegments, wanWarpSegments);
+  assert.equal(request.videoStitch.samplerSteps, 6);
+  assert.equal(request.videoStitch.samplerStepsToRun, 3);
+  assert.equal(request.videoStitch.distillLoraHigh, 1.8);
+  assert.equal(request.videoStitch.distillLoraLow, 0.9);
+  assert.equal(request.videoStitch.motionLoraHigh, 1.2);
+  assert.equal(request.videoStitch.motionLoraLow, 0.35);
+  assert.equal(request.videoStitch.crf, 8);
+});

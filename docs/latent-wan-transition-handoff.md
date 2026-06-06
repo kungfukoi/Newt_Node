@@ -193,7 +193,7 @@ Outputs:
 
 4. Newt_Node wiring
    - Add the model option and controls after the endpoint returns useful output.
-   - Keep Transition Builder separate or rename it clearly so it does not confuse the public API approximation with the true latent workflow.
+   - Keep WanWarp separate or name it clearly so it does not confuse the public API approximation with the true latent workflow.
 
 ## Acceptance Criteria
 
@@ -234,7 +234,7 @@ Then read this file and continue with the first experiment that has not been com
 
 Recent relevant branch changes include:
 
-- Transition Builder was reworked toward a two-pass Wan LoRA plus VACE influence-mask experiment.
+- WanWarp was reworked toward a two-pass Wan LoRA plus VACE influence-mask experiment.
 - Ctrl/Cmd+S behavior was restored to use the app save flow instead of the browser Save As dialog.
 - The top bar now shows `Saving...` during saves.
 - Wan LoRA scale is no longer clamped to `0..2` in the server payload or editor inputs.

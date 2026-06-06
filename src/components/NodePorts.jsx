@@ -21,9 +21,9 @@ export function PortHandle({ node, port, side, onConnectStart, onDisconnectInput
   );
 }
 
-export function OutputPortRow({ node, port, onConnectStart, onDisconnectInput, connectedPortKeys, label = port.label }) {
+export function OutputPortRow({ node, port, onConnectStart, onDisconnectInput, connectedPortKeys, label = port.label, align = "" }) {
   return (
-    <div className="port-row output-row">
+    <div className={`port-row output-row ${align === "right" ? "align-right" : ""}`}>
       <span>{label}</span>
       <PortHandle
         node={node}
