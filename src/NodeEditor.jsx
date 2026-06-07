@@ -638,6 +638,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     workflowRequestContext,
     appendWorkflowContextToForm,
     loadProjects,
+    createNewWorkflow,
     saveProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
@@ -3291,6 +3292,10 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
             </button>
             {fileMenuOpen && (
               <div className="file-menu-list">
+                <button onClick={() => { setFileMenuOpen(false); createNewWorkflow(); }} title="Start a new blank workflow">
+                  <Plus size={15} />
+                  <span>New</span>
+                </button>
                 <button onClick={() => { setFileMenuOpen(false); saveProject(); }} title="Save project">
                   <Save size={15} />
                   <span>Save</span>
@@ -3497,6 +3502,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
 function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }) {
   const color = group.color || groupPalette[0];
+  const moveEdges = ["top", "right", "bottom", "left"];
 
   return (
     <section
@@ -3507,9 +3513,8 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
         height: group.height,
         "--group-color": color
       }}
-      onPointerDown={(event) => onDragStart(event, group)}
     >
-      <div className="group-header">
+      <div className="group-header" onPointerDown={(event) => onDragStart(event, group)}>
         <input
           value={group.name || ""}
           onChange={(event) => onUpdate(group.id, { name: event.target.value })}
@@ -3534,6 +3539,14 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
           <X size={13} />
         </button>
       </div>
+      {moveEdges.map((edge) => (
+        <span
+          key={edge}
+          className={`group-move-edge group-move-edge-${edge}`}
+          onPointerDown={(event) => onDragStart(event, group)}
+          aria-hidden="true"
+        />
+      ))}
       <span className="group-resize-handle" onPointerDown={(event) => onResizeStart(event, group)} />
     </section>
   );
@@ -3605,7 +3618,7 @@ function NodeColorPicker({ color, onChange }) {
 }
 
 function isCanvasSurface(target, canvas) {
-  return target === canvas || target.classList?.contains("node-scene") || target.classList?.contains("edge-layer");
+  return target === canvas || target.classList?.contains("node-scene") || target.classList?.contains("edge-layer") || target.classList?.contains("node-group-backdrop");
 }
 
 function NodeCard({
@@ -8946,11 +8959,7 @@ function connectedWanWarpSegments(items = [], incomingByNode = {}) {
   return items
     .map(({ source, edge }, index) => {
       if (source?.type !== "utility" || !isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) return null;
-      const resultItem =
-        normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, "video")
-          .find((item) => item.type === "wanSegment" && item.wanWarpSegment) ||
-        transitionBuilderResultItemForPort(source, edge?.from?.port);
-      const segment = resultItem?.wanWarpSegment || wanSegmentPayloadFromNode(source, incomingByNode[source.id] || {}, index);
+      const segment = wanSegmentPayloadFromNode(source, incomingByNode[source.id] || {}, index);
       if (!segment) return null;
       return {
         ...segment,
