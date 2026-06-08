@@ -1,0 +1,307 @@
+# Newt Node ComfyWan requirements manifest
+#
+# Purpose:
+#   Use this file after installing ComfyUI Desktop on another machine.
+#   It describes the custom nodes, model files, target folders, and runtime
+#   settings needed by the Newt Node WanBlend / WanWarp ComfyUI API workflows.
+#
+# Notes:
+#   - Paths are relative to the ComfyUI root unless noted otherwise.
+#   - Prefer copying known-good files from the working ComfyUI install when a
+#     source_url is marked TBD. Those files were present locally during Newt
+#     WanBlend / WanWarp development but still need canonical source validation.
+#   - Do not copy a ComfyUI .venv between machines unless the Python, CUDA,
+#     PyTorch, GPU, and path layout match. Reinstall node requirements instead.
+
+schema_version: 1
+name: comfyWan
+status: production_ready
+newt_branch: wan22-animdiff-transition-dev
+comfy_root_placeholder: "%COMFYUI_ROOT%"
+
+runtime:
+  comfy_api_url: "http://127.0.0.1:8188"
+  newt_env:
+    WANWARP_COMFY_URL: "http://127.0.0.1:8188"
+    WANBLEND_COMFY_URL: "http://127.0.0.1:8188"
+    WANWARP_COMFY_TIMEOUT_MS: "1800000"
+    WANBLEND_COMFY_TIMEOUT_MS: "1800000"
+
+workflows:
+  wanwarp_creator_locked:
+    status: production_ready
+    repo_template: "server/wanwarp/templates/creator-locked-full.json"
+    output_node_id: 3138
+    notes:
+      - "Runtime bypasses the torch compile nodes from the creator workflow."
+      - "Uses Wan2.2 VACE / T2V models plus motion LoRAs."
+      - "Treat this as the locked production segment/stitch workflow contract."
+  wanwarp_refine:
+    status: production_ready
+    repo_template: "server/wanwarp/templates/wanblend-refine.json"
+    output_node_id: 3138
+    notes:
+      - "Takes a reference video, samples segments, and refines with Wan2.2 motion/depth controls."
+      - "Treat this as the locked production WanBlend-to-WanWarp refine workflow contract."
+  wanblend_context_smashing:
+    status: production_ready
+    repo_template: "server/wanblend/templates/context-smashing.json"
+    notes:
+      - "Uses AnimateDiff/IPAdapter attention-mask style generation before optional WanWarp refinement."
+      - "Treat this as the locked production WanBlend prepass workflow contract."
+
+install_strategy:
+  preferred:
+    - "Install ComfyUI Desktop."
+    - "Install custom nodes listed below into custom_nodes."
+    - "Install each custom node's Python requirements through ComfyUI Manager or pip inside ComfyUI's venv."
+    - "Copy/download all model files into the exact target paths below."
+    - "Restart ComfyUI Desktop, then refresh Workflow Overview."
+  fastest_for_office_pc:
+    - "Copy models from the known-good local ComfyUI models folder to the office ComfyUI models folder."
+    - "Copy any custom node repo that has source_url: TBD from the known-good custom_nodes folder."
+    - "Use git clone / ComfyUI Manager for the custom nodes that have source_url values."
+
+custom_nodes:
+  - id: comfyui-manager
+    required: false
+    target: "custom_nodes/ComfyUI-Manager"
+    source_url: "https://github.com/ltdrdata/ComfyUI-Manager.git"
+    provides:
+      - "Node install/update UI"
+      - "Model manager helpers"
+
+  - id: comfyui-video-helper-suite
+    required: true
+    target: "custom_nodes/ComfyUI-VideoHelperSuite"
+    source_url: "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+    provides:
+      - "VHS_LoadVideoPath"
+      - "VHS_VideoCombine"
+      - "VHS_GetImageCount"
+
+  - id: comfyui-animatediff-evolved
+    required: true
+    target: "custom_nodes/ComfyUI-AnimateDiff-Evolved"
+    source_url: "https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git"
+    provides:
+      - "ADE_AnimateDiffLoaderWithContext"
+      - "ADE_AnimateDiffLoRALoader"
+      - "ADE_AnimateDiffSamplingSettings"
+      - "ADE_LoopedUniformContextOptions"
+
+  - id: comfyui-ipadapter-plus
+    required: true
+    target: "custom_nodes/ComfyUI_IPAdapter_plus"
+    source_url: "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
+    provides:
+      - "IPAdapterAdvanced"
+      - "IPAdapterUnifiedLoader"
+
+  - id: rgthree-comfy
+    required: true
+    target: "custom_nodes/rgthree-comfy"
+    source_url: "https://github.com/rgthree/rgthree-comfy.git"
+    provides:
+      - "Power Lora Loader (rgthree)"
+
+  - id: comfyui-kjnodes
+    required: true
+    target: "custom_nodes/ComfyUI-KJNodes"
+    source_url: "https://github.com/kijai/ComfyUI-KJNodes.git"
+    provides:
+      - "DiffusionModelLoaderKJ"
+      - "DiffusionModelSelector"
+      - "PathchSageAttentionKJ"
+      - "SimpleCalculatorKJ"
+      - "StringToFloatListRanged"
+
+  - id: comfyui-wanvideowrapper
+    required: true
+    target: "custom_nodes/ComfyUI-WanVideoWrapper"
+    source_url: "https://github.com/kijai/ComfyUI-WanVideoWrapper.git"
+    provides:
+      - "WanVacePhantomSimpleV2"
+      - "WanVideoBlender"
+      - "WanVideoNAG"
+      - "Wan2.2 video model loaders and Wan VACE helpers"
+
+  - id: comfyui-essentials
+    required: true
+    target: "custom_nodes/ComfyUI_essentials"
+    source_url: "https://github.com/cubiq/ComfyUI_essentials.git"
+    provides:
+      - "BatchImagesNode"
+      - "ImageFromBatch+"
+      - "RepeatImageBatch"
+      - "MaskFromRGBCMYBW+"
+
+  - id: res4lyf
+    required: true
+    target: "custom_nodes/RES4LYF"
+    source_url: "https://github.com/ClownsharkBatwing/RES4LYF.git"
+    verify_source: true
+    provides:
+      - "SharkSampler_Beta"
+      - "SharkChainsampler_Beta"
+      - "ClownSampler_Beta"
+      - "ClownOptions_ExtraOptions_Beta"
+
+  - id: local-or-workflow-specific-utilities
+    required: true
+    target: "custom_nodes"
+    source_url: "TBD - copy from known-good ComfyUI custom_nodes if ComfyUI reports missing classes"
+    verify_source: true
+    provides:
+      - "ImageBlend"
+      - "StringConcatenate"
+      - "PrimitiveInt"
+      - "PrimitiveString"
+      - "INTConstant"
+      - "Any node class reported missing by Workflow Overview after the above installs"
+
+models:
+  wanwarp_required:
+    - id: wan_umt5_encoder
+      workflow: "WanWarp"
+      target: "models/clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+      source_url: "TBD - likely Kijai/WanVideo_comfy; copy from known-good ComfyUI if unsure"
+      node_reference: "CLIPLoader clip_name"
+      required: true
+
+    - id: wan_vae_bf16
+      workflow: "WanWarp"
+      target: "models/vae/Wan2.1_VAE_bf16.safetensors"
+      source_url: "TBD - likely Kijai/WanVideo_comfy; copy from known-good ComfyUI if unsure"
+      node_reference: "VAELoader vae_name"
+      required: true
+
+    - id: wan22_t2v_high_fp8
+      workflow: "WanWarp"
+      target: "models/diffusion_models/Wan2.2/Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+      source_url: "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/T2V/Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+      node_reference: "DiffusionModelLoaderKJ model_name"
+      required: true
+
+    - id: wan22_t2v_low_fp8
+      workflow: "WanWarp"
+      target: "models/diffusion_models/Wan2.2/Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+      source_url: "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/T2V/Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+      node_reference: "DiffusionModelLoaderKJ model_name"
+      required: true
+
+    - id: wan22_vace_high_fp8
+      workflow: "WanWarp"
+      target: "models/diffusion_models/Wan2.2/Wan2_2_Fun_VACE_module_A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+      source_url: "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/VACE/Wan2_2_Fun_VACE_module_A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+      node_reference: "DiffusionModelSelector model_name"
+      required: true
+
+    - id: wan22_vace_low_fp8
+      workflow: "WanWarp"
+      target: "models/diffusion_models/Wan2.2/Wan2_2_Fun_VACE_module_A14B_LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+      source_url: "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/VACE/Wan2_2_Fun_VACE_module_A14B_LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+      node_reference: "DiffusionModelSelector model_name"
+      required: true
+
+    - id: lightx2v_cfg_step_distill
+      workflow: "WanWarp"
+      target: "models/loras/Wan2.1_T2V-Util/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank128_bf16.safetensors"
+      source_url: "TBD - copy from known-good ComfyUI if unsure"
+      node_reference: "Power Lora Loader (rgthree)"
+      required: true
+
+    - id: flippnrad_motion_morph
+      workflow: "WanWarp"
+      target: "models/loras/Wan2.1-Style/trigger_phrase_flippnrad-motion-morph.safetensors"
+      source_url: "TBD - copy from known-good ComfyUI if unsure"
+      node_reference: "Power Lora Loader (rgthree)"
+      required: true
+
+  wanblend_required:
+    - id: dreamshaper8_lcm
+      workflow: "WanBlend"
+      target: "models/checkpoints/05_LCM/DreamShaper8_LCM.safetensors"
+      source_url: "TBD - copy from known-good ComfyUI if unsure"
+      node_reference: "CheckpointLoaderSimple ckpt_name"
+      required: true
+
+    - id: animated_lcm_sd15_t2v
+      workflow: "WanBlend"
+      target: "models/animatediff_models/AnimateLCM_sd15_t2v.ckpt"
+      source_url: "TBD - copy from known-good ComfyUI if unsure"
+      node_reference: "ADE_AnimateDiffLoaderWithContext model_name"
+      required: true
+
+    - id: lcm_lora_sd15
+      workflow: "WanBlend"
+      target: "models/loras/sd15/lcm-lora-sdv1-5.safetensors"
+      source_url: "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors"
+      rename_to: "lcm-lora-sdv1-5.safetensors"
+      node_reference: "LoraLoader lora_name"
+      required: true
+
+    - id: was26_animatediff_lora
+      workflow: "WanBlend"
+      target: "models/animatediff_motion_lora/WAS26.safetensors"
+      source_url: "TBD - copy from known-good ComfyUI if unsure"
+      node_reference: "ADE_AnimateDiffLoRALoader name"
+      required: true
+
+  wanblend_ipadapter_inferred:
+    - id: ipadapter_plus_sd15
+      workflow: "WanBlend"
+      target: "models/ipadapter/ip-adapter-plus_sd15.safetensors"
+      source_url: "TBD - install through ComfyUI_IPAdapter_plus docs/Manager or copy from known-good ComfyUI"
+      required_by: "IPAdapterUnifiedLoader preset PLUS (high strength)"
+      required: true
+
+    - id: clip_vision_vit_h
+      workflow: "WanBlend"
+      target: "models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+      source_url: "TBD - install through ComfyUI_IPAdapter_plus docs/Manager or copy from known-good ComfyUI"
+      required_by: "IPAdapterUnifiedLoader preset PLUS (high strength)"
+      required: true
+
+python_packages:
+  install_method:
+    - "Use ComfyUI Manager: Install Missing Custom Nodes, then Install requirements for each custom node."
+    - "If needed, run pip inside ComfyUI's venv only."
+  packages_to_expect:
+    - "opencv-python"
+    - "imageio-ffmpeg"
+    - "matplotlib"
+    - "einops"
+    - "safetensors"
+    - "transformers"
+    - "accelerate"
+    - "sageattention"
+    - "triton-windows or compatible Windows Triton package, only if SageAttention is enabled"
+  caution:
+    - "SageAttention/Triton support on Windows can be fragile. WanWarp should still be able to run with the workflow torch compile nodes bypassed."
+    - "If sageattention imports fail, disable/bypass SageAttention nodes before treating it as a hard blocker."
+
+verification:
+  after_install:
+    - "Start ComfyUI Desktop."
+    - "Open Workflow Overview for the WanBlend and WanWarp templates."
+    - "Missing Node Packs should be zero."
+    - "Missing Models should be zero."
+    - "Run WanBlend at low settings first: short max frames, low steps, CRF around 18-23."
+    - "Run WanWarp refine with a short input/reference video before a full render."
+    - "Confirm Newt Node can reach ComfyUI at http://127.0.0.1:8188."
+
+known_newt_outputs:
+  segment_clips:
+    description: "WanSegment/WanWarp temporary and final API outputs are mirrored into Newt workflow asset output folders."
+    typical_path: "workflow-assets/<project-id>/outputs"
+  comfy_outputs:
+    description: "ComfyUI also writes to its own output/temp folders depending on Video Combine settings."
+    typical_paths:
+      - "output"
+      - "temp"
+
+future_automation:
+  intended_use:
+    - "A future installer can read this manifest, ask for COMFYUI_ROOT, clone custom nodes, and download each model into target."
+    - "TBD source_url entries should be resolved by inspecting the known-good ComfyUI install or the custom node docs."

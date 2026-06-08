@@ -244,12 +244,13 @@ Local API routes should live in the smallest backend owner that fits the route. 
 
 ## ComfyUI Custom Workflow API Standards
 
-Some Newt features are local custom workflow integrations rather than direct hosted model calls. WanWarp is the current reference implementation: Newt presents a purpose-built node interface, then the backend patches and runs a locked ComfyUI API workflow.
+Some Newt features are local custom workflow integrations rather than direct hosted model calls. WanBlend and WanWarp are the current production reference implementations: Newt presents a purpose-built node interface, then the backend patches and runs locked ComfyUI API workflows.
 
 Use this pattern for future ComfyUI-backed custom builds.
 
 - Store each integration in a focused server folder such as `server/wanwarp/`.
 - Track the Comfy API prompt templates in `server/<integration>/templates/`. These are source fixtures, not runtime output. Keep large generated media and local Comfy output folders out of git.
+- Treat production-ready Comfy templates as backend contracts. Prototype workflow changes should branch into a new template file or integration mode before replacing a locked production template.
 - Include template metadata when useful, such as `templates/manifest.json`, so required models, custom nodes, output node ids, and workflow purpose are discoverable.
 - Keep all Comfy-specific patching server-side. Browser code should submit normalized node settings and local asset URLs, never raw Comfy graph internals or machine-local paths.
 - Use a single backend engine module to own template loading, prompt patching, Comfy queueing, polling, output copying, result shaping, and history append.

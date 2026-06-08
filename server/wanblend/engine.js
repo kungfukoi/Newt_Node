@@ -10,7 +10,18 @@ const comfyPollIntervalMs = 2000;
 const templatePath = new URL("./templates/context-smashing.json", import.meta.url);
 const outputNodeId = "37";
 const contextImageNodeIds = ["20", "21", "22", "23", "24", "25"];
+const contextScaleNodeIds = ["14", "15", "16", "17", "18", "19"];
 const ipAdapterNodeIds = ["2", "4", "5", "6", "7", "8"];
+const wanBlendImageSlotDefinitions = [
+  { channel: "red", label: "Red", maskIndex: 0 },
+  { channel: "green", label: "Green", maskIndex: 1 },
+  { channel: "blue", label: "Blue", maskIndex: 2 },
+  { channel: "cyan", label: "Cyan", maskIndex: 3 },
+  { channel: "magenta", label: "Magenta", maskIndex: 4 },
+  { channel: "yellow", label: "Yellow", maskIndex: 5 },
+  { channel: "black", label: "Black", maskIndex: 6 },
+  { channel: "white", label: "White", maskIndex: 7 }
+];
 
 const imageMimeTypes = new Map([
   [".jpg", "image/jpeg"],
@@ -32,11 +43,12 @@ export async function createWanBlendComfyResult({
   const requestId = randomUUID();
   const options = normalizeWanBlendOptions(body.wanBlend || {}, body);
   const promptText = String(prompt || body.prompt || "").trim() || options.positivePrompt || "4k";
-  const sourceImageUrls = referenceImageUrls.filter(Boolean);
+  const sourceImageSlots = normalizeContextImageSlots(options.imageSlots, referenceImageUrls);
+  const sourceImageUrls = sourceImageSlots.map((slot) => slot.url);
   const sourceVideoUrl = helpers.firstLocalOutput(referenceVideoUrls);
 
-  if (!sourceImageUrls.length) {
-    const error = new Error("WanBlend requires at least one connected context image. Six images are recommended for the RGB/CMY mask channels.");
+  if (!sourceImageSlots.length) {
+    const error = new Error("WanBlend requires at least one connected context image. Connect only the color-mask slots you want to use.");
     error.status = 400;
     throw error;
   }
@@ -49,16 +61,19 @@ export async function createWanBlendComfyResult({
 
   await assertComfyAvailable();
 
-  const imageUrls = normalizeContextImageUrls(sourceImageUrls);
-  const imageAssets = await Promise.all(imageUrls.map((url) => helpers.resolveLocalAssetPathFromUrl(url)));
+  const imageAssets = await Promise.all(sourceImageSlots.map((slot) => helpers.resolveLocalAssetPathFromUrl(slot.url)));
   const colorMapVideo = await helpers.resolveLocalAssetPathFromUrl(sourceVideoUrl);
   const imageNames = await Promise.all(imageAssets.map((asset) => uploadImageToComfy(asset.filePath, asset.fileName)));
+  const imageSlots = sourceImageSlots.map((slot, index) => ({
+    ...slot,
+    imageName: imageNames[index]
+  }));
 
   const comfyPrompt = await buildWanBlendPrompt({
     requestId,
     prompt: promptText,
     negativePrompt: options.negativePrompt,
-    imageNames,
+    imageSlots,
     colorMapVideoPath: colorMapVideo.filePath,
     options
   });
@@ -120,6 +135,7 @@ export async function createWanBlendComfyResult({
       comfyPromptId: queued.prompt_id || queued.promptId || "",
       outputNodeId,
       sourceImageCount: sourceImageUrls.length,
+      imageSlots: sourceImageSlots.map(({ channel, label, maskIndex }) => ({ channel, label, maskIndex })),
       colorMapVideoUrl: sourceVideoUrl,
       fps: options.fps,
       width: options.width,
@@ -160,15 +176,13 @@ async function buildWanBlendPrompt({
   requestId,
   prompt,
   negativePrompt,
-  imageNames,
+  imageSlots,
   colorMapVideoPath,
   options
 }) {
   const comfyPrompt = JSON.parse(await readFile(templatePath, "utf8"));
 
-  contextImageNodeIds.forEach((nodeId, index) => {
-    comfyPrompt[nodeId].inputs.image = imageNames[index];
-  });
+  patchWanBlendIpAdapterChain(comfyPrompt, imageSlots, options);
 
   comfyPrompt["10"].inputs.video = JSON.stringify(colorMapVideoPath);
   comfyPrompt["10"].inputs.frame_load_cap = options.frameLoadCap;
@@ -196,19 +210,89 @@ async function buildWanBlendPrompt({
   comfyPrompt["37"].inputs.crf = options.crf;
   comfyPrompt["37"].inputs.save_output = true;
 
-  ipAdapterNodeIds.forEach((nodeId) => {
-    comfyPrompt[nodeId].inputs.weight = options.ipAdapterWeight;
-    comfyPrompt[nodeId].inputs.start_at = options.ipAdapterStartAt;
-    comfyPrompt[nodeId].inputs.end_at = options.ipAdapterEndAt;
-  });
-
   return comfyPrompt;
 }
 
-function normalizeContextImageUrls(urls = []) {
-  const first = urls[0];
-  const last = urls[urls.length - 1] || first;
-  return Array.from({ length: contextImageNodeIds.length }, (_value, index) => urls[index] || last);
+function patchWanBlendIpAdapterChain(comfyPrompt, imageSlots = [], options = {}) {
+  const activeNodeIds = new Set();
+  let previousModel = ["3", 0];
+
+  imageSlots.forEach((slot, index) => {
+    const imageNodeId = contextImageNodeIds[index] || String(9000 + index);
+    const scaleNodeId = contextScaleNodeIds[index] || String(9020 + index);
+    const adapterNodeId = ipAdapterNodeIds[index] || String(9040 + index);
+    activeNodeIds.add(imageNodeId);
+    activeNodeIds.add(scaleNodeId);
+    activeNodeIds.add(adapterNodeId);
+
+    comfyPrompt[imageNodeId] = {
+      inputs: {
+        image: slot.imageName
+      },
+      class_type: "LoadImage"
+    };
+    comfyPrompt[scaleNodeId] = {
+      inputs: {
+        image: [imageNodeId, 0],
+        upscale_method: "bilinear",
+        megapixels: 0.56,
+        resolution_steps: 1
+      },
+      class_type: "ImageScaleToTotalPixels"
+    };
+    comfyPrompt[adapterNodeId] = {
+      inputs: {
+        model: previousModel,
+        ipadapter: ["3", 1],
+        image: [scaleNodeId, 0],
+        attn_mask: ["9", slot.maskIndex],
+        weight: options.ipAdapterWeight,
+        weight_type: "linear",
+        combine_embeds: "concat",
+        start_at: options.ipAdapterStartAt,
+        end_at: options.ipAdapterEndAt,
+        embeds_scaling: "V only"
+      },
+      class_type: "IPAdapterAdvanced"
+    };
+    previousModel = [adapterNodeId, 0];
+  });
+
+  comfyPrompt["30"].inputs.model = previousModel;
+
+  [...contextImageNodeIds, ...contextScaleNodeIds, ...ipAdapterNodeIds].forEach((nodeId) => {
+    if (!activeNodeIds.has(nodeId)) delete comfyPrompt[nodeId];
+  });
+}
+
+function normalizeContextImageSlots(rawSlots = [], fallbackUrls = []) {
+  const slotDefinitionsByChannel = new Map(wanBlendImageSlotDefinitions.map((slot) => [slot.channel, slot]));
+  const normalizedSlots = Array.isArray(rawSlots)
+    ? rawSlots
+        .map((item) => {
+          const channel = String(item?.channel || "").trim().toLowerCase();
+          const definition = slotDefinitionsByChannel.get(channel);
+          const url = String(item?.url || "").trim();
+          if (!definition || !isNewtLocalAssetUrl(url)) return null;
+          return {
+            channel: definition.channel,
+            label: definition.label,
+            maskIndex: definition.maskIndex,
+            url
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  if (normalizedSlots.length) return normalizedSlots;
+
+  return fallbackUrls
+    .filter(isNewtLocalAssetUrl)
+    .slice(0, wanBlendImageSlotDefinitions.length)
+    .map((url, index) => ({
+      ...wanBlendImageSlotDefinitions[index],
+      url
+    }));
 }
 
 function normalizeWanBlendOptions(options = {}, body = {}) {
@@ -235,6 +319,7 @@ function normalizeWanBlendOptions(options = {}, body = {}) {
     ipAdapterEndAt: clampNumber(options.ipAdapterEndAt, 0, 1, 1),
     motionLoraStrength: clampNumber(options.motionLoraStrength, 0, 10, 0.5),
     lcmLoraStrength: clampNumber(options.lcmLoraStrength, -100, 100, 0.1),
+    imageSlots: Array.isArray(options.imageSlots) ? options.imageSlots : [],
     samplerName,
     scheduler,
     seed
@@ -393,6 +478,18 @@ function formatComfyError(data) {
 function normalizeChoice(value, choices, fallback) {
   const normalized = String(value ?? "").trim();
   return choices.has(normalized) ? normalized : fallback;
+}
+
+function isNewtLocalAssetUrl(value) {
+  const raw = String(value || "").trim();
+  if (/^\/(?:uploads|outputs|workflow-assets)\//.test(raw)) return true;
+
+  try {
+    const parsed = new URL(raw, "http://localhost");
+    return /^\/(?:uploads|outputs|workflow-assets)\//.test(decodeURIComponent(parsed.pathname || ""));
+  } catch {
+    return false;
+  }
 }
 
 function optionalInteger(value) {

@@ -335,17 +335,14 @@ export async function createWanWarpBlendRefineResult({
   ]);
   const sourceFrameCount = videoFrameCountFromMetadata(wanBlendMetadata);
   const sourceFps = positiveNumber(wanBlendMetadata?.fps);
-  const options = normalizeWanBlendRefineOptions(body.videoStitch || {}, body, {
+  const options = normalizeWanBlendSampledCreatorOptions(body.videoStitch || {}, body, {
     sourceFrameCount,
-    sourceFps
-  });
-  validateControlVideoLength({
-    sourceFrameCount: options.length,
+    sourceFps,
     motionFrameCount: videoFrameCountFromMetadata(motionMetadata),
     depthFrameCount: videoFrameCountFromMetadata(depthMetadata)
   });
 
-  const comfyPrompt = await buildBlendRefineComfyPrompt({
+  const comfyPrompt = await buildSampledCreatorComfyPrompt({
     requestId,
     prompt: promptText,
     negativePrompt: options.negativePrompt,
@@ -365,7 +362,7 @@ export async function createWanWarpBlendRefineResult({
     throw error;
   }
 
-  const output = await helpers.createManagedAssetTarget({ body }, "wanwarp-blend-refine", "mp4", helpers.workflowPackageOutputDirName);
+  const output = await helpers.createManagedAssetTarget({ body }, "wanwarp-sampled-creator", "mp4", helpers.workflowPackageOutputDirName);
   await copyComfyVideoToOutput(comfyVideo, output.filePath);
   const [outputStats, metadata] = await Promise.all([
     stat(output.filePath),
@@ -374,7 +371,7 @@ export async function createWanWarpBlendRefineResult({
   const video = helpers.enrichVideoMetadata(
     {
       type: "video",
-      label: "WanWarp Blend Refine",
+      label: "WanWarp Sampled Creator",
       localUrl: output.publicPath,
       fileName: output.fileName,
       mimeType: "video/mp4",
@@ -382,7 +379,7 @@ export async function createWanWarpBlendRefineResult({
     },
     metadata
   );
-  const text = "WanWarp refined a WanBlend video with motion/depth control.";
+  const text = "WanWarp rebuilt a WanBlend video with sampled creator-style motion/depth segments.";
   const cost = {
     amountUsd: 0,
     currency: "USD",
@@ -400,8 +397,8 @@ export async function createWanWarpBlendRefineResult({
     mediaType: "video",
     provider: "local-comfyui",
     modelName: selectedVideoModel?.displayName || "WanWarp",
-    endpoint: "local/wanwarp/comfyui/wanblend-refine",
-    mode: "WanWarp WanBlend motion/depth refine",
+    endpoint: "local/wanwarp/comfyui/wanblend-sampled-creator",
+    mode: "WanWarp WanBlend sampled creator rebuild",
     prompt: promptText,
     submittedPrompt: promptText,
     project: helpers.projectFromBody(body),
@@ -420,18 +417,18 @@ export async function createWanWarpBlendRefineResult({
       width: options.width,
       height: options.height,
       length: options.length,
+      loop: options.loop,
+      sampledSegmentCount: options.sampledSegmentCount,
+      sampledFrameIndices: options.sampledFrameIndices,
+      controlRepeat: options.controlRepeat,
       samplerSteps: options.samplerSteps,
       samplerStepsToRun: options.samplerStepsToRun,
-      refineDenoise: options.refineDenoise,
-      controlBlend: options.controlBlend,
-      depthMotionBlend: options.depthMotionBlend,
-      vaceRefStrength: options.vaceRefStrength,
       conditioningStrength: options.conditioningStrength,
       strengthCurve: options.strengthCurve,
       strengthSchedule: options.strengthSchedule,
       loraStrengths: options.loraStrengths,
       crf: options.crf,
-      workflow: "wanblend-refine"
+      workflow: "wanblend-sampled-creator"
     },
     cost,
     localVideo: video.localUrl,
@@ -445,7 +442,7 @@ export async function createWanWarpBlendRefineResult({
 
   return {
     requestId,
-    endpoint: "local/wanwarp/comfyui/wanblend-refine",
+    endpoint: "local/wanwarp/comfyui/wanblend-sampled-creator",
     modelName: selectedVideoModel?.displayName || "WanWarp",
     text,
     cost,
@@ -858,6 +855,120 @@ async function buildFullComfyPrompt({
   return comfyPrompt;
 }
 
+async function buildSampledCreatorComfyPrompt({
+  requestId,
+  prompt,
+  negativePrompt,
+  options,
+  wanBlendVideoPath,
+  motionVideoPath,
+  depthVideoPath
+}) {
+  const comfyPrompt = JSON.parse(await readFile(fullTemplatePath, "utf8"));
+  const segment = {
+    prompt,
+    negativePrompt,
+    conditioningStrength: options.conditioningStrength,
+    strengthSchedule: options.strengthSchedule,
+    seed: options.seed
+  };
+
+  comfyPrompt["2969"].inputs.video = JSON.stringify(motionVideoPath);
+  comfyPrompt["2653"].inputs.video = JSON.stringify(depthVideoPath);
+  delete comfyPrompt["2969"].inputs.vae;
+  delete comfyPrompt["2653"].inputs.vae;
+  if (comfyPrompt["2919"]?.inputs) comfyPrompt["2919"].inputs.amount = options.controlRepeat;
+
+  patchFullSegment(comfyPrompt, "A", segment, {
+    positiveNodeId: "2564",
+    negativeNodeId: "3038",
+    conditioningNodeId: "2732",
+    scheduleNodeId: "2739",
+    seedNodeId: "2703",
+    refFirstNodeId: "2555",
+    refSecondNodeId: "2581"
+  });
+  patchFullSegment(comfyPrompt, "B", segment, {
+    positiveNodeId: "3647",
+    negativeNodeId: "3631",
+    conditioningNodeId: "3633",
+    scheduleNodeId: "3646",
+    seedNodeId: "3635",
+    refFirstNodeId: "3630",
+    refSecondNodeId: "3649"
+  });
+  patchFullSegment(comfyPrompt, "C", segment, {
+    positiveNodeId: "3785",
+    negativeNodeId: "3721",
+    conditioningNodeId: "3723",
+    scheduleNodeId: "3786",
+    seedNodeId: "3791",
+    refFirstNodeId: "3789",
+    refSecondNodeId: "3790"
+  });
+  if (options.loop) {
+    patchFullSegment(comfyPrompt, "D", segment, {
+      positiveNodeId: "3864",
+      negativeNodeId: "3865",
+      conditioningNodeId: "3869",
+      scheduleNodeId: "3866",
+      seedNodeId: "3867",
+      refFirstNodeId: "3858",
+      refSecondNodeId: "3859"
+    });
+  }
+
+  comfyPrompt["3143"].inputs.value = options.width;
+  comfyPrompt["3144"].inputs.value = options.height;
+  comfyPrompt["3145"].inputs.value = fullWorkflowRenderLength(options);
+  if (comfyPrompt["3415"]?.inputs) comfyPrompt["3415"].inputs.value = options.blendFrames;
+  if (comfyPrompt["3417"]?.inputs) comfyPrompt["3417"].inputs.value = options.keyTrimFrames;
+  patchFullWorkflowSamplerSettings(comfyPrompt, options);
+  patchLoraLoaderStrengths(comfyPrompt, options.loraStrengths);
+
+  const keyframeRefs = patchSampledWanBlendKeyframes(comfyPrompt, {
+    videoPath: wanBlendVideoPath,
+    frameIndices: options.sampledFrameIndices,
+    widthNodeId: "3143",
+    heightNodeId: "3144"
+  });
+
+  const openSegmentCount = options.loop ? Math.max(1, options.sampledSegmentCount - 1) : options.sampledSegmentCount;
+  let finalImages = sampledCreatorBaseOutputRef(openSegmentCount);
+  let previousSegmentOutput = sampledCreatorBaseSegmentOutputRef(Math.min(openSegmentCount - 1, 2));
+  for (let segmentIndex = 3; segmentIndex < openSegmentCount; segmentIndex += 1) {
+    const kind = segmentIndex % 2 === 1 ? "B" : "C";
+    const cloned = cloneSampledCreatorMiddleSegment(comfyPrompt, {
+      kind,
+      segmentIndex,
+      previousSegmentOutput,
+      keyframeRef: keyframeRefs[segmentIndex + 1],
+      seed: options.seed
+    });
+    finalImages = appendSampledCreatorBlend(comfyPrompt, {
+      segmentIndex,
+      currentOutput: finalImages,
+      nextSegmentOutput: cloned.output
+    });
+    previousSegmentOutput = cloned.output;
+  }
+  if (options.loop) {
+    finalImages = wireSampledCreatorLoopClose(comfyPrompt, {
+      currentOutput: finalImages,
+      previousSegmentOutput,
+      segmentCount: options.sampledSegmentCount
+    });
+  }
+
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.filename_prefix = `wanwarp-sampled-creator-${requestId}`;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.frame_rate = options.fps;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.crf = options.crf;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.save_output = true;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.images = finalImages;
+  sanitizeComfyPromptInputs(comfyPrompt);
+  return comfyPrompt;
+}
+
 async function buildBlendRefineComfyPrompt({
   requestId,
   prompt,
@@ -977,6 +1088,185 @@ function patchFullWorkflowWanBlendKeyframes(comfyPrompt, { videoPath, frameIndic
   delete comfyPrompt["3022"];
   delete comfyPrompt["3638"];
   delete comfyPrompt["3754"];
+}
+
+function patchSampledWanBlendKeyframes(comfyPrompt, { videoPath, frameIndices, widthNodeId, heightNodeId }) {
+  comfyPrompt["9200"] = {
+    inputs: {
+      video: JSON.stringify(videoPath),
+      force_rate: 0,
+      custom_width: 0,
+      custom_height: 0,
+      frame_load_cap: 0,
+      skip_first_frames: 0,
+      select_every_nth: 1,
+      format: "None"
+    },
+    class_type: "VHS_LoadVideoPath"
+  };
+  comfyPrompt["9201"] = {
+    inputs: {
+      image: ["9200", 0],
+      width: [widthNodeId, 0],
+      height: [heightNodeId, 0],
+      upscale_method: "lanczos",
+      crop: "center"
+    },
+    class_type: "ImageScale"
+  };
+
+  const refs = frameIndices.map((frameIndex, index) => {
+    const nodeId = String(9202 + index);
+    comfyPrompt[nodeId] = {
+      inputs: {
+        image: ["9201", 0],
+        start: Math.max(0, Math.round(Number(frameIndex) || 0)),
+        length: 1
+      },
+      class_type: "ImageFromBatch+"
+    };
+    return [nodeId, 0];
+  });
+
+  comfyPrompt["3035"].inputs.image = refs[0];
+  comfyPrompt["3023"].inputs.image = refs[1] || refs[0];
+  if (refs[2] && comfyPrompt["3641"]?.inputs) comfyPrompt["3641"].inputs.image = refs[2];
+  if (refs[3] && comfyPrompt["3727"]?.inputs) comfyPrompt["3727"].inputs.image = refs[3];
+
+  delete comfyPrompt["3021"];
+  delete comfyPrompt["3022"];
+  delete comfyPrompt["3638"];
+  delete comfyPrompt["3754"];
+  return refs;
+}
+
+const sampledCreatorMiddleSegmentTemplates = {
+  B: {
+    ids: ["3622", "3623", "3624", "3625", "3626", "3630", "3631", "3633", "3634", "3635", "3639", "3641", "3646", "3647", "3649", "3650", "3651", "3652", "3653", "3654", "3655", "3663", "3670", "3671", "3680", "3681", "3682", "3684", "3685", "3686", "3687"],
+    batchNodeId: "3651",
+    endRepeatNodeId: "3641",
+    seedNodeId: "3635",
+    outputNodeId: "3680"
+  },
+  C: {
+    ids: ["3713", "3714", "3715", "3716", "3717", "3721", "3723", "3724", "3726", "3727", "3731", "3732", "3733", "3734", "3735", "3736", "3740", "3747", "3753", "3755", "3758", "3761", "3764", "3766", "3767", "3770", "3784", "3785", "3786", "3789", "3790", "3791", "3792", "3793"],
+    batchNodeId: "3732",
+    endRepeatNodeId: "3727",
+    prevTailNodeId: "3766",
+    seedNodeId: "3791",
+    outputNodeId: "3753"
+  }
+};
+
+function cloneSampledCreatorMiddleSegment(comfyPrompt, { kind, segmentIndex, previousSegmentOutput, keyframeRef, seed }) {
+  const template = sampledCreatorMiddleSegmentTemplates[kind] || sampledCreatorMiddleSegmentTemplates.B;
+  const idBase = 10000 + segmentIndex * 100;
+  const idMap = new Map(template.ids.map((id, index) => [id, String(idBase + index)]));
+  for (const id of template.ids) {
+    const sourceNode = comfyPrompt[id];
+    if (!sourceNode) continue;
+    const clonedNode = remapComfyNodeLinks(JSON.parse(JSON.stringify(sourceNode)), idMap);
+    comfyPrompt[idMap.get(id)] = clonedNode;
+  }
+
+  const prevTailNodeId = String(idBase + 90);
+  comfyPrompt[prevTailNodeId] = {
+    inputs: {
+      image: previousSegmentOutput,
+      start: ["3793", 0],
+      length: ["3682", 0]
+    },
+    class_type: "ImageFromBatch+"
+  };
+
+  const batchNode = comfyPrompt[idMap.get(template.batchNodeId)];
+  if (batchNode?.inputs) batchNode.inputs["images.image0"] = [prevTailNodeId, 0];
+
+  const endRepeatNode = comfyPrompt[idMap.get(template.endRepeatNodeId)];
+  if (endRepeatNode?.inputs) endRepeatNode.inputs.image = keyframeRef;
+
+  const seedNode = comfyPrompt[idMap.get(template.seedNodeId)];
+  const seedValue = optionalInteger(seed);
+  if (seedNode?.inputs && seedValue !== undefined) seedNode.inputs.value = seedValue + segmentIndex;
+
+  return {
+    output: [idMap.get(template.outputNodeId), 0],
+    outputNodeId: idMap.get(template.outputNodeId)
+  };
+}
+
+function appendSampledCreatorBlend(comfyPrompt, { segmentIndex, currentOutput, nextSegmentOutput }) {
+  const idBase = 11000 + segmentIndex * 10;
+  const countNodeId = String(idBase);
+  const lengthNodeId = String(idBase + 1);
+  const trimNodeId = String(idBase + 2);
+  const blendNodeId = String(idBase + 3);
+  comfyPrompt[countNodeId] = {
+    inputs: {
+      images: currentOutput
+    },
+    class_type: "VHS_GetImageCount"
+  };
+  comfyPrompt[lengthNodeId] = {
+    inputs: {
+      "variables.a": [countNodeId, 0],
+      "variables.b": ["3417", 0],
+      expression: "a-b"
+    },
+    class_type: "SimpleCalculatorKJ"
+  };
+  comfyPrompt[trimNodeId] = {
+    inputs: {
+      image: currentOutput,
+      length: [lengthNodeId, 1],
+      start: 0
+    },
+    class_type: "ImageFromBatch+"
+  };
+  comfyPrompt[blendNodeId] = {
+    inputs: {
+      video_1: [trimNodeId, 0],
+      video_2: nextSegmentOutput,
+      overlap_frames: ["3415", 0]
+    },
+    class_type: "WanVideoBlender"
+  };
+  return [blendNodeId, 0];
+}
+
+function wireSampledCreatorLoopClose(comfyPrompt, { currentOutput, previousSegmentOutput, segmentCount }) {
+  if (comfyPrompt["3844"]?.inputs) comfyPrompt["3844"].inputs.image = previousSegmentOutput;
+  if (comfyPrompt["3404"]?.inputs) comfyPrompt["3404"].inputs.image = currentOutput;
+  if (comfyPrompt["3406"]?.inputs) comfyPrompt["3406"].inputs.images = currentOutput;
+  if (comfyPrompt["3416"]?.inputs) comfyPrompt["3416"].inputs.value = Math.max(2, Math.round(Number(segmentCount) || 2));
+  return ["3412", 0];
+}
+
+function sampledCreatorBaseOutputRef(segmentCount) {
+  if (segmentCount <= 1) return ["2559", 0];
+  if (segmentCount === 2) return ["3133", 0];
+  return ["3339", 0];
+}
+
+function sampledCreatorBaseSegmentOutputRef(segmentIndex) {
+  if (segmentIndex <= 0) return ["2559", 0];
+  if (segmentIndex === 1) return ["3680", 0];
+  return ["3753", 0];
+}
+
+function remapComfyNodeLinks(value, idMap) {
+  if (Array.isArray(value)) {
+    if (value.length === 2 && typeof value[0] === "string" && idMap.has(value[0])) {
+      return [idMap.get(value[0]), value[1]];
+    }
+    return value.map((item) => remapComfyNodeLinks(item, idMap));
+  }
+  if (value && typeof value === "object") {
+    for (const [key, next] of Object.entries(value)) {
+      value[key] = remapComfyNodeLinks(next, idMap);
+    }
+  }
+  return value;
 }
 
 function patchFullWorkflowSamplerSettings(comfyPrompt, options) {
@@ -1394,6 +1684,70 @@ function normalizeWanWarpOptions(options = {}, body = {}) {
   };
 }
 
+function normalizeWanBlendSampledCreatorOptions(stitchOptions = {}, body = {}, sourceMetadata = {}) {
+  const base = normalizeWanWarpOptions(body.transitionBuilder || {}, body);
+  const loop = Boolean(stitchOptions.loop);
+  const sourceFrameLimit = clampInteger(stitchOptions.frameLoadCap, 0, 4096, 0);
+  const probedFrameCount = clampInteger(sourceMetadata.sourceFrameCount, 0, 4096, 0);
+  const sourceFrameCount = probedFrameCount
+    ? (sourceFrameLimit ? Math.min(probedFrameCount, sourceFrameLimit) : probedFrameCount)
+    : sourceFrameLimit || base.length;
+  const segmentLength = clampInteger(stitchOptions.segmentLength ?? base.length, 9, 241, 57);
+  const requestedSegmentCount = clampInteger(stitchOptions.sampledSegmentCount, 0, 48, 0);
+  const minimumSegmentCount = loop ? 2 : 1;
+  const sampledSegmentCount = clampInteger(
+    requestedSegmentCount || Math.ceil(Math.max(1, sourceFrameCount) / segmentLength),
+    minimumSegmentCount,
+    48,
+    minimumSegmentCount
+  );
+  const sampledFrameIndices = sampledWanBlendFrameIndices(sourceFrameCount, sampledSegmentCount, loop);
+  const strengthCurve = normalizeStrengthCurvePoints(stitchOptions.strengthCurve);
+  const motionFrameCount = videoFrameCountFromMetadata({ num_frames: sourceMetadata.motionFrameCount });
+  const depthFrameCount = videoFrameCountFromMetadata({ num_frames: sourceMetadata.depthFrameCount });
+  const shortestControlCount = [motionFrameCount, depthFrameCount].filter(Boolean).sort((a, b) => a - b)[0] || segmentLength;
+  const controlRepeat = Math.max(2, Math.ceil((segmentLength + 48) / Math.max(1, shortestControlCount)));
+  const samplerSteps = clampInteger(stitchOptions.samplerSteps, 1, 200, base.samplerSteps);
+  const samplerStepsToRun = clampInteger(stitchOptions.samplerStepsToRun, 1, samplerSteps, Math.min(base.samplerStepsToRun, samplerSteps));
+
+  return {
+    ...base,
+    fps: base.fps,
+    length: segmentLength,
+    sourceFrameCount,
+    loop,
+    sampledSegmentCount,
+    sampledFrameIndices,
+    controlRepeat,
+    negativePrompt: String(stitchOptions.negativePrompt || base.negativePrompt || ""),
+    samplerSteps,
+    samplerStepsToRun,
+    conditioningStrength: clampNumber(stitchOptions.conditioningStrength, 0, 1, base.conditioningStrength),
+    strengthCurve,
+    strengthSchedule: strengthCurve
+      ? strengthScheduleFromCurve(strengthCurve, segmentLength)
+      : normalizeStrengthScheduleForFrameCount(stitchOptions.strengthSchedule, segmentLength, base.strengthSchedule),
+    crf: clampInteger(stitchOptions.crf, 0, 51, base.crf),
+    loraStrengths: {
+      distillHigh: clampNumber(stitchOptions.distillLoraHigh, 0, 5, base.loraStrengths.distillHigh),
+      distillLow: clampNumber(stitchOptions.distillLoraLow, 0, 5, base.loraStrengths.distillLow),
+      motionHigh: clampNumber(stitchOptions.motionLoraHigh, 0, 5, base.loraStrengths.motionHigh),
+      motionLow: clampNumber(stitchOptions.motionLoraLow, 0, 5, base.loraStrengths.motionLow)
+    }
+  };
+}
+
+function sampledWanBlendFrameIndices(sourceFrameCount, segmentCount, loop = false) {
+  const count = Math.max(1, Math.round(Number(segmentCount) || 1));
+  const lastFrame = Math.max(0, Math.round(Number(sourceFrameCount) || 1) - 1);
+  if (loop) {
+    const frameCount = Math.max(1, Math.round(Number(sourceFrameCount) || 1));
+    return Array.from({ length: count }, (_, index) => Math.min(lastFrame, Math.round(index * frameCount / count)));
+  }
+  if (count === 1) return [0, lastFrame];
+  return Array.from({ length: count + 1 }, (_, index) => Math.round(index * lastFrame / count));
+}
+
 function normalizeWanBlendRefineOptions(stitchOptions = {}, body = {}, sourceMetadata = {}) {
   const base = normalizeWanWarpOptions(body.transitionBuilder || {}, body);
   const samplerSteps = clampInteger(stitchOptions.samplerSteps, 1, 200, creatorDefaultSamplerSteps);
@@ -1403,12 +1757,11 @@ function normalizeWanBlendRefineOptions(stitchOptions = {}, body = {}, sourceMet
   const sourceFrameCount = probedFrameCount
     ? (requestedFrameLoadCap ? Math.min(probedFrameCount, requestedFrameLoadCap) : probedFrameCount)
     : requestedFrameLoadCap || base.length;
-  const sourceFps = clampInteger(sourceMetadata.sourceFps, 4, 60, base.fps);
   const defaultStrengthSchedule = defaultWanBlendRefineStrengthSchedule(sourceFrameCount);
   const strengthCurve = normalizeStrengthCurvePoints(stitchOptions.strengthCurve);
   return {
     ...base,
-    fps: sourceFps,
+    fps: base.fps,
     length: sourceFrameCount,
     negativePrompt: String(stitchOptions.negativePrompt || base.negativePrompt || ""),
     samplerSteps,

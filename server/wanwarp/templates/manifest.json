@@ -1,6 +1,6 @@
 {
   "name": "WanFlow",
-  "status": "locked-local-engine",
+  "status": "production-ready-local-engine",
   "workflow_json": "D:\\_AI\\Comfyui_1_0_4\\ComfyUI\\user\\default\\workflows\\260415-wan22animdiff-07_rev1_FULL-WORKFLOW-CREATOR-EXACT-OUR-IMAGES-PROMPTS.json",
   "api_prompts": {
     "segment_a": "C:\\dev\\comfy_api_prompt_creator_locked_seg_a.json",

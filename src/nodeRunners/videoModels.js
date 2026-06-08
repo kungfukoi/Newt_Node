@@ -1,5 +1,9 @@
 import { workflowContextPayload } from "../workflowContext.js";
 
+function defaultedField(value, fallback) {
+  return value === "" || value === undefined || value === null ? fallback : value;
+}
+
 export function buildVideoGenerationRequest({
   node,
   prompt,
@@ -73,6 +77,7 @@ export function buildUtilityVideoRequest({
   startFrameUrls = [],
   endFrameUrls = [],
   referenceImageUrls = [],
+  wanBlendImageSlots = [],
   referenceVideoUrls = [],
   controlVideoUrls = [],
   startFrameVideoUrls = [],
@@ -121,11 +126,12 @@ export function buildUtilityVideoRequest({
       height: node.data.wanBlendHeight || 512,
       fps: node.data.wanBlendFps || 24,
       steps: node.data.wanBlendSteps || 11,
-      cfg: node.data.wanBlendCfg || 1.2,
+      cfg: defaultedField(node.data.wanBlendCfg, 1.2),
       ipAdapterWeight: node.data.wanBlendIpAdapterWeight ?? 1,
       selectEveryNth: node.data.wanBlendSelectEveryNth || 2,
       frameLoadCap: node.data.wanBlendFrameLoadCap ?? 0,
       crf: node.data.wanBlendCrf ?? 19,
+      imageSlots: wanBlendImageSlots,
       seed: node.data.seed || ""
     },
     videoStitch,

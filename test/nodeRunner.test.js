@@ -377,6 +377,7 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
       { x: 1, y: 0.4, mode: "ease" }
     ],
     strengthSchedule: "0.42, 0.58#20, 0.42",
+    sampledSegmentCount: 4,
     frameLoadCap: 57,
     wanWarpSegments
   };
@@ -385,7 +386,8 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
     node: {
       id: "utility-wanwarp",
       data: {
-        title: "WanWarp"
+        title: "WanWarp",
+        transitionWanFps: 18
       }
     },
     prompt: "",
@@ -422,7 +424,9 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
     { x: 1, y: 0.4, mode: "ease" }
   ]);
   assert.equal(request.videoStitch.strengthSchedule, "0.42, 0.58#20, 0.42");
+  assert.equal(request.videoStitch.sampledSegmentCount, 4);
   assert.equal(request.videoStitch.frameLoadCap, 57);
+  assert.equal(request.transitionBuilder.wanFps, 18);
   assert.deepEqual(request.controlVideoUrls, ["/uploads/motion-map.mp4"]);
 });
 
@@ -452,6 +456,11 @@ test("buildUtilityVideoRequest preserves WanBlend Comfy controls", () => {
     projectId: "project",
     projectName: "Project",
     referenceImageUrls: ["/uploads/red.png", "/uploads/green.png"],
+    wanBlendImageSlots: [
+      { channel: "red", label: "Red", maskIndex: 0, url: "/uploads/red.png" },
+      { channel: "black", label: "Black", maskIndex: 6, url: "/uploads/black.png" },
+      { channel: "white", label: "White", maskIndex: 7, url: "/uploads/white.png" }
+    ],
     referenceVideoUrls: ["/uploads/color-map.mp4"]
   });
 
@@ -466,6 +475,47 @@ test("buildUtilityVideoRequest preserves WanBlend Comfy controls", () => {
   assert.equal(request.wanBlend.frameLoadCap, 72);
   assert.equal(request.wanBlend.crf, 17);
   assert.equal(request.wanBlend.seed, "1357");
+  assert.deepEqual(request.wanBlend.imageSlots, [
+    { channel: "red", label: "Red", maskIndex: 0, url: "/uploads/red.png" },
+    { channel: "black", label: "Black", maskIndex: 6, url: "/uploads/black.png" },
+    { channel: "white", label: "White", maskIndex: 7, url: "/uploads/white.png" }
+  ]);
+});
+
+test("buildUtilityVideoRequest preserves WanBlend CFG edge values", () => {
+  const zeroCfgRequest = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wanblend-zero-cfg",
+      data: {
+        title: "WanBlend",
+        utilityVideoModel: "WanBlend",
+        wanBlendCfg: 0
+      }
+    },
+    prompt: "attention masked blend",
+    model: "WanBlend",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project"
+  });
+  const emptyCfgRequest = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wanblend-empty-cfg",
+      data: {
+        title: "WanBlend",
+        utilityVideoModel: "WanBlend",
+        wanBlendCfg: ""
+      }
+    },
+    prompt: "attention masked blend",
+    model: "WanBlend",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project"
+  });
+
+  assert.equal(zeroCfgRequest.wanBlend.cfg, 0);
+  assert.equal(emptyCfgRequest.wanBlend.cfg, 1.2);
 });
 
 test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {

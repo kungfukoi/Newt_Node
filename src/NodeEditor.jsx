@@ -268,12 +268,14 @@ const portColors = {
 };
 
 const wanBlendImageSlots = [
-  { id: "wanBlendRedImageIn", label: "Red", shortLabel: "R", color: "#ff3b30" },
-  { id: "wanBlendGreenImageIn", label: "Green", shortLabel: "G", color: "#34c759" },
-  { id: "wanBlendBlueImageIn", label: "Blue", shortLabel: "B", color: "#3d85ff" },
-  { id: "wanBlendCyanImageIn", label: "Cyan", shortLabel: "C", color: "#32d7d7" },
-  { id: "wanBlendMagentaImageIn", label: "Magenta", shortLabel: "M", color: "#ff4fb3" },
-  { id: "wanBlendYellowImageIn", label: "Yellow", shortLabel: "Y", color: "#f0c83b" }
+  { id: "wanBlendRedImageIn", channel: "red", label: "Red", shortLabel: "R", color: "#ff3b30", maskIndex: 0 },
+  { id: "wanBlendGreenImageIn", channel: "green", label: "Green", shortLabel: "G", color: "#34c759", maskIndex: 1 },
+  { id: "wanBlendBlueImageIn", channel: "blue", label: "Blue", shortLabel: "B", color: "#3d85ff", maskIndex: 2 },
+  { id: "wanBlendCyanImageIn", channel: "cyan", label: "Cyan", shortLabel: "C", color: "#32d7d7", maskIndex: 3 },
+  { id: "wanBlendMagentaImageIn", channel: "magenta", label: "Magenta", shortLabel: "M", color: "#ff4fb3", maskIndex: 4 },
+  { id: "wanBlendYellowImageIn", channel: "yellow", label: "Yellow", shortLabel: "Y", color: "#f0c83b", maskIndex: 5 },
+  { id: "wanBlendBlackImageIn", channel: "black", label: "Black", shortLabel: "Blk", color: "#050505", maskIndex: 6 },
+  { id: "wanBlendWhiteImageIn", channel: "white", label: "White", shortLabel: "Wht", color: "#f8fafc", maskIndex: 7 }
 ];
 const wanBlendImagePortIds = wanBlendImageSlots.map((slot) => slot.id);
 const utilityImageInputPortIds = ["startFrameIn", "endFrameIn", "imageIn", "referenceImageIn", ...wanBlendImagePortIds];
@@ -6767,6 +6769,10 @@ function CompositeVideoControls({ incoming, maskVideoPort, settingsOpen, node, o
 
 function WanBlendControls({ incoming, wanBlendImagePorts = [], settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const imageCount = wanBlendConnectedImageCount(incoming);
+  const wanBlendCfgValue = node.data.wanBlendCfg ?? 1.2;
+  const commitWanBlendCfg = (event) => {
+    onUpdate(node.id, { wanBlendCfg: clampedNumber(event.currentTarget.value, 0, 20, 1.2) });
+  };
 
   return (
     <>
@@ -6789,7 +6795,7 @@ function WanBlendControls({ incoming, wanBlendImagePorts = [], settingsOpen, nod
             </NodeRow>
           );
         })}
-        <div className="utility-mini-note wanblend-slot-note">{imageCount ? `${imageCount}/6 image slot${imageCount === 1 ? "" : "s"} connected` : "Connect images to the matching color-mask slots."}</div>
+        <div className="utility-mini-note wanblend-slot-note">{imageCount ? `${imageCount}/${wanBlendImageSlots.length} image slot${imageCount === 1 ? "" : "s"} connected` : "Connect images to the matching color-mask slots."}</div>
       </div>
       <NodeRow label="Negative">
         <textarea value={node.data.wanBlendNegativePrompt || "nsfw, nude"} onChange={(event) => onUpdate(node.id, { wanBlendNegativePrompt: event.target.value })} />
@@ -6807,7 +6813,7 @@ function WanBlendControls({ incoming, wanBlendImagePorts = [], settingsOpen, nod
         <input type="number" min="1" max="100" value={node.data.wanBlendSteps || 11} onChange={(event) => onUpdate(node.id, { wanBlendSteps: event.target.value })} />
       </NodeRow>
       <NodeRow label="CFG">
-        <input type="number" min="0" max="20" step="0.1" value={node.data.wanBlendCfg || 1.2} onChange={(event) => onUpdate(node.id, { wanBlendCfg: event.target.value })} />
+        <input inputMode="decimal" value={wanBlendCfgValue} onChange={(event) => onUpdate(node.id, { wanBlendCfg: event.target.value })} onBlur={commitWanBlendCfg} />
       </NodeRow>
       <NodeRow label="IP Weight">
         <input type="number" min="-1" max="5" step="0.05" value={node.data.wanBlendIpAdapterWeight ?? 1} onChange={(event) => onUpdate(node.id, { wanBlendIpAdapterWeight: event.target.value })} />
@@ -7044,47 +7050,52 @@ function VideoStitchControls({ incoming, promptPort, promptValue, promptConnecte
       <NodeRow label="Blend Ref">
         <div className="utility-mini-note">{referenceVideoCount ? `${referenceVideoCount} video${referenceVideoCount === 1 ? "" : "s"} connected${wanBlendCount ? `, ${wanBlendCount} from WanBlend` : ""}` : "Connect WanBlend output."}</div>
       </NodeRow>
+      {isWanBlendRefineMode && (
+        <NodeRow label="Segments">
+          <input type="number" min="0" max="48" value={node.data.videoStitchSampledSegmentCount ?? ""} onChange={(event) => onUpdate(node.id, { videoStitchSampledSegmentCount: event.target.value })} placeholder="Auto" />
+        </NodeRow>
+      )}
       {referenceVideoCount > 0 && !isWanBlendRefineMode && (
         <NodeRow label="Keyframes">
           <input value={node.data.videoStitchWanBlendFrameIndices || "0,17,35,52"} onChange={(event) => onUpdate(node.id, { videoStitchWanBlendFrameIndices: event.target.value })} />
         </NodeRow>
       )}
-      {!isWanBlendRefineMode && (
-        <>
-          <NodeRow label="Loop">
-            <button className={`node-toggle ${node.data.videoStitchLoop ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { videoStitchLoop: !node.data.videoStitchLoop })}>
-              <span />
-            </button>
-          </NodeRow>
-          <NodeRow label="Frames">
-            <input type="number" min="1" max="241" value={node.data.transitionWanNumFrames || 57} onChange={(event) => onUpdate(node.id, { transitionWanNumFrames: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Tail Trim">
-            <input type="number" min="0" max="24" value={node.data.videoStitchKeyTrimFrames ?? 5} onChange={(event) => onUpdate(node.id, { videoStitchKeyTrimFrames: event.target.value })} />
-          </NodeRow>
-          <NodeRow label="Blend">
-            <input type="number" min="1" max="24" value={node.data.videoStitchBlendFrames ?? 4} onChange={(event) => onUpdate(node.id, { videoStitchBlendFrames: event.target.value })} />
-          </NodeRow>
-        </>
-      )}
+      <NodeRow label="Loop">
+        <button className={`node-toggle ${node.data.videoStitchLoop ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { videoStitchLoop: !node.data.videoStitchLoop })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label={isWanBlendRefineMode ? "Chunk Frames" : "Frames"}>
+        <input type="number" min="1" max="241" value={node.data.transitionWanNumFrames || 57} onChange={(event) => onUpdate(node.id, { transitionWanNumFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Tail Trim">
+        <input type="number" min="0" max="24" value={node.data.videoStitchKeyTrimFrames ?? 5} onChange={(event) => onUpdate(node.id, { videoStitchKeyTrimFrames: event.target.value })} />
+      </NodeRow>
+      <NodeRow label="Blend">
+        <input type="number" min="1" max="24" value={node.data.videoStitchBlendFrames ?? 4} onChange={(event) => onUpdate(node.id, { videoStitchBlendFrames: event.target.value })} />
+      </NodeRow>
       <NodeRow label="Steps">
         <div className="inline-two-fields">
           <input type="number" min="1" max="200" value={node.data.videoStitchSamplerSteps ?? 2} onChange={(event) => onUpdate(node.id, { videoStitchSamplerSteps: event.target.value })} title="Sampler steps" />
           <input type="number" min="1" max="200" value={node.data.videoStitchSamplerStepsToRun ?? 1} onChange={(event) => onUpdate(node.id, { videoStitchSamplerStepsToRun: event.target.value })} title="Sampler steps to run" />
         </div>
       </NodeRow>
-      <NodeRow label="Denoise">
-        <input type="number" min="0" max="1" step="0.05" value={node.data.videoStitchRefineDenoise ?? 0.3} onChange={(event) => onUpdate(node.id, { videoStitchRefineDenoise: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Control Mix">
-        <input type="number" min="0" max="1" step="0.01" value={node.data.videoStitchControlBlend ?? 0.05} onChange={(event) => onUpdate(node.id, { videoStitchControlBlend: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Depth/Motion">
-        <input type="number" min="0" max="1" step="0.01" value={node.data.videoStitchDepthMotionBlend ?? 0.04} onChange={(event) => onUpdate(node.id, { videoStitchDepthMotionBlend: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Ref Strength">
-        <input type="number" min="0" max="2" step="0.05" value={node.data.videoStitchVaceRefStrength ?? 1} onChange={(event) => onUpdate(node.id, { videoStitchVaceRefStrength: event.target.value })} />
-      </NodeRow>
+      {!isWanBlendRefineMode && (
+        <>
+          <NodeRow label="Denoise">
+            <input type="number" min="0" max="1" step="0.05" value={node.data.videoStitchRefineDenoise ?? 0.3} onChange={(event) => onUpdate(node.id, { videoStitchRefineDenoise: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Control Mix">
+            <input type="number" min="0" max="1" step="0.01" value={node.data.videoStitchControlBlend ?? 0.05} onChange={(event) => onUpdate(node.id, { videoStitchControlBlend: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Depth/Motion">
+            <input type="number" min="0" max="1" step="0.01" value={node.data.videoStitchDepthMotionBlend ?? 0.04} onChange={(event) => onUpdate(node.id, { videoStitchDepthMotionBlend: event.target.value })} />
+          </NodeRow>
+          <NodeRow label="Ref Strength">
+            <input type="number" min="0" max="2" step="0.05" value={node.data.videoStitchVaceRefStrength ?? 1} onChange={(event) => onUpdate(node.id, { videoStitchVaceRefStrength: event.target.value })} />
+          </NodeRow>
+        </>
+      )}
       <NodeRow label="Cond Strength">
         <input type="number" min="0" max="1" step="0.05" value={node.data.videoStitchConditioningStrength ?? 0.6} onChange={(event) => onUpdate(node.id, { videoStitchConditioningStrength: event.target.value })} />
       </NodeRow>
@@ -7094,11 +7105,9 @@ function VideoStitchControls({ incoming, promptPort, promptValue, promptConnecte
       <NodeRow label="Frame Cap">
         <input type="number" min="0" max="4096" value={node.data.videoStitchFrameLoadCap ?? 0} onChange={(event) => onUpdate(node.id, { videoStitchFrameLoadCap: event.target.value })} />
       </NodeRow>
-      {!isWanBlendRefineMode && (
-        <NodeRow label="FPS">
-          <input type="number" min="4" max="60" value={node.data.transitionWanFps || 16} onChange={(event) => onUpdate(node.id, { transitionWanFps: event.target.value })} />
-        </NodeRow>
-      )}
+      <NodeRow label="FPS">
+        <input type="number" min="4" max="60" value={node.data.transitionWanFps || 16} onChange={(event) => onUpdate(node.id, { transitionWanFps: event.target.value })} />
+      </NodeRow>
       <NodeRow label="Size">
         <div className="inline-two-fields">
           <input type="number" min="128" max="2048" step="8" value={node.data.transitionWidth || 512} onChange={(event) => onUpdate(node.id, { transitionWidth: event.target.value })} />
@@ -8303,6 +8312,7 @@ function createDefaultNodeData(type, label, count) {
       videoStitchConditioningStrength: 0.6,
       videoStitchStrengthCurve: defaultVaceStrengthCurve,
       videoStitchStrengthSchedule: "0.45, 0.55#13, 0.45",
+      videoStitchSampledSegmentCount: "",
       videoStitchFrameLoadCap: 0,
       videoStitchDistillLoraHigh: 2,
       videoStitchDistillLoraLow: 1,
@@ -8960,6 +8970,7 @@ function utilityVideoModelSelectionPatch(model) {
       videoStitchConditioningStrength: 0.6,
       videoStitchStrengthCurve: defaultVaceStrengthCurve,
       videoStitchStrengthSchedule: "0.45, 0.55#13, 0.45",
+      videoStitchSampledSegmentCount: "",
       videoStitchFrameLoadCap: 0,
       videoStitchDistillLoraHigh: 2,
       videoStitchDistillLoraLow: 1,
@@ -9298,10 +9309,25 @@ function connectedAssetUrlsByType(items = [], type) {
 }
 
 function wanBlendInputImageUrls(incoming = {}) {
-  const slotUrls = wanBlendImageSlots
-    .map((slot) => connectedAssetUrlsByType(incoming[slot.id], "image").at(-1) || "")
-    .filter(Boolean);
+  const slotUrls = wanBlendInputImageSlots(incoming).map((slot) => slot.url);
   return slotUrls.length ? slotUrls : connectedAssetUrlsByType(incoming.referenceImageIn, "image");
+}
+
+function wanBlendInputImageSlots(incoming = {}) {
+  return wanBlendImageSlots
+    .map((slot) => {
+      const url = connectedAssetUrlsByType(incoming[slot.id], "image").at(-1) || "";
+      return url
+        ? {
+            id: slot.id,
+            channel: slot.channel,
+            label: slot.label,
+            maskIndex: slot.maskIndex,
+            url
+          }
+        : null;
+    })
+    .filter(Boolean);
 }
 
 function wanBlendConnectedImageCount(incoming = {}) {
@@ -9921,6 +9947,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
   const wanWarpReferenceVideoUrls = isWanWarp ? connectedAssetUrlsByType(incoming.referenceVideoIn, "video") : [];
   const wanWarpMotionVideoUrl = isWanWarp ? connectedAssetUrlsByType(incoming.controlVideoIn, "video").at(-1) || "" : "";
   const wanWarpDepthVideoUrl = isWanWarp ? connectedAssetUrlsByType(incoming.maskVideoIn, "video").at(-1) || "" : "";
+  const wanBlendImageSlots = isUtilityWanBlendModel(model) ? wanBlendInputImageSlots(incoming) : [];
   const referenceImageUrls = isUtilityTransitionBuilderModel(model)
     ? wanWarpInputImageUrlsForNode(node, incoming)
     : isUtilityWanBlendModel(model)
@@ -9936,6 +9963,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     startFrameUrls,
     endFrameUrls,
     referenceImageUrls,
+    wanBlendImageSlots,
     startFrameVideoUrls,
     referenceVideoUrls: wanWarpSegments.length ? wanBlendVideoUrls : connectedAssetUrls(incoming.referenceVideoIn),
     controlVideoUrls: connectedAssetUrls(incoming.controlVideoIn),
@@ -9983,6 +10011,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
       conditioningStrength: node.data.videoStitchConditioningStrength ?? 0.6,
       strengthCurve: normalizeVaceStrengthCurve(node.data.videoStitchStrengthCurve),
       strengthSchedule: node.data.videoStitchStrengthSchedule || "0.45, 0.55#13, 0.45",
+      sampledSegmentCount: node.data.videoStitchSampledSegmentCount ?? "",
       frameLoadCap: node.data.videoStitchFrameLoadCap ?? 0,
       wanBlendVideoUrl: wanBlendVideoUrls.at(-1) || wanWarpReferenceVideoUrls.at(-1) || "",
       motionVideoUrl: wanWarpMotionVideoUrl,
@@ -10549,6 +10578,18 @@ function finiteNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function clampedNumber(value, min, max, fallback) {
+  if (value === "" || value === undefined || value === null) return fallback;
+  return Math.max(min, Math.min(max, finiteNumber(value, fallback)));
+}
+
+function clampedOptionalInteger(value, min, max) {
+  if (value === "" || value === undefined || value === null) return "";
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return "";
+  return Math.max(min, Math.min(max, number));
+}
+
 function normalizeVoidVideoFrameCount(value) {
   const numeric = Number.parseInt(value, 10);
   const target = Number.isFinite(numeric) ? numeric : 85;
@@ -10866,7 +10907,7 @@ function normalizeUtilityData(data = {}) {
     wanBlendHeight: Math.max(128, Math.min(2048, Math.round(Number(data.wanBlendHeight || 512)))),
     wanBlendFps: Math.max(1, Math.min(60, Math.round(Number(data.wanBlendFps || 24)))),
     wanBlendSteps: Math.max(1, Math.min(100, Math.round(Number(data.wanBlendSteps || 11)))),
-    wanBlendCfg: Math.max(0, Math.min(20, Number(data.wanBlendCfg || 1.2))),
+    wanBlendCfg: clampedNumber(data.wanBlendCfg, 0, 20, 1.2),
     wanBlendIpAdapterWeight: Math.max(-1, Math.min(5, Number(data.wanBlendIpAdapterWeight ?? 1))),
     wanBlendSelectEveryNth: Math.max(1, Math.min(120, Math.round(Number(data.wanBlendSelectEveryNth || 2)))),
     wanBlendFrameLoadCap: Math.max(0, Math.min(4096, Math.round(Number(data.wanBlendFrameLoadCap ?? 0)))),
@@ -10882,6 +10923,7 @@ function normalizeUtilityData(data = {}) {
     videoStitchConditioningStrength: Math.max(0, Math.min(1, Number(data.videoStitchConditioningStrength ?? 0.6))),
     videoStitchStrengthCurve: normalizeVaceStrengthCurve(data.videoStitchStrengthCurve),
     videoStitchStrengthSchedule: String(data.videoStitchStrengthSchedule || "0.45, 0.55#13, 0.45"),
+    videoStitchSampledSegmentCount: clampedOptionalInteger(data.videoStitchSampledSegmentCount, 0, 48),
     videoStitchFrameLoadCap: Math.max(0, Math.min(4096, Math.round(Number(data.videoStitchFrameLoadCap ?? 0)))),
     videoStitchDistillLoraHigh: Math.max(0, Math.min(5, Number(data.videoStitchDistillLoraHigh ?? 2))),
     videoStitchDistillLoraLow: Math.max(0, Math.min(5, Number(data.videoStitchDistillLoraLow ?? 1))),
