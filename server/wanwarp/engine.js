@@ -9,8 +9,10 @@ const defaultComfyTimeoutMs = 4 * 60 * 60 * 1000;
 const comfyPollIntervalMs = 2000;
 const templatePath = new URL("./templates/creator-locked-seg-a.json", import.meta.url);
 const fullTemplatePath = new URL("./templates/creator-locked-full.json", import.meta.url);
+const blendRefineTemplatePath = new URL("./templates/wanblend-refine.json", import.meta.url);
 const wanWarpOutputNodeId = "2590";
 const wanWarpFullOutputNodeId = "3138";
+const wanWarpBlendRefineOutputNodeId = "3138";
 
 const imageMimeTypes = new Map([
   [".jpg", "image/jpeg"],
@@ -21,11 +23,30 @@ const imageMimeTypes = new Map([
 const comfySchedulerOptions = new Set(["simple", "sgm_uniform", "karras", "exponential", "ddim_uniform", "beta", "normal", "linear_quadratic", "kl_optimal", "bong_tangent", "beta57"]);
 const comfyUpscaleMethodOptions = new Set(["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]);
 const comfyCropOptions = new Set(["disabled", "center"]);
+const comfyImageBlendModeOptions = new Set(["normal", "multiply", "screen", "overlay", "soft_light", "difference"]);
 const creatorDefaultKeyTrimFrames = 5;
 const creatorDefaultBlendFrames = 4;
 const creatorDefaultSamplerSteps = 2;
 const creatorDefaultSamplerStepsToRun = 1;
 const creatorDefaultCrf = 6;
+const wanBlendRefineLegacyStrengthSchedule = "0.45, 0.55#20, 0.45";
+const wanBlendRefinePreserveDefaults = {
+  refineDenoise: 0.3,
+  controlBlend: 0.05,
+  depthMotionBlend: 0.04,
+  vaceRefStrength: 1
+};
+const wanBlendRefinePreviousDefaults = {
+  refineDenoise: 0.45,
+  controlBlend: 0.12,
+  depthMotionBlend: 0.1,
+  vaceRefStrength: 0.75
+};
+const wanBlendRefineDefaultStrengthCurve = [
+  { x: 0, y: 0.45, mode: "ease" },
+  { x: 0.5, y: 0.55, mode: "ease" },
+  { x: 1, y: 0.45, mode: "ease" }
+];
 const creatorDefaultLoraStrengths = {
   distillHigh: 2,
   distillLow: 1,
@@ -46,6 +67,9 @@ export async function createWanWarpFullWorkflowResult({
   const options = normalizeWanWarpOptions(body.transitionBuilder || {}, body);
   const stitchOptions = body.videoStitch && typeof body.videoStitch === "object" ? body.videoStitch : {};
   const loop = Boolean(stitchOptions.loop);
+  const wanBlendVideoUrl = isNewtLocalAssetUrl(stitchOptions.wanBlendVideoUrl) ? stitchOptions.wanBlendVideoUrl : "";
+  const usesWanBlendKeyframes = Boolean(wanBlendVideoUrl);
+  const wanBlendFrameIndices = normalizeWanBlendFrameIndices(stitchOptions.wanBlendFrameIndices);
   const orderedSegments = normalizeFullWorkflowSegments(segments, loop);
   const segmentA = orderedSegments.find((segment) => segment.role === "A");
   const segmentB = orderedSegments.find((segment) => segment.role === "B");
@@ -57,7 +81,7 @@ export async function createWanWarpFullWorkflowResult({
     error.status = 400;
     throw error;
   }
-  if (!segmentA.startImageUrl || !segmentA.endImageUrl) {
+  if (!usesWanBlendKeyframes && (!segmentA.startImageUrl || !segmentA.endImageUrl)) {
     const error = new Error("WanSegment A requires Start and End images.");
     error.status = 400;
     throw error;
@@ -74,7 +98,7 @@ export async function createWanWarpFullWorkflowResult({
     error.status = 400;
     throw error;
   }
-  if (segmentB && !segmentB.endImageUrl) {
+  if (!usesWanBlendKeyframes && segmentB && !segmentB.endImageUrl) {
     const error = new Error("WanSegment B requires an End image.");
     error.status = 400;
     throw error;
@@ -84,7 +108,7 @@ export async function createWanWarpFullWorkflowResult({
     error.status = 400;
     throw error;
   }
-  if (segmentC && !segmentC.endImageUrl) {
+  if (!usesWanBlendKeyframes && segmentC && !segmentC.endImageUrl) {
     const error = new Error("WanSegment C requires an End image.");
     error.status = 400;
     throw error;
@@ -99,19 +123,20 @@ export async function createWanWarpFullWorkflowResult({
   await assertComfyAvailable();
 
   const localAssetTasks = [
-    helpers.resolveLocalAssetPathFromUrl(segmentA.startImageUrl),
-    helpers.resolveLocalAssetPathFromUrl(segmentA.endImageUrl),
-    segmentB?.endImageUrl ? helpers.resolveLocalAssetPathFromUrl(segmentB.endImageUrl) : Promise.resolve(null),
-    segmentC?.endImageUrl ? helpers.resolveLocalAssetPathFromUrl(segmentC.endImageUrl) : Promise.resolve(null),
+    usesWanBlendKeyframes ? Promise.resolve(null) : helpers.resolveLocalAssetPathFromUrl(segmentA.startImageUrl),
+    usesWanBlendKeyframes ? Promise.resolve(null) : helpers.resolveLocalAssetPathFromUrl(segmentA.endImageUrl),
+    !usesWanBlendKeyframes && segmentB?.endImageUrl ? helpers.resolveLocalAssetPathFromUrl(segmentB.endImageUrl) : Promise.resolve(null),
+    !usesWanBlendKeyframes && segmentC?.endImageUrl ? helpers.resolveLocalAssetPathFromUrl(segmentC.endImageUrl) : Promise.resolve(null),
     helpers.resolveLocalAssetPathFromUrl(motionVideoUrl),
     isNewtLocalAssetUrl(depthVideoUrl)
       ? helpers.resolveLocalAssetPathFromUrl(depthVideoUrl)
-      : Promise.resolve({ filePath: depthVideoUrl, fileName: path.basename(depthVideoUrl) })
+      : Promise.resolve({ filePath: depthVideoUrl, fileName: path.basename(depthVideoUrl) }),
+    usesWanBlendKeyframes ? helpers.resolveLocalAssetPathFromUrl(wanBlendVideoUrl) : Promise.resolve(null)
   ];
-  const [startImage, endAImage, endBImage, endCImage, motionVideo, depthVideo] = await Promise.all(localAssetTasks);
+  const [startImage, endAImage, endBImage, endCImage, motionVideo, depthVideo, wanBlendVideo] = await Promise.all(localAssetTasks);
   const [comfyStartImage, comfyEndAImage, comfyEndBImage, comfyEndCImage] = await Promise.all([
-    uploadImageToComfy(startImage.filePath, startImage.fileName),
-    uploadImageToComfy(endAImage.filePath, endAImage.fileName),
+    startImage ? uploadImageToComfy(startImage.filePath, startImage.fileName) : Promise.resolve(""),
+    endAImage ? uploadImageToComfy(endAImage.filePath, endAImage.fileName) : Promise.resolve(""),
     endBImage ? uploadImageToComfy(endBImage.filePath, endBImage.fileName) : Promise.resolve(""),
     endCImage ? uploadImageToComfy(endCImage.filePath, endCImage.fileName) : Promise.resolve("")
   ]);
@@ -126,7 +151,9 @@ export async function createWanWarpFullWorkflowResult({
     endBImageName: comfyEndBImage,
     endCImageName: comfyEndCImage,
     motionVideoPath: motionVideo.filePath,
-    depthVideoPath: depthVideo.filePath
+    depthVideoPath: depthVideo.filePath,
+    wanBlendVideoPath: wanBlendVideo?.filePath || "",
+    wanBlendFrameIndices
   });
 
   const queued = await queueComfyPrompt(comfyPrompt, requestId);
@@ -214,6 +241,8 @@ export async function createWanWarpFullWorkflowResult({
       loop,
       motionVideoUrl,
       depthVideoUrl,
+      wanBlendVideoUrl,
+      wanBlendFrameIndices,
       fps: options.fps,
       width: options.width,
       height: options.height,
@@ -246,6 +275,183 @@ export async function createWanWarpFullWorkflowResult({
     video,
     videos: [video, ...segmentVideos.map((segment) => segment.item)],
     resultItems: [video, ...segmentVideos.map((segment) => segment.item)]
+  };
+}
+
+export async function createWanWarpBlendRefineResult({
+  body,
+  prompt = "",
+  referenceVideoUrls = [],
+  controlVideoUrls = [],
+  maskVideoUrls = [],
+  selectedVideoModel = null,
+  helpers
+}) {
+  const requestId = randomUUID();
+  const promptText = String(prompt || body.prompt || "").trim();
+  const stitchOptions = body.videoStitch && typeof body.videoStitch === "object" ? body.videoStitch : {};
+  const wanBlendVideoUrl = isNewtLocalAssetUrl(stitchOptions.wanBlendVideoUrl)
+    ? stitchOptions.wanBlendVideoUrl
+    : helpers.firstLocalOutput(referenceVideoUrls);
+  const motionVideoUrl = isNewtLocalAssetUrl(stitchOptions.motionVideoUrl)
+    ? stitchOptions.motionVideoUrl
+    : helpers.firstLocalOutput(controlVideoUrls);
+  const depthVideoUrl = isNewtLocalAssetUrl(stitchOptions.depthVideoUrl)
+    ? stitchOptions.depthVideoUrl
+    : helpers.firstLocalOutput(maskVideoUrls);
+
+  if (!promptText) {
+    const error = new Error("WanWarp Blend Refine requires a prompt.");
+    error.status = 400;
+    throw error;
+  }
+  if (!wanBlendVideoUrl) {
+    const error = new Error("WanWarp Blend Refine requires a connected WanBlend/reference video.");
+    error.status = 400;
+    throw error;
+  }
+  if (!motionVideoUrl) {
+    const error = new Error("WanWarp Blend Refine requires a connected Motion Map video.");
+    error.status = 400;
+    throw error;
+  }
+  if (!depthVideoUrl) {
+    const error = new Error("WanWarp Blend Refine requires a connected Depth Video.");
+    error.status = 400;
+    throw error;
+  }
+
+  await assertComfyAvailable();
+
+  const [wanBlendVideo, motionVideo, depthVideo] = await Promise.all([
+    helpers.resolveLocalAssetPathFromUrl(wanBlendVideoUrl),
+    helpers.resolveLocalAssetPathFromUrl(motionVideoUrl),
+    helpers.resolveLocalAssetPathFromUrl(depthVideoUrl)
+  ]);
+  const [wanBlendMetadata, motionMetadata, depthMetadata] = await Promise.all([
+    helpers.probeVideoFile(wanBlendVideo.filePath),
+    helpers.probeVideoFile(motionVideo.filePath),
+    helpers.probeVideoFile(depthVideo.filePath)
+  ]);
+  const sourceFrameCount = videoFrameCountFromMetadata(wanBlendMetadata);
+  const sourceFps = positiveNumber(wanBlendMetadata?.fps);
+  const options = normalizeWanBlendRefineOptions(body.videoStitch || {}, body, {
+    sourceFrameCount,
+    sourceFps
+  });
+  validateControlVideoLength({
+    sourceFrameCount: options.length,
+    motionFrameCount: videoFrameCountFromMetadata(motionMetadata),
+    depthFrameCount: videoFrameCountFromMetadata(depthMetadata)
+  });
+
+  const comfyPrompt = await buildBlendRefineComfyPrompt({
+    requestId,
+    prompt: promptText,
+    negativePrompt: options.negativePrompt,
+    options,
+    wanBlendVideoPath: wanBlendVideo.filePath,
+    motionVideoPath: motionVideo.filePath,
+    depthVideoPath: depthVideo.filePath
+  });
+
+  const queued = await queueComfyPrompt(comfyPrompt, requestId);
+  const history = await waitForComfyPrompt(queued.prompt_id || queued.promptId);
+  const comfyVideo = findComfyVideo(history, wanWarpBlendRefineOutputNodeId);
+  if (!comfyVideo) {
+    const error = new Error("Comfy completed WanWarp Blend Refine but returned no final video.");
+    error.status = 502;
+    error.raw = history?.outputs || history;
+    throw error;
+  }
+
+  const output = await helpers.createManagedAssetTarget({ body }, "wanwarp-blend-refine", "mp4", helpers.workflowPackageOutputDirName);
+  await copyComfyVideoToOutput(comfyVideo, output.filePath);
+  const [outputStats, metadata] = await Promise.all([
+    stat(output.filePath),
+    helpers.probeVideoFile(output.filePath)
+  ]);
+  const video = helpers.enrichVideoMetadata(
+    {
+      type: "video",
+      label: "WanWarp Blend Refine",
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: "video/mp4",
+      seed: options.seed ?? null
+    },
+    metadata
+  );
+  const text = "WanWarp refined a WanBlend video with motion/depth control.";
+  const cost = {
+    amountUsd: 0,
+    currency: "USD",
+    unitRateUsd: 0,
+    units: 1,
+    unit: "local ComfyUI workflow",
+    mediaType: "video",
+    pricingBasis: "Local ComfyUI WanWarp Blend Refine run",
+    pricingSource: "local-comfyui"
+  };
+
+  await helpers.appendHistory({
+    id: requestId,
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "local-comfyui",
+    modelName: selectedVideoModel?.displayName || "WanWarp",
+    endpoint: "local/wanwarp/comfyui/wanblend-refine",
+    mode: "WanWarp WanBlend motion/depth refine",
+    prompt: promptText,
+    submittedPrompt: promptText,
+    project: helpers.projectFromBody(body),
+    node: helpers.nodeFromBody(body),
+    settings: {
+      model: selectedVideoModel?.displayName || "WanWarp",
+      comfyUrl: comfyBaseUrl,
+      comfyPromptId: queued.prompt_id || queued.promptId || "",
+      outputNodeId: wanWarpBlendRefineOutputNodeId,
+      wanBlendVideoUrl,
+      motionVideoUrl,
+      depthVideoUrl,
+      sourceFrameCount,
+      sourceFps,
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      length: options.length,
+      samplerSteps: options.samplerSteps,
+      samplerStepsToRun: options.samplerStepsToRun,
+      refineDenoise: options.refineDenoise,
+      controlBlend: options.controlBlend,
+      depthMotionBlend: options.depthMotionBlend,
+      vaceRefStrength: options.vaceRefStrength,
+      conditioningStrength: options.conditioningStrength,
+      strengthCurve: options.strengthCurve,
+      strengthSchedule: options.strengthSchedule,
+      loraStrengths: options.loraStrengths,
+      crf: options.crf,
+      workflow: "wanblend-refine"
+    },
+    cost,
+    localVideo: video.localUrl,
+    localVideos: [video.localUrl],
+    outputFileName: video.fileName,
+    outputFileNames: [video.fileName],
+    outputLabels: [video.label],
+    outputBytes: outputStats.size,
+    text
+  });
+
+  return {
+    requestId,
+    endpoint: "local/wanwarp/comfyui/wanblend-refine",
+    modelName: selectedVideoModel?.displayName || "WanWarp",
+    text,
+    cost,
+    video,
+    videos: [video],
+    resultItems: [video]
   };
 }
 
@@ -545,13 +751,24 @@ async function buildFullComfyPrompt({
   endBImageName,
   endCImageName,
   motionVideoPath,
-  depthVideoPath
+  depthVideoPath,
+  wanBlendVideoPath = "",
+  wanBlendFrameIndices = [0, 17, 35, 52]
 }) {
   const comfyPrompt = JSON.parse(await readFile(fullTemplatePath, "utf8"));
-  comfyPrompt["3021"].inputs.image = startImageName;
-  comfyPrompt["3022"].inputs.image = endAImageName;
-  if (segments.B && endBImageName) comfyPrompt["3638"].inputs.image = endBImageName;
-  if (segments.C && endCImageName) comfyPrompt["3754"].inputs.image = endCImageName;
+  if (wanBlendVideoPath) {
+    patchFullWorkflowWanBlendKeyframes(comfyPrompt, {
+      videoPath: wanBlendVideoPath,
+      frameIndices: wanBlendFrameIndices,
+      widthNodeId: "3143",
+      heightNodeId: "3144"
+    });
+  } else {
+    comfyPrompt["3021"].inputs.image = startImageName;
+    comfyPrompt["3022"].inputs.image = endAImageName;
+    if (segments.B && endBImageName) comfyPrompt["3638"].inputs.image = endBImageName;
+    if (segments.C && endCImageName) comfyPrompt["3754"].inputs.image = endCImageName;
+  }
 
   comfyPrompt["2969"].inputs.video = JSON.stringify(motionVideoPath);
   comfyPrompt["2653"].inputs.video = JSON.stringify(depthVideoPath);
@@ -641,6 +858,127 @@ async function buildFullComfyPrompt({
   return comfyPrompt;
 }
 
+async function buildBlendRefineComfyPrompt({
+  requestId,
+  prompt,
+  negativePrompt,
+  options,
+  wanBlendVideoPath,
+  motionVideoPath,
+  depthVideoPath
+}) {
+  const comfyPrompt = JSON.parse(await readFile(blendRefineTemplatePath, "utf8"));
+
+  comfyPrompt["9200"].inputs.video = JSON.stringify(wanBlendVideoPath);
+  comfyPrompt["2969"].inputs.video = JSON.stringify(motionVideoPath);
+  comfyPrompt["2653"].inputs.video = JSON.stringify(depthVideoPath);
+  delete comfyPrompt["2969"].inputs.vae;
+  delete comfyPrompt["2653"].inputs.vae;
+
+  comfyPrompt["2564"].inputs.text = prompt;
+  comfyPrompt["3038"].inputs.text = negativePrompt;
+  comfyPrompt["2732"].inputs.conditioning_to_strength = options.conditioningStrength;
+  comfyPrompt["2739"].inputs.string = options.strengthSchedule;
+  comfyPrompt["2703"].inputs.value = options.seed ?? Math.floor(Math.random() * 2147483647);
+  comfyPrompt["3143"].inputs.value = options.width;
+  comfyPrompt["3144"].inputs.value = options.height;
+  comfyPrompt["3145"].inputs.value = options.length;
+  comfyPrompt["2581"].inputs.vace_ref_strength = options.vaceRefStrength;
+  comfyPrompt["2555"].inputs.vace_ref_strength = options.vaceRefStrength;
+  comfyPrompt["2581"].inputs.vace_reference = ["9205", 0];
+  comfyPrompt["2555"].inputs.vace_reference = ["9205", 0];
+  delete comfyPrompt["2581"].inputs.latent_in;
+  delete comfyPrompt["9204"];
+  comfyPrompt["2588"].inputs.scheduler = "beta";
+  comfyPrompt["2588"].inputs.steps = options.samplerSteps;
+  comfyPrompt["2588"].inputs.steps_to_run = options.samplerStepsToRun;
+  comfyPrompt["2588"].inputs.denoise = options.refineDenoise;
+  comfyPrompt["2588"].inputs.cfg = 1;
+  comfyPrompt["9202"].inputs.blend_factor = options.depthMotionBlend;
+  comfyPrompt["9203"].inputs.blend_factor = options.controlBlend;
+  comfyPrompt["9203"].inputs.blend_mode = options.controlBlendMode;
+  comfyPrompt["9200"].inputs.frame_load_cap = options.frameLoadCap;
+  comfyPrompt["2969"].inputs.frame_load_cap = options.frameLoadCap;
+  comfyPrompt["2653"].inputs.frame_load_cap = options.frameLoadCap;
+  patchLoraLoaderStrengths(comfyPrompt, options.loraStrengths);
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.filename_prefix = `wanwarp-blend-refine-${requestId}`;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.frame_rate = options.fps;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.crf = options.crf;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.save_output = true;
+  comfyPrompt[wanWarpBlendRefineOutputNodeId].inputs.images = ["2559", 0];
+  sanitizeComfyPromptInputs(comfyPrompt);
+  return comfyPrompt;
+}
+
+function patchFullWorkflowWanBlendKeyframes(comfyPrompt, { videoPath, frameIndices, widthNodeId, heightNodeId }) {
+  const [startIndex, endAIndex, endBIndex, endCIndex] = frameIndices;
+  comfyPrompt["9200"] = {
+    inputs: {
+      video: JSON.stringify(videoPath),
+      force_rate: 0,
+      custom_width: 0,
+      custom_height: 0,
+      frame_load_cap: 0,
+      skip_first_frames: 0,
+      select_every_nth: 1,
+      format: "None"
+    },
+    class_type: "VHS_LoadVideoPath"
+  };
+  comfyPrompt["9201"] = {
+    inputs: {
+      image: ["9200", 0],
+      width: [widthNodeId, 0],
+      height: [heightNodeId, 0],
+      upscale_method: "lanczos",
+      crop: "center"
+    },
+    class_type: "ImageScale"
+  };
+  comfyPrompt["9202"] = {
+    inputs: {
+      image: ["9201", 0],
+      start: startIndex,
+      length: 1
+    },
+    class_type: "ImageFromBatch+"
+  };
+  comfyPrompt["9203"] = {
+    inputs: {
+      image: ["9201", 0],
+      start: endAIndex,
+      length: 1
+    },
+    class_type: "ImageFromBatch+"
+  };
+  comfyPrompt["9204"] = {
+    inputs: {
+      image: ["9201", 0],
+      start: endBIndex,
+      length: 1
+    },
+    class_type: "ImageFromBatch+"
+  };
+  comfyPrompt["9205"] = {
+    inputs: {
+      image: ["9201", 0],
+      start: endCIndex,
+      length: 1
+    },
+    class_type: "ImageFromBatch+"
+  };
+
+  comfyPrompt["3035"].inputs.image = ["9202", 0];
+  comfyPrompt["3023"].inputs.image = ["9203", 0];
+  if (comfyPrompt["3641"]?.inputs) comfyPrompt["3641"].inputs.image = ["9204", 0];
+  if (comfyPrompt["3727"]?.inputs) comfyPrompt["3727"].inputs.image = ["9205", 0];
+
+  delete comfyPrompt["3021"];
+  delete comfyPrompt["3022"];
+  delete comfyPrompt["3638"];
+  delete comfyPrompt["3754"];
+}
+
 function patchFullWorkflowSamplerSettings(comfyPrompt, options) {
   for (const nodeId of fullWorkflowSharkSamplerNodeIds) {
     const inputs = comfyPrompt[nodeId]?.inputs;
@@ -693,6 +1031,11 @@ function sanitizeComfyPromptInputs(comfyPrompt) {
     if (node.class_type === "ImageScale") {
       inputs.upscale_method = normalizeComfyChoice(inputs.upscale_method, comfyUpscaleMethodOptions, "lanczos");
       inputs.crop = normalizeComfyChoice(inputs.crop, comfyCropOptions, "center");
+    }
+
+    if (node.class_type === "ImageBlend") {
+      inputs.blend_factor = clampNumber(inputs.blend_factor, 0, 1, 0.1);
+      inputs.blend_mode = normalizeComfyChoice(inputs.blend_mode, comfyImageBlendModeOptions, "normal");
     }
   }
 }
@@ -1051,9 +1394,237 @@ function normalizeWanWarpOptions(options = {}, body = {}) {
   };
 }
 
+function normalizeWanBlendRefineOptions(stitchOptions = {}, body = {}, sourceMetadata = {}) {
+  const base = normalizeWanWarpOptions(body.transitionBuilder || {}, body);
+  const samplerSteps = clampInteger(stitchOptions.samplerSteps, 1, 200, creatorDefaultSamplerSteps);
+  const samplerStepsToRun = clampInteger(stitchOptions.samplerStepsToRun, 1, samplerSteps, Math.min(creatorDefaultSamplerStepsToRun, samplerSteps));
+  const probedFrameCount = clampInteger(sourceMetadata.sourceFrameCount, 0, 4096, 0);
+  const requestedFrameLoadCap = clampInteger(stitchOptions.frameLoadCap, 0, 4096, 0);
+  const sourceFrameCount = probedFrameCount
+    ? (requestedFrameLoadCap ? Math.min(probedFrameCount, requestedFrameLoadCap) : probedFrameCount)
+    : requestedFrameLoadCap || base.length;
+  const sourceFps = clampInteger(sourceMetadata.sourceFps, 4, 60, base.fps);
+  const defaultStrengthSchedule = defaultWanBlendRefineStrengthSchedule(sourceFrameCount);
+  const strengthCurve = normalizeStrengthCurvePoints(stitchOptions.strengthCurve);
+  return {
+    ...base,
+    fps: sourceFps,
+    length: sourceFrameCount,
+    negativePrompt: String(stitchOptions.negativePrompt || base.negativePrompt || ""),
+    samplerSteps,
+    samplerStepsToRun,
+    refineDenoise: normalizeWanBlendRefineDefaultedNumber("refineDenoise", stitchOptions.refineDenoise, 0, 1),
+    controlBlend: normalizeWanBlendRefineDefaultedNumber("controlBlend", stitchOptions.controlBlend, 0, 1),
+    depthMotionBlend: normalizeWanBlendRefineDefaultedNumber("depthMotionBlend", stitchOptions.depthMotionBlend, 0, 1),
+    controlBlendMode: normalizeComfyChoice(stitchOptions.controlBlendMode, comfyImageBlendModeOptions, "normal"),
+    vaceRefStrength: normalizeWanBlendRefineDefaultedNumber("vaceRefStrength", stitchOptions.vaceRefStrength, 0, 2),
+    conditioningStrength: clampNumber(stitchOptions.conditioningStrength, 0, 1, 0.6),
+    strengthCurve,
+    strengthSchedule: strengthCurve
+      ? strengthScheduleFromCurve(strengthCurve, sourceFrameCount)
+      : normalizeStrengthScheduleForFrameCount(stitchOptions.strengthSchedule, sourceFrameCount, defaultStrengthSchedule),
+    frameLoadCap: sourceFrameCount,
+    crf: clampInteger(stitchOptions.crf, 0, 51, creatorDefaultCrf),
+    loraStrengths: {
+      distillHigh: clampNumber(stitchOptions.distillLoraHigh, 0, 5, creatorDefaultLoraStrengths.distillHigh),
+      distillLow: clampNumber(stitchOptions.distillLoraLow, 0, 5, creatorDefaultLoraStrengths.distillLow),
+      motionHigh: clampNumber(stitchOptions.motionLoraHigh, 0, 5, creatorDefaultLoraStrengths.motionHigh),
+      motionLow: clampNumber(stitchOptions.motionLoraLow, 0, 5, creatorDefaultLoraStrengths.motionLow)
+    }
+  };
+}
+
 function normalizeStrengthSchedule(value) {
   const schedule = String(value || "").trim();
   return schedule || "0.90, 0.64#10, 0.80, 1.00, 0.64#2";
+}
+
+function normalizeWanBlendRefineDefaultedNumber(key, value, min, max) {
+  const previousDefault = wanBlendRefinePreviousDefaults[key];
+  const preserveDefault = wanBlendRefinePreserveDefaults[key];
+  const number = Number(value);
+  if (!Number.isFinite(number)) return preserveDefault;
+  if (Math.abs(number - previousDefault) < 0.0001) return preserveDefault;
+  return clampNumber(number, min, max, preserveDefault);
+}
+
+function defaultWanBlendRefineStrengthSchedule(frameCount) {
+  const expectedCount = wanVaceStrengthCount(frameCount);
+  if (expectedCount <= 1) return "0.45";
+  if (expectedCount === 2) return "0.45, 0.45";
+  return `0.45, 0.55#${expectedCount - 2}, 0.45`;
+}
+
+function normalizeStrengthScheduleForFrameCount(value, frameCount, fallbackSchedule) {
+  const expectedCount = wanVaceStrengthCount(frameCount);
+  const rawSchedule = String(value || "").trim();
+  const schedule = rawSchedule || fallbackSchedule;
+  if (!expectedCount) return normalizeStrengthSchedule(schedule);
+  if (!rawSchedule || isWanBlendRefineDefaultSchedule(rawSchedule)) return fallbackSchedule;
+
+  const expanded = expandStrengthSchedule(schedule);
+  if (!expanded.length) return fallbackSchedule;
+  if (expanded.length === expectedCount) return normalizeStrengthSchedule(schedule);
+
+  return formatStrengthSchedule(resampleStrengthValues(expanded, expectedCount));
+}
+
+function normalizeStrengthCurvePoints(value) {
+  if (!Array.isArray(value)) return null;
+  const points = value
+    .map((point) => {
+      if (Array.isArray(point)) return { x: Number(point[0]), y: Number(point[1]), mode: point[2] };
+      if (point && typeof point === "object") return { x: Number(point.x), y: Number(point.y), mode: point.mode };
+      return null;
+    })
+    .filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => ({
+      x: clampNumber(point.x, 0, 1, 0),
+      y: clampNumber(point.y, 0, 1, 0.5),
+      mode: normalizeStrengthCurveMode(point.mode)
+    }))
+    .sort((a, b) => a.x - b.x)
+    .slice(0, 64);
+  if (!points.length) return null;
+
+  const deduped = [];
+  for (const point of points) {
+    const previous = deduped.at(-1);
+    if (previous && Math.abs(previous.x - point.x) < 0.0001) {
+      previous.y = point.y;
+    } else {
+      deduped.push({ ...point });
+    }
+  }
+
+  if (deduped[0].x > 0.0001) deduped.unshift({ x: 0, y: deduped[0].y, mode: deduped[0].mode || "ease" });
+  deduped[0].x = 0;
+  if (deduped.at(-1).x < 0.9999) deduped.push({ x: 1, y: deduped.at(-1).y, mode: "ease" });
+  deduped[deduped.length - 1].x = 1;
+  return deduped.length >= 2 ? deduped : wanBlendRefineDefaultStrengthCurve;
+}
+
+function normalizeStrengthCurveMode(value) {
+  return String(value || "").toLowerCase() === "linear" ? "linear" : "ease";
+}
+
+function strengthScheduleFromCurve(points, frameCount) {
+  const expectedCount = wanVaceStrengthCount(frameCount);
+  return formatStrengthSchedule(sampleStrengthCurve(points, expectedCount || 1));
+}
+
+function sampleStrengthCurve(points, targetCount) {
+  const normalized = normalizeStrengthCurvePoints(points) || wanBlendRefineDefaultStrengthCurve;
+  const count = Math.max(1, Math.round(Number(targetCount) || 1));
+  if (count === 1) return [clampNumber(normalized[0]?.y, 0, 1, 0.5)];
+
+  return Array.from({ length: count }, (_, index) => {
+    const x = index / (count - 1);
+    return interpolateStrengthCurveY(normalized, x);
+  });
+}
+
+function interpolateStrengthCurveY(points, x) {
+  if (x <= 0) return clampNumber(points[0]?.y, 0, 1, 0.5);
+  if (x >= 1) return clampNumber(points.at(-1)?.y, 0, 1, 0.5);
+
+  const segmentIndex = Math.max(0, points.findIndex((point) => point.x >= x) - 1);
+  const p1 = points[segmentIndex] || points[0];
+  const p2 = points[segmentIndex + 1] || points.at(-1);
+  if (!p1 || !p2 || Math.abs(p2.x - p1.x) < 0.0001) return clampNumber(p1?.y, 0, 1, 0.5);
+
+  const t = clampNumber((x - p1.x) / (p2.x - p1.x), 0, 1, 0);
+  const segmentT = normalizeStrengthCurveMode(p2.mode) === "linear" ? t : t * t * (3 - 2 * t);
+  const y = p1.y + (p2.y - p1.y) * segmentT;
+  return clampNumber(y, 0, 1, 0.5);
+}
+
+function isWanBlendRefineDefaultSchedule(value) {
+  const signature = strengthScheduleSignature(value);
+  return signature === strengthScheduleSignature(wanBlendRefineLegacyStrengthSchedule) ||
+    /^0\.45,0\.55#\d+,0\.45$/.test(signature);
+}
+
+function wanVaceStrengthCount(frameCount) {
+  const frames = Math.max(1, Math.round(Number(frameCount) || 1));
+  return Math.floor((frames - 1) / 4) + 1;
+}
+
+function videoFrameCountFromMetadata(metadata = {}) {
+  const directFrames = positiveNumber(metadata.num_frames || metadata.frames || metadata.frame_count || metadata.frameCount);
+  if (directFrames) return Math.round(directFrames);
+  const duration = positiveNumber(metadata.duration);
+  const fps = positiveNumber(metadata.fps);
+  return duration && fps ? Math.round(duration * fps) : 0;
+}
+
+function validateControlVideoLength({ sourceFrameCount = 0, motionFrameCount = 0, depthFrameCount = 0 }) {
+  if (!sourceFrameCount) return;
+  const shortages = [
+    motionFrameCount && motionFrameCount < sourceFrameCount ? `Motion Map has ${motionFrameCount}` : "",
+    depthFrameCount && depthFrameCount < sourceFrameCount ? `Depth Video has ${depthFrameCount}` : ""
+  ].filter(Boolean);
+  if (!shortages.length) return;
+
+  const error = new Error(`WanWarp uses the full WanBlend length (${sourceFrameCount} frames), but connected controls are shorter: ${shortages.join(", ")} frames.`);
+  error.status = 400;
+  throw error;
+}
+
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function expandStrengthSchedule(value) {
+  return String(value || "")
+    .split(",")
+    .flatMap((part) => {
+      const [rawValue, rawCount] = part.trim().split("#");
+      const number = Number(rawValue);
+      if (!Number.isFinite(number)) return [];
+      const count = rawCount === undefined ? 1 : clampInteger(rawCount, 1, 4096, 1);
+      return Array.from({ length: count }, () => number);
+    });
+}
+
+function resampleStrengthValues(values, targetCount) {
+  if (targetCount <= 0) return [];
+  if (targetCount === 1) return [values[0] ?? 0];
+  if (values.length <= 1) return Array.from({ length: targetCount }, () => values[0] ?? 0);
+
+  return Array.from({ length: targetCount }, (_, index) => {
+    const sourceIndex = Math.round(index * (values.length - 1) / (targetCount - 1));
+    return values[sourceIndex] ?? values.at(-1) ?? 0;
+  });
+}
+
+function formatStrengthSchedule(values) {
+  return values.map((value) => formatStrengthNumber(value)).join(", ");
+}
+
+function formatStrengthNumber(value) {
+  return Number(value.toFixed(4)).toString();
+}
+
+function strengthScheduleSignature(value) {
+  return String(value || "").replace(/\s+/g, "");
+}
+
+function normalizeWanBlendFrameIndices(value) {
+  const fallback = [0, 17, 35, 52];
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+  const numbers = rawValues
+    .map((item) => Math.round(Number(item)))
+    .filter((item) => Number.isFinite(item) && item >= 0)
+    .slice(0, 4);
+  while (numbers.length < 4) numbers.push(fallback[numbers.length]);
+  return numbers;
 }
 
 function optionalInteger(value) {

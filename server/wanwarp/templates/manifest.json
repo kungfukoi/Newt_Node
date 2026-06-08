@@ -5,7 +5,8 @@
   "api_prompts": {
     "segment_a": "C:\\dev\\comfy_api_prompt_creator_locked_seg_a.json",
     "full_stitch": "C:\\dev\\comfy_api_prompt_creator_locked_full.json",
-    "repo_full_stitch": "server\\wanwarp\\templates\\creator-locked-full.json"
+    "repo_full_stitch": "server\\wanwarp\\templates\\creator-locked-full.json",
+    "repo_wanblend_refine": "server\\wanwarp\\templates\\wanblend-refine.json"
   },
   "runtime_patches": {
     "bypass_torch_compile_nodes": [
@@ -18,7 +19,11 @@
   "controls": {
     "maps": {
       "depth_video_path_node": 2653,
-      "bw_video_path_node": 2969
+      "bw_video_path_node": 2969,
+      "wanblend_refine_video_path_node": 9200,
+      "wanblend_refine_depth_motion_blend_node": 9202,
+      "wanblend_refine_control_blend_node": 9203,
+      "wanblend_refine_first_frame_node": 9205
     },
     "images": {
       "image_a_node": 3021,
@@ -58,7 +63,8 @@
     },
     "outputs": {
       "segment_a_video_combine_node": 2590,
-      "full_stitch_video_combine_node": 3138
+      "full_stitch_video_combine_node": 3138,
+      "wanblend_refine_video_combine_node": 3138
     }
   }
 }

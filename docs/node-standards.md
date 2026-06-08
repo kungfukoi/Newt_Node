@@ -254,8 +254,8 @@ Use this pattern for future ComfyUI-backed custom builds.
 - Keep all Comfy-specific patching server-side. Browser code should submit normalized node settings and local asset URLs, never raw Comfy graph internals or machine-local paths.
 - Use a single backend engine module to own template loading, prompt patching, Comfy queueing, polling, output copying, result shaping, and history append.
 - The backend should talk to ComfyUI through its local HTTP API: check availability with `/system_stats`, upload still images through `/upload/image`, queue prompts with `/prompt`, and poll completion through `/history/<prompt_id>`. `/queue` is useful for diagnostics and monitors, but normal runs should rely on prompt history.
-- Default Comfy URL should be environment-configurable. WanWarp uses `WANWARP_COMFY_URL`, defaulting to `http://127.0.0.1:8188`.
-- Long local renders must use a generous server-side timeout and should be environment-configurable. WanWarp uses `WANWARP_COMFY_TIMEOUT_MS`, with a long default suitable for multi-segment local video renders.
+- Default Comfy URL should be environment-configurable. WanWarp uses `WANWARP_COMFY_URL`, defaulting to `http://127.0.0.1:8188`; WanBlend uses `WANBLEND_COMFY_URL` and falls back to `WANWARP_COMFY_URL`.
+- Long local renders must use a generous server-side timeout and should be environment-configurable. WanWarp uses `WANWARP_COMFY_TIMEOUT_MS`; WanBlend uses `WANBLEND_COMFY_TIMEOUT_MS` and falls back to the WanWarp timeout.
 - Timeout errors must include enough context to debug, especially the Comfy `prompt_id`, and should say the render may still be running in Comfy.
 - When a workflow is queued, record the Comfy `prompt_id` in history settings.
 - If Comfy returns `status_str: "error"`, surface Comfy's exception message and attach raw status where possible.
@@ -266,13 +266,23 @@ WanWarp reference map:
 | Surface | Current files |
 | --- | --- |
 | Comfy engine | `server/wanwarp/engine.js` |
-| Locked API templates | `server/wanwarp/templates/creator-locked-full.json`, `server/wanwarp/templates/creator-locked-seg-a.json` |
+| Locked API templates | `server/wanwarp/templates/creator-locked-full.json`, `server/wanwarp/templates/creator-locked-seg-a.json`, `server/wanwarp/templates/wanblend-refine.json` |
 | Template metadata | `server/wanwarp/templates/manifest.json` |
 | Backend route integration | `/api/node/utility-video` path in `server/index.js` |
 | Browser request shape | `src/nodeRunners/videoModels.js` and the utility runner path in `src/NodeEditor.jsx` |
 | User-facing model labels | `src/modelOptions.js` |
 | Result and preview support | `src/components/MediaViews.jsx`, `src/components/NodePorts.jsx`, and shared result helpers |
 | Standards/history docs | `docs/node-standards.md`, `docs/latent-wan-transition-handoff.md` |
+
+WanBlend reference map:
+
+| Surface | Current files |
+| --- | --- |
+| Comfy engine | `server/wanblend/engine.js` |
+| Context-smashing template | `server/wanblend/templates/context-smashing.json` |
+| Backend route integration | `/api/node/utility-video` path in `server/index.js` |
+| Browser request shape | `src/nodeRunners/videoModels.js` and the utility runner path in `src/NodeEditor.jsx` |
+| User-facing model labels | `src/modelOptions.js` |
 
 ### Template Patching
 
@@ -300,6 +310,8 @@ WanWarp establishes a useful pattern for complex Comfy workflows that are easier
 
 - Use lightweight config nodes when the user needs repeated editable segments. WanSegment is config-only: it validates connected media and prompt/settings, then emits a `wanSegment` result item carrying the normalized segment payload.
 - Use one executor node for global workflow execution. WanWarp receives connected WanSegment outputs and runs the full locked Comfy workflow.
+- If a workflow has a useful prepass, keep it as a normal media-producing utility when it can stand alone. WanBlend outputs a regular video, and WanWarp may optionally consume that video as a keyframe/prepass source while still running the locked creator workflow.
+- When a prepass can replace segment config, keep that as a separate executor mode instead of forcing fake segments. WanWarp can refine a connected WanBlend/reference video directly with Motion Map and Depth Video inputs through `server/wanwarp/templates/wanblend-refine.json`.
 - Keep user-facing node names clear even if older internal code names remain during migration. In the current app, `WanSegment` replaces the old Transition Builder concept and `WanWarp` replaces the old Video Stitch concept.
 - Config outputs may use a non-media internal type, such as `wanSegment`, when they are graph instructions rather than playable media. Shared preview/result code must explicitly understand that shape.
 - Still expose playable media from segment nodes when a full workflow finishes. WanWarp copies Segment A/B/C/D outputs back into the connected WanSegment previews while keeping the segment config output available for chaining.
@@ -312,6 +324,8 @@ WanWarp establishes a useful pattern for complex Comfy workflows that are easier
 - Expose stable controls that map to intentional template patch points. Do not expose every Comfy widget by default.
 - Preserve creator defaults as the default Newt values unless the product intentionally changes the workflow.
 - Group global workflow controls on the executor node. WanWarp owns frames, fps, size, output format, CRF, sampler steps, LoRA strengths, tail trim, and blend.
+- For WanBlend refine mode, WanWarp also owns refine denoise, Control Mix, Depth/Motion mix, VACE reference strength, conditioning strength, VACE strength schedule, and frame cap. These patch how much the WanBlend RGB video, motion map, depth video, and prompt influence the final Wan 2.2 pass. A frame cap of `0` means auto: probe the connected WanBlend video and run its full length/FPS, then cap motion/depth loaders to that selected length.
+- Keep prepass controls on the prepass node. WanBlend owns context-smashing prompt/negative text, color-region images, color-map video, output size/FPS, IPAdapter weight, stride, frame cap, steps, CFG, CRF, and seed.
 - Group segment-specific controls on segment nodes. WanSegment owns prompt, negative prompt, conditioning strength, VACE schedule, VACE reference strengths, seed, start/end keyframes, motion map, and depth video.
 - For paired sampler controls, keep `steps_to_run` no greater than total `steps`.
 - For video encoding, expose CRF as an output quality/file-size control and document that it cannot fix generation noise.

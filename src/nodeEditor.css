@@ -3758,6 +3758,9 @@ video.newtnode-video-fallback {
   color: rgba(244, 240, 232, 0.62);
   text-align: left;
   padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-row > .wanwarp-frame-thumb-button {
@@ -3938,6 +3941,164 @@ video.newtnode-video-fallback {
   box-sizing: border-box;
 }
 
+.wanblend-slot-list {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 9px;
+}
+
+.wanblend-slot-list .node-row {
+  margin-bottom: 0;
+}
+
+.wanblend-slot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wanblend-slot-swatch {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  background: var(--slot-color);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.22);
+}
+
+.wanblend-slot-note {
+  margin: -1px 0 2px 110px;
+}
+
+.vace-curve-editor {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.vace-curve-svg {
+  width: 100%;
+  aspect-ratio: 260 / 112;
+  min-height: 96px;
+  overflow: visible;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.025);
+  background-size: 25% 25%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.vace-curve-svg line {
+  stroke: rgba(244, 240, 232, 0.22);
+  stroke-width: 1;
+}
+
+.vace-curve-svg path {
+  fill: none;
+  stroke: #ddc631;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 5px rgba(221, 198, 49, 0.2));
+  pointer-events: none;
+}
+
+.vace-curve-svg circle {
+  fill: #17150f;
+  stroke: #ddc631;
+  stroke-width: 2.5;
+  cursor: grab;
+}
+
+.vace-curve-svg circle.active {
+  fill: #ddc631;
+  stroke: #f7f1ce;
+}
+
+.vace-curve-svg circle:active {
+  cursor: grabbing;
+}
+
+.vace-curve-controls {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.78fr) minmax(112px, 1fr) 28px;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.vace-curve-field {
+  display: grid;
+  grid-template-columns: 31px 1fr;
+  gap: 5px;
+  align-items: center;
+}
+
+.vace-curve-field span {
+  color: rgba(244, 240, 232, 0.58);
+  font-size: 11px;
+  font-weight: 780;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.vace-curve-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.vace-curve-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.vace-curve-mode button,
+.vace-curve-reset {
+  min-height: 28px;
+  min-width: 0;
+  border: 0;
+  color: rgba(244, 240, 232, 0.68);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.vace-curve-mode button.active {
+  color: #15130a;
+  background: #ddc631;
+}
+
+.vace-curve-reset {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.vace-curve-reset:hover {
+  color: #f6f1e8;
+  background: rgba(221, 198, 49, 0.18);
+}
+
 .node-row > input,
 .node-row > select,
 .node-row > textarea,
@@ -3947,6 +4108,7 @@ video.newtnode-video-fallback {
 .node-row > .color-id-preset-row,
 .node-row > .color-id-selected,
 .node-row > .utility-lora-stack,
+.node-row > .vace-curve-editor,
 .node-row > .transition-keyframe-sheet {
   max-width: 100%;
   min-width: 0;

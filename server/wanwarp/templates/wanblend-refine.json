@@ -1,0 +1,2768 @@
+{
+  "570": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "571": {
+    "inputs": {
+      "vae_name": "Wan2.1_VAE_bf16.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "2274": {
+    "inputs": {
+      "model": [
+        "2633",
+        0
+      ],
+      "shift": 8
+    },
+    "class_type": "ModelSamplingSD3"
+  },
+  "2303": {
+    "inputs": {
+      "model": [
+        "2632",
+        0
+      ],
+      "shift": 8
+    },
+    "class_type": "ModelSamplingSD3"
+  },
+  "2313": {
+    "inputs": {
+      "model": [
+        "2274",
+        0
+      ],
+      "sage_attention": "auto",
+      "allow_compile": false
+    },
+    "class_type": "PathchSageAttentionKJ"
+  },
+  "2314": {
+    "inputs": {
+      "model": [
+        "2303",
+        0
+      ],
+      "sage_attention": "auto",
+      "allow_compile": false
+    },
+    "class_type": "PathchSageAttentionKJ"
+  },
+  "2347": {
+    "inputs": {
+      "options": [
+        "2348",
+        0
+      ],
+      "eta": 0.25,
+      "sampler_name": "linear/heun_2s",
+      "seed": 1234,
+      "bongmath": "fixed"
+    },
+    "class_type": "ClownSampler_Beta"
+  },
+  "2348": {
+    "inputs": {
+      "extra_options": "default_dtype=float32"
+    },
+    "class_type": "ClownOptions_ExtraOptions_Beta"
+  },
+  "2555": {
+    "inputs": {
+      "model": [
+        "3037",
+        0
+      ],
+      "positive": [
+        "2732",
+        0
+      ],
+      "negative": [
+        "2563",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "latent_in": [
+        "2588",
+        0
+      ],
+      "control_video": [
+        "9203",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "2739",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 0.75,
+      "vace_reference": [
+        "9205",
+        0
+      ]
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "2559": {
+    "inputs": {
+      "samples": [
+        "2561",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "2561": {
+    "inputs": {
+      "model": [
+        "2555",
+        0
+      ],
+      "positive": [
+        "2555",
+        1
+      ],
+      "negative": [
+        "2555",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "2555",
+        4
+      ],
+      "steps_to_run": -1,
+      "cfg": 1,
+      "sampler_mode": "resample"
+    },
+    "class_type": "SharkChainsampler_Beta"
+  },
+  "2563": {
+    "inputs": {
+      "conditioning": [
+        "2732",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut"
+  },
+  "2564": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippinrad motion morph of a cinematic gold skull erupting from electric-blue liquid against pitch black background, the upward splash walls curl inward and wrap the cranium as fluid streams slide across reflective metal contours, blue pigment channels surge through every liquid sheet while surface-tension membranes stretch over the crown, suspended droplets accelerate along arcing trajectories and reconnect with the surrounding pool, then chromatic energy propagates through the fluid volume as cobalt transforms into glossy bubblegum pink, splash columns broaden into rounded wave crests, bubble clusters reorganize into smoother liquid forms, and thick pink cascades pour over the skull’s forehead and eye sockets while preserving the metallic gold structure beneath, ending as a hyper-detailed macro photograph of a gold skull immersed in vibrant pink liquid with sculpted pink splash crowns, reflective ripples, and dense flowing pink coatings against pitch black background.\n"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "2581": {
+    "inputs": {
+      "model": [
+        "2314",
+        0
+      ],
+      "positive": [
+        "2732",
+        0
+      ],
+      "negative": [
+        "2563",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "control_video": [
+        "9203",
+        0
+      ],
+      "vace_reference": [
+        "9205",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "2739",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 0.75
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "2588": {
+    "inputs": {
+      "model": [
+        "2581",
+        0
+      ],
+      "positive": [
+        "2581",
+        1
+      ],
+      "negative": [
+        "2581",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "2581",
+        4
+      ],
+      "seed": [
+        "2703",
+        0
+      ],
+      "scheduler": 4,
+      "steps": 2,
+      "steps_to_run": 1,
+      "denoise": 0.45,
+      "cfg": 1709,
+      "sampler_mode": "standard"
+    },
+    "class_type": "SharkSampler_Beta"
+  },
+  "2628": {
+    "inputs": {
+      "extra_state_dict": [
+        "2630",
+        0
+      ],
+      "model_name": "Wan2.2\\Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors",
+      "weight_dtype": "fp8_e4m3fn",
+      "compute_dtype": "default",
+      "patch_cublaslinear": false,
+      "sage_attention": "auto",
+      "enable_fp16_accumulation": true
+    },
+    "class_type": "DiffusionModelLoaderKJ"
+  },
+  "2629": {
+    "inputs": {
+      "model_name": "Wan2.2\\Wan2_2_Fun_VACE_module_A14B_LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+    },
+    "class_type": "DiffusionModelSelector"
+  },
+  "2630": {
+    "inputs": {
+      "model_name": "Wan2.2\\Wan2_2_Fun_VACE_module_A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+    },
+    "class_type": "DiffusionModelSelector"
+  },
+  "2631": {
+    "inputs": {
+      "extra_state_dict": [
+        "2629",
+        0
+      ],
+      "model_name": "Wan2.2\\Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors",
+      "weight_dtype": "fp8_e4m3fn",
+      "compute_dtype": "default",
+      "patch_cublaslinear": false,
+      "sage_attention": "auto",
+      "enable_fp16_accumulation": true
+    },
+    "class_type": "DiffusionModelLoaderKJ"
+  },
+  "2632": {
+    "inputs": {
+      "model": [
+        "2628",
+        0
+      ],
+      "clip": [
+        "570",
+        0
+      ],
+      "lora_1": {
+        "on": true,
+        "lora": "Wan2.1_T2V-Util\\lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank128_bf16.safetensors",
+        "strength": 2,
+        "strengthTwo": null
+      },
+      "lora_2": {
+        "on": true,
+        "lora": "Wan2.1-Style\\trigger_phrase_flippnrad-motion-morph.safetensors",
+        "strength": 1.5,
+        "strengthTwo": null
+      }
+    },
+    "class_type": "Power Lora Loader (rgthree)"
+  },
+  "2633": {
+    "inputs": {
+      "model": [
+        "2631",
+        0
+      ],
+      "clip": [
+        "570",
+        0
+      ],
+      "lora_1": {
+        "on": true,
+        "lora": "Wan2.1_T2V-Util\\lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank128_bf16.safetensors",
+        "strength": 1,
+        "strengthTwo": null
+      },
+      "lora_2": {
+        "on": true,
+        "lora": "Wan2.1-Style\\trigger_phrase_flippnrad-motion-morph.safetensors",
+        "strength": 0.5,
+        "strengthTwo": null
+      }
+    },
+    "class_type": "Power Lora Loader (rgthree)"
+  },
+  "2653": {
+    "inputs": {
+      "video": "\"C:\\Users\\kungf\\OneDrive\\09_SOURCE_MATERIAL\\RGBCYMK_Mattes\\rishi.sarswat-controlnet3-512x910_depth.mp4\"",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "class_type": "VHS_LoadVideoPath"
+  },
+  "2659": {
+    "inputs": {
+      "image": [
+        "2919",
+        0
+      ],
+      "start": [
+        "3142",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "2703": {
+    "inputs": {
+      "value": 2037
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "2732": {
+    "inputs": {
+      "conditioning_to": [
+        "2564",
+        0
+      ],
+      "conditioning_from": [
+        "2733",
+        0
+      ],
+      "conditioning_to_strength": 0.6
+    },
+    "class_type": "ConditioningAverage"
+  },
+  "2733": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippin rad motion morph"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "2739": {
+    "inputs": {
+      "string": "0.45, 0.55#13, 0.45"
+    },
+    "class_type": "StringToFloatListRanged"
+  },
+  "2752": {
+    "inputs": {
+      "image": [
+        "2653",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "crop": "center"
+    },
+    "class_type": "ImageScale"
+  },
+  "2863": {
+    "inputs": {
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "batch_size": 1,
+      "color": 16777215
+    },
+    "class_type": "EmptyImage"
+  },
+  "2871": {
+    "inputs": {
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "batch_size": 1,
+      "color": 0
+    },
+    "class_type": "EmptyImage"
+  },
+  "2890": {
+    "inputs": {
+      "image": [
+        "2659",
+        0
+      ],
+      "start": [
+        "3147",
+        0
+      ],
+      "length": [
+        "3152",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "2919": {
+    "inputs": {
+      "image": [
+        "3080",
+        0
+      ],
+      "amount": 2
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "2969": {
+    "inputs": {
+      "video": "\"C:\\Users\\kungf\\OneDrive\\09_SOURCE_MATERIAL\\RGBCYMK_Mattes\\rishi.sarswat-controlnet3.mp4\"",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "class_type": "VHS_LoadVideoPath"
+  },
+  "2999": {
+    "inputs": {
+      "image": [
+        "3023",
+        0
+      ],
+      "start": 0,
+      "length": 1
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3000": {
+    "inputs": {
+      "image": [
+        "2969",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "crop": "center"
+    },
+    "class_type": "ImageScale"
+  },
+  "3021": {
+    "inputs": {
+      "image": "2.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage"
+  },
+  "3022": {
+    "inputs": {
+      "image": "a_cinematic_photograph_of_a_golden_skull_dropping_into_a_pool__d2b0e434-68a1-431b-8d7b-ce9dcba1e584.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage"
+  },
+  "3023": {
+    "inputs": {
+      "image": [
+        "3022",
+        0
+      ],
+      "amount": [
+        "3148",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3024": {
+    "inputs": {
+      "image": [
+        "2659",
+        0
+      ],
+      "start": [
+        "3158",
+        1
+      ],
+      "length": [
+        "3156",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3035": {
+    "inputs": {
+      "image": [
+        "3021",
+        0
+      ],
+      "amount": [
+        "3147",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3037": {
+    "inputs": {
+      "model": [
+        "2313",
+        0
+      ],
+      "conditioning": [
+        "3038",
+        0
+      ],
+      "nag_scale": 6,
+      "nag_alpha": 0.25,
+      "nag_tau": 1.5,
+      "input_type": "default"
+    },
+    "class_type": "WanVideoNAG"
+  },
+  "3038": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "pixar style, finding nemo, eyeball, iris, pupil"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3076": {
+    "inputs": {
+      "images.image0": [
+        "3035",
+        0
+      ],
+      "images.image1": [
+        "2890",
+        0
+      ],
+      "images.image2": [
+        "3023",
+        0
+      ],
+      "images.image3": [
+        "3024",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3080": {
+    "inputs": {
+      "image1": [
+        "2752",
+        0
+      ],
+      "image2": [
+        "3000",
+        0
+      ],
+      "blend_factor": 0.1,
+      "blend_mode": "difference"
+    },
+    "class_type": "ImageBlend"
+  },
+  "3130": {
+    "inputs": {
+      "image": [
+        "2559",
+        0
+      ],
+      "start": [
+        "3793",
+        0
+      ],
+      "length": [
+        "3682",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3133": {
+    "inputs": {
+      "video_1": [
+        "3136",
+        0
+      ],
+      "video_2": [
+        "3680",
+        0
+      ],
+      "overlap_frames": [
+        "3415",
+        0
+      ]
+    },
+    "class_type": "WanVideoBlender"
+  },
+  "3136": {
+    "inputs": {
+      "image": [
+        "2559",
+        0
+      ],
+      "length": [
+        "3157",
+        1
+      ],
+      "start": 0
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3138": {
+    "inputs": {
+      "images": [
+        "2559",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "filename_prefix": "wanblend-refine",
+      "frame_rate": 16,
+      "loop_count": 0,
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 6,
+      "save_metadata": false,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true
+    },
+    "class_type": "VHS_VideoCombine"
+  },
+  "3140": {
+    "inputs": {
+      "images": [
+        "2559",
+        0
+      ]
+    },
+    "class_type": "VHS_GetImageCount"
+  },
+  "3142": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "INTConstant"
+  },
+  "3143": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "INTConstant"
+  },
+  "3144": {
+    "inputs": {
+      "value": 512
+    },
+    "class_type": "INTConstant"
+  },
+  "3145": {
+    "inputs": {
+      "value": 57
+    },
+    "class_type": "INTConstant"
+  },
+  "3147": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "INTConstant"
+  },
+  "3148": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "INTConstant"
+  },
+  "3152": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3147",
+        0
+      ],
+      "expression": "a-(b+c)"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3156": {
+    "inputs": {
+      "variables.a": [
+        "3910",
+        0
+      ],
+      "variables.b": [
+        "3148",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3157": {
+    "inputs": {
+      "variables.a": [
+        "3140",
+        0
+      ],
+      "variables.b": [
+        "3417",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3158": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3148",
+        0
+      ],
+      "expression": "(a-b)+c"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3236": {
+    "inputs": {
+      "value": "260415-wan22animdiff-07_rev1_FULL"
+    },
+    "class_type": "PrimitiveString"
+  },
+  "3339": {
+    "inputs": {
+      "video_1": [
+        "3340",
+        0
+      ],
+      "video_2": [
+        "3753",
+        0
+      ],
+      "overlap_frames": [
+        "3415",
+        0
+      ]
+    },
+    "class_type": "WanVideoBlender"
+  },
+  "3340": {
+    "inputs": {
+      "image": [
+        "3133",
+        0
+      ],
+      "length": [
+        "3341",
+        1
+      ],
+      "start": 0
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3341": {
+    "inputs": {
+      "variables.a": [
+        "3342",
+        0
+      ],
+      "variables.b": [
+        "3417",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3342": {
+    "inputs": {
+      "images": [
+        "3133",
+        0
+      ]
+    },
+    "class_type": "VHS_GetImageCount"
+  },
+  "3403": {
+    "inputs": {
+      "variables.a": [
+        "3406",
+        0
+      ],
+      "variables.b": [
+        "3417",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3404": {
+    "inputs": {
+      "image": [
+        "3339",
+        0
+      ],
+      "length": [
+        "3403",
+        1
+      ],
+      "start": 0
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3405": {
+    "inputs": {
+      "video_1": [
+        "3404",
+        0
+      ],
+      "video_2": [
+        "3834",
+        0
+      ],
+      "overlap_frames": [
+        "3415",
+        0
+      ]
+    },
+    "class_type": "WanVideoBlender"
+  },
+  "3406": {
+    "inputs": {
+      "images": [
+        "3339",
+        0
+      ]
+    },
+    "class_type": "VHS_GetImageCount"
+  },
+  "3407": {
+    "inputs": {
+      "variables.a": [
+        "3410",
+        0
+      ],
+      "variables.b": [
+        "3417",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3408": {
+    "inputs": {
+      "image": [
+        "3405",
+        0
+      ],
+      "length": [
+        "3407",
+        1
+      ],
+      "start": 0
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3409": {
+    "inputs": {
+      "video_1": [
+        "3408",
+        0
+      ],
+      "video_2": [
+        "2559",
+        0
+      ],
+      "overlap_frames": [
+        "3415",
+        0
+      ]
+    },
+    "class_type": "WanVideoBlender"
+  },
+  "3410": {
+    "inputs": {
+      "images": [
+        "3405",
+        0
+      ]
+    },
+    "class_type": "VHS_GetImageCount"
+  },
+  "3412": {
+    "inputs": {
+      "image": [
+        "3409",
+        0
+      ],
+      "start": [
+        "3415",
+        0
+      ],
+      "length": [
+        "3413",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3413": {
+    "inputs": {
+      "variables.a": [
+        "3140",
+        0
+      ],
+      "variables.b": [
+        "3417",
+        0
+      ],
+      "variables.c": [
+        "3415",
+        0
+      ],
+      "variables.d": [
+        "3416",
+        0
+      ],
+      "expression": "((a-b)-c)*d"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3415": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "INTConstant"
+  },
+  "3416": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "INTConstant"
+  },
+  "3417": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "INTConstant"
+  },
+  "3622": {
+    "inputs": {
+      "image": [
+        "3654",
+        0
+      ],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask"
+  },
+  "3623": {
+    "inputs": {
+      "model": [
+        "3649",
+        0
+      ],
+      "positive": [
+        "3649",
+        1
+      ],
+      "negative": [
+        "3649",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3649",
+        4
+      ],
+      "steps_to_run": -1,
+      "cfg": 1,
+      "sampler_mode": "resample"
+    },
+    "class_type": "SharkChainsampler_Beta"
+  },
+  "3624": {
+    "inputs": {
+      "model": [
+        "3630",
+        0
+      ],
+      "positive": [
+        "3630",
+        1
+      ],
+      "negative": [
+        "3630",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3630",
+        4
+      ],
+      "seed": [
+        "3635",
+        0
+      ],
+      "scheduler": 4,
+      "steps": 2,
+      "steps_to_run": 1,
+      "denoise": 1,
+      "cfg": 1709,
+      "sampler_mode": "standard"
+    },
+    "class_type": "SharkSampler_Beta"
+  },
+  "3625": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippin rad motion morph"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3626": {
+    "inputs": {
+      "model": [
+        "2313",
+        0
+      ],
+      "conditioning": [
+        "3631",
+        0
+      ],
+      "nag_scale": 6,
+      "nag_alpha": 0.25,
+      "nag_tau": 1.5,
+      "input_type": "default"
+    },
+    "class_type": "WanVideoNAG"
+  },
+  "3630": {
+    "inputs": {
+      "model": [
+        "2314",
+        0
+      ],
+      "positive": [
+        "3633",
+        0
+      ],
+      "negative": [
+        "3634",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "control_video": [
+        "3651",
+        0
+      ],
+      "control_masks": [
+        "3622",
+        0
+      ],
+      "vace_reference": [
+        "3670",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3646",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 1
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3631": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "pixar style, finding nemo, eyeball, iris, pupil"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3633": {
+    "inputs": {
+      "conditioning_to": [
+        "3647",
+        0
+      ],
+      "conditioning_from": [
+        "3625",
+        0
+      ],
+      "conditioning_to_strength": 0.6
+    },
+    "class_type": "ConditioningAverage"
+  },
+  "3634": {
+    "inputs": {
+      "conditioning": [
+        "3633",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut"
+  },
+  "3635": {
+    "inputs": {
+      "value": 2043
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "3638": {
+    "inputs": {
+      "image": "a_cinematic_photograph_of_a_golden_skull_dropping_into_a_pool__2eec0bb7-17e2-46f8-bbe5-ec18e8e652c5.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage"
+  },
+  "3639": {
+    "inputs": {
+      "image": [
+        "3671",
+        0
+      ],
+      "start": [
+        "3686",
+        1
+      ],
+      "length": [
+        "3687",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3641": {
+    "inputs": {
+      "image": [
+        "3638",
+        0
+      ],
+      "amount": [
+        "3684",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3646": {
+    "inputs": {
+      "string": "0.90, 0.64#10, 0.80, 1.00, 0.80#2"
+    },
+    "class_type": "StringToFloatListRanged"
+  },
+  "3647": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippinrad motion morph of a hyper-detailed gold skull engulfed in thick glossy pink liquid against pitch black background, the liquid canopy stretches upward into elastic crowns while pink surface layers accelerate across the metallic contours, chromatic waves propagate through every fluid volume as bubblegum pigment converts into deep emerald green, splash walls sharpen into taller impact crests, rounded pink ripples compress into tighter green turbulence rings, suspended droplets multiply and launch outward in ballistic arcs, the skull subtly rotates toward a frontal orientation as reflective gold surfaces emerge through shifting liquid membranes, flowing sheets retract from the eye sockets and reassemble into streamlined green coatings, micro-droplets nucleate into dense airborne particle fields, and the surrounding pool develops energetic splash geometry with vertical jets and crown formations, ending as a cinematic gold skull bursting through vibrant green liquid with towering green splash structures, scattered droplets, metallic reflections, and dramatic macro-photography styling against pitch black background.\n"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3649": {
+    "inputs": {
+      "model": [
+        "3626",
+        0
+      ],
+      "positive": [
+        "3633",
+        0
+      ],
+      "negative": [
+        "3634",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "latent_in": [
+        "3624",
+        0
+      ],
+      "control_video": [
+        "3651",
+        0
+      ],
+      "control_masks": [
+        "3622",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3646",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 1
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3650": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3682",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3651": {
+    "inputs": {
+      "images.image0": [
+        "3130",
+        0
+      ],
+      "images.image1": [
+        "3663",
+        0
+      ],
+      "images.image2": [
+        "3641",
+        0
+      ],
+      "images.image3": [
+        "3639",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3652": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3685",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3653": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3684",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3654": {
+    "inputs": {
+      "images.image0": [
+        "3650",
+        0
+      ],
+      "images.image1": [
+        "3652",
+        0
+      ],
+      "images.image2": [
+        "3653",
+        0
+      ],
+      "images.image3": [
+        "3655",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3655": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3687",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3663": {
+    "inputs": {
+      "image": [
+        "3671",
+        0
+      ],
+      "start": [
+        "3682",
+        0
+      ],
+      "length": [
+        "3685",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3670": {
+    "inputs": {
+      "image": [
+        "3641",
+        0
+      ],
+      "start": 0,
+      "length": 1
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3671": {
+    "inputs": {
+      "image": [
+        "2919",
+        0
+      ],
+      "start": [
+        "3681",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3680": {
+    "inputs": {
+      "samples": [
+        "3623",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "3681": {
+    "inputs": {
+      "value": 48
+    },
+    "class_type": "INTConstant"
+  },
+  "3682": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "INTConstant"
+  },
+  "3684": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "INTConstant"
+  },
+  "3685": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3682",
+        0
+      ],
+      "expression": "a-(b+c)"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3686": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3684",
+        0
+      ],
+      "expression": "(a-b)+c"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3687": {
+    "inputs": {
+      "variables.a": [
+        "3910",
+        0
+      ],
+      "variables.b": [
+        "3684",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3713": {
+    "inputs": {
+      "image": [
+        "3735",
+        0
+      ],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask"
+  },
+  "3714": {
+    "inputs": {
+      "model": [
+        "3790",
+        0
+      ],
+      "positive": [
+        "3790",
+        1
+      ],
+      "negative": [
+        "3790",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3790",
+        4
+      ],
+      "steps_to_run": -1,
+      "cfg": 1,
+      "sampler_mode": "resample"
+    },
+    "class_type": "SharkChainsampler_Beta"
+  },
+  "3715": {
+    "inputs": {
+      "model": [
+        "3789",
+        0
+      ],
+      "positive": [
+        "3789",
+        1
+      ],
+      "negative": [
+        "3789",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3789",
+        4
+      ],
+      "seed": [
+        "3791",
+        0
+      ],
+      "scheduler": 4,
+      "steps": 2,
+      "steps_to_run": 1,
+      "denoise": 1,
+      "cfg": 1709,
+      "sampler_mode": "standard"
+    },
+    "class_type": "SharkSampler_Beta"
+  },
+  "3716": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippin rad motion morph"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3717": {
+    "inputs": {
+      "model": [
+        "2313",
+        0
+      ],
+      "conditioning": [
+        "3721",
+        0
+      ],
+      "nag_scale": 6,
+      "nag_alpha": 0.25,
+      "nag_tau": 1.5,
+      "input_type": "default"
+    },
+    "class_type": "WanVideoNAG"
+  },
+  "3721": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "pixar style, plastic fake texture, eyeball, iris, pupil"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3723": {
+    "inputs": {
+      "conditioning_to": [
+        "3785",
+        0
+      ],
+      "conditioning_from": [
+        "3716",
+        0
+      ],
+      "conditioning_to_strength": 0.8
+    },
+    "class_type": "ConditioningAverage"
+  },
+  "3724": {
+    "inputs": {
+      "conditioning": [
+        "3723",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut"
+  },
+  "3726": {
+    "inputs": {
+      "image": [
+        "3767",
+        0
+      ],
+      "start": [
+        "3758",
+        1
+      ],
+      "length": [
+        "3761",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3727": {
+    "inputs": {
+      "image": [
+        "3754",
+        0
+      ],
+      "amount": [
+        "3784",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3731": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3764",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3732": {
+    "inputs": {
+      "images.image0": [
+        "3766",
+        0
+      ],
+      "images.image1": [
+        "3740",
+        0
+      ],
+      "images.image2": [
+        "3727",
+        0
+      ],
+      "images.image3": [
+        "3726",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3733": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3755",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3734": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3784",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3735": {
+    "inputs": {
+      "images.image0": [
+        "3731",
+        0
+      ],
+      "images.image1": [
+        "3733",
+        0
+      ],
+      "images.image2": [
+        "3734",
+        0
+      ],
+      "images.image3": [
+        "3736",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3736": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3761",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3740": {
+    "inputs": {
+      "image": [
+        "3767",
+        0
+      ],
+      "start": [
+        "3764",
+        0
+      ],
+      "length": [
+        "3755",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3747": {
+    "inputs": {
+      "image": [
+        "3727",
+        0
+      ],
+      "start": 0,
+      "length": 1
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3753": {
+    "inputs": {
+      "samples": [
+        "3714",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "3754": {
+    "inputs": {
+      "image": "a_cinematic_photograph_of_a_golden_skull_dropping_into_a_pool__8a6547fc-0833-432b-818a-23fd4c46e864.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage"
+  },
+  "3755": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3764",
+        0
+      ],
+      "expression": "a-(b+c)"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3758": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3784",
+        0
+      ],
+      "expression": "(a-b)+c"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3761": {
+    "inputs": {
+      "variables.a": [
+        "3910",
+        0
+      ],
+      "variables.b": [
+        "3784",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3764": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "INTConstant"
+  },
+  "3766": {
+    "inputs": {
+      "image": [
+        "3680",
+        0
+      ],
+      "start": [
+        "3792",
+        0
+      ],
+      "length": [
+        "3764",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3767": {
+    "inputs": {
+      "image": [
+        "2919",
+        0
+      ],
+      "start": [
+        "3770",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3770": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "INTConstant"
+  },
+  "3784": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "INTConstant"
+  },
+  "3785": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippinrad motion morph of a cinematic metallic gold skull erupting from emerald-green liquid against pitch black background, the towering green splash crown flexes and folds around the cranium as fluid membranes slide across reflective bone contours, airborne droplets accelerate into dense orbital streams while chromatic energy ripples through every liquid volume, transforming emerald pigment into radiant molten yellow, the surrounding pool contracts and launches upward into thinner high-velocity sheets, crown-shaped splash structures fracture into branching liquid wings, green surface coatings retract from the eye sockets and jawline as glossy yellow layers surge forward and encapsulate the skull, thousands of suspended droplets nucleate and multiply into a glittering particle storm, metallic reflections brighten and warm as the skull subtly rotates toward a centered hero pose, and the fluid geometry stretches into elegant vertical ribbons and explosive splash arcs, ending as a hyper-detailed gold skull engulfed in brilliant yellow liquid with expansive splash wings, cascading streams, and a halo of floating droplets in dramatic macro-photography style against pitch black background.\n"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3786": {
+    "inputs": {
+      "string": "0.90, 0.64#10, 0.80, 1.00, 0.64#2"
+    },
+    "class_type": "StringToFloatListRanged"
+  },
+  "3789": {
+    "inputs": {
+      "model": [
+        "2314",
+        0
+      ],
+      "positive": [
+        "3723",
+        0
+      ],
+      "negative": [
+        "3724",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "control_video": [
+        "3732",
+        0
+      ],
+      "control_masks": [
+        "3713",
+        0
+      ],
+      "vace_reference": [
+        "3747",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3786",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 1
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3790": {
+    "inputs": {
+      "model": [
+        "3717",
+        0
+      ],
+      "positive": [
+        "3723",
+        0
+      ],
+      "negative": [
+        "3724",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "latent_in": [
+        "3715",
+        0
+      ],
+      "control_video": [
+        "3732",
+        0
+      ],
+      "control_masks": [
+        "3713",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3786",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 1
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3791": {
+    "inputs": {
+      "value": 2094
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "3792": {
+    "inputs": {
+      "value": 48
+    },
+    "class_type": "INTConstant"
+  },
+  "3793": {
+    "inputs": {
+      "value": 48
+    },
+    "class_type": "INTConstant"
+  },
+  "3797": {
+    "inputs": {
+      "image": [
+        "3817",
+        0
+      ],
+      "channel": "red"
+    },
+    "class_type": "ImageToMask"
+  },
+  "3798": {
+    "inputs": {
+      "model": [
+        "3859",
+        0
+      ],
+      "positive": [
+        "3859",
+        1
+      ],
+      "negative": [
+        "3859",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3859",
+        4
+      ],
+      "steps_to_run": -1,
+      "cfg": 1,
+      "sampler_mode": "resample"
+    },
+    "class_type": "SharkChainsampler_Beta"
+  },
+  "3799": {
+    "inputs": {
+      "model": [
+        "3858",
+        0
+      ],
+      "positive": [
+        "3858",
+        1
+      ],
+      "negative": [
+        "3858",
+        2
+      ],
+      "sampler": [
+        "2347",
+        0
+      ],
+      "latent_image": [
+        "3858",
+        4
+      ],
+      "seed": [
+        "3867",
+        0
+      ],
+      "scheduler": 4,
+      "steps": 2,
+      "steps_to_run": 1,
+      "denoise": 1,
+      "cfg": 1709,
+      "sampler_mode": "standard"
+    },
+    "class_type": "SharkSampler_Beta"
+  },
+  "3800": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippin rad motion morph"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3801": {
+    "inputs": {
+      "model": [
+        "2313",
+        0
+      ],
+      "conditioning": [
+        "3865",
+        0
+      ],
+      "nag_scale": 6,
+      "nag_alpha": 0.25,
+      "nag_tau": 1.5,
+      "input_type": "default"
+    },
+    "class_type": "WanVideoNAG"
+  },
+  "3806": {
+    "inputs": {
+      "conditioning": [
+        "3869",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut"
+  },
+  "3808": {
+    "inputs": {
+      "image": [
+        "3845",
+        0
+      ],
+      "start": [
+        "3838",
+        1
+      ],
+      "length": [
+        "3841",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3813": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3873",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3814": {
+    "inputs": {
+      "images.image0": [
+        "3844",
+        0
+      ],
+      "images.image1": [
+        "3861",
+        0
+      ],
+      "images.image2": [
+        "3878",
+        0
+      ],
+      "images.image3": [
+        "3808",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3815": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3835",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3816": {
+    "inputs": {
+      "image": [
+        "2871",
+        0
+      ],
+      "amount": [
+        "3872",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3817": {
+    "inputs": {
+      "images.image0": [
+        "3813",
+        0
+      ],
+      "images.image1": [
+        "3815",
+        0
+      ],
+      "images.image2": [
+        "3816",
+        0
+      ],
+      "images.image3": [
+        "3818",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode"
+  },
+  "3818": {
+    "inputs": {
+      "image": [
+        "2863",
+        0
+      ],
+      "amount": [
+        "3841",
+        1
+      ]
+    },
+    "class_type": "RepeatImageBatch"
+  },
+  "3828": {
+    "inputs": {
+      "image": [
+        "3878",
+        0
+      ],
+      "start": 0,
+      "length": 1
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3834": {
+    "inputs": {
+      "samples": [
+        "3798",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "3835": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3873",
+        0
+      ],
+      "expression": "a-(b+c)"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3838": {
+    "inputs": {
+      "variables.a": [
+        "3145",
+        0
+      ],
+      "variables.b": [
+        "3910",
+        0
+      ],
+      "variables.c": [
+        "3872",
+        0
+      ],
+      "expression": "(a-b)+c"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3841": {
+    "inputs": {
+      "variables.a": [
+        "3910",
+        0
+      ],
+      "variables.b": [
+        "3872",
+        0
+      ],
+      "expression": "a-b"
+    },
+    "class_type": "SimpleCalculatorKJ"
+  },
+  "3844": {
+    "inputs": {
+      "image": [
+        "3753",
+        0
+      ],
+      "start": [
+        "3876",
+        0
+      ],
+      "length": [
+        "3873",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3845": {
+    "inputs": {
+      "image": [
+        "2919",
+        0
+      ],
+      "start": [
+        "3874",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3858": {
+    "inputs": {
+      "model": [
+        "2314",
+        0
+      ],
+      "positive": [
+        "3869",
+        0
+      ],
+      "negative": [
+        "3806",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "control_video": [
+        "3814",
+        0
+      ],
+      "control_masks": [
+        "3797",
+        0
+      ],
+      "vace_reference": [
+        "3828",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3866",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 0.6
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3859": {
+    "inputs": {
+      "model": [
+        "3801",
+        0
+      ],
+      "positive": [
+        "3869",
+        0
+      ],
+      "negative": [
+        "3806",
+        0
+      ],
+      "vae": [
+        "571",
+        0
+      ],
+      "latent_in": [
+        "3799",
+        0
+      ],
+      "control_video": [
+        "3814",
+        0
+      ],
+      "control_masks": [
+        "3797",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "length": [
+        "3145",
+        0
+      ],
+      "vace_strength": [
+        "3866",
+        0
+      ],
+      "batch_size": 1,
+      "vace_ref_strength": 1
+    },
+    "class_type": "WanVacePhantomSimpleV2"
+  },
+  "3861": {
+    "inputs": {
+      "image": [
+        "3845",
+        0
+      ],
+      "start": [
+        "3873",
+        0
+      ],
+      "length": [
+        "3835",
+        1
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3864": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "flippinrad motion morph of a hyper-detailed skull engulfed in molten yellow liquid against pitch black background, the towering yellow splash wings recoil and twist around the cranium as fluid sheets slide across the metallic surface, thousands of suspended amber droplets accelerate through curved trajectories and merge into thicker liquid channels, chromatic waves propagate through every flowing layer as radiant yellow pigment converts into electric cobalt blue, vertical liquid ribbons collapse into broad splash walls, fine particle fields condense into glossy bubble clusters, and the skull subtly rotates while reflective gold anatomy re-emerges beneath shifting fluid membranes, blue liquid streams descend from above and mechanically attach to the crown, wrapping the forehead, eye sockets, and jawline with dense viscous coatings, while surrounding impact rings expand across the liquid surface and crown-shaped splashes rise from the pool edge, ending as a cinematic gold skull erupting from vivid blue liquid with thick cascading blue streams, rounded splash formations, reflective bubbles, and dramatic macro-photography styling against pitch black background.\n"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3865": {
+    "inputs": {
+      "clip": [
+        "570",
+        0
+      ],
+      "text": "pixar style, plastic fake texture, eyeball, iris, pupil"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3866": {
+    "inputs": {
+      "string": "0.90, 0.64#11, 1.00#3"
+    },
+    "class_type": "StringToFloatListRanged"
+  },
+  "3867": {
+    "inputs": {
+      "value": 2135
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "3869": {
+    "inputs": {
+      "conditioning_to": [
+        "3864",
+        0
+      ],
+      "conditioning_from": [
+        "3800",
+        0
+      ],
+      "conditioning_to_strength": 1
+    },
+    "class_type": "ConditioningAverage"
+  },
+  "3872": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "INTConstant"
+  },
+  "3873": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "INTConstant"
+  },
+  "3874": {
+    "inputs": {
+      "value": 48
+    },
+    "class_type": "INTConstant"
+  },
+  "3876": {
+    "inputs": {
+      "value": 48
+    },
+    "class_type": "INTConstant"
+  },
+  "3878": {
+    "inputs": {
+      "image": [
+        "2559",
+        0
+      ],
+      "start": [
+        "3901",
+        0
+      ],
+      "length": [
+        "3872",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch+"
+  },
+  "3884": {
+    "inputs": {
+      "string_a": [
+        "3236",
+        0
+      ],
+      "string_b": [
+        "3886",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate"
+  },
+  "3886": {
+    "inputs": {
+      "value": "-STITCH"
+    },
+    "class_type": "PrimitiveString"
+  },
+  "3901": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "INTConstant"
+  },
+  "3910": {
+    "inputs": {
+      "value": 9
+    },
+    "class_type": "INTConstant"
+  },
+  "9200": {
+    "inputs": {
+      "video": "",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "class_type": "VHS_LoadVideoPath"
+  },
+  "9201": {
+    "inputs": {
+      "image": [
+        "9200",
+        0
+      ],
+      "width": [
+        "3143",
+        0
+      ],
+      "height": [
+        "3144",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "crop": "center"
+    },
+    "class_type": "ImageScale"
+  },
+  "9202": {
+    "inputs": {
+      "image1": [
+        "2752",
+        0
+      ],
+      "image2": [
+        "3000",
+        0
+      ],
+      "blend_factor": 0.1,
+      "blend_mode": "difference"
+    },
+    "class_type": "ImageBlend"
+  },
+  "9203": {
+    "inputs": {
+      "image1": [
+        "9201",
+        0
+      ],
+      "image2": [
+        "9202",
+        0
+      ],
+      "blend_factor": 0.12,
+      "blend_mode": "normal"
+    },
+    "class_type": "ImageBlend"
+  },
+  "9205": {
+    "inputs": {
+      "image": [
+        "9201",
+        0
+      ],
+      "start": 0,
+      "length": 1
+    },
+    "class_type": "ImageFromBatch+"
+  }
+}

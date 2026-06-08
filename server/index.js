@@ -17,7 +17,8 @@ import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
-import { createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
+import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
+import { createWanBlendComfyResult } from "./wanblend/engine.js";
 import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2109,6 +2110,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     const endFrameUrls = Array.isArray(req.body.endFrameUrls) ? req.body.endFrameUrls.filter(isLocalAssetUrl) : [];
     const referenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [];
     const referenceVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [];
+    const controlVideoUrls = Array.isArray(req.body.controlVideoUrls) ? req.body.controlVideoUrls.filter(isLocalAssetUrl) : [];
     const startFrameVideoUrls = Array.isArray(req.body.startFrameVideoUrls) ? req.body.startFrameVideoUrls.filter(isLocalAssetUrl) : [];
     const maskVideoUrls = Array.isArray(req.body.maskVideoUrls) ? req.body.maskVideoUrls.filter(isLocalAssetUrl) : [];
     const wanWarpSegments = normalizeWanWarpSegmentPayloads(
@@ -2144,7 +2146,18 @@ app.post("/api/node/utility-video", async (req, res) => {
     if (selectedVideoModel.provider === "local-video-stitch") {
       return runVideoStitchUtilityVideo(req, res, {
         referenceVideoUrls,
+        controlVideoUrls,
+        maskVideoUrls,
         wanWarpSegments,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "local-wanblend") {
+      return runWanBlendUtilityVideo(req, res, {
+        prompt,
+        referenceImageUrls,
+        referenceVideoUrls,
         selectedVideoModel
       });
     }
@@ -2444,12 +2457,41 @@ function normalizeWanWarpSegmentPayloads(value = []) {
   return normalized.sort((first, second) => roleOrder.indexOf(first.role) - roleOrder.indexOf(second.role) || first.order - second.order);
 }
 
-async function runVideoStitchUtilityVideo(req, res, { referenceVideoUrls, wanWarpSegments = [], selectedVideoModel = null }) {
+async function runVideoStitchUtilityVideo(req, res, { referenceVideoUrls, controlVideoUrls = [], maskVideoUrls = [], wanWarpSegments = [], selectedVideoModel = null }) {
   if (wanWarpSegments.length) {
     return res.json(
       await createWanWarpFullWorkflowResult({
         body: req.body,
         segments: wanWarpSegments,
+        selectedVideoModel,
+        helpers: {
+          firstLocalOutput,
+          resolveLocalAssetPathFromUrl,
+          createManagedAssetTarget,
+          workflowPackageOutputDirName,
+          probeVideoFile,
+          enrichVideoMetadata,
+          appendHistory,
+          projectFromBody,
+          nodeFromBody
+        }
+      })
+    );
+  }
+
+  const stitchOptions = req.body.videoStitch && typeof req.body.videoStitch === "object" ? req.body.videoStitch : {};
+  const hasBlendRefineInputs =
+    (isLocalAssetUrl(stitchOptions.wanBlendVideoUrl) || referenceVideoUrls.length > 0) &&
+    (isLocalAssetUrl(stitchOptions.motionVideoUrl) || controlVideoUrls.length > 0) &&
+    (isLocalAssetUrl(stitchOptions.depthVideoUrl) || maskVideoUrls.length > 0);
+  if (hasBlendRefineInputs) {
+    return res.json(
+      await createWanWarpBlendRefineResult({
+        body: req.body,
+        prompt: String(req.body.prompt || "").trim(),
+        referenceVideoUrls,
+        controlVideoUrls,
+        maskVideoUrls,
         selectedVideoModel,
         helpers: {
           firstLocalOutput,
@@ -2475,6 +2517,29 @@ async function runVideoStitchUtilityVideo(req, res, { referenceVideoUrls, wanWar
     await createVideoStitchResult({
       body: req.body,
       videoUrls: referenceVideoUrls
+    })
+  );
+}
+
+async function runWanBlendUtilityVideo(req, res, { prompt, referenceImageUrls, referenceVideoUrls, selectedVideoModel = null }) {
+  return res.json(
+    await createWanBlendComfyResult({
+      body: req.body,
+      prompt,
+      referenceImageUrls,
+      referenceVideoUrls,
+      selectedVideoModel,
+      helpers: {
+        firstLocalOutput,
+        resolveLocalAssetPathFromUrl,
+        createManagedAssetTarget,
+        workflowPackageOutputDirName,
+        probeVideoFile,
+        enrichVideoMetadata,
+        appendHistory,
+        projectFromBody,
+        nodeFromBody
+      }
     })
   );
 }
@@ -9211,6 +9276,15 @@ function resolveUtilityVideoModel(model) {
       provider: "local-composite-video",
       displayName: "Composite Video",
       id: "local/composite-video",
+      requiresPrompt: false
+    };
+  }
+
+  if (normalized.includes("wanblend") || normalized.includes("context smashing") || normalized.includes("context-smashing")) {
+    return {
+      provider: "local-wanblend",
+      displayName: "WanBlend",
+      id: "local/wanblend",
       requiresPrompt: false
     };
   }

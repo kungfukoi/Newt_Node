@@ -362,6 +362,22 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
     motionLoraHigh: 1.2,
     motionLoraLow: 0.35,
     crf: 8,
+    wanBlendVideoUrl: "/outputs/wanblend.mp4",
+    motionVideoUrl: "/outputs/motion-map.mp4",
+    depthVideoUrl: "/outputs/depth.mp4",
+    wanBlendFrameIndices: "0,18,36,54",
+    refineDenoise: 0.42,
+    controlBlend: 0.18,
+    depthMotionBlend: 0.08,
+    vaceRefStrength: 0.72,
+    conditioningStrength: 0.55,
+    strengthCurve: [
+      { x: 0, y: 0.3, mode: "ease" },
+      { x: 0.5, y: 0.7, mode: "linear" },
+      { x: 1, y: 0.4, mode: "ease" }
+    ],
+    strengthSchedule: "0.42, 0.58#20, 0.42",
+    frameLoadCap: 57,
     wanWarpSegments
   };
 
@@ -378,6 +394,7 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
     projectId: "project",
     projectName: "Project",
     referenceVideoUrls: [],
+    controlVideoUrls: ["/uploads/motion-map.mp4"],
     wanWarpSegments,
     videoStitch
   });
@@ -390,6 +407,65 @@ test("buildUtilityVideoRequest preserves WanWarp quality controls", () => {
   assert.equal(request.videoStitch.motionLoraHigh, 1.2);
   assert.equal(request.videoStitch.motionLoraLow, 0.35);
   assert.equal(request.videoStitch.crf, 8);
+  assert.equal(request.videoStitch.wanBlendVideoUrl, "/outputs/wanblend.mp4");
+  assert.equal(request.videoStitch.motionVideoUrl, "/outputs/motion-map.mp4");
+  assert.equal(request.videoStitch.depthVideoUrl, "/outputs/depth.mp4");
+  assert.equal(request.videoStitch.wanBlendFrameIndices, "0,18,36,54");
+  assert.equal(request.videoStitch.refineDenoise, 0.42);
+  assert.equal(request.videoStitch.controlBlend, 0.18);
+  assert.equal(request.videoStitch.depthMotionBlend, 0.08);
+  assert.equal(request.videoStitch.vaceRefStrength, 0.72);
+  assert.equal(request.videoStitch.conditioningStrength, 0.55);
+  assert.deepEqual(request.videoStitch.strengthCurve, [
+    { x: 0, y: 0.3, mode: "ease" },
+    { x: 0.5, y: 0.7, mode: "linear" },
+    { x: 1, y: 0.4, mode: "ease" }
+  ]);
+  assert.equal(request.videoStitch.strengthSchedule, "0.42, 0.58#20, 0.42");
+  assert.equal(request.videoStitch.frameLoadCap, 57);
+  assert.deepEqual(request.controlVideoUrls, ["/uploads/motion-map.mp4"]);
+});
+
+test("buildUtilityVideoRequest preserves WanBlend Comfy controls", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-wanblend",
+      data: {
+        title: "WanBlend",
+        utilityVideoModel: "WanBlend",
+        wanBlendNegativePrompt: "blur, flicker",
+        wanBlendWidth: 768,
+        wanBlendHeight: 432,
+        wanBlendFps: 24,
+        wanBlendSteps: 14,
+        wanBlendCfg: 1.4,
+        wanBlendIpAdapterWeight: 0.85,
+        wanBlendSelectEveryNth: 3,
+        wanBlendFrameLoadCap: 72,
+        wanBlendCrf: 17,
+        seed: "1357"
+      }
+    },
+    prompt: "attention masked blend",
+    model: "WanBlend",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceImageUrls: ["/uploads/red.png", "/uploads/green.png"],
+    referenceVideoUrls: ["/uploads/color-map.mp4"]
+  });
+
+  assert.equal(request.wanBlend.negativePrompt, "blur, flicker");
+  assert.equal(request.wanBlend.width, 768);
+  assert.equal(request.wanBlend.height, 432);
+  assert.equal(request.wanBlend.fps, 24);
+  assert.equal(request.wanBlend.steps, 14);
+  assert.equal(request.wanBlend.cfg, 1.4);
+  assert.equal(request.wanBlend.ipAdapterWeight, 0.85);
+  assert.equal(request.wanBlend.selectEveryNth, 3);
+  assert.equal(request.wanBlend.frameLoadCap, 72);
+  assert.equal(request.wanBlend.crf, 17);
+  assert.equal(request.wanBlend.seed, "1357");
 });
 
 test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
