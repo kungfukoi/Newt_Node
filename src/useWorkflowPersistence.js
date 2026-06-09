@@ -432,6 +432,18 @@ export function useWorkflowPersistence({
     }
   }
 
+  function openWorkflowFromBrowserPicker() {
+    const input = workflowFileInputRef.current;
+    if (!input) {
+      setSaveStatus("Workflow file picker is unavailable.");
+      return;
+    }
+
+    input.value = "";
+    setSaveStatus("Choose a workflow JSON...");
+    input.click();
+  }
+
   async function openWorkflowFromSystemPicker() {
     try {
       if (!(await guardUnsavedWorkflowChange("open another workflow"))) return;
@@ -561,6 +573,7 @@ export function useWorkflowPersistence({
     saveProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
+    openWorkflowFromBrowserPicker,
     openWorkflowFromSystemPicker,
     importWorkflowFromSystemPicker,
     loadProject,

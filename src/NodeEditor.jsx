@@ -656,6 +656,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     saveProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
+    openWorkflowFromBrowserPicker,
     openWorkflowFromSystemPicker,
     importWorkflowFromSystemPicker,
     loadProject,
@@ -3318,7 +3319,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
                   <Save size={15} />
                   <span>Save As</span>
                 </button>
-                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow package JSON">
+                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromBrowserPicker(); }} title="Open workflow JSON">
                   <FolderOpen size={15} />
                   <span>Open</span>
                 </button>
