@@ -19,6 +19,12 @@ import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./j
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { normalizeModelPreferences } from "../src/modelOptions.js";
+import {
+  comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
+  normalizeComfyRootPath,
+  normalizeComfyWanWorkflowName,
+  readComfyWanInstallStatus
+} from "./comfyWanPreflight.js";
 import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import { createWanBlendComfyResult } from "./wanblend/engine.js";
 import "./restart-marker.js";
@@ -48,7 +54,7 @@ const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
-const comfyWanRequirementsPath = "docs/comfyWan-requirements.yaml";
+const comfyWanRequirementsPath = defaultComfyWanRequirementsPath;
 const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
@@ -60,6 +66,7 @@ const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
 const runtimeConfigSources = {
   FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
+  COMFYUI_ROOT: process.env.COMFYUI_ROOT ? "runtime" : "",
   [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
 };
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
@@ -356,6 +363,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     repository,
     branch,
     branchStatus,
+    comfyWanRootPath: settingsValues.comfyWanRootPath || process.env.COMFYUI_ROOT || "",
     modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
     updateInProgress: Boolean(updatePromise),
     restartRequested
@@ -380,6 +388,7 @@ async function saveRuntimeSettings(body = {}) {
   if (falKey !== undefined) updates.falKey = falKey;
   if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
   if (repository) updates.repository = repository;
+  if (body.comfyWanRootPath !== undefined) updates.comfyWanRootPath = normalizeComfyRootPath(body.comfyWanRootPath);
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
 
   if (Object.keys(updates).length) {
@@ -467,12 +476,13 @@ async function requestServerRestart() {
 
 async function refreshRuntimeConfigFromEnvFile() {
   const [envValues, settingsValues] = await Promise.all([
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", updateRepositoryEnvKey]),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "COMFYUI_ROOT", updateRepositoryEnvKey]),
     readRuntimeSettingsStore()
   ]);
 
   applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
   applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
+  applyRuntimeConfigValue("COMFYUI_ROOT", envValues.COMFYUI_ROOT, settingsValues.comfyWanRootPath, { preferSettings: true });
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
 
   if (process.env.FAL_KEY) {
@@ -486,6 +496,7 @@ async function readRuntimeSettingsStore() {
     falKey: optionalRuntimeSetting(data?.falKey) || "",
     googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
     repository: normalizeUpdateRepository(data?.repository),
+    comfyWanRootPath: normalizeComfyRootPath(data?.comfyWanRootPath),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences)
   };
 }
@@ -499,6 +510,7 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
+  if (patch.comfyWanRootPath !== undefined) next.comfyWanRootPath = normalizeComfyRootPath(patch.comfyWanRootPath);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
@@ -564,15 +576,23 @@ async function writeRestartMarker() {
   );
 }
 
-async function readComfyWanStatus({ workflow = "" } = {}) {
-  const workflowName = normalizedComfyWanWorkflowName(workflow);
+async function readComfyWanStatus({ workflow = "", rootPath = "" } = {}) {
+  const workflowName = normalizeComfyWanWorkflowName(workflow);
   const comfyUrl = comfyWanUrlForWorkflow(workflowName);
+  const install = await readComfyWanInstallStatus({
+    projectRoot: rootDir,
+    requirementsPath: comfyWanRequirementsPath,
+    comfyRootPath: normalizeComfyRootPath(rootPath) || process.env.COMFYUI_ROOT || "",
+    workflow: workflowName
+  });
 
   try {
     const response = await fetch(`${comfyUrl}/system_stats`);
+    const apiAvailable = response.ok;
     if (!response.ok) {
       return comfyWanStatusPayload({
-        available: false,
+        apiAvailable,
+        install,
         workflow: workflowName,
         comfyUrl,
         status: response.status,
@@ -581,13 +601,15 @@ async function readComfyWanStatus({ workflow = "" } = {}) {
     }
 
     return comfyWanStatusPayload({
-      available: true,
+      apiAvailable,
+      install,
       workflow: workflowName,
       comfyUrl
     });
   } catch (error) {
     return comfyWanStatusPayload({
-      available: false,
+      apiAvailable: false,
+      install,
       workflow: workflowName,
       comfyUrl,
       status: 503,
@@ -597,25 +619,48 @@ async function readComfyWanStatus({ workflow = "" } = {}) {
   }
 }
 
-function comfyWanStatusPayload({ available, workflow, comfyUrl, status = 200, message = "", detail = "" }) {
+function comfyWanStatusPayload({ apiAvailable = false, install = null, workflow, comfyUrl, status = 200, message = "", detail = "" }) {
+  const installReady = install?.ready === true;
+  const available = Boolean(apiAvailable && installReady);
+  const installErrorCode = install && !installReady ? install.errorCode || "COMFYUI_SETUP_REQUIRED" : "";
+  const errorCode = available ? "" : installErrorCode || (apiAvailable ? "COMFYUI_SETUP_REQUIRED" : "COMFYUI_UNAVAILABLE");
+  const statusMessage = available
+    ? `${workflow} is ready.`
+    : installErrorCode ? install?.message || `${workflow} ComfyUI setup is incomplete.` : message || `${workflow} ComfyUI setup is incomplete.`;
   return {
     ok: true,
-    available: Boolean(available),
+    available,
+    apiAvailable: Boolean(apiAvailable),
     workflow,
     comfyUrl,
     status,
-    errorCode: available ? "" : "COMFYUI_UNAVAILABLE",
-    message,
+    errorCode,
+    message: statusMessage,
     detail,
-    requirementsPath: comfyWanRequirementsPath
+    requirementsPath: comfyWanRequirementsPath,
+    setupTitle: available ? "" : installErrorCode ? "ComfyUI dependency setup required" : "ComfyUI setup required",
+    install,
+    missingCustomNodes: install?.missingCustomNodes || [],
+    missingModels: install?.missingModels || []
   };
 }
 
-function normalizedComfyWanWorkflowName(value) {
-  const text = String(value || "").toLowerCase();
-  if (text.includes("blend")) return "WanBlend";
-  if (text.includes("segment")) return "WanSegment";
-  return "WanWarp";
+async function assertComfyWanReadyForWorkflow(workflow) {
+  const status = await readComfyWanStatus({ workflow });
+  if (status.available) return status;
+
+  const error = new Error(status.message || `${status.workflow || workflow || "Wan"} requires ComfyUI setup.`);
+  error.status = status.apiAvailable ? 409 : 503;
+  error.code = status.errorCode || "COMFYUI_SETUP_REQUIRED";
+  error.errorCode = status.errorCode || "COMFYUI_SETUP_REQUIRED";
+  error.workflow = status.workflow || normalizeComfyWanWorkflowName(workflow);
+  error.comfyUrl = status.comfyUrl || "";
+  error.requirementsPath = status.requirementsPath || comfyWanRequirementsPath;
+  error.setupTitle = status.setupTitle || "ComfyUI setup required";
+  error.install = status.install || null;
+  error.missingCustomNodes = status.missingCustomNodes || [];
+  error.missingModels = status.missingModels || [];
+  throw error;
 }
 
 function comfyWanUrlForWorkflow(workflow) {
@@ -2214,6 +2259,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     }
 
     if (selectedVideoModel.provider === "local-video-stitch") {
+      await assertComfyWanReadyForWorkflow("WanWarp");
       return runVideoStitchUtilityVideo(req, res, {
         referenceVideoUrls,
         controlVideoUrls,
@@ -2224,6 +2270,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     }
 
     if (selectedVideoModel.provider === "local-wanblend") {
+      await assertComfyWanReadyForWorkflow("WanBlend");
       return runWanBlendUtilityVideo(req, res, {
         prompt,
         referenceImageUrls,
@@ -2233,6 +2280,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     }
 
     if (selectedVideoModel.provider === "local-transition-builder") {
+      await assertComfyWanReadyForWorkflow("WanSegment");
       return runTransitionBuilderUtilityVideo(req, res, {
         startFrameUrls,
         endFrameUrls,
@@ -8094,6 +8142,9 @@ function sendApiError(res, error, fallback) {
     if (error?.comfyUrl) payload.comfyUrl = String(error.comfyUrl);
     if (error?.requirementsPath) payload.requirementsPath = String(error.requirementsPath);
     if (error?.setupTitle) payload.setupTitle = String(error.setupTitle);
+    if (error?.install) payload.install = error.install;
+    if (Array.isArray(error?.missingCustomNodes)) payload.missingCustomNodes = error.missingCustomNodes;
+    if (Array.isArray(error?.missingModels)) payload.missingModels = error.missingModels;
     res.status(status).json(payload);
   }
 }

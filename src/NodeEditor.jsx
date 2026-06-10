@@ -2962,7 +2962,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       error: status?.message || status?.error || "ComfyUI is not reachable.",
       comfyUrl: status?.comfyUrl,
       requirementsPath: status?.requirementsPath,
-      detail: status?.detail
+      detail: status?.detail,
+      errorCode: status?.errorCode,
+      setupTitle: status?.setupTitle,
+      install: status?.install,
+      missingCustomNodes: status?.missingCustomNodes,
+      missingModels: status?.missingModels
     });
   }
 
@@ -2975,7 +2980,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       message: error?.message || "ComfyUI is not reachable.",
       comfyUrl: error?.comfyUrl || "",
       requirementsPath: error?.requirementsPath || "docs/comfyWan-requirements.yaml",
-      setupTitle: error?.setupTitle || "ComfyUI setup required"
+      setupTitle: error?.setupTitle || "ComfyUI setup required",
+      install: error?.install || null,
+      missingCustomNodes: Array.isArray(error?.missingCustomNodes) ? error.missingCustomNodes : [],
+      missingModels: Array.isArray(error?.missingModels) ? error.missingModels : []
     });
   }
 
@@ -3617,6 +3625,14 @@ function ComfyWanSetupDialog({ details = {}, onClose }) {
   const [copied, setCopied] = React.useState(false);
   const workflow = details.workflow || "Wan workflow";
   const requirementsPath = details.requirementsPath || "docs/comfyWan-requirements.yaml";
+  const install = details.install || {};
+  const rootPath = install.rootPath || "";
+  const missingCustomNodes = Array.isArray(details.missingCustomNodes)
+    ? details.missingCustomNodes
+    : Array.isArray(install.missingCustomNodes) ? install.missingCustomNodes : [];
+  const missingModels = Array.isArray(details.missingModels)
+    ? details.missingModels
+    : Array.isArray(install.missingModels) ? install.missingModels : [];
 
   React.useEffect(() => {
     function handleKeyDown(event) {
@@ -3655,6 +3671,12 @@ function ComfyWanSetupDialog({ details = {}, onClose }) {
         <div className="comfy-wan-dialog-body">
           <p>Install ComfyUI Desktop, install the custom nodes, models, and Python dependencies listed in the Wan requirements file, then start ComfyUI and run this node again.</p>
           <dl>
+            {rootPath && (
+              <div>
+                <dt>ComfyUI Root</dt>
+                <dd>{rootPath}</dd>
+              </div>
+            )}
             <div>
               <dt>Requirements</dt>
               <dd>{requirementsPath}</dd>
@@ -3666,6 +3688,7 @@ function ComfyWanSetupDialog({ details = {}, onClose }) {
               </div>
             )}
           </dl>
+          <ComfyWanMissingRequirements customNodes={missingCustomNodes} models={missingModels} />
           {details.message && <small>{details.message}</small>}
         </div>
         <div className="comfy-wan-dialog-actions">
@@ -3675,6 +3698,29 @@ function ComfyWanSetupDialog({ details = {}, onClose }) {
           <button type="button" onClick={onClose}>Close</button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ComfyWanMissingRequirements({ customNodes = [], models = [] }) {
+  const items = [
+    ...customNodes.map((item) => ({ ...item, label: "Node" })),
+    ...models.map((item) => ({ ...item, label: "Model" }))
+  ];
+  if (!items.length) return null;
+
+  return (
+    <div className="comfy-wan-missing">
+      <strong>Missing requirements</strong>
+      <ul>
+        {items.slice(0, 8).map((item) => (
+          <li key={`${item.label}-${item.id || item.target}`}>
+            <em>{item.label}</em>
+            <span>{item.target || item.id}</span>
+          </li>
+        ))}
+      </ul>
+      {items.length > 8 && <small>{items.length - 8} more requirement{items.length - 8 === 1 ? "" : "s"} not shown.</small>}
     </div>
   );
 }
@@ -8681,26 +8727,43 @@ function comfyWanWorkflowName(model) {
   return "WanWarp";
 }
 
-function comfyWanSetupError({ workflow, error, comfyUrl = "", requirementsPath = "", detail = "" }) {
+function comfyWanSetupError({
+  workflow,
+  error,
+  comfyUrl = "",
+  requirementsPath = "",
+  detail = "",
+  errorCode = "COMFYUI_UNAVAILABLE",
+  setupTitle = "ComfyUI setup required",
+  install = null,
+  missingCustomNodes = [],
+  missingModels = []
+}) {
   const message = error || `${workflow || "Wan"} requires ComfyUI.`;
   const next = new Error(message);
-  next.code = "COMFYUI_UNAVAILABLE";
-  next.errorCode = "COMFYUI_UNAVAILABLE";
+  next.code = errorCode || "COMFYUI_UNAVAILABLE";
+  next.errorCode = errorCode || "COMFYUI_UNAVAILABLE";
   next.workflow = workflow || "WanWarp";
   next.comfyUrl = comfyUrl;
   next.requirementsPath = requirementsPath || "docs/comfyWan-requirements.yaml";
   next.detail = detail;
-  next.setupTitle = "ComfyUI setup required";
+  next.setupTitle = setupTitle || "ComfyUI setup required";
+  next.install = install;
+  next.missingCustomNodes = Array.isArray(missingCustomNodes) ? missingCustomNodes : [];
+  next.missingModels = Array.isArray(missingModels) ? missingModels : [];
   return next;
 }
 
 function isComfyWanSetupError(error) {
-  return ["COMFYUI_UNAVAILABLE", "COMFYUI_SETUP_REQUIRED"].includes(String(error?.errorCode || error?.code || ""));
+  return ["COMFYUI_UNAVAILABLE", "COMFYUI_SETUP_REQUIRED", "COMFYUI_ROOT_NOT_CONFIGURED"].includes(String(error?.errorCode || error?.code || ""));
 }
 
 function looksLikeComfyUnavailableMessage(message) {
   const text = String(message || "").toLowerCase();
-  return text.includes("could not reach comfyui") || text.includes("comfyui is not reachable");
+  return text.includes("could not reach comfyui") ||
+    text.includes("comfyui is not reachable") ||
+    text.includes("comfyui setup") ||
+    text.includes("comfyui root");
 }
 
 function isUtilityWanVaceMaskToVideoModel(model) {
@@ -10026,6 +10089,9 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     error.comfyUrl = data.comfyUrl || "";
     error.requirementsPath = data.requirementsPath || "";
     error.setupTitle = data.setupTitle || "";
+    error.install = data.install || null;
+    error.missingCustomNodes = Array.isArray(data.missingCustomNodes) ? data.missingCustomNodes : [];
+    error.missingModels = Array.isArray(data.missingModels) ? data.missingModels : [];
     throw error;
   }
 

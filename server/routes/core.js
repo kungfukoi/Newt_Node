@@ -90,7 +90,8 @@ export function registerCoreRoutes(
   app.get("/api/comfy-wan/status", async (req, res) => {
     await timedApi("comfy-wan:status", async () => {
       res.json(await readComfyWanStatus({
-        workflow: String(req.query.workflow || "")
+        workflow: String(req.query.workflow || ""),
+        rootPath: String(req.query.rootPath || "")
       }));
     });
   });

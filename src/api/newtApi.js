@@ -243,9 +243,10 @@ export const systemApi = {
     return fetchJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
   },
 
-  comfyWanStatus({ workflow = "" } = {}) {
+  comfyWanStatus({ workflow = "", rootPath = "" } = {}) {
     const params = new URLSearchParams();
     if (workflow) params.set("workflow", workflow);
+    if (rootPath) params.set("rootPath", rootPath);
     const suffix = params.toString() ? `?${params.toString()}` : "";
     return getJson(`/api/comfy-wan/status${suffix}`, "Could not check ComfyUI.");
   }

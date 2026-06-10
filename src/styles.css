@@ -856,6 +856,7 @@ textarea::placeholder {
   gap: 12px;
 }
 
+.settings-collapsible-panel,
 .settings-model-panel {
   gap: 12px;
 }
@@ -877,7 +878,7 @@ textarea::placeholder {
   display: inline-flex;
   flex: 0 1 auto;
   justify-content: flex-start;
-  gap: 0;
+  gap: 10px;
   margin-bottom: 0;
 }
 
@@ -892,6 +893,7 @@ textarea::placeholder {
   transition: transform 160ms ease;
 }
 
+.settings-collapsible-panel.open .settings-panel-toggle > svg,
 .settings-model-panel.open .settings-panel-toggle > svg {
   transform: rotate(180deg);
 }
@@ -1027,6 +1029,10 @@ textarea::placeholder {
   grid-template-columns: 18px minmax(0, 1fr) 28px;
 }
 
+.settings-input-row.path {
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+}
+
 .settings-input-row input,
 .settings-repository-input {
   width: 100%;
@@ -1071,6 +1077,77 @@ textarea::placeholder {
 .settings-secret-toggle:disabled {
   cursor: not-allowed;
   opacity: 0.3;
+}
+
+.settings-comfy-status {
+  display: grid;
+  gap: 10px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.68);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.settings-comfy-status.ready {
+  border-color: rgba(88, 206, 99, 0.28);
+  background: rgba(88, 206, 99, 0.08);
+}
+
+.settings-comfy-status.missing {
+  border-color: rgba(221, 198, 49, 0.24);
+  background: rgba(221, 198, 49, 0.08);
+}
+
+.settings-comfy-status.checking {
+  border-color: rgba(61, 133, 255, 0.24);
+  background: rgba(61, 133, 255, 0.08);
+}
+
+.settings-comfy-status > div {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-comfy-status strong {
+  color: #f4f0e8;
+  font-size: 13px;
+}
+
+.settings-comfy-status span,
+.settings-comfy-status small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.settings-comfy-status ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-comfy-status li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.settings-comfy-status li em {
+  color: rgba(244, 240, 232, 0.48);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 780;
+  text-transform: uppercase;
 }
 
 .settings-actions {
@@ -1515,6 +1592,10 @@ textarea::placeholder {
   }
 
   .settings-model-list.two-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-comfy-status ul {
     grid-template-columns: 1fr;
   }
 

@@ -3,13 +3,14 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  FolderOpen,
   GitPullRequest,
   KeyRound,
   RefreshCcw,
   RotateCcw,
   Save
 } from "lucide-react";
-import { settingsApi } from "./api/newtApi.js";
+import { settingsApi, systemApi } from "./api/newtApi.js";
 import {
   defaultModelPreferences,
   imageModelOptions,
@@ -26,8 +27,12 @@ export default function SettingsPage() {
   const [googleApiKey, setGoogleApiKey] = React.useState("");
   const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
   const [repository, setRepository] = React.useState("");
+  const [comfyWanRootPath, setComfyWanRootPath] = React.useState("");
+  const [comfyWanStatus, setComfyWanStatus] = React.useState(null);
+  const [comfyWanBusy, setComfyWanBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [modelsOpen, setModelsOpen] = React.useState(false);
+  const [comfyOpen, setComfyOpen] = React.useState(false);
   const [status, setStatus] = React.useState("loading");
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
@@ -48,6 +53,7 @@ export default function SettingsPage() {
       setStatus("ready");
       setMessage(data.apiKeysFound ? "" : "No API keys found.");
       setLastUpdated(new Date());
+      refreshComfyWanStatus(data.comfyWanRootPath || "", { quiet: true });
     } catch (error) {
       setStatus("error");
       setMessage(error.message || "Could not load settings.");
@@ -61,7 +67,7 @@ export default function SettingsPage() {
     try {
       const initialSecrets = initialSecretsRef.current;
       const nextModelPreferences = normalizeModelPreferences(modelPreferences);
-      const payload = { repository, modelPreferences: nextModelPreferences };
+      const payload = { repository, comfyWanRootPath, modelPreferences: nextModelPreferences };
       if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
       if (googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = googleApiKey;
 
@@ -80,6 +86,7 @@ export default function SettingsPage() {
       dispatchModelPreferences(savedModelPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
+      refreshComfyWanStatus(data.comfyWanRootPath || comfyWanRootPath, { quiet: true });
     } catch (error) {
       setMessage(error.message || "Could not save settings.");
     } finally {
@@ -134,7 +141,43 @@ export default function SettingsPage() {
     setFalKey(secrets.falKey);
     setGoogleApiKey(secrets.googleApiKey);
     setRepository(data.repository || "");
+    setComfyWanRootPath(data.comfyWanRootPath || "");
     setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+  }
+
+  async function chooseComfyWanRoot() {
+    setComfyWanBusy(true);
+    setMessage("");
+    try {
+      const { response, data } = await systemApi.selectFolder({
+        title: "Choose ComfyUI root",
+        defaultPath: comfyWanRootPath
+      });
+      if (!response.ok || !data?.path) return;
+      setComfyWanRootPath(data.path);
+      await refreshComfyWanStatus(data.path, { quiet: true });
+    } catch (error) {
+      if (!String(error.message || "").toLowerCase().includes("cancel")) {
+        setMessage(error.message || "Could not choose ComfyUI folder.");
+      }
+    } finally {
+      setComfyWanBusy(false);
+    }
+  }
+
+  async function refreshComfyWanStatus(rootPath = comfyWanRootPath, { quiet = false } = {}) {
+    setComfyWanBusy(true);
+    if (!quiet) setMessage("");
+    try {
+      const data = await systemApi.comfyWanStatus({ workflow: "WanWarp", rootPath });
+      setComfyWanStatus(data);
+      if (!quiet) setMessage(data.available ? "ComfyUI is ready." : data.message || "ComfyUI setup needs attention.");
+    } catch (error) {
+      setComfyWanStatus({ available: false, message: error.message || "Could not check ComfyUI." });
+      if (!quiet) setMessage(error.message || "Could not check ComfyUI.");
+    } finally {
+      setComfyWanBusy(false);
+    }
   }
 
   function updateModelPreference(kind, model, enabled) {
@@ -231,7 +274,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className={`stats-panel settings-panel wide settings-model-panel ${modelsOpen ? "open" : ""}`}>
+        <section className={`stats-panel settings-panel wide settings-collapsible-panel settings-model-panel ${modelsOpen ? "open" : ""}`}>
           <button
             type="button"
             className="settings-panel-toggle"
@@ -326,9 +369,103 @@ export default function SettingsPage() {
             {updateLog && <pre className="settings-log">{updateLog}</pre>}
           </section>
         )}
+
+        <section className={`stats-panel settings-panel wide settings-collapsible-panel settings-comfy-panel ${comfyOpen ? "open" : ""}`}>
+          <button
+            type="button"
+            className="settings-panel-toggle"
+            onClick={() => setComfyOpen((value) => !value)}
+            aria-expanded={comfyOpen}
+          >
+            <span className="panel-title settings-toggle-title">
+              <span>Comfy Engine</span>
+              <small>{comfyWanAside(comfyWanStatus, comfyWanBusy)}</small>
+            </span>
+            <ChevronDown size={16} />
+          </button>
+          {comfyOpen && (
+            <>
+              <label className="settings-field">
+                <span>ComfyUI Root</span>
+                <div className="settings-input-row path">
+                  <FolderOpen size={15} />
+                  <input
+                    type="text"
+                    value={comfyWanRootPath}
+                    onChange={(event) => setComfyWanRootPath(event.target.value)}
+                    placeholder="Folder with custom_nodes and models"
+                    autoComplete="off"
+                    spellCheck="false"
+                  />
+                  <button
+                    type="button"
+                    className="settings-secret-toggle"
+                    onClick={chooseComfyWanRoot}
+                    disabled={actionsDisabled || comfyWanBusy}
+                    title="Choose ComfyUI folder"
+                    aria-label="Choose ComfyUI folder"
+                  >
+                    <FolderOpen size={15} />
+                  </button>
+                </div>
+              </label>
+              <ComfyWanStatusCard status={comfyWanStatus} busy={comfyWanBusy} />
+              <div className="settings-actions">
+                <button type="button" onClick={() => refreshComfyWanStatus()} disabled={actionsDisabled || comfyWanBusy}>
+                  <RefreshCcw className={comfyWanBusy ? "spin" : ""} size={15} />
+                  <span>{comfyWanBusy ? "Checking" : "Rescan"}</span>
+                </button>
+                <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+                  <Save size={15} />
+                  <span>{busy === "save" ? "Saving" : "Save ComfyUI"}</span>
+                </button>
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </section>
   );
+}
+
+function ComfyWanStatusCard({ status, busy }) {
+  const install = status?.install || {};
+  const missingCustomNodes = Array.isArray(status?.missingCustomNodes) ? status.missingCustomNodes : [];
+  const missingModels = Array.isArray(status?.missingModels) ? status.missingModels : [];
+  const missingItems = [...missingCustomNodes, ...missingModels];
+  const tone = busy ? "checking" : status?.available ? "ready" : status ? "missing" : "";
+  const message = busy
+    ? "Checking ComfyUI..."
+    : status?.message || "No ComfyUI check has run yet.";
+
+  return (
+    <div className={`settings-comfy-status ${tone}`}>
+      <div>
+        <strong>{status?.available ? "Ready" : busy ? "Checking" : status ? "Setup needed" : "Not checked"}</strong>
+        <span>{message}</span>
+      </div>
+      {install.rootPath && <small>{install.rootPath}</small>}
+      {missingItems.length > 0 && (
+        <ul>
+          {missingItems.slice(0, 6).map((item) => (
+            <li key={`${item.type || "item"}-${item.id || item.target}`}>
+              <em>{item.type === "customNode" ? "Node" : "Model"}</em>
+              <span>{item.target || item.id}</span>
+            </li>
+          ))}
+          {missingItems.length > 6 && <li><em>More</em><span>{missingItems.length - 6} additional requirements</span></li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function comfyWanAside(status, busy) {
+  if (busy) return "Checking";
+  if (status?.available) return "Ready";
+  if (status?.errorCode === "COMFYUI_ROOT_NOT_CONFIGURED") return "Not configured";
+  if (status) return "Setup needed";
+  return "Local workflow";
 }
 
 function ModelToggleGroup({ title, kind, options, values = {}, onToggle, columns = 1, wide = false }) {
