@@ -10,6 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
@@ -17,12 +18,15 @@ import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { normalizeModelPreferences } from "../src/modelOptions.js";
 import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import { createWanBlendComfyResult } from "./wanblend/engine.js";
 import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const packageMetadata = require("../package.json");
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
@@ -45,6 +49,7 @@ const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
 const comfyWanRequirementsPath = "docs/comfyWan-requirements.yaml";
+const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
@@ -88,7 +93,6 @@ const wanFunControlCostPerSecond = 0.1;
 const wan27ReferenceVideoCostPerSecond = Number(process.env.WAN_2_7_REFERENCE_VIDEO_COST_PER_SECOND || 0.1);
 const wan22A14bLoraI2vEndpoint = "fal-ai/wan/v2.2-a14b/image-to-video/lora";
 const wan22A14bLoraCostPerSecond = Number(process.env.WAN_22_A14B_LORA_COST_PER_SECOND || 0.1);
-const wan21LoraCostPerVideo = Number(process.env.WAN_21_LORA_COST_PER_VIDEO || 0.75);
 const wanVaceCostPerSecond = {
   "480p": 0.04,
   "580p": 0.06,
@@ -277,6 +281,7 @@ function buildHealthPayload() {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
   return {
     ok: true,
+    version: appVersion,
     routes: {
       utilityImage: true,
       utilityVideo: true,
@@ -288,8 +293,6 @@ function buildHealthPayload() {
       wanWarp: true,
       wan22A14bT2v: true,
       wan22A14bI2v: true,
-      wan21T2vLora: true,
-      wan21I2vLora: true,
       wanVaceMaskToVideo: true,
       wanVaceInpainting: true,
       wan22VaceDepth: true,
@@ -341,6 +344,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
 
   const payload = {
+    version: appVersion,
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     apiKeysFound,
@@ -352,6 +356,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     repository,
     branch,
     branchStatus,
+    modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
     updateInProgress: Boolean(updatePromise),
     restartRequested
   };
@@ -375,6 +380,7 @@ async function saveRuntimeSettings(body = {}) {
   if (falKey !== undefined) updates.falKey = falKey;
   if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
   if (repository) updates.repository = repository;
+  if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
 
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
@@ -479,7 +485,8 @@ async function readRuntimeSettingsStore() {
   return {
     falKey: optionalRuntimeSetting(data?.falKey) || "",
     googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
-    repository: normalizeUpdateRepository(data?.repository)
+    repository: normalizeUpdateRepository(data?.repository),
+    modelPreferences: normalizeModelPreferences(data?.modelPreferences)
   };
 }
 
@@ -492,6 +499,7 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
+  if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
 
@@ -851,10 +859,6 @@ app.get("/api/stats", async (_req, res) => {
         },
         wan22A14bLora: {
           costPerSecond: wan22A14bLoraCostPerSecond,
-          currency: "USD"
-        },
-        wan21Lora: {
-          costPerVideo: wan21LoraCostPerVideo,
           currency: "USD"
         },
         wanVaceMaskToVideo: {
@@ -2272,14 +2276,6 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
-    if (selectedVideoModel.provider === "fal-wan-21-lora") {
-      return runWan21LoraUtility(req, res, {
-        prompt,
-        referenceImageUrls,
-        selectedVideoModel
-      });
-    }
-
     if (selectedVideoModel.provider === "fal-wan-vace-mask-to-video") {
       return runWanVaceMaskToVideoUtility(req, res, {
         prompt,
@@ -3530,104 +3526,6 @@ async function runWan22A14bUtility(req, res, { prompt, referenceImageUrls, selec
       loraCount: loras.length,
       loras,
       referenceImageCount: isImageToVideo ? (endImageUrl ? 2 : 1) : 0,
-      seed: result?.data?.seed ?? input.seed ?? null
-    },
-    cost,
-    remoteVideo: outputVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
-
-  return res.json({
-    requestId: result.requestId,
-    endpoint,
-    modelName: selectedVideoModel.displayName,
-    seed: result?.data?.seed ?? input.seed,
-    cost,
-    video: {
-      ...outputVideo,
-      label: selectedVideoModel.displayName,
-      localUrl: output.publicPath,
-      fileName: output.fileName
-    }
-  });
-}
-
-async function runWan21LoraUtility(req, res, { prompt, referenceImageUrls, selectedVideoModel }) {
-  const options = req.body.wan21Lora || {};
-  const endpoint = selectedVideoModel.id;
-  const isImageToVideo = selectedVideoModel.mode === "image-to-video";
-  const imageUrl = firstLocalOutput(referenceImageUrls);
-
-  if (isImageToVideo && !imageUrl) {
-    return res.status(400).json({ error: `${selectedVideoModel.displayName} requires a connected reference image.` });
-  }
-
-  const resolutionOptions = isImageToVideo ? ["480p", "720p"] : ["480p", "580p", "720p"];
-  const aspectRatioOptions = isImageToVideo ? ["auto", "16:9", "9:16", "1:1"] : ["16:9", "9:16"];
-  const loras = await normalizeWanLoraWeights(options.loras);
-  const input = {
-    prompt,
-    negative_prompt: String(options.negativePrompt || ""),
-    num_frames: clampInteger(options.numFrames, 81, 100, 81),
-    frames_per_second: clampInteger(options.fps, 5, 24, 16),
-    resolution: normalizeChoice(options.resolution, resolutionOptions, isImageToVideo ? "720p" : "480p"),
-    aspect_ratio: normalizeChoice(options.aspectRatio, aspectRatioOptions, "16:9"),
-    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 30),
-    enable_safety_checker: options.enableSafetyChecker !== false,
-    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
-    turbo_mode: options.turboMode !== false,
-    loras,
-    reverse_video: Boolean(options.reverseVideo)
-  };
-  const seed = optionalInteger(options.seed);
-  if (seed !== undefined) input.seed = seed;
-  if (isImageToVideo) {
-    input.image_url = await uploadLocalOutputToFal(imageUrl);
-    input.guide_scale = clampNumber(options.guideScale, 0, 20, 5);
-    input.shift = clampNumber(options.shift, 0, 20, 5);
-  }
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = normalizeFalFile(result?.data?.video);
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: `Fal returned no ${selectedVideoModel.displayName} video URL.`, raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, isImageToVideo ? "wan-21-i2v-lora" : "wan-21-t2v-lora");
-  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-  const cost = estimateWan21LoraCost({ endpoint });
-
-  await appendHistory({
-    id: result.requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider: "fal.ai",
-    modelName: selectedVideoModel.displayName,
-    endpoint,
-    mode: `Wan 2.1 14B LoRA ${isImageToVideo ? "image-to-video" : "text-to-video"}`,
-    prompt,
-    submittedPrompt: prompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
-      mode: selectedVideoModel.mode,
-      negativePrompt: input.negative_prompt,
-      numFrames: input.num_frames,
-      fps: input.frames_per_second,
-      resolution: input.resolution,
-      aspectRatio: input.aspect_ratio,
-      numInferenceSteps: input.num_inference_steps,
-      guideScale: input.guide_scale ?? null,
-      shift: input.shift ?? null,
-      enableSafetyChecker: input.enable_safety_checker,
-      enablePromptExpansion: input.enable_prompt_expansion,
-      turboMode: input.turbo_mode,
-      reverseVideo: input.reverse_video,
-      loraCount: loras.length,
-      loras,
-      referenceImageCount: isImageToVideo ? 1 : 0,
       seed: result?.data?.seed ?? input.seed ?? null
     },
     cost,
@@ -8407,18 +8305,6 @@ function wan22A14bLoraBillingSeconds(outputVideo = {}, numFrames, fps) {
   return frames && framesPerSecond ? frames / framesPerSecond : null;
 }
 
-function estimateWan21LoraCost({ endpoint }) {
-  return estimateFalVideoUtilityCost({
-    endpoint,
-    amountUsd: wan21LoraCostPerVideo,
-    unitRateUsd: wan21LoraCostPerVideo,
-    units: 1,
-    unit: "video",
-    pricingBasis: "Wan 2.1 14B LoRA fal.ai per-video estimate",
-    pricingSource: "fal-model-page-2026-06-03"
-  });
-}
-
 function estimateWanVaceInpaintingCost({ endpoint, resolution, outputVideo, matchInputNumFrames, numFrames, matchInputFps, fps }) {
   const billingResolution = resolveWanVaceBillingResolution(resolution, outputVideo);
   const unitRateUsd = wanVaceCostPerSecond[billingResolution] || wanVaceCostPerSecond["480p"];
@@ -9467,22 +9353,22 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
-  const isWan21Lora = normalized.includes("wan") && (normalized.includes("2.1") || normalized.includes("21")) && normalized.includes("lora");
-  if (isWan21Lora && (normalized.includes("image") || normalized.includes("i2v"))) {
+  const isRetiredWanLora = normalized.includes("wan") && (normalized.includes("2.1") || normalized.includes("21")) && normalized.includes("lora");
+  if (isRetiredWanLora && (normalized.includes("image") || normalized.includes("i2v"))) {
     return {
-      provider: "fal-wan-21-lora",
-      displayName: "Wan 2.1 14B LoRA Image-to-Video",
-      id: "fal-ai/wan-i2v-lora",
+      provider: "fal-wan-22-a14b",
+      displayName: "Wan 2.2 A14B LoRA Image-to-Video",
+      id: "fal-ai/wan/v2.2-a14b/image-to-video/lora",
       mode: "image-to-video",
       requiresPrompt: true
     };
   }
 
-  if (isWan21Lora) {
+  if (isRetiredWanLora) {
     return {
-      provider: "fal-wan-21-lora",
-      displayName: "Wan 2.1 14B LoRA Text-to-Video",
-      id: "fal-ai/wan-t2v-lora",
+      provider: "fal-wan-22-a14b",
+      displayName: "Wan 2.2 A14B LoRA Text-to-Video",
+      id: "fal-ai/wan/v2.2-a14b/text-to-video/lora",
       mode: "text-to-video",
       requiresPrompt: true
     };

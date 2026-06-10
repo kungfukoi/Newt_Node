@@ -139,55 +139,6 @@ test("buildUtilityVideoRequest sends Wan 2.2 VACE control settings", () => {
   assert.equal(request.wanVaceControl.seed, "456");
 });
 
-test("buildUtilityVideoRequest sends Wan 2.1 LoRA settings", () => {
-  const request = buildUtilityVideoRequest({
-    node: {
-      id: "utility-wan21",
-      data: {
-        title: "Utility",
-        utilityVideoModel: "Wan 2.1 14B LoRA Image-to-Video",
-        wan21LoraNegativePrompt: "blur",
-        wan21LoraResolution: "720p",
-        wan21LoraAspectRatio: "auto",
-        wan21LoraNumFrames: 81,
-        wan21LoraFps: 16,
-        wan21LoraNumInferenceSteps: 30,
-        wan21LoraGuideScale: 6,
-        wan21LoraShift: 4,
-        wan21LoraEnableSafetyChecker: true,
-        wan21LoraEnablePromptExpansion: false,
-        wan21LoraTurboMode: true,
-        wan21LoraReverseVideo: true,
-        wan21Loras: [
-          { path: "https://huggingface.co/org/model/resolve/main/lora.safetensors", weightName: "lora.safetensors", scale: "0.8" },
-          { path: "", weightName: "", scale: "1" }
-        ],
-        seed: "789"
-      }
-    },
-    prompt: "stylized motion",
-    model: "Wan 2.1 14B LoRA Image-to-Video",
-    workflowContext: {},
-    projectId: "project",
-    projectName: "Project",
-    referenceImageUrls: ["/uploads/start.png"],
-    referenceVideoUrls: [],
-    maskVideoUrls: []
-  });
-
-  assert.equal(request.wan21Lora.negativePrompt, "blur");
-  assert.equal(request.wan21Lora.resolution, "720p");
-  assert.equal(request.wan21Lora.aspectRatio, "auto");
-  assert.equal(request.wan21Lora.guideScale, 6);
-  assert.equal(request.wan21Lora.shift, 4);
-  assert.equal(request.wan21Lora.reverseVideo, true);
-  assert.equal(request.wan21Lora.loras.length, 2);
-  assert.equal(request.wan21Lora.loras[0].path, "https://huggingface.co/org/model/resolve/main/lora.safetensors");
-  assert.equal(request.wan21Lora.loras[0].weightName, "lora.safetensors");
-  assert.equal(request.wan21Lora.loras[0].scale, "0.8");
-  assert.equal(request.wan21Lora.seed, "789");
-});
-
 test("buildUtilityVideoRequest sends Wan 2.2 A14B LoRA settings", () => {
   const request = buildUtilityVideoRequest({
     node: {

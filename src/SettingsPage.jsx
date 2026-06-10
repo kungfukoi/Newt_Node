@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  ChevronDown,
   Eye,
   EyeOff,
   GitPullRequest,
@@ -9,6 +10,14 @@ import {
   Save
 } from "lucide-react";
 import { settingsApi } from "./api/newtApi.js";
+import {
+  defaultModelPreferences,
+  imageModelOptions,
+  normalizeModelPreferences,
+  utilityImageModelOptions,
+  utilityVideoModelOptions,
+  videoModelOptions
+} from "./modelOptions.js";
 
 export default function SettingsPage() {
   const [settings, setSettings] = React.useState(null);
@@ -17,6 +26,8 @@ export default function SettingsPage() {
   const [googleApiKey, setGoogleApiKey] = React.useState("");
   const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
   const [repository, setRepository] = React.useState("");
+  const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
+  const [modelsOpen, setModelsOpen] = React.useState(false);
   const [status, setStatus] = React.useState("loading");
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
@@ -49,13 +60,24 @@ export default function SettingsPage() {
     setUpdateLog("");
     try {
       const initialSecrets = initialSecretsRef.current;
-      const payload = { repository };
+      const nextModelPreferences = normalizeModelPreferences(modelPreferences);
+      const payload = { repository, modelPreferences: nextModelPreferences };
       if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
       if (googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = googleApiKey;
 
-      await settingsApi.save(payload);
-      const data = await settingsApi.load();
+      const savedData = await settingsApi.save(payload);
+      const loadedData = await settingsApi.load();
+      const savedModelPreferences = hasModelPreferences(loadedData)
+        ? normalizeModelPreferences(loadedData.modelPreferences)
+        : hasModelPreferences(savedData)
+          ? normalizeModelPreferences(savedData.modelPreferences)
+          : nextModelPreferences;
+      const data = {
+        ...(loadedData || {}),
+        modelPreferences: savedModelPreferences
+      };
       applyLoadedSettings(data);
+      dispatchModelPreferences(savedModelPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
     } catch (error) {
@@ -112,6 +134,19 @@ export default function SettingsPage() {
     setFalKey(secrets.falKey);
     setGoogleApiKey(secrets.googleApiKey);
     setRepository(data.repository || "");
+    setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+  }
+
+  function updateModelPreference(kind, model, enabled) {
+    setModelPreferences((current) =>
+      normalizeModelPreferences({
+        ...current,
+        [kind]: {
+          ...(current?.[kind] || {}),
+          [model]: enabled
+        }
+      })
+    );
   }
 
   return (
@@ -196,6 +231,60 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        <section className={`stats-panel settings-panel wide settings-model-panel ${modelsOpen ? "open" : ""}`}>
+          <button
+            type="button"
+            className="settings-panel-toggle"
+            onClick={() => setModelsOpen((value) => !value)}
+            aria-expanded={modelsOpen}
+          >
+            <span className="panel-title settings-toggle-title">Enabled Models</span>
+            <ChevronDown size={16} />
+          </button>
+          {modelsOpen && (
+            <>
+              <div className="settings-model-grid">
+                <ModelToggleGroup
+                  title="Image Models"
+                  kind="image"
+                  options={imageModelOptions}
+                  values={modelPreferences.image}
+                  onToggle={updateModelPreference}
+                />
+                <ModelToggleGroup
+                  title="Video Models"
+                  kind="video"
+                  options={videoModelOptions}
+                  values={modelPreferences.video}
+                  onToggle={updateModelPreference}
+                />
+                <ModelToggleGroup
+                  title="Utility Image Models"
+                  kind="utilityImage"
+                  options={utilityImageModelOptions}
+                  values={modelPreferences.utilityImage}
+                  onToggle={updateModelPreference}
+                />
+                <ModelToggleGroup
+                  title="Utility Video Models"
+                  kind="utilityVideo"
+                  options={utilityVideoModelOptions}
+                  values={modelPreferences.utilityVideo}
+                  onToggle={updateModelPreference}
+                  columns={2}
+                  wide
+                />
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+                  <Save size={15} />
+                  <span>{busy === "save" ? "Saving" : "Save Models"}</span>
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+
         <section className="stats-panel settings-panel">
           <SettingsPanelTitle title="Repository" aside={settings?.branch || "Current branch"} />
           <label className="settings-field">
@@ -242,6 +331,43 @@ export default function SettingsPage() {
   );
 }
 
+function ModelToggleGroup({ title, kind, options, values = {}, onToggle, columns = 1, wide = false }) {
+  return (
+    <div className={`settings-model-group ${wide ? "wide" : ""}`}>
+      <h2>{title}</h2>
+      <div className={`settings-model-list ${columns === 2 ? "two-columns" : ""}`}>
+        {options.map((model) => {
+          const enabled = Boolean(values?.[model]);
+          return (
+            <label key={model} className={`settings-model-toggle ${enabled ? "enabled" : ""}`}>
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(event) => onToggle(kind, model, event.target.checked)}
+              />
+              <span className="node-toggle compact">
+                <span />
+              </span>
+              <em>{model}</em>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function dispatchModelPreferences(preferences) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("newtnode:model-settings-updated", {
+    detail: normalizeModelPreferences(preferences)
+  }));
+}
+
+function hasModelPreferences(data) {
+  return data?.modelPreferences && typeof data.modelPreferences === "object";
+}
+
 function SettingsMetric({ icon, label, value, detail, tone = "" }) {
   return (
     <article className={`metric-card settings-metric ${tone ? `tone-${tone}` : ""}`}>
@@ -271,8 +397,17 @@ function branchMetricValue(settings) {
 }
 
 function branchMetricDetail(settings) {
-  if (!settings?.branchStatus) return settings?.updateInProgress ? "Updating" : "Ready";
-  return settings.branchStatus.detail || settings.branch || "Ready";
+  const branchDetail = settings?.branchStatus
+    ? settings.branchStatus.detail || settings.branch || "Ready"
+    : settings?.updateInProgress ? "Updating" : "Ready";
+  const version = versionLabel(settings?.version);
+  return version ? `${branchDetail} / ${version}` : branchDetail;
+}
+
+function versionLabel(version) {
+  const value = String(version || "").trim();
+  if (!value) return "";
+  return value.startsWith("v") ? value : `v${value}`;
 }
 
 function SettingsPanelTitle({ title, aside }) {

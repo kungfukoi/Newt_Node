@@ -139,6 +139,15 @@ export const utilityImageModelNames = {
   sam3Image: "SAM 3 Image",
   birefnetImage: "BiRefNet Image"
 };
+export const utilityImageModelOptions = [
+  utilityImageModelNames.colorIdMatte,
+  utilityImageModelNames.stillFrame,
+  utilityImageModelNames.dwpose,
+  utilityImageModelNames.depthAnything,
+  utilityImageModelNames.patina,
+  utilityImageModelNames.birefnetImage,
+  utilityImageModelNames.sam3Image
+];
 export const patinaMapOptions = [
   { id: "basecolor", label: "Basecolor" },
   { id: "normal", label: "Normal" },
@@ -159,8 +168,6 @@ export const utilityVideoModelNames = {
   wanVaceInpainting: "Wan VACE 14B Inpainting",
   wan22A14bT2v: "Wan 2.2 A14B LoRA Text-to-Video",
   wan22A14bI2v: "Wan 2.2 A14B LoRA Image-to-Video",
-  wan21T2vLora: "Wan 2.1 14B LoRA Text-to-Video",
-  wan21I2vLora: "Wan 2.1 14B LoRA Image-to-Video",
   wan22VaceDepth: "Wan 2.2 VACE Fun A14B Depth",
   wan22VacePose: "Wan 2.2 VACE Fun A14B Pose",
   wan22VaceInpainting: "Wan 2.2 VACE Fun A14B Inpainting",
@@ -171,6 +178,73 @@ export const utilityVideoModelNames = {
   bytedanceUpscaler: "Bytedance Video Upscaler",
   topazUpscaler: "Topaz Video Upscale"
 };
+export const utilityVideoModelOptions = [
+  utilityVideoModelNames.wanFunControl,
+  utilityVideoModelNames.extractFrame,
+  utilityVideoModelNames.colorIdMatte,
+  utilityVideoModelNames.compositeVideo,
+  utilityVideoModelNames.depthAnythingVideo,
+  utilityVideoModelNames.wanBlend,
+  utilityVideoModelNames.videoStitch,
+  utilityVideoModelNames.transitionBuilder,
+  utilityVideoModelNames.wanVaceMaskToVideo,
+  utilityVideoModelNames.wanVaceInpainting,
+  utilityVideoModelNames.wan22A14bT2v,
+  utilityVideoModelNames.wan22A14bI2v,
+  utilityVideoModelNames.wan22VaceDepth,
+  utilityVideoModelNames.wan22VacePose,
+  utilityVideoModelNames.wan22VaceInpainting,
+  utilityVideoModelNames.sam3Video,
+  utilityVideoModelNames.voidVideoInpainting,
+  utilityVideoModelNames.birefnetVideo,
+  utilityVideoModelNames.rifeVideo,
+  utilityVideoModelNames.bytedanceUpscaler,
+  utilityVideoModelNames.topazUpscaler
+];
+
+export const modelPreferenceGroups = {
+  image: imageModelOptions,
+  video: videoModelOptions,
+  utilityImage: utilityImageModelOptions,
+  utilityVideo: utilityVideoModelOptions
+};
+export const defaultModelPreferences = Object.fromEntries(
+  Object.entries(modelPreferenceGroups).map(([kind, options]) => [kind, Object.fromEntries(options.map((model) => [model, true]))])
+);
+export function normalizeModelPreferences(value = {}) {
+  const normalized = {};
+
+  Object.entries(modelPreferenceGroups).forEach(([kind, options]) => {
+    const incoming = value?.[kind] && typeof value[kind] === "object" ? value[kind] : {};
+    normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? defaultModelPreferences[kind]?.[model])]));
+    if (!Object.values(normalized[kind]).some(Boolean) && options[0]) normalized[kind][options[0]] = true;
+  });
+
+  return normalized;
+}
+export function enabledImageModelOptions(preferences) {
+  const normalized = normalizeModelPreferences(preferences);
+  return imageModelOptions.filter((model) => normalized.image[model]);
+}
+export function enabledVideoModelOptions(preferences, { workspaceOnly = false } = {}) {
+  const normalized = normalizeModelPreferences(preferences);
+  const options = workspaceOnly ? videoWorkspaceModelOptions : videoModelOptions;
+  return options.filter((model) => normalized.video[model]);
+}
+export function enabledUtilityImageModelOptions(preferences) {
+  const normalized = normalizeModelPreferences(preferences);
+  return utilityImageModelOptions.filter((model) => normalized.utilityImage[model]);
+}
+export function enabledUtilityVideoModelOptions(preferences) {
+  const normalized = normalizeModelPreferences(preferences);
+  return utilityVideoModelOptions.filter((model) => normalized.utilityVideo[model]);
+}
+export function firstEnabledImageModel(preferences) {
+  return enabledImageModelOptions(preferences)[0] || imageModelNames.nanoBananaPro;
+}
+export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
+  return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
+}
 
 export const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 export const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -215,10 +289,6 @@ export const colorIdMatteVideoOutputOptions = [
   ["webm", "WebM mask"],
   ["mov", "ProRes mask"]
 ];
-export const wan21T2vLoraResolutionOptions = ["480p", "580p", "720p"];
-export const wan21I2vLoraResolutionOptions = ["480p", "720p"];
-export const wan21T2vLoraAspectRatioOptions = ["16:9", "9:16"];
-export const wan21I2vLoraAspectRatioOptions = ["auto", "16:9", "9:16", "1:1"];
 export const wan22A14bResolutionOptions = ["480p", "580p", "720p"];
 export const wan22A14bT2vAspectRatioOptions = ["16:9", "9:16", "1:1"];
 export const wan22A14bI2vAspectRatioOptions = ["auto", "16:9", "9:16", "1:1"];
@@ -253,8 +323,6 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.wanVaceInpainting]: "Uses Fal Wan VACE 14B with source video, mask video, prompt, and optional reference images for masked video generation.",
   [utilityVideoModelNames.wan22A14bT2v]: "Uses Fal Wan 2.2 A14B text-to-video with optional LoRA weights, frame interpolation, guidance, and quality controls.",
   [utilityVideoModelNames.wan22A14bI2v]: "Uses Fal Wan 2.2 A14B image-to-video with optional LoRA weights from a connected start image and optional end image.",
-  [utilityVideoModelNames.wan21T2vLora]: "Uses Fal Wan 2.1 14B text-to-video with optional LoRA weights.",
-  [utilityVideoModelNames.wan21I2vLora]: "Uses Fal Wan 2.1 14B image-to-video with optional LoRA weights from a connected reference image.",
   [utilityVideoModelNames.wan22VaceDepth]: "Uses Fal Wan 2.2 VACE Fun A14B Depth for prompted video generation from a source or precomputed depth video.",
   [utilityVideoModelNames.wan22VacePose]: "Uses Fal Wan 2.2 VACE Fun A14B Pose for prompted video generation from a source or precomputed pose video.",
   [utilityVideoModelNames.wan22VaceInpainting]: "Uses Fal Wan 2.2 VACE Fun A14B for prompted masked video generation with optional first/last frames and references.",

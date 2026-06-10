@@ -220,28 +220,6 @@ export function buildUtilityVideoRequest({
         : [],
       seed: node.data.seed || ""
     },
-    wan21Lora: {
-      negativePrompt: node.data.wan21LoraNegativePrompt || "",
-      numFrames: node.data.wan21LoraNumFrames || 81,
-      fps: node.data.wan21LoraFps || 16,
-      resolution: node.data.wan21LoraResolution || "480p",
-      aspectRatio: node.data.wan21LoraAspectRatio || "16:9",
-      numInferenceSteps: node.data.wan21LoraNumInferenceSteps || 30,
-      guideScale: node.data.wan21LoraGuideScale || 5,
-      shift: node.data.wan21LoraShift || 5,
-      enableSafetyChecker: node.data.wan21LoraEnableSafetyChecker !== false,
-      enablePromptExpansion: Boolean(node.data.wan21LoraEnablePromptExpansion),
-      turboMode: node.data.wan21LoraTurboMode !== false,
-      reverseVideo: Boolean(node.data.wan21LoraReverseVideo),
-      loras: Array.isArray(node.data.wan21Loras)
-        ? node.data.wan21Loras.map((item) => ({
-            path: item?.path || "",
-            weightName: item?.weightName || "",
-            scale: item?.scale === undefined || item?.scale === null || item?.scale === "" ? "1" : item.scale
-          }))
-        : [],
-      seed: node.data.seed || ""
-    },
     wanVaceMaskToVideo: {
       negativePrompt: node.data.wanVaceNegativePrompt || "",
       matchInputNumFrames: node.data.wanVaceMatchInputNumFrames !== false,

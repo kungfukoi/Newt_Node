@@ -46,9 +46,6 @@ const defaultPricing = {
     wan22A14bLora: {
       costPerSecond: 0.1
     },
-    wan21Lora: {
-      costPerVideo: 0.75
-    },
     wanVaceInpainting: {
       costPerSecond480p: 0.04,
       costPerSecond580p: 0.06,
@@ -573,11 +570,6 @@ function estimateItemCost(item, mediaType, pricing) {
     return estimateWan22A14bLoraStatsCost(item, settings, pricing);
   }
 
-  if (isWan21LoraModel(modelKey)) {
-    const utilityPricing = pricing.utility?.wan21Lora || defaultPricing.utility.wan21Lora;
-    return utilityPricing.costPerVideo;
-  }
-
   if (modelKey.includes("wan-vace") || modelKey.includes("wan-22-vace") || modelKey.includes("wan vace") || modelKey.includes("wan 2.2 vace")) {
     return estimateWanVaceStatsCost(item, settings, pricing);
   }
@@ -741,13 +733,6 @@ function isWan22A14bLoraModel(modelKey) {
     modelKey.includes("wan") &&
     (modelKey.includes("2.2") || modelKey.includes("v2.2") || modelKey.includes("22")) &&
     modelKey.includes("a14b") &&
-    modelKey.includes("lora")
-  );
-}
-
-function isWan21LoraModel(modelKey) {
-  return (
-    ((modelKey.includes("wan") && (modelKey.includes("2.1") || modelKey.includes("21"))) || modelKey.includes("wan-t2v") || modelKey.includes("wan-i2v")) &&
     modelKey.includes("lora")
   );
 }
