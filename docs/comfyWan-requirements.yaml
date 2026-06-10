@@ -16,7 +16,7 @@
 schema_version: 1
 name: comfyWan
 status: production_ready
-newt_branch: wan22-animdiff-transition-dev
+newt_branch: dev
 comfy_root_placeholder: "%COMFYUI_ROOT%"
 
 runtime:

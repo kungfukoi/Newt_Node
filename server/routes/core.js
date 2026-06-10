@@ -15,7 +15,8 @@ export function registerCoreRoutes(
     readRuntimeSettings,
     saveRuntimeSettings,
     pullRuntimeUpdate,
-    requestServerRestart
+    requestServerRestart,
+    readComfyWanStatus
   }
 ) {
   app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -84,6 +85,14 @@ export function registerCoreRoutes(
 
   app.get("/api/health", (_req, res) => {
     res.json(buildHealthPayload());
+  });
+
+  app.get("/api/comfy-wan/status", async (req, res) => {
+    await timedApi("comfy-wan:status", async () => {
+      res.json(await readComfyWanStatus({
+        workflow: String(req.query.workflow || "")
+      }));
+    });
   });
 
   app.get("/api/settings", async (req, res) => {

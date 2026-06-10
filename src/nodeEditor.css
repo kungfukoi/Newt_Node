@@ -428,6 +428,127 @@
   background: #ead94a;
 }
 
+.comfy-wan-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(560px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid rgba(221, 198, 49, 0.22);
+  border-radius: 10px;
+  color: #f4f0e8;
+  background: #171717;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.56);
+}
+
+.comfy-wan-dialog header {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: start;
+}
+
+.comfy-wan-dialog-icon,
+.comfy-wan-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.comfy-wan-dialog-icon {
+  color: #ddc631;
+  background: rgba(221, 198, 49, 0.12);
+}
+
+.comfy-wan-close {
+  color: rgba(244, 240, 232, 0.66);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.comfy-wan-dialog h2,
+.comfy-wan-dialog p {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.comfy-wan-dialog h2 {
+  font-size: 17px;
+}
+
+.comfy-wan-dialog header p,
+.comfy-wan-dialog-body p,
+.comfy-wan-dialog-body small {
+  color: rgba(244, 240, 232, 0.68);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.comfy-wan-dialog-body {
+  display: grid;
+  gap: 12px;
+}
+
+.comfy-wan-dialog-body dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.comfy-wan-dialog-body dl div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.comfy-wan-dialog-body dt {
+  color: rgba(244, 240, 232, 0.48);
+  font-size: 11px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.comfy-wan-dialog-body dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: rgba(244, 240, 232, 0.84);
+  font-size: 12px;
+}
+
+.comfy-wan-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.comfy-wan-dialog-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.78);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.comfy-wan-dialog-actions button.primary {
+  color: #111;
+  background: #ddc631;
+}
+
+.comfy-wan-dialog-actions button:hover {
+  background: rgba(221, 198, 49, 0.18);
+}
+
+.comfy-wan-dialog-actions button.primary:hover {
+  background: #ead94a;
+}
+
 .output-lightbox {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

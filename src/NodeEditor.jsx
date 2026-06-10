@@ -625,6 +625,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
+  const [comfyWanDialog, setComfyWanDialog] = React.useState(null);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
@@ -2893,6 +2894,35 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
   }
 
+  async function ensureComfyWanAvailableForRun(node) {
+    if (!requiresComfyWanSetup(node)) return;
+
+    const workflow = comfyWanWorkflowName(node?.data?.utilityVideoModel);
+    const status = await systemApi.comfyWanStatus({ workflow });
+    if (status?.available) return;
+
+    throw comfyWanSetupError({
+      workflow,
+      error: status?.message || status?.error || "ComfyUI is not reachable.",
+      comfyUrl: status?.comfyUrl,
+      requirementsPath: status?.requirementsPath,
+      detail: status?.detail
+    });
+  }
+
+  function showComfyWanDialogForError(error, node) {
+    if (!isComfyWanSetupError(error) && !requiresComfyWanSetup(node)) return;
+    if (!isComfyWanSetupError(error) && !looksLikeComfyUnavailableMessage(error?.message)) return;
+
+    setComfyWanDialog({
+      workflow: error?.workflow || comfyWanWorkflowName(node?.data?.utilityVideoModel),
+      message: error?.message || "ComfyUI is not reachable.",
+      comfyUrl: error?.comfyUrl || "",
+      requirementsPath: error?.requirementsPath || "docs/comfyWan-requirements.yaml",
+      setupTitle: error?.setupTitle || "ComfyUI setup required"
+    });
+  }
+
   function clearImportOffset(importedNodes) {
     const importBounds = graphBoundsForNodes(importedNodes);
     const importWidth = Math.max(estimatedNodeWidth("image"), importBounds.right - importBounds.left);
@@ -2958,6 +2988,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     const requestContext = workflowRequestContext();
 
     try {
+      await ensureComfyWanAvailableForRun(currentNode);
       const runningPatch =
         currentNode.type === "text"
           ? { status: "running", error: "" }
@@ -3144,6 +3175,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
+      showComfyWanDialogForError(error, currentNode);
       updateNode(currentNode.id, { status: "error", error: error.message });
       return { status: "error", error };
     }
@@ -3271,6 +3303,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         <UnsavedWorkflowPrompt
           actionLabel={unsavedPrompt.actionLabel}
           onDecision={resolveUnsavedWorkflowPrompt}
+        />
+      )}
+      {comfyWanDialog && (
+        <ComfyWanSetupDialog
+          details={comfyWanDialog}
+          onClose={() => setComfyWanDialog(null)}
         />
       )}
       {previewLightboxItem && (
@@ -3512,6 +3550,72 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         />
       )}
     </section>
+  );
+}
+
+function ComfyWanSetupDialog({ details = {}, onClose }) {
+  const [copied, setCopied] = React.useState(false);
+  const workflow = details.workflow || "Wan workflow";
+  const requirementsPath = details.requirementsPath || "docs/comfyWan-requirements.yaml";
+
+  React.useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose?.();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  async function copyRequirementsPath() {
+    try {
+      await navigator.clipboard?.writeText(requirementsPath);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="workflow-prompt-backdrop comfy-wan-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose?.();
+    }}>
+      <section className="comfy-wan-dialog" role="dialog" aria-modal="true" aria-labelledby="comfy-wan-dialog-title" onPointerDown={(event) => event.stopPropagation()}>
+        <header>
+          <span className="comfy-wan-dialog-icon"><Wrench size={20} /></span>
+          <div>
+            <h2 id="comfy-wan-dialog-title">{details.setupTitle || "ComfyUI setup required"}</h2>
+            <p>{workflow} needs a local ComfyUI install before it can render.</p>
+          </div>
+          <button type="button" className="comfy-wan-close" onClick={onClose} title="Close" aria-label="Close">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="comfy-wan-dialog-body">
+          <p>Install ComfyUI Desktop, install the custom nodes, models, and Python dependencies listed in the Wan requirements file, then start ComfyUI and run this node again.</p>
+          <dl>
+            <div>
+              <dt>Requirements</dt>
+              <dd>{requirementsPath}</dd>
+            </div>
+            {details.comfyUrl && (
+              <div>
+                <dt>Comfy URL</dt>
+                <dd>{details.comfyUrl}</dd>
+              </div>
+            )}
+          </dl>
+          {details.message && <small>{details.message}</small>}
+        </div>
+        <div className="comfy-wan-dialog-actions">
+          <button type="button" className="primary" onClick={copyRequirementsPath}>
+            <span>{copied ? "Copied" : "Copy Requirements Path"}</span>
+          </button>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -8679,6 +8783,44 @@ function isUtilityTransitionBuilderModel(model) {
   return normalized.includes("wansegment") || (normalized.includes("transition") && normalized.includes("builder"));
 }
 
+function requiresComfyWanSetup(node) {
+  return node?.type === "utility" &&
+    utilityMode(node) === "video" &&
+    isComfyWanUtilityModel(node.data?.utilityVideoModel);
+}
+
+function isComfyWanUtilityModel(model) {
+  return isUtilityWanBlendModel(model) || isUtilityVideoStitchModel(model) || isUtilityTransitionBuilderModel(model);
+}
+
+function comfyWanWorkflowName(model) {
+  if (isUtilityWanBlendModel(model)) return "WanBlend";
+  if (isUtilityTransitionBuilderModel(model)) return "WanSegment";
+  return "WanWarp";
+}
+
+function comfyWanSetupError({ workflow, error, comfyUrl = "", requirementsPath = "", detail = "" }) {
+  const message = error || `${workflow || "Wan"} requires ComfyUI.`;
+  const next = new Error(message);
+  next.code = "COMFYUI_UNAVAILABLE";
+  next.errorCode = "COMFYUI_UNAVAILABLE";
+  next.workflow = workflow || "WanWarp";
+  next.comfyUrl = comfyUrl;
+  next.requirementsPath = requirementsPath || "docs/comfyWan-requirements.yaml";
+  next.detail = detail;
+  next.setupTitle = "ComfyUI setup required";
+  return next;
+}
+
+function isComfyWanSetupError(error) {
+  return ["COMFYUI_UNAVAILABLE", "COMFYUI_SETUP_REQUIRED"].includes(String(error?.errorCode || error?.code || ""));
+}
+
+function looksLikeComfyUnavailableMessage(message) {
+  const text = String(message || "").toLowerCase();
+  return text.includes("could not reach comfyui") || text.includes("comfyui is not reachable");
+}
+
 function isUtilityWanVaceMaskToVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("vace") && normalized.includes("mask");
@@ -10022,7 +10164,16 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     },
     voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames)
   }), "Utility video");
-  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);
+  if (!response.ok) {
+    const error = new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);
+    error.code = data.errorCode || data.code || "";
+    error.errorCode = data.errorCode || data.code || "";
+    error.workflow = data.workflow || comfyWanWorkflowName(model);
+    error.comfyUrl = data.comfyUrl || "";
+    error.requirementsPath = data.requirementsPath || "";
+    error.setupTitle = data.setupTitle || "";
+    throw error;
+  }
 
   return normalizeUtilityVideoGenerationResult(data, index);
 }

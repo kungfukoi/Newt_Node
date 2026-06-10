@@ -44,6 +44,7 @@ const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
+const comfyWanRequirementsPath = "docs/comfyWan-requirements.yaml";
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
@@ -260,7 +261,8 @@ registerCoreRoutes(app, {
   readRuntimeSettings,
   saveRuntimeSettings,
   pullRuntimeUpdate,
-  requestServerRestart
+  requestServerRestart,
+  readComfyWanStatus
 });
 
 registerComposerPoseRoutes(app, {
@@ -300,7 +302,8 @@ function buildHealthPayload() {
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
-      settings: true
+      settings: true,
+      comfyWanStatus: true
     },
     ffmpeg: {
       configured: Boolean(ffmpegBinaryPath),
@@ -551,6 +554,67 @@ async function writeRestartMarker() {
     `export const restartMarker = ${JSON.stringify(timestamp)};\n`,
     "utf8"
   );
+}
+
+async function readComfyWanStatus({ workflow = "" } = {}) {
+  const workflowName = normalizedComfyWanWorkflowName(workflow);
+  const comfyUrl = comfyWanUrlForWorkflow(workflowName);
+
+  try {
+    const response = await fetch(`${comfyUrl}/system_stats`);
+    if (!response.ok) {
+      return comfyWanStatusPayload({
+        available: false,
+        workflow: workflowName,
+        comfyUrl,
+        status: response.status,
+        message: `ComfyUI did not respond successfully at ${comfyUrl}.`
+      });
+    }
+
+    return comfyWanStatusPayload({
+      available: true,
+      workflow: workflowName,
+      comfyUrl
+    });
+  } catch (error) {
+    return comfyWanStatusPayload({
+      available: false,
+      workflow: workflowName,
+      comfyUrl,
+      status: 503,
+      message: `ComfyUI is not reachable at ${comfyUrl}.`,
+      detail: error?.message || ""
+    });
+  }
+}
+
+function comfyWanStatusPayload({ available, workflow, comfyUrl, status = 200, message = "", detail = "" }) {
+  return {
+    ok: true,
+    available: Boolean(available),
+    workflow,
+    comfyUrl,
+    status,
+    errorCode: available ? "" : "COMFYUI_UNAVAILABLE",
+    message,
+    detail,
+    requirementsPath: comfyWanRequirementsPath
+  };
+}
+
+function normalizedComfyWanWorkflowName(value) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("blend")) return "WanBlend";
+  if (text.includes("segment")) return "WanSegment";
+  return "WanWarp";
+}
+
+function comfyWanUrlForWorkflow(workflow) {
+  const value = workflow === "WanBlend"
+    ? process.env.WANBLEND_COMFY_URL || process.env.WANWARP_COMFY_URL || "http://127.0.0.1:8188"
+    : process.env.WANWARP_COMFY_URL || "http://127.0.0.1:8188";
+  return String(value).replace(/\/+$/, "");
 }
 
 async function resolveUpdateRepository() {
@@ -8122,10 +8186,17 @@ function sendApiError(res, error, fallback) {
   }
 
   if (!res.headersSent) {
-    res.status(status).json({
+    const payload = {
       error: message,
       status
-    });
+    };
+    const errorCode = error?.errorCode || (String(error?.code || "").startsWith("COMFYUI_") ? error.code : "");
+    if (errorCode) payload.errorCode = String(errorCode);
+    if (error?.workflow) payload.workflow = String(error.workflow);
+    if (error?.comfyUrl) payload.comfyUrl = String(error.comfyUrl);
+    if (error?.requirementsPath) payload.requirementsPath = String(error.requirementsPath);
+    if (error?.setupTitle) payload.setupTitle = String(error.setupTitle);
+    res.status(status).json(payload);
   }
 }
 

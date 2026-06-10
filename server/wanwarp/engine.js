@@ -13,6 +13,7 @@ const blendRefineTemplatePath = new URL("./templates/wanblend-refine.json", impo
 const wanWarpOutputNodeId = "2590";
 const wanWarpFullOutputNodeId = "3138";
 const wanWarpBlendRefineOutputNodeId = "3138";
+const comfyWanRequirementsPath = "docs/comfyWan-requirements.yaml";
 
 const imageMimeTypes = new Map([
   [".jpg", "image/jpeg"],
@@ -1486,13 +1487,23 @@ async function assertComfyAvailable() {
     const next = new Error(`WanWarp could not reach ComfyUI at ${comfyBaseUrl}. Start Comfy Desktop and try again.`);
     next.status = 503;
     next.cause = error;
-    throw next;
+    throw markComfyUnavailable(next);
   }
   if (!response.ok) {
     const error = new Error(`WanWarp could not reach ComfyUI at ${comfyBaseUrl}: ${response.status} ${response.statusText}`);
     error.status = 503;
-    throw error;
+    throw markComfyUnavailable(error);
   }
+}
+
+function markComfyUnavailable(error) {
+  error.code = "COMFYUI_UNAVAILABLE";
+  error.errorCode = "COMFYUI_UNAVAILABLE";
+  error.workflow = "WanWarp";
+  error.comfyUrl = comfyBaseUrl;
+  error.requirementsPath = comfyWanRequirementsPath;
+  error.setupTitle = "ComfyUI setup required";
+  return error;
 }
 
 async function uploadImageToComfy(filePath, fileName = "") {
@@ -1540,7 +1551,7 @@ async function waitForComfyPrompt(promptId) {
         const error = new Error(status.messages?.at(-1)?.[1]?.exception_message || "Comfy reported a WanWarp error.");
         error.status = 502;
         error.raw = status;
-        throw error;
+        throw maybeMarkComfySetupRequired(error);
       }
       if (status.status_str === "success") return history;
       if (!status.status_str && history.outputs && Object.keys(history.outputs).length > 0) return history;
@@ -1600,9 +1611,36 @@ async function responseJson(response, fallback) {
     const error = new Error(formatComfyError(data) || `${fallback} ${response.status} ${response.statusText}`);
     error.status = response.status;
     error.raw = data;
-    throw error;
+    throw maybeMarkComfySetupRequired(error);
   }
   return data || {};
+}
+
+function maybeMarkComfySetupRequired(error) {
+  if (!isComfySetupRequiredError(error)) return error;
+  error.code = "COMFYUI_SETUP_REQUIRED";
+  error.errorCode = "COMFYUI_SETUP_REQUIRED";
+  error.workflow = "WanWarp";
+  error.comfyUrl = comfyBaseUrl;
+  error.requirementsPath = comfyWanRequirementsPath;
+  error.setupTitle = "ComfyUI dependency setup required";
+  return error;
+}
+
+function isComfySetupRequiredError(error) {
+  const text = [
+    error?.message,
+    publicRawComfyErrorText(error?.raw)
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /node type|node types|custom node|not installed|missing|not found|no such file|cannot find|can't find|model.*not|checkpoint.*not|lora.*not/.test(text);
+}
+
+function publicRawComfyErrorText(value) {
+  try {
+    return JSON.stringify(value || {}).slice(0, 2400);
+  } catch {
+    return "";
+  }
 }
 
 function formatComfyError(data) {

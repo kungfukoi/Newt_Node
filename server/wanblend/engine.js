@@ -9,6 +9,7 @@ const defaultComfyTimeoutMs = 4 * 60 * 60 * 1000;
 const comfyPollIntervalMs = 2000;
 const templatePath = new URL("./templates/context-smashing.json", import.meta.url);
 const outputNodeId = "37";
+const comfyWanRequirementsPath = "docs/comfyWan-requirements.yaml";
 const contextImageNodeIds = ["20", "21", "22", "23", "24", "25"];
 const contextScaleNodeIds = ["14", "15", "16", "17", "18", "19"];
 const ipAdapterNodeIds = ["2", "4", "5", "6", "7", "8"];
@@ -334,13 +335,23 @@ async function assertComfyAvailable() {
     const next = new Error(`WanBlend could not reach ComfyUI at ${comfyBaseUrl}. Start Comfy Desktop and try again.`);
     next.status = 503;
     next.cause = error;
-    throw next;
+    throw markComfyUnavailable(next);
   }
   if (!response.ok) {
     const error = new Error(`WanBlend could not reach ComfyUI at ${comfyBaseUrl}: ${response.status} ${response.statusText}`);
     error.status = 503;
-    throw error;
+    throw markComfyUnavailable(error);
   }
+}
+
+function markComfyUnavailable(error) {
+  error.code = "COMFYUI_UNAVAILABLE";
+  error.errorCode = "COMFYUI_UNAVAILABLE";
+  error.workflow = "WanBlend";
+  error.comfyUrl = comfyBaseUrl;
+  error.requirementsPath = comfyWanRequirementsPath;
+  error.setupTitle = "ComfyUI setup required";
+  return error;
 }
 
 async function uploadImageToComfy(filePath, fileName = "") {
@@ -388,7 +399,7 @@ async function waitForComfyPrompt(promptId) {
         const error = new Error(status.messages?.at(-1)?.[1]?.exception_message || "Comfy reported a WanBlend error.");
         error.status = 502;
         error.raw = status;
-        throw error;
+        throw maybeMarkComfySetupRequired(error);
       }
       if (status.status_str === "success") return history;
       if (!status.status_str && history.outputs && Object.keys(history.outputs).length > 0) return history;
@@ -448,9 +459,36 @@ async function responseJson(response, fallback) {
     const error = new Error(formatComfyError(data) || `${fallback} ${response.status} ${response.statusText}`);
     error.status = response.status;
     error.raw = data;
-    throw error;
+    throw maybeMarkComfySetupRequired(error);
   }
   return data || {};
+}
+
+function maybeMarkComfySetupRequired(error) {
+  if (!isComfySetupRequiredError(error)) return error;
+  error.code = "COMFYUI_SETUP_REQUIRED";
+  error.errorCode = "COMFYUI_SETUP_REQUIRED";
+  error.workflow = "WanBlend";
+  error.comfyUrl = comfyBaseUrl;
+  error.requirementsPath = comfyWanRequirementsPath;
+  error.setupTitle = "ComfyUI dependency setup required";
+  return error;
+}
+
+function isComfySetupRequiredError(error) {
+  const text = [
+    error?.message,
+    publicRawComfyErrorText(error?.raw)
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /node type|node types|custom node|not installed|missing|not found|no such file|cannot find|can't find|model.*not|checkpoint.*not|lora.*not/.test(text);
+}
+
+function publicRawComfyErrorText(value) {
+  try {
+    return JSON.stringify(value || {}).slice(0, 2400);
+  } catch {
+    return "";
+  }
 }
 
 function formatComfyError(data) {

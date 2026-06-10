@@ -12,6 +12,18 @@ Before starting any new feature, read this document first. If the feature change
 - Track generation cost honestly whenever the app can estimate or record it.
 - Prefer small, compatible changes over one-off node behavior.
 - Keep saved workflows portable enough that another user can open and run a packaged graph from a shared drive when the needed assets are included.
+- Keep runtime configuration, update, and restart behavior local, visible, and cross-platform.
+
+## Current Branch Scope
+
+This branch is the current development line for the next mainline merge. Treat these as durable surfaces, even if the branch name or release version changes during promotion:
+
+- The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.
+- The File menu owns New, Save, Save As, Open, and Import. New starts a blank workflow through the same unsaved-change guard as Open and Import.
+- Text Model defaults to the Fal OpenRouter route with Gemini Flash model ids unless environment variables override them.
+- Utility model coverage includes Luma Photon/Ray2, Depth Anything Video, Fal Wan LoRA/VACE models, and local ComfyUI WanBlend/WanSegment/WanWarp workflows.
+- Workflow saves should stay fast: the client upserts the returned project summary, and the server rebuilds workflow indexes after the save response rather than blocking the write path.
+- When this branch is merged or released, app version displays should derive from package metadata and be updated with the release bump, not hard-coded in UI copy.
 
 ## New Feature Checklist
 
@@ -33,6 +45,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Area | Primary files | Standard |
 | --- | --- | --- |
 | API clients | `src/api/newtApi.js` | Add browser-side route wrappers here instead of scattering raw `fetch` calls. |
+| App shell and Settings | `src/main.jsx`, `src/SettingsPage.jsx`, `src/api/newtApi.js`, `server/routes/core.js`, `server/index.js` | Lazy-load Settings from the app shell. Keep settings API wrappers in `newtApi.js`; register Settings, update, restart, health, and storage routes through `server/routes/core.js`; keep runtime config implementation in `server/index.js`. |
 | Node registry | `src/nodeRegistry.js`, `src/NodeEditor.jsx` icon map | Add catalog definitions in `nodeRegistry.js`; add only the display icon mapping in `NodeEditor.jsx`. |
 | Node config/defaults/normalization | `src/NodeEditor.jsx` | `getNodeConfig`, `createDefaultNodeData`, and `normalizeCurrentNode` still live here. Keep backward-compatible migrations close to these functions until they are deliberately extracted. |
 | Run scheduling and result state | `src/nodeRunner.js`, `src/nodeRunners/*` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong in `nodeRunner.js`. Node-specific API runners and reusable request/result builders belong in focused files under `src/nodeRunners/`. |
@@ -124,6 +137,9 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
 - `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
+- The default text-processing provider is Fal via `TEXT_LLM_PROVIDER=fal`. The current default model ids are `google/gemini-2.5-flash` for `FAL_TEXT_MODEL`, `FAL_VISION_TEXT_MODEL`, `FAL_VISION_TEXT_FALLBACK_MODEL`, and `FAL_VIDEO_TEXT_MODEL`.
+- Fal text processing uses `openrouter/router` and should pass the app's text-processing instructions as `system_prompt`. Image and video helper descriptions use the matching OpenRouter vision/video routes before the final text prompt is assembled.
+- OpenAI text processing remains an explicit provider override through `TEXT_LLM_PROVIDER=openai` and `OPENAI_TEXT_MODEL`; do not silently switch providers in UI code.
 
 ## Node Definition Checklist
 
@@ -242,6 +258,32 @@ Local API routes should live in the smallest backend owner that fits the route. 
 - Keep request fields aligned with the provider's current API schema.
 - Keep response payloads small and predictable: `image`, `video`, `model`, `thumbnail`, `cost`, `seed`, `text`, as appropriate.
 
+## Settings And Runtime Update Standards
+
+Settings is a local runtime control surface, not an account system.
+
+- The Settings page is lazy-loaded by `src/main.jsx` and should use `settingsApi` from `src/api/newtApi.js` for every request.
+- The current Settings routes are `GET /api/settings`, `POST /api/settings`, `POST /api/settings/update`, and `POST /api/settings/restart`; `/api/health` must advertise `routes.settings: true`.
+- Secrets can be loaded into Settings with `includeSecrets=1`, but UI fields must remain password-style by default with explicit reveal buttons.
+- Runtime settings live in `server/data/runtime-settings.json`. Treat that file as local state: ignored by git, not a fixture, and not a source of defaults for another machine.
+- `.env` remains a valid source for keys and update repository values. Settings overrides should be reflected in `process.env` through the runtime config refresh path, and the UI should show whether each key came from `.env` or Settings.
+- The update action must stay constrained to the configured repository and the currently checked-out branch. Keep it fast-forward only; do not add merge, reset, or branch-changing behavior to the Settings button.
+- Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, or check failed.
+- Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
+- If the Settings branch tile or health payload shows the app version, derive it from package metadata so release bumps update the display automatically.
+
+## Hosted Utility Model Standards
+
+Hosted utility models should follow the same request, result, history, and stats contracts as other generation nodes.
+
+- Keep hosted utility labels and option lists in `src/modelOptions.js`; saved workflows rely on stable labels.
+- Luma image generation is represented by `Luma Dream Machine` image model behavior through Fal Luma Photon. Luma video generation uses Luma Ray2 through Fal and should keep duration, resolution, and aspect-ratio normalization aligned between `src/modelOptions.js`, `src/NodeEditor.jsx`, `server/index.js`, and `StatsDashboard.jsx`.
+- Luma pricing belongs in server pricing constants and `/api/stats`; support endpoint and pricing overrides with environment variables.
+- Depth Anything Video is a Utility Video model. It requires a connected source video, supports model, colormap, resolution, max-frame, output-FPS, and side-by-side controls, and returns a normal video result item.
+- Depth Anything image and video preprocessors are paid Fal utilities. Estimate cost from the available image/video duration data; mark the cost unpriced when duration is unavailable instead of inventing a fake amount.
+- Fal Wan 2.1/2.2 LoRA and VACE models stay in Utility Video. Keep their provider-specific payload builders in `src/nodeRunners/videoModels.js` and `server/index.js`, not inline inside generic UI rendering.
+- When adding a hosted utility that can also be used as a prepass for a local Comfy workflow, keep the standalone hosted result as ordinary media and let the downstream executor decide how to consume it.
+
 ## ComfyUI Custom Workflow API Standards
 
 Some Newt features are local custom workflow integrations rather than direct hosted model calls. WanBlend and WanWarp are the current production reference implementations: Newt presents a purpose-built node interface, then the backend patches and runs locked ComfyUI API workflows.
@@ -256,6 +298,7 @@ Use this pattern for future ComfyUI-backed custom builds.
 - Use a single backend engine module to own template loading, prompt patching, Comfy queueing, polling, output copying, result shaping, and history append.
 - The backend should talk to ComfyUI through its local HTTP API: check availability with `/system_stats`, upload still images through `/upload/image`, queue prompts with `/prompt`, and poll completion through `/history/<prompt_id>`. `/queue` is useful for diagnostics and monitors, but normal runs should rely on prompt history.
 - Default Comfy URL should be environment-configurable. WanWarp uses `WANWARP_COMFY_URL`, defaulting to `http://127.0.0.1:8188`; WanBlend uses `WANBLEND_COMFY_URL` and falls back to `WANWARP_COMFY_URL`.
+- WanBlend, WanWarp, and WanSegment runs should preflight local ComfyUI availability through `/api/comfy-wan/status`. If ComfyUI is not reachable, show a dialog that points the user to `docs/comfyWan-requirements.yaml` for ComfyUI, custom node, model, and Python dependency setup.
 - Long local renders must use a generous server-side timeout and should be environment-configurable. WanWarp uses `WANWARP_COMFY_TIMEOUT_MS`; WanBlend uses `WANBLEND_COMFY_TIMEOUT_MS` and falls back to the WanWarp timeout.
 - Timeout errors must include enough context to debug, especially the Comfy `prompt_id`, and should say the render may still be running in Comfy.
 - When a workflow is queued, record the Comfy `prompt_id` in history settings.
@@ -273,7 +316,7 @@ WanWarp reference map:
 | Browser request shape | `src/nodeRunners/videoModels.js` and the utility runner path in `src/NodeEditor.jsx` |
 | User-facing model labels | `src/modelOptions.js` |
 | Result and preview support | `src/components/MediaViews.jsx`, `src/components/NodePorts.jsx`, and shared result helpers |
-| Standards/history docs | `docs/node-standards.md`, `docs/latent-wan-transition-handoff.md` |
+| Standards/history docs | `docs/node-standards.md`, `docs/latent-wan-transition-handoff.md`, `docs/comfyWan-requirements.yaml` |
 
 WanBlend reference map:
 
@@ -284,6 +327,7 @@ WanBlend reference map:
 | Backend route integration | `/api/node/utility-video` path in `server/index.js` |
 | Browser request shape | `src/nodeRunners/videoModels.js` and the utility runner path in `src/NodeEditor.jsx` |
 | User-facing model labels | `src/modelOptions.js` |
+| External requirements | `docs/comfyWan-requirements.yaml` |
 
 ### Template Patching
 
@@ -373,11 +417,15 @@ Every paid remote model should record cost metadata.
 
 Saved workflows are long-lived project files. Changes must avoid breaking them.
 
-- Save, Save As, Open, and Import live under the left toolbar File menu. Open replaces the current graph; Import merges the selected workflow into the current graph.
+- New, Save, Save As, Open, and Import live under the left toolbar File menu. New clears the current graph into an untitled blank workflow; Open replaces the current graph; Import merges the selected workflow into the current graph.
+- New, Open, and Import must use the unsaved-change guard before discarding or changing the current graph. New resets project id, package path, file path, local file handle state, groups, selections, and viewport, then marks the blank workflow clean.
 - When a workflow replacement would discard unsaved graph or project-name changes, prompt with Save, Don't Save, and Cancel. Save writes never-saved workflows to the local app saved-workflows folder.
 - Ctrl+S and Cmd+S save the current workflow. If it has never been saved, use the default local saved-workflows registry rather than requiring Save As.
 - The Recent workflows dropdown behaves as a Recent Files list backed by the local server registry, not as a live scan of every JSON file on disk. The trash action removes the workflow from the dropdown only; it must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
-- Save/Open/Import orchestration belongs in `src/useWorkflowPersistence.js`; workflow document construction and display paths belong in `src/workflowFiles.js`; graph fingerprints, cloning, deduping, import remapping, and stale runtime cleanup belong in `src/workflowState.js`.
+- New/Save/Open/Import orchestration belongs in `src/useWorkflowPersistence.js`; workflow document construction and display paths belong in `src/workflowFiles.js`; graph fingerprints, cloning, deduping, import remapping, and stale runtime cleanup belong in `src/workflowState.js`.
+- After a successful save, update the Recent workflows list by upserting the returned workflow summary instead of immediately reloading every project. Keep the summary shape compatible with `readSavedWorkflowSummaryFiles`.
+- Server saves should migrate legacy projects when needed, read summary files for collision/existing checks, write the workflow/package, return the registered workflow promptly, and schedule the workflow-index rebuild in the background.
+- Background workflow-index rebuilds should log success or failure but must not make an already-successful save look failed to the user.
 - The dirty/unsaved fingerprint includes nodes, edges, groups, project name, and package path. It intentionally excludes viewport pan/zoom.
 - Add normalization for new node fields.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
@@ -469,8 +517,10 @@ Before committing node or UI changes:
 - Run `npm run bundle:report` after startup-loading, lazy-loading, or heavy UI ownership changes.
 - Run `npm test` when pure helpers, workflow state, node runner scheduling, or geometry changed.
 - Run `node --check server/index.js` and any touched `server/routes/*.js` file when the server changed.
+- When Settings, update, restart, or health payload behavior changes, verify `/api/settings`, `/api/settings/update`, `/api/settings/restart`, and `/api/health` with the dev server running.
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
+- For workflow persistence changes, test New, Save, Save As, Open, Import, Recent workflows, and the unsaved-change guard. Confirm save success is not blocked by background index rebuild failures.
 - When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5174/ http://localhost:3333/api/health`.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.

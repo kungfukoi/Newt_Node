@@ -95,6 +95,7 @@ function localApiRouteKey(path) {
   if (path.includes("composer-poses")) return "composerPoses";
   if (path.includes("generate-3d")) return "generate3d";
   if (path.includes("settings")) return "settings";
+  if (path.includes("comfy-wan")) return "comfyWanStatus";
   return "";
 }
 
@@ -240,6 +241,13 @@ export const systemApi = {
 
   saveWorkflowFile(body, label = "Save workflow") {
     return fetchJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
+  },
+
+  comfyWanStatus({ workflow = "" } = {}) {
+    const params = new URLSearchParams();
+    if (workflow) params.set("workflow", workflow);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return getJson(`/api/comfy-wan/status${suffix}`, "Could not check ComfyUI.");
   }
 };
 
