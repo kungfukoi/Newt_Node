@@ -9,6 +9,7 @@ export function registerCoreRoutes(
     readWorkflowFromFilePath,
     readWorkflowFromPath,
     buildHealthPayload,
+    openProjectOutputFolder,
     timedApi,
     buildStorageDiagnostics,
     readRuntimeSettings,
@@ -62,6 +63,15 @@ export function registerCoreRoutes(
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
       res.status(status).json({ error: error.message || "Workflow selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+    }
+  });
+
+  app.post("/api/system/open-project-output-folder", async (req, res) => {
+    try {
+      if (!openProjectOutputFolder) throw new Error("Opening output folders is not available.");
+      res.json(await openProjectOutputFolder(req.body || {}));
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Could not open output folder." });
     }
   });
 

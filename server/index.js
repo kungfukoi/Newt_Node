@@ -9,7 +9,7 @@ import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, write
 import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
@@ -289,6 +289,7 @@ registerCoreRoutes(app, {
   readWorkflowFromFilePath,
   readWorkflowFromPath,
   buildHealthPayload,
+  openProjectOutputFolder,
   timedApi,
   buildStorageDiagnostics,
   readRuntimeSettings,
@@ -325,7 +326,8 @@ function buildHealthPayload() {
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
-      settings: true
+      settings: true,
+      projectOutputFolder: true
     },
     ffmpeg: {
       configured: Boolean(ffmpegBinaryPath),
@@ -4446,6 +4448,53 @@ async function ensureWorkflowPackageDirs(packagePath) {
     mkdir(metadataDir, { recursive: true })
   ]);
   await hideWorkflowPackageMetadataDir(metadataDir);
+}
+
+async function openProjectOutputFolder(body = {}) {
+  const targetPath = await projectOutputDirectoryFromBody(body);
+  await mkdir(targetPath, { recursive: true });
+  await openDirectoryWithSystemShell(targetPath);
+  return { path: targetPath };
+}
+
+async function projectOutputDirectoryFromBody(body = {}) {
+  const packageContext = workflowPackageContextFromBody(body);
+  if (packageContext?.packagePath) {
+    const packagePath = packageContext.packagePath;
+    const registeredWorkflow = packageContext.id ? await findRegisteredWorkflowPackage(packageContext.id).catch(() => null) : null;
+    const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
+    const isRegisteredPackage = registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath);
+    const hasPackageManifest = existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath));
+    const hasPackageDirs = [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
+      existsSync(path.join(packagePath, directoryName))
+    );
+
+    if (!isRegisteredPackage && !hasPackageManifest && !hasPackageDirs) {
+      throw new Error("Workflow package path is not registered or does not look like a NewtNode package.");
+    }
+
+    await ensureWorkflowPackageDirs(packagePath);
+    return path.join(packagePath, workflowPackageOutputDirName);
+  }
+
+  return path.join(outputsDir, localWorkflowAssetDirName(body));
+}
+
+function openDirectoryWithSystemShell(directoryPath) {
+  const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [directoryPath], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 async function hideWorkflowPackageMetadataDir(metadataDir) {

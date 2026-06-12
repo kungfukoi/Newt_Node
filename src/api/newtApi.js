@@ -90,6 +90,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("open-project-output-folder")) return "projectOutputFolder";
   if (path.includes("utility-image")) return "utilityImage";
   if (path.includes("utility-video")) return "utilityVideo";
   if (path.includes("extract-video-frame")) return "extractVideoFrame";
@@ -247,6 +248,10 @@ export const systemApi = {
 
   openWorkflowFile(body, label = "Open workflow") {
     return fetchJsonApi("/api/system/open-workflow-file", jsonBody(body), label);
+  },
+
+  openProjectOutputFolder(body, label = "Open output folder") {
+    return fetchJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
   }
 };
 

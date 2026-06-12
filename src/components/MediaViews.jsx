@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, ChevronLeft, ChevronRight, Download, FileAudio, FileImage, Film, ImagePlus, PanelRightClose, Plus, RefreshCw, Video, X } from "lucide-react";
+import { Box, ChevronLeft, ChevronRight, Download, FileAudio, FileImage, Film, FolderOpen, ImagePlus, PanelRightClose, Plus, RefreshCw, Video, X } from "lucide-react";
 import { capitalizeMediaType, outputDragMime as defaultOutputDragMime } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
@@ -61,7 +61,15 @@ export function UploadIcon({ type }) {
   return <Plus size={22} />;
 }
 
-export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
+export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
+  items,
+  onClose,
+  onOpenFolder,
+  onRefresh,
+  onPreviewOpen,
+  openFolderBusy = false,
+  outputDragMime = defaultOutputDragMime
+}) {
   const startDrag = React.useCallback((event, item) => {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
@@ -73,6 +81,9 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ ite
     <aside className="project-output-drawer">
       <div className="output-drawer-header">
         <div className="output-drawer-actions">
+          <button onClick={onOpenFolder} disabled={!onOpenFolder || openFolderBusy} title="Open output folder" aria-label="Open output folder">
+            <FolderOpen size={14} />
+          </button>
           <button onClick={onRefresh} title="Refresh outputs" aria-label="Refresh outputs">
             <RefreshCw size={14} />
           </button>
@@ -187,8 +198,8 @@ export function OutputPreviewLightbox({ item, onClose }) {
           </button>
         </header>
         <div className="output-lightbox-stage">
-          {item.type === "image" && <img src={item.url} alt={label} onError={useNewtNodeImageFallback} />}
-          {item.type === "video" && <video src={item.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
+          {item.type === "image" && <img className="output-lightbox-media" src={item.url} alt={label} onError={useNewtNodeImageFallback} />}
+          {item.type === "video" && <video className="output-lightbox-media" src={item.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
           {item.type === "model3d" && <Model3DViewer url={item.url} label={label} />}
           {item.type === "audio" && (
             <div className="output-lightbox-audio">

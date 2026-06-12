@@ -571,6 +571,10 @@ const initialEdges = [
 
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
+const viewportZoomStep = 1.16;
+const continuousWheelZoomSensitivity = 0.006;
+const discreteWheelDeltaThreshold = 90;
+const discreteWheelNotchThreshold = 120;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const namedColorPalette = [
@@ -625,6 +629,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [contextMenu, setContextMenu] = React.useState(null);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
+  const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
   const [outputHistory, setOutputHistory] = React.useState([]);
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
@@ -2807,7 +2812,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
 
     if (event.ctrlKey || event.metaKey || event.altKey) {
-      zoomViewportAtPoint(pointer, Math.exp(-event.deltaY * 0.006));
+      const zoomDelta = event.deltaY || event.deltaX;
+      const zoomFactor = isContinuousPinchZoomEvent(event)
+        ? Math.exp(-zoomDelta * continuousWheelZoomSensitivity)
+        : zoomDelta > 0 ? 1 / viewportZoomStep : viewportZoomStep;
+      zoomViewportAtPoint(pointer, zoomFactor);
       return;
     }
 
@@ -2871,6 +2880,34 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         scale: nextScale
       };
     });
+  }
+
+  function isContinuousPinchZoomEvent(event) {
+    if (event.altKey || (!event.ctrlKey && !event.metaKey)) return false;
+    if (typeof WheelEvent !== "undefined" && event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return false;
+    return !isDiscreteMouseWheelZoomEvent(event);
+  }
+
+  function isDiscreteMouseWheelZoomEvent(event) {
+    if (event.altKey) return true;
+    if (typeof WheelEvent !== "undefined" && event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
+    const wheelDelta = Math.abs(Number(event.wheelDelta || 0));
+    const delta = Math.abs(event.deltaY || event.deltaX);
+    return wheelDelta >= discreteWheelNotchThreshold && delta >= discreteWheelDeltaThreshold;
+  }
+
+  async function openProjectOutputFolder() {
+    if (openingOutputFolder) return;
+    setOpeningOutputFolder(true);
+    try {
+      const { response, data } = await systemApi.openProjectOutputFolder(workflowRequestContext());
+      if (!response.ok) throw new Error(data?.error || "Could not open output folder.");
+      setSaveStatus("Opened output folder");
+    } catch (error) {
+      setSaveStatus(error.message || "Could not open output folder");
+    } finally {
+      setOpeningOutputFolder(false);
+    }
   }
 
   function screenToScene(clientX, clientY) {
@@ -3927,13 +3964,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / 1.16)} title="Zoom out" aria-label="Zoom out">
+          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / viewportZoomStep)} title="Zoom out" aria-label="Zoom out">
             <Minus size={14} />
           </button>
           <button type="button" onClick={resetViewportZoom} title="Reset zoom" aria-label="Reset zoom" className="zoom-readout">
             {Math.round(viewport.scale * 100)}%
           </button>
-          <button type="button" onClick={() => zoomViewportAtCanvasCenter(1.16)} title="Zoom in" aria-label="Zoom in">
+          <button type="button" onClick={() => zoomViewportAtCanvasCenter(viewportZoomStep)} title="Zoom in" aria-label="Zoom in">
             <Plus size={14} />
           </button>
         </div>
@@ -3942,8 +3979,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         <ProjectOutputDrawer
           items={projectOutputs}
           onClose={() => setOutputsCollapsed(true)}
+          onOpenFolder={openProjectOutputFolder}
           onRefresh={loadOutputHistory}
           onPreviewOpen={setPreviewLightboxItem}
+          openFolderBusy={openingOutputFolder}
           outputDragMime={outputDragMime}
         />
       )}
