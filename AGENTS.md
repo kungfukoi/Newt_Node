@@ -1,4 +1,4 @@
-# Newt Node Agent Instructions
+# NewtNode Agent Instructions
 
 Before adding or changing a feature in this repository, read `docs/node-standards.md` and follow it as the current source of truth for node behavior, UI conventions, backend routes, media persistence, workflow packages, stats, and verification.
 

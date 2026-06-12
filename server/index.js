@@ -71,8 +71,10 @@ const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_P
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
 const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_PER_1000_TOKENS || (seedanceFastCostPerSecond / 21.6));
-const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
-const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
+const falNanoBananaCost1K2K = Number(process.env.FAL_NANO_BANANA_PRO_IMAGE_COST_1K_2K || process.env.FAL_NANO_BANANA_IMAGE_COST_1K_2K || process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
+const falNanoBananaCost4K = Number(process.env.FAL_NANO_BANANA_PRO_IMAGE_COST_4K || process.env.FAL_NANO_BANANA_IMAGE_COST_4K || process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
+const googleNanoBananaCost1K2K = Number(process.env.GOOGLE_NANO_BANANA_PRO_IMAGE_COST_1K_2K || process.env.GOOGLE_NANO_BANANA_IMAGE_COST_1K_2K || 0.134);
+const googleNanoBananaCost4K = Number(process.env.GOOGLE_NANO_BANANA_PRO_IMAGE_COST_4K || process.env.GOOGLE_NANO_BANANA_IMAGE_COST_4K || 0.24);
 const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
@@ -797,8 +799,16 @@ app.get("/api/stats", async (_req, res) => {
         currency: "USD"
       },
       nanoBananaPro: {
-        cost1K2K: nanoBananaCost1K2K,
-        cost4K: nanoBananaCost4K,
+        cost1K2K: falNanoBananaCost1K2K,
+        cost4K: falNanoBananaCost4K,
+        fal: {
+          cost1K2K: falNanoBananaCost1K2K,
+          cost4K: falNanoBananaCost4K
+        },
+        google: {
+          cost1K2K: googleNanoBananaCost1K2K,
+          cost4K: googleNanoBananaCost4K
+        },
         currency: "USD"
       },
       zImage: {
@@ -1536,7 +1546,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         resolution: req.body.resolution
       });
       const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = estimateImageCost({ resolution: req.body.resolution });
+      const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
 
       await appendHistory({
         id: randomUUID(),
@@ -1616,7 +1626,7 @@ app.post("/api/node/generate-image", async (req, res) => {
     const imageBytes = Buffer.from(inlineData.data, "base64");
     await writeFile(output.filePath, imageBytes);
 
-    const cost = estimateImageCost({ resolution: req.body.resolution });
+    const cost = estimateImageCost({ resolution: req.body.resolution, provider: "Google", endpoint: model });
     await appendHistory({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
@@ -7409,9 +7419,13 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
   };
 }
 
-function estimateImageCost({ resolution }) {
+function estimateImageCost({ resolution, provider, endpoint }) {
   const normalized = String(resolution || "2K").toUpperCase();
-  const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
+  const providerKey = String(provider || "").toLowerCase();
+  const isGoogleDirect = providerKey.includes("google") || String(endpoint || "").toLowerCase().includes("gemini");
+  const amountUsd = normalized.includes("4K")
+    ? isGoogleDirect ? googleNanoBananaCost4K : falNanoBananaCost4K
+    : isGoogleDirect ? googleNanoBananaCost1K2K : falNanoBananaCost1K2K;
 
   return {
     amountUsd: roundCurrency(amountUsd),
@@ -7421,8 +7435,14 @@ function estimateImageCost({ resolution }) {
     unit: "image",
     mediaType: "image",
     resolution,
-    pricingBasis: "Nano Banana Pro fal.ai per-image estimate",
-    pricingSource: "fal-model-page-2026-05-15"
+    provider,
+    endpoint,
+    pricingBasis: isGoogleDirect
+      ? "Nano Banana Pro Google Gemini API per-image estimate"
+      : "Nano Banana Pro fal.ai per-image estimate",
+    pricingSource: isGoogleDirect
+      ? "google-gemini-api-pricing-2026-06-11"
+      : "fal-model-page-2026-06-11"
   };
 }
 

@@ -1,6 +1,6 @@
-# Newt Node Development Standards
+# NewtNode Development Standards
 
-This is a living standard for Newt_Node. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
+This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
@@ -44,6 +44,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
+| Settings page | `src/SettingsPage.jsx`, `server/index.js` settings routes | Runtime API key entry, repository update, restart, branch status, loaded app version, and enabled-model preferences live here. Keep settings data local and avoid exposing secret values in logs, history, or docs. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
 | Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
@@ -121,7 +122,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 ## Text Node Roles
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
-- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost.
+- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. The default text and vision-text route is Gemini Flash-class through Fal/OpenRouter route constants in `server/index.js`, with explicit environment overrides for model changes.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
 
 ## Node Definition Checklist
@@ -248,6 +249,7 @@ Every paid remote model should record cost metadata.
 - Add pricing constants near the top of `server/index.js`.
 - Allow environment overrides for pricing where model pricing may change.
 - Add a local estimator function with a `pricingBasis` and `pricingSource`.
+- Keep provider-specific estimates separate when the same model can route through different providers. Nano Banana Pro should record Google Gemini API pricing for Google-direct runs and Fal pricing for Fal-routed runs.
 - Append history with `mediaType`, `provider`, `modelName`, `endpoint`, `mode`, `settings`, `cost`, and local output paths.
 - Update `/api/stats` pricing payload.
 - Update `StatsDashboard.jsx` so historical and current runs estimate consistently.
@@ -308,14 +310,22 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 - Fal is the default provider route for remote models.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
-- Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. When it is absent, route the same Google-branded image model through Fal instead.
+- Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
 - Do not automatically fall back from direct Google to Fal after a Google request fails; if the user supplied a Google key, Google model failures should surface as Google failures.
+
+## Settings Standards
+
+- The Settings page shows local key status for Fal and Google without revealing stored secret values.
+- The Branch metric shows the current branch state and the loaded package version from `package.json`.
+- Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.
+- Repository update and restart actions belong in Settings and should call local server routes through `src/api/newtApi.js`.
+- Runtime settings should remain local app state. Do not treat `server/data/runtime-settings.json` or generated history files as source fixtures.
 
 ## Cross-Platform App Standards
 
 - Browser and shared helper code must not depend on Windows-only paths, drive letters, hidden-folder behavior, shell commands, or `.exe` names. Use URL helpers in browser code and Node `path`/`fs` APIs server-side.
-- Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
-- Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `NewtNode.app/Contents/Resources/`.
+- Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `Versus_NewtNode.command`, `Versus_NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
+- Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `Versus_NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `Versus_NewtNode.app/Contents/Resources/`.
 - Keep launcher ports, health URLs, package scripts, and README startup instructions aligned. Document platform-specific commands separately rather than baking them into shared code.
 
 ## UI Design Standards

@@ -21,7 +21,15 @@ const defaultPricing = {
   },
   nanoBananaPro: {
     cost1K2K: 0.15,
-    cost4K: 0.3
+    cost4K: 0.3,
+    fal: {
+      cost1K2K: 0.15,
+      cost4K: 0.3
+    },
+    google: {
+      cost1K2K: 0.134,
+      cost4K: 0.24
+    }
   },
   zImage: {
     costPerMegapixel: 0.005
@@ -503,9 +511,10 @@ function estimateItemCost(item, mediaType, pricing) {
     }
 
     if (modelKey.includes("nano") || modelKey.includes("banana") || modelKey.includes("gemini")) {
+      const nanoPricing = nanoBananaPricingForItem(item, pricing);
       return String(settings.resolution || "").toUpperCase().includes("4K")
-        ? pricing.nanoBananaPro.cost4K
-        : pricing.nanoBananaPro.cost1K2K;
+        ? nanoPricing.cost4K
+        : nanoPricing.cost1K2K;
     }
 
     return null;
@@ -618,6 +627,21 @@ function estimateZImageStatsCost(item, settings, pricing) {
   const height = Number(imageSize?.height || 0);
   if (width <= 0 || height <= 0) return null;
   return (width * height * unitRateUsd) / 1000000;
+}
+
+function nanoBananaPricingForItem(item, pricing) {
+  const configured = pricing.nanoBananaPro || defaultPricing.nanoBananaPro;
+  const providerKey = String(item.provider || item.settings?.provider || "").toLowerCase();
+  const endpointKey = String(item.endpoint || item.cost?.endpoint || "").toLowerCase();
+  const basisKey = String(item.cost?.pricingBasis || "").toLowerCase();
+  const route = providerKey.includes("google") || endpointKey.includes("gemini") || basisKey.includes("google")
+    ? configured.google || defaultPricing.nanoBananaPro.google
+    : configured.fal || defaultPricing.nanoBananaPro.fal;
+
+  return {
+    cost1K2K: route?.cost1K2K ?? configured.cost1K2K ?? defaultPricing.nanoBananaPro.cost1K2K,
+    cost4K: route?.cost4K ?? configured.cost4K ?? defaultPricing.nanoBananaPro.cost4K
+  };
 }
 
 const seedanceResolutionDimensions = {

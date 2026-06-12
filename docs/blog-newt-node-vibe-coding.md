@@ -1,16 +1,16 @@
-# Blog Draft: Image-First Newt_Node Post
+# Blog Draft: Image-First NewtNode Post
 
 Suggested title:
 
-Vibe Coding Newt_Node: Replacing Krea and Flaura With My Own Creative Node System
+Vibe Coding NewtNode: Replacing Krea and Flora With My Own Creative Node System
 
 Suggested labels:
 
-Newt_Node, AI tools, vibe coding, generative AI, creative workflow, node editor
+NewtNode, AI tools, vibe coding, generative AI, creative workflow, node editor
 
 ## Visual Direction
 
-Use screenshots and generated output images as the main storytelling layer. Do not show raw workflow JSON or code in the post. Instead, open the saved workflow files in Newt_Node and screenshot the canvas so the JSONs are represented visually as node graphs.
+Use screenshots and generated output images as the main storytelling layer. Do not show raw workflow JSON or code in the post. Instead, open the saved workflow files in NewtNode and screenshot the canvas so the JSONs are represented visually as node graphs.
 
 The strongest version of this post should feel like a guided studio tour:
 
@@ -24,8 +24,8 @@ The strongest version of this post should feel like a guided studio tour:
 
 1. Hero canvas
    Open a visually rich workflow such as `Storyboard-Builder_v01.json`, `Invasion.json`, or `MarkHead.json`.
-   Capture the full Newt_Node canvas with several connected nodes visible.
-   Caption: A Newt_Node canvas turns prompts, references, masks, previews, and generations into a reusable creative graph.
+   Capture the full NewtNode canvas with several connected nodes visible.
+   Caption: A NewtNode canvas turns prompts, references, masks, previews, and generations into a reusable creative graph.
 
 2. Composer workflow
    Open a workflow with the Composer node connected into an Image Model node.
@@ -35,10 +35,10 @@ The strongest version of this post should feel like a guided studio tour:
 3. 3D node workflow
    Open `image-to-3d_template.json`.
    Capture the Image node connected to the 3D node and the Preview node.
-   Caption: The new 3D node sends named image views into Hunyuan 3D and previews the generated GLB inside Newt_Node.
+   Caption: The 3D node sends named image views into Hunyuan 3D and previews the generated GLB inside NewtNode.
 
 4. 3D output example
-   Use the generated Hunyuan 3D thumbnail in `C:\dev\Newt_Node\outputs`.
+   Use the generated Hunyuan 3D thumbnail in the local `outputs/` folder.
    Caption: A generated 3D asset becomes part of the local project instead of being trapped on a provider page.
 
 5. Utility video workflow
@@ -61,27 +61,27 @@ The strongest version of this post should feel like a guided studio tour:
 
 ## Copy-Ready Post
 
-Over the last stretch of development, I have been vibe coding a new creative tool called **Newt_Node**.
+Over the last stretch of development, I have been vibe coding a new creative tool called **NewtNode**.
 
 That phrase, vibe coding, gets thrown around a lot right now, but in this case it is exactly what the process felt like. I was not writing a formal spec from the top down. I was working from friction. I would hit something annoying in the creative workflow, describe what I wanted the tool to feel like, test it, react to it, and then keep shaping it.
 
 The app evolved through conversation, screenshots, broken runs, UI instincts, and a lot of small decisions that slowly turned into a real system.
 
-[IMAGE 01: Full Newt_Node canvas hero]
+[IMAGE 01: Full NewtNode canvas hero]
 
-Newt_Node started as a local node-based workflow for image and video generation. It has now become the center of how I am doing AI visual development. At this point, it has effectively replaced my use of Krea and Flaura for this kind of work.
+NewtNode started as a local node-based workflow for image and video generation. It has now become the center of how I am doing AI visual development. At this point, it has effectively replaced my use of Krea and Flora for this kind of work.
 
 Not because those tools are bad. They are polished, capable, and useful. But they are also someone else's workflow.
 
-Newt_Node is becoming mine.
+NewtNode is becoming mine.
 
-## Why Replace Krea And Flaura?
+## Why Replace Krea And Flora?
 
 The biggest shift is control.
 
 In hosted creative tools, I am usually working inside a beautifully designed box. That can be great when the box matches what I want to do. But when I want to build a repeatable workflow, inspect costs, reuse intermediate outputs, route prompts through different processors, connect images into video models, or keep a local project structure, I start wanting something more modular.
 
-Newt_Node gives me a graph instead of a single prompt box.
+NewtNode gives me a graph instead of a single prompt box.
 
 [IMAGE 02: A saved workflow JSON loaded as a visible canvas graph]
 
@@ -93,7 +93,7 @@ That is the part that changed the workflow for me.
 
 ## Building The Tool While Using The Tool
 
-The funny thing about Newt_Node is that it was built in the same spirit that it supports.
+The funny thing about NewtNode is that it was built in the same spirit that it supports.
 
 I would use the app, find the next missing behavior, and then add it. The canvas needed to pan with a regular mouse, not just a touchpad. The canvas needed to resize with the browser window. Save and Open needed to preserve projects. Previews needed to hold onto multiple generations. Stats needed to show real cost estimates, because guessing at spend is a terrible way to use paid generation APIs.
 
@@ -103,7 +103,7 @@ Each improvement came from a real moment of use.
 
 The app grew node by node: Text nodes for prompt processing, Image Model nodes for generation, Video Model nodes for motion, Utility nodes for cleanup and transformation, Preview nodes for comparing outputs, Groups for organizing workflows, Composer for shot blocking, and now a dedicated 3D node for asset generation.
 
-That last one is especially interesting because it starts to pull Newt_Node beyond image and video prompting and into asset creation.
+That last one is especially interesting because it starts to pull NewtNode beyond image and video prompting and into asset creation.
 
 ## The Composer Node
 
@@ -121,13 +121,13 @@ The Composer node is not trying to be final art. It is trying to be visual inten
 
 ## The 3D Node
 
-Newt_Node includes a dedicated **3D** node using Hunyuan 3D through Fal.
+NewtNode includes a dedicated **3D** node using Hunyuan 3D through Fal.
 
 [IMAGE 05: Image-to-3D workflow canvas]
 
 The node takes named image inputs such as Front, Back, Left, Right, Top, Bottom, Left Front, and Right Front. Front is required. The rest are optional. The important part is that the graph preserves the meaning of each view instead of guessing based on connection order.
 
-When the model runs, Newt_Node downloads the generated GLB locally, stores it with the current workflow package or local outputs area, previews it inside the node with a Three.js viewer, and provides a download button directly on the result.
+When the model runs, NewtNode downloads the generated GLB locally, stores it with the current workflow package or local outputs area, previews it inside the node with a Three.js viewer, and provides a download button directly on the result.
 
 [IMAGE 06: Generated 3D output thumbnail]
 
@@ -135,7 +135,7 @@ That may sound like a small thing, but it changes the feel of the workflow. The 
 
 ## Utility Nodes And Video Workflows
 
-Another area where Newt_Node has grown quickly is the Utility node.
+Another area where NewtNode has grown quickly is the Utility node.
 
 Video cleanup is rarely one model and done. A shot might need a mask, a matte, interpolation, upscaling, frame extraction, or inpainting. Having those operations live in the same canvas as the creative generation nodes makes the work easier to understand and repeat.
 
@@ -143,7 +143,7 @@ Video cleanup is rarely one model and done. A shot might need a mask, a matte, i
 
 The important part is that every pass stays visible. I can see what source video went into the node, what model was used, where the mask came from, and where the result went next.
 
-That visual continuity is one of the reasons I keep reaching for Newt_Node first.
+That visual continuity is one of the reasons I keep reaching for NewtNode first.
 
 ## Cost Tracking Became A Feature, Not An Afterthought
 
@@ -153,7 +153,7 @@ If a model run costs money, the app should try to show that cost honestly.
 
 [IMAGE 08: Generation Stats tab]
 
-So Newt_Node tracks generation history, media type, model, project, settings, and estimated spend. For some models, the estimate is straightforward. For others, it depends on resolution, duration, frames, add-ons, or whether the provider returns usage metadata.
+So NewtNode tracks generation history, media type, model, project, settings, and estimated spend. For some models, the estimate is straightforward. For others, it depends on resolution, duration, frames, add-ons, or whether the provider returns usage metadata.
 
 The rule I want in the app is simple: if we can estimate it, estimate it. If we cannot, mark it as unpriced. Do not pretend it is free.
 
@@ -161,7 +161,7 @@ That decision came directly from use. It is easy to get caught up in generation 
 
 ## Why This Feels Different
 
-The reason Newt_Node has started replacing Krea and Flaura for me is not just that it can call similar models. It is that it reflects the way I actually want to work.
+The reason NewtNode has started replacing Krea and Flora for me is not just that it can call similar models. It is that it reflects the way I actually want to work.
 
 I want to connect ideas visually, keep prompts and outputs together, use images, video, text, masks, and 3D as equal citizens, build workflows that can be saved and reopened, see which models are active, inspect and reuse generations, understand cost, and add new model types without redesigning the whole app.
 
@@ -169,7 +169,7 @@ I want to connect ideas visually, keep prompts and outputs together, use images,
 
 That is the real win.
 
-Newt_Node is not just a wrapper around generation APIs. It is becoming a personal creative operating system for AI media work.
+NewtNode is not just a wrapper around generation APIs. It is becoming a personal creative operating system for AI media work.
 
 ## Vibe Coding As A Collaboration
 
@@ -191,13 +191,13 @@ These tools are not just interesting experiments anymore. They are going to be u
 
 That is where this starts to feel empowering.
 
-Newt_Node gives me a way to control media instead of just prompting and hoping. I can build a workflow, steer the references, shape the composition, review the outputs, track the cost, and keep the whole process inside a sandbox that is tuned to how I actually think.
+NewtNode gives me a way to control media instead of just prompting and hoping. I can build a workflow, steer the references, shape the composition, review the outputs, track the cost, and keep the whole process inside a sandbox that is tuned to how I actually think.
 
 I am already cooking up partnerships for media creation, and I can see how this will blow commercial clients away with visuals that move faster from idea to execution than a traditional pipeline could allow.
 
-Yes, a lot of this is possible with third-party apps. Krea and Flaura are still out there, and they are still powerful. But there is something incredible about having a bespoke sandbox where I can roll my own.
+Yes, a lot of this is possible with third-party apps. Krea and Flora are still out there, and they are still powerful. But there is something incredible about having a bespoke sandbox where I can roll my own.
 
-That is what Newt_Node is becoming: not just another AI interface, but a production environment for making the work sharper, faster, stranger, and more mine.
+That is what NewtNode is becoming: not just another AI interface, but a production environment for making the work sharper, faster, stranger, and more mine.
 
 ## Upload Checklist
 
