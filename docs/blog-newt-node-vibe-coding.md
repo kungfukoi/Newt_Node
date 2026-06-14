@@ -15,7 +15,7 @@ Use screenshots and generated output images as the main storytelling layer. Do n
 The strongest version of this post should feel like a guided studio tour:
 
 - Full canvas screenshots to show the complete workflow language.
-- Node closeups to show how text, image, video, utility, Composer, Preview, and 3D nodes behave.
+- Node closeups to show how text, image, video, utility, Edit, Composer, Preview, and 3D nodes behave.
 - Output examples to prove the workflows are producing usable media.
 - Stats screenshots to show that cost tracking is part of the creative process.
 - Short captions under every image so readers can understand the workflow without reading raw configuration.
@@ -46,15 +46,19 @@ The strongest version of this post should feel like a guided studio tour:
    Capture Video input into Utility nodes such as SAM, VOID, BiRefNet, RIFE, or upscaling.
    Caption: Utility nodes make cleanup, matting, interpolation, upscaling, and extraction part of the same graph.
 
-6. Preview node gallery
+6. Edit node workflow
+   Capture a Video or Image node connected into an Edit node, with the Trim timeline or Crop Center pixel controls visible.
+   Caption: The Edit node keeps local ffmpeg transforms, trims, color passes, blur, and effects inside the same creative graph.
+
+7. Preview node gallery
    Capture a Preview node with multiple results and the next/previous controls visible.
    Caption: Preview nodes keep generations available so results can be compared instead of overwritten.
 
-7. Stats tab
+8. Stats tab
    Capture the Generation Stats view with model spend, project names, and media mix visible.
    Caption: Cost tracking is treated as part of the workflow, not an afterthought.
 
-8. Workflow gallery
+9. Workflow gallery
    Load several saved workflow JSONs and capture one thumbnail-style screenshot for each.
    Suggested saved workflows: `Storyboard-Builder_v01.json`, `CharaterBuilder_v01.json`, `lab_v04.json`, `image-to-3d_template.json`, `Zootopia.json`.
    Caption: Saved workflows are local project files, but in the post they should be shown as visual node systems.
@@ -99,9 +103,9 @@ I would use the app, find the next missing behavior, and then add it. The canvas
 
 Each improvement came from a real moment of use.
 
-[IMAGE 03: Node closeups showing Text, Image Model, Utility, Preview, Composer, and 3D]
+[IMAGE 03: Node closeups showing Text, Image Model, Utility, Edit, Preview, Composer, and 3D]
 
-The app grew node by node: Text nodes for prompt processing, Image Model nodes for generation, Video Model nodes for motion, Utility nodes for cleanup and transformation, Preview nodes for comparing outputs, Groups for organizing workflows, Composer for shot blocking, and now a dedicated 3D node for asset generation.
+The app grew node by node: Text nodes for prompt processing, Image Model nodes for generation, Video Model nodes for motion, Utility nodes for matting and model-driven processing, Edit nodes for local media adjustments, Preview nodes for comparing outputs, Groups for organizing workflows, Composer for shot blocking, and a dedicated 3D node for asset generation.
 
 That last one is especially interesting because it starts to pull NewtNode beyond image and video prompting and into asset creation.
 
@@ -145,13 +149,25 @@ The important part is that every pass stays visible. I can see what source video
 
 That visual continuity is one of the reasons I keep reaching for NewtNode first.
 
+## The Edit Node
+
+The newest piece of that continuity is the **Edit** node.
+
+Instead of round-tripping out to another tool for basic media work, I can keep local ffmpeg edits in the graph. Scale, crop, rotate, flip, trim, frame-rate changes, color adjustment, blur, sharpen, vignette, noise, negative, and edge-detect passes can all sit between generation steps.
+
+[IMAGE 08: Edit node with Trim timeline or Crop Center controls]
+
+The interaction matters here. Crop Center works in pixels, starts from the source dimensions, and has sliders plus an aspect-lock toggle. Trim has a small clip timeline, so the start and end fields can be dragged visually instead of guessed numerically.
+
+The result is still a normal NewtNode image or video output. It can go into Preview, another Edit node, a Utility node, an Image Model, a Video Model, or a 3D node if the media type fits.
+
 ## Cost Tracking Became A Feature, Not An Afterthought
 
 When working with paid APIs, the cost of experimentation can creep up quickly. One of the lessons from building this tool is that creative flow and financial visibility need to exist together.
 
 If a model run costs money, the app should try to show that cost honestly.
 
-[IMAGE 08: Generation Stats tab]
+[IMAGE 09: Generation Stats tab]
 
 So NewtNode tracks generation history, media type, model, project, settings, and estimated spend. For some models, the estimate is straightforward. For others, it depends on resolution, duration, frames, add-ons, or whether the provider returns usage metadata.
 
@@ -165,7 +181,7 @@ The reason NewtNode has started replacing Krea and Flora for me is not just that
 
 I want to connect ideas visually, keep prompts and outputs together, use images, video, text, masks, and 3D as equal citizens, build workflows that can be saved and reopened, see which models are active, inspect and reuse generations, understand cost, and add new model types without redesigning the whole app.
 
-[IMAGE 09: Workflow gallery made from saved JSON projects]
+[IMAGE 10: Workflow gallery made from saved JSON projects]
 
 That is the real win.
 

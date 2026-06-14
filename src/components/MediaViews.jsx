@@ -30,6 +30,19 @@ export function MediaPreview({ node }) {
     event.dataTransfer.setData("text/uri-list", dragItem.url);
   }
 
+  function startVideoPreviewDrag(event) {
+    if (!event.ctrlKey) {
+      event.preventDefault();
+      return;
+    }
+
+    startPreviewDrag(event);
+  }
+
+  function stopPreviewPointer(event) {
+    event.stopPropagation();
+  }
+
   if (node.type === "image") {
     return (
       <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag image into another node">
@@ -40,7 +53,13 @@ export function MediaPreview({ node }) {
 
   if (node.type === "video") {
     return (
-      <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag video into another node">
+      <div
+        className="media-preview"
+        draggable
+        onPointerDown={stopPreviewPointer}
+        onDragStart={startVideoPreviewDrag}
+        title="Scrub video with left-drag. Ctrl-drag to use this video in another node."
+      >
         <video src={node.data.resultUrl} controls muted loop draggable={false} onError={useNewtNodeVideoFallback} />
       </div>
     );
@@ -217,6 +236,10 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   const items = normalizedResultItems(resultItems, resultUrl, type);
   const activeIndex = Math.min(Math.max(Number(selectedIndex) || 0, 0), Math.max(items.length - 1, 0));
   const activeItem = items[activeIndex];
+  const canDragActiveItem = activeItem?.type === "image" || activeItem?.type === "video";
+  const activeDragTitle = activeItem?.type === "video"
+    ? "Scrub video with left-drag. Ctrl-drag to use this video in another node."
+    : canDragActiveItem ? "Drag result into another node" : undefined;
 
   function selectOffset(offset) {
     if (!items.length) return;
@@ -232,13 +255,39 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
     link.click();
   }
 
+  function startResultDrag(event) {
+    if (!canDragActiveItem || !activeItem?.url || (activeItem.type === "video" && !event.ctrlKey)) {
+      event.preventDefault();
+      return;
+    }
+
+    const dragItem = {
+      id: activeItem.id || `${activeItem.type || type}:${activeItem.url}`,
+      url: activeItem.url,
+      type: activeItem.type || type,
+      label: activeItem.label || label,
+      fileName: activeItem.fileName || resultDownloadFileName(activeItem),
+      mimeType: activeItem.mimeType || ""
+    };
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(defaultOutputDragMime, JSON.stringify(dragItem));
+    event.dataTransfer.setData("text/plain", dragItem.url);
+    event.dataTransfer.setData("text/uri-list", dragItem.url);
+  }
+
   return (
     <div className={`result-pane ${items.length ? "has-result" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
       {activeItem && (
-        <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
+        <div
+          className="result-carousel"
+          draggable={canDragActiveItem}
+          onDragStart={startResultDrag}
+          onPointerDown={(event) => event.stopPropagation()}
+          title={activeDragTitle}
+        >
           <div className="result-item" key={activeItem.url}>
-            {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} onError={useNewtNodeImageFallback} />}
-            {activeItem.type === "video" && <video src={activeItem.url} controls loop onError={useNewtNodeVideoFallback} />}
+            {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} draggable={false} onError={useNewtNodeImageFallback} />}
+            {activeItem.type === "video" && <video src={activeItem.url} controls loop draggable={false} onError={useNewtNodeVideoFallback} />}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
           <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">

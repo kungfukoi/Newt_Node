@@ -16,6 +16,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
@@ -317,6 +318,7 @@ function buildHealthPayload() {
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
+      editMedia: true,
       wanVaceMaskToVideo: true,
       wanVaceInpainting: true,
       composerFrame: true,
@@ -2471,6 +2473,38 @@ app.post("/api/node/utility-video", async (req, res) => {
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Utility video failed.");
+  }
+});
+
+app.post("/api/node/edit-media", async (req, res) => {
+  try {
+    const requestedEffectId = String(req.body.effectId || "").trim();
+    const effect = findEditEffect(requestedEffectId);
+    if (!requestedEffectId || effect.id !== requestedEffectId) {
+      return res.status(400).json({ error: "Unsupported Edit effect." });
+    }
+
+    const sourceMediaType = normalizeEditSourceType(effect, req.body.sourceMediaType);
+    const sourceUrls = sourceMediaType === "image" ? req.body.sourceImageUrls : req.body.sourceVideoUrls;
+    const sourceUrl = firstLocalOutput(sourceUrls);
+    if (!sourceUrl) {
+      const hasSourceUrl = (Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls]).some((url) => String(url || "").trim());
+      if (hasSourceUrl) {
+        return res.status(400).json({
+          error: `${effect.label} needs a local NewtNode ${sourceMediaType} asset. Re-run or re-upload the source so it is saved under outputs, uploads, or the workflow package before editing.`
+        });
+      }
+      return res.status(400).json({ error: `${effect.label} requires a connected ${sourceMediaType}.` });
+    }
+
+    return createEditMediaResult(req, res, {
+      effect,
+      sourceMediaType,
+      sourceUrl
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Edit media failed.");
   }
 });
 
@@ -6238,6 +6272,268 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
     if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
     throw error;
   }
+}
+
+async function createEditMediaResult(req, res, { effect, sourceMediaType, sourceUrl }) {
+  let outputPath = "";
+  try {
+    const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+    const sourceMetadata = sourceMediaType === "video" ? await probeVideoFile(source.filePath) : await probeLocalImageFile(source.filePath, source.fileName);
+    const settings = normalizedEditSettings(effect, req.body.settings, sourceMetadata);
+    const filter = editEffectFilter(effect, settings, { sourceMediaType, sourceMetadata });
+    const outputFormat = normalizeVideoOutputFormat(req.body.outputFormat);
+    const extension = sourceMediaType === "video" ? videoOutputExtension(outputFormat) : ".png";
+    const output = await createManagedAssetTarget(req, `edit-${effect.id}`, extension, workflowPackageOutputDirName);
+    outputPath = output.filePath;
+
+    await applyEditEffectWithFfmpeg({
+      sourcePath: source.filePath,
+      outputPath,
+      sourceMediaType,
+      effect,
+      filter,
+      outputFormat
+    });
+
+    const outputStats = await stat(outputPath);
+    const outputMetadata = sourceMediaType === "video" ? await probeVideoFile(outputPath) : await probeLocalImageFile(outputPath, output.fileName);
+    const localUrl = output.publicPath;
+    const text = `${effect.label} edit.`;
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 1,
+      unit: "local edit",
+      mediaType: sourceMediaType,
+      pricingBasis: "Local ffmpeg edit",
+      pricingSource: "local-ffmpeg"
+    };
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: sourceMediaType,
+      provider: "local",
+      modelName: `Edit: ${effect.label}`,
+      endpoint: "local/edit-media",
+      mode: "FFmpeg edit",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        effectId: effect.id,
+        effect: effect.label,
+        groupId: effect.groupId,
+        sourceMediaType,
+        sourceUrl,
+        effectSettings: settings,
+        outputFormat: sourceMediaType === "video" ? outputFormat : "png",
+        width: outputMetadata.width || null,
+        height: outputMetadata.height || null,
+        fps: outputMetadata.fps || null,
+        duration: outputMetadata.duration || null,
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localImage: sourceMediaType === "image" ? localUrl : undefined,
+      localVideo: sourceMediaType === "video" ? localUrl : undefined,
+      outputFileName: output.fileName,
+      outputBytes: outputStats.size,
+      text
+    });
+
+    const media = {
+      label: effect.label,
+      localUrl,
+      fileName: output.fileName,
+      mimeType: sourceMediaType === "video" ? videoOutputMimeType(outputFormat) : "image/png",
+      bytes: outputStats.size,
+      metadata: outputMetadata
+    };
+
+    return res.json({
+      endpoint: "local/edit-media",
+      modelName: `Edit: ${effect.label}`,
+      text,
+      cost,
+      effect: {
+        id: effect.id,
+        label: effect.label,
+        groupId: effect.groupId,
+        definition: effect.definition
+      },
+      image: sourceMediaType === "image" ? media : undefined,
+      video: sourceMediaType === "video" ? enrichVideoMetadata(media, outputMetadata) : undefined
+    });
+  } catch (error) {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function normalizedEditSettings(effect, rawSettings = {}, sourceMetadata = {}) {
+  const defaults = defaultEditEffectSettings(effect, sourceMetadata);
+  const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  return Object.fromEntries((effect.controls || []).map((control) => [control.id, normalizedEditControlValue(control, source[control.id] ?? defaults[control.id])]));
+}
+
+function normalizedEditControlValue(control, value) {
+  if (control.type === "checkbox") return Boolean(value);
+  if (control.type === "select") return (control.options || []).includes(value) ? value : control.defaultValue;
+  const number = Number(value);
+  const fallback = Number(control.defaultValue || 0);
+  const safeNumber = Number.isFinite(number) ? number : fallback;
+  const min = Number(control.min);
+  const max = Number(control.max);
+  const clamped = Math.min(Number.isFinite(max) ? max : safeNumber, Math.max(Number.isFinite(min) ? min : safeNumber, safeNumber));
+  return control.type === "number" && Number(control.step) >= 1 ? Math.round(clamped) : clamped;
+}
+
+function editSetting(settings, key, fallback = 0) {
+  const value = Number(settings[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function editCropDimension(value, sourceValue, fallback, sourceMediaType) {
+  const requested = Math.max(1, Math.round(Number(value || fallback) || fallback));
+  const sourceDimension = Math.round(Number(sourceValue || 0));
+  let dimension = sourceDimension > 0 ? Math.min(requested, sourceDimension) : requested;
+  if (sourceMediaType === "video" && dimension > 2 && dimension % 2 !== 0) {
+    dimension -= 1;
+  }
+  return Math.max(sourceMediaType === "video" ? 2 : 1, dimension);
+}
+
+function editBool(value) {
+  return value ? "1" : "0";
+}
+
+function editEffectFilter(effect, settings = {}, context = {}) {
+  const sourceMetadata = context.sourceMetadata || {};
+  const sourceMediaType = context.sourceMediaType || "video";
+  switch (effect.id) {
+    case "scale":
+      return `scale=${ensureEven(settings.width)}:${ensureEven(settings.height)}:flags=${settings.algorithm},setsar=1`;
+    case "crop": {
+      const width = editCropDimension(settings.width, sourceMetadata.width, 1280, sourceMediaType);
+      const height = editCropDimension(settings.height, sourceMetadata.height, 720, sourceMediaType);
+      return `crop=${width}:${height}:(iw-ow)/2:(ih-oh)/2`;
+    }
+    case "rotate":
+      return `rotate=${(editSetting(settings, "degrees", 0) * Math.PI / 180).toFixed(6)}:fillcolor=black`;
+    case "flip":
+      return settings.direction === "both" ? "hflip,vflip" : settings.direction === "vertical" ? "vflip" : "hflip";
+    case "trim": {
+      const start = Math.max(0, editSetting(settings, "start", 0));
+      const end = Math.max(0, editSetting(settings, "end", 0));
+      return end > start ? `trim=start=${formatFfmpegSeconds(start)}:end=${formatFfmpegSeconds(end)},setpts=PTS-STARTPTS` : `trim=start=${formatFfmpegSeconds(start)},setpts=PTS-STARTPTS`;
+    }
+    case "fps":
+      return `fps=${Math.max(1, Math.round(editSetting(settings, "fps", 24)))}`;
+    case "reverse":
+      return "reverse";
+    case "eq":
+      return `eq=brightness=${editSetting(settings, "brightness", 0)}:contrast=${editSetting(settings, "contrast", 1)}:saturation=${editSetting(settings, "saturation", 1)}:gamma=${editSetting(settings, "gamma", 1)}`;
+    case "hue":
+      return `hue=h=${editSetting(settings, "hue", 0)}:s=${editSetting(settings, "saturation", 1)}`;
+    case "grayscale":
+      return "hue=s=0";
+    case "hqdn3d":
+      return `hqdn3d=luma_spatial=${settings.lumaSpatial}:chroma_spatial=${settings.chromaSpatial}:luma_tmp=${settings.lumaTemporal}:chroma_tmp=${settings.chromaTemporal}`;
+    case "nlmeans":
+      return `nlmeans=s=${settings.strength}:p=${settings.patch}:r=${settings.research}`;
+    case "bm3d":
+      return `bm3d=sigma=${settings.sigma}:block=${settings.block}:group=${settings.group}:range=${settings.range}`;
+    case "atadenoise":
+      return `atadenoise=s=${settings.frames}:0a=${settings.thresholdA}:0b=${settings.thresholdB}:1a=${settings.thresholdA}:1b=${settings.thresholdB}:2a=${settings.thresholdA}:2b=${settings.thresholdB}`;
+    case "fftdnoiz":
+      return `fftdnoiz=sigma=${settings.sigma}:amount=${settings.amount}:method=${settings.method}`;
+    case "vaguedenoiser":
+      return `vaguedenoiser=threshold=${settings.threshold}:method=${settings.method}:percent=${settings.percent}`;
+    case "removegrain":
+      return `removegrain=m0=${settings.mode}:m1=${settings.mode}:m2=${settings.mode}`;
+    case "median":
+      return `median=radius=${settings.radius}:percentile=${settings.percentile}`;
+    case "deflicker":
+      return `deflicker=size=${settings.frames}:mode=${settings.mode}`;
+    case "deband":
+      return `deband=1thr=${settings.threshold}:2thr=${settings.threshold}:3thr=${settings.threshold}:4thr=${settings.threshold}:range=${settings.range}:blur=${editBool(settings.blur)}`;
+    case "deblock":
+      return `deblock=filter=${settings.filter}:block=${settings.block}:alpha=${settings.alpha}:beta=${settings.beta}`;
+    case "dctdnoiz":
+      return `dctdnoiz=sigma=${settings.sigma}`;
+    case "owdenoise":
+      return `owdenoise=depth=${settings.depth}:luma_strength=${settings.luma}:chroma_strength=${settings.chroma}`;
+    case "gblur":
+      return `gblur=sigma=${settings.sigma}`;
+    case "boxblur":
+      return `boxblur=${settings.radius}:${settings.power}`;
+    case "unsharp":
+      return `unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=${settings.amount}`;
+    case "vignette":
+      return `vignette=angle=${settings.angle}`;
+    case "noise":
+      return `noise=alls=${settings.strength}:allf=t`;
+    case "negate":
+      return "negate";
+    case "edgedetect":
+      return `edgedetect=mode=${settings.mode}:low=${settings.low}:high=${settings.high}`;
+    default: {
+      const error = new Error(`Unsupported Edit effect: ${effect.id}`);
+      error.status = 400;
+      throw error;
+    }
+  }
+}
+
+function editEffectKeepsAudio(effect) {
+  return !["trim", "reverse"].includes(effect.id);
+}
+
+async function applyEditEffectWithFfmpeg({ sourcePath, outputPath, sourceMediaType, effect, filter, outputFormat }) {
+  if (sourceMediaType === "image") {
+    const args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      sourcePath,
+      "-vf",
+      filter,
+      "-frames:v",
+      "1",
+      outputPath
+    ];
+    await runFfmpeg(args, `Edit ${effect.label}`, 600000);
+    return;
+  }
+
+  const videoFilter = `${filter},format=yuv420p`;
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    videoFilter
+  ];
+  const keepAudio = editEffectKeepsAudio(effect);
+  if (keepAudio) {
+    args.push("-map", "0:a?");
+  } else {
+    args.push("-an");
+  }
+  addVideoEncoderArgs(args, outputFormat);
+  if (keepAudio) args.push("-c:a", "aac");
+  args.push(outputPath);
+  await runFfmpeg(args, `Edit ${effect.label}`, 600000);
 }
 
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {

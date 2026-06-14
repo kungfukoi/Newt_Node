@@ -8,14 +8,15 @@
   <strong>A local-first node canvas for AI media workflows.</strong>
 </p>
 
-NewtNode is a desktop-friendly browser app for building repeatable creative pipelines with connected nodes. It can generate, preview, save, import, and remix images, video, audio, 3D assets, text, character references, style references, camera instructions, and Composer guide frames while keeping API keys and workflow files on your machine.
+NewtNode is a desktop-friendly browser app for building repeatable creative pipelines with connected nodes. It can generate, edit, preview, save, import, and remix images, video, audio, 3D assets, text, character references, style references, camera instructions, and Composer guide frames while keeping API keys and workflow files on your machine.
 
 Current release: `v3.0.0-beta.0`
 
 ## What It Does
 
 - Build media workflows visually with typed node ports and dependency-aware `Run All`.
-- Generate image, video, text, utility, and 3D outputs through local API routes.
+- Generate image, video, text, utility, edit, and 3D outputs through local API routes.
+- Edit local image and video outputs with ffmpeg-backed Transform, Time, Color, Blur, and Effects controls.
 - Use the Composer node to block camera, pose, image planes, props, maquettes, and guide frames before generation.
 - Keep multiple node results, preview them in-node, send them to Preview nodes, or browse recent project outputs in the right rail.
 - Drag outputs or external files onto the canvas to create matching Image, Video, Audio, 3D, or Text nodes.
@@ -28,7 +29,9 @@ Current release: `v3.0.0-beta.0`
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
 - **Provider routing**: Fal is the default provider path. When `GOOGLE_API_KEY` exists, supported Google image models use Google directly; otherwise they route through Fal.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
-- **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview, and can be dragged back into the graph.
+- **Edit node**: Local ffmpeg edits support scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
+- **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
+- **Video handling**: Video thumbnails and result panes keep native scrub controls; use Ctrl-drag when dragging video results into another node.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Settings**: Local API keys, repository updates, restart, branch status, loaded version, and enabled model dropdown preferences are managed from the Settings page.

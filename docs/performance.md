@@ -40,7 +40,7 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for `v3.0.0-beta.0` on `main` after `npm.cmd run build` and `npm.cmd run bundle:report`.
+Measured for `v3.0.0-beta.0` on `main` after adding the Edit node, using `npm.cmd run build` and `npm.cmd run bundle:report`.
 
 | Area | Current behavior |
 | --- | --- |
@@ -48,6 +48,7 @@ Measured for `v3.0.0-beta.0` on `main` after `npm.cmd run build` and `npm.cmd ru
 | Node editor | `src/NodeEditor.jsx` is loaded through `React.lazy` after the user enters the node workspace. |
 | Stats dashboard | `src/StatsDashboard.jsx` is loaded through `React.lazy`. |
 | Settings page | `src/SettingsPage.jsx` is loaded through `React.lazy`. |
+| Edit node controls | Edit effect UI is part of the lazy node editor chunk; local effect definitions live in `src/editEffects.js` and do not add to the initial shell. |
 | Color ID matte controls | `src/components/ColorIdMatteControls.jsx` is loaded only when the relevant utility controls render. |
 | 3D result viewer | `src/components/Model3DViewer.jsx` is loaded only when a 3D preview/result renders. |
 | Three.js runtime | `vendor-three` is generated as an async chunk from `src/threeRuntime.js`; it is not referenced by `dist/index.html`. |
@@ -57,13 +58,13 @@ Recent production build summary:
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
 | `index.html` | document | 0.73 kB | 0.37 kB |
-| `assets/index-*.js` | entry script | 38.41 kB | 13.17 kB |
+| `assets/index-*.js` | entry script | 38.70 kB | 13.25 kB |
 | `assets/index-*.css` | entry style | 18.54 kB | 4.34 kB |
 | `assets/vendor-*.js` | modulepreload | 3.53 kB | 1.54 kB |
 | `assets/vendor-react-*.js` | modulepreload | 184.32 kB | 57.63 kB |
-| `assets/vendor-icons-*.js` | modulepreload | 13.32 kB | 4.52 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 332.71 kB | 89.86 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 73.61 kB | 13.08 kB |
+| `assets/vendor-icons-*.js` | modulepreload | 14.08 kB | 4.74 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 385.03 kB | 104.07 kB |
+| `assets/NodeEditor-*.css` | lazy editor style | 83.92 kB | 14.76 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer chunk | 3.53 kB | 1.64 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy utility chunk | 12.92 kB | 3.27 kB |
 | `assets/SettingsPage-*.js` | lazy settings chunk | 9.08 kB | 2.89 kB |
@@ -72,9 +73,9 @@ Recent production build summary:
 
 Current totals:
 
-- Initial shell: 258.84 kB, 81.57 kB gzip.
-- Lazy/generated: 1212.74 kB, 315.94 kB gzip.
-- All assets: 1471.58 kB, 397.51 kB gzip.
+- Initial shell: 259.89 kB, 81.87 kB gzip.
+- Lazy/generated: 1275.38 kB, 331.84 kB gzip.
+- All assets: 1535.27 kB, 413.72 kB gzip.
 
 ## Guardrails
 

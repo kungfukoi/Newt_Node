@@ -5,6 +5,7 @@ const requiredHealthRoutes = [
   "apiJsonErrors",
   "composerFrame",
   "composerPoses",
+  "editMedia",
   "extractVideoFrame",
   "generate3d",
   "utilityImage",

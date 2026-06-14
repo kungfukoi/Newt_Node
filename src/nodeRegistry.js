@@ -11,6 +11,7 @@ export const nodeTypeDefinitions = [
   { type: "style", label: "Style" },
   { type: "transfer", label: "Mood Board" },
   { type: "utility", label: "Utility" },
+  { type: "edit", label: "Edit" },
   { type: "audio", label: "Audio" },
   { type: "model3d", label: "3D" },
   { type: "imageModel", label: "Image Model" },

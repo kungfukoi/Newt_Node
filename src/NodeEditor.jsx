@@ -28,6 +28,7 @@ import {
   Plus,
   GripVertical,
   Save,
+  SlidersHorizontal,
   Trash2,
   Type,
   Unlock,
@@ -88,6 +89,16 @@ import {
   normalizeColorIdMatteItems,
   rgbToHex
 } from "./colorIdMatte.js";
+import {
+  defaultEditEffectSettings,
+  editEffectGroups,
+  editEffectsForGroup,
+  findEditEffect,
+  firstEditEffectForGroup,
+  normalizeEditEffectForGroup,
+  normalizeEditGroupId,
+  normalizeEditSourceType
+} from "./editEffects.js";
 import {
   allowFileDrop,
   assetFromOutputItem,
@@ -233,6 +244,7 @@ const nodeIcons = {
   style: Palette,
   transfer: Compass,
   utility: Wrench,
+  edit: SlidersHorizontal,
   audio: FileAudio,
   model3d: Box,
   autoAspect: Maximize2,
@@ -264,6 +276,11 @@ const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const autoAspectDefaultRatios = [];
 const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
+const editVideoOutputOptions = [
+  ["mp4", "MP4"],
+  ["webm", "WebM"],
+  ["mov", "ProRes MOV"]
+];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -1399,6 +1416,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function updateNode(nodeId, patch) {
     let nextUtilityData = null;
+    let nextEditData = null;
     let nextCameraData = null;
     let nextStyleData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
@@ -1413,6 +1431,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ...patch
               };
               if (node.type === "utility") nextUtilityData = data;
+              if (node.type === "edit") nextEditData = data;
               if (node.type === "camera") nextCameraData = data;
               if (node.type === "style") nextStyleData = data;
               return {
@@ -1432,6 +1451,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       setEdges((current) =>
         current.filter((edge) => {
           const staleOutput = "utilityMode" in patch && edge.from.nodeId === nodeId;
+          const inactiveInput = edge.to.nodeId === nodeId && !activePorts.has(edge.to.port);
+          return !staleOutput && !inactiveInput;
+        })
+      );
+    }
+
+    if (nextEditData && ("editGroup" in patch || "editEffect" in patch || "editSourceType" in patch)) {
+      const activePorts = new Set(editInputPortIds(nextEditData));
+      setEdges((current) =>
+        current.filter((edge) => {
+          const staleOutput = edge.from.nodeId === nodeId;
           const inactiveInput = edge.to.nodeId === nodeId && !activePorts.has(edge.to.port);
           return !staleOutput && !inactiveInput;
         })
@@ -3080,6 +3110,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       image: {
         preview: ["sourceIn"],
         autoAspect: ["imageIn"],
+        edit: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
@@ -3091,6 +3122,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       video: {
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
+        edit: ["videoIn"],
         utility: ["referenceVideoIn", "maskVideoIn"],
         text: ["videoIn"]
       },
@@ -3110,6 +3142,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         storyboard: ["transferIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
+        edit: ["imageIn"],
         utility: ["imageIn", "referenceImageIn"],
         preview: ["sourceIn"]
       },
@@ -3134,6 +3167,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source);
+    if (source.type === "edit") return editOutputType(source);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
@@ -3168,6 +3202,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
       return "Storyboard frames connect to image inputs or previews";
     }
 
@@ -3182,6 +3217,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
       return "Auto Aspect outputs connect to image inputs or previews";
     }
 
@@ -3211,6 +3247,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         (target.type === "composer" && to.port === "imageIn") ||
         (target.type === "model3d" && isModel3DImageInputPort(to.port)) ||
         (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) ||
+        (target.type === "edit" && to.port === "imageIn") ||
         (target.type === "preview" && to.port === "sourceIn")
       )
         return "";
@@ -3246,6 +3283,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "videoIn") return "";
         return "Utility video output connects to video inputs";
       }
 
@@ -3257,7 +3295,30 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "text" && to.port === "imageIn") return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
       return "Utility image output connects to image inputs";
+    }
+
+    if (source.type === "edit") {
+      if (editOutputType(source) === "video") {
+        if (target.type === "preview" && to.port === "sourceIn") return "";
+        if (target.type === "text" && to.port === "videoIn") return "";
+        if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
+        if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "videoIn") return "";
+        return "Edit video output connects to video inputs";
+      }
+
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
+      return "Edit image output connects to image inputs";
     }
 
     if (target?.type === "utility") {
@@ -3274,6 +3335,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (["referenceVideoIn", "maskVideoIn"].includes(to.port)) {
         if (["video", "videoModel"].includes(source.type)) return "";
         return "Video input accepts video outputs";
+      }
+    }
+
+    if (target?.type === "edit") {
+      if (to.port === "imageIn") {
+        if (source.type === "composer") return from.port === "imageOut" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "edit") return editOutputType(source) === "image" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
+        if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+        if (["image", "imageModel", "transfer"].includes(source.type)) return "";
+        return "Edit image input accepts image outputs";
+      }
+
+      if (to.port === "videoIn") {
+        if (source.type === "utility") return utilityOutputType(source) === "video" ? "" : "Edit video input accepts video outputs";
+        if (source.type === "edit") return editOutputType(source) === "video" ? "" : "Edit video input accepts video outputs";
+        if (["video", "videoModel"].includes(source.type)) return "";
+        return "Edit video input accepts video outputs";
       }
     }
 
@@ -3294,6 +3374,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (to.port === "imageIn") {
         if (source.type === "composer") return from.port === "imageOut" ? "" : "Auto Aspect accepts image outputs";
         if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "edit") return editOutputType(source) === "image" ? "" : "Auto Aspect accepts image outputs";
         if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
         if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
         if (["image", "imageModel"].includes(source.type)) return "";
@@ -3311,6 +3392,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "text" && to.port === "imageIn") return "";
         if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "imageIn") return "";
         return "Composer frame output connects to image inputs";
       }
     }
@@ -3318,6 +3400,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target?.type === "model3d" && isModel3DImageInputPort(to.port)) {
       if (source.type === "composer") return from.port === "imageOut" ? "" : "3D image input accepts Composer frame output";
       if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
+      if (source.type === "edit") return editOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
       if (["image", "imageModel", "transfer"].includes(source.type)) return "";
       return "3D image input accepts image outputs";
     }
@@ -3342,12 +3425,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (source.type === "style") return "";
         return "Style input accepts style outputs";
       }
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "character"].includes(source?.type)) return "";
+      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "transfer", "character"].includes(source?.type)) return "";
       return "Preview accepts image and video sources";
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "model3d"].includes(source?.type)) return "";
+      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "transfer", "composer", "model3d"].includes(source?.type)) return "";
       return "Preview accepts image, video, and 3D sources";
     }
 
@@ -3537,6 +3620,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
+    const previousEditResults = existingResultItemsForNode(currentNode, currentNode.type === "edit" ? editOutputType(currentNode) : "video");
     const requestContext = workflowRequestContext();
 
     try {
@@ -3651,6 +3735,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           resultType: utilityResultType,
           error: batchRunError(utilityResultType, batchCount, successes, failures)
+        });
+        loadOutputHistory();
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "edit") {
+        const generated = await runEditNodeGeneration({
+          node: currentNode,
+          incoming,
+          workflowContext: requestContext
+        });
+        const editResultType = generated.type;
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousEditResults, [generated], editResultType);
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: generated.url,
+          resultItems,
+          selectedResultIndex: firstNewIndex,
+          resultText: generated.text || "",
+          resultType: editResultType,
+          error: ""
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -4434,6 +4539,155 @@ function CharacterVoicePlayer({ voice }) {
         {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
       </button>
       <span>{formatTimelineTime(currentTime)} / {formatTimelineTime(duration)}</span>
+    </div>
+  );
+}
+
+function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
+  const reportedKeyRef = React.useRef("");
+
+  React.useEffect(() => {
+    reportedKeyRef.current = "";
+  }, [sourceUrl, sourceType]);
+
+  function reportDimensions(width, height, duration = 0) {
+    const next = editDimensionsFromValue({ width, height, duration });
+    if (!next || !sourceUrl) return;
+    const key = `${sourceType}:${sourceUrl}:${next.width || 0}x${next.height || 0}:${next.duration || 0}`;
+    if (reportedKeyRef.current === key) return;
+    reportedKeyRef.current = key;
+    onDimensions?.(next);
+  }
+
+  if (!sourceUrl) return null;
+
+  if (sourceType === "video") {
+    return (
+      <video
+        className="edit-source-dimension-probe"
+        src={sourceUrl}
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          reportDimensions(video.videoWidth, video.videoHeight, video.duration);
+        }}
+      />
+    );
+  }
+
+  return (
+    <img
+      className="edit-source-dimension-probe"
+      src={sourceUrl}
+      alt=""
+      draggable={false}
+      onLoad={(event) => reportDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+    />
+  );
+}
+
+function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
+  const trackRef = React.useRef(null);
+  const dragRef = React.useRef(null);
+  const safeDuration = Math.max(0.001, finiteNumber(duration, 0));
+  const minGap = Math.min(0.033, Math.max(0.001, safeDuration / 1000));
+  const safeStart = clamp(finiteNumber(start, 0), 0, Math.max(0, safeDuration - minGap));
+  const safeEnd = clamp(finiteNumber(end, safeDuration), safeStart + minGap, safeDuration);
+  const startPercent = (safeStart / safeDuration) * 100;
+  const endPercent = (safeEnd / safeDuration) * 100;
+  const selectionWidth = Math.max(0, endPercent - startPercent);
+
+  function timeFromPointer(event) {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect?.width) return 0;
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    return ratio * safeDuration;
+  }
+
+  function commitDrag(event, handle) {
+    const pointerTime = timeFromPointer(event);
+    if (handle === "start") {
+      onChange?.({ start: clamp(pointerTime, 0, safeEnd - minGap), end: safeEnd }, "start");
+      return;
+    }
+    onChange?.({ start: safeStart, end: clamp(pointerTime, safeStart + minGap, safeDuration) }, "end");
+  }
+
+  function startHandleDrag(event, handle) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = handle;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    commitDrag(event, handle);
+  }
+
+  function moveHandleDrag(event) {
+    const handle = dragRef.current;
+    if (!handle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    commitDrag(event, handle);
+  }
+
+  function endHandleDrag(event) {
+    if (!dragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  function startTrackDrag(event) {
+    if (event.button !== 0) return;
+    const pointerTime = timeFromPointer(event);
+    const handle = Math.abs(pointerTime - safeStart) <= Math.abs(pointerTime - safeEnd) ? "start" : "end";
+    startHandleDrag(event, handle);
+  }
+
+  return (
+    <div className="edit-trim-timeline" onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        ref={trackRef}
+        className="edit-trim-track"
+        onPointerDown={startTrackDrag}
+        onPointerMove={moveHandleDrag}
+        onPointerUp={endHandleDrag}
+        onPointerCancel={endHandleDrag}
+      >
+        {sourceUrl ? <video src={sourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
+        <div className="edit-trim-shade left" style={{ width: `${startPercent}%` }} />
+        <div className="edit-trim-shade right" style={{ left: `${endPercent}%` }} />
+        <div className="edit-trim-selection" style={{ left: `${startPercent}%`, width: `${selectionWidth}%` }} />
+        <button
+          type="button"
+          className="edit-trim-handle start"
+          style={{ left: `${startPercent}%` }}
+          onPointerDown={(event) => startHandleDrag(event, "start")}
+          onPointerMove={moveHandleDrag}
+          onPointerUp={endHandleDrag}
+          onPointerCancel={endHandleDrag}
+          aria-label="Trim start"
+          title="Drag trim start"
+        />
+        <button
+          type="button"
+          className="edit-trim-handle end"
+          style={{ left: `${endPercent}%` }}
+          onPointerDown={(event) => startHandleDrag(event, "end")}
+          onPointerMove={moveHandleDrag}
+          onPointerUp={endHandleDrag}
+          onPointerCancel={endHandleDrag}
+          aria-label="Trim end"
+          title="Drag trim end"
+        />
+      </div>
+      <div className="edit-trim-time-readout">
+        <span>{formatTimelineTime(safeStart)}</span>
+        <span>{formatTimelineTime(safeEnd)}</span>
+      </div>
     </div>
   );
 }
@@ -6561,6 +6815,497 @@ function NodeBody({
     );
   }
 
+  if (node.type === "edit") {
+    const { groupId, effect, sourceType } = editSelectionFromData(node.data);
+    const settingsOpen = Boolean(node.data.settingsOpen);
+    const groupEffects = editEffectsForGroup(groupId);
+    const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
+    const sourcePort = config.input.find((port) => port.id === inputPortId);
+    const outputPort = outputPortDefinitionsForNode(node)[0];
+    const sourceItems = incoming[inputPortId] || [];
+    const sourceUrl = connectedAssetUrls(sourceItems).at(-1) || "";
+    const sourceDimensions = editSourceDimensionsForItems(sourceItems, sourceType, sourceUrl, node.data.editSourceDimensions);
+    const settings = editSettingsForEffect(node.data, effect, sourceDimensions);
+    const sourceConnected = Boolean(sourceItems.length);
+    const resultType = node.data.resultType || sourceType;
+    const outputFormat = normalizeChoice(node.data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4");
+    const cropAspectLocked = node.data.editCropAspectLocked !== false;
+
+    function updateEditSelection(nextEffect, nextSourceType = sourceType) {
+      const normalizedSourceType = normalizeEditSourceType(nextEffect, nextSourceType);
+      const nextDimensions = normalizedSourceType === sourceType ? sourceDimensions : null;
+      onUpdate(node.id, {
+        editEffect: nextEffect.id,
+        editGroup: nextEffect.groupId,
+        editSourceType: normalizedSourceType,
+        editSettings: defaultEditEffectSettings(nextEffect, nextDimensions || {}),
+        ...resetEditOutputPatch(normalizedSourceType)
+      });
+    }
+
+    function setEditGroup(nextGroupId) {
+      const nextEffect = firstEditEffectForGroup(nextGroupId);
+      updateEditSelection(nextEffect, node.data.editSourceType);
+    }
+
+    function setEditEffect(nextEffectId) {
+      updateEditSelection(findEditEffect(nextEffectId), sourceType);
+    }
+
+    function setEditSourceType(nextSourceType) {
+      const normalizedSourceType = normalizeEditSourceType(effect, nextSourceType);
+      onUpdate(node.id, {
+        editSourceType: normalizedSourceType,
+        editSettings: defaultEditEffectSettings(effect),
+        ...resetEditOutputPatch(normalizedSourceType)
+      });
+    }
+
+    function updateEditSourceDimensions(nextDimensions) {
+      const nextMetadata = editDimensionsFromValue(nextDimensions);
+      if (!nextMetadata || !sourceUrl) return;
+      const normalizedDimensions = {
+        url: sourceUrl,
+        type: sourceType,
+        ...nextMetadata
+      };
+      const previousDimensions = editStoredSourceDimensions(node.data.editSourceDimensions, sourceUrl, sourceType);
+      const previousStoredDimensions = editDimensionsFromValue(node.data.editSourceDimensions);
+      const sameDimensions =
+        previousDimensions?.width === normalizedDimensions.width &&
+        previousDimensions?.height === normalizedDimensions.height &&
+        previousDimensions?.duration === normalizedDimensions.duration;
+      const patch = {
+        editSourceDimensions: normalizedDimensions,
+        error: ""
+      };
+
+      if (effect.id === "crop" && normalizedDimensions.width && normalizedDimensions.height && shouldSeedEditCropSettings(node.data.editSettings, settings, previousStoredDimensions)) {
+        patch.editSettings = {
+          ...settings,
+          width: normalizedDimensions.width,
+          height: normalizedDimensions.height
+        };
+      }
+
+      if (effect.id === "trim" && normalizedDimensions.duration && shouldSeedEditTrimSettings(node.data.editSettings, settings, previousStoredDimensions)) {
+        patch.editSettings = {
+          ...settings,
+          start: 0,
+          end: normalizedDimensions.duration
+        };
+      }
+
+      if (sameDimensions && !patch.editSettings) return;
+      onUpdate(node.id, patch);
+    }
+
+    function updateEditSetting(control, value) {
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          [control.id]: control.type === "checkbox" ? Boolean(value) : value
+        },
+        error: ""
+      });
+    }
+
+    function setCropAspectLocked(nextLocked) {
+      onUpdate(node.id, {
+        editCropAspectLocked: nextLocked,
+        error: ""
+      });
+    }
+
+    function editCropControl(controlId) {
+      return effect.controls.find((control) => control.id === controlId) || {
+        id: controlId,
+        label: controlId === "width" ? "Width" : "Height",
+        min: sourceType === "video" ? 2 : 1,
+        max: 32768,
+        step: 1,
+        defaultValue: controlId === "width" ? 1280 : 720,
+        unit: "px"
+      };
+    }
+
+    function editCropDimensionLimits(control) {
+      const sourceValue = Math.round(Number(sourceDimensions?.[control.id] || 0));
+      const min = sourceType === "video" ? Math.max(2, Math.round(Number(control.min || 2))) : Math.max(1, Math.round(Number(control.min || 1)));
+      const rawMax = Math.max(min, Math.round(Number(sourceValue || control.max || 32768)));
+      const max = sourceType === "video" && rawMax > min && rawMax % 2 !== 0 ? rawMax - 1 : rawMax;
+      return {
+        min,
+        max,
+        step: sourceType === "video" ? 2 : Math.max(1, Number(control.step || 1))
+      };
+    }
+
+    function sanitizeEditCropDimension(value, limits) {
+      const numeric = Math.round(Number(value));
+      const fallback = limits.max;
+      const clamped = clamp(Number.isFinite(numeric) ? numeric : fallback, limits.min, limits.max);
+      if (limits.step === 2) {
+        const even = Math.round(clamped / 2) * 2;
+        return clamp(even, limits.min, limits.max);
+      }
+      return Math.round(clamped);
+    }
+
+    function editCropDimensionValue(control) {
+      const limits = editCropDimensionLimits(control);
+      return sanitizeEditCropDimension(settings[control.id] ?? sourceDimensions?.[control.id] ?? control.defaultValue, limits);
+    }
+
+    function lockedCropDimensions(changedControlId, rawValue) {
+      const widthControl = editCropControl("width");
+      const heightControl = editCropControl("height");
+      const widthLimits = editCropDimensionLimits(widthControl);
+      const heightLimits = editCropDimensionLimits(heightControl);
+      const currentWidth = editCropDimensionValue(widthControl);
+      const currentHeight = editCropDimensionValue(heightControl);
+      const ratio = currentWidth > 0 && currentHeight > 0 ? currentWidth / currentHeight : (sourceDimensions?.width || 16) / Math.max(1, sourceDimensions?.height || 9);
+
+      if (!cropAspectLocked) {
+        return {
+          width: changedControlId === "width" ? sanitizeEditCropDimension(rawValue, widthLimits) : currentWidth,
+          height: changedControlId === "height" ? sanitizeEditCropDimension(rawValue, heightLimits) : currentHeight
+        };
+      }
+
+      if (changedControlId === "width") {
+        let width = sanitizeEditCropDimension(rawValue, widthLimits);
+        let height = sanitizeEditCropDimension(width / ratio, heightLimits);
+        if (height >= heightLimits.max && width / ratio > heightLimits.max) {
+          height = heightLimits.max;
+          width = sanitizeEditCropDimension(height * ratio, widthLimits);
+        }
+        return { width, height };
+      }
+
+      let height = sanitizeEditCropDimension(rawValue, heightLimits);
+      let width = sanitizeEditCropDimension(height * ratio, widthLimits);
+      if (width >= widthLimits.max && height * ratio > widthLimits.max) {
+        width = widthLimits.max;
+        height = sanitizeEditCropDimension(width / ratio, heightLimits);
+      }
+      return { width, height };
+    }
+
+    function updateEditCropDimension(controlId, value) {
+      const nextDimensions = lockedCropDimensions(controlId, value);
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...nextDimensions
+        },
+        error: ""
+      });
+    }
+
+    function renderEditCropDimensionControl(control) {
+      const limits = editCropDimensionLimits(control);
+      const value = editCropDimensionValue(control);
+      return (
+        <NodeRow key={control.id} label={control.label}>
+          <div className="edit-crop-dimension-control">
+            <input
+              type="range"
+              min={limits.min}
+              max={limits.max}
+              step={limits.step}
+              value={value}
+              onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
+            />
+            <input
+              type="number"
+              min={limits.min}
+              max={limits.max}
+              step={limits.step}
+              value={value}
+              onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
+            />
+            <span>px</span>
+          </div>
+        </NodeRow>
+      );
+    }
+
+    function renderEditCropControls() {
+      const widthControl = editCropControl("width");
+      const heightControl = editCropControl("height");
+      const sourceSizeLabel = sourceDimensions?.width && sourceDimensions?.height ? `${sourceDimensions.width} x ${sourceDimensions.height}` : "";
+      return (
+        <>
+          <NodeRow label="Aspect">
+            <div className="edit-crop-toolbar">
+              <button
+                type="button"
+                className={`edit-aspect-lock ${cropAspectLocked ? "active" : ""}`}
+                onClick={() => setCropAspectLocked(!cropAspectLocked)}
+                aria-pressed={cropAspectLocked}
+                title={cropAspectLocked ? "Unlock aspect ratio" : "Lock aspect ratio"}
+                aria-label={cropAspectLocked ? "Unlock aspect ratio" : "Lock aspect ratio"}
+              >
+                {cropAspectLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+              {sourceSizeLabel && <span>{sourceSizeLabel}</span>}
+            </div>
+          </NodeRow>
+          {renderEditCropDimensionControl(widthControl)}
+          {renderEditCropDimensionControl(heightControl)}
+        </>
+      );
+    }
+
+    function editTrimControl(controlId) {
+      return effect.controls.find((control) => control.id === controlId) || {
+        id: controlId,
+        label: controlId === "start" ? "Start" : "End",
+        min: 0,
+        max: 86400,
+        step: 0.01,
+        defaultValue: controlId === "start" ? 0 : 5,
+        unit: "s"
+      };
+    }
+
+    function editTrimDuration() {
+      const duration = finiteNumber(sourceDimensions?.duration, 0);
+      if (duration > 0) return duration;
+      return Math.max(1, finiteNumber(settings.end, 5), finiteNumber(settings.start, 0));
+    }
+
+    function normalizedEditTrimTimes(nextStart = settings.start, nextEnd = settings.end, changedControl = null) {
+      const duration = editTrimDuration();
+      const minGap = Math.min(0.033, Math.max(0.001, duration / 1000));
+      let start = clamp(finiteNumber(nextStart, 0), 0, Math.max(0, duration - minGap));
+      let end = clamp(finiteNumber(nextEnd, duration), minGap, duration);
+      if (end <= start) {
+        const startChanged = changedControl ? changedControl === "start" : nextStart !== settings.start;
+        if (startChanged) {
+          start = Math.max(0, end - minGap);
+        } else {
+          end = Math.min(duration, start + minGap);
+        }
+      }
+      return {
+        start: Number(start.toFixed(3)),
+        end: Number(end.toFixed(3))
+      };
+    }
+
+    function updateEditTrimTimes(nextTimes, changedControl = null) {
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...normalizedEditTrimTimes(nextTimes.start ?? settings.start, nextTimes.end ?? settings.end, changedControl)
+        },
+        error: ""
+      });
+    }
+
+    function updateEditTrimSetting(controlId, value) {
+      updateEditTrimTimes(controlId === "start" ? { start: value } : { end: value }, controlId);
+    }
+
+    function renderEditTrimNumberControl(control) {
+      const duration = editTrimDuration();
+      const times = normalizedEditTrimTimes();
+      const value = control.id === "start" ? times.start : times.end;
+      return (
+        <NodeRow key={control.id} label={control.label}>
+          <div className="edit-trim-number-control">
+            <input
+              type="number"
+              min={0}
+              max={duration}
+              step={control.step || 0.01}
+              value={value}
+              onChange={(event) => updateEditTrimSetting(control.id, event.target.value)}
+            />
+            <span>s</span>
+          </div>
+        </NodeRow>
+      );
+    }
+
+    function renderEditTrimControls() {
+      const startControl = editTrimControl("start");
+      const endControl = editTrimControl("end");
+      const duration = editTrimDuration();
+      const times = normalizedEditTrimTimes();
+      return (
+        <>
+          {renderEditTrimNumberControl(startControl)}
+          {renderEditTrimNumberControl(endControl)}
+          <EditTrimTimeline
+            sourceUrl={sourceUrl}
+            duration={duration}
+            start={times.start}
+            end={times.end}
+            onChange={updateEditTrimTimes}
+          />
+        </>
+      );
+    }
+
+    function renderEditControl(control) {
+      const value = settings[control.id] ?? control.defaultValue;
+      if (control.type === "select") {
+        return (
+          <select value={value} onChange={(event) => updateEditSetting(control, event.target.value)}>
+            {(control.options || []).map((option) => (
+              <option key={option} value={option}>{formatEditOptionLabel(option)}</option>
+            ))}
+          </select>
+        );
+      }
+
+      if (control.type === "checkbox") {
+        return (
+          <button
+            type="button"
+            className={`edit-checkbox ${value ? "active" : ""}`}
+            onClick={() => updateEditSetting(control, !value)}
+            aria-pressed={Boolean(value)}
+          >
+            {value ? "On" : "Off"}
+          </button>
+        );
+      }
+
+      if (control.type === "range") {
+        return (
+          <div className="edit-range-control">
+            <input
+              type="range"
+              min={control.min}
+              max={control.max}
+              step={control.step}
+              value={value}
+              onChange={(event) => updateEditSetting(control, event.target.value)}
+            />
+            <input
+              type="number"
+              min={control.min}
+              max={control.max}
+              step={control.step}
+              value={value}
+              onChange={(event) => updateEditSetting(control, event.target.value)}
+            />
+            {control.unit && <span>{control.unit}</span>}
+          </div>
+        );
+      }
+
+      return (
+        <div className="edit-number-control">
+          <input
+            type="number"
+            min={control.min}
+            max={control.max}
+            step={control.step}
+            value={value}
+            onChange={(event) => updateEditSetting(control, event.target.value)}
+          />
+          {control.unit && <span>{control.unit}</span>}
+        </div>
+      );
+    }
+
+    return (
+      <div className="node-body model-node-body edit-node-body">
+        <EditSourceDimensionProbe sourceUrl={sourceUrl} sourceType={sourceType} onDimensions={updateEditSourceDimensions} />
+        <div className="edit-effect-tabs" role="tablist" aria-label="Edit effect groups">
+          {editEffectGroups.map((group) => (
+            <button
+              key={group.id}
+              className={groupId === group.id ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={groupId === group.id}
+              onClick={() => setEditGroup(group.id)}
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
+        <ResultPane
+          label="Edited output will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type={resultType}
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        />
+        <OutputPortRow node={node} port={outputPort} label={outputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        {!settingsOpen && (
+          <div className="model-input-port-stack utility-input-port-stack" aria-label="Edit inputs">
+            <PortHandle
+              node={node}
+              port={sourcePort}
+              side="input"
+              onConnectStart={onConnectStart}
+              onDisconnectInput={onDisconnectInput}
+              connectedPortKeys={connectedPortKeys}
+            />
+          </div>
+        )}
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
+          {running ? "Editing..." : "Run Edit"}
+        </button>
+        <details className="model-settings-drawer edit-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
+          <summary>Edit</summary>
+          <NodeRow label="Effect">
+            <select value={effect.id} onChange={(event) => setEditEffect(event.target.value)}>
+              {groupEffects.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </NodeRow>
+          {effect.mediaTypes.length > 1 && (
+            <NodeRow label="Source">
+              <select value={sourceType} onChange={(event) => setEditSourceType(event.target.value)}>
+                {effect.mediaTypes.map((mediaType) => (
+                  <option key={mediaType} value={mediaType}>{capitalizeMediaType(mediaType)}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
+          <NodeRow label={capitalizeMediaType(sourceType)} inputPort={settingsOpen ? sourcePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button type="button" className={sourceConnected ? "connected-field" : ""}>{connectedSummary(sourceItems, `Add ${sourceType}`)}</button>
+          </NodeRow>
+          {sourceType === "video" && (
+            <NodeRow label="Format">
+              <select value={outputFormat} onChange={(event) => onUpdate(node.id, { editOutputFormat: event.target.value, error: "" })}>
+                {editVideoOutputOptions.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
+          {effect.id === "crop" ? (
+            renderEditCropControls()
+          ) : effect.id === "trim" ? (
+            renderEditTrimControls()
+          ) : effect.controls.length ? (
+            effect.controls.map((control) => (
+              <NodeRow key={control.id} label={control.label}>
+                {renderEditControl(control)}
+              </NodeRow>
+            ))
+          ) : (
+            <div className="edit-empty-controls">No settings for this effect.</div>
+          )}
+          <p className="edit-effect-description">{effect.definition}</p>
+        </details>
+      </div>
+    );
+  }
+
   if (node.type === "utility") {
     const mode = utilityMode(node);
     const isVideoMode = mode === "video";
@@ -8324,6 +9069,14 @@ function getNodeConfig(type) {
       ],
       output: [{ id: "utilityOut", label: "Output", color: portColors.image }]
     },
+    edit: {
+      icon: SlidersHorizontal,
+      input: [
+        { id: "imageIn", label: "Image", color: portColors.image },
+        { id: "videoIn", label: "Video", color: portColors.video }
+      ],
+      output: [{ id: "editOut", label: "Output", color: portColors.video }]
+    },
     video: {
       icon: Video,
       input: [],
@@ -8577,6 +9330,20 @@ function createDefaultNodeData(type, label, count) {
       guidanceScale: 6,
       shift: 5,
       seed: ""
+    };
+  }
+  if (type === "edit") {
+    const effect = firstEditEffectForGroup("transform");
+    return {
+      title,
+      editGroup: "transform",
+      editEffect: effect.id,
+      editSourceType: normalizeEditSourceType(effect, "image"),
+      editSettings: defaultEditEffectSettings(effect),
+      editCropAspectLocked: true,
+      editOutputFormat: "mp4",
+      resultType: "image",
+      settingsOpen: true
     };
   }
   if (type === "style") {
@@ -9031,6 +9798,139 @@ function utilityModelDescription(model) {
   return utilityModelDescriptions[model] || "Utility preprocessing model.";
 }
 
+function editSelectionFromData(data = {}) {
+  const groupId = normalizeEditGroupId(data.editGroup);
+  const effect = normalizeEditEffectForGroup(groupId, data.editEffect);
+  const sourceType = normalizeEditSourceType(effect, data.editSourceType || data.resultType);
+  return {
+    groupId: effect.groupId,
+    effect,
+    sourceType
+  };
+}
+
+function editInputPortIds(data = {}) {
+  const { sourceType } = editSelectionFromData(data);
+  return [sourceType === "image" ? "imageIn" : "videoIn"];
+}
+
+function editOutputType(nodeOrData = {}) {
+  const data = nodeOrData.data || nodeOrData;
+  return editSelectionFromData(data).sourceType;
+}
+
+function editSourceDimensionsForItems(items = [], sourceType, sourceUrl, storedDimensions) {
+  const itemDimensions = [...items]
+    .reverse()
+    .map((item) => editSourceDimensionsFromConnection(item))
+    .find(Boolean);
+  return itemDimensions || editStoredSourceDimensions(storedDimensions, sourceUrl, sourceType);
+}
+
+function editSourceDimensionsFromConnection(item = {}) {
+  const { source, edge } = item;
+  const outputType = previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } });
+  const resultItems = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, outputType);
+  const selectedIndex = Math.trunc(Number(source?.data?.selectedResultIndex));
+  const selectedItem =
+    resultItems[selectedIndex] ||
+    resultItems.find((resultItem) => resultItem.url === source?.data?.resultUrl) ||
+    resultItems.at(-1);
+  return editDimensionsFromValue(selectedItem) || editDimensionsFromValue(source?.data);
+}
+
+function editStoredSourceDimensions(storedDimensions, sourceUrl, sourceType) {
+  if (!storedDimensions || storedDimensions.url !== sourceUrl || storedDimensions.type !== sourceType) return null;
+  return editDimensionsFromValue(storedDimensions);
+}
+
+function editDimensionsFromValue(value = {}) {
+  const width = finiteNumber(value.width ?? value.metadata?.width ?? value.dimensions?.width, 0);
+  const height = finiteNumber(value.height ?? value.metadata?.height ?? value.dimensions?.height, 0);
+  const duration = finiteNumber(value.duration ?? value.metadata?.duration ?? value.dimensions?.duration, 0);
+  if (width <= 0 && height <= 0 && duration <= 0) return null;
+  return {
+    ...(width > 0 ? { width: Math.round(width) } : {}),
+    ...(height > 0 ? { height: Math.round(height) } : {}),
+    ...(duration > 0 ? { duration: Number(duration.toFixed(3)) } : {})
+  };
+}
+
+function shouldSeedEditCropSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  if ("widthPercent" in raw || "heightPercent" in raw) return true;
+  const hasWidth = Object.prototype.hasOwnProperty.call(raw, "width");
+  const hasHeight = Object.prototype.hasOwnProperty.call(raw, "height");
+  if (!hasWidth && !hasHeight) return true;
+
+  const defaultCropSettings = defaultEditEffectSettings("crop");
+  const width = Number(settings.width);
+  const height = Number(settings.height);
+  const matchesFallbackDefaults = width === defaultCropSettings.width && height === defaultCropSettings.height;
+  const matchesPreviousDimensions =
+    previousDimensions?.width &&
+    previousDimensions?.height &&
+    width === previousDimensions.width &&
+    height === previousDimensions.height;
+
+  return matchesFallbackDefaults || matchesPreviousDimensions;
+}
+
+function shouldSeedEditTrimSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  const hasStart = Object.prototype.hasOwnProperty.call(raw, "start");
+  const hasEnd = Object.prototype.hasOwnProperty.call(raw, "end");
+  if (!hasStart && !hasEnd) return true;
+
+  const defaultTrimSettings = defaultEditEffectSettings("trim");
+  const start = Number(settings.start);
+  const end = Number(settings.end);
+  const previousDuration = finiteNumber(previousDimensions?.duration, 0);
+  const matchesFallbackDefaults = start === Number(defaultTrimSettings.start) && end === Number(defaultTrimSettings.end);
+  const matchesPreviousDuration = previousDuration > 0 && start === Number(defaultTrimSettings.start) && end === previousDuration;
+
+  return (!previousDuration && matchesFallbackDefaults) || matchesPreviousDuration;
+}
+
+function editSettingsForEffect(data = {}, effect = findEditEffect(data.editEffect), sourceDimensions = null) {
+  const defaults = defaultEditEffectSettings(effect);
+  const rawSettings = data.editSettings && typeof data.editSettings === "object" ? data.editSettings : {};
+  const settings = Object.fromEntries((effect.controls || []).map((control) => [control.id, rawSettings[control.id] ?? defaults[control.id]]));
+  if (effect.id === "crop" && sourceDimensions?.width && sourceDimensions?.height) {
+    const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
+    if (shouldSeedEditCropSettings(rawSettings, settings, previousDimensions)) {
+      return {
+        ...settings,
+        width: sourceDimensions.width,
+        height: sourceDimensions.height
+      };
+    }
+  }
+  if (effect.id === "trim" && sourceDimensions?.duration) {
+    const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
+    if (shouldSeedEditTrimSettings(rawSettings, settings, previousDimensions)) {
+      return {
+        ...settings,
+        start: 0,
+        end: sourceDimensions.duration
+      };
+    }
+  }
+  return settings;
+}
+
+function resetEditOutputPatch(resultType) {
+  return {
+    resultUrl: "",
+    resultItems: [],
+    resultText: "",
+    selectedResultIndex: 0,
+    resultType,
+    status: "ready",
+    error: ""
+  };
+}
+
 function patinaMapsForData(data = {}) {
   const selectedMaps = Array.isArray(data.patinaMaps) ? data.patinaMaps : patinaMapOptions.map((option) => option.id);
   const validMaps = selectedMaps.filter((mapId) => patinaMapOptions.some((option) => option.id === mapId));
@@ -9040,6 +9940,10 @@ function patinaMapsForData(data = {}) {
 function visiblePortIdsForNode(node) {
   if (node?.type === "utility") {
     return [...utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel), "utilityOut"];
+  }
+
+  if (node?.type === "edit") {
+    return [...editInputPortIds(node.data), "editOut"];
   }
 
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
@@ -9054,6 +9958,14 @@ function outputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "storyboard") return [...basePorts, ...storyboardFrameOutputPortsForNode(node)];
   if (node?.type === "autoAspect") return [...basePorts, ...autoAspectOutputPortsForNode(node)];
+  if (node?.type === "edit") {
+    const outputType = editOutputType(node);
+    return [{
+      id: "editOut",
+      label: outputType === "image" ? "Image output" : "Video output",
+      color: outputType === "image" ? portColors.image : portColors.video
+    }];
+  }
   if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
 }
@@ -9065,6 +9977,10 @@ function inputPortIdsForNode(node) {
 function activeInputPortIdsForNode(node) {
   if (node?.type === "utility") {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel);
+  }
+
+  if (node?.type === "edit") {
+    return editInputPortIds(node.data);
   }
 
   if (node?.type === "storyboard") {
@@ -9102,6 +10018,7 @@ function portKindForNodePort(node, portId, role) {
   if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "utility" && portId === "utilityOut") return utilityOutputType(node) === "video" ? "video" : "image";
+  if (role === "output" && node.type === "edit" && portId === "editOut") return editOutputType(node);
   if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
   return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
 }
@@ -9140,6 +10057,12 @@ function humanPortKindLabel(kind) {
     model3d: "3D",
     preview: "Preview"
   }[kind] || "matching";
+}
+
+function formatEditOptionLabel(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function storyboardFrameOutputPortsForNode(node) {
@@ -9330,6 +10253,7 @@ function configTitleFallback(type) {
 function nodeResultMediaType(node) {
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
+  if (node.type === "edit") return editOutputType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
   if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "camera" || node.type === "composer" || node.type === "character" || node.type === "storyboard") return "image";
@@ -9441,7 +10365,7 @@ function connectedText(items = []) {
     .map(({ source }) => {
       if (source.type === "text") return source.data.resultText || source.data.text;
       if (source.type === "plainText") return source.data.text;
-      if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility") return source.data.resultText;
+      if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
       return source.data.title;
     })
     .filter(Boolean)
@@ -9951,6 +10875,37 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
   return normalizeUtilityVideoGenerationResult(data, index);
 }
 
+async function runEditNodeGeneration({ node, incoming, projectId, projectName, workflowContext }) {
+  const { effect, sourceType } = editSelectionFromData(node.data);
+  const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
+  const sourceUrl = connectedAssetUrls(incoming[inputPortId]).at(-1);
+  if (!sourceUrl) throw new Error(`Connect a ${sourceType} to the Edit node.`);
+  const sourceDimensions = editSourceDimensionsForItems(incoming[inputPortId], sourceType, sourceUrl, node.data.editSourceDimensions);
+
+  const { response, data } = await nodeApi.editMedia({
+    effectId: effect.id,
+    sourceMediaType: sourceType,
+    sourceImageUrls: sourceType === "image" ? [sourceUrl] : [],
+    sourceVideoUrls: sourceType === "video" ? [sourceUrl] : [],
+    settings: editSettingsForEffect(node.data, effect, sourceDimensions),
+    outputFormat: node.data.editOutputFormat || "mp4",
+    ...workflowContextPayload(workflowContext, projectId, projectName),
+    nodeId: node.id,
+    nodeTitle: node.data.title
+  }, "Edit media");
+  if (!response.ok) throw new Error(data.error || "Edit failed.");
+
+  const media = sourceType === "image" ? data.image : data.video;
+  if (!media?.localUrl) throw new Error(`${data.modelName || "Edit"} returned no ${sourceType}.`);
+  return {
+    url: media.localUrl,
+    type: sourceType,
+    label: media.label || data.modelName || effect.label,
+    text: data.text || "",
+    cost: data.cost || null
+  };
+}
+
 function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
@@ -10016,6 +10971,7 @@ function previewMediaType(source, edge) {
   if (source.type === "storyboard" && storyboardFrameOutputItem(source, edge)) return "image";
   if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityResultType(source);
+  if (source.type === "edit") return editOutputType(source);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
@@ -10697,6 +11653,7 @@ function sourceLabel(source) {
   if (source.type === "transfer" && source.data.resultUrl) return moodBoardOutputFileName;
   if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
+  if (source.type === "edit" && source.data.resultUrl) return editOutputType(source) === "video" ? "Edit video" : "Edit image";
   if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
   if (source.data.fileName) return source.data.fileName;
   return source.data.title || source.type;
@@ -10833,6 +11790,13 @@ function normalizeCurrentNode(node) {
     return {
       ...nextNode,
       data: normalizeUtilityData(data)
+    };
+  }
+
+  if (nextNode.type === "edit") {
+    return {
+      ...nextNode,
+      data: normalizeEditData(data)
     };
   }
 
@@ -11676,6 +12640,23 @@ function normalizeUtilityData(data = {}) {
   };
 }
 
+function normalizeEditData(data = {}) {
+  const selection = editSelectionFromData(data);
+  const editSettings = editSettingsForEffect(data, selection.effect);
+  return {
+    ...createDefaultNodeData("edit", data.title || "Edit", 1),
+    ...data,
+    title: data.title || "Edit",
+    editGroup: selection.groupId,
+    editEffect: selection.effect.id,
+    editSourceType: selection.sourceType,
+    editSettings,
+    editCropAspectLocked: data.editCropAspectLocked !== false,
+    editOutputFormat: normalizeChoice(data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4"),
+    resultType: selection.sourceType
+  };
+}
+
 function isLegacyDirectionNode(node) {
   return node.type === "direction" || (node.type === "style" && hasLegacyDirectionData(node));
 }
@@ -11794,6 +12775,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     return null;
   }
 
+  if (target?.type === "edit" && !editInputPortIds(target.data).includes(nextEdge.to.port)) {
+    return null;
+  }
+
   if (source.type === "transfer") {
     nextEdge.from.port = "transferOut";
     if (nextEdge.to.port === "imagePromptIn") nextEdge.to.port = "transferIn";
@@ -11814,6 +12799,11 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   if (source.type === "utility") {
     nextEdge.from.port = "utilityOut";
     nextEdge.color = utilityOutputType(source) === "video" ? portColors.video : portColors.image;
+  }
+
+  if (source.type === "edit") {
+    nextEdge.from.port = "editOut";
+    nextEdge.color = editOutputType(source) === "video" ? portColors.video : portColors.image;
   }
 
   if (source.type === "autoAspect") {

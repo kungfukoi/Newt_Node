@@ -920,6 +920,7 @@
 .node-card.imageModel,
 .node-card.videoModel,
 .node-card.utility,
+.node-card.edit,
 .node-card.model3d {
   width: 365px;
 }
@@ -960,6 +961,10 @@
 }
 
 .node-card.utility {
+  width: 370px;
+}
+
+.node-card.edit {
   width: 370px;
 }
 
@@ -4601,6 +4606,279 @@ video.newtnode-video-fallback {
 .utility-mode-tabs button.active {
   color: #111;
   background: #ddc631;
+}
+
+.edit-effect-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 4px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.edit-effect-tabs button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: rgba(244, 240, 232, 0.62);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.edit-effect-tabs button.active {
+  color: #111;
+  background: #ddc631;
+}
+
+.edit-node-body .result-pane {
+  min-height: 260px;
+}
+
+.edit-node-body .node-row {
+  grid-template-columns: 104px minmax(0, 1fr);
+}
+
+.edit-source-dimension-probe {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
+.edit-crop-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-crop-toolbar span {
+  color: rgba(244, 240, 232, 0.52);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.edit-aspect-lock {
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: rgba(244, 240, 232, 0.7);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.edit-aspect-lock.active {
+  color: #111;
+  background: #ddc631;
+}
+
+.edit-aspect-lock svg {
+  display: block;
+}
+
+.edit-range-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-crop-dimension-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-trim-number-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-range-control input[type="range"] {
+  min-width: 0;
+  accent-color: #ddc631;
+}
+
+.edit-crop-dimension-control input[type="range"] {
+  min-width: 0;
+  accent-color: #ddc631;
+}
+
+.edit-range-control input[type="number"],
+.edit-crop-dimension-control input[type="number"],
+.edit-trim-number-control input,
+.edit-number-control input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  outline: 0;
+  color: #f6f1e8;
+  background: rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.edit-number-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-range-control span,
+.edit-crop-dimension-control span,
+.edit-trim-number-control span,
+.edit-number-control span {
+  color: rgba(244, 240, 232, 0.45);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.edit-trim-timeline {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.edit-trim-track {
+  position: relative;
+  height: 46px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #050505;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.edit-trim-track video,
+.edit-trim-empty-strip {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.edit-trim-empty-strip {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.08) 0 16px,
+      rgba(255, 255, 255, 0.03) 16px 32px
+    ),
+    #101010;
+}
+
+.edit-trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.58);
+  pointer-events: none;
+}
+
+.edit-trim-shade.left {
+  left: 0;
+}
+
+.edit-trim-shade.right {
+  right: 0;
+}
+
+.edit-trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 1px solid rgba(221, 198, 49, 0.86);
+  background: rgba(221, 198, 49, 0.13);
+  pointer-events: none;
+}
+
+.edit-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  min-width: 12px;
+  border: 0;
+  border-radius: 6px;
+  transform: translateX(-50%);
+  background: #ddc631;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.35);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.edit-trim-handle::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 2px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.edit-trim-handle:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.82);
+  outline-offset: 2px;
+}
+
+.edit-trim-time-readout {
+  display: flex;
+  justify-content: space-between;
+  color: rgba(244, 240, 232, 0.5);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.edit-checkbox {
+  width: 74px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: rgba(244, 240, 232, 0.68);
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.edit-checkbox.active {
+  color: #111;
+  background: #ddc631;
+}
+
+.edit-empty-controls,
+.edit-effect-description {
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.62);
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.edit-empty-controls {
+  color: rgba(244, 240, 232, 0.45);
 }
 
 .still-frame-scrubber {
