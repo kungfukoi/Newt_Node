@@ -56,10 +56,12 @@ let updatePromise = null;
 let restartRequested = false;
 const execFile = promisify(execFileCallback);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
+const nanoBananaProviderEnvKey = "NANO_BANANA_PROVIDER";
 const runtimeConfigSources = {
   FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
-  [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
+  [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : "",
+  [nanoBananaProviderEnvKey]: process.env[nanoBananaProviderEnvKey] ? "runtime" : ""
 };
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
@@ -340,7 +342,8 @@ function buildHealthPayload() {
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
-    googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
+    googleImageModelsUseGoogleDirect: shouldUseGoogleDirectNanoBanana(),
+    nanoBananaProvider: activeNanoBananaProvider(),
     falZImageEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
@@ -378,6 +381,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     repository,
     branch,
     branchStatus,
+    nanoBananaProvider: activeNanoBananaProvider(),
     modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
     updateInProgress: Boolean(updatePromise),
     restartRequested
@@ -402,6 +406,7 @@ async function saveRuntimeSettings(body = {}) {
   if (falKey !== undefined) updates.falKey = falKey;
   if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
   if (repository) updates.repository = repository;
+  if (body.nanoBananaProvider !== undefined) updates.nanoBananaProvider = normalizeNanoBananaProviderPreference(body.nanoBananaProvider);
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
 
   if (Object.keys(updates).length) {
@@ -489,13 +494,14 @@ async function requestServerRestart() {
 
 async function refreshRuntimeConfigFromEnvFile() {
   const [envValues, settingsValues] = await Promise.all([
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", updateRepositoryEnvKey]),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", updateRepositoryEnvKey, nanoBananaProviderEnvKey]),
     readRuntimeSettingsStore()
   ]);
 
   applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
   applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
+  applyRuntimeConfigValue(nanoBananaProviderEnvKey, envValues[nanoBananaProviderEnvKey], settingsValues.nanoBananaProvider, { preferSettings: true });
 
   if (process.env.FAL_KEY) {
     fal.config({ credentials: process.env.FAL_KEY });
@@ -508,6 +514,7 @@ async function readRuntimeSettingsStore() {
     falKey: optionalRuntimeSetting(data?.falKey) || "",
     googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
     repository: normalizeUpdateRepository(data?.repository),
+    nanoBananaProvider: normalizeNanoBananaProviderPreference(data?.nanoBananaProvider),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences)
   };
 }
@@ -521,8 +528,21 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
+  if (patch.nanoBananaProvider !== undefined) next.nanoBananaProvider = normalizeNanoBananaProviderPreference(patch.nanoBananaProvider);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
+}
+
+function activeNanoBananaProvider() {
+  return normalizeNanoBananaProviderPreference(process.env[nanoBananaProviderEnvKey]);
+}
+
+function shouldUseGoogleDirectNanoBanana() {
+  return Boolean(process.env.GOOGLE_API_KEY) && activeNanoBananaProvider() !== "fal";
+}
+
+function normalizeNanoBananaProviderPreference(value) {
+  return String(value || "").trim().toLowerCase() === "fal" ? "fal" : "google";
 }
 
 function normalizeModelPreferences(value = {}) {
@@ -1668,8 +1688,9 @@ app.post("/api/node/generate-image", async (req, res) => {
       }
     });
   } catch (error) {
-    if (error.status) {
-      return res.status(error.status).json({ error: error.message || "Image generation failed.", text: error.text || "", raw: error.raw });
+    if (error.status || error.statusCode || error.response?.status) {
+      const message = publicErrorMessage(error, error.message || "Image generation failed.");
+      return res.status(errorStatusCode(error)).json({ error: message, text: error.text || "", raw: error.raw });
     }
 
     console.error(error);
@@ -8167,7 +8188,7 @@ function resolveImageModel(model) {
     };
   }
 
-  const useGoogleDirect = Boolean(process.env.GOOGLE_API_KEY);
+  const useGoogleDirect = shouldUseGoogleDirectNanoBanana();
   return {
     provider: useGoogleDirect ? "google" : "fal-nano-banana-pro",
     displayName: "Nano Banana Pro",
@@ -9228,7 +9249,12 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
 
     const data = await response.json();
     if (!response.ok) {
-      throw httpError(response.status, data?.error?.message || "Image generation failed.", { raw: data });
+      const message = data?.error?.message || "Image generation failed.";
+      if (attempt < maxAttempts && isRetryableGeminiImageError(response.status, data?.error?.status, message)) {
+        await delay(1400 * attempt);
+        continue;
+      }
+      throw httpError(response.status, message, { raw: data, attempts: attempt });
     }
 
     const parsed = extractGeminiImageData(data);
@@ -9253,6 +9279,13 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
     text: lastText,
     raw: lastRaw
   });
+}
+
+function isRetryableGeminiImageError(status, googleStatus, message) {
+  const httpStatus = Number(status || 0);
+  if ([429, 500, 502, 503, 504].includes(httpStatus)) return true;
+  const text = `${googleStatus || ""} ${message || ""}`.toLowerCase();
+  return /resource[_\s-]*exhausted|quota|overload|capacity|high usage|try again later|temporarily unavailable/.test(text);
 }
 
 function extractGeminiImageData(data) {
@@ -9441,7 +9474,7 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
   }
 
-  const result = await fal.subscribe(endpoint, { input, logs: true });
+  const result = await subscribeFal(endpoint, { input, logs: true });
   const remoteImage = firstFalImageResult(result?.data);
 
   if (!remoteImage?.url) {

@@ -26,7 +26,7 @@ Current release: `v3.0.0-beta.0`
 
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
-- **Provider routing**: Fal is the default provider path. When `GOOGLE_API_KEY` exists, supported Google image models use Google directly; otherwise they route through Fal.
+- **Provider routing**: Fal is the default provider path. Nano Banana Pro can be routed through Fal or Google from Settings; Google routing requires `GOOGLE_API_KEY`.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview, and can be dragged back into the graph.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
@@ -48,6 +48,8 @@ Add your API keys to `.env` after copying it from `.env.example`:
 ```bash
 FAL_KEY=your_fal_key_here
 GOOGLE_API_KEY=your_google_api_key_here
+# Optional: google or fal
+NANO_BANANA_PROVIDER=fal
 ```
 
 ### macOS
