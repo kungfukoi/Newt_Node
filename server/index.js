@@ -1540,53 +1540,16 @@ app.post("/api/node/generate-image", async (req, res) => {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
-      const falImage = await generateFalNanoBananaPro({
+      return sendFalNanoBananaImageResponse({
+        req,
+        res,
+        selectedModel,
         prompt,
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio,
-        resolution: req.body.resolution
-      });
-      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
-
-      await appendHistory({
-        id: randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "image",
-        provider: "fal.ai",
-        modelName: selectedModel.displayName,
-        endpoint: falImage.endpoint,
-        mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
-        prompt,
-        submittedPrompt: falImage.submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          model: req.body.model || selectedModel.displayName,
-          aspectRatio,
-          requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: falImage.resolution,
-          imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
-        },
-        cost,
-        remoteImage: falImage.remoteImage,
-        localImage: output.publicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes,
-        text: falImage.description || ""
-      });
-
-      return res.json({
-        text: falImage.description || "",
-        cost,
-        image: {
-          ...falImage.remoteImage,
-          localUrl: output.publicPath,
-          fileName: output.fileName,
-          mimeType: output.mimeType
-        }
+        requestedAspectRatio,
+        cleanReferenceLabels
       });
     }
 
@@ -1616,11 +1579,32 @@ app.post("/api/node/generate-image", async (req, res) => {
       });
     }
 
-    const { text, inlineData, attempts } = await generateGeminiImageWithRetries({
-      model,
-      parts,
-      imageConfig
-    });
+    let geminiResult;
+    try {
+      geminiResult = await generateGeminiImageWithRetries({
+        model,
+        parts,
+        imageConfig
+      });
+    } catch (googleError) {
+      if (process.env.FAL_KEY && shouldFallbackFromGoogleImageError(googleError)) {
+        return sendFalNanoBananaImageResponse({
+          req,
+          res,
+          selectedModel,
+          prompt,
+          imagePromptUrls,
+          imagePromptLabels,
+          aspectRatio,
+          requestedAspectRatio,
+          cleanReferenceLabels,
+          fallbackFromGoogleError: googleError
+        });
+      }
+      throw googleError;
+    }
+
+    const { text, inlineData, attempts } = geminiResult;
 
     const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
     const extension = extensionForMime(mimeType);
@@ -1677,6 +1661,71 @@ app.post("/api/node/generate-image", async (req, res) => {
     res.status(500).json({ error: error.message || "Image generation failed." });
   }
 });
+
+async function sendFalNanoBananaImageResponse({
+  req,
+  res,
+  selectedModel,
+  prompt,
+  imagePromptUrls,
+  imagePromptLabels,
+  aspectRatio,
+  requestedAspectRatio,
+  cleanReferenceLabels,
+  fallbackFromGoogleError = null
+}) {
+  const falImage = await generateFalNanoBananaPro({
+    prompt,
+    imagePromptUrls,
+    imagePromptLabels,
+    aspectRatio,
+    resolution: req.body.resolution
+  });
+  const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+  const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
+  const fallback = fallbackFromGoogleError ? googleFallbackSummary(fallbackFromGoogleError) : null;
+
+  await appendHistory({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "fal.ai",
+    modelName: selectedModel.displayName,
+    endpoint: falImage.endpoint,
+    mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+    prompt,
+    submittedPrompt: falImage.submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: req.body.model || selectedModel.displayName,
+      aspectRatio,
+      requestedAspectRatio: requestedAspectRatio || aspectRatio,
+      resolution: falImage.resolution,
+      imagePromptCount: imagePromptUrls.length,
+      imagePromptLabels: cleanReferenceLabels,
+      ...(fallback ? { fallbackFromProvider: "Google", fallbackReason: fallback.message, fallbackStatus: fallback.status } : {})
+    },
+    cost,
+    remoteImage: falImage.remoteImage,
+    localImage: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text: falImage.description || ""
+  });
+
+  return res.json({
+    text: falImage.description || "",
+    cost,
+    fallback,
+    image: {
+      ...falImage.remoteImage,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    }
+  });
+}
 
 app.post("/api/node/storyboard-plan", async (req, res) => {
   try {
@@ -9266,6 +9315,31 @@ function isRetryableGeminiImageError(status, googleStatus, message) {
   if ([429, 500, 502, 503, 504].includes(httpStatus)) return true;
   const text = `${googleStatus || ""} ${message || ""}`.toLowerCase();
   return /resource[_\s-]*exhausted|quota|overload|capacity|high usage|try again later|temporarily unavailable/.test(text);
+}
+
+function shouldFallbackFromGoogleImageError(error) {
+  const message = publicErrorMessage(error, error?.message || "Google image generation failed.");
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  const googleStatus = rawError.status || "";
+  const text = `${googleStatus} ${message}`.toLowerCase();
+
+  if (/permission|unauthenticated|auth|api key|invalid|malformed|content[_\s-]*policy|safety|blocked|prohibited/.test(text)) {
+    return false;
+  }
+
+  return isRetryableGeminiImageError(errorStatusCode(error), googleStatus, message);
+}
+
+function googleFallbackSummary(error) {
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  return {
+    from: "google",
+    to: "fal",
+    status: errorStatusCode(error),
+    providerStatus: rawError.status || "",
+    attempts: Number(error?.attempts || 0) || null,
+    message: publicErrorMessage(error, error?.message || "Google image generation failed.")
+  };
 }
 
 function extractGeminiImageData(data) {
