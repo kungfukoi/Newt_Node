@@ -51,7 +51,11 @@ export function batchRunError(mediaType, total, successes, failures) {
 }
 
 export function ensureRunSuccesses(successes, failures, fallbackMessage) {
-  if (!successes.length) throw new Error(failures[0]?.reason?.message || fallbackMessage);
+  if (!successes.length) {
+    const reason = failures[0]?.reason;
+    if (reason instanceof Error) throw reason;
+    throw new Error(reason?.message || fallbackMessage);
+  }
   return successes;
 }
 

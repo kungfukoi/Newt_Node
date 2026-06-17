@@ -311,7 +311,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Fal is the default provider route for remote models.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
 - Google image models should use a direct Google API key first when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
-- Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses may automatically fall back to the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
+- Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should first display the Google diagnostic on the node. The node can then mark Fal fallback as available so the next run uses the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
 
 ## Settings Standards
 

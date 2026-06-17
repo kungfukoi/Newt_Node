@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   appendedNodeResultState,
   batchRunError,
+  ensureRunSuccesses,
   fulfilledRunValues,
   rejectedRunResults,
   runRunnableNodesByDependencyOrder
@@ -65,4 +66,14 @@ test("result helpers aggregate successful and failed batch results", () => {
   const state = appendedNodeResultState([{ url: "/outputs/old.png" }], [{ url: "/outputs/new.png" }], "image");
   assert.equal(state.firstNewIndex, 1);
   assert.deepEqual(state.resultItems.map((item) => item.type), ["image", "image"]);
+});
+
+test("ensureRunSuccesses preserves original error metadata", () => {
+  const error = new Error("google said no");
+  error.nodePatch = { googleImageFallbackAvailable: true };
+
+  assert.throws(
+    () => ensureRunSuccesses([], [{ status: "rejected", reason: error }], "Image generation failed."),
+    (thrown) => thrown === error && thrown.nodePatch.googleImageFallbackAvailable
+  );
 });
