@@ -23,7 +23,6 @@ export default function SettingsPage() {
   const [googleApiKey, setGoogleApiKey] = React.useState("");
   const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
   const [repository, setRepository] = React.useState("");
-  const [nanoBananaProvider, setNanoBananaProvider] = React.useState("google");
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [status, setStatus] = React.useState("loading");
   const [busy, setBusy] = React.useState("");
@@ -58,7 +57,7 @@ export default function SettingsPage() {
     try {
       const initialSecrets = initialSecretsRef.current;
       const nextModelPreferences = normalizeModelPreferences(modelPreferences);
-      const payload = { repository, nanoBananaProvider, modelPreferences: nextModelPreferences };
+      const payload = { repository, modelPreferences: nextModelPreferences };
       if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
       if (googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = googleApiKey;
 
@@ -131,7 +130,6 @@ export default function SettingsPage() {
     setFalKey(secrets.falKey);
     setGoogleApiKey(secrets.googleApiKey);
     setRepository(data.repository || "");
-    setNanoBananaProvider(data.nanoBananaProvider === "fal" ? "fal" : "google");
     setModelPreferences(normalizeModelPreferences(data.modelPreferences));
   }
 
@@ -251,36 +249,6 @@ export default function SettingsPage() {
             <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
               <Save size={15} />
               <span>{busy === "save" ? "Saving" : "Save Models"}</span>
-            </button>
-          </div>
-        </section>
-
-        <section className="stats-panel settings-panel">
-          <SettingsPanelTitle title="Provider Routing" aside={nanoBananaProvider === "fal" ? "Fal" : "Google"} />
-          <div className="settings-provider-options" role="group" aria-label="Nano Banana Pro provider">
-            <button
-              type="button"
-              className={`settings-provider-option ${nanoBananaProvider === "fal" ? "selected" : ""}`}
-              onClick={() => setNanoBananaProvider("fal")}
-              disabled={actionsDisabled}
-            >
-              <strong>Fal</strong>
-              <span>Nano Banana Pro</span>
-            </button>
-            <button
-              type="button"
-              className={`settings-provider-option ${nanoBananaProvider === "google" ? "selected" : ""}`}
-              onClick={() => setNanoBananaProvider("google")}
-              disabled={actionsDisabled}
-            >
-              <strong>Google</strong>
-              <span>Nano Banana Pro</span>
-            </button>
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
-              <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save Routing"}</span>
             </button>
           </div>
         </section>
