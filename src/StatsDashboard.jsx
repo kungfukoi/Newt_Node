@@ -37,6 +37,10 @@ const defaultPricing = {
   openAiImage2: {
     mediumCost: 0.053
   },
+  krea2Large: {
+    cost: 0.06,
+    styleReferenceCost: 0.065
+  },
   luma: {
     photonCostPerMegapixel: 0.019,
     ray2CostPerFiveSeconds540p: 0.5
@@ -508,6 +512,13 @@ function estimateItemCost(item, mediaType, pricing) {
 
     if (modelKey.includes("openai")) {
       return pricing.openAiImage2?.mediumCost || defaultPricing.openAiImage2.mediumCost;
+    }
+
+    if (modelKey.includes("krea") && modelKey.includes("large")) {
+      const kreaPricing = pricing.krea2Large || defaultPricing.krea2Large;
+      return Number(settings.imageStyleReferenceCount || 0) > 0
+        ? kreaPricing.styleReferenceCost
+        : kreaPricing.cost;
     }
 
     if (modelKey.includes("nano") || modelKey.includes("banana") || modelKey.includes("gemini")) {
