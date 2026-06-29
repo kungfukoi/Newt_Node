@@ -9,7 +9,9 @@ export function registerCoreRoutes(
     selectWorkflowFileWithDialog,
     readWorkflowFromFilePath,
     saveWorkflowToFilePath,
+    readWorkflowFromPath,
     buildHealthPayload,
+    openProjectOutputFolder,
     timedApi,
     buildStorageDiagnostics,
     readRuntimeSettings,
@@ -62,11 +64,17 @@ export function registerCoreRoutes(
 
   app.post("/api/system/open-workflow-file", async (req, res) => {
     try {
-      const selectedPath = await selectWorkflowFileWithDialog({
-        title: String(req.body.title || "Open NewtNode workflow"),
-        defaultPath: String(req.body.defaultPath || "")
-      });
-      const workflow = await readWorkflowFromFilePath(selectedPath);
+      const useFolderPicker = req.body.mode === "folder";
+      const selectedPath = useFolderPicker
+        ? await selectFolderWithDialog({
+          title: String(req.body.title || "Open NewtNode workflow package folder"),
+          defaultPath: String(req.body.defaultPath || "")
+        })
+        : await selectWorkflowFileWithDialog({
+          title: String(req.body.title || "Open NewtNode workflow"),
+          defaultPath: String(req.body.defaultPath || "")
+        });
+      const workflow = await (readWorkflowFromPath || readWorkflowFromFilePath)(selectedPath);
       res.json(workflow);
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
@@ -80,6 +88,15 @@ export function registerCoreRoutes(
       res.json(workflow);
     } catch (error) {
       res.status(error.status || 500).json({ error: error.message || "Workflow save failed." });
+    }
+  });
+
+  app.post("/api/system/open-project-output-folder", async (req, res) => {
+    try {
+      if (!openProjectOutputFolder) throw new Error("Opening output folders is not available.");
+      res.json(await openProjectOutputFolder(req.body || {}));
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Could not open output folder." });
     }
   });
 

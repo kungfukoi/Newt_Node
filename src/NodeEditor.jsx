@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Compass,
   Download,
   FileAudio,
@@ -13,6 +14,7 @@ import {
   FolderOpen,
   MonitorPlay,
   ImagePlus,
+  Loader2,
   Lock,
   Maximize2,
   Minus,
@@ -21,10 +23,13 @@ import {
   PanelRightOpen,
   Palette,
   Pause,
+  Pipette,
   Play,
   Plus,
   RotateCcw,
+  GripVertical,
   Save,
+  SlidersHorizontal,
   Trash2,
   Type,
   Unlock,
@@ -50,7 +55,7 @@ import {
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
-import { canvasToBlob, createTransferCollageBlob, loadCanvasImage } from "./canvasMedia.js";
+import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
 import {
   composerAspectRatioNumber,
@@ -85,6 +90,16 @@ import {
   normalizeColorIdMatteItems,
   rgbToHex
 } from "./colorIdMatte.js";
+import {
+  defaultEditEffectSettings,
+  editEffectGroups,
+  editEffectsForGroup,
+  findEditEffect,
+  firstEditEffectForGroup,
+  normalizeEditEffectForGroup,
+  normalizeEditGroupId,
+  normalizeEditSourceType
+} from "./editEffects.js";
 import {
   allowFileDrop,
   assetFromOutputItem,
@@ -122,10 +137,13 @@ import {
   firstEnabledImageModel,
   firstEnabledVideoModel,
   happyHorseDurationOptions,
+  imageBatchOptions,
   imageModelNames,
   imageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
+  krea2AspectRatios,
+  krea2CreativityOptions,
   lensPresetNames,
   lensPresetPrompts,
   lumaImageAspectRatios,
@@ -206,7 +224,7 @@ import {
   runRunnableNodesByDependencyOrder,
   settleSequential
 } from "./nodeRunner.js";
-import { run3DModelGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
+import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
@@ -232,6 +250,65 @@ import {
 } from "./workflowState.js";
 import "./nodeEditor.css";
 
+class NodeCardBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Node card failed to render", {
+      nodeId: this.props.node?.id,
+      nodeType: this.props.node?.type,
+      error,
+      info
+    });
+  }
+
+  componentDidUpdate(previousProps) {
+    if (this.state.error && previousProps.node !== this.props.node) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    const node = this.props.node || {};
+    const nodeData = node.data || {};
+    const title = nodeData.title || String(node.type || "Unknown node");
+    const x = Number.isFinite(Number(node.x)) ? Number(node.x) : 0;
+    const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0;
+
+    return (
+      <article
+        className="node-card node-card-error"
+        style={{
+          transform: `translate(${x}px, ${y}px)`
+        }}
+        data-node-card-id={node.id}
+      >
+        <div className="node-title">
+          <span className="node-title-label">
+            <Wrench size={15} />
+            <span className="node-title-name">{title}</span>
+          </span>
+          <button onClick={() => this.props.onRemove?.(node.id)} title="Remove node">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="node-body model-node-body">
+          <p className="utility-model-description">This node could not render. Remove it or switch to a branch that supports this node type.</p>
+        </div>
+      </article>
+    );
+  }
+}
+
 const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMattePicker })));
 const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
@@ -246,10 +323,13 @@ const nodeIcons = {
   style: Palette,
   transfer: Compass,
   utility: Wrench,
+  edit: SlidersHorizontal,
   audio: FileAudio,
   model3d: Box,
+  autoAspect: Maximize2,
   imageModel: ImagePlus,
   videoModel: Film,
+  storyboard: Clapperboard,
   text: Type
 };
 
@@ -286,12 +366,21 @@ const utilityImageInputPortIds = ["startFrameIn", "endFrameIn", "imageIn", "refe
 
 const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
+const autoAspectDefaultRatios = [];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
+const editVideoOutputOptions = [
+  ["mp4", "MP4"],
+  ["webm", "WebM"],
+  ["mov", "ProRes MOV"]
+];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
 const characterDefaultWardrobeId = "__default-wardrobe__";
 const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
+const cinematicCharacterSheetPrompt =
+  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic and authentic with natural skin texture and natural skin tones. Fine detail, subtle film grain, true-to-life skin tones. The image should resemble being shot on a real cinema camera with high quality 35mm prime lens, high dynamic range, a high production value and a feature film quality look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const characterBasicWardrobePrompt =
   "Wardrobe rule: use exactly one outfit across all six views. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently worn in every panel. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 const characterWardrobePrompt =
@@ -508,60 +597,132 @@ Generate the final image as a fully rendered interpretation of the written promp
 };
 const transferPromptSuffix =
   "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
+const storyboardDefaultFrameCount = 6;
+const storyboardFrameCountOptions = ["Auto", "3", "6", "9", "12", "18", "24"];
+const storyboardMoodBoardLabel = moodBoardOutputFileName;
+const storyboardDefaultMoodBoardUrl = "/storyboard/MOOD_BOARD.png";
+const storyboardMaxCharacters = 4;
+const storyboardCharacterSheetVersion = 2;
+const storyboardDefaultAspectRatio = "16:9";
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
+const storyboardDefaultResolution = "1K";
+const storyboardHighResolution = "4K";
+const storyboardFixedModel = imageModelNames.openAiImage2;
+const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
+const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
+const storyboardBaseInstruction =
+  "STORYBOARD STYLE LOCK: Create a single clean hand-drawn film storyboard frame. Use black ink linework, minimal grayscale shading, loose but intentional drawing, simple tonal blocking, readable silhouettes, and production-planning clarity. This is not a realistic black-and-white photograph, not photorealistic grayscale, not a 3D render, and not photographic concept art. Avoid photographic skin texture, realistic camera lighting, glossy realism, and fully rendered photo detail. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
+const storyboardReferenceStyleGuard =
+  "FINAL STYLE PRIORITY: The hand-drawn storyboard line-art style overrides every uploaded image reference. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, or polished photo detail from any reference image.";
+const storyboardContinuityInstruction =
+  "Follow professional storyboard continuity. Maintain the 180 degree rule, screen direction, blocking, eyeline, silhouette, and editorial sequencing. Characters should not look at camera unless explicitly stated. Describe only this one frame.";
+const storyboardCharacterSheetStyleInstruction =
+  "STORYBOARD STYLE OVERRIDE: Convert the character sheet into the exact same clean storyboard style used for the final boards. Use hand-drawn digital storyboard line art, black ink linework, minimal grayscale shading, cinematic production-planning clarity, simple tonal blocking, and clear readable silhouettes. Do not create a realistic grayscale photograph, realistic black-and-white portrait, 3D render, fashion photo, photographic skin texture, photo lighting, or realistic camera render. No color, no labels, no numbers, no frame borders, no captions, and no decorative borders. This style override is more important than preserving the uploaded image's photographic style.";
+const storyboardCharacterWardrobeFromPortraitPrompt =
+  "Wardrobe rule: use exactly one outfit across all six views. Use the exact visible wardrobe from the uploaded character reference image consistently in every panel. Do not switch to a plain black outfit, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
+const storyboardCharacterSheetBasePrompt = characterSheetPrompt
+  .replace(
+    "Study the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.",
+    "Study the reference image of the character and preserve the person's identity, physical features, proportions, and recognizable details as closely as possible while converting the final sheet into storyboard line art."
+  )
+  .replace(
+    "Create one high-resolution horizontal character photo sheet on a clean white background.",
+    "Create one high-resolution horizontal character storyboard reference sheet on a clean white background."
+  );
 const initialNodes = [
   {
     id: "text-1",
     type: "plainText",
-    x: 110,
-    y: 108,
+    x: 123.3203125,
+    y: 102.61370849609375,
     data: {
-      title: "Prompt",
-      text: "A serene landscape with mountains"
-    }
-  },
-  {
-    id: "image-1",
-    type: "image",
-    x: 110,
-    y: 442,
-    data: {
-      title: "Image"
+      title: "Prompt 1",
+      text: "A dog with a ball."
     }
   },
   {
     id: "image-model-1",
     type: "imageModel",
-    x: 620,
-    y: 126,
+    x: 546.8897713928794,
+    y: 96.03308838042841,
     data: {
       title: "Image Model",
-      model: imageModelNames.nanoBananaPro,
+      model: imageModelNames.openAiImage2,
       prompt: "A serene landscape with mountains",
       aspectRatio: "16:9",
-      resolution: "1K"
+      resolution: "2K",
+      kreaCreativity: "raw",
+      batchCount: "1",
+      settingsOpen: true
     }
   },
   {
-    id: "video-model-1",
-    type: "videoModel",
-    x: 1138,
-    y: 44,
+    id: "text-2",
+    type: "plainText",
+    x: 124.23687795605827,
+    y: 379.67701542395395,
     data: {
-      title: "Video Model",
-      model: videoModelNames.seedance,
-      prompt: "A beautiful sunset over a calm ocean",
-      duration: "15 seconds",
-      resolution: "720p",
-      aspectRatio: "16:9 (Landscape)",
-      generateAudio: true
+      title: "Prompt",
+      text: "The location is a park."
+    }
+  },
+  {
+    id: "camera-1",
+    type: "camera",
+    x: 101.27786006671954,
+    y: 658.981734327887,
+    data: {
+      title: "Camera",
+      shotPreset: "MS",
+      lensPreset: "35mm",
+      typePreset: "None"
+    }
+  },
+  {
+    id: "style-1",
+    type: "style",
+    x: 102.00101081119362,
+    y: 970.3715360841652,
+    data: {
+      title: "Style",
+      stylePreset: "Cinematic",
+      customPaletteRgbText: "",
+      customPalettePicker: "#ddc631",
+      customPaletteColors: [],
+      customPalettePreviewUrl: "",
+      customPaletteSourceName: "",
+      customPaletteStatus: "",
+      customPaletteError: ""
+    }
+  },
+  {
+    id: "preview-1",
+    type: "preview",
+    x: 1022.6723497659082,
+    y: 313.64054190479334,
+    data: {
+      title: "Preview",
+      previewScale: 2.42,
+      previewItemIndex: 0,
+      previewTab: "preview",
+      previewLayoutItems: []
     }
   }
 ];
 
 const initialEdges = [
   { id: "edge-1", from: { nodeId: "text-1", port: "promptOut" }, to: { nodeId: "image-model-1", port: "promptIn" }, color: portColors.prompt },
-  { id: "edge-2", from: { nodeId: "image-1", port: "imageOut" }, to: { nodeId: "image-model-1", port: "imagePromptIn" }, color: portColors.image }
+  { id: "edge-2", from: { nodeId: "text-2", port: "promptOut" }, to: { nodeId: "image-model-1", port: "promptIn" }, color: portColors.prompt },
+  { id: "edge-3", from: { nodeId: "camera-1", port: "cameraOut" }, to: { nodeId: "image-model-1", port: "cameraIn" }, color: portColors.camera },
+  { id: "edge-4", from: { nodeId: "style-1", port: "styleOut" }, to: { nodeId: "image-model-1", port: "styleIn" }, color: portColors.style },
+  { id: "edge-5", from: { nodeId: "image-model-1", port: "imageOut" }, to: { nodeId: "preview-1", port: "sourceIn" }, color: portColors.image }
 ];
+
+const initialViewport = {
+  x: -1.7490859208151575,
+  y: 16.552319630928295,
+  scale: 0.7127650165308045
+};
 
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
@@ -573,6 +734,7 @@ const mouseWheelZoomResetMs = 180;
 const mouseWheelZoomStepCooldownMs = 70;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
+const previewLayoutDragMime = "application/x-newtnode-preview-layout-item";
 const namedColorPalette = [
   { label: "Red", color: "#ff3b30" },
   { label: "Green", color: "#58ce63" },
@@ -586,6 +748,13 @@ const namedColorPalette = [
 const groupPalette = namedColorPalette.map((item) => item.color);
 const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
+const zImageUnsupportedInputPorts = new Set(["cameraIn", "styleIn", "transferIn", "characterIn"]);
+const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "character"]);
+const lumaImageUnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
+const lumaImageUnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
+const krea2UnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
+const krea2UnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
+const emptyPortSet = new Set();
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
@@ -595,6 +764,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
   const undoStackRef = React.useRef([]);
+  const redoStackRef = React.useRef([]);
+  const portPositionFrameRef = React.useRef(null);
   const clipboardRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
   const outputHistoryLoadedRef = React.useRef(false);
@@ -602,7 +773,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const mouseWheelZoomDirectionRef = React.useRef(0);
   const mouseWheelZoomLastEventAtRef = React.useRef(0);
   const mouseWheelZoomLastStepAtRef = React.useRef(0);
-  const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, normalizeEditorGraph }), []);
+  const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
@@ -624,10 +795,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [contextMenu, setContextMenu] = React.useState(null);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
+  const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
   const [outputHistory, setOutputHistory] = React.useState([]);
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
+  const selectedEdgeIdRef = React.useRef(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [comfyWanDialog, setComfyWanDialog] = React.useState(null);
 
@@ -675,6 +848,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     loadProjects,
     createNewWorkflow,
     saveProject,
+    startNewProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
     openWorkflowFromBrowserPicker,
@@ -706,9 +880,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSelectedEdgeId,
     setProjectMenuOpen,
     setFileMenuOpen,
+    newProjectNodes: initialNodes,
+    newProjectEdges: initialEdges,
+    newProjectViewport: initialViewport,
     normalizeEditorGraph,
     dedupeEdges,
     pushUndoSnapshot,
+    clearUndoStack,
     importOffsetForNodes: clearImportOffset,
     onStatusChange
   });
@@ -778,6 +956,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [active, nodes, viewport, selectedNodeIds]);
 
   React.useLayoutEffect(() => {
+    if (!active || typeof ResizeObserver === "undefined") return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    const observer = new ResizeObserver(() => schedulePortPositionRefresh());
+    observer.observe(canvas);
+    canvas.querySelectorAll("[data-node-card-id]").forEach((element) => observer.observe(element));
+    canvas.querySelectorAll("[data-port-key]").forEach((element) => observer.observe(element));
+    schedulePortPositionRefresh();
+
+    return () => observer.disconnect();
+  }, [active, nodes.map((node) => node.id).join("|"), selectedNodeIds.join("|"), viewport]);
+
+  React.useEffect(() => () => {
+    if (portPositionFrameRef.current) {
+      window.cancelAnimationFrame(portPositionFrameRef.current);
+      portPositionFrameRef.current = null;
+    }
+  }, []);
+
+  React.useLayoutEffect(() => {
     if (!active) return;
     syncGroupMembership();
   }, [active, nodes, groups, viewport]);
@@ -802,9 +1001,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   React.useEffect(() => {
     if (selectedEdgeId && !edges.some((edge) => edge.id === selectedEdgeId)) {
+      selectedEdgeIdRef.current = null;
       setSelectedEdgeId(null);
     }
   }, [edges, selectedEdgeId]);
+
+  React.useEffect(() => {
+    selectedEdgeIdRef.current = selectedEdgeId || null;
+  }, [selectedEdgeId]);
+
+  React.useEffect(() => {
+    if (selectedNodeIds.length) selectedEdgeIdRef.current = null;
+  }, [selectedNodeIds]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -816,6 +1024,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         event.preventDefault();
         saveProject();
         return;
+      }
+
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const edgeId = selectedEdgeIdRef.current || selectedEdgeId;
+        if (!selectedNodeIds.length && edgeId && edgesRef.current.some((edge) => edge.id === edgeId)) {
+          event.preventDefault();
+          removeEdges([edgeId]);
+          return;
+        }
       }
 
       if (event.target.closest?.("input, textarea, select")) return;
@@ -838,6 +1055,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
+      if (commandKey && key === "z" && event.shiftKey) {
+        event.preventDefault();
+        redoGraphChange();
+        return;
+      }
+
+      if (commandKey && key === "y") {
+        event.preventDefault();
+        redoGraphChange();
+        return;
+      }
+
       if (commandKey && key === "z") {
         event.preventDefault();
         undoGraphChange();
@@ -857,15 +1086,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (event.key === "Backspace" || event.key === "Delete") {
-        if (selectedEdgeId) {
+        if (selectedNodeIds.length) {
           event.preventDefault();
-          removeEdges([selectedEdgeId]);
-          return;
+          removeNodes(selectedNodeIds);
         }
-
-        if (!selectedNodeIds.length) return;
-        event.preventDefault();
-        removeNodes(selectedNodeIds);
       }
     }
 
@@ -952,6 +1176,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }, [active]);
 
+  function schedulePortPositionRefresh() {
+    if (portPositionFrameRef.current) return;
+    portPositionFrameRef.current = window.requestAnimationFrame(() => {
+      portPositionFrameRef.current = null;
+      updatePortPositions();
+      updateSelectionBounds();
+    });
+  }
+
   function updatePortPositions() {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -974,11 +1207,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    setSelectionBounds(getNodeSetBounds(selectedNodeIds));
+    setSelectionBounds(getSelectionBounds(selectedNodeIds));
   }
 
   function getNodeSetBounds(nodeIds) {
     const bounds = nodeIds.map(getNodeBounds).filter((rect) => rect.right > rect.left && rect.bottom > rect.top);
+    return rectBounds(bounds);
+  }
+
+  function getSelectionBounds(nodeIds) {
+    const bounds = nodeIds.map(getNodeBounds).filter((rect) => rect.right > rect.left && rect.bottom > rect.top);
+    getSelectedGroupsForNodeIds(nodeIds).forEach((group) => bounds.push(groupToRect(group)));
+    return rectBounds(bounds);
+  }
+
+  function rectBounds(bounds) {
     if (!bounds.length) return null;
 
     const left = Math.min(...bounds.map((rect) => rect.left));
@@ -1056,7 +1299,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function createNodeData(type, label, count) {
     const data = createDefaultNodeData(type, label, count);
     if (type === "imageModel") {
-      const model = enabledImageModels[0] || imageModelNames.nanoBananaPro;
+      const model = enabledImageModels[0] || imageModelNames.zImage;
       return {
         ...data,
         ...imageModelSelectionPatch(data, model)
@@ -1293,7 +1536,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!edgeIds.length) return;
     pushUndoSnapshot();
     const ids = new Set(edgeIds);
+    const autoAspectInputsRemoved = new Set(
+      edgesRef.current
+        .filter((edge) => ids.has(edge.id))
+        .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "autoAspect")
+        .map((edge) => edge.to.nodeId)
+    );
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
+    autoAspectInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetAutoAspectOutputPatch()));
+    selectedEdgeIdRef.current = null;
     setSelectedEdgeId(null);
     setSaveStatus(`${edgeIds.length} connection${edgeIds.length === 1 ? "" : "s"} deleted`);
   }
@@ -1389,8 +1640,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function updateNode(nodeId, patch) {
     let nextUtilityData = null;
+    let nextEditData = null;
     let nextCameraData = null;
+    let nextStyleData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -1401,7 +1655,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ...patch
               };
               if (node.type === "utility") nextUtilityData = data;
+              if (node.type === "edit") nextEditData = data;
               if (node.type === "camera") nextCameraData = data;
+              if (node.type === "style") nextStyleData = data;
               return {
                 ...node,
                 data
@@ -1430,6 +1686,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return !staleOutput && !inactiveInput;
         })
       );
+    }
+
+    if (nextEditData && ("editGroup" in patch || "editEffect" in patch || "editSourceType" in patch)) {
+      const activePorts = new Set(editInputPortIds(nextEditData));
+      setEdges((current) =>
+        current.filter((edge) => {
+          const staleOutput = edge.from.nodeId === nodeId;
+          const inactiveInput = edge.to.nodeId === nodeId && !activePorts.has(edge.to.port);
+          return !staleOutput && !inactiveInput;
+        })
+      );
+    }
+
+    if (nextStyleData && styleOutputMaybeChanged && !styleOutputEnabled(nextStyleData)) {
+      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && edge.from.port === "styleOut")));
+      setSelectedEdgeId((current) => {
+        const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
+        return selectedEdge?.from.nodeId === nodeId && selectedEdge?.from.port === "styleOut" ? null : current;
+      });
     }
 
     if (nextCameraData && cameraPresetChanged && !hasCameraPreset({ data: nextCameraData })) {
@@ -1898,6 +2173,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
+    const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     let completedVariantCount = 0;
 
     try {
@@ -1910,7 +2186,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const results = await Promise.allSettled(
         wardrobeOptions.map(async (wardrobe) => {
           try {
-            const prompt = [characterSheetPrompt, wardrobe ? characterWardrobePrompt : characterBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n");
+            const prompt = [baseCharacterSheetPrompt, wardrobe ? characterWardrobePrompt : characterBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n");
             const generated = await runCharacterSheetGeneration({
               node,
               prompt,
@@ -2082,8 +2358,650 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  function updateStoryboardNodeFrames(nodeId, updater, patch = {}) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
+    const nextFrames = normalizedStoryboardFrames(typeof updater === "function" ? updater(frames) : updater);
+    const selectedFrameId = patch.selectedFrameId || node.data.selectedFrameId || nextFrames.find((frame) => frame.resultUrl)?.id || nextFrames[0]?.id || "";
+    const selectedFrame = nextFrames.find((frame) => frame.id === selectedFrameId) || nextFrames.find((frame) => frame.resultUrl);
+    const dataPatch = {
+      ...patch,
+      storyboardFrames: nextFrames,
+      selectedFrameId,
+      resultUrl: selectedFrame?.resultUrl || "",
+      resultItems: storyboardResultItems(nextFrames),
+      selectedResultIndex: Math.max(0, nextFrames.filter((frame) => frame.resultUrl).findIndex((frame) => frame.id === selectedFrameId))
+    };
+    const nextNodes = nodesRef.current.map((item) => (
+      item.id === nodeId
+        ? {
+            ...item,
+            data: {
+              ...item.data,
+              ...dataPatch
+            }
+          }
+        : item
+    ));
+    const updatedNodes = dataPatch.resultItems?.some((item) => item?.url)
+      ? syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current)
+      : nextNodes;
+    nodesRef.current = updatedNodes;
+    setNodes(updatedNodes);
+  }
+
+  function patchStoryboardFrame(nodeId, frameId, patch) {
+    updateStoryboardNodeFrames(nodeId, (frames) => frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame)), { selectedFrameId: frameId });
+  }
+
+  function syncStoryboardPreparedCharacters(nodeId, characters) {
+    const nextCharacters = normalizedStoryboardCharacters(characters);
+    const nextNodes = nodesRef.current.map((item) => (
+      item.id === nodeId
+        ? {
+            ...item,
+            data: {
+              ...item.data,
+              storyboardCharacters: nextCharacters
+            }
+          }
+        : item
+    ));
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    return nextNodes.find((item) => item.id === nodeId);
+  }
+
+  function updateStoryboardCharacter(nodeId, characterId, patch) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters).map((character) => (
+      character.id === characterId ? { ...character, ...patch } : character
+    ));
+    updateNode(nodeId, { storyboardCharacters: characters, error: "" });
+  }
+
+  async function uploadStoryboardCharacter(node, file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    if (characters.length >= storyboardMaxCharacters) {
+      updateNode(node.id, { error: `Storyboard accepts up to ${storyboardMaxCharacters} internal characters.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const asset = await uploadNodeAsset(file, "storyboard-character");
+      const character = createStoryboardCharacter({
+        name: storyboardCharacterNameFromFile(file.name, characters.length + 1),
+        portrait: asset,
+        status: "ready"
+      });
+      updateNode(node.id, {
+        storyboardCharacters: [...characters, character],
+        useInternalStoryboardCharacters: true,
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  function importStoryboardCharacter(node, outputItem) {
+    if (!outputItem?.url || outputItem.type !== "image") return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    if (characters.length >= storyboardMaxCharacters) {
+      updateNode(node.id, { error: `Storyboard accepts up to ${storyboardMaxCharacters} internal characters.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    const asset = assetFromOutputItem(outputItem);
+    const character = createStoryboardCharacter({
+      name: storyboardCharacterNameFromFile(outputItem.fileName || outputItem.label || asset.fileName, characters.length + 1),
+      portrait: asset,
+      status: "ready"
+    });
+    updateNode(node.id, {
+      storyboardCharacters: [...characters, character],
+      useInternalStoryboardCharacters: true,
+      status: "ready",
+      error: ""
+    });
+  }
+
+  function removeStoryboardCharacter(nodeId, characterId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      storyboardCharacters: normalizedStoryboardCharacters(node.data.storyboardCharacters).filter((character) => character.id !== characterId),
+      error: ""
+    });
+  }
+
+  async function ensureStoryboardCharactersReady(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    if (!storyboardUsesInternalCharacters(currentNode)) return currentNode;
+    const characters = normalizedStoryboardCharacters(currentNode.data.storyboardCharacters);
+    let preparedNode = currentNode;
+    const unnamedCharacters = characters.filter((character) => character.portrait?.localUrl && !String(character.name || "").trim());
+    if (unnamedCharacters.length) {
+      const nextCharacters = characters.map((character) => (
+        unnamedCharacters.some((item) => item.id === character.id)
+          ? { ...character, status: "error", error: "Add a name tag before generating." }
+          : character
+      ));
+      updateNode(currentNode.id, {
+        storyboardCharacters: nextCharacters,
+        status: "ready",
+        error: "Add name tags for all Storyboard characters before generating."
+      });
+      throw new Error("Add name tags for all Storyboard characters before generating.");
+    }
+    const pendingCharacters = characters.filter((character) =>
+      character.portrait?.localUrl &&
+      storyboardCharacterTag(character) &&
+      (!character.sheetUrl || finiteNumber(character.sheetVersion, 0) < storyboardCharacterSheetVersion)
+    );
+    if (!pendingCharacters.length) return currentNode;
+
+    updateNode(currentNode.id, { status: "compiling-characters", storyboardTab: "view", error: "" });
+    let latestCharacters = characters;
+    for (const character of pendingCharacters) {
+      updateStoryboardCharacter(currentNode.id, character.id, { status: "compiling", error: "" });
+      try {
+        const generationNode = {
+          ...currentNode,
+          data: {
+            ...currentNode.data,
+            title: `${currentNode.data.title || "Storyboard"} ${character.name || "Character"}`
+          }
+        };
+        const generated = await runCharacterSheetGeneration({
+          node: generationNode,
+          prompt: storyboardCharacterSheetPromptForNode(currentNode),
+          portrait: character.portrait,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: storyboardCharacterTag(character)
+        });
+        latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
+          item.id === character.id
+            ? {
+                ...item,
+                sheetUrl: generated.url,
+                sheetFileName: generated.fileName || "",
+                sheetVersion: storyboardCharacterSheetVersion,
+                status: "ready",
+                error: ""
+              }
+            : item
+        ));
+        preparedNode = {
+          ...preparedNode,
+          data: {
+            ...preparedNode.data,
+            storyboardCharacters: latestCharacters
+          }
+        };
+        preparedNode = syncStoryboardPreparedCharacters(currentNode.id, latestCharacters) || preparedNode;
+        updateNode(currentNode.id, { error: "" });
+      } catch (error) {
+        latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
+          item.id === character.id ? { ...item, status: "error", error: error.message || "Character sheet failed." } : item
+        ));
+        updateNode(currentNode.id, { storyboardCharacters: latestCharacters, error: error.message || "Character sheet failed." });
+      }
+    }
+
+    updateNode(currentNode.id, { status: "ready" });
+    return preparedNode;
+  }
+
+  async function planStoryboardNode(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    const incoming = currentIncomingByNode[currentNode.id] || {};
+    const sceneDescription = storyboardSceneDescriptionForNode(currentNode, incoming);
+    if (!sceneDescription.trim()) {
+      updateNode(currentNode.id, { error: "Add a scene description before planning frames." });
+      return null;
+    }
+
+    try {
+      updateNode(currentNode.id, { status: "planning", error: "" });
+      const { response, data } = await nodeApi.planStoryboard({
+        sceneDescription,
+        frameCount: currentNode.data.frameCount,
+        notes: currentNode.data.storyboardNotes || "",
+        characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode),
+        sceneReferences: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], currentIncomingByNode)
+      }, "Storyboard planning");
+      const plan = data.plan || fallbackStoryboardPlanForClient(sceneDescription, storyboardFrameCountForNode(currentNode));
+      const plannedFrames = storyboardFramesFromPlan(plan.frames);
+      if (!response.ok && !plannedFrames.length) throw new Error(data.error || "Storyboard planning failed.");
+
+      pushUndoSnapshot();
+      updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(storyboardFrameCountForNode(currentNode)), {
+        storyboardAnalysis: plan.analysis || "",
+        storyboardPlanSceneDescription: sceneDescription,
+        sceneName: plan.sceneTitle || currentNode.data.sceneName || "Scene 1",
+        storyboardTab: "view",
+        status: "ready",
+        error: response.ok ? "" : data.error || ""
+      });
+      return plannedFrames;
+    } catch (error) {
+      const fallbackFrames = defaultStoryboardFrames(storyboardFrameCountForNode(currentNode)).map((frame, index) => ({
+        ...frame,
+        prompt: `${storyboardFallbackBeat(index)} Single storyboard frame for: ${sceneDescription}. Keep screen direction, blocking, silhouette, eyeline, and continuity clear.`,
+        beat: storyboardFallbackBeat(index)
+      }));
+      updateStoryboardNodeFrames(currentNode.id, fallbackFrames, {
+        storyboardPlanSceneDescription: sceneDescription,
+        storyboardTab: "view",
+        status: "ready",
+        error: `Planner fallback used. ${error.message || ""}`.trim()
+      });
+      return fallbackFrames;
+    }
+  }
+
+  async function generateStoryboardFrame(node, frameId) {
+    return generateStoryboardNode(node, [frameId]);
+  }
+
+  async function generateStoryboardNode(node, frameIds = null) {
+    let currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    let currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    let incoming = currentIncomingByNode[currentNode.id] || {};
+    let frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
+    const sceneDescription = storyboardSceneDescriptionForNode(currentNode, incoming);
+
+    if (!storyboardPlanIsCurrent(currentNode, sceneDescription)) {
+      updateNode(currentNode.id, {
+        status: "ready",
+        error: "Plan the storyboard again after changing the scene description."
+      });
+      return { status: "error", error: new Error("Plan the storyboard again after changing the scene description.") };
+    }
+
+    const targetIds = new Set(frameIds?.length ? frameIds : frames.map((frame) => frame.id));
+    const targetFrames = frames.filter((frame) => targetIds.has(frame.id));
+    if (!targetFrames.length) {
+      updateNode(currentNode.id, { error: "No storyboard frames selected to generate." });
+      return { status: "error", error: new Error("No storyboard frames selected to generate.") };
+    }
+
+    const workflowContext = workflowRequestContext();
+    try {
+      currentNode = await ensureStoryboardCharactersReady(currentNode);
+    } catch (error) {
+      return { status: "error", error };
+    }
+    currentNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
+    currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    incoming = currentIncomingByNode[currentNode.id] || {};
+    const baseImagePromptItems = storyboardImagePromptItems(currentNode, incoming, currentIncomingByNode);
+    const aspectRatio = storyboardAspectRatioForNode(currentNode);
+    const resolution = storyboardResolutionForNode(currentNode);
+    const successes = [];
+    const failures = [];
+
+    updateNode(currentNode.id, { status: "running", storyboardTab: "view", error: "" });
+    const queuedVersion = Date.now();
+    for (const frame of targetFrames) {
+      patchStoryboardFrame(currentNode.id, frame.id, { status: "queued", error: "", resultVersion: queuedVersion });
+    }
+
+    for (const frame of targetFrames) {
+      try {
+        patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
+        const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
+        const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
+        const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, continuityReferenceItems);
+        const missingCharacterTags = storyboardMissingRequiredCharacterTags(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, [
+          frame.prompt,
+          frame.beat,
+          frame.notes,
+          sceneDescription
+        ].filter(Boolean).join("\n"));
+        if (missingCharacterTags.length) {
+          throw new Error(`Character sheet missing for ${missingCharacterTags.map((tag) => `@${tag}`).join(", ")}. Regenerate or re-upload that Storyboard character before running this frame.`);
+        }
+        const prompt = buildStoryboardFramePrompt(currentNode, frame, sceneDescription, incoming, currentIncomingByNode, {
+          hasPreviousFrameReference: continuityReferenceItems.some((item) => item.label === storyboardPreviousFrameLabel),
+          hasSpatialAnchorReference: continuityReferenceItems.some((item) => item.label === storyboardSpatialAnchorLabel)
+        });
+        const generated = await runImageModelGeneration({
+          node: {
+            ...currentNode,
+            data: {
+              ...currentNode.data,
+              title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
+              model: storyboardFixedModel,
+              aspectRatio,
+              resolution
+            }
+          },
+          prompt,
+          aspectRatio,
+          imagePromptItems,
+          workflowContext,
+          index: frame.number - 1
+        });
+        const exported = await exportStoryboardFrameResult({
+          node: currentNode,
+          frame,
+          generated,
+          workflowContext
+        });
+        const nextFrame = {
+          resultUrl: generated.url,
+          exportUrl: exported.url,
+          resultFallbackUrl: exported.url && exported.url !== generated.url ? exported.url : "",
+          resultVersion: Date.now(),
+          fileName: exported.fileName || generated.fileName || "",
+          status: "complete",
+          error: ""
+        };
+        patchStoryboardFrame(currentNode.id, frame.id, nextFrame);
+        successes.push({ ...generated, url: exported.url, label: `Frame ${String(frame.number).padStart(3, "0")}` });
+      } catch (error) {
+        patchStoryboardFrame(currentNode.id, frame.id, { status: "error", error: error.message || "Frame generation failed." });
+        failures.push(error);
+      }
+    }
+
+    const latestNode = nodesRef.current.find((item) => item.id === currentNode.id) || currentNode;
+    updateStoryboardNodeFrames(currentNode.id, normalizedStoryboardFrames(latestNode.data.storyboardFrames), {
+      status: successes.length ? "complete" : "error",
+      storyboardTab: "view",
+      error: failures.length ? `${failures.length} frame${failures.length === 1 ? "" : "s"} failed. ${failures[0]?.message || ""}`.trim() : "",
+      resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n")
+    });
+    loadOutputHistory();
+    return successes.length ? { status: "complete" } : { status: "error", error: failures[0] || new Error("Storyboard generation failed.") };
+  }
+
+  async function exportStoryboardFrameResult({ node, frame, generated, workflowContext }) {
+    const { response, data } = await nodeApi.exportStoryboardFrame({
+      sourceUrl: generated.url,
+      sceneName: node.data.sceneName || "Scene 1",
+      frameNumber: frame.number,
+      ...workflowContextPayload(workflowContext),
+      nodeId: node.id,
+      nodeTitle: node.data.title
+    });
+
+    if (!response.ok) {
+      return { url: generated.url, fileName: "" };
+    }
+
+    return {
+      url: data.frame.localUrl,
+      fileName: data.frame.fileName
+    };
+  }
+
+  async function exportStoryboardBoard(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    const incoming = currentIncomingByNode[currentNode.id] || {};
+    const frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames)
+      .filter((frame) => frame.exportUrl || frame.resultUrl)
+      .map((frame) => ({
+        number: frame.number,
+        sourceUrl: frame.exportUrl || frame.resultUrl,
+        description: frame.description || frame.beat || frame.prompt || "",
+        prompt: frame.prompt || "",
+        beat: frame.beat || "",
+        notes: frame.notes || "",
+        shot: frame.shot || "None",
+        lens: frame.lens || "None",
+        angle: frame.angle || "None"
+      }));
+
+    if (!frames.length) {
+      updateNode(currentNode.id, { error: "Generate at least one storyboard frame before exporting boards." });
+      return;
+    }
+
+    updateNode(currentNode.id, { status: "exporting", storyboardTab: "view", error: "" });
+
+    try {
+      const folderSelection = await systemApi.selectFolder({
+        title: "Choose where to save final storyboard boards",
+        defaultPath: projectPackagePath || ""
+      });
+      if (!folderSelection.response.ok) {
+        if (folderSelection.data?.canceled) {
+          updateNode(currentNode.id, { status: "complete", error: "" });
+          return;
+        }
+        throw new Error(folderSelection.data?.error || "Could not choose an export folder.");
+      }
+      const exportDestinationPath = folderSelection.data?.path || "";
+      if (!exportDestinationPath) {
+        updateNode(currentNode.id, { status: "complete", error: "" });
+        return;
+      }
+
+      const { response, data } = await nodeApi.exportStoryboardBoard({
+        sceneName: currentNode.data.sceneName || "Scene 1",
+        sceneDescription: storyboardSceneDescriptionForNode(currentNode, incoming),
+        aspectRatio: storyboardAspectRatioForNode(currentNode),
+        exportDestinationPath,
+        frames,
+        includePdf: true,
+        ...workflowContextPayload(workflowRequestContext()),
+        nodeId: currentNode.id,
+        nodeTitle: currentNode.data.title
+      });
+
+      if (!response.ok) throw new Error(data.error || "Storyboard export failed.");
+
+      updateNode(currentNode.id, {
+        status: "complete",
+        error: "",
+        storyboardTab: "view",
+        storyboardExport: data.export
+      });
+    } catch (error) {
+      updateNode(currentNode.id, {
+        status: "error",
+        error: error.message || "Storyboard export failed."
+      });
+    }
+  }
+
+  async function exportPreviewLayoutBoard(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
+    const frames = layoutItems.map((item, index) => {
+      const description = previewLayoutExportCaption(item, index);
+      return {
+        number: index + 1,
+        sourceUrl: item.url,
+        description,
+        prompt: "",
+        beat: "",
+        notes: "",
+        shot: "None",
+        lens: "None",
+        angle: "None"
+      };
+    });
+
+    if (!frames.length) {
+      updateNode(currentNode.id, {
+        previewLayoutExportStatus: "",
+        previewLayoutExportError: "Add at least one image to the Layout tab before exporting."
+      });
+      return;
+    }
+
+    updateNode(currentNode.id, {
+      previewTab: "layout",
+      previewLayoutExportStatus: "exporting",
+      previewLayoutExportError: ""
+    });
+
+    try {
+      const folderSelection = await systemApi.selectFolder({
+        title: "Choose where to save preview layout boards",
+        defaultPath: projectPackagePath || ""
+      });
+      if (!folderSelection.response.ok) {
+        if (folderSelection.data?.canceled) {
+          updateNode(currentNode.id, { previewLayoutExportStatus: "", previewLayoutExportError: "" });
+          return;
+        }
+        throw new Error(folderSelection.data?.error || "Could not choose an export folder.");
+      }
+
+      const exportDestinationPath = folderSelection.data?.path || "";
+      if (!exportDestinationPath) {
+        updateNode(currentNode.id, { previewLayoutExportStatus: "", previewLayoutExportError: "" });
+        return;
+      }
+
+      const { response, data } = await nodeApi.exportStoryboardBoard({
+        sceneName: currentNode.data.title || "Preview Layout",
+        sceneDescription: `${currentNode.data.title || "Preview Layout"} exported from Preview Layout.`,
+        aspectRatio: "16:9",
+        exportDestinationPath,
+        frames,
+        includePdf: false,
+        ...workflowContextPayload(workflowRequestContext()),
+        nodeId: currentNode.id,
+        nodeTitle: currentNode.data.title || "Preview Layout"
+      }, "Preview layout export");
+
+      if (!response.ok) throw new Error(data.error || "Preview layout export failed.");
+
+      updateNode(currentNode.id, {
+        previewLayoutExportStatus: "complete",
+        previewLayoutExportError: "",
+        previewLayoutExport: data.export
+      });
+    } catch (error) {
+      updateNode(currentNode.id, {
+        previewLayoutExportStatus: "error",
+        previewLayoutExportError: error.message || "Preview layout export failed."
+      });
+    }
+  }
+
+  async function applyPreviewLayoutImageEdit(item, edit = {}) {
+    const editContext = item?.editContext || {};
+    if (editContext.type !== "previewLayout" || !editContext.nodeId || !editContext.itemId) {
+      throw new Error("This image is not editable from the layout board.");
+    }
+
+    const currentNode = nodesRef.current.find((node) => node.id === editContext.nodeId && node.type === "preview");
+    if (!currentNode) throw new Error("Could not find the Preview node for this image.");
+
+    const currentItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
+    const targetItem = currentItems.find((layoutItem) => layoutItem.id === editContext.itemId);
+    if (!targetItem?.url) throw new Error("Could not find the layout image to edit.");
+
+    const editSuffix = edit.type === "crop" ? "crop" : edit.type === "flipVertical" ? "flip-v" : edit.type === "rotateClockwise" ? "rotate-cw" : edit.type === "curves" ? "curves" : edit.type === "tone" ? "brightness-contrast" : edit.type === "text" ? "text" : edit.type === "inpaint" ? "inpaint" : "flip-h";
+    const baseName = safeStillFrameName(fileBaseName(targetItem.fileName || targetItem.label || currentNode.data.title || "layout-image"));
+    let asset;
+    if (edit.type === "inpaint") {
+      const { response, data } = await nodeApi.previewInpaint({
+        sourceUrl: targetItem.url,
+        prompt: edit.prompt || "",
+        maskDataUrl: edit.maskDataUrl || "",
+        resolution: edit.resolution || "2K",
+        ...workflowContextPayload(workflowRequestContext()),
+        nodeId: currentNode.id,
+        nodeTitle: `${currentNode.data.title || "Preview"} Inpaint`,
+        outputFileNameBase: `${baseName}-${editSuffix}`
+      }, "Preview inpainting");
+      if (!response.ok) throw new Error(data.error || "Preview inpainting failed.");
+      if (!data.image?.localUrl) throw new Error("Preview inpainting returned no image output.");
+      const compositeBlob = await createInpaintCompositePreviewLayoutBlob(targetItem.url, data.image.localUrl, edit.maskDataUrl || "");
+      asset = await uploadNodeAsset(new File([compositeBlob], `${baseName}-${editSuffix}.png`, { type: "image/png" }), "preview-layout");
+    } else {
+      const blob = await createEditedPreviewLayoutImageBlob(targetItem.url, edit);
+      asset = await uploadNodeAsset(new File([blob], `${baseName}-${editSuffix}.png`, { type: "image/png" }), "preview-layout");
+    }
+    if (!asset?.localUrl) throw new Error("Preview edit returned no image output.");
+    const editedItem = {
+      ...targetItem,
+      url: asset.localUrl,
+      fileName: asset.fileName,
+      mimeType: asset.mimeType || "image/png",
+      label: targetItem.label || asset.fileName
+    };
+    const editedLightboxItem = {
+      ...editedItem,
+      editContext
+    };
+    const nextItems = currentItems.map((layoutItem) => (layoutItem.id === targetItem.id ? editedItem : layoutItem));
+
+    pushUndoSnapshot();
+    updateNode(currentNode.id, {
+      previewTab: "layout",
+      previewLayoutItems: nextItems,
+      previewLayoutExport: null,
+      previewLayoutExportStatus: "",
+      previewLayoutExportError: ""
+    });
+    setPreviewLightboxItem((current) => {
+      if (current?.editContext?.type !== "previewLayout") return current;
+      if (current.editContext.nodeId !== currentNode.id || current.editContext.itemId !== targetItem.id) return current;
+      return editedLightboxItem;
+    });
+    return editedLightboxItem;
+  }
+
+  async function restorePreviewLayoutImageEdit(item) {
+    const editContext = item?.editContext || {};
+    if (editContext.type !== "previewLayout" || !editContext.nodeId || !editContext.itemId) {
+      throw new Error("This image is not editable from the layout board.");
+    }
+
+    const currentNode = nodesRef.current.find((node) => node.id === editContext.nodeId && node.type === "preview");
+    if (!currentNode) throw new Error("Could not find the Preview node for this image.");
+
+    const currentItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
+    const targetItem = currentItems.find((layoutItem) => layoutItem.id === editContext.itemId);
+    if (!targetItem) throw new Error("Could not find the layout image to restore.");
+
+    const { editContext: _lightboxEditContext, ...itemData } = item;
+    const restoredItem = {
+      ...targetItem,
+      ...itemData
+    };
+    const restoredLightboxItem = {
+      ...restoredItem,
+      editContext
+    };
+    updateNode(currentNode.id, {
+      previewTab: "layout",
+      previewLayoutItems: currentItems.map((layoutItem) => (layoutItem.id === editContext.itemId ? restoredItem : layoutItem)),
+      previewLayoutExport: null,
+      previewLayoutExportStatus: "",
+      previewLayoutExportError: ""
+    });
+    setPreviewLightboxItem((current) => {
+      if (current?.editContext?.type !== "previewLayout") return current;
+      if (current.editContext.nodeId !== currentNode.id || current.editContext.itemId !== editContext.itemId) return current;
+      return restoredLightboxItem;
+    });
+    return restoredLightboxItem;
+  }
+
   function startNodeDrag(event, node) {
-    if (event.target.closest("input, textarea, select, button, label, summary, details, .preview-resize-handle")) return;
+    if (event.target.closest("input, textarea, select, button, label, summary, details, .preview-resize-handle, .storyboard-frame-card")) return;
     event.stopPropagation();
     const selectedIds = selectNodeForDrag(node.id, event.shiftKey);
     pushUndoSnapshot();
@@ -2098,7 +3016,38 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           id: item.id,
           x: item.x,
           y: item.y
-        }))
+        })),
+      groups: getSelectedGroupsForNodeIds(selectedIds).map((group) => ({
+        id: group.id,
+        x: group.x,
+        y: group.y
+      }))
+    });
+  }
+
+  function startSelectionMove(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!selectedNodeIds.length) return;
+    pushUndoSnapshot();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const pointer = screenToScene(event.clientX, event.clientY);
+    const selected = new Set(selectedNodeIds);
+    setDragState({
+      type: "nodes",
+      startPointer: pointer,
+      nodes: nodes
+        .filter((item) => selected.has(item.id))
+        .map((item) => ({
+          id: item.id,
+          x: item.x,
+          y: item.y
+        })),
+      groups: getSelectedGroupsForNodeIds(selectedNodeIds).map((group) => ({
+        id: group.id,
+        x: group.x,
+        y: group.y
+      }))
     });
   }
 
@@ -2119,6 +3068,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
+      const draggedGroups = new Map((dragState.groups || []).map((item) => [item.id, item]));
+      if (draggedGroups.size) {
+        setGroups((current) =>
+          current.map((group) => {
+            const start = draggedGroups.get(group.id);
+            return start
+              ? {
+                  ...group,
+                  x: start.x + deltaX,
+                  y: start.y + deltaY
+                }
+              : group;
+          })
+        );
+      }
       setNodes((current) =>
         current.map((node) => {
           const start = dragged.get(node.id);
@@ -2298,6 +3262,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     event.stopPropagation();
     pushUndoSnapshot();
     setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
+    const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (targetNode?.type === "autoAspect" && port === "imageIn") {
+      updateNode(nodeId, resetAutoAspectOutputPatch());
+    }
     setSelectedEdgeId(null);
     setDraftEdge(null);
     setSaveStatus("Disconnected input");
@@ -2306,7 +3274,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function selectEdge(event, edgeId) {
     event.preventDefault();
     event.stopPropagation();
+    document.activeElement?.blur?.();
     setSelectedNodeIds([]);
+    selectedEdgeIdRef.current = edgeId;
     setSelectedEdgeId(edgeId);
     setContextMenu(null);
   }
@@ -2370,6 +3340,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         event.preventDefault();
         event.stopPropagation();
         characterScroller.scrollTop += event.deltaY || event.deltaX;
+        return;
+      }
+
+      const storyboardScroller = event.target.closest(".storyboard-view");
+      const storyboardInteractive = event.target.closest("input, textarea, select, button");
+      if (storyboardScroller && !storyboardInteractive) {
+        event.preventDefault();
+        event.stopPropagation();
+        storyboardScroller.scrollTop += event.deltaY || 0;
+        storyboardScroller.scrollLeft += event.deltaX || 0;
         return;
       }
     }
@@ -2463,6 +3443,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  async function openProjectOutputFolder() {
+    if (openingOutputFolder) return;
+    setOpeningOutputFolder(true);
+    try {
+      const { response, data } = await systemApi.openProjectOutputFolder(workflowRequestContext());
+      if (!response.ok) throw new Error(data?.error || "Could not open output folder.");
+      setSaveStatus("Opened output folder");
+    } catch (error) {
+      setSaveStatus(error.message || "Could not open output folder");
+    } finally {
+      setOpeningOutputFolder(false);
+    }
+  }
+
   function screenToScene(clientX, clientY) {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -2506,6 +3500,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .map((node) => node.id);
   }
 
+  function getSelectedGroupsForNodeIds(nodeIds) {
+    if (!groups.length || !nodeIds.length) return [];
+    const selected = new Set(nodeIds);
+    return groups.filter((group) => {
+      const groupNodeIds = getNodeIdsInsideGroup(group);
+      return groupNodeIds.length > 0 && groupNodeIds.every((nodeId) => selected.has(nodeId));
+    });
+  }
+
   function finishConnection(event) {
     if (dragState?.type === "marquee") {
       stopNodeDrag();
@@ -2535,11 +3538,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
 
         pushUndoSnapshot();
+        const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
+        const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         setEdges((current) => {
-          const targetNode = nodesRef.current.find((node) => node.id === to.nodeId);
-          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNode);
+          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
+          const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
+          const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
             if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+            if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+            if (replacesSingleStoryboardSceneInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             return !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
           });
 
@@ -2553,6 +3561,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             }
           ];
         });
+        if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
       }
     } else {
       event.preventDefault();
@@ -2595,26 +3604,31 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const outputKind = autoConnectionOutputKind(source, from);
     const inputs = {
       prompt: {
-        text: ["textIn"],
         imageModel: ["promptIn"],
         videoModel: ["promptIn"],
-        utility: ["promptIn"]
+        utility: ["promptIn"],
+        storyboard: ["sceneDescriptionIn"],
+        text: ["textIn"]
       },
       image: {
         preview: ["sourceIn"],
-        text: ["imageIn"],
+        autoAspect: ["imageIn"],
+        edit: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
         imageModel: ["imagePromptIn", "transferIn"],
+        storyboard: ["sceneReferenceIn"],
         videoModel: ["startFrameIn", "referenceImageIn", "endFrameIn"],
-        utility: utilityImageInputPortIds
+        utility: utilityImageInputPortIds,
+        text: ["imageIn"]
       },
       video: {
         preview: ["sourceIn"],
-        text: ["videoIn"],
         videoModel: ["referenceVideoIn"],
-        utility: ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"]
+        edit: ["videoIn"],
+        utility: ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"],
+        text: ["videoIn"]
       },
       audio: {
         videoModel: ["referenceAudioIn"]
@@ -2624,18 +3638,22 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       },
       style: {
         imageModel: ["styleIn"],
+        storyboard: ["styleIn"],
         text: ["styleIn"]
       },
       transfer: {
         imageModel: ["transferIn"],
+        storyboard: ["transferIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
         utility: utilityImageInputPortIds,
+        edit: ["imageIn"],
         preview: ["sourceIn"]
       },
       character: {
         imageModel: ["characterIn"],
         videoModel: ["characterIn"],
+        storyboard: ["characterIn"],
         composer: composerCharacterInputPortIdsForNode(target),
         preview: ["sourceIn"]
       },
@@ -2648,9 +3666,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function autoConnectionOutputKind(source, from) {
-    if (source.type === "camera") return from.port === "cameraOut" ? "camera" : "image";
+    if (source.type === "storyboard") return storyboardFrameForOutputPort(source, from.port)?.resultUrl ? "image" : "";
+    if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
+    if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source, from.port);
+    if (source.type === "edit") return editOutputType(source);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
@@ -2669,6 +3690,42 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!source || !target) return "Choose a valid connection";
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
+    if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
+    if (isImageModelUnsupportedSource(target, source)) return imageModelUnsupportedInputMessage(target.data?.model);
+    if (isVideoModelUnsupportedCharacterInput(target, to.port)) return videoModelUnsupportedCharacterMessage(target.data?.model);
+    const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
+    if (compatibilityError) return compatibilityError;
+
+    if (source.type === "storyboard") {
+      const frame = storyboardFrameForOutputPort(source, from.port);
+      if (!frame?.resultUrl) return "Generate this Storyboard frame before connecting it";
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "storyboard" && to.port === "sceneReferenceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
+      return "Storyboard frames connect to image inputs or previews";
+    }
+
+    if (source.type === "autoAspect") {
+      const outputItem = autoAspectOutputItem(source, { from });
+      if (!outputItem?.url) return "Generate this Auto Aspect output before connecting it";
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "storyboard" && to.port === "sceneReferenceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
+      return "Auto Aspect outputs connect to image inputs or previews";
+    }
 
     if (source.type === "camera") {
       if (from.port === "imageOut") {
@@ -2680,6 +3737,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "imageIn") return "";
         return "Camera image output connects to image inputs";
       }
 
@@ -2688,14 +3746,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Camera connects to the Image Model camera input";
     }
 
-    if (target.type === "camera" && to.port === "imageIn") {
-      if (["image", "imageModel", "transfer"].includes(source.type)) return "";
-      return "Camera image input accepts image outputs";
-    }
-
     if (source?.type === "style") {
       if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
-      if ((target.type === "imageModel" || target.type === "text") && to.port === "styleIn") return "";
+      if ((source.data.stylePreset || "None") === "Custom Palette" && !customPalettePromptPiece(source.data)) return "Add palette colors before connecting";
+      if (target.type === "imageModel" && to.port === "styleIn") return "";
+      if (target.type === "text" && to.port === "styleIn") return "";
+      if (target.type === "storyboard" && to.port === "styleIn") {
+        if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting a custom Style";
+        return "";
+      }
       return "Style presets connect to Style inputs";
     }
 
@@ -2703,12 +3762,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (!source.data.activated || !source.data.resultUrl) return `Lock Mood Board to enable ${moodBoardOutputFileName} output`;
       if (
         (target.type === "imageModel" && to.port === "transferIn") ||
+        (target.type === "storyboard" && to.port === "transferIn" && target.data.useStoryboardStyle === false) ||
         (target.type === "composer" && to.port === "imageIn") ||
         (target.type === "model3d" && isModel3DImageInputPort(to.port)) ||
         (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) ||
+        (target.type === "edit" && to.port === "imageIn") ||
         (target.type === "preview" && to.port === "sourceIn")
       )
         return "";
+      if (target.type === "storyboard" && to.port === "transferIn") return "Disable Storyboard Style before connecting a custom Mood Board";
       return "Mood Board connects to the Image Model mood board input or previews";
     }
 
@@ -2719,6 +3781,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "videoModel" && to.port === "referenceAudioIn") return "";
         return "Character voice connects to a Video Model audio input";
       }
+      if (target.type === "storyboard" && to.port === "characterIn") {
+        if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
+        return "";
+      }
       if (target.type === "imageModel" && to.port === "characterIn") return "";
       if (target.type === "videoModel" && to.port === "characterIn") return "";
       if (target.type === "composer" && isComposerCharacterInputPort(to.port, target)) return "";
@@ -2726,7 +3792,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Character connects to Character inputs or previews";
     }
 
-    if (["imageModel", "videoModel"].includes(target.type) && to.port === "characterIn") {
+    if ((["imageModel", "videoModel"].includes(target.type) || target.type === "storyboard") && to.port === "characterIn") {
       return "Character inputs accept locked Character nodes";
     }
 
@@ -2736,19 +3802,44 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"].includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "videoIn") return "";
         return "Utility video output connects to video inputs";
       }
 
       if (target.type === "preview" && to.port === "sourceIn") return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
-      if (target.type === "camera" && to.port === "imageIn") return "";
+      if (target.type === "storyboard" && to.port === "sceneReferenceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && isUtilityVideoStitchModel(target.data?.utilityVideoModel) && to.port === "referenceVideoIn") return "";
       if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
       return "Utility image output connects to image inputs";
+    }
+
+    if (source.type === "edit") {
+      if (editOutputType(source) === "video") {
+        if (target.type === "preview" && to.port === "sourceIn") return "";
+        if (target.type === "text" && to.port === "videoIn") return "";
+        if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
+        if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
+        if (target.type === "edit" && to.port === "videoIn") return "";
+        return "Edit video output connects to video inputs";
+      }
+
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "edit" && to.port === "imageIn") return "";
+      return "Edit image output connects to image inputs";
     }
 
     if (target?.type === "utility") {
@@ -2768,6 +3859,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    if (target?.type === "edit") {
+      if (to.port === "imageIn") {
+        if (source.type === "composer") return from.port === "imageOut" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "utility") return utilityOutputType(source, from.port) === "image" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "edit") return editOutputType(source) === "image" ? "" : "Edit image input accepts image outputs";
+        if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
+        if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+        if (["image", "imageModel", "transfer"].includes(source.type)) return "";
+        return "Edit image input accepts image outputs";
+      }
+
+      if (to.port === "videoIn") {
+        if (source.type === "utility") return utilityOutputType(source, from.port) === "video" ? "" : "Edit video input accepts video outputs";
+        if (source.type === "edit") return editOutputType(source) === "video" ? "" : "Edit video input accepts video outputs";
+        if (["video", "videoModel"].includes(source.type)) return "";
+        return "Edit video input accepts video outputs";
+      }
+    }
+
     if (target?.type === "composer") {
       if (isComposerCharacterInputPort(to.port, target)) {
         if (source.type === "character" && from.port === "characterOut") return "";
@@ -2781,37 +3891,55 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    if (target?.type === "autoAspect") {
+      if (to.port === "imageIn") {
+        if (source.type === "composer") return from.port === "imageOut" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "utility") return utilityOutputType(source, from.port) === "image" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "edit") return editOutputType(source) === "image" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
+        if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+        if (["image", "imageModel"].includes(source.type)) return "";
+        return "Auto Aspect accepts image outputs";
+      }
+    }
+
     if (source?.type === "composer") {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "imageIn") return "";
-        if (target.type === "camera" && to.port === "imageIn") return "";
+        if (target.type === "storyboard" && to.port === "sceneReferenceIn") return "";
+        if (target.type === "autoAspect" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
+        if (target.type === "text" && to.port === "imageIn") return "";
+        if (target.type === "edit" && to.port === "imageIn") return "";
         return "Composer frame output connects to image inputs";
       }
     }
 
     if (target?.type === "model3d" && isModel3DImageInputPort(to.port)) {
-      if (source.type === "camera") return from.port === "imageOut" ? "" : "3D image input accepts Camera image output";
       if (source.type === "composer") return from.port === "imageOut" ? "" : "3D image input accepts Composer frame output";
       if (source.type === "utility") return utilityOutputType(source, from.port) === "image" ? "" : "3D image input accepts image outputs";
+      if (source.type === "edit") return editOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
       if (["image", "imageModel", "transfer"].includes(source.type)) return "";
       return "3D image input accepts image outputs";
     }
 
-    if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "model3d"].includes(source?.type)) return "";
-      return "Preview accepts image, video, and 3D sources";
+    if (target?.type === "storyboard" && to.port === "sceneReferenceIn") {
+      if (source.type === "composer") return from.port === "imageOut" ? "" : "Storyboard scene reference accepts image outputs";
+      if (source.type === "utility") return utilityOutputType(source, from.port) === "image" ? "" : "Storyboard scene reference accepts image outputs";
+      if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
+      if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+      if (["image", "imageModel"].includes(source.type)) return "";
+      return "Storyboard scene reference accepts image outputs";
     }
 
     if (target?.type === "text") {
       if (to.port === "textIn") {
         if (["plainText", "text", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Text Model input accepts text outputs";
+        return "Smart Text Model input accepts text outputs";
       }
 
       if (to.port === "imageIn") {
@@ -2828,8 +3956,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (source.type === "style") return "";
         return "Style input accepts style outputs";
       }
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "character"].includes(source?.type)) return "";
+      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "transfer", "character"].includes(source?.type)) return "";
       return "Preview accepts image and video sources";
+    }
+
+    if (target?.type === "preview") {
+      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "transfer", "composer", "model3d"].includes(source?.type)) return "";
+      return "Preview accepts image, video, and 3D sources";
     }
 
     return "";
@@ -2867,6 +4000,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       ...undoStackRef.current.slice(-39),
       cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
     ];
+    redoStackRef.current = [];
+  }
+
+  function clearUndoStack() {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
   }
 
   function undoGraphChange() {
@@ -2876,6 +4015,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
+    redoStackRef.current = [
+      ...redoStackRef.current.slice(-39),
+      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+    ];
     setNodes(previous.nodes);
     setEdges(previous.edges);
     setGroups(previous.groups || []);
@@ -2883,6 +4026,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSelectedNodeIds(previous.selectedNodeIds);
     setSelectedEdgeId(previous.selectedEdgeId || null);
     setSaveStatus("Undone");
+  }
+
+  function redoGraphChange() {
+    const next = redoStackRef.current.pop();
+    if (!next) {
+      setSaveStatus("Nothing to redo");
+      return;
+    }
+
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-39),
+      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+    ];
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setGroups(next.groups || []);
+    setViewport(next.viewport);
+    setSelectedNodeIds(next.selectedNodeIds);
+    setSelectedEdgeId(next.selectedEdgeId || null);
+    setSaveStatus("Redone");
   }
 
   function copySelection() {
@@ -2918,6 +4081,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         })
       };
     });
+    const pastedNodeMap = new Map(pastedNodes.map((node) => [node.id, node]));
     const pastedEdges = clipboard.edges
       .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
       .map((edge, index) => ({
@@ -2931,7 +4095,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...edge.to,
           nodeId: idMap.get(edge.to.nodeId)
         }
-      }));
+      }))
+      .map((edge) => normalizeEdgeForCurrentGraph(edge, pastedNodeMap))
+      .filter(Boolean);
 
     setNodes((current) => [...current, ...pastedNodes]);
     setEdges((current) => [...current, ...pastedEdges]);
@@ -3044,20 +4210,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityBirefnetVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
-    const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode);
+    const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
+    const previousEditResults = existingResultItemsForNode(currentNode, currentNode.type === "edit" ? editOutputType(currentNode) : "video");
     const requestContext = workflowRequestContext();
 
     try {
       await ensureComfyWanAvailableForRun(currentNode);
-      const runningPatch =
-        currentNode.type === "text"
-          ? { status: "running", error: "" }
-          : { status: "running", error: "" };
-      updateNode(currentNode.id, runningPatch);
+      updateNode(currentNode.id, { status: "running", error: "" });
 
       if (currentNode.type === "camera") {
         const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
@@ -3089,6 +4252,50 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: processed.text,
           lastRunModel: processed.model
         });
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "autoAspect") {
+        const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+        if (!sourceImageUrl) throw new Error("Connect an image to Auto Aspect.");
+        const autoAspectTargets = autoAspectTargetsForData(currentNode.data);
+        if (!autoAspectTargets.length) throw new Error("Select at least one aspect ratio.");
+
+        const settled = await settleSequential(
+          autoAspectTargets,
+          (target, index) => runAutoAspectGeneration({
+            node: currentNode,
+            sourceImageUrl,
+            aspectRatio: target.aspectRatio,
+            workflowContext: requestContext,
+            index
+          }),
+          imageRunStaggerMs
+        );
+        const successes = fulfilledRunValues(settled);
+        const failures = rejectedRunResults(settled);
+        ensureRunSuccesses(successes, failures, "Auto Aspect generation failed.");
+        const autoAspectResults = successes.map((item) => ({
+          key: item.key || autoAspectTargetKey(item),
+          aspectRatio: item.aspectRatio,
+          url: item.url,
+          label: item.label,
+          text: item.text || "",
+          cost: item.cost ?? null,
+          sourceUrl: item.sourceUrl || ""
+        }));
+        const resultItems = autoAspectResultItems({ autoAspectResults });
+
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: resultItems[0]?.url || autoAspectResults[0]?.url || "",
+          resultItems,
+          selectedResultIndex: 0,
+          autoAspectResults,
+          resultText: resultTextFromItems(autoAspectResults),
+          error: batchRunError("image", autoAspectTargets.length, successes, failures)
+        });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -3153,13 +4360,42 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
+      if (currentNode.type === "edit") {
+        const generated = await runEditNodeGeneration({
+          node: currentNode,
+          incoming,
+          workflowContext: requestContext
+        });
+        const editResultType = generated.type;
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousEditResults, [generated], editResultType);
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: generated.url,
+          resultItems,
+          selectedResultIndex: firstNewIndex,
+          resultText: generated.text || "",
+          resultType: editResultType,
+          error: ""
+        });
+        loadOutputHistory();
+        return { status: "complete" };
+      }
+
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
+        const isZImage = isZImageImageModel(currentNode.data.model);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
-        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], currentIncomingByNode);
+        const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
+        const imagePromptItems = connectedImagePromptItems(
+          isSegmentation ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
+          currentIncomingByNode,
+          { includeComposerCharacterBindings: !isZImage }
+        );
         const prompt = isSegmentation
           ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio, currentIncomingByNode);
+          : isZImage
+            ? basePrompt
+          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -3174,8 +4410,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         );
         const successes = fulfilledRunValues(settled);
         const failures = rejectedRunResults(settled);
+        const googleFallbackPatch = failures.find((failure) => failure.reason?.nodePatch?.googleImageFallbackAvailable)?.reason.nodePatch || {
+          googleImageFallbackAvailable: false,
+          googleImageFallbackProvider: "",
+          googleImageError: null
+        };
         ensureRunSuccesses(successes, failures, "Image generation failed.");
-        const { resultItems, firstNewIndex } = appendedNodeResultState(previousImageResults, successes, "image");
+        const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
 
         updateNode(currentNode.id, {
           status: "complete",
@@ -3183,7 +4424,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultItems,
           selectedResultIndex: firstNewIndex,
           resultText: resultTextFromItems(successes),
-          error: batchRunError("image", batchCount, successes, failures)
+          error: batchRunError("image", batchCount, successes, failures),
+          ...googleFallbackPatch
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -3212,12 +4454,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      const prompt = buildEffectiveVideoPrompt(basePrompt, incoming);
+      const videoIncoming = videoModelSupportsCharacterInput(currentNode.data.model)
+        ? incoming
+        : { ...incoming, characterIn: [] };
+      const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
           node: currentNode,
           prompt,
-          incoming,
+          incoming: videoIncoming,
           workflowContext: requestContext,
           index
         })
@@ -3240,8 +4485,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return { status: "complete" };
     } catch (error) {
       showComfyWanDialogForError(error, currentNode);
-      updateNode(currentNode.id, { status: "error", error: error.message });
-      return { status: "error", error };
+      const message = error?.message || String(error || "Node failed.");
+      updateNode(currentNode.id, { status: "error", error: message, ...(error?.nodePatch || {}) });
+      return { status: "error", error: error instanceof Error ? error : new Error(message) };
     }
   }
 
@@ -3378,6 +4624,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {previewLightboxItem && (
         <OutputPreviewLightbox
           item={previewLightboxItem}
+          onApplyImageEdit={applyPreviewLayoutImageEdit}
+          onRestoreImageEdit={restorePreviewLayoutImageEdit}
           onClose={() => setPreviewLightboxItem(null)}
         />
       )}
@@ -3400,6 +4648,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </button>
         </div>
         <div className="project-tools">
+          <button className="new-project-button" onClick={startNewProject} title="Start a new node project">
+            <Plus size={14} />
+            <span>New Project</span>
+          </button>
           <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" />
           <div className="file-menu" ref={fileMenuRef}>
             <button className="file-menu-trigger" onClick={() => setFileMenuOpen((open) => !open)} title="File">
@@ -3441,7 +4693,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           />
           <div className="project-picker" ref={projectMenuRef}>
             <button className="project-picker-trigger" onClick={() => setProjectMenuOpen((open) => !open)} title="Load saved workflow">
-              <span>{selectedProjectName || "Recent workflows"}</span>
+              <span>Recent Projects</span>
               <ChevronDown size={13} />
             </button>
             {projectMenuOpen && (
@@ -3532,45 +4784,57 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </svg>
 
           {nodes.map((node) => (
-            <NodeCard
-              key={node.id}
-              node={node}
-              onDragStart={startNodeDrag}
-              onRemove={removeNode}
-              onUpdate={updateNode}
-              onConnectStart={startConnection}
-              onDisconnectInput={disconnectInputPort}
-              connectedPortKeys={connectedPortKeys}
-              incoming={incomingByNode[node.id] || {}}
-              incomingByNode={incomingByNode}
-              onRun={runNode}
-              onUpload={uploadMediaAsset}
-              onOutputImport={importOutputAssetToMediaNode}
-              onTransferImagesUpload={uploadTransferImages}
-              onTransferOutputImport={importOutputAssetToTransferNode}
-              onTransferImageRemove={removeTransferImage}
-              onTransferActivate={activateTransferNode}
-              onTransferUnlock={unlockTransferNode}
-              onCharacterPortraitUpload={uploadCharacterPortrait}
-              onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
-              onCharacterWardrobesUpload={uploadCharacterWardrobes}
-              onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
-              onCharacterVoicesUpload={uploadCharacterVoices}
-              onCharacterWardrobeRemove={removeCharacterWardrobe}
-              onCharacterVoiceRemove={removeCharacterVoice}
-              onCharacterActivate={activateCharacterNode}
-              onCharacterUnlock={unlockCharacterNode}
-              onPreviewResizeStart={startPreviewResize}
-              onOpenComposer={setComposerEditorNodeId}
-              running={node.data.status === "running"}
-              transferCompiling={compilingTransferNodeId === node.id}
-              selected={selectedNodeSet.has(node.id)}
-              tagHighlight={referenceTagHighlights.get(node.id)}
-              imageModelOptions={enabledImageModels}
-              videoModelOptions={enabledVideoModels}
-              utilityImageModelOptions={enabledUtilityImageModels}
-              utilityVideoModelOptions={enabledUtilityVideoModels}
-            />
+            <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
+              <NodeCard
+                node={node}
+                onDragStart={startNodeDrag}
+                onRemove={removeNode}
+                onUpdate={updateNode}
+                onConnectStart={startConnection}
+                onDisconnectInput={disconnectInputPort}
+                connectedPortKeys={connectedPortKeys}
+                incoming={incomingByNode[node.id] || {}}
+                incomingByNode={incomingByNode}
+                onRun={runNode}
+                onUpload={uploadMediaAsset}
+                onOutputImport={importOutputAssetToMediaNode}
+                onTransferImagesUpload={uploadTransferImages}
+                onTransferOutputImport={importOutputAssetToTransferNode}
+                onTransferImageRemove={removeTransferImage}
+                onTransferActivate={activateTransferNode}
+                onTransferUnlock={unlockTransferNode}
+                onCharacterPortraitUpload={uploadCharacterPortrait}
+                onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
+                onCharacterWardrobesUpload={uploadCharacterWardrobes}
+                onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
+                onCharacterVoicesUpload={uploadCharacterVoices}
+                onCharacterWardrobeRemove={removeCharacterWardrobe}
+                onCharacterVoiceRemove={removeCharacterVoice}
+                onCharacterActivate={activateCharacterNode}
+                onCharacterUnlock={unlockCharacterNode}
+                onStoryboardPlan={planStoryboardNode}
+                onStoryboardGenerateAll={generateStoryboardNode}
+                onStoryboardGenerateFrame={generateStoryboardFrame}
+                onStoryboardExport={exportStoryboardBoard}
+                onStoryboardCharacterUpload={uploadStoryboardCharacter}
+                onStoryboardCharacterImport={importStoryboardCharacter}
+                onStoryboardCharacterUpdate={updateStoryboardCharacter}
+                onStoryboardCharacterRemove={removeStoryboardCharacter}
+                onUndoSnapshot={pushUndoSnapshot}
+                onPreviewResizeStart={startPreviewResize}
+                onPreviewOpen={setPreviewLightboxItem}
+                onPreviewLayoutExport={exportPreviewLayoutBoard}
+                onOpenComposer={setComposerEditorNodeId}
+                running={node.data?.status === "running"}
+                transferCompiling={compilingTransferNodeId === node.id}
+                selected={selectedNodeSet.has(node.id)}
+                tagHighlight={referenceTagHighlights.get(node.id)}
+                imageModelOptions={enabledImageModels}
+                videoModelOptions={enabledVideoModels}
+                utilityImageModelOptions={enabledUtilityImageModels}
+                utilityVideoModelOptions={enabledUtilityVideoModels}
+              />
+            </NodeCardBoundary>
           ))}
         </div>
         {selectionBounds && (
@@ -3581,6 +4845,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
+            onMoveStart={startSelectionMove}
           />
         )}
         {contextMenu && (
@@ -3612,8 +4877,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         <ProjectOutputDrawer
           items={projectOutputs}
           onClose={() => setOutputsCollapsed(true)}
+          onOpenFolder={openProjectOutputFolder}
           onRefresh={loadOutputHistory}
           onPreviewOpen={setPreviewLightboxItem}
+          openFolderBusy={openingOutputFolder}
           outputDragMime={outputDragMime}
         />
       )}
@@ -3873,7 +5140,18 @@ function NodeCard({
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
+  onStoryboardPlan,
+  onStoryboardGenerateAll,
+  onStoryboardGenerateFrame,
+  onStoryboardExport,
+  onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
+  onStoryboardCharacterUpdate,
+  onStoryboardCharacterRemove,
+  onUndoSnapshot,
   onPreviewResizeStart,
+  onPreviewOpen,
+  onPreviewLayoutExport,
   onOpenComposer,
   running,
   transferCompiling,
@@ -3885,39 +5163,42 @@ function NodeCard({
   utilityVideoModelOptions
 }) {
   const config = getNodeConfig(node.type);
+  const nodeData = node.data || {};
   const Icon = config.icon;
-  const nodeColor = nodeColorForData(node.data);
+  const nodeColor = nodeColorForData(nodeData);
   const [editingTitle, setEditingTitle] = React.useState(false);
-  const [draftTitle, setDraftTitle] = React.useState(node.data.title || "");
+  const [draftTitle, setDraftTitle] = React.useState(nodeData.title || "");
 
   React.useEffect(() => {
     if (!editingTitle) {
-      setDraftTitle(node.data.title || "");
+      setDraftTitle(nodeData.title || "");
     }
-  }, [node.data.title, editingTitle]);
+  }, [nodeData.title, editingTitle]);
 
   function commitTitleEdit() {
-    const title = draftTitle.trim() || node.data.title || configTitleFallback(node.type);
+    const title = draftTitle.trim() || nodeData.title || configTitleFallback(node.type);
     onUpdate(node.id, { title });
     setDraftTitle(title);
     setEditingTitle(false);
   }
 
   function cancelTitleEdit() {
-    setDraftTitle(node.data.title || "");
+    setDraftTitle(nodeData.title || "");
     setEditingTitle(false);
   }
 
-  const moodBoardScalable = node.type === "transfer" && node.data.locked && node.data.activated && node.data.resultUrl;
+  const moodBoardScalable = node.type === "transfer" && nodeData.locked && nodeData.activated && nodeData.resultUrl;
+  const storyboardScalable = node.type === "storyboard";
 
   return (
     <article
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
-        "--preview-scale": node.data.previewScale || 1,
+        "--preview-scale": nodeData.previewScale || 1,
         "--node-color": nodeColor || "transparent",
-        "--mood-board-scale": moodBoardScalable ? node.data.moodBoardScale || 1 : 1,
+        "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
+        "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
         "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
@@ -3962,7 +5243,7 @@ function NodeCard({
                 }
               }}
             >
-              {node.data.title}
+              {nodeData.title || configTitleFallback(node.type)}
             </span>
           )}
           <NodeColorPicker color={nodeColor} onChange={(color) => onUpdate(node.id, { nodeColor: color })} />
@@ -3998,7 +5279,18 @@ function NodeCard({
         onCharacterVoiceRemove={onCharacterVoiceRemove}
         onCharacterActivate={onCharacterActivate}
         onCharacterUnlock={onCharacterUnlock}
+        onStoryboardPlan={onStoryboardPlan}
+        onStoryboardGenerateAll={onStoryboardGenerateAll}
+        onStoryboardGenerateFrame={onStoryboardGenerateFrame}
+        onStoryboardExport={onStoryboardExport}
+        onStoryboardCharacterUpload={onStoryboardCharacterUpload}
+        onStoryboardCharacterImport={onStoryboardCharacterImport}
+        onStoryboardCharacterUpdate={onStoryboardCharacterUpdate}
+        onStoryboardCharacterRemove={onStoryboardCharacterRemove}
+        onUndoSnapshot={onUndoSnapshot}
         onPreviewResizeStart={onPreviewResizeStart}
+        onPreviewOpen={onPreviewOpen}
+        onPreviewLayoutExport={onPreviewLayoutExport}
         onOpenComposer={onOpenComposer}
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
@@ -4056,6 +5348,256 @@ function CharacterVoicePlayer({ voice }) {
         {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
       </button>
       <span>{formatTimelineTime(currentTime)} / {formatTimelineTime(duration)}</span>
+    </div>
+  );
+}
+
+function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
+  const reportedKeyRef = React.useRef("");
+
+  React.useEffect(() => {
+    reportedKeyRef.current = "";
+  }, [sourceUrl, sourceType]);
+
+  function reportDimensions(width, height, duration = 0) {
+    const next = editDimensionsFromValue({ width, height, duration });
+    if (!next || !sourceUrl) return;
+    const key = `${sourceType}:${sourceUrl}:${next.width || 0}x${next.height || 0}:${next.duration || 0}`;
+    if (reportedKeyRef.current === key) return;
+    reportedKeyRef.current = key;
+    onDimensions?.(next);
+  }
+
+  if (!sourceUrl) return null;
+
+  if (sourceType === "video") {
+    return (
+      <video
+        className="edit-source-dimension-probe"
+        src={sourceUrl}
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          reportDimensions(video.videoWidth, video.videoHeight, video.duration);
+        }}
+      />
+    );
+  }
+
+  return (
+    <img
+      className="edit-source-dimension-probe"
+      src={sourceUrl}
+      alt=""
+      draggable={false}
+      onLoad={(event) => reportDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+    />
+  );
+}
+
+function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
+  const trackRef = React.useRef(null);
+  const dragRef = React.useRef(null);
+  const safeDuration = Math.max(0.001, finiteNumber(duration, 0));
+  const minGap = Math.min(0.033, Math.max(0.001, safeDuration / 1000));
+  const safeStart = clamp(finiteNumber(start, 0), 0, Math.max(0, safeDuration - minGap));
+  const safeEnd = clamp(finiteNumber(end, safeDuration), safeStart + minGap, safeDuration);
+  const startPercent = (safeStart / safeDuration) * 100;
+  const endPercent = (safeEnd / safeDuration) * 100;
+  const selectionWidth = Math.max(0, endPercent - startPercent);
+
+  function timeFromPointer(event) {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect?.width) return 0;
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    return ratio * safeDuration;
+  }
+
+  function commitDrag(event, handle) {
+    const pointerTime = timeFromPointer(event);
+    if (handle === "start") {
+      onChange?.({ start: clamp(pointerTime, 0, safeEnd - minGap), end: safeEnd }, "start");
+      return;
+    }
+    onChange?.({ start: safeStart, end: clamp(pointerTime, safeStart + minGap, safeDuration) }, "end");
+  }
+
+  function startHandleDrag(event, handle) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = handle;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    commitDrag(event, handle);
+  }
+
+  function moveHandleDrag(event) {
+    const handle = dragRef.current;
+    if (!handle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    commitDrag(event, handle);
+  }
+
+  function endHandleDrag(event) {
+    if (!dragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  function startTrackDrag(event) {
+    if (event.button !== 0) return;
+    const pointerTime = timeFromPointer(event);
+    const handle = Math.abs(pointerTime - safeStart) <= Math.abs(pointerTime - safeEnd) ? "start" : "end";
+    startHandleDrag(event, handle);
+  }
+
+  return (
+    <div className="edit-trim-timeline" onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        ref={trackRef}
+        className="edit-trim-track"
+        onPointerDown={startTrackDrag}
+        onPointerMove={moveHandleDrag}
+        onPointerUp={endHandleDrag}
+        onPointerCancel={endHandleDrag}
+      >
+        {sourceUrl ? <video src={sourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
+        <div className="edit-trim-shade left" style={{ width: `${startPercent}%` }} />
+        <div className="edit-trim-shade right" style={{ left: `${endPercent}%` }} />
+        <div className="edit-trim-selection" style={{ left: `${startPercent}%`, width: `${selectionWidth}%` }} />
+        <button
+          type="button"
+          className="edit-trim-handle start"
+          style={{ left: `${startPercent}%` }}
+          onPointerDown={(event) => startHandleDrag(event, "start")}
+          onPointerMove={moveHandleDrag}
+          onPointerUp={endHandleDrag}
+          onPointerCancel={endHandleDrag}
+          aria-label="Trim start"
+          title="Drag trim start"
+        />
+        <button
+          type="button"
+          className="edit-trim-handle end"
+          style={{ left: `${endPercent}%` }}
+          onPointerDown={(event) => startHandleDrag(event, "end")}
+          onPointerMove={moveHandleDrag}
+          onPointerUp={endHandleDrag}
+          onPointerCancel={endHandleDrag}
+          aria-label="Trim end"
+          title="Drag trim end"
+        />
+      </div>
+      <div className="edit-trim-time-readout">
+        <span>{formatTimelineTime(safeStart)}</span>
+        <span>{formatTimelineTime(safeEnd)}</span>
+      </div>
+    </div>
+  );
+}
+
+function EditLivePreview({ sourceUrl, sourceType, sourceDimensions, effect, settings }) {
+  const requestSeqRef = React.useRef(0);
+  const duration = finiteNumber(sourceDimensions?.duration, 0);
+  const settingsSignature = JSON.stringify(settings || {});
+  const [frameTime, setFrameTime] = React.useState(0);
+  const [preview, setPreview] = React.useState({
+    status: sourceUrl ? "loading" : "idle",
+    dataUrl: "",
+    error: "",
+    frameTime: 0
+  });
+  const timeBounds = editPreviewTimeBounds(effect, settings, duration);
+  const boundedFrameTime = sourceType === "video" ? clamp(frameTime, timeBounds.min, timeBounds.max) : 0;
+
+  React.useEffect(() => {
+    if (sourceType !== "video") {
+      setFrameTime(0);
+      return;
+    }
+    setFrameTime((current) => clamp(current || timeBounds.min, timeBounds.min, timeBounds.max));
+  }, [sourceType, duration, effect.id, settingsSignature, timeBounds.min, timeBounds.max]);
+
+  React.useEffect(() => {
+    if (!sourceUrl) {
+      requestSeqRef.current += 1;
+      setPreview({ status: "idle", dataUrl: "", error: "", frameTime: 0 });
+      return undefined;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    setPreview((current) => ({
+      ...current,
+      status: "loading",
+      error: ""
+    }));
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const { response, data } = await nodeApi.editPreview({
+          effectId: effect.id,
+          sourceMediaType: sourceType,
+          sourceImageUrls: sourceType === "image" ? [sourceUrl] : [],
+          sourceVideoUrls: sourceType === "video" ? [sourceUrl] : [],
+          settings,
+          previewTime: boundedFrameTime
+        }, "Edit preview");
+        if (requestSeqRef.current !== requestId) return;
+        if (!response.ok) throw new Error(data.error || "Preview failed.");
+        const dataUrl = data.preview?.dataUrl || "";
+        setPreview({
+          status: dataUrl ? "ready" : "error",
+          dataUrl,
+          error: dataUrl ? "" : "Preview failed.",
+          frameTime: finiteNumber(data.preview?.frameTime, boundedFrameTime)
+        });
+      } catch (error) {
+        if (requestSeqRef.current !== requestId) return;
+        setPreview((current) => ({
+          ...current,
+          status: "error",
+          error: error.message || "Preview failed."
+        }));
+      }
+    }, 320);
+
+    return () => window.clearTimeout(timer);
+  }, [sourceUrl, sourceType, effect.id, settingsSignature, boundedFrameTime]);
+
+  const hasPreview = Boolean(preview.dataUrl);
+  const showFrameControl = sourceType === "video" && duration > 0 && timeBounds.max > timeBounds.min;
+  const displayTime = preview.status === "ready" ? preview.frameTime : boundedFrameTime;
+
+  return (
+    <div className={`edit-live-preview ${hasPreview ? "has-preview" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
+      <div className="edit-live-preview-frame">
+        {hasPreview ? (
+          <img src={preview.dataUrl} alt={`${effect.label} preview`} draggable={false} />
+        ) : (
+          <span>{sourceUrl ? preview.status === "loading" ? "Previewing..." : "Preview unavailable" : "Connect source to preview"}</span>
+        )}
+        {preview.status === "loading" && hasPreview && <span className="edit-live-preview-badge">Updating</span>}
+      </div>
+      {showFrameControl && (
+        <div className="edit-live-preview-controls">
+          <input
+            type="range"
+            min={timeBounds.min}
+            max={timeBounds.max}
+            step={0.01}
+            value={boundedFrameTime}
+            onChange={(event) => setFrameTime(Number(event.target.value))}
+          />
+          <span>{formatTimelineTime(displayTime)}</span>
+        </div>
+      )}
+      {preview.error && <small>{preview.error}</small>}
     </div>
   );
 }
@@ -4869,7 +6411,18 @@ function NodeBody({
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
+  onStoryboardPlan,
+  onStoryboardGenerateAll,
+  onStoryboardGenerateFrame,
+  onStoryboardExport,
+  onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
+  onStoryboardCharacterUpdate,
+  onStoryboardCharacterRemove,
+  onUndoSnapshot,
   onPreviewResizeStart,
+  onPreviewOpen,
+  onPreviewLayoutExport,
   onOpenComposer,
   incomingByNode,
   transferCompiling,
@@ -4881,6 +6434,27 @@ function NodeBody({
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
   const resolvedPromptText = (items = []) => connectedText(items);
+
+  React.useEffect(() => {
+    if (node.type !== "preview" || node.data.previewTab !== "layout") return;
+    const previewSources = connectedPreviewSources(incoming.sourceIn || []);
+    const { source } = previewSelectionForNode(node, previewSources);
+    const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
+    const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls);
+    const nextItems = mergePreviewImagesIntoLayout(currentItems, previewLayoutImageItems(source?.items || []), hiddenUrls);
+    if (samePreviewLayoutItems(currentItems, nextItems)) return;
+    onUpdate(node.id, { previewLayoutItems: nextItems });
+  }, [incoming.sourceIn, node, onUpdate]);
+
+  if (config.unsupported) {
+    return (
+      <div className="node-body model-node-body">
+        <p className="utility-model-description">
+          This saved node type is not available in this branch: {node.type || "unknown"}.
+        </p>
+      </div>
+    );
+  }
 
   if (node.type === "plainText") {
     return (
@@ -5097,6 +6671,18 @@ function NodeBody({
                     onChange={(event) => onUpdate(node.id, { characterReferenceNotes: event.target.value })}
                   />
                 </label>
+                <label className="character-section character-option-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(node.data.cinematicCharacterSheet)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { cinematicCharacterSheet: event.target.checked })}
+                  />
+                  <span>
+                    <strong>Cinematic Sheet</strong>
+                    <small>Natural skin texture and film-quality realism</small>
+                  </span>
+                </label>
                 <details className="character-section character-collapsible characteristics" defaultOpen={hasCharacterTraits}>
                   <summary>
                     <span className="character-section-label">Characteristics <span className="character-optional-label">(Optional)</span></span>
@@ -5189,18 +6775,400 @@ function NodeBody({
     );
   }
 
+  if (node.type === "storyboard") {
+    const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
+    const storedStoryboardTab = ["setup", "view", "advanced"].includes(node.data.storyboardTab) ? node.data.storyboardTab : "setup";
+    const selectedFrame = frames.find((frame) => frame.id === node.data.selectedFrameId) || frames[0];
+    const preparingCharacters = node.data.status === "compiling-characters";
+    const runningStoryboard = node.data.status === "running" || preparingCharacters;
+    const planningStoryboard = node.data.status === "planning";
+    const exportingStoryboard = node.data.status === "exporting";
+    const storyboardLocked = planningStoryboard || runningStoryboard || exportingStoryboard;
+    const activeTab = runningStoryboard || exportingStoryboard ? "view" : storedStoryboardTab;
+    const completedStoryboardFrameCount = frames.filter((frame) => frame.exportUrl || frame.resultUrl).length;
+    const sceneDescriptionPort = config.input.find((port) => port.id === "sceneDescriptionIn");
+    const sceneReferencePort = config.input.find((port) => port.id === "sceneReferenceIn");
+    const stylePort = config.input.find((port) => port.id === "styleIn");
+    const transferPort = config.input.find((port) => port.id === "transferIn");
+    const characterPort = config.input.find((port) => port.id === "characterIn");
+    const connectedSceneDescription = connectedText(incoming.sceneDescriptionIn || []);
+    const sceneDescriptionConnected = Boolean(connectedSceneDescription.trim());
+    const sceneDescription = storyboardSceneDescriptionForNode(node, incoming);
+    const storyboardPlanCurrent = storyboardPlanIsCurrent(node, sceneDescription);
+    const storyboardCharacters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+    const internalCharactersEnabled = storyboardUsesInternalCharacters(node);
+    const sceneCharacterTagMatches = storyboardSceneTagMatches(sceneDescription, node, incoming, incomingByNode);
+    const customInputReason = "Disable Storyboard Style to connect custom nodes";
+    const customInputDisabled = storyboardLocked || storyboardStyleEnabled;
+    const customInputDisabledReason = storyboardLocked ? "Storyboard is generating" : customInputReason;
+    const sceneDescriptionInputPort = sceneDescriptionPort ? { ...sceneDescriptionPort, disabled: storyboardLocked, disabledReason: "Storyboard is generating" } : null;
+    const sceneReferenceInputPort = sceneReferencePort ? { ...sceneReferencePort, disabled: storyboardLocked, disabledReason: "Storyboard is generating" } : null;
+    const customStylePort = stylePort ? { ...stylePort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const customTransferPort = transferPort ? { ...transferPort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const customCharacterPort = characterPort ? { ...characterPort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const storyboardAspectRatio = storyboardAspectRatioForNode(node);
+    const storyboardAspectKey = storyboardAspectRatio.replace(":", "x");
+    const storyboardFrameAspectStyle = { "--storyboard-frame-aspect": storyboardCssAspectRatio(storyboardAspectRatio) };
+
+    function updateFrame(frameId, patch) {
+      if (storyboardLocked) return;
+      const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame));
+      onUpdate(node.id, {
+        storyboardFrames: nextFrames,
+        selectedFrameId: frameId,
+        resultItems: storyboardResultItems(nextFrames),
+        resultUrl: nextFrames.find((frame) => frame.id === frameId)?.resultUrl || node.data.resultUrl || ""
+      });
+    }
+
+    function addFrame() {
+      if (storyboardLocked) return;
+      if (frames.length >= 24) return;
+      const nextFrames = [...frames, createStoryboardFrame(frames.length + 1)];
+      onUndoSnapshot?.();
+      onUpdate(node.id, { storyboardFrames: nextFrames, selectedFrameId: nextFrames.at(-1).id, storyboardTab: "view" });
+    }
+
+    function removeFrame(frameId) {
+      if (storyboardLocked) return;
+      if (frames.length <= 1) return;
+      const nextFrames = normalizedStoryboardFrames(frames.filter((frame) => frame.id !== frameId));
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        storyboardFrames: nextFrames,
+        selectedFrameId: nextFrames[0]?.id || "",
+        resultItems: storyboardResultItems(nextFrames),
+        resultUrl: nextFrames.find((frame) => frame.resultUrl)?.resultUrl || ""
+      });
+    }
+
+    function moveFrame(fromId, toId) {
+      if (storyboardLocked) return;
+      if (!fromId || !toId || fromId === toId) return;
+      const fromIndex = frames.findIndex((frame) => frame.id === fromId);
+      const toIndex = frames.findIndex((frame) => frame.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const nextFrames = [...frames];
+      const [moved] = nextFrames.splice(fromIndex, 1);
+      nextFrames.splice(toIndex, 0, moved);
+      onUndoSnapshot?.();
+      onUpdate(node.id, { storyboardFrames: normalizedStoryboardFrames(nextFrames), selectedFrameId: fromId });
+    }
+
+    function handleCharacterDrop(event) {
+      allowFileDrop(event);
+      if (storyboardLocked || !internalCharactersEnabled) return;
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+      if (outputItem?.type === "image") {
+        onStoryboardCharacterImport?.(node, outputItem);
+        return;
+      }
+      const file = firstAcceptedFile(event.dataTransfer.files, "image");
+      if (file) onStoryboardCharacterUpload?.(node, file);
+    }
+
+    return (
+      <div className={`node-body storyboard-node-body ${storyboardLocked ? "is-rendering" : ""}`}>
+        <div className="storyboard-topbar">
+          <div className="character-tabs" role="tablist" aria-label="Storyboard views">
+            <button type="button" role="tab" aria-selected={activeTab === "setup"} className={activeTab === "setup" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "setup" })}>
+              Storyboard Setup
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "view"} className={activeTab === "view" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "view" })}>
+              Storyboard View
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "advanced"} className={activeTab === "advanced" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "advanced" })}>
+              Advanced
+            </button>
+          </div>
+          <div className="storyboard-actions">
+            <button type="button" onClick={() => onStoryboardPlan?.(node)} disabled={planningStoryboard || runningStoryboard || !sceneDescription.trim()}>
+              {planningStoryboard ? "Planning..." : "Plan"}
+            </button>
+            {(preparingCharacters || exportingStoryboard) && (
+              <span className="storyboard-action-busy" title={preparingCharacters ? "Generating character sheets" : "Exporting storyboard boards"}>
+                <Loader2 size={15} />
+              </span>
+            )}
+            <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node)} disabled={runningStoryboard || planningStoryboard || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate storyboard frames"}>
+              {preparingCharacters ? "Preparing..." : runningStoryboard ? "Generating..." : "Generate"}
+            </button>
+            {activeTab === "view" && (
+              <>
+                <button type="button" onClick={() => onStoryboardExport?.(node)} disabled={storyboardLocked || !completedStoryboardFrameCount} title="Export ordered storyboard frames and PDF">
+                  {exportingStoryboard ? "Exporting..." : "Export Boards"}
+                </button>
+                <button type="button" className="icon-only" onClick={addFrame} disabled={storyboardLocked || frames.length >= 24} title="Add frame">
+                  <Plus size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {activeTab === "setup" ? (
+          <section className="storyboard-setup">
+            <div className="storyboard-setup-grid">
+              <label className="storyboard-scene-field">
+                <span>Scene Description</span>
+                <TaggedPromptTextarea
+                  className="storyboard-tagged-editor"
+                  value={sceneDescription}
+                  placeholder={sceneDescriptionConnected ? "Connected scene description" : "Describe the scene, action, location, and story beat."}
+                  tagMatches={sceneCharacterTagMatches}
+                  readOnly={storyboardLocked || sceneDescriptionConnected}
+                  onChange={(event) => onUpdate(node.id, {
+                    sceneDescription: event.target.value,
+                    storyboardPlanSceneDescription: "",
+                    storyboardAnalysis: ""
+                  })}
+                />
+              </label>
+              <div className="storyboard-settings-grid">
+                <NodeRow label="Scene">
+                  <input value={node.data.sceneName || ""} placeholder="Scene 1" disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { sceneName: event.target.value })} />
+                </NodeRow>
+                <NodeRow label="Frames">
+                  <select value={node.data.frameCount || "Auto"} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { frameCount: event.target.value })}>
+                    {storyboardFrameCountOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+                <NodeRow label="Scene Text" inputPort={sceneDescriptionInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={sceneDescriptionConnected ? "connected-field" : ""} disabled={storyboardLocked}>
+                    {sceneDescriptionConnected ? connectedSummary(incoming.sceneDescriptionIn, "Connected text") : "Manual scene"}
+                  </button>
+                </NodeRow>
+                <NodeRow label="Scene Reference" inputPort={sceneReferenceInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.sceneReferenceIn?.length ? "connected-field" : ""} disabled={storyboardLocked}>
+                    {connectedSummary(incoming.sceneReferenceIn, "Optional image")}
+                  </button>
+                </NodeRow>
+              </div>
+            </div>
+            <section className={`storyboard-character-zone ${internalCharactersEnabled ? "" : "disabled"}`} onDragOver={allowFileDrop} onDrop={handleCharacterDrop}>
+              <div className="storyboard-character-head">
+                <span>Characters</span>
+                {internalCharactersEnabled && !storyboardLocked && storyboardCharacters.length < storyboardMaxCharacters && (
+                  <label className="storyboard-add-character" title="Upload character image">
+                    <Plus size={14} />
+                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onStoryboardCharacterUpload?.(node, event.target.files?.[0])} />
+                  </label>
+                )}
+              </div>
+              <div className="storyboard-character-strip">
+                {internalCharactersEnabled ? (
+                  storyboardCharacters.length ? storyboardCharacters.map((character) => (
+                    <div className={`storyboard-character-card ${character.sheetUrl ? "ready" : ""} ${character.status === "error" ? "error" : ""}`} key={character.id}>
+                      <div className="storyboard-character-thumb">
+                        {character.portrait?.localUrl ? <img src={character.portrait.localUrl} alt={character.name || "Storyboard character"} /> : <UserRound size={20} />}
+                      </div>
+                      <div className="storyboard-character-name-row">
+                        <input value={character.name || ""} placeholder="Name becomes @Name" disabled={storyboardLocked} onChange={(event) => onStoryboardCharacterUpdate?.(node.id, character.id, { name: event.target.value, error: "", status: character.status === "error" ? "ready" : character.status })} />
+                        <div className="storyboard-character-meta-row">
+                          {character.name ? <span className="storyboard-character-tag-preview">@{storyboardCharacterTag(character)}</span> : <span className="storyboard-character-tag-example">Example: @Researcher</span>}
+                          {character.sheetUrl && <span className="storyboard-character-ready">Sheet ready</span>}
+                        </div>
+                      </div>
+                      <button type="button" className="storyboard-character-remove" onClick={() => onStoryboardCharacterRemove?.(node.id, character.id)} disabled={storyboardLocked} title="Remove character">
+                        <X size={12} />
+                      </button>
+                      {character.status === "compiling" && !character.sheetUrl && <small>Building sheet...</small>}
+                      {character.error && <small className="upload-error">{character.error}</small>}
+                    </div>
+                  )) : (
+                    <div className="storyboard-character-empty">Drag to upload a headshot of any character consistency needed in the scene</div>
+                  )
+                ) : (
+                  <div className="storyboard-character-empty">Internal characters disabled in Advanced</div>
+                )}
+              </div>
+            </section>
+            <div className="storyboard-mood-row compact">
+              <label className="storyboard-notes-field">
+                <span>Planning Notes</span>
+                <textarea value={node.data.storyboardNotes || ""} placeholder="Optional scene rules" disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
+              </label>
+            </div>
+            {node.data.storyboardAnalysis && <p className="storyboard-analysis">{node.data.storyboardAnalysis}</p>}
+          </section>
+        ) : activeTab === "advanced" ? (
+          <section className="storyboard-advanced">
+            <div className="storyboard-advanced-panel">
+              <div className="storyboard-advanced-controls">
+                <div className="storyboard-style-master-row">
+                  <span>Storyboard Style</span>
+                  <button
+                    type="button"
+                    className={`storyboard-master-toggle ${storyboardStyleEnabled ? "enabled" : ""}`}
+                    disabled={storyboardLocked}
+                    onClick={() => {
+                      const nextEnabled = !storyboardStyleEnabled;
+                      onUpdate(node.id, {
+                        useStoryboardStyle: nextEnabled,
+                        useMoodBoard: nextEnabled,
+                        useInternalStoryboardCharacters: nextEnabled
+                      });
+                    }}
+                    aria-pressed={storyboardStyleEnabled}
+                    title={storyboardStyleEnabled ? "Storyboard Style enabled" : "Storyboard Style disabled"}
+                  >
+                    <span />
+                  </button>
+                  <small>Disable Storyboard Style for access to custom node inputs for style, mood board and character.</small>
+                </div>
+                <NodeRow label="Resolution">
+                  <select value={storyboardResolutionForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                    {imageResolutionOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+                <NodeRow label="Aspect Ratio">
+                  <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                    {storyboardAspectRatioOptions.map((ratio) => (
+                      <option key={ratio}>{ratio}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+              </div>
+              <div className={`storyboard-custom-inputs ${storyboardStyleEnabled ? "disabled" : ""}`}>
+                <NodeRow label="Style" inputPort={customStylePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.styleIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.styleIn, "Add style")}
+                  </button>
+                </NodeRow>
+                <NodeRow label="Mood Board" inputPort={customTransferPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.transferIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.transferIn, "Add mood board")}
+                  </button>
+                </NodeRow>
+                <NodeRow label="Character" inputPort={customCharacterPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.characterIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.characterIn, "Add character")}
+                  </button>
+                </NodeRow>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="storyboard-view" style={storyboardFrameAspectStyle}>
+            <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
+              {frames.map((frame) => {
+                const selected = frame.id === selectedFrame?.id;
+                const frameBusy = frame.status === "running" || frame.status === "queued";
+                const frameCharacterTagMatches = storyboardSceneTagMatches(frame.prompt || "", node, incoming, incomingByNode);
+                return (
+                  <article
+                    key={frame.id}
+                    className={`storyboard-frame-card ${selected ? "selected" : ""} ${frame.resultUrl ? "has-result" : ""} ${frameBusy ? "is-busy" : ""}`}
+                    draggable={!storyboardLocked}
+                    onDragStart={(event) => {
+                      if (storyboardLocked) {
+                        event.preventDefault();
+                        return;
+                      }
+                      event.stopPropagation();
+                      event.dataTransfer.setData("application/x-storyboard-frame-id", frame.id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (storyboardLocked) return;
+                      moveFrame(event.dataTransfer.getData("application/x-storyboard-frame-id"), frame.id);
+                    }}
+                    onClick={() => {
+                      if (storyboardLocked) return;
+                      onUpdate(node.id, { selectedFrameId: frame.id, resultUrl: frame.resultUrl || node.data.resultUrl });
+                    }}
+                  >
+                    <div className="storyboard-frame-media">
+                      {frame.resultUrl ? (
+                        <img
+                          src={storyboardFrameImageSrc(frame)}
+                          alt={`Storyboard frame ${frame.number}`}
+                          onError={(event) => {
+                            const fallbackSrc = storyboardFrameFallbackSrc(frame);
+                            if (fallbackSrc && event.currentTarget.src !== new URL(fallbackSrc, window.location.href).href) {
+                              event.currentTarget.src = fallbackSrc;
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="storyboard-frame-empty">
+                          <Clapperboard size={22} />
+                          <span>Frame {String(frame.number).padStart(2, "0")}</span>
+                        </div>
+                      )}
+                      {frameBusy && (
+                        <div className="storyboard-frame-rendering">
+                          <Loader2 size={18} />
+                          <span>{frame.status === "queued" ? "Queued" : "Rendering"}</span>
+                        </div>
+                      )}
+                      <div className="storyboard-frame-number">
+                        <GripVertical size={12} />
+                        <span>{String(frame.number).padStart(2, "0")}</span>
+                      </div>
+                    </div>
+                    <div className="storyboard-frame-controls">
+                      <select value={frame.shot || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
+                        {shotPresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                      <select value={frame.lens || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
+                        {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                      <select value={frame.angle || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
+                        {typePresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                    </div>
+                    <TaggedPromptTextarea
+                      className="storyboard-tagged-editor"
+                      value={frame.prompt || ""}
+                      placeholder="Frame prompt"
+                      tagMatches={frameCharacterTagMatches}
+                      readOnly={storyboardLocked}
+                      onChange={(event) => updateFrame(frame.id, { prompt: event.target.value })}
+                    />
+                    <div className="storyboard-frame-actions">
+                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate this frame"}>
+                        {frame.status === "queued" ? "Queued..." : frame.status === "running" ? "Running..." : "Run"}
+                      </button>
+                      <button type="button" className="icon-only" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    {frame.error && <small className="upload-error">{frame.error}</small>}
+                  </article>
+                );
+              })}
+            </div>
+            {node.data.storyboardExport && (
+              <div className="storyboard-export-status">
+                <Download size={13} />
+                <span>
+                  Exported {node.data.storyboardExport.frameCount || 0} board{node.data.storyboardExport.frameCount === 1 ? "" : "s"}
+                  {node.data.storyboardExport.pdf ? " + PDF" : ""} to {node.data.storyboardExport.folderPath || node.data.storyboardExport.folderName || "final boards"}
+                </span>
+              </div>
+            )}
+          </section>
+        )}
+        {node.data.error && <small className="upload-error storyboard-error">{node.data.error}</small>}
+        <button className="preview-resize-handle storyboard-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node, "storyboardScale")} title="Resize storyboard" />
+      </div>
+    );
+  }
+
   if (node.type === "camera") {
     const cameraSelected = hasCameraPreset(node);
     const cameraOutputPort = config.output.find((port) => port.id === "cameraOut");
-    const imageOutputPort = config.output.find((port) => port.id === "imageOut");
-    const imageInputPort = config.input.find((port) => port.id === "imageIn");
-    const imageInputUrl = connectedAssetUrls(incoming.imageIn).at(-1) || "";
-    const imageInputLabel = connectedSummary(incoming.imageIn, "Add image");
-    const cameraPresetDisabled = Boolean(imageInputUrl);
-    const qwenOpen = Boolean(node.data.qwenCameraOpen);
-    const horizontalAngle = finiteNumber(node.data.horizontalAngle, qwenCameraDefaults.horizontalAngle);
-    const verticalAngle = finiteNumber(node.data.verticalAngle, qwenCameraDefaults.verticalAngle);
-    const zoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     return (
       <div className="node-body style-only-node-body camera-node-body">
         {cameraSelected ? (
@@ -5208,104 +7176,31 @@ function NodeBody({
         ) : (
           <div className="style-output-placeholder">Choose camera preset to enable output</div>
         )}
-        <OutputPortRow node={node} port={imageOutputPort} label="Camera image" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        {!qwenOpen && imageInputPort && (
-          <div className="model-input-port-stack camera-input-port-stack" aria-label="Camera edit inputs">
-            <PortHandle
-              node={node}
-              port={imageInputPort}
-              side="input"
-              onConnectStart={onConnectStart}
-              onDisconnectInput={onDisconnectInput}
-              connectedPortKeys={connectedPortKeys}
-            />
-          </div>
-        )}
 
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Shot</span>
-          <select value={node.data.shotPreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { shotPreset: event.target.value })}>
+          <select value={node.data.shotPreset || "None"} onChange={(event) => onUpdate(node.id, { shotPreset: event.target.value })}>
             {shotPresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Lens</span>
-          <select value={node.data.lensPreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { lensPreset: event.target.value })}>
+          <select value={node.data.lensPreset || "None"} onChange={(event) => onUpdate(node.id, { lensPreset: event.target.value })}>
             {lensPresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Type</span>
-          <select value={node.data.typePreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { typePreset: event.target.value })}>
+          <select value={node.data.typePreset || "None"} onChange={(event) => onUpdate(node.id, { typePreset: event.target.value })}>
             {typePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <details className="model-settings-drawer camera-control-drawer" open={qwenOpen} onToggle={(event) => onUpdate(node.id, { qwenCameraOpen: event.currentTarget.open })}>
-          <summary>Qwen Camera Edit</summary>
-          <NodeRow label="Image" inputPort={qwenOpen ? imageInputPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-            <button className={imageInputUrl ? "connected-field" : ""}>{imageInputLabel}</button>
-          </NodeRow>
-          <CameraControlViewport
-            imageUrl={imageInputUrl}
-            horizontalAngle={horizontalAngle}
-            verticalAngle={verticalAngle}
-            zoom={zoom}
-            onChange={(patch) => onUpdate(node.id, patch)}
-          />
-          <div className="camera-control-grid">
-            <div className="camera-control-toolbar">
-              <button
-                className="camera-reset-button"
-                onClick={() =>
-                  onUpdate(node.id, {
-                    horizontalAngle: qwenCameraDefaults.horizontalAngle,
-                    verticalAngle: qwenCameraDefaults.verticalAngle,
-                    zoom: qwenCameraDefaults.zoom
-                  })
-                }
-              >
-                Reset
-              </button>
-            </div>
-            <label>
-              <span>Azimuth</span>
-              <input type="range" min="0" max="360" step="1" value={horizontalAngle} onChange={(event) => onUpdate(node.id, { horizontalAngle: Number(event.target.value) })} />
-              <strong>{Math.round(horizontalAngle)} deg</strong>
-            </label>
-            <label>
-              <span>Elevation</span>
-              <input type="range" min="-30" max="90" step="1" value={verticalAngle} onChange={(event) => onUpdate(node.id, { verticalAngle: Number(event.target.value) })} />
-              <strong>{Math.round(verticalAngle)} deg</strong>
-            </label>
-            <label>
-              <span>Zoom</span>
-              <input type="range" min="0" max="10" step="0.1" value={zoom} onChange={(event) => onUpdate(node.id, { zoom: Number(event.target.value) })} />
-              <strong>{zoom.toFixed(1)}</strong>
-            </label>
-          </div>
-          <NodeRow label="Prompt">
-            <textarea
-              value={node.data.additionalPrompt || ""}
-              onChange={(event) => onUpdate(node.id, { additionalPrompt: event.target.value })}
-              placeholder="Optional extra instruction"
-            />
-          </NodeRow>
-          {node.data.resultUrl && (
-            <div className="camera-generated-preview">
-              <img src={node.data.resultUrl} alt="Qwen camera edit result" />
-            </div>
-          )}
-          {node.data.error && <small className="upload-error">{node.data.error}</small>}
-          <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !imageInputUrl}>
-            {running ? "Running Camera..." : "Run Camera Edit"}
-          </button>
-        </details>
       </div>
     );
   }
@@ -5363,7 +7258,141 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const styleSelected = selectedPreset !== "None";
+    const customPaletteSelected = selectedPreset === "Custom Palette";
+    const paletteColors = normalizedCustomPaletteColors(node.data);
+    const styleSelected = styleOutputEnabled(node.data);
+
+    async function handlePaletteImageUpload(files) {
+      const file = firstAcceptedFile(files, "image");
+      if (!file) return;
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteStatus: "extracting",
+        customPaletteError: "",
+        customPaletteSourceName: file.name,
+        customPalettePreviewUrl: "",
+        customPaletteColors: [],
+        customPaletteRgbText: ""
+      });
+      try {
+        const extracted = await extractCustomPaletteFromFile(file);
+        const firstExtractedColor = extracted.colors?.[0]?.hex;
+        onUpdate(node.id, {
+          customPaletteStatus: "",
+          customPaletteError: "",
+          customPaletteSourceName: file.name,
+          customPalettePreviewUrl: extracted.previewUrl,
+          customPaletteColors: extracted.colors,
+          customPaletteRgbText: "",
+          customPalettePicker: firstExtractedColor || node.data.customPalettePicker || "#ddc631"
+        });
+      } catch (error) {
+        onUpdate(node.id, {
+          customPaletteStatus: "",
+          customPaletteError: error.message || "Could not extract palette from image."
+        });
+      }
+    }
+
+    function handlePaletteDrop(event) {
+      allowFileDrop(event);
+      handlePaletteImageUpload(event.dataTransfer.files);
+    }
+
+    function addPickerColor() {
+      const pickerColor = node.data.customPalettePicker || "#ddc631";
+      const nextColors = uniqueCustomPaletteColors([...paletteColors, customPaletteColorFromHex(pickerColor)]).slice(0, 10);
+      const colorAlreadyApplied = nextColors.length === paletteColors.length && nextColors.every((color, index) => color.hex === paletteColors[index]?.hex);
+      if (colorAlreadyApplied) return;
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteColors: nextColors,
+        customPaletteRgbText: "",
+        customPalettePicker: pickerColor,
+        customPaletteError: ""
+      });
+    }
+
+    async function pickScreenColor() {
+      if (typeof window === "undefined" || !window.EyeDropper) {
+        onUpdate(node.id, {
+          customPaletteError: "Eye dropper is not available in this browser."
+        });
+        return;
+      }
+      try {
+        const result = await new window.EyeDropper().open();
+        const color = customPaletteColorFromHex(result.sRGBHex);
+        onUpdate(node.id, {
+          customPalettePicker: color.hex,
+          customPaletteError: ""
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        onUpdate(node.id, {
+          customPaletteError: "Could not pick that color."
+        });
+      }
+    }
+
+    function clearCustomPalette() {
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteRgbText: "",
+        customPaletteColors: [],
+        customPalettePreviewUrl: "",
+        customPaletteSourceName: "",
+        customPaletteStatus: "",
+        customPaletteError: ""
+      });
+    }
+
+    function updateInlinePicker(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+      const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      const saturation = Math.round(x * 100);
+      const value = Math.round((1 - y) * 100);
+      const color = customPaletteColorFromHsv(pickerColor.hue, saturation, value);
+      onUpdate(node.id, {
+        customPalettePicker: color.hex,
+        customPaletteError: ""
+      });
+    }
+
+    function startInlinePicker(event) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      updateInlinePicker(event);
+    }
+
+    function updateHuePicker(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      const hue = Math.round(y * 360);
+      const color = customPaletteColorFromHsv(hue, pickerColor.saturation, pickerColor.value);
+      onUpdate(node.id, {
+        customPalettePicker: color.hex,
+        customPaletteError: ""
+      });
+    }
+
+    function startHuePicker(event) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      updateHuePicker(event);
+    }
+
+    const pickerColor = customPaletteColorFromHex(node.data.customPalettePicker || "#ddc631");
+    const hasImagePalette = Boolean(node.data.customPalettePreviewUrl);
+    const pickerHueColor = customPaletteColorFromHsv(pickerColor.hue, 100, 100);
+    const pickerMarkerStyle = {
+      "--picker-color": pickerColor.hex,
+      "--picker-hue-color": pickerHueColor.hex,
+      "--picker-x": `${pickerColor.saturation}%`,
+      "--picker-y": `${100 - pickerColor.value}%`,
+      "--picker-hue-y": `${pickerColor.hue / 3.6}%`
+    };
 
     return (
       <div className="node-body style-only-node-body">
@@ -5377,17 +7406,100 @@ function NodeBody({
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">Choose style to enable output</div>
+          <div className="style-output-placeholder">{customPaletteSelected ? "Add palette colors to enable output" : "Choose style to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, customPaletteError: "" })}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
+
+        {customPaletteSelected && (
+          <section className="custom-palette-panel" onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
+            <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
+              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
+                {node.data.customPalettePreviewUrl ? (
+                  <img className="custom-palette-preview" src={node.data.customPalettePreviewUrl} alt="Extracted custom palette" />
+                ) : (
+                  <span className="custom-palette-empty">
+                    <FileImage size={18} />
+                    <span>Drop image or click to extract palette</span>
+                  </span>
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => {
+                    handlePaletteImageUpload(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              {hasImagePalette && (
+                <button type="button" className="custom-palette-image-clear" onClick={clearCustomPalette} title="Clear extracted palette">
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+
+            {!hasImagePalette && (
+              <>
+                <div className="custom-palette-inline-picker">
+                  <div className="custom-palette-spectrum-wrap" style={pickerMarkerStyle}>
+                    <button
+                      type="button"
+                      className="custom-palette-spectrum"
+                      onPointerDown={startInlinePicker}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 1) updateInlinePicker(event);
+                      }}
+                      title="Pick a palette color"
+                    >
+                      <span className="custom-palette-marker" />
+                    </button>
+                    <button
+                      type="button"
+                      className="custom-palette-hue-rail"
+                      onPointerDown={startHuePicker}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 1) updateHuePicker(event);
+                      }}
+                      title="Choose hue"
+                    >
+                      <span className="custom-palette-hue-thumb" />
+                    </button>
+                  </div>
+                  <div className="custom-palette-tool-rail">
+                    <button type="button" className="custom-palette-tool" onClick={addPickerColor} title="Add selected color">
+                      <Plus size={16} />
+                      <span>Add</span>
+                    </button>
+                    <button type="button" className="custom-palette-tool" onClick={pickScreenColor} title="Use eye dropper">
+                      <Pipette size={16} />
+                      <span>Pick</span>
+                    </button>
+                    <button type="button" className="custom-palette-tool muted" onClick={clearCustomPalette} title="Clear palette colors">
+                      <Trash2 size={16} />
+                      <span>Clear</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="custom-palette-swatches" aria-label="Custom palette colors">
+                  {paletteColors.map((color) => (
+                    <span key={`${color.hex}-${color.hue}-${color.value}`} title={`${color.hex} RGB(${color.r}, ${color.g}, ${color.b}) H${color.hue} V${color.value}%`} style={{ "--swatch-color": color.hex }} />
+                  ))}
+                </div>
+              </>
+            )}
+            {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
+            {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
+          </section>
+        )}
       </div>
     );
   }
@@ -5396,15 +7508,176 @@ function NodeBody({
     const previewSources = connectedPreviewSources(incoming.sourceIn);
     const { source: previewSource, item: previewItem, itemIndex: previewIndex } = previewSelectionForNode(node, previewSources);
     const previewItems = previewSource?.items || [];
+    const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
+    const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
+    const layoutColumnCount = previewLayoutColumnCount(layoutItems);
+    const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
+    const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
-    function stepPreview(direction) {
-      if (!previewItems.length) return;
-      const nextIndex = (previewIndex + direction + previewItems.length) % previewItems.length;
-      onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: nextIndex });
+
+    function selectPreviewItem(index, event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      if (!previewSource || !previewItems.length) return;
+      const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
+      const item = previewItems[nextIndex];
+      if (!item?.url) return;
+      onUpdate(previewSource.sourceNodeId, {
+        selectedResultIndex: item.sourceResultIndex ?? nextIndex,
+        resultUrl: item.url
+      });
+      onUpdate(node.id, {
+        previewSourceId: previewSource.id,
+        previewItemIndex: nextIndex
+      });
+    }
+
+    function startPreviewThumbDrag(event, item, index) {
+      if (!item?.url || !item?.type) return;
+      const dragItem = {
+        id: `preview:${previewSource.id}:${index}`,
+        url: item.url,
+        type: item.type,
+        label: item.label || `${previewSource.label} ${index + 1}`,
+        fileName: item.fileName || fileNameFromLocalUrl(item.url),
+        mimeType: item.mimeType || mimeForOutputItem(item)
+      };
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData(outputDragMime, JSON.stringify(dragItem));
+      event.dataTransfer.setData("text/plain", dragItem.url);
+      event.dataTransfer.setData("text/uri-list", dragItem.url);
+    }
+
+    function previewLayoutDropAllowed(event) {
+      const types = Array.from(event.dataTransfer?.types || []);
+      return types.includes(previewLayoutDragMime) || hasOutputItemDragData(event.dataTransfer);
+    }
+
+    function handleLayoutDragOver(event) {
+      if (!previewLayoutDropAllowed(event)) return;
+      allowFileDrop(event);
+      event.dataTransfer.dropEffect = Array.from(event.dataTransfer?.types || []).includes(previewLayoutDragMime) ? "move" : "copy";
+    }
+
+    function addLayoutItem(item, beforeId = "") {
+      if (item?.type !== "image" || !item.url) return;
+      const nextItem = createPreviewLayoutItem(item);
+      const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
+      const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls).filter((url) => url !== nextItem.url && url !== nextItem.sourceUrl);
+      const insertIndex = beforeId ? currentItems.findIndex((layoutItem) => layoutItem.id === beforeId) : -1;
+      const nextItems = [...currentItems];
+      if (insertIndex >= 0) nextItems.splice(insertIndex, 0, nextItem);
+      else nextItems.push(nextItem);
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        previewTab: "layout",
+        previewLayoutItems: nextItems,
+        previewLayoutHiddenUrls: hiddenUrls
+      });
+    }
+
+    function moveLayoutItem(fromId, beforeId = "") {
+      if (!fromId || fromId === beforeId) return;
+      const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
+      const fromIndex = currentItems.findIndex((item) => item.id === fromId);
+      if (fromIndex < 0) return;
+      const nextItems = [...currentItems];
+      const [moved] = nextItems.splice(fromIndex, 1);
+      const toIndex = beforeId ? nextItems.findIndex((item) => item.id === beforeId) : -1;
+      if (toIndex >= 0) nextItems.splice(toIndex, 0, moved);
+      else nextItems.push(moved);
+      if (samePreviewLayoutItems(currentItems, nextItems)) return;
+      onUndoSnapshot?.();
+      onUpdate(node.id, { previewLayoutItems: nextItems });
+    }
+
+    function handleLayoutDrop(event, beforeId = "") {
+      if (!previewLayoutDropAllowed(event)) return;
+      allowFileDrop(event);
+      const layoutItemId = event.dataTransfer.getData(previewLayoutDragMime);
+      if (layoutItemId) {
+        moveLayoutItem(layoutItemId, beforeId);
+        return;
+      }
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+      if (outputItem?.type === "image") addLayoutItem(outputItem, beforeId);
+    }
+
+    function startLayoutItemDrag(event, item) {
+      if (!item?.url) return;
+      event.dataTransfer.effectAllowed = "copyMove";
+      event.dataTransfer.setData(previewLayoutDragMime, item.id);
+      event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
+      event.dataTransfer.setData("text/plain", item.url);
+      event.dataTransfer.setData("text/uri-list", item.url);
+    }
+
+    function removeLayoutItem(itemId, event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const target = layoutItems.find((item) => item.id === itemId);
+      const nextItems = layoutItems.filter((item) => item.id !== itemId);
+      if (nextItems.length === layoutItems.length) return;
+      const nextHiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls);
+      [target?.sourceUrl, target?.url].filter(Boolean).forEach((url) => {
+        if (!nextHiddenUrls.includes(url)) nextHiddenUrls.push(url);
+      });
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        previewLayoutItems: nextItems,
+        previewLayoutHiddenUrls: nextHiddenUrls
+      });
+    }
+
+    function rememberLayoutItemImageElement(itemId, image) {
+      const width = previewLayoutDimension(image?.naturalWidth);
+      const height = previewLayoutDimension(image?.naturalHeight);
+      if (!itemId || !width || !height) return;
+      const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
+      const target = currentItems.find((item) => item.id === itemId);
+      if (!target || (target.width === width && target.height === height)) return;
+      onUpdate(node.id, {
+        previewLayoutItems: currentItems.map((item) => (item.id === itemId ? { ...item, width, height } : item))
+      });
+    }
+
+    function rememberLayoutItemDimensions(itemId, event) {
+      rememberLayoutItemImageElement(itemId, event?.currentTarget);
+    }
+
+    function rememberCachedLayoutItemDimensions(itemId, image) {
+      if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return;
+      window.requestAnimationFrame(() => rememberLayoutItemImageElement(itemId, image));
+    }
+
+    function openLayoutItem(item, event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      if (!item?.url) return;
+      onPreviewOpen?.({
+        ...item,
+        editContext: {
+          type: "previewLayout",
+          nodeId: node.id,
+          itemId: item.id
+        }
+      });
     }
 
     return (
       <div className="node-body preview-node-body">
+        <div className="preview-tabs" role="tablist" aria-label="Preview views" onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" role="tab" aria-selected={activePreviewTab === "preview"} className={activePreviewTab === "preview" ? "active" : ""} onClick={() => onUpdate(node.id, { previewTab: "preview" })}>
+            Preview
+          </button>
+          <button type="button" role="tab" aria-selected={activePreviewTab === "layout"} className={activePreviewTab === "layout" ? "active" : ""} onClick={() => {
+            const nextItems = mergePreviewImagesIntoLayout(layoutItems, previewLayoutImageItems(previewItems), normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls));
+            onUpdate(node.id, samePreviewLayoutItems(layoutItems, nextItems) ? { previewTab: "layout" } : { previewTab: "layout", previewLayoutItems: nextItems });
+          }}>
+            Layout
+          </button>
+        </div>
+
         <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
           {previewSources.length > 1 ? (
             <select
@@ -5423,42 +7696,776 @@ function NodeBody({
             <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect media"}</button>
           )}
         </NodeRow>
-        <div className={`preview-stage ${previewItem ? "has-preview" : ""}`}>
-          {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} onError={useNewtNodeImageFallback} />}
-          {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
-          {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
-          {!previewItem && <span>Preview will appear here</span>}
-        </div>
-        {previewItems.length > 1 && (
-          <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" onClick={() => stepPreview(-1)} title="Previous preview" aria-label="Previous preview">
-              <ChevronLeft size={15} />
-            </button>
-            <div className="preview-thumb-strip">
-              {previewItems.map((item, index) => (
-                <button
-                  key={`${previewSource.id}-${item.url}-${index}`}
-                  type="button"
-                  className={index === previewIndex ? "active" : ""}
-                  onClick={() => onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: index })}
-                  title={item.label || `${previewSource.label} ${index + 1}`}
-                >
-                  {item.type === "image" && <img src={item.url} alt={item.label || `Preview ${index + 1}`} onError={useNewtNodeImageFallback} />}
-                  {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
-                  {item.type === "model3d" && (
-                    <span className="preview-thumb-model">
-                      <Box size={18} />
-                    </span>
-                  )}
-                </button>
-              ))}
+
+        {activePreviewTab === "preview" ? (
+          <>
+            <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+              {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} draggable={false} onError={useNewtNodeImageFallback} />}
+              {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
+              {!previewItem && <span>Preview will appear here</span>}
             </div>
-            <button type="button" onClick={() => stepPreview(1)} title="Next preview" aria-label="Next preview">
-              <ChevronRight size={15} />
-            </button>
-          </div>
+            {previewItems.length > 1 && (
+              <div className="preview-frame-nav" onPointerDown={(event) => event.stopPropagation()}>
+                <button type="button" onClick={(event) => selectPreviewItem(previewIndex - 1, event)} title="Previous preview" aria-label="Previous preview">
+                  <ChevronLeft size={15} />
+                </button>
+                <span>{previewIndex + 1} / {previewItems.length}</span>
+                <button type="button" onClick={(event) => selectPreviewItem(previewIndex + 1, event)} title="Next preview" aria-label="Next preview">
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            )}
+            {previewItems.length > 0 && (
+              <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
+                <div className="preview-thumb-strip">
+                  {previewItems.map((item, index) => (
+                    <button
+                      key={`${previewSource.id}-${item.url}-${index}`}
+                      type="button"
+                      className={index === previewIndex ? "active" : ""}
+                      draggable
+                      onClick={(event) => selectPreviewItem(index, event)}
+                      onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
+                      title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
+                      aria-label={`Select preview ${index + 1}`}
+                    >
+                      {item.type === "image" && <img src={item.url} alt={item.label || `Preview ${index + 1}`} draggable={false} onError={useNewtNodeImageFallback} />}
+                      {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "model3d" && (
+                        <span className="preview-thumb-model">
+                          <Box size={18} />
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <section className="preview-layout-panel" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="preview-layout-toolbar">
+              <span>{layoutItems.length ? `${layoutItems.length} frame${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
+              <button
+                type="button"
+                onClick={() => onPreviewLayoutExport?.(node)}
+                disabled={!layoutItems.length || layoutExporting}
+                title="Export layout frames and PDF"
+              >
+                {layoutExporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                <span>{layoutExporting ? "Exporting" : "Export"}</span>
+              </button>
+            </div>
+            <div
+              className={`preview-layout-board ${layoutItems.length ? "has-items" : ""}`}
+              onDragOver={handleLayoutDragOver}
+              onDrop={(event) => handleLayoutDrop(event)}
+            >
+              {layoutItems.length ? (
+                <div className="preview-layout-grid" style={{ "--preview-layout-column-count": layoutColumnCount }}>
+                  {layoutItems.map((item, index) => (
+                    <figure
+                      key={item.id}
+                      className={`preview-layout-item ${item.width && item.height ? "has-dimensions" : ""}`}
+                      style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
+                      draggable
+                      onDragStart={(event) => startLayoutItemDrag(event, item)}
+                      onDragOver={handleLayoutDragOver}
+                      onDrop={(event) => handleLayoutDrop(event, item.id)}
+                      onDoubleClick={(event) => openLayoutItem(item, event)}
+                      title={`${item.label || `Layout image ${index + 1}`}\nDrag to reorder, double-click to preview`}
+                    >
+                      <img ref={(image) => {
+                        if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
+                      }} src={item.url} alt={item.label || `Layout image ${index + 1}`} draggable={false} onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      <figcaption>{index + 1}</figcaption>
+                      <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
+                        <X size={12} />
+                      </button>
+                    </figure>
+                  ))}
+                </div>
+              ) : (
+                <div className="preview-layout-empty">
+                  <ImagePlus size={20} />
+                  <span>Drop image thumbnails here</span>
+                </div>
+              )}
+            </div>
+            {(node.data.previewLayoutExportError || layoutExport?.folderPath) && (
+              <small className={`preview-layout-export-status ${node.data.previewLayoutExportError ? "error" : ""}`} title={layoutExport?.folderPath || ""}>
+                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutItems.length} frame${(layoutExport.frameCount || layoutItems.length) === 1 ? "" : "s"}`}
+              </small>
+            )}
+          </section>
         )}
         <button className="preview-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node)} title="Resize preview" />
+      </div>
+    );
+  }
+
+  if (node.type === "autoAspect") {
+    const imagePort = config.input.find((port) => port.id === "imageIn");
+    const selectedAspectRatios = normalizedAutoAspectRatios(node.data);
+    const results = normalizedAutoAspectResults(node.data);
+    const sourceConnected = Boolean(incoming.imageIn?.length);
+    const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
+    const advancedOpen = Boolean(node.data.advancedOpen);
+    const model = normalizeAutoAspectModel(node.data.model);
+    const resolution = normalizeImageModelResolution(node.data.resolution || "2K");
+    const removeTextGraphics = Boolean(node.data.removeTextGraphics);
+    const resultItems = autoAspectResultItems({ autoAspectResults: results });
+    const outputPorts = new Map(autoAspectOutputPortsForNode(node).map((port) => [autoAspectTargetKeyFromOutputPort(port.id), port]));
+
+    function activeResultKeysFor(selectedRatios) {
+      return new Set(autoAspectTargetsForData({ selectedAspectRatios: selectedRatios }).map(autoAspectTargetKey));
+    }
+
+    function toggleAspectRatio(ratio) {
+      if (running) return;
+      const nextSelected = selectedAspectRatios.includes(ratio)
+        ? selectedAspectRatios.filter((item) => item !== ratio)
+        : [...selectedAspectRatios, ratio];
+      const activeKeys = activeResultKeysFor(nextSelected);
+      const nextResults = results.filter((result) => activeKeys.has(result.key));
+      const resultItems = autoAspectResultItems({ autoAspectResults: nextResults });
+      onUpdate(node.id, {
+        selectedAspectRatios: nextSelected,
+        autoAspectResults: nextResults,
+        resultItems,
+        resultUrl: resultItems[0]?.url || "",
+        selectedResultIndex: 0
+      });
+    }
+
+    function updateModel(value) {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        model: normalizeAutoAspectModel(value)
+      });
+    }
+
+    function updateResolution(value) {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        resolution: normalizeImageModelResolution(value)
+      });
+    }
+
+    function toggleRemoveTextGraphics() {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        removeTextGraphics: !removeTextGraphics
+      });
+    }
+
+    return (
+      <div className="node-body model-node-body auto-aspect-node-body">
+        <ResultPane
+          label="Aspect outputs will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type="image"
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        />
+        <NodeRow label="Image" inputPort={imagePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <button type="button" className={sourceConnected ? "connected-field" : ""} title={sourceConnected ? sourceSummary : ""}>{sourceSummary}</button>
+        </NodeRow>
+        <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
+          {openAiImageAspectRatios.map((ratio) => {
+            const selected = selectedAspectRatios.includes(ratio);
+            const targets = autoAspectTargetsForRatio(ratio);
+            const targetResults = targets.map((target) => autoAspectResultForTarget(node, target)).filter(Boolean);
+            const readyCount = targetResults.filter((result) => result?.url).length;
+            const result = targetResults[0] || null;
+            const statusText = !selected
+              ? "Select"
+              : readyCount === targets.length
+                ? targets.length > 1 ? `${readyCount} ready` : "Ready"
+                : targets.length > 1 ? `${targets.length} outputs` : "Will generate";
+            return (
+              <div key={ratio} className={`auto-aspect-row ${selected ? "selected" : ""} ${result?.url ? "ready" : ""}`}>
+                <button type="button" disabled={running} onClick={() => toggleAspectRatio(ratio)} title={selected ? `Remove ${ratio}` : `Add ${ratio}`}>
+                  <span className="auto-aspect-check" />
+                  <span>{ratio}</span>
+                  <small>{statusText}</small>
+                </button>
+                {selected && (
+                  <div className="auto-aspect-output-stack" aria-label={`${ratio} outputs`}>
+                    {targets.map((target) => {
+                      const targetKey = autoAspectTargetKey(target);
+                      const port = outputPorts.get(targetKey) || {
+                        id: autoAspectOutputPortId(target),
+                        label: ratio,
+                        color: portColors.image,
+                        disabled: true
+                      };
+                      return (
+                        <OutputPortRow
+                          key={targetKey}
+                          node={node}
+                          port={port}
+                          label=""
+                          onConnectStart={onConnectStart}
+                          onDisconnectInput={onDisconnectInput}
+                          connectedPortKeys={connectedPortKeys}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className={`auto-aspect-advanced ${advancedOpen ? "open" : ""}`}>
+          <button
+            type="button"
+            className="auto-aspect-advanced-toggle"
+            disabled={running}
+            onClick={() => onUpdate(node.id, { advancedOpen: !advancedOpen })}
+            aria-expanded={advancedOpen}
+          >
+            <ChevronDown size={14} />
+            <span>Advanced</span>
+          </button>
+          {advancedOpen && (
+            <div className="auto-aspect-advanced-content">
+              <NodeRow label="Model">
+                <select value={model} disabled={running} onChange={(event) => updateModel(event.target.value)}>
+                  {autoAspectModelOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </NodeRow>
+              <NodeRow label="Resolution">
+                <select value={resolution} disabled={running} onChange={(event) => updateResolution(event.target.value)}>
+                  {imageResolutionOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </NodeRow>
+              <button
+                type="button"
+                className={`auto-aspect-clean-toggle ${removeTextGraphics ? "active" : ""}`}
+                disabled={running}
+                onClick={toggleRemoveTextGraphics}
+                aria-pressed={removeTextGraphics}
+              >
+                <span className="auto-aspect-check" />
+                <span>Remove Graphic Overlays for Compositing</span>
+              </button>
+            </div>
+          )}
+        </div>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected || !selectedAspectRatios.length}>
+          {running ? "Generating aspects..." : "Generate Aspects"}
+        </button>
+      </div>
+    );
+  }
+
+  if (node.type === "edit") {
+    const { groupId, effect, sourceType } = editSelectionFromData(node.data);
+    const settingsOpen = Boolean(node.data.settingsOpen);
+    const groupEffects = editEffectsForGroup(groupId);
+    const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
+    const sourcePort = config.input.find((port) => port.id === inputPortId);
+    const outputPort = outputPortDefinitionsForNode(node)[0];
+    const sourceItems = incoming[inputPortId] || [];
+    const sourceUrl = connectedAssetUrls(sourceItems).at(-1) || "";
+    const sourceDimensions = editSourceDimensionsForItems(sourceItems, sourceType, sourceUrl, node.data.editSourceDimensions);
+    const settings = editSettingsForEffect(node.data, effect, sourceDimensions);
+    const sourceConnected = Boolean(sourceItems.length);
+    const resultType = node.data.resultType || sourceType;
+    const outputFormat = normalizeChoice(node.data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4");
+    const cropAspectLocked = node.data.editCropAspectLocked !== false;
+
+    function updateEditSelection(nextEffect, nextSourceType = sourceType) {
+      const normalizedSourceType = normalizeEditSourceType(nextEffect, nextSourceType);
+      const nextDimensions = normalizedSourceType === sourceType ? sourceDimensions : null;
+      onUpdate(node.id, {
+        editEffect: nextEffect.id,
+        editGroup: nextEffect.groupId,
+        editSourceType: normalizedSourceType,
+        editSettings: defaultEditEffectSettings(nextEffect, nextDimensions || {}),
+        ...resetEditOutputPatch(normalizedSourceType)
+      });
+    }
+
+    function setEditGroup(nextGroupId) {
+      const nextEffect = firstEditEffectForGroup(nextGroupId);
+      updateEditSelection(nextEffect, node.data.editSourceType);
+    }
+
+    function setEditEffect(nextEffectId) {
+      updateEditSelection(findEditEffect(nextEffectId), sourceType);
+    }
+
+    function setEditSourceType(nextSourceType) {
+      const normalizedSourceType = normalizeEditSourceType(effect, nextSourceType);
+      onUpdate(node.id, {
+        editSourceType: normalizedSourceType,
+        editSettings: defaultEditEffectSettings(effect),
+        ...resetEditOutputPatch(normalizedSourceType)
+      });
+    }
+
+    function updateEditSourceDimensions(nextDimensions) {
+      const nextMetadata = editDimensionsFromValue(nextDimensions);
+      if (!nextMetadata || !sourceUrl) return;
+      const normalizedDimensions = {
+        url: sourceUrl,
+        type: sourceType,
+        ...nextMetadata
+      };
+      const previousDimensions = editStoredSourceDimensions(node.data.editSourceDimensions, sourceUrl, sourceType);
+      const previousStoredDimensions = editDimensionsFromValue(node.data.editSourceDimensions);
+      const sameDimensions =
+        previousDimensions?.width === normalizedDimensions.width &&
+        previousDimensions?.height === normalizedDimensions.height &&
+        previousDimensions?.duration === normalizedDimensions.duration;
+      const patch = {
+        editSourceDimensions: normalizedDimensions,
+        error: ""
+      };
+
+      if (effect.id === "crop" && normalizedDimensions.width && normalizedDimensions.height && shouldSeedEditCropSettings(node.data.editSettings, settings, previousStoredDimensions)) {
+        patch.editSettings = {
+          ...settings,
+          width: normalizedDimensions.width,
+          height: normalizedDimensions.height
+        };
+      }
+
+      if (effect.id === "trim" && normalizedDimensions.duration && shouldSeedEditTrimSettings(node.data.editSettings, settings, previousStoredDimensions)) {
+        patch.editSettings = {
+          ...settings,
+          start: 0,
+          end: normalizedDimensions.duration
+        };
+      }
+
+      if (sameDimensions && !patch.editSettings) return;
+      onUpdate(node.id, patch);
+    }
+
+    function updateEditSetting(control, value) {
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          [control.id]: control.type === "checkbox" ? Boolean(value) : value
+        },
+        error: ""
+      });
+    }
+
+    function setCropAspectLocked(nextLocked) {
+      onUpdate(node.id, {
+        editCropAspectLocked: nextLocked,
+        error: ""
+      });
+    }
+
+    function editCropControl(controlId) {
+      return effect.controls.find((control) => control.id === controlId) || {
+        id: controlId,
+        label: controlId === "width" ? "Width" : "Height",
+        min: sourceType === "video" ? 2 : 1,
+        max: 32768,
+        step: 1,
+        defaultValue: controlId === "width" ? 1280 : 720,
+        unit: "px"
+      };
+    }
+
+    function editCropDimensionLimits(control) {
+      const sourceValue = Math.round(Number(sourceDimensions?.[control.id] || 0));
+      const min = sourceType === "video" ? Math.max(2, Math.round(Number(control.min || 2))) : Math.max(1, Math.round(Number(control.min || 1)));
+      const rawMax = Math.max(min, Math.round(Number(sourceValue || control.max || 32768)));
+      const max = sourceType === "video" && rawMax > min && rawMax % 2 !== 0 ? rawMax - 1 : rawMax;
+      return {
+        min,
+        max,
+        step: sourceType === "video" ? 2 : Math.max(1, Number(control.step || 1))
+      };
+    }
+
+    function sanitizeEditCropDimension(value, limits) {
+      const numeric = Math.round(Number(value));
+      const fallback = limits.max;
+      const clamped = clamp(Number.isFinite(numeric) ? numeric : fallback, limits.min, limits.max);
+      if (limits.step === 2) {
+        const even = Math.round(clamped / 2) * 2;
+        return clamp(even, limits.min, limits.max);
+      }
+      return Math.round(clamped);
+    }
+
+    function editCropDimensionValue(control) {
+      const limits = editCropDimensionLimits(control);
+      return sanitizeEditCropDimension(settings[control.id] ?? sourceDimensions?.[control.id] ?? control.defaultValue, limits);
+    }
+
+    function lockedCropDimensions(changedControlId, rawValue) {
+      const widthControl = editCropControl("width");
+      const heightControl = editCropControl("height");
+      const widthLimits = editCropDimensionLimits(widthControl);
+      const heightLimits = editCropDimensionLimits(heightControl);
+      const currentWidth = editCropDimensionValue(widthControl);
+      const currentHeight = editCropDimensionValue(heightControl);
+      const ratio = currentWidth > 0 && currentHeight > 0 ? currentWidth / currentHeight : (sourceDimensions?.width || 16) / Math.max(1, sourceDimensions?.height || 9);
+
+      if (!cropAspectLocked) {
+        return {
+          width: changedControlId === "width" ? sanitizeEditCropDimension(rawValue, widthLimits) : currentWidth,
+          height: changedControlId === "height" ? sanitizeEditCropDimension(rawValue, heightLimits) : currentHeight
+        };
+      }
+
+      if (changedControlId === "width") {
+        let width = sanitizeEditCropDimension(rawValue, widthLimits);
+        let height = sanitizeEditCropDimension(width / ratio, heightLimits);
+        if (height >= heightLimits.max && width / ratio > heightLimits.max) {
+          height = heightLimits.max;
+          width = sanitizeEditCropDimension(height * ratio, widthLimits);
+        }
+        return { width, height };
+      }
+
+      let height = sanitizeEditCropDimension(rawValue, heightLimits);
+      let width = sanitizeEditCropDimension(height * ratio, widthLimits);
+      if (width >= widthLimits.max && height * ratio > widthLimits.max) {
+        width = widthLimits.max;
+        height = sanitizeEditCropDimension(width / ratio, heightLimits);
+      }
+      return { width, height };
+    }
+
+    function updateEditCropDimension(controlId, value) {
+      const nextDimensions = lockedCropDimensions(controlId, value);
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...nextDimensions
+        },
+        error: ""
+      });
+    }
+
+    function renderEditCropDimensionControl(control) {
+      const limits = editCropDimensionLimits(control);
+      const value = editCropDimensionValue(control);
+      return (
+        <NodeRow key={control.id} label={control.label}>
+          <div className="edit-crop-dimension-control">
+            <input
+              type="range"
+              min={limits.min}
+              max={limits.max}
+              step={limits.step}
+              value={value}
+              onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
+            />
+            <input
+              type="number"
+              min={limits.min}
+              max={limits.max}
+              step={limits.step}
+              value={value}
+              onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
+            />
+            <span>px</span>
+          </div>
+        </NodeRow>
+      );
+    }
+
+    function renderEditCropControls() {
+      const widthControl = editCropControl("width");
+      const heightControl = editCropControl("height");
+      const sourceSizeLabel = sourceDimensions?.width && sourceDimensions?.height ? `${sourceDimensions.width} x ${sourceDimensions.height}` : "";
+      return (
+        <>
+          <NodeRow label="Aspect">
+            <div className="edit-crop-toolbar">
+              <button
+                type="button"
+                className={`edit-aspect-lock ${cropAspectLocked ? "active" : ""}`}
+                onClick={() => setCropAspectLocked(!cropAspectLocked)}
+                aria-pressed={cropAspectLocked}
+                title={cropAspectLocked ? "Unlock aspect ratio" : "Lock aspect ratio"}
+                aria-label={cropAspectLocked ? "Unlock aspect ratio" : "Lock aspect ratio"}
+              >
+                {cropAspectLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+              {sourceSizeLabel && <span>{sourceSizeLabel}</span>}
+            </div>
+          </NodeRow>
+          {renderEditCropDimensionControl(widthControl)}
+          {renderEditCropDimensionControl(heightControl)}
+        </>
+      );
+    }
+
+    function editTrimControl(controlId) {
+      return effect.controls.find((control) => control.id === controlId) || {
+        id: controlId,
+        label: controlId === "start" ? "Start" : "End",
+        min: 0,
+        max: 86400,
+        step: 0.01,
+        defaultValue: controlId === "start" ? 0 : 5,
+        unit: "s"
+      };
+    }
+
+    function editTrimDuration() {
+      const duration = finiteNumber(sourceDimensions?.duration, 0);
+      if (duration > 0) return duration;
+      return Math.max(1, finiteNumber(settings.end, 5), finiteNumber(settings.start, 0));
+    }
+
+    function normalizedEditTrimTimes(nextStart = settings.start, nextEnd = settings.end, changedControl = null) {
+      const duration = editTrimDuration();
+      const minGap = Math.min(0.033, Math.max(0.001, duration / 1000));
+      let start = clamp(finiteNumber(nextStart, 0), 0, Math.max(0, duration - minGap));
+      let end = clamp(finiteNumber(nextEnd, duration), minGap, duration);
+      if (end <= start) {
+        const startChanged = changedControl ? changedControl === "start" : nextStart !== settings.start;
+        if (startChanged) {
+          start = Math.max(0, end - minGap);
+        } else {
+          end = Math.min(duration, start + minGap);
+        }
+      }
+      return {
+        start: Number(start.toFixed(3)),
+        end: Number(end.toFixed(3))
+      };
+    }
+
+    function updateEditTrimTimes(nextTimes, changedControl = null) {
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...normalizedEditTrimTimes(nextTimes.start ?? settings.start, nextTimes.end ?? settings.end, changedControl)
+        },
+        error: ""
+      });
+    }
+
+    function updateEditTrimSetting(controlId, value) {
+      updateEditTrimTimes(controlId === "start" ? { start: value } : { end: value }, controlId);
+    }
+
+    function renderEditTrimNumberControl(control) {
+      const duration = editTrimDuration();
+      const times = normalizedEditTrimTimes();
+      const value = control.id === "start" ? times.start : times.end;
+      return (
+        <NodeRow key={control.id} label={control.label}>
+          <div className="edit-trim-number-control">
+            <input
+              type="number"
+              min={0}
+              max={duration}
+              step={control.step || 0.01}
+              value={value}
+              onChange={(event) => updateEditTrimSetting(control.id, event.target.value)}
+            />
+            <span>s</span>
+          </div>
+        </NodeRow>
+      );
+    }
+
+    function renderEditTrimControls() {
+      const startControl = editTrimControl("start");
+      const endControl = editTrimControl("end");
+      const duration = editTrimDuration();
+      const times = normalizedEditTrimTimes();
+      return (
+        <>
+          {renderEditTrimNumberControl(startControl)}
+          {renderEditTrimNumberControl(endControl)}
+          <EditTrimTimeline
+            sourceUrl={sourceUrl}
+            duration={duration}
+            start={times.start}
+            end={times.end}
+            onChange={updateEditTrimTimes}
+          />
+        </>
+      );
+    }
+
+    function renderEditControl(control) {
+      const value = settings[control.id] ?? control.defaultValue;
+      if (control.type === "select") {
+        return (
+          <select value={value} onChange={(event) => updateEditSetting(control, event.target.value)}>
+            {(control.options || []).map((option) => (
+              <option key={option} value={option}>{formatEditOptionLabel(option)}</option>
+            ))}
+          </select>
+        );
+      }
+
+      if (control.type === "checkbox") {
+        return (
+          <button
+            type="button"
+            className={`edit-checkbox ${value ? "active" : ""}`}
+            onClick={() => updateEditSetting(control, !value)}
+            aria-pressed={Boolean(value)}
+          >
+            {value ? "On" : "Off"}
+          </button>
+        );
+      }
+
+      if (control.type === "range") {
+        return (
+          <div className="edit-range-control">
+            <input
+              type="range"
+              min={control.min}
+              max={control.max}
+              step={control.step}
+              value={value}
+              onChange={(event) => updateEditSetting(control, event.target.value)}
+            />
+            <input
+              type="number"
+              min={control.min}
+              max={control.max}
+              step={control.step}
+              value={value}
+              onChange={(event) => updateEditSetting(control, event.target.value)}
+            />
+            {control.unit && <span>{control.unit}</span>}
+          </div>
+        );
+      }
+
+      return (
+        <div className="edit-number-control">
+          <input
+            type="number"
+            min={control.min}
+            max={control.max}
+            step={control.step}
+            value={value}
+            onChange={(event) => updateEditSetting(control, event.target.value)}
+          />
+          {control.unit && <span>{control.unit}</span>}
+        </div>
+      );
+    }
+
+    return (
+      <div className="node-body model-node-body edit-node-body">
+        <EditSourceDimensionProbe sourceUrl={sourceUrl} sourceType={sourceType} onDimensions={updateEditSourceDimensions} />
+        <div className="edit-effect-tabs" role="tablist" aria-label="Edit effect groups">
+          {editEffectGroups.map((group) => (
+            <button
+              key={group.id}
+              className={groupId === group.id ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={groupId === group.id}
+              onClick={() => setEditGroup(group.id)}
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
+        <ResultPane
+          label="Edited output will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type={resultType}
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        />
+        <OutputPortRow node={node} port={outputPort} label={outputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        {!settingsOpen && (
+          <div className="model-input-port-stack utility-input-port-stack" aria-label="Edit inputs">
+            <PortHandle
+              node={node}
+              port={sourcePort}
+              side="input"
+              onConnectStart={onConnectStart}
+              onDisconnectInput={onDisconnectInput}
+              connectedPortKeys={connectedPortKeys}
+            />
+          </div>
+        )}
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
+          {running ? "Editing..." : "Run Edit"}
+        </button>
+        <details className="model-settings-drawer edit-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
+          <summary>Edit</summary>
+          <NodeRow label="Effect">
+            <select value={effect.id} onChange={(event) => setEditEffect(event.target.value)}>
+              {groupEffects.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </NodeRow>
+          {effect.mediaTypes.length > 1 && (
+            <NodeRow label="Source">
+              <select value={sourceType} onChange={(event) => setEditSourceType(event.target.value)}>
+                {effect.mediaTypes.map((mediaType) => (
+                  <option key={mediaType} value={mediaType}>{capitalizeMediaType(mediaType)}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
+          <NodeRow label={capitalizeMediaType(sourceType)} inputPort={settingsOpen ? sourcePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button type="button" className={sourceConnected ? "connected-field" : ""}>{connectedSummary(sourceItems, `Add ${sourceType}`)}</button>
+          </NodeRow>
+          {sourceType === "video" && (
+            <NodeRow label="Format">
+              <select value={outputFormat} onChange={(event) => onUpdate(node.id, { editOutputFormat: event.target.value, error: "" })}>
+                {editVideoOutputOptions.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
+          <EditLivePreview
+            sourceUrl={sourceUrl}
+            sourceType={sourceType}
+            sourceDimensions={sourceDimensions}
+            effect={effect}
+            settings={settings}
+          />
+          {effect.id === "crop" ? (
+            renderEditCropControls()
+          ) : effect.id === "trim" ? (
+            renderEditTrimControls()
+          ) : effect.controls.length ? (
+            effect.controls.map((control) => (
+              <NodeRow key={control.id} label={control.label}>
+                {renderEditControl(control)}
+              </NodeRow>
+            ))
+          ) : (
+            <div className="edit-empty-controls">No settings for this effect.</div>
+          )}
+          <p className="edit-effect-description">{effect.definition}</p>
+        </details>
       </div>
     );
   }
@@ -5481,6 +8488,7 @@ function NodeBody({
     const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
     const utilityVideoModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel);
     const isColorIdMatte = isUtilityColorIdMatteModel(utilityImageModel);
+    const isQwenCameraEdit = isUtilityQwenCameraEditModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
     const isPatina = isPatinaModel(utilityImageModel);
     const isStillFrame = isUtilityStillFrameModel(utilityImageModel);
@@ -5511,6 +8519,10 @@ function NodeBody({
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
     const stillFrameVideoUrl = isStillFrame ? connectedAssetUrls(incoming.referenceVideoIn).at(-1) || "" : "";
+    const qwenImageInputUrl = isQwenCameraEdit ? connectedAssetUrls(incoming.imageIn).at(-1) || "" : "";
+    const qwenHorizontalAngle = finiteNumber(node.data.horizontalAngle, qwenCameraDefaults.horizontalAngle);
+    const qwenVerticalAngle = finiteNumber(node.data.verticalAngle, qwenCameraDefaults.verticalAngle);
+    const qwenZoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     const utilityOutputPort = {
       ...config.output[0],
       label: utilityOutputMediaType === "video" ? "Video output" : "Image output",
@@ -5611,6 +8623,8 @@ function NodeBody({
                               : "Run Utility Video"
       : isColorIdMatte
         ? "Run Color Matte"
+        : isQwenCameraEdit
+          ? "Run Camera Edit"
         : isSam3Image
         ? "Run SAM 3 Image"
         : isBirefnetImage
@@ -5704,7 +8718,7 @@ function NodeBody({
           </div>
         )}
         <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun}>
-          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : "Running Image...") : utilityRunLabel}
+          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
@@ -6150,6 +9164,57 @@ function NodeBody({
                   </NodeRow>
                   <StillFrameScrubber videoUrl={stillFrameVideoUrl} value={node.data.stillFrameTime ?? 0} onChange={(stillFrameTime) => onUpdate(node.id, { stillFrameTime })} />
                 </>
+              ) : isQwenCameraEdit ? (
+                <>
+                  <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                    <button className={qwenImageInputUrl ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
+                  </NodeRow>
+                  <CameraControlViewport
+                    imageUrl={qwenImageInputUrl}
+                    horizontalAngle={qwenHorizontalAngle}
+                    verticalAngle={qwenVerticalAngle}
+                    zoom={qwenZoom}
+                    onChange={(patch) => onUpdate(node.id, patch)}
+                  />
+                  <div className="camera-control-grid">
+                    <div className="camera-control-toolbar">
+                      <button
+                        className="camera-reset-button"
+                        onClick={() =>
+                          onUpdate(node.id, {
+                            horizontalAngle: qwenCameraDefaults.horizontalAngle,
+                            verticalAngle: qwenCameraDefaults.verticalAngle,
+                            zoom: qwenCameraDefaults.zoom
+                          })
+                        }
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <label>
+                      <span>Azimuth</span>
+                      <input type="range" min="0" max="360" step="1" value={qwenHorizontalAngle} onChange={(event) => onUpdate(node.id, { horizontalAngle: Number(event.target.value) })} />
+                      <strong>{Math.round(qwenHorizontalAngle)} deg</strong>
+                    </label>
+                    <label>
+                      <span>Elevation</span>
+                      <input type="range" min="-30" max="90" step="1" value={qwenVerticalAngle} onChange={(event) => onUpdate(node.id, { verticalAngle: Number(event.target.value) })} />
+                      <strong>{Math.round(qwenVerticalAngle)} deg</strong>
+                    </label>
+                    <label>
+                      <span>Zoom</span>
+                      <input type="range" min="0" max="10" step="0.1" value={qwenZoom} onChange={(event) => onUpdate(node.id, { zoom: Number(event.target.value) })} />
+                      <strong>{qwenZoom.toFixed(1)}</strong>
+                    </label>
+                  </div>
+                  <NodeRow label="Prompt">
+                    <textarea
+                      value={node.data.additionalPrompt || ""}
+                      onChange={(event) => onUpdate(node.id, { additionalPrompt: event.target.value })}
+                      placeholder="Optional extra instruction"
+                    />
+                  </NodeRow>
+                </>
               ) : (
                 <>
                   <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -6253,6 +9318,7 @@ function NodeBody({
     const frontConnected = Boolean(frontInputs.length);
     const generateType = normalizeModel3DGenerateType(node.data.generateType);
     const faceCount = model3DFaceCount(node.data.faceCount);
+    const pbrEnabled = node.data.enablePbr !== false;
 
     return (
       <div
@@ -6341,8 +9407,8 @@ function NodeBody({
           </NodeRow>
           <NodeRow label="PBR">
             <button
-              className={`node-toggle ${node.data.enablePbr && generateType !== "Geometry" ? "enabled" : ""}`}
-              onClick={() => onUpdate(node.id, { enablePbr: !node.data.enablePbr })}
+              className={`node-toggle ${pbrEnabled && generateType !== "Geometry" ? "enabled" : ""}`}
+              onClick={() => onUpdate(node.id, { enablePbr: !pbrEnabled })}
               disabled={generateType === "Geometry"}
               title={generateType === "Geometry" ? "PBR is ignored in Geometry mode" : "Enable PBR textures"}
             >
@@ -6369,12 +9435,15 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
-    const imageInstructionSources = [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
-    const effectivePromptValue = isSam3Image ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
+    const isZImage = isZImageImageModel(node.data.model);
+    const isKrea2Large = isKrea2LargeImageModel(node.data.model);
+    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
+    const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const characterTagMatches = isSam3Image ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
-    const imagePromptLabel = connectedSummary(incoming.imagePromptIn, "Add file");
+    const characterTagMatches = isSam3Image || isImageModelUnsupportedInput(node, "characterIn") ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
+    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
+    const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
     const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
@@ -6385,8 +9454,21 @@ function NodeBody({
     const stylePort = config.input.find((port) => port.id === "styleIn");
     const transferPort = config.input.find((port) => port.id === "transferIn");
     const characterPort = config.input.find((port) => port.id === "characterIn");
-    const settingsOpen = Boolean(node.data.settingsOpen);
-    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, cameraPort, stylePort, transferPort, characterPort];
+    const cameraInputUnsupported = isImageModelUnsupportedInput(node, "cameraIn");
+    const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
+    const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
+    const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
+    const settingsOpen = node.data.settingsOpen !== false;
+    const collapsedPorts = isSam3Image
+      ? [promptPort, imagePromptPort]
+      : [
+          promptPort,
+          imagePromptPort,
+          cameraInputUnsupported ? null : cameraPort,
+          styleInputUnsupported ? null : stylePort,
+          transferInputUnsupported ? null : transferPort,
+          characterInputUnsupported ? null : characterPort
+        ];
     return (
       <div className="node-body model-node-body image-model-body">
         <ResultPane
@@ -6452,26 +9534,45 @@ function NodeBody({
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
+          {isKrea2Large && (
+            <NodeRow label="Creativity">
+              <select value={normalizeKrea2Creativity(node.data.kreaCreativity)} onChange={(event) => onUpdate(node.id, { kreaCreativity: event.target.value })}>
+                {krea2CreativityOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {formatKrea2Creativity(option)}
+                  </option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
           {!isSam3Image && (
             <>
-              <NodeRow label="Camera" inputPort={settingsOpen ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraPromptLabel}</button>
-              </NodeRow>
-              <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
-              </NodeRow>
-              <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
-              </NodeRow>
-              <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
-              </NodeRow>
+              {!cameraInputUnsupported && (
+                <NodeRow label="Camera" inputPort={settingsOpen ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraPromptLabel}</button>
+                </NodeRow>
+              )}
+              {!styleInputUnsupported && (
+                <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
+                </NodeRow>
+              )}
+              {!transferInputUnsupported && (
+                <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
+                </NodeRow>
+              )}
+              {!characterInputUnsupported && (
+                <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
+                </NodeRow>
+              )}
               <NodeRow label="Generations">
                 <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
-                  {batchOptions.map((option) => (
+                  {imageBatchOptions.map((option) => (
                     <option key={option} value={option}>
                       {formatNodeBatchCount(option)}
                     </option>
@@ -6529,19 +9630,20 @@ function NodeBody({
   const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
   const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
   const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
+  const supportsCharacterInput = videoModelSupportsCharacterInput(node.data.model);
   const tagMatches = isWanFunControl || isAurora || isLumaVideo || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, incoming);
-  const characterConnected = Boolean(incoming.characterIn?.length);
-  const settingsOpen = Boolean(node.data.settingsOpen);
+  const characterConnected = supportsCharacterInput && Boolean(incoming.characterIn?.length);
+  const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, referenceVideoPort, referenceImagePort, characterPort]
     : isWan27Reference
       ? [promptPort, referenceImagePort, referenceVideoPort, characterPort]
     : isAurora
-      ? [promptPort, referenceImagePort, referenceAudioPort, characterPort]
+      ? [promptPort, referenceImagePort, referenceAudioPort]
       : isHappyHorse
         ? [promptPort, referenceImagePort, characterPort]
     : isLumaVideo
-      ? [promptPort, startFramePort, endFramePort, referenceImagePort, characterPort]
+      ? [promptPort, startFramePort, endFramePort, referenceImagePort]
     : isSam3Video
       ? [promptPort, referenceVideoPort]
       : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
@@ -6726,9 +9828,6 @@ function NodeBody({
             <NodeRow label="Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceAudioIn, "Add audio")}</button>
             </NodeRow>
-            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Add character")}</button>
-            </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 <option>720p</option>
@@ -6782,9 +9881,6 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional start")}</button>
-            </NodeRow>
-            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Optional character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
               <select value={lumaDuration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
@@ -6877,7 +9973,7 @@ function NodeBody({
   );
 }
 
-function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [] }) {
+function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [], placeholder = "" }) {
   const highlighterRef = React.useRef(null);
   const parts = React.useMemo(() => promptHighlightParts(value, tagMatches), [value, tagMatches]);
 
@@ -6901,7 +9997,7 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
         )}
         {String(value || "").endsWith("\n") ? "\u00a0" : null}
       </div>
-      <textarea value={value} readOnly={readOnly} onChange={onChange} onScroll={syncScroll} />
+      <textarea value={value} readOnly={readOnly} placeholder={placeholder} onChange={onChange} onScroll={syncScroll} />
     </div>
   );
 }
@@ -8140,11 +11236,8 @@ function getNodeConfig(type) {
     },
     camera: {
       icon: Camera,
-      input: [{ id: "imageIn", label: "Image", color: portColors.image }],
-      output: [
-        { id: "cameraOut", label: "Camera", color: portColors.camera },
-        { id: "imageOut", label: "Image", color: portColors.image }
-      ]
+      input: [],
+      output: [{ id: "cameraOut", label: "Camera", color: portColors.camera }]
     },
     composer: {
       icon: Box,
@@ -8184,6 +11277,14 @@ function getNodeConfig(type) {
         { id: "maskVideoOut", label: "Mask Video", color: portColors.video }
       ]
     },
+    edit: {
+      icon: SlidersHorizontal,
+      input: [
+        { id: "imageIn", label: "Image", color: portColors.image },
+        { id: "videoIn", label: "Video", color: portColors.video }
+      ],
+      output: [{ id: "editOut", label: "Output", color: portColors.video }]
+    },
     video: {
       icon: Video,
       input: [],
@@ -8197,6 +11298,22 @@ function getNodeConfig(type) {
     preview: {
       icon: MonitorPlay,
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
+      output: []
+    },
+    autoAspect: {
+      icon: Maximize2,
+      input: [{ id: "imageIn", label: "Image", color: portColors.image }],
+      output: []
+    },
+    storyboard: {
+      icon: Clapperboard,
+      input: [
+        { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
+        { id: "sceneReferenceIn", label: "Scene Reference", color: portColors.image },
+        { id: "styleIn", label: "Style", color: portColors.style },
+        { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "characterIn", label: "Character", color: portColors.character }
+      ],
       output: []
     },
     model3d: {
@@ -8231,7 +11348,17 @@ function getNodeConfig(type) {
     }
   };
 
-  return configs[type];
+  return configs[type] || unsupportedNodeConfig(type);
+}
+
+function unsupportedNodeConfig(type) {
+  return {
+    icon: Wrench,
+    input: [],
+    output: [],
+    unsupported: true,
+    label: nodeTypeLabel(type)
+  };
 }
 
 function createDefaultNodeData(type, label, count) {
@@ -8240,13 +11367,50 @@ function createDefaultNodeData(type, label, count) {
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
-  if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
+  if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0, previewTab: "preview", previewLayoutItems: [] };
+  if (type === "autoAspect") {
+    return {
+      title,
+      selectedAspectRatios: autoAspectDefaultRatios,
+      autoAspectResults: [],
+      model: imageModelNames.openAiImage2,
+      resolution: "2K",
+      removeTextGraphics: false,
+      advancedOpen: false
+    };
+  }
+  if (type === "storyboard") {
+    return {
+      title,
+      storyboardTab: "setup",
+      sceneName: "Scene 1",
+      sceneDescription: "",
+      storyboardNotes: "",
+      frameCount: "Auto",
+      model: storyboardFixedModel,
+      aspectRatio: storyboardDefaultAspectRatio,
+      resolution: storyboardDefaultResolution,
+      useStoryboardStyle: true,
+      useMoodBoard: true,
+      useInternalStoryboardCharacters: true,
+      storyboardStylePreset: "None",
+      storyboardMoodBoardUrl: storyboardDefaultMoodBoardUrl,
+      storyboardMoodBoardFileName: storyboardMoodBoardLabel,
+      storyboardCharacters: [],
+      storyboardAnalysis: "",
+      storyboardPlanSceneDescription: "",
+      storyboardFrames: defaultStoryboardFrames(storyboardDefaultFrameCount),
+      selectedFrameId: "",
+      storyboardScale: 1,
+      settingsOpen: true
+    };
+  }
   if (type === "model3d") {
     return {
       title,
       model: model3DNames.hunyuanPro,
       generateType: "Normal",
-      enablePbr: false,
+      enablePbr: true,
       faceCount: 500000,
       resultType: "model3d",
       settingsOpen: false
@@ -8274,6 +11438,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
+      cinematicCharacterSheet: false,
       characterVoices: [],
       activeVoiceId: "",
       characterTab: "build",
@@ -8292,9 +11457,7 @@ function createDefaultNodeData(type, label, count) {
       title,
       shotPreset: "None",
       lensPreset: "None",
-      typePreset: "None",
-      qwenCameraOpen: false,
-      ...qwenCameraDefaults
+      typePreset: "None"
     };
   }
   if (type === "transfer") {
@@ -8315,6 +11478,7 @@ function createDefaultNodeData(type, label, count) {
       utilityImageModel: utilityImageModelNames.dwpose,
       utilityVideoModel: utilityVideoModelNames.wan22VaceDepth,
       stillFrameTime: 0,
+      ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
       patinaMaps: patinaMapOptions.map((option) => option.id),
       patinaOutputFormat: "png",
@@ -8480,15 +11644,43 @@ function createDefaultNodeData(type, label, count) {
       seed: ""
     };
   }
-  if (type === "style") return { title, stylePreset: "None" };
+  if (type === "edit") {
+    const effect = firstEditEffectForGroup("transform");
+    return {
+      title,
+      editGroup: "transform",
+      editEffect: effect.id,
+      editSourceType: normalizeEditSourceType(effect, "image"),
+      editSettings: defaultEditEffectSettings(effect),
+      editCropAspectLocked: true,
+      editOutputFormat: "mp4",
+      resultType: "image",
+      settingsOpen: true
+    };
+  }
+  if (type === "style") {
+    return {
+      title,
+      stylePreset: "None",
+      customPaletteRgbText: "",
+      customPalettePicker: "#ddc631",
+      customPaletteColors: [],
+      customPalettePreviewUrl: "",
+      customPaletteSourceName: "",
+      customPaletteStatus: "",
+      customPaletteError: ""
+    };
+  }
   if (type === "imageModel") {
     return {
       title,
-      model: imageModelNames.nanoBananaPro,
+      model: imageModelNames.zImage,
       prompt: "",
       aspectRatio: "16:9",
-      resolution: "1K",
-      batchCount: "1"
+      resolution: "2K",
+      kreaCreativity: "raw",
+      batchCount: "1",
+      settingsOpen: true
     };
   }
 
@@ -8505,7 +11697,8 @@ function createDefaultNodeData(type, label, count) {
     multiShots: false,
     enableSafetyChecker: true,
     seed: "",
-    batchCount: "1"
+    batchCount: "1",
+    settingsOpen: true
   };
 }
 
@@ -8513,7 +11706,8 @@ function imageModelSelectionPatch(data = {}, model) {
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
-    resolution: normalizeImageModelResolution(data.resolution)
+    resolution: normalizeImageModelResolution(data.resolution),
+    kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity)
   };
 }
 
@@ -8540,6 +11734,7 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
@@ -8556,6 +11751,95 @@ function isAutoImageAspectRatio(value) {
 
 function isOpenAiImageModel(model) {
   return String(model || "").toLowerCase().includes("openai");
+}
+
+function isKrea2LargeImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("krea") && normalized.includes("large");
+}
+
+function normalizeKrea2Creativity(value) {
+  return normalizeChoice(String(value || "raw").toLowerCase(), krea2CreativityOptions, "raw");
+}
+
+function formatKrea2Creativity(value) {
+  const text = normalizeKrea2Creativity(value);
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+function isZImageImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage");
+}
+
+function zImageUnsupportedInputMessage() {
+  return "Z-Image supports Prompt and Image Prompt only; Camera, Style, Mood Board, and Character inputs are not supported.";
+}
+
+function lumaImageUnsupportedInputMessage() {
+  return "Luma Dream Machine supports Prompt, Image Prompt, and Style inputs only; Camera, Mood Board, and Character inputs are not supported.";
+}
+
+function imageModelUnsupportedInputMessage(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedInputMessage();
+  if (isKrea2LargeImageModel(model)) return "This input is not supported by the selected model.";
+  if (isLumaImageModel(model)) return lumaImageUnsupportedInputMessage();
+  return "";
+}
+
+function imageModelUnsupportedInputPorts(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedInputPorts;
+  if (isKrea2LargeImageModel(model)) return krea2UnsupportedInputPorts;
+  if (isLumaImageModel(model)) return lumaImageUnsupportedInputPorts;
+  return emptyPortSet;
+}
+
+function imageModelUnsupportedSourceTypes(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedSourceTypes;
+  if (isKrea2LargeImageModel(model)) return krea2UnsupportedSourceTypes;
+  if (isLumaImageModel(model)) return lumaImageUnsupportedSourceTypes;
+  return emptyPortSet;
+}
+
+function isImageModelUnsupportedInput(node, portId) {
+  return node?.type === "imageModel" && imageModelUnsupportedInputPorts(node.data?.model).has(portId);
+}
+
+function isImageModelUnsupportedSource(target, source) {
+  return target?.type === "imageModel" && imageModelUnsupportedSourceTypes(target.data?.model).has(source?.type);
+}
+
+function zImageSupportedReferenceConnections(items = []) {
+  return items.filter(({ source, edge }) => {
+    if (!source?.data?.resultUrl || zImageUnsupportedSourceTypes.has(source.type)) return false;
+    return previewMediaType(source, edge) === "image";
+  });
+}
+
+function imagePromptInputConnectionsForModel(model, incoming = {}) {
+  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
+  return incoming.imagePromptIn || [];
+}
+
+function imageInstructionSourcesForModel(model, incoming = {}) {
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  return [
+    ...(incoming.imagePromptIn || []),
+    ...(!unsupportedPorts.has("cameraIn") ? incoming.cameraIn || [] : []),
+    ...(!unsupportedPorts.has("styleIn") ? incoming.styleIn || [] : []),
+    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
+    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+  ];
+}
+
+function imageReferenceConnectionsForModel(model, incoming = {}) {
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
+  return [
+    ...(incoming.imagePromptIn || []),
+    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
+    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+  ];
 }
 
 function isLumaImageModel(model) {
@@ -8586,6 +11870,20 @@ function isHappyHorseModel(model) {
 function isLumaVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2");
+}
+
+function videoModelSupportsCharacterInput(model) {
+  return !isAuroraModel(model) && !isLumaVideoModel(model) && !isSam3VideoModel(model);
+}
+
+function isVideoModelUnsupportedCharacterInput(node, portId) {
+  return node?.type === "videoModel" && portId === "characterIn" && !videoModelSupportsCharacterInput(node.data?.model);
+}
+
+function videoModelUnsupportedCharacterMessage(model) {
+  if (isAuroraModel(model)) return "Creative Aurora does not support Character inputs.";
+  if (isLumaVideoModel(model)) return "Luma Dream Machine video does not support Character inputs.";
+  return "This video model does not support Character inputs.";
 }
 
 function videoModelSelectionPatch(data = {}, model) {
@@ -8633,7 +11931,11 @@ function videoModelSelectionPatch(data = {}, model) {
 }
 
 function normalizeImageModelResolution(value) {
-  return imageResolutionOptions.includes(value) ? value : "1K";
+  return imageResolutionOptions.includes(value) ? value : "2K";
+}
+
+function normalizeAutoAspectModel(value) {
+  return autoAspectModelOptions.includes(value) ? value : imageModelNames.openAiImage2;
 }
 
 function normalizedLumaVideoDurationLabel(value) {
@@ -8689,6 +11991,11 @@ function isPatinaModel(model) {
 function isUtilityColorIdMatteModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("color") && normalized.includes("matte");
+}
+
+function isUtilityQwenCameraEditModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("qwen") && normalized.includes("camera");
 }
 
 function isUtilityCompositeVideoModel(model) {
@@ -9072,6 +12379,7 @@ function utilityVideoModelSelectionPatch(model) {
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wan22VaceDepth, data = {}) {
   if (mode === "image") {
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
+    if (isUtilityQwenCameraEditModel(imageModel)) return ["imageIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
@@ -9097,6 +12405,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityImageModelNames.colorIdMatte;
+  if (isUtilityQwenCameraEditModel(normalized)) return utilityImageModelNames.qwenCameraEdit;
   if (normalized.includes("still") || normalized.includes("frame")) return utilityImageModelNames.stillFrame;
   if (normalized.includes("sam") && normalized.includes("image")) return utilityImageModelNames.sam3Image;
   if (normalized.includes("birefnet")) return utilityImageModelNames.birefnetImage;
@@ -9173,6 +12482,157 @@ function transitionWanLoraItemsForData(data = {}) {
   return wanLoraItemsForDataItems(Array.isArray(data.transitionWanLoras) ? data.transitionWanLoras : []);
 }
 
+function editSelectionFromData(data = {}) {
+  const groupId = normalizeEditGroupId(data.editGroup);
+  const effect = normalizeEditEffectForGroup(groupId, data.editEffect);
+  const sourceType = normalizeEditSourceType(effect, data.editSourceType || data.resultType);
+  return {
+    groupId: effect.groupId,
+    effect,
+    sourceType
+  };
+}
+
+function editInputPortIds(data = {}) {
+  const { sourceType } = editSelectionFromData(data);
+  return [sourceType === "image" ? "imageIn" : "videoIn"];
+}
+
+function editOutputType(nodeOrData = {}) {
+  const data = nodeOrData.data || nodeOrData;
+  return editSelectionFromData(data).sourceType;
+}
+
+function editSourceDimensionsForItems(items = [], sourceType, sourceUrl, storedDimensions) {
+  const itemDimensions = [...items]
+    .reverse()
+    .map((item) => editSourceDimensionsFromConnection(item))
+    .find(Boolean);
+  return itemDimensions || editStoredSourceDimensions(storedDimensions, sourceUrl, sourceType);
+}
+
+function editSourceDimensionsFromConnection(item = {}) {
+  const { source, edge } = item;
+  const outputType = previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } });
+  const resultItems = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, outputType);
+  const selectedIndex = Math.trunc(Number(source?.data?.selectedResultIndex));
+  const selectedItem =
+    resultItems[selectedIndex] ||
+    resultItems.find((resultItem) => resultItem.url === source?.data?.resultUrl) ||
+    resultItems.at(-1);
+  return editDimensionsFromValue(selectedItem) || editDimensionsFromValue(source?.data);
+}
+
+function editStoredSourceDimensions(storedDimensions, sourceUrl, sourceType) {
+  if (!storedDimensions || storedDimensions.url !== sourceUrl || storedDimensions.type !== sourceType) return null;
+  return editDimensionsFromValue(storedDimensions);
+}
+
+function editDimensionsFromValue(value = {}) {
+  const width = finiteNumber(value.width ?? value.metadata?.width ?? value.dimensions?.width, 0);
+  const height = finiteNumber(value.height ?? value.metadata?.height ?? value.dimensions?.height, 0);
+  const duration = finiteNumber(value.duration ?? value.metadata?.duration ?? value.dimensions?.duration, 0);
+  if (width <= 0 && height <= 0 && duration <= 0) return null;
+  return {
+    ...(width > 0 ? { width: Math.round(width) } : {}),
+    ...(height > 0 ? { height: Math.round(height) } : {}),
+    ...(duration > 0 ? { duration: Number(duration.toFixed(3)) } : {})
+  };
+}
+
+function shouldSeedEditCropSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  if ("widthPercent" in raw || "heightPercent" in raw) return true;
+  const hasWidth = Object.prototype.hasOwnProperty.call(raw, "width");
+  const hasHeight = Object.prototype.hasOwnProperty.call(raw, "height");
+  if (!hasWidth && !hasHeight) return true;
+
+  const defaultCropSettings = defaultEditEffectSettings("crop");
+  const width = Number(settings.width);
+  const height = Number(settings.height);
+  const matchesFallbackDefaults = width === defaultCropSettings.width && height === defaultCropSettings.height;
+  const matchesPreviousDimensions =
+    previousDimensions?.width &&
+    previousDimensions?.height &&
+    width === previousDimensions.width &&
+    height === previousDimensions.height;
+
+  return matchesFallbackDefaults || matchesPreviousDimensions;
+}
+
+function shouldSeedEditTrimSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  const hasStart = Object.prototype.hasOwnProperty.call(raw, "start");
+  const hasEnd = Object.prototype.hasOwnProperty.call(raw, "end");
+  if (!hasStart && !hasEnd) return true;
+
+  const defaultTrimSettings = defaultEditEffectSettings("trim");
+  const start = Number(settings.start);
+  const end = Number(settings.end);
+  const previousDuration = finiteNumber(previousDimensions?.duration, 0);
+  const matchesFallbackDefaults = start === Number(defaultTrimSettings.start) && end === Number(defaultTrimSettings.end);
+  const matchesPreviousDuration = previousDuration > 0 && start === Number(defaultTrimSettings.start) && end === previousDuration;
+
+  return (!previousDuration && matchesFallbackDefaults) || matchesPreviousDuration;
+}
+
+function editSettingsForEffect(data = {}, effect = findEditEffect(data.editEffect), sourceDimensions = null) {
+  const defaults = defaultEditEffectSettings(effect);
+  const rawSettings = data.editSettings && typeof data.editSettings === "object" ? data.editSettings : {};
+  const settings = Object.fromEntries((effect.controls || []).map((control) => [control.id, rawSettings[control.id] ?? defaults[control.id]]));
+  if (effect.id === "crop" && sourceDimensions?.width && sourceDimensions?.height) {
+    const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
+    if (shouldSeedEditCropSettings(rawSettings, settings, previousDimensions)) {
+      return {
+        ...settings,
+        width: sourceDimensions.width,
+        height: sourceDimensions.height
+      };
+    }
+  }
+  if (effect.id === "trim" && sourceDimensions?.duration) {
+    const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
+    if (shouldSeedEditTrimSettings(rawSettings, settings, previousDimensions)) {
+      return {
+        ...settings,
+        start: 0,
+        end: sourceDimensions.duration
+      };
+    }
+  }
+  return settings;
+}
+
+function editPreviewTimeBounds(effect = {}, settings = {}, duration = 0) {
+  const safeDuration = Math.max(0, finiteNumber(duration, 0));
+  if (effect?.id !== "trim") {
+    return {
+      min: 0,
+      max: safeDuration
+    };
+  }
+
+  const fallbackEnd = safeDuration || Math.max(0, finiteNumber(settings.end, 0), finiteNumber(settings.start, 0));
+  const start = clamp(finiteNumber(settings.start, 0), 0, fallbackEnd);
+  const end = clamp(finiteNumber(settings.end, fallbackEnd), start, fallbackEnd);
+  return {
+    min: start,
+    max: Math.max(start, end)
+  };
+}
+
+function resetEditOutputPatch(resultType) {
+  return {
+    resultUrl: "",
+    resultItems: [],
+    resultText: "",
+    selectedResultIndex: 0,
+    resultType,
+    status: "ready",
+    error: ""
+  };
+}
+
 function patinaMapsForData(data = {}) {
   const selectedMaps = Array.isArray(data.patinaMaps) ? data.patinaMaps : patinaMapOptions.map((option) => option.id);
   const validMaps = selectedMaps.filter((mapId) => patinaMapOptions.some((option) => option.id === mapId));
@@ -9184,12 +12644,50 @@ function visiblePortIdsForNode(node) {
     return [...utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data), ...utilityOutputPortIdsForNode(node)];
   }
 
+  if (node?.type === "edit") {
+    return [...editInputPortIds(node.data), "editOut"];
+  }
+
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
 }
 
+function inputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.input || [];
+  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
+}
+
+function outputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.output || [];
+  if (node?.type === "storyboard") return [...basePorts, ...storyboardFrameOutputPortsForNode(node)];
+  if (node?.type === "autoAspect") return [...basePorts, ...autoAspectOutputPortsForNode(node)];
+  if (node?.type === "utility") {
+    const activeIds = new Set(utilityOutputPortIdsForNode(node));
+    return basePorts
+      .filter((port) => activeIds.has(port.id))
+      .map((port) =>
+        port.id === "utilityOut"
+          ? {
+              ...port,
+              label: utilityOutputType(node, port.id) === "video" ? "Video output" : "Image output",
+              color: utilityOutputType(node, port.id) === "video" ? portColors.video : portColors.image
+            }
+          : port
+      );
+  }
+  if (node?.type === "edit") {
+    const outputType = editOutputType(node);
+    return [{
+      id: "editOut",
+      label: outputType === "image" ? "Image output" : "Video output",
+      color: outputType === "image" ? portColors.image : portColors.video
+    }];
+  }
+  if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
+  return basePorts;
+}
+
 function inputPortIdsForNode(node) {
-  const basePorts = (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
-  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortIdsForNode(node)] : basePorts;
+  return inputPortDefinitionsForNode(node).map((port) => port.id);
 }
 
 function activeInputPortIdsForNode(node) {
@@ -9197,12 +12695,241 @@ function activeInputPortIdsForNode(node) {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data);
   }
 
+  if (node?.type === "edit") {
+    return editInputPortIds(node.data);
+  }
+
+  if (node?.type === "storyboard") {
+    return [
+      "sceneDescriptionIn",
+      "sceneReferenceIn",
+      ...(node.data?.useStoryboardStyle === false ? ["styleIn", "transferIn", "characterIn"] : [])
+    ];
+  }
+
+  if (node?.type === "imageModel") {
+    return inputPortIdsForNode(node).filter((portId) => !isImageModelUnsupportedInput(node, portId));
+  }
+
+  if (node?.type === "videoModel") {
+    return inputPortIdsForNode(node).filter((portId) => !isVideoModelUnsupportedCharacterInput(node, portId));
+  }
+
   return inputPortIdsForNode(node);
 }
 
 function outputPortIdsForNode(node) {
-  if (node?.type === "utility") return utilityOutputPortIdsForNode(node);
-  return (getNodeConfig(node?.type)?.output || []).map((port) => port.id);
+  return outputPortDefinitionsForNode(node).map((port) => port.id);
+}
+
+function portDefinitionForNode(node, portId, role) {
+  const ports = role === "input" ? inputPortDefinitionsForNode(node) : outputPortDefinitionsForNode(node);
+  return ports.find((port) => port.id === portId) || null;
+}
+
+function portKindFromColor(color) {
+  return Object.entries(portColors).find(([, value]) => value === color)?.[0] || "";
+}
+
+function portKindForNodePort(node, portId, role) {
+  if (!node || !portId) return "";
+  if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
+  if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
+  if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
+  if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
+  if (role === "output" && node.type === "utility") return utilityOutputType(node, portId) === "video" ? "video" : "image";
+  if (role === "output" && node.type === "edit" && portId === "editOut") return editOutputType(node);
+  if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
+  return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
+}
+
+function acceptedInputPortKinds(node, portId) {
+  const inputKind = portKindForNodePort(node, portId, "input");
+  if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  return inputKind ? [inputKind] : [];
+}
+
+function portsAreCompatible(source, fromPort, target, toPort) {
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const acceptedKinds = acceptedInputPortKinds(target, toPort);
+  return Boolean(outputKind && acceptedKinds.includes(outputKind));
+}
+
+function getPortCompatibilityError(source, fromPort, target, toPort) {
+  if (portsAreCompatible(source, fromPort, target, toPort)) return "";
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const inputKind = portKindForNodePort(target, toPort, "input");
+  if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (!outputKind || !inputKind) return "Choose a valid connection";
+  return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
+}
+
+function humanPortKindLabel(kind) {
+  return {
+    prompt: "Prompt",
+    image: "Image",
+    camera: "Camera",
+    style: "Style",
+    transfer: "Mood Board",
+    character: "Character",
+    video: "Video",
+    audio: "Audio",
+    model3d: "3D",
+    preview: "Preview"
+  }[kind] || "matching";
+}
+
+function formatEditOptionLabel(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function storyboardFrameOutputPortsForNode(node) {
+  if (node?.type !== "storyboard") return [];
+  return normalizedStoryboardFrames(node.data?.storyboardFrames).map((frame, index) => ({
+    id: storyboardFrameOutputPortId(frame.id),
+    label: `Frame ${String(index + 1).padStart(2, "0")}`,
+    color: portColors.image,
+    disabled: !frame.resultUrl,
+    disabledReason: "Generate this storyboard frame before connecting it"
+  }));
+}
+
+function storyboardFrameOutputPortId(frameId) {
+  return `frameOut:${frameId}`;
+}
+
+function storyboardFrameIdFromOutputPort(portId) {
+  const value = String(portId || "");
+  return value.startsWith("frameOut:") ? value.slice("frameOut:".length) : "";
+}
+
+function storyboardFrameForOutputPort(node, portId) {
+  const frameId = storyboardFrameIdFromOutputPort(portId);
+  if (!frameId) return null;
+  return normalizedStoryboardFrames(node?.data?.storyboardFrames).find((frame) => frame.id === frameId) || null;
+}
+
+function autoAspectOutputPortsForNode(node) {
+  if (node?.type !== "autoAspect") return [];
+  return autoAspectTargetsForData(node.data).map((target) => {
+    const result = autoAspectResultForTarget(node, target);
+    const label = target.aspectRatio;
+    return {
+      id: autoAspectOutputPortId(target),
+      label,
+      color: portColors.image,
+      disabled: !result?.url,
+      disabledReason: `Generate ${label} before connecting it`
+    };
+  });
+}
+
+function autoAspectOutputPortId(target) {
+  return `aspectOut:${typeof target === "string" ? target : autoAspectTargetKey(target)}`;
+}
+
+function autoAspectRatioFromOutputPort(portId) {
+  const key = autoAspectTargetKeyFromOutputPort(portId);
+  return key ? key.split("|")[0] : "";
+}
+
+function autoAspectTargetKeyFromOutputPort(portId) {
+  const value = String(portId || "");
+  return value.startsWith("aspectOut:") ? value.slice("aspectOut:".length) : "";
+}
+
+function autoAspectTargetKey(target = {}) {
+  const aspectRatio = String(target?.aspectRatio || "").trim();
+  return aspectRatio;
+}
+
+function autoAspectTargetsForData(data = {}) {
+  return normalizedAutoAspectRatios(data).map((ratio) => autoAspectTargetsForRatio(ratio)[0]).filter(Boolean);
+}
+
+function autoAspectTargetsForRatio(ratio) {
+  const cleanRatio = String(ratio || "").trim();
+  if (!cleanRatio) return [];
+  return [{
+    key: cleanRatio,
+    aspectRatio: cleanRatio
+  }];
+}
+
+function normalizedAutoAspectRatios(data = {}) {
+  const source = Array.isArray(data.selectedAspectRatios) ? data.selectedAspectRatios : autoAspectDefaultRatios;
+  const ratios = [...new Set(source.map((ratio) => String(ratio || "").trim()).filter((ratio) => openAiImageAspectRatios.includes(ratio)))];
+  return ratios;
+}
+
+function normalizedAutoAspectResults(data = {}) {
+  return (Array.isArray(data.autoAspectResults) ? data.autoAspectResults : [])
+    .map((result) => {
+      const aspectRatio = String(result?.aspectRatio || "").trim();
+      const normalized = {
+        key: autoAspectTargetKey({ aspectRatio }),
+        aspectRatio,
+        url: result?.url || "",
+        label: result?.label || "",
+        text: result?.text || "",
+        cost: result?.cost ?? null,
+        sourceUrl: result?.sourceUrl || ""
+      };
+      return {
+        ...normalized,
+        key: normalized.key || autoAspectTargetKey(normalized)
+      };
+    })
+    .filter((result) => openAiImageAspectRatios.includes(result.aspectRatio) && result.url);
+}
+
+function autoAspectResultForTarget(node, target) {
+  const targetKey = typeof target === "string" ? target : autoAspectTargetKey(target);
+  return normalizedAutoAspectResults(node?.data).find((result) => result.key === targetKey) || null;
+}
+
+function autoAspectResultItems(data = {}) {
+  return normalizedAutoAspectResults(data).map((result) => ({
+    url: result.url,
+    type: "image",
+    label: result.label || `${result.aspectRatio} Auto Aspect`,
+    text: result.text || "",
+    cost: result.cost,
+    aspectRatio: result.aspectRatio,
+    key: result.key,
+    sourceUrl: result.sourceUrl
+  }));
+}
+
+function autoAspectOutputItem(source, edge) {
+  const targetKey = autoAspectTargetKeyFromOutputPort(edge?.from?.port);
+  if (!targetKey) return null;
+  const result = autoAspectResultForTarget(source, targetKey);
+  if (!result?.url) return null;
+  return {
+    url: result.url,
+    type: "image",
+    label: result.label || `${result.aspectRatio} Auto Aspect`,
+    text: result.text || "",
+    cost: result.cost,
+    aspectRatio: result.aspectRatio,
+    key: result.key,
+    sourceUrl: result.sourceUrl
+  };
+}
+
+function resetAutoAspectOutputPatch() {
+  return {
+    autoAspectResults: [],
+    resultItems: [],
+    resultUrl: "",
+    resultText: "",
+    selectedResultIndex: 0,
+    status: "",
+    error: ""
+  };
 }
 
 function utilityOutputPortIdsForNode(node) {
@@ -9251,9 +12978,10 @@ function configTitleFallback(type) {
 function nodeResultMediaType(node) {
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
+  if (node.type === "edit") return editOutputType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
-  if (node.type === "imageModel" || node.type === "camera" || node.type === "composer" || node.type === "character") return "image";
+  if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "camera" || node.type === "composer" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
 
@@ -9283,12 +13011,19 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
 
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
-    const prompt = connectedText(incoming.promptIn) || node.data.prompt || "";
-    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model)
+    const prompt = node.type === "storyboard"
+      ? [
+          storyboardSceneDescriptionForNode(node, incoming),
+          ...normalizedStoryboardFrames(node.data.storyboardFrames).map((frame) => frame.prompt || "")
+        ].join("\n")
+      : connectedText(incoming.promptIn) || node.data.prompt || "";
+    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isImageModelUnsupportedInput(node, "characterIn")
       ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
-      : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && !isAuroraModel(node.data.model) && !isSam3VideoModel(node.data.model)
+      : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
         ? videoModelReferenceTagMatches(prompt, incoming)
-        : [];
+        : node.type === "storyboard"
+          ? storyboardSceneTagMatches(prompt, node, incoming, incomingByNode)
+          : [];
 
     matches.forEach((match) => {
       if (!highlights.has(match.nodeId)) {
@@ -9336,6 +13071,11 @@ function buildInactiveEdgeIds(nodes, edges) {
     edges
       .filter((edge) => {
         const source = nodeMap.get(edge.from.nodeId);
+        const target = nodeMap.get(edge.to.nodeId);
+        if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
+        if (isImageModelUnsupportedSource(target, source)) return true;
+        if (isVideoModelUnsupportedCharacterInput(target, edge.to.port)) return true;
+        if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
         return (
           (source?.type === "transfer" || source?.type === "character") &&
           (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl)
@@ -9348,23 +13088,51 @@ function buildInactiveEdgeIds(nodes, edges) {
 function connectedText(items = []) {
   return items
     .map(({ source }) => {
-      if (source.type === "plainText") return source.data.text;
       if (source.type === "text") return source.data.resultText || source.data.text;
-      if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility") return source.data.resultText;
+      if (source.type === "plainText") return source.data.text;
+      if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
       return source.data.title;
     })
     .filter(Boolean)
     .join("\n");
 }
 
+function connectedOutputItem(source, edge) {
+  if (source?.type === "storyboard") return storyboardFrameOutputItem(source, edge);
+  if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
+  if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    const item = transitionBuilderResultItemForPort(source, edge?.from?.port);
+    return item?.url
+      ? {
+          ...item,
+          type: item.type === "wanSegment" ? "image" : item.type || previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+          label: item.label || sourceLabel(source),
+          text: item.text || source?.data?.resultText || ""
+        }
+      : null;
+  }
+  const url = sourceResultUrlForPort(source, edge?.from?.port);
+  if (!url) return null;
+  return {
+    url,
+    type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+    label: sourceLabel(source),
+    text: source?.data?.resultText || ""
+  };
+}
+
+function connectedOutputUrl(source, edge) {
+  return connectedOutputItem(source, edge)?.url || "";
+}
+
 function connectedAssetUrls(items = []) {
-  return items.map(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port)).filter(Boolean);
+  return items.map(({ source, edge }) => connectedOutputUrl(source, edge)).filter(Boolean);
 }
 
 function connectedAssetUrlsByType(items = [], type) {
   return items
     .filter(({ source, edge }) => previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }) === type)
-    .map(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port))
+    .map(({ source, edge }) => connectedOutputUrl(source, edge))
     .filter(Boolean);
 }
 
@@ -9443,12 +13211,13 @@ function transitionKeyframeInputKey(item, index = 0) {
 function connectedAssetItems(items = []) {
   return items
     .map(({ source, edge }) => {
-      const url = sourceResultUrlForPort(source, edge?.from?.port);
+      const outputItem = connectedOutputItem(source, edge);
+      const url = outputItem?.url || connectedOutputUrl(source, edge);
       if (!url) return null;
       return {
         url,
-        type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
-        label: sourceResultLabelForPort(source, edge?.from?.port) || sourceLabel(source)
+        type: outputItem?.type || previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+        label: outputItem?.label || sourceLabel(source)
       };
     })
     .filter(Boolean);
@@ -9456,8 +13225,8 @@ function connectedAssetItems(items = []) {
 
 function connectedAssetLabels(items = []) {
   return items
-    .filter(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port))
-    .map(({ source, edge }) => sourceResultLabelForPort(source, edge?.from?.port) || source.data.title || sourceLabel(source));
+    .filter(({ source, edge }) => connectedOutputUrl(source, edge))
+    .map(({ source, edge }) => connectedOutputItem(source, edge)?.label || source.data.title || sourceLabel(source));
 }
 
 function connectedWanWarpSegments(items = [], incomingByNode = {}) {
@@ -9479,7 +13248,7 @@ function connectedWanWarpSegments(items = [], incomingByNode = {}) {
 function connectedWanBlendVideoUrls(items = []) {
   return items
     .filter(({ source }) => source?.type === "utility" && isUtilityWanBlendModel(source.data?.utilityVideoModel))
-    .map(({ source, edge }) => sourceResultUrlForPort(source, edge?.from?.port))
+    .map(({ source, edge }) => connectedOutputUrl(source, edge))
     .filter(Boolean);
 }
 
@@ -9601,6 +13370,67 @@ function imageModelCharacterTagMatches(prompt, items = [], incomingByNode = null
     .filter((match) => promptHasTag(text, match.tag));
 }
 
+function storyboardCharacterTagMatches(prompt, node, externalItems = [], incomingByNode = null) {
+  const text = String(prompt || "");
+  const internalCandidates = storyboardUsesInternalCharacters(node)
+    ? normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+        .filter((character) => character.name || character.portrait?.localUrl)
+        .map((character, index) => ({
+          nodeId: `${node.id}:${character.id}`,
+          tag: storyboardCharacterTag(character),
+          color: referenceTagPalette[index % referenceTagPalette.length],
+          type: "character"
+        }))
+    : [];
+  const externalCandidates = activeConnectedCharacterSources(externalItems, incomingByNode)
+    .map((source, index) => ({
+      nodeId: source.id,
+      tag: characterTag(source),
+      color: referenceTagPalette[(internalCandidates.length + index) % referenceTagPalette.length],
+      type: "character"
+    }));
+  const uniqueCandidates = new Map();
+
+  [...internalCandidates, ...externalCandidates].forEach((candidate) => {
+    if (!candidate.tag) return;
+    uniqueCandidates.set(candidate.tag.toLowerCase(), candidate);
+  });
+
+  return [...uniqueCandidates.values()].filter((match) => promptHasTag(text, match.tag));
+}
+
+function storyboardSceneReferenceTagMatches(prompt, items = [], colorOffset = 0) {
+  const text = String(prompt || "");
+  return items
+    .map(({ source, edge }, index) => {
+      const outputItem = connectedOutputItem(source, edge);
+      const url = outputItem?.url || connectedOutputUrl(source, edge);
+      if (!url) return null;
+      const label = cleanImageReferenceLabel(source.data?.title || outputItem?.label || sourceLabel(source) || `Reference ${index + 1}`) || `Reference ${index + 1}`;
+      return {
+        nodeId: source.id,
+        tag: cleanPromptTag(source.data?.title || label) || `Reference${index + 1}`,
+        color: portColors.image || referenceTagPalette[(colorOffset + index) % referenceTagPalette.length],
+        type: "scene-reference"
+      };
+    })
+    .filter(Boolean)
+    .filter((match) => promptHasTag(text, match.tag));
+}
+
+function storyboardSceneTagMatches(prompt, node, incoming = {}, incomingByNode = null) {
+  const characterMatches = storyboardCharacterTagMatches(prompt, node, incoming.characterIn, incomingByNode);
+  const referenceMatches = storyboardSceneReferenceTagMatches(prompt, incoming.sceneReferenceIn || [], characterMatches.length);
+  const uniqueMatches = new Map();
+
+  [...characterMatches, ...referenceMatches].forEach((match) => {
+    if (!match.tag) return;
+    uniqueMatches.set(`${match.nodeId}:${match.tag}`.toLowerCase(), match);
+  });
+
+  return [...uniqueMatches.values()];
+}
+
 function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "Image") {
   return items
     .filter(({ source }) => source.data.resultUrl)
@@ -9672,7 +13502,7 @@ function escapeRegExp(value) {
 
 async function runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext }) {
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
-  if (!imageUrl) throw new Error("Connect an image to the Camera node.");
+  if (!imageUrl) throw new Error("Connect an image to the Utility node.");
 
   const { response, data } = await nodeApi.qwenCameraEdit({
     imageUrls: [imageUrl],
@@ -9711,6 +13541,10 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
       workflowContext
     });
     return [still];
+  }
+
+  if (isUtilityQwenCameraEditModel(modelName)) {
+    return [await runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext })];
   }
 
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
@@ -9922,8 +13756,9 @@ function connected3DViewUrls(incoming = {}) {
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, workflowContext, index }) {
-  const characterReferences = connectedCharacterReferences(incoming.characterIn);
-  const characterVoices = connectedCharacterVoiceUrls(incoming.characterIn);
+  const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
+  const characterReferences = connectedCharacterReferences(characterConnections);
+  const characterVoices = connectedCharacterVoiceUrls(characterConnections);
   const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
     node,
     prompt,
@@ -10098,13 +13933,45 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
   return normalizeUtilityVideoGenerationResult(data, index);
 }
 
+async function runEditNodeGeneration({ node, incoming, projectId, projectName, workflowContext }) {
+  const { effect, sourceType } = editSelectionFromData(node.data);
+  const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
+  const sourceUrl = connectedAssetUrls(incoming[inputPortId]).at(-1);
+  if (!sourceUrl) throw new Error(`Connect a ${sourceType} to the Edit node.`);
+  const sourceDimensions = editSourceDimensionsForItems(incoming[inputPortId], sourceType, sourceUrl, node.data.editSourceDimensions);
+
+  const { response, data } = await nodeApi.editMedia({
+    effectId: effect.id,
+    sourceMediaType: sourceType,
+    sourceImageUrls: sourceType === "image" ? [sourceUrl] : [],
+    sourceVideoUrls: sourceType === "video" ? [sourceUrl] : [],
+    settings: editSettingsForEffect(node.data, effect, sourceDimensions),
+    outputFormat: node.data.editOutputFormat || "mp4",
+    ...workflowContextPayload(workflowContext, projectId, projectName),
+    nodeId: node.id,
+    nodeTitle: node.data.title
+  }, "Edit media");
+  if (!response.ok) throw new Error(data.error || "Edit failed.");
+
+  const media = sourceType === "image" ? data.image : data.video;
+  if (!media?.localUrl) throw new Error(`${data.modelName || "Edit"} returned no ${sourceType}.`);
+  return {
+    url: media.localUrl,
+    type: sourceType,
+    label: media.label || data.modelName || effect.label,
+    text: data.text || "",
+    cost: data.cost || null
+  };
+}
+
 function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
-      const resultItems = sourceResultItemsForPort(source, edge?.from?.port, sourceType);
+      const resultItems = previewSourceResultItems(source, edge, sourceType);
       if (!resultItems.length) return null;
-      const sourceName = source.type === "camera" && edge.from.port === "imageOut" ? "Camera image" : sourceLabel(source);
+      const outputSpecificLabel = (source.type === "storyboard" || source.type === "autoAspect") && resultItems.length === 1 ? resultItems[0]?.label : "";
+      const sourceName = outputSpecificLabel || sourceLabel(source);
       const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
       return {
         id: `${source.id}:${edge.from.port}`,
@@ -10129,6 +13996,462 @@ function connectedPreviewSources(items = []) {
     .filter(Boolean);
 }
 
+function previewSourceResultItems(source, edge, sourceType = "image") {
+  if (!source) return [];
+  if (source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    return sourceResultItemsForPort(source, edge?.from?.port, sourceType);
+  }
+  if (source.type === "storyboard" || source.type === "autoAspect") {
+    const outputItem = connectedOutputItem(source, edge);
+    return outputItem?.url ? [{ ...outputItem, type: outputItem.type || sourceType }] : [];
+  }
+
+  const resultItems = normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, sourceType);
+  if (resultItems.length) return resultItems;
+
+  const outputItem = connectedOutputItem(source, edge);
+  if (outputItem?.url) return [{ ...outputItem, type: outputItem.type || sourceType }];
+
+  const localUrl = source.data?.localUrl || source.data?.asset?.localUrl || "";
+  if (!localUrl) return [];
+  return [{
+    url: localUrl,
+    type: sourceType,
+    label: sourceLabel(source),
+    fileName: source.data?.fileName || fileNameFromLocalUrl(localUrl),
+    mimeType: source.data?.mimeType || mimeForOutputItem({ url: localUrl, type: sourceType })
+  }];
+}
+
+function normalizedPreviewLayoutItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const url = String(item?.url || "").trim();
+      if (!url) return null;
+      const width = previewLayoutDimension(item?.width || item?.naturalWidth);
+      const height = previewLayoutDimension(item?.height || item?.naturalHeight);
+      const sourceUrl = String(item?.sourceUrl || url).trim();
+      return {
+        id: String(item?.id || `layout-${index}-${url}`).slice(0, 120),
+        url,
+        sourceUrl,
+        type: "image",
+        label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || `Layout image ${index + 1}`,
+        fileName: item?.fileName || fileNameFromLocalUrl(url),
+        mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
+        ...(width && height ? { width, height } : {})
+      };
+    })
+    .filter(Boolean);
+}
+
+function createPreviewLayoutItem(item) {
+  const url = String(item?.url || "").trim();
+  const width = previewLayoutDimension(item?.width || item?.naturalWidth);
+  const height = previewLayoutDimension(item?.height || item?.naturalHeight);
+  const sourceUrl = String(item?.sourceUrl || url).trim();
+  return {
+    id: `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    url,
+    sourceUrl,
+    type: "image",
+    label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || "Layout image",
+    fileName: item?.fileName || fileNameFromLocalUrl(url),
+    mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
+    ...(width && height ? { width, height } : {})
+  };
+}
+
+function normalizedPreviewLayoutHiddenUrls(urls = []) {
+  return [...new Set((Array.isArray(urls) ? urls : [])
+    .map((url) => String(url || "").trim())
+    .filter(Boolean))];
+}
+
+function previewLayoutImageItems(items = []) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => item?.type === "image" && item.url)
+    .map((item) => ({ ...item, sourceUrl: item.sourceUrl || item.url }))
+    .filter((item) => {
+      const key = String(item.sourceUrl || item.url || "").trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function mergePreviewImagesIntoLayout(layoutItems = [], sourceItems = [], hiddenUrls = []) {
+  const hidden = new Set(normalizedPreviewLayoutHiddenUrls(hiddenUrls));
+  const existing = new Set();
+  const nextItems = normalizedPreviewLayoutItems(layoutItems);
+  nextItems.forEach((item) => {
+    if (item.url) existing.add(item.url);
+    if (item.sourceUrl) existing.add(item.sourceUrl);
+  });
+
+  previewLayoutImageItems(sourceItems).forEach((item) => {
+    const sourceUrl = String(item.sourceUrl || item.url || "").trim();
+    if (!sourceUrl || hidden.has(sourceUrl) || hidden.has(item.url) || existing.has(sourceUrl) || existing.has(item.url)) return;
+    const nextItem = createPreviewLayoutItem({ ...item, sourceUrl });
+    nextItems.push(nextItem);
+    existing.add(nextItem.url);
+    existing.add(nextItem.sourceUrl);
+  });
+
+  return nextItems;
+}
+
+function previewLayoutDimension(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+}
+
+function previewLayoutAspectValue(item = {}) {
+  const width = previewLayoutDimension(item.width);
+  const height = previewLayoutDimension(item.height);
+  return width && height ? `${width} / ${height}` : "16 / 9";
+}
+
+function previewLayoutColumnCount(items = []) {
+  return Math.max(1, Math.min(3, items.length || 1));
+}
+
+function previewLayoutExportCaption(item, index = 0) {
+  const label = String(item?.label || "").replace(/\s+/g, " ").trim();
+  if (isUsefulPreviewLayoutCaption(label, item)) return label;
+  return `Frame ${index + 1}.`;
+}
+
+function isUsefulPreviewLayoutCaption(label = "", item = {}) {
+  if (!label) return false;
+  const fileName = String(item?.fileName || fileNameFromLocalUrl(item?.url) || "").trim();
+  const fileBase = fileName ? fileName.replace(/\.[A-Za-z0-9]+$/, "") : "";
+  if (label === fileName || label === fileBase) return false;
+  if (/\.(png|jpe?g|webp|gif|mp4|mov|webm)$/i.test(label)) return false;
+  if (/^20\d{2}-\d{2}-\d{2}T\d{2}/.test(label)) return false;
+  if (/\bgenerated\s+(image|video)\s*,?\s+unique\s+id\b/i.test(label)) return false;
+  return true;
+}
+
+function samePreviewLayoutItems(first = [], second = []) {
+  if (first.length !== second.length) return false;
+  return first.every((item, index) => item.id === second[index]?.id && item.url === second[index]?.url);
+}
+
+async function createEditedPreviewLayoutImageBlob(sourceUrl, edit = {}) {
+  const image = await loadCanvasImage(sourceUrl);
+  const imageWidth = image.naturalWidth || image.width;
+  const imageHeight = image.naturalHeight || image.height;
+  if (!imageWidth || !imageHeight) throw new Error("Could not read layout image dimensions.");
+
+  const crop = edit.type === "crop"
+    ? previewCropRectToPixels(edit.cropRect, imageWidth, imageHeight)
+    : { x: 0, y: 0, width: imageWidth, height: imageHeight };
+  const canvas = document.createElement("canvas");
+  const rotateClockwise = edit.type === "rotateClockwise";
+  canvas.width = Math.max(1, Math.round(rotateClockwise ? crop.height : crop.width));
+  canvas.height = Math.max(1, Math.round(rotateClockwise ? crop.width : crop.height));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare image editor.");
+
+  const flipX = edit.type === "flipHorizontal";
+  const flipY = edit.type === "flipVertical";
+  context.save();
+  if (rotateClockwise) {
+    context.translate(canvas.width, 0);
+    context.rotate(Math.PI / 2);
+    context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  } else {
+    context.translate(flipX ? canvas.width : 0, flipY ? canvas.height : 0);
+    context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+  }
+  context.restore();
+
+  if (edit.type === "curves") {
+    applyPreviewCurveToCanvas(context, canvas.width, canvas.height, edit.points);
+  }
+
+  if (edit.type === "tone") {
+    applyPreviewToneAdjustmentsToCanvas(context, canvas.width, canvas.height, edit.adjustments);
+  }
+
+  if (edit.type === "text") {
+    drawPreviewTextOverlay(context, canvas.width, canvas.height, edit.overlay);
+  }
+
+  return canvasToBlob(canvas, "image/png", "Could not update layout image.");
+}
+
+async function createInpaintCompositePreviewLayoutBlob(sourceUrl, generatedUrl, maskDataUrl) {
+  const [sourceImage, generatedImage, maskImage] = await Promise.all([
+    loadCanvasImage(sourceUrl),
+    loadCanvasImage(generatedUrl),
+    loadCanvasImage(maskDataUrl)
+  ]);
+  const width = sourceImage.naturalWidth || sourceImage.width;
+  const height = sourceImage.naturalHeight || sourceImage.height;
+  if (!width || !height) throw new Error("Could not read inpaint image dimensions.");
+
+  const originalCanvas = document.createElement("canvas");
+  originalCanvas.width = width;
+  originalCanvas.height = height;
+  const originalContext = originalCanvas.getContext("2d", { willReadFrequently: true });
+  if (!originalContext) throw new Error("Could not prepare original image layer.");
+  originalContext.drawImage(sourceImage, 0, 0, width, height);
+
+  const generatedCanvas = document.createElement("canvas");
+  generatedCanvas.width = width;
+  generatedCanvas.height = height;
+  const generatedContext = generatedCanvas.getContext("2d", { willReadFrequently: true });
+  if (!generatedContext) throw new Error("Could not prepare generated image layer.");
+  drawImageCover(generatedContext, generatedImage, 0, 0, width, height);
+
+  const maskCanvas = createSoftInpaintMaskCanvas(maskImage, width, height);
+  const originalData = originalContext.getImageData(0, 0, width, height);
+  const generatedData = generatedContext.getImageData(0, 0, width, height);
+  const maskData = maskCanvas.getContext("2d", { willReadFrequently: true })?.getImageData(0, 0, width, height);
+  if (!maskData) throw new Error("Could not prepare inpaint mask.");
+
+  for (let index = 0; index < originalData.data.length; index += 4) {
+    const alpha = maskData.data[index + 3] / 255;
+    if (alpha <= 0) continue;
+    const inverse = 1 - alpha;
+    originalData.data[index] = generatedData.data[index] * alpha + originalData.data[index] * inverse;
+    originalData.data[index + 1] = generatedData.data[index + 1] * alpha + originalData.data[index + 1] * inverse;
+    originalData.data[index + 2] = generatedData.data[index + 2] * alpha + originalData.data[index + 2] * inverse;
+    originalData.data[index + 3] = 255;
+  }
+
+  originalContext.putImageData(originalData, 0, 0);
+  return canvasToBlob(originalCanvas, "image/png", "Could not blend inpaint edit.");
+}
+
+function createSoftInpaintMaskCanvas(maskImage, width, height) {
+  const binaryCanvas = document.createElement("canvas");
+  binaryCanvas.width = width;
+  binaryCanvas.height = height;
+  const binaryContext = binaryCanvas.getContext("2d", { willReadFrequently: true });
+  if (!binaryContext) throw new Error("Could not prepare inpaint mask.");
+  binaryContext.drawImage(maskImage, 0, 0, width, height);
+  const imageData = binaryContext.getImageData(0, 0, width, height);
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const masked = imageData.data[index + 3] > 8 || imageData.data[index] > 12 || imageData.data[index + 1] > 12 || imageData.data[index + 2] > 12;
+    imageData.data[index] = 255;
+    imageData.data[index + 1] = 255;
+    imageData.data[index + 2] = 255;
+    imageData.data[index + 3] = masked ? 255 : 0;
+  }
+  binaryContext.clearRect(0, 0, width, height);
+  binaryContext.putImageData(imageData, 0, 0);
+
+  const expand = Math.max(6, Math.min(42, Math.round(Math.min(width, height) * 0.018)));
+  const feather = Math.max(8, Math.min(56, Math.round(expand * 1.25)));
+  const expandedCanvas = document.createElement("canvas");
+  expandedCanvas.width = width;
+  expandedCanvas.height = height;
+  const expandedContext = expandedCanvas.getContext("2d");
+  if (!expandedContext) throw new Error("Could not expand inpaint mask.");
+  previewInpaintMaskOffsets(expand).forEach(([x, y]) => {
+    expandedContext.drawImage(binaryCanvas, x, y, width, height);
+  });
+
+  const softCanvas = document.createElement("canvas");
+  softCanvas.width = width;
+  softCanvas.height = height;
+  const softContext = softCanvas.getContext("2d");
+  if (!softContext) throw new Error("Could not feather inpaint mask.");
+  softContext.filter = `blur(${feather}px)`;
+  softContext.drawImage(expandedCanvas, 0, 0);
+  softContext.filter = "none";
+  softContext.drawImage(expandedCanvas, 0, 0);
+  return softCanvas;
+}
+
+function previewInpaintMaskOffsets(radius) {
+  const half = Math.max(1, Math.round(radius * 0.55));
+  return [
+    [0, 0],
+    [-radius, 0],
+    [radius, 0],
+    [0, -radius],
+    [0, radius],
+    [-half, -half],
+    [half, -half],
+    [-half, half],
+    [half, half],
+    [-radius, -half],
+    [radius, -half],
+    [-radius, half],
+    [radius, half],
+    [-half, -radius],
+    [half, -radius],
+    [-half, radius],
+    [half, radius]
+  ];
+}
+
+function normalizePreviewTextOverlay(overlay = {}) {
+  const safeColor = /^#[0-9a-f]{6}$/i.test(String(overlay?.color || "")) ? String(overlay.color) : "#f4f0e8";
+  const safeFont = String(overlay?.font || "Inter").replace(/[^\w\s"',-]/g, "").trim() || "Inter";
+  return {
+    text: String(overlay?.text || "").slice(0, 220),
+    x: clamp(Number(overlay?.x) || 50, 0, 100),
+    y: clamp(Number(overlay?.y) || 50, 0, 100),
+    size: clamp(Number(overlay?.size) || 7, 2, 24),
+    color: safeColor,
+    font: safeFont
+  };
+}
+
+function wrapCanvasTextLines(context, text, maxWidth, maxLines = 8) {
+  const output = [];
+  const paragraphs = String(text || "").split(/\r?\n/);
+  for (const paragraph of paragraphs) {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      output.push("");
+      continue;
+    }
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (line && context.measureText(candidate).width > maxWidth) {
+        output.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+      if (output.length >= maxLines) break;
+    }
+    if (output.length >= maxLines) break;
+    if (line) output.push(line);
+    if (output.length >= maxLines) break;
+  }
+  return output.slice(0, maxLines);
+}
+
+function drawPreviewTextOverlay(context, width, height, overlay = {}) {
+  const normalized = normalizePreviewTextOverlay(overlay);
+  if (!normalized.text.trim()) return;
+  const fontSize = Math.max(10, Math.round(Math.min(width, height) * (normalized.size / 100)));
+  const x = (normalized.x / 100) * width;
+  const y = (normalized.y / 100) * height;
+  const maxWidth = width * 0.86;
+  context.save();
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.font = `700 ${fontSize}px "${normalized.font}", Arial, sans-serif`;
+  const lines = wrapCanvasTextLines(context, normalized.text, maxWidth, 8);
+  const lineHeight = fontSize * 1.14;
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  context.fillStyle = normalized.color;
+  context.shadowColor = "rgba(0, 0, 0, 0.52)";
+  context.shadowBlur = Math.max(2, fontSize * 0.08);
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = Math.max(1, fontSize * 0.045);
+  lines.forEach((line, index) => {
+    context.fillText(line, x, startY + index * lineHeight, maxWidth);
+  });
+  context.restore();
+}
+
+function applyPreviewToneAdjustmentsToCanvas(context, width, height, adjustments = {}) {
+  const imageData = context.getImageData(0, 0, width, height);
+  const brightness = clamp(Number(adjustments?.brightness) || 0, -100, 100);
+  const contrast = clamp(Number(adjustments?.contrast) || 0, -100, 100);
+  const brightnessOffset = brightness * 2.55;
+  const contrastValue = contrast * 2.55;
+  const contrastFactor = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue));
+  const pixels = imageData.data;
+  for (let index = 0; index < pixels.length; index += 4) {
+    pixels[index] = clamp(contrastFactor * (pixels[index] - 128) + 128 + brightnessOffset, 0, 255);
+    pixels[index + 1] = clamp(contrastFactor * (pixels[index + 1] - 128) + 128 + brightnessOffset, 0, 255);
+    pixels[index + 2] = clamp(contrastFactor * (pixels[index + 2] - 128) + 128 + brightnessOffset, 0, 255);
+  }
+  context.putImageData(imageData, 0, 0);
+}
+
+function applyPreviewCurveToCanvas(context, width, height, points = []) {
+  const imageData = context.getImageData(0, 0, width, height);
+  const lookup = previewCurveLookup(points);
+  const pixels = imageData.data;
+  for (let index = 0; index < pixels.length; index += 4) {
+    pixels[index] = lookup[pixels[index]];
+    pixels[index + 1] = lookup[pixels[index + 1]];
+    pixels[index + 2] = lookup[pixels[index + 2]];
+  }
+  context.putImageData(imageData, 0, 0);
+}
+
+function previewCurveLookup(points = []) {
+  const normalized = previewCurveControlPoints(points);
+  const lookup = new Uint8ClampedArray(256);
+  for (let input = 0; input < 256; input += 1) {
+    lookup[input] = previewInterpolatedCurveOutput(normalized, input);
+  }
+  return lookup;
+}
+
+function previewInterpolatedCurveOutput(points, input) {
+  if (points.length < 2) return input;
+  let segmentIndex = 0;
+  while (segmentIndex < points.length - 2 && input > points[segmentIndex + 1].input) {
+    segmentIndex += 1;
+  }
+  const p0 = points[Math.max(0, segmentIndex - 1)];
+  const p1 = points[segmentIndex];
+  const p2 = points[Math.min(segmentIndex + 1, points.length - 1)];
+  const p3 = points[Math.min(segmentIndex + 2, points.length - 1)];
+  const range = Math.max(1, p2.input - p1.input);
+  const t = clamp((input - p1.input) / range, 0, 1);
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const output = 0.5 * (
+    (2 * p1.output) +
+    (-p0.output + p2.output) * t +
+    (2 * p0.output - 5 * p1.output + 4 * p2.output - p3.output) * t2 +
+    (-p0.output + 3 * p1.output - 3 * p2.output + p3.output) * t3
+  );
+  return Math.round(clamp(output, 0, 255));
+}
+
+function previewCurveControlPoints(points = []) {
+  const safePoints = Array.isArray(points) && points.length ? points : [{ x: 0, y: 100 }, { x: 100, y: 0 }];
+  const normalized = safePoints
+    .map((point) => ({
+      x: clamp(Number(point?.x) || 0, 0, 100),
+      y: clamp(Number(point?.y) || 0, 0, 100)
+    }))
+    .sort((a, b) => a.x - b.x);
+  const middle = normalized.filter((point) => point.x > 0.5 && point.x < 99.5);
+  const first = normalized.find((point) => point.x <= 0.5) || { x: 0, y: 100 };
+  const last = [...normalized].reverse().find((point) => point.x >= 99.5) || { x: 100, y: 0 };
+  return [
+    { input: 0, output: Math.round(clamp(100 - first.y, 0, 100) * 2.55) },
+    ...middle.map((point) => ({
+      input: Math.round(clamp(point.x, 0, 100) * 2.55),
+      output: Math.round(clamp(100 - point.y, 0, 100) * 2.55)
+    })),
+    { input: 255, output: Math.round(clamp(100 - last.y, 0, 100) * 2.55) }
+  ].filter((point, index, all) => index === 0 || point.input !== all[index - 1].input);
+}
+
+function previewCropRectToPixels(rect, imageWidth, imageHeight) {
+  const source = rect && typeof rect === "object" ? rect : {};
+  const widthPct = clamp(Number(source.width) || 100, 1, 100);
+  const heightPct = clamp(Number(source.height) || 100, 1, 100);
+  const xPct = clamp(Number(source.x) || 0, 0, 100 - widthPct);
+  const yPct = clamp(Number(source.y) || 0, 0, 100 - heightPct);
+  return {
+    x: Math.round((xPct / 100) * imageWidth),
+    y: Math.round((yPct / 100) * imageHeight),
+    width: Math.max(1, Math.round((widthPct / 100) * imageWidth)),
+    height: Math.max(1, Math.round((heightPct / 100) * imageHeight))
+  };
+}
+
 function previewVideoSourceForNode(node, incomingByNode) {
   if (node?.type !== "preview") return null;
   const previewSources = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
@@ -10139,14 +14462,6 @@ function previewVideoSourceForNode(node, incomingByNode) {
 function previewSelectionForNode(node, previewSources = []) {
   if (!previewSources.length) return { source: null, item: null, itemIndex: 0 };
   const data = node?.data || {};
-  if (!data.previewSourceId && data.previewSelectedIndex !== undefined && data.previewSelectedIndex !== null && data.previewSelectedIndex !== "") {
-    const flatItems = previewSources.flatMap((source) => source.items.map((item, itemIndex) => ({ source, item, itemIndex })));
-    const maxIndex = Math.max(0, flatItems.length - 1);
-    const selectedIndex = Math.trunc(Number(data.previewSelectedIndex));
-    const selected = flatItems[Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex)];
-    if (selected) return selected;
-  }
-
   const source =
     selectedPreviewSource(previewSources, data.previewSourceId) ||
     previewSources.find((previewSource) => previewSource.items.some((item) => item.sourceSelectedResult)) ||
@@ -10161,13 +14476,6 @@ function previewSelectionForNode(node, previewSources = []) {
 
 function previewSelectedItemIndexForSource(node, source) {
   const items = source?.items || [];
-  const maxIndex = Math.max(0, items.length - 1);
-  const data = node?.data || {};
-  if (data.previewItemIndex !== undefined && data.previewItemIndex !== null && data.previewItemIndex !== "") {
-    const selectedIndex = Math.trunc(Number(data.previewItemIndex));
-    return Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex);
-  }
-
   const sourceSelectedIndex = items.findIndex((item) => item.sourceSelectedResult);
   return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
 }
@@ -10178,7 +14486,11 @@ function selectedPreviewSource(sources = [], selectedId) {
 }
 
 function previewMediaType(source, edge) {
+  if (!source) return "";
+  if (source.type === "storyboard" && storyboardFrameOutputItem(source, edge)) return "image";
+  if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
+  if (source.type === "edit") return editOutputType(source);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
@@ -10186,19 +14498,25 @@ function previewMediaType(source, edge) {
   return "image";
 }
 
-function connectedImagePromptItems(items = [], incomingByNode = null) {
-  const namedCharacterReferences = activeConnectedCharacterSources(items, incomingByNode).length > 1;
+function connectedImagePromptItems(items = [], incomingByNode = null, options = {}) {
+  const includeComposerCharacterBindings = options.includeComposerCharacterBindings !== false;
+  const namedCharacterReferences = includeComposerCharacterBindings && activeConnectedCharacterSources(items, incomingByNode).length > 1;
   const uniqueItems = new Map();
 
   items
-    .flatMap(({ source }) => {
-      if (!source.data.resultUrl) return null;
+    .flatMap(({ source, edge }) => {
+      const outputItem = connectedOutputItem(source, edge);
+      const outputUrl = outputItem?.url || connectedOutputUrl(source, edge);
+      if (!outputUrl) return null;
       if (source.type === "character") {
-        return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
+        return { url: outputUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
       }
       if (source.type === "composer") {
+        if (!includeComposerCharacterBindings) {
+          return { url: outputUrl, label: sourceLabel(source) };
+        }
         return [
-          { url: source.data.resultUrl, label: "Input guide image" },
+          { url: outputUrl, label: "Input guide image" },
           ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
             url: binding.source.data.resultUrl,
             label: composerCharacterReferenceLabel(binding, namedCharacterReferences)
@@ -10206,8 +14524,8 @@ function connectedImagePromptItems(items = [], incomingByNode = null) {
         ];
       }
       return {
-        url: source.data.resultUrl,
-        label: source.type === "transfer" ? moodBoardOutputFileName : sourceLabel(source)
+        url: outputUrl,
+        label: source.type === "transfer" ? moodBoardOutputFileName : outputItem?.label || sourceLabel(source)
       };
     })
     .filter(Boolean)
@@ -10300,7 +14618,7 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
     return normalizeImageModelAspectRatio(configuredAspectRatio, node.data.model);
   }
 
-  const imageUrl = imageModelAutoAspectInputUrls(incoming)[0];
+  const imageUrl = imageModelAutoAspectInputUrls(incoming, node.data.model)[0];
   if (!imageUrl) {
     throw new Error("Auto aspect ratio needs a connected image.");
   }
@@ -10313,12 +14631,21 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
   return closestAspectRatio(dimensions.width / Math.max(1, dimensions.height), imageModelSupportedAspectRatios(node.data.model));
 }
 
-function imageModelAutoAspectInputUrls(incoming = {}) {
-  return ["imagePromptIn", "cameraIn", "transferIn"]
+function imageModelAutoAspectInputUrls(incoming = {}, model = "") {
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  const unsupportedSources = imageModelUnsupportedSourceTypes(model);
+  const portIds = [
+    "imagePromptIn",
+    ...(!unsupportedPorts.has("cameraIn") ? ["cameraIn"] : []),
+    ...(!unsupportedPorts.has("transferIn") ? ["transferIn"] : [])
+  ];
+  return portIds
     .flatMap((portId) => incoming[portId] || [])
     .map(({ source, edge }) => {
-      if (!source?.data?.resultUrl) return "";
-      return previewMediaType(source, edge) === "image" ? source.data.resultUrl : "";
+      if (unsupportedSources.has(source?.type)) return "";
+      const url = connectedOutputUrl(source, edge);
+      if (!url) return "";
+      return previewMediaType(source, edge) === "image" ? url : "";
     })
     .filter(Boolean);
 }
@@ -10423,7 +14750,10 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
   if (source.type === "style") {
     const selectedPreset = source.data.stylePreset || "None";
-    return [stylePresetPrompts[selectedPreset] || ""].filter(Boolean);
+    return [
+      stylePresetPrompts[selectedPreset] || "",
+      selectedPreset === "Custom Palette" ? customPalettePromptPiece(source.data) : ""
+    ].filter(Boolean);
   }
 
   if (source.type === "composer") {
@@ -10437,6 +14767,230 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
   if (source.type !== "transfer" || !source.data.activated || !source.data.resultUrl) return [];
 
   return [source.data.hiddenPrompt || transferPromptSuffix].filter(Boolean);
+}
+
+async function extractCustomPaletteFromFile(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadCanvasImage(dataUrl);
+  const colors = extractDominantPaletteColors(image, 10);
+  if (!colors.length) throw new Error("No usable colors found in that image.");
+  return {
+    colors,
+    previewUrl: renderCustomPalettePreview(image, colors)
+  };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read palette image."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function extractDominantPaletteColors(image, limit = 10) {
+  const sourceWidth = image.naturalWidth || image.width || 1;
+  const sourceHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, 220 / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const buckets = new Map();
+  const bucketSize = 24;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const alpha = pixels[index + 3];
+    if (alpha < 32) continue;
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    const key = [
+      Math.min(255, Math.round(r / bucketSize) * bucketSize),
+      Math.min(255, Math.round(g / bucketSize) * bucketSize),
+      Math.min(255, Math.round(b / bucketSize) * bucketSize)
+    ].join(",");
+    const bucket = buckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+    bucket.r += r;
+    bucket.g += g;
+    bucket.b += b;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+  }
+
+  const total = [...buckets.values()].reduce((sum, bucket) => sum + bucket.count, 0) || 1;
+  const candidates = [...buckets.values()]
+    .map((bucket) => customPaletteColorFromRgb(
+      Math.round(bucket.r / bucket.count),
+      Math.round(bucket.g / bucket.count),
+      Math.round(bucket.b / bucket.count),
+      Math.round((bucket.count / total) * 1000) / 10
+    ))
+    .sort((first, second) => second.percent - first.percent);
+
+  const selected = [];
+  candidates.forEach((candidate) => {
+    if (selected.length >= limit) return;
+    const tooClose = selected.some((color) => colorDistance(color, candidate) < 30);
+    if (!tooClose) selected.push(candidate);
+  });
+
+  return selected.length >= limit ? selected : candidates.slice(0, limit);
+}
+
+function renderCustomPalettePreview(image, colors) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 560;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#101010";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  drawImageCover(context, image, 0, 0, canvas.width, 420);
+
+  const swatchGap = 9;
+  const swatchTop = 434;
+  const swatchHeight = 110;
+  const swatchWidth = Math.floor((canvas.width - swatchGap * (colors.length + 1)) / Math.max(1, colors.length));
+  colors.forEach((color, index) => {
+    const x = swatchGap + index * (swatchWidth + swatchGap);
+    context.fillStyle = color.hex;
+    context.fillRect(x, swatchTop, swatchWidth, swatchHeight);
+  });
+
+  return canvas.toDataURL("image/jpeg", 0.88);
+}
+
+function normalizedCustomPaletteColors(data = {}) {
+  const textColors = parseCustomPaletteText(data.customPaletteRgbText);
+  if (textColors.length) return uniqueCustomPaletteColors(textColors).slice(0, 10);
+  const savedColors = Array.isArray(data.customPaletteColors) ? data.customPaletteColors : [];
+  return uniqueCustomPaletteColors(savedColors.map((color) => customPaletteColorFromRgb(color.r, color.g, color.b, color.percent))).slice(0, 10);
+}
+
+function parseCustomPaletteText(text = "") {
+  const chunks = String(text || "").split(/[\n;]+/).map((chunk) => chunk.trim()).filter(Boolean);
+  const colors = [];
+  chunks.forEach((chunk) => {
+    const hexMatch = chunk.match(/#?([0-9a-f]{6})\b/i);
+    if (hexMatch) {
+      colors.push(customPaletteColorFromHex(hexMatch[1]));
+      return;
+    }
+    const rgbMatch = chunk.match(/(\d{1,3})\D+(\d{1,3})\D+(\d{1,3})/);
+    if (rgbMatch) {
+      colors.push(customPaletteColorFromRgb(rgbMatch[1], rgbMatch[2], rgbMatch[3]));
+    }
+  });
+  return colors;
+}
+
+function uniqueCustomPaletteColors(colors = []) {
+  const seen = new Set();
+  return colors
+    .filter((color) => Number.isFinite(color.r) && Number.isFinite(color.g) && Number.isFinite(color.b))
+    .map((color) => customPaletteColorFromRgb(color.r, color.g, color.b, color.percent))
+    .filter((color) => {
+      const key = color.hex.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function customPalettePromptPiece(data = {}) {
+  const colors = normalizedCustomPaletteColors(data);
+  if (!colors.length) return "";
+  return `Utilize the hues and values: ${colors.map((color) => `${color.hex} RGB(${color.r}, ${color.g}, ${color.b}), hue ${color.hue} degrees, value ${color.value}%`).join("; ")}.`;
+}
+
+function styleOutputEnabled(data = {}) {
+  const selectedPreset = data.stylePreset || "None";
+  if (selectedPreset === "None") return false;
+  if (selectedPreset === "Custom Palette") return Boolean(customPalettePromptPiece(data));
+  return true;
+}
+
+function customPaletteColorFromHex(value) {
+  const hex = String(value || "").replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return customPaletteColorFromRgb(0, 0, 0);
+  return customPaletteColorFromRgb(parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16));
+}
+
+function customPaletteColorFromRgb(r, g, b, percent = null) {
+  const color = {
+    r: clamp(Math.round(Number(r) || 0), 0, 255),
+    g: clamp(Math.round(Number(g) || 0), 0, 255),
+    b: clamp(Math.round(Number(b) || 0), 0, 255),
+    percent: Number.isFinite(Number(percent)) ? Number(percent) : null
+  };
+  color.hex = rgbToHex(color);
+  const hsv = rgbToHsv(color.r, color.g, color.b);
+  color.hue = hsv.hue;
+  color.saturation = hsv.saturation;
+  color.value = hsv.value;
+  return color;
+}
+
+function customPaletteColorFromHsv(hue, saturation, value) {
+  const h = ((Number(hue) || 0) % 360 + 360) % 360;
+  const s = clamp(Number(saturation) || 0, 0, 100) / 100;
+  const v = clamp(Number(value) || 0, 0, 100) / 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+
+  return customPaletteColorFromRgb(
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255)
+  );
+}
+
+function rgbToHsv(r, g, b) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  let hue = 0;
+
+  if (delta) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue = Math.round(hue * 60);
+    if (hue < 0) hue += 360;
+  }
+
+  return {
+    hue,
+    saturation: max === 0 ? 0 : Math.round((delta / max) * 100),
+    value: Math.round(max * 100)
+  };
+}
+
+function colorDistance(first, second) {
+  return Math.sqrt(
+    (first.r - second.r) ** 2 +
+      (first.g - second.g) ** 2 +
+      (first.b - second.b) ** 2
+  );
 }
 
 function buildEffectiveVideoPrompt(prompt, incoming = {}) {
@@ -10454,7 +15008,7 @@ function buildEffectiveVideoPrompt(prompt, incoming = {}) {
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
   return [
-    `CHARACTER REFERENCE: Use "${sheetLabel}" as the only identity, selected wardrobe, and body-proportion authority for the character. Render this same recognizable character in the requested scene and keep the selected outfit consistent.`,
+    `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -10547,7 +15101,7 @@ function activeConnectedCharacterSources(items = [], incomingByNode = null) {
 function resolveImageCharacterMentions(prompt, characterSources = [], namedCharacterReferences = false) {
   return characterSources.reduce((value, source) => {
     const replacement = namedCharacterReferences
-      ? `the character in the reference sheet labeled "${characterReferenceLabel(source, true)}"`
+      ? `the character from the image reference labeled "${characterReferenceLabel(source, true)}"`
       : "the character in the connected character sheet";
     return replacePromptTag(value, characterTag(source), replacement);
   }, String(prompt || ""));
@@ -10563,7 +15117,7 @@ function replacePromptTag(prompt, tag, replacement) {
 }
 
 function characterReferenceLabel(node, namedCharacterReferences = false) {
-  return namedCharacterReferences ? `${characterTag(node)} character identity sheet` : "The Character identity sheet";
+  return namedCharacterReferences ? `${characterTag(node)} Character Sheet` : "The Character identity sheet";
 }
 
 function cameraPromptPieces(source) {
@@ -10610,22 +15164,34 @@ function ordinalLabel(value) {
   return `${number}${suffix}`;
 }
 
+function autoAspectSourceSummary(items = [], fallback) {
+  if (!items.length) return fallback;
+  if (items.length === 1) {
+    const source = items[0].source;
+    return source?.data?.title || nodeTypeLabel(source?.type) || fallback;
+  }
+  return `${items.length} connected`;
+}
+
 function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
+  if (source.type === "storyboard") return source.data.title || "Storyboard";
+  if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "TRANSFER.png";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
   if (source.type === "transfer" && source.data.resultUrl) return moodBoardOutputFileName;
   if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
+  if (source.type === "edit" && source.data.resultUrl) return editOutputType(source) === "video" ? "Edit video" : "Edit image";
   if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
   if (source.data.fileName) return source.data.fileName;
   return source.data.title || source.type;
 }
 
 function extractAspectRatio(value) {
-  return String(value || "").match(/\d+:\d+/)?.[0] || "";
+  return String(value || "").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "";
 }
 
 function closestAspectRatio(ratio, options = []) {
@@ -10708,7 +15274,23 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
 
 function normalizeEdgesForCurrentGraph(edges = [], nodes = []) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  return dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean));
+  return keepLatestAutoAspectInputs(dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
+}
+
+function keepLatestAutoAspectInputs(edges = [], nodeMap = new Map()) {
+  const latestAutoAspectInputIndexes = new Map();
+  edges.forEach((edge, index) => {
+    const target = nodeMap.get(edge.to.nodeId);
+    if (target?.type === "autoAspect" && edge.to.port === "imageIn") {
+      latestAutoAspectInputIndexes.set(edge.to.nodeId, index);
+    }
+  });
+  if (!latestAutoAspectInputIndexes.size) return edges;
+  return edges.filter((edge, index) => {
+    const target = nodeMap.get(edge.to.nodeId);
+    if (target?.type !== "autoAspect" || edge.to.port !== "imageIn") return true;
+    return latestAutoAspectInputIndexes.get(edge.to.nodeId) === index;
+  });
 }
 
 function normalizeGroups(groups = [], nodeMap = new Map()) {
@@ -10754,6 +15336,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "edit") {
+    return {
+      ...nextNode,
+      data: normalizeEditData(data)
+    };
+  }
+
   if (nextNode.type === "text") {
     return {
       ...nextNode,
@@ -10777,6 +15366,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "storyboard") {
+    return {
+      ...nextNode,
+      data: normalizeStoryboardData(data)
+    };
+  }
+
   if (nextNode.type === "composer") {
     return {
       ...nextNode,
@@ -10788,6 +15384,20 @@ function normalizeCurrentNode(node) {
     return {
       ...nextNode,
       data: normalizeImageModelData(data)
+    };
+  }
+
+  if (nextNode.type === "autoAspect") {
+    return {
+      ...nextNode,
+      data: normalizeAutoAspectData(data)
+    };
+  }
+
+  if (nextNode.type === "style") {
+    return {
+      ...nextNode,
+      data: normalizeStyleData(data)
     };
   }
 
@@ -10839,14 +15449,577 @@ function normalizeCurrentNode(node) {
     };
   }
 
-  return nextNode;
+  return {
+    ...nextNode,
+    data: {
+      ...data,
+      title: data.title || nodeTypeLabel(nextNode.type)
+    }
+  };
 }
 
-function textModelTitleFromLegacy(title) {
-  const value = String(title || "").trim();
-  if (!value) return "Text Model";
-  const match = value.match(/^Text( \d+)?$/);
-  return match ? `Text Model${match[1] || ""}` : value;
+function defaultStoryboardFrames(count = storyboardDefaultFrameCount) {
+  return Array.from({ length: Math.max(1, count) }, (_item, index) => createStoryboardFrame(index + 1));
+}
+
+function createStoryboardFrame(number = 1, patch = {}) {
+  const { id: patchId, ...framePatch } = patch;
+  const id = patchId || createNodeId("frame", number);
+  return {
+    id,
+    number,
+    shot: "None",
+    lens: "None",
+    angle: "None",
+    beat: "",
+    prompt: "",
+    notes: "",
+    resultUrl: "",
+    exportUrl: "",
+    resultFallbackUrl: "",
+    resultVersion: 0,
+    fileName: "",
+    status: "",
+    error: "",
+    ...framePatch
+  };
+}
+
+function normalizeStoryboardData(data = {}) {
+  const frames = normalizedStoryboardFrames(data.storyboardFrames);
+  const selectedFrameId = frames.some((frame) => frame.id === data.selectedFrameId)
+    ? data.selectedFrameId
+    : frames.find((frame) => frame.resultUrl)?.id || frames[0]?.id || "";
+  const selectedFrame = frames.find((frame) => frame.id === selectedFrameId) || frames.find((frame) => frame.resultUrl);
+  const legacyResolution = data.useHighResolution ? storyboardHighResolution : storyboardDefaultResolution;
+  const inferredPlanSceneDescription = typeof data.storyboardPlanSceneDescription === "string"
+    ? data.storyboardPlanSceneDescription
+    : data.storyboardAnalysis && frames.some((frame) => String(frame.prompt || "").trim())
+      ? data.sceneDescription || ""
+      : "";
+  return {
+    ...createDefaultNodeData("storyboard", data.title || "Storyboard", 1),
+    ...data,
+    storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
+    sceneName: data.sceneName || "Scene 1",
+    frameCount: storyboardFrameCountOptions.includes(String(data.frameCount || "")) ? String(data.frameCount) : data.frameCount || "Auto",
+    model: storyboardFixedModel,
+    aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
+    resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
+    useStoryboardStyle: data.useStoryboardStyle !== false,
+    useMoodBoard: data.useMoodBoard !== false,
+    useInternalStoryboardCharacters: data.useInternalStoryboardCharacters !== false,
+    useHighResolution: Boolean(data.useHighResolution),
+    storyboardStylePreset: normalizeChoice(data.storyboardStylePreset || "None", stylePresetNames, "None"),
+    storyboardMoodBoardUrl: data.storyboardMoodBoardUrl || storyboardDefaultMoodBoardUrl,
+    storyboardMoodBoardFileName: data.storyboardMoodBoardFileName || storyboardMoodBoardLabel,
+    storyboardCharacters: normalizedStoryboardCharacters(data.storyboardCharacters),
+    storyboardPlanSceneDescription: inferredPlanSceneDescription,
+    storyboardScale: Math.max(1, finiteNumber(data.storyboardScale, 1)),
+    storyboardFrames: frames,
+    selectedFrameId,
+    resultUrl: selectedFrame?.resultUrl || data.resultUrl || "",
+    resultItems: storyboardResultItems(frames),
+    selectedResultIndex: Math.max(0, frames.filter((frame) => frame.resultUrl).findIndex((frame) => frame.id === selectedFrameId))
+  };
+}
+
+function normalizedStoryboardFrames(frames = []) {
+  const sourceFrames = Array.isArray(frames) && frames.length ? frames : defaultStoryboardFrames(storyboardDefaultFrameCount);
+  return sourceFrames.slice(0, 24).map((frame, index) =>
+    createStoryboardFrame(index + 1, {
+      ...frame,
+      id: frame.id || createNodeId("frame", index + 1),
+      number: index + 1,
+      shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
+      lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      prompt: String(frame.prompt || ""),
+      beat: String(frame.beat || ""),
+      notes: String(frame.notes || ""),
+      resultUrl: frame.resultUrl || frame.url || "",
+      exportUrl: frame.exportUrl || "",
+      resultFallbackUrl: frame.resultFallbackUrl || "",
+      resultVersion: finiteNumber(frame.resultVersion, 0),
+      fileName: frame.fileName || "",
+      status: frame.status || "",
+      error: frame.error || ""
+    })
+  );
+}
+
+function normalizedStoryboardCharacters(characters = []) {
+  return Array.isArray(characters)
+    ? characters.filter(Boolean).slice(0, storyboardMaxCharacters).map((character, index) => {
+        const sheetUrl = character.sheetUrl || character.resultUrl || "";
+        const status = sheetUrl && character.status === "compiling" ? "ready" : character.status || "";
+        return createStoryboardCharacter({
+          ...character,
+          id: character.id || createNodeId("storyboard-character", index + 1),
+          name: String(character.name || ""),
+          portrait: character.portrait?.localUrl ? character.portrait : null,
+          sheetUrl,
+          sheetFileName: character.sheetFileName || character.fileName || "",
+          sheetVersion: finiteNumber(character.sheetVersion, 0),
+          status,
+          error: character.error || ""
+        });
+      })
+    : [];
+}
+
+function createStoryboardCharacter(patch = {}) {
+  return {
+    id: patch.id || createNodeId("storyboard-character", 1),
+    name: "",
+    portrait: null,
+    sheetUrl: "",
+    sheetFileName: "",
+    sheetVersion: 0,
+    status: "",
+    error: "",
+    ...patch
+  };
+}
+
+function storyboardCharacterNameFromFile(fileName = "", index = 1) {
+  const baseName = String(fileName || "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return baseName || `Character ${index}`;
+}
+
+function storyboardCharacterTag(character = {}) {
+  return cleanPromptTag(character.name || "Character") || "Character";
+}
+
+function storyboardUsesInternalCharacters(node) {
+  return node?.data?.useStoryboardStyle !== false && node?.data?.useInternalStoryboardCharacters !== false;
+}
+
+function storyboardResolutionForNode(node) {
+  const fallbackResolution = node?.data?.useHighResolution ? storyboardHighResolution : storyboardDefaultResolution;
+  return normalizeChoice(node?.data?.resolution || fallbackResolution, imageResolutionOptions, storyboardDefaultResolution);
+}
+
+function storyboardAspectRatioForNode(node) {
+  return normalizeChoice(node?.data?.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio);
+}
+
+function storyboardCssAspectRatio(value) {
+  const ratio = storyboardAspectRatioForNode({ data: { aspectRatio: value } });
+  return ratio.replace(":", " / ");
+}
+
+function storyboardSceneDescriptionForNode(node, incoming = {}) {
+  return connectedText(incoming?.sceneDescriptionIn || []) || node?.data?.sceneDescription || "";
+}
+
+function storyboardPlanIsCurrent(node, sceneDescriptionOverride = null) {
+  const sceneDescription = String(sceneDescriptionOverride ?? storyboardSceneDescriptionForNode(node)).trim();
+  if (!sceneDescription) return false;
+  return String(node?.data?.storyboardPlanSceneDescription || "").trim() === sceneDescription;
+}
+
+function storyboardCharacterSheetPromptForNode(node) {
+  return [
+    storyboardCharacterSheetBasePrompt,
+    node?.data?.useStoryboardStyle !== false ? storyboardCharacterSheetStyleInstruction : "",
+    storyboardCharacterWardrobeFromPortraitPrompt
+  ].filter(Boolean).join("\n\n");
+}
+
+function storyboardResultItems(frames = []) {
+  return frames
+    .filter((frame) => frame.exportUrl || frame.resultUrl)
+    .map((frame, index) => ({
+      url: frame.exportUrl || frame.resultUrl,
+      type: "image",
+      label: `Frame ${String(frame.number || index + 1).padStart(3, "0")}`,
+      text: frame.prompt || "",
+      fileName: frame.fileName || ""
+    }));
+}
+
+function cacheBustedAssetUrl(url, version = 0) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  const token = finiteNumber(version, 0);
+  if (!token) return value;
+  return `${value}${value.includes("?") ? "&" : "?"}v=${encodeURIComponent(token)}`;
+}
+
+function storyboardFrameImageSrc(frame = {}) {
+  return cacheBustedAssetUrl(frame.resultUrl, frame.resultVersion);
+}
+
+function storyboardFrameFallbackSrc(frame = {}) {
+  return cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion);
+}
+
+function storyboardFrameCountForNode(node) {
+  const value = String(node?.data?.frameCount || "Auto");
+  if (value === "Auto") return storyboardDefaultFrameCount;
+  const parsed = Number.parseInt(value, 10);
+  return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : storyboardDefaultFrameCount));
+}
+
+function storyboardFramesFromPlan(frames = []) {
+  if (!Array.isArray(frames)) return [];
+  return frames.slice(0, 24).map((frame, index) =>
+    createStoryboardFrame(index + 1, {
+      shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
+      lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      beat: frame.beat || "",
+      prompt: frame.prompt || "",
+      notes: frame.notes || ""
+    })
+  );
+}
+
+function fallbackStoryboardPlanForClient(sceneDescription = "", frameCount = storyboardDefaultFrameCount) {
+  return {
+    sceneTitle: "Scene 1",
+    analysis: "Fallback shot plan with clear screen direction and simple editorial progression.",
+    frames: defaultStoryboardFrames(frameCount).map((frame, index) => ({
+      ...frame,
+      shot: ["WS", "MS", "CU", "MS", "CU", "WS"][index % 6],
+      lens: index === 0 ? "35mm" : "None",
+      beat: storyboardFallbackBeat(index),
+      prompt: `${storyboardFallbackBeat(index)} Single storyboard frame for: ${sceneDescription || "the described scene"}. Preserve screen direction, blocking, eyeline, silhouette, and continuity.`
+    }))
+  };
+}
+
+function storyboardFallbackBeat(index) {
+  return [
+    "Establish the scene geography and main subjects.",
+    "Move closer to clarify action and blocking.",
+    "Show the key emotional or story detail.",
+    "Show the reaction or next action while preserving eyelines.",
+    "Use a story-relevant insert or tighter detail.",
+    "Resolve the beat in a wider contextual frame."
+  ][index % 6];
+}
+
+function storyboardCharacterSummariesForNode(node, externalItems = [], incomingByNode = null) {
+  if (storyboardUsesInternalCharacters(node)) {
+    return normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+      .filter((character) => character.name || character.portrait?.localUrl)
+      .map((character) => ({
+        name: character.name || "Character",
+        tag: storyboardCharacterTag(character)
+      }));
+  }
+
+  return storyboardCharacterSourcesForNode(node, externalItems, incomingByNode).map((source) => ({
+    name: source.data.characterName || source.data.title || "Character",
+    tag: characterTag(source)
+  }));
+}
+
+function storyboardMissingRequiredCharacterTags(node, externalItems = [], incomingByNode = null, text = "") {
+  const knownTags = storyboardCharacterSummariesForNode(node, externalItems, incomingByNode)
+    .map((character) => character.tag)
+    .filter(Boolean);
+  if (!knownTags.length) return [];
+
+  const availableTags = new Set(
+    storyboardCharacterSourcesForNode(node, externalItems, incomingByNode)
+      .map((source) => characterTag(source).toLowerCase())
+      .filter(Boolean)
+  );
+
+  return knownTags
+    .filter((tag) => promptHasTag(text, tag))
+    .filter((tag) => !availableTags.has(tag.toLowerCase()));
+}
+
+function storyboardPreparedCharacterCount(node) {
+  return normalizedStoryboardCharacters(node?.data?.storyboardCharacters)
+    .filter((character) => character.sheetUrl && storyboardCharacterTag(character))
+    .length;
+}
+
+function storyboardNodeWithMostPreparedCharacters(preparedNode, stateNode) {
+  if (!stateNode || preparedNode?.type !== "storyboard" || stateNode.type !== "storyboard") return preparedNode || stateNode;
+  if (storyboardPreparedCharacterCount(stateNode) >= storyboardPreparedCharacterCount(preparedNode)) return stateNode;
+  return {
+    ...stateNode,
+    data: {
+      ...stateNode.data,
+      storyboardCharacters: normalizedStoryboardCharacters(preparedNode.data?.storyboardCharacters)
+    }
+  };
+}
+
+function storyboardCharacterSourcesForNode(node, externalItems = [], incomingByNode = null) {
+  if (!storyboardUsesInternalCharacters(node)) {
+    return activeConnectedCharacterSources(externalItems, incomingByNode);
+  }
+
+  return normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+    .filter((character) => character.sheetUrl && storyboardCharacterTag(character))
+    .map((character) => ({
+      id: `${node.id}:${character.id}`,
+      type: "character",
+      data: {
+        title: character.name || "Character",
+        characterName: character.name || "Character",
+        locked: true,
+        activated: true,
+        resultUrl: character.sheetUrl,
+        resultItems: [{
+          url: character.sheetUrl,
+          type: "image",
+          label: `@${storyboardCharacterTag(character)} Character Sheet`,
+          fileName: character.sheetFileName || ""
+        }],
+        characterPhysicalDetails: "",
+        characterTraits: [],
+        customCharacterTraits: "",
+        compiledTraitPrompt: ""
+      }
+    }));
+}
+
+function storyboardCharacterReferenceItems(node, externalItems = [], incomingByNode = null) {
+  return storyboardCharacterSourcesForNode(node, externalItems, incomingByNode).map((source) => ({
+    url: source.data.resultUrl,
+    label: characterReferenceLabel(source, true)
+  }));
+}
+
+function storyboardImagePromptItems(node, incoming = {}, incomingByNode = null) {
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+  const characterItems = storyboardCharacterReferenceItems(node, incoming.characterIn || [], incomingByNode);
+  const sceneReferenceItems = storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], incomingByNode)
+    .map(({ url, label }) => ({ url, label }));
+  const directMoodBoard = storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl
+    ? [{ url: node.data.storyboardMoodBoardUrl, label: storyboardMoodBoardLabel }]
+    : [];
+  const connectedMoodBoard = storyboardStyleEnabled ? [] : connectedImagePromptItems(incoming.transferIn || [], incomingByNode, { includeComposerCharacterBindings: false });
+  return uniqueStoryboardImagePromptItems([...characterItems, ...sceneReferenceItems, ...directMoodBoard, ...connectedMoodBoard]);
+}
+
+function uniqueStoryboardImagePromptItems(items = []) {
+  const uniqueItems = new Map();
+  items.forEach((item) => {
+    if (item?.url) uniqueItems.set(`${item.url}|${item.label || ""}`, item);
+  });
+  return [...uniqueItems.values()];
+}
+
+function storyboardFrameReferenceUrl(frame = {}) {
+  return frame.exportUrl || frame.resultUrl || "";
+}
+
+function storyboardFrameContinuityText(frame = {}) {
+  return [frame.beat, frame.prompt, frame.notes, frame.shot, frame.angle]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isStoryboardInsertFrame(frame = {}) {
+  const text = storyboardFrameContinuityText(frame);
+  if (!text) return false;
+  return /\b(insert|cutaway|detail|prop|object|macro|still life|phone screen|screen close|message|muffin)\b/.test(text)
+    || /\b(close[-\s]?up|closeup|extreme close[-\s]?up)\b/.test(text);
+}
+
+function isStoryboardSpatialAnchorFrame(frame = {}) {
+  if (!storyboardFrameReferenceUrl(frame) || isStoryboardInsertFrame(frame)) return false;
+  const shot = String(frame.shot || "").toUpperCase();
+  if (shot === "CU" || shot === "ECU") return false;
+  return true;
+}
+
+function storyboardContinuityReferenceItems(node, frame) {
+  const frames = normalizedStoryboardFrames(node?.data?.storyboardFrames);
+  const frameIndex = frames.findIndex((item) => item.id === frame.id);
+  if (frameIndex <= 0) return [];
+  const previousFrames = [...frames.slice(0, frameIndex)].reverse();
+  const previousFrame = previousFrames.find((item) => storyboardFrameReferenceUrl(item));
+  if (!previousFrame) return [];
+
+  const references = [{
+    url: storyboardFrameReferenceUrl(previousFrame),
+    label: storyboardPreviousFrameLabel
+  }];
+  const previousFrameIsSpatialAnchor = isStoryboardSpatialAnchorFrame(previousFrame);
+  if (!previousFrameIsSpatialAnchor) {
+    const spatialAnchorFrame = previousFrames.find((item) => isStoryboardSpatialAnchorFrame(item));
+    const spatialAnchorUrl = storyboardFrameReferenceUrl(spatialAnchorFrame);
+    if (spatialAnchorUrl && spatialAnchorUrl !== storyboardFrameReferenceUrl(previousFrame)) {
+      references.push({
+        url: spatialAnchorUrl,
+        label: storyboardSpatialAnchorLabel
+      });
+    }
+  }
+  return references;
+}
+
+function storyboardImagePromptItemsForFrame(baseItems = [], continuityReferenceItems = []) {
+  return uniqueStoryboardImagePromptItems([
+    ...baseItems,
+    ...continuityReferenceItems
+  ]);
+}
+
+function storyboardCharacterReferenceMapPrompt(characterSources = []) {
+  if (!characterSources.length) return "";
+  const mappings = characterSources
+    .map((source) => `@${characterTag(source)} = uploaded image reference labeled "${characterReferenceLabel(source, true)}"`)
+    .join("; ");
+  return `Character reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching character sheet exactly for that character's face, hair, body proportions, selected wardrobe, and recognizable details. Keep each named character visually distinct and do not substitute one character sheet for another.`;
+}
+
+function storyboardSceneReferenceSources(items = [], incomingByNode = null) {
+  const uniqueSources = new Map();
+
+  items.forEach(({ source, edge }, index) => {
+    const outputItem = connectedOutputItem(source, edge);
+    const url = outputItem?.url || connectedOutputUrl(source, edge);
+    if (!url) return;
+
+    const rawLabel = source.data?.title || outputItem?.label || sourceLabel(source) || `Reference ${index + 1}`;
+    const label = cleanImageReferenceLabel(rawLabel) || `Reference ${index + 1}`;
+    const tag = cleanPromptTag(source.data?.title || label) || `Reference${index + 1}`;
+    uniqueSources.set(`${url}|${tag}`, {
+      url,
+      label,
+      tag,
+      nodeId: source.id
+    });
+  });
+
+  return [...uniqueSources.values()];
+}
+
+function storyboardSceneReferenceMapPrompt(referenceSources = []) {
+  if (!referenceSources.length) return "";
+  const mappings = referenceSources
+    .map((source) => `@${source.tag} = uploaded image reference labeled "${source.label}"`)
+    .join("; ");
+  return `Scene reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching uploaded image reference for that product, prop, object, location, environment, brand detail, texture, or design cue. Preserve the Storyboard node's final drawing style; use scene references for visual continuity and referenced details only, not as a photorealistic rendering style. If a connected scene reference is not named or clearly relevant, do not force it into every frame.`;
+}
+
+function storyboardSceneReferenceSummaries(items = [], incomingByNode = null) {
+  return storyboardSceneReferenceSources(items, incomingByNode)
+    .map((source) => ({
+      tag: source.tag,
+      label: source.label
+    }));
+}
+
+function storyboardCharacterSourcesTaggedInText(characterSources = [], text = "") {
+  const uniqueSources = new Map();
+  characterSources.forEach((source) => {
+    const tag = characterTag(source);
+    if (tag && promptHasTag(text, tag)) uniqueSources.set(tag.toLowerCase(), source);
+  });
+  return [...uniqueSources.values()];
+}
+
+function storyboardRequiredCastPrompt(requiredSources = []) {
+  if (!requiredSources.length) return "";
+  const cast = requiredSources
+    .map((source) => `@${characterTag(source)} must use "${characterReferenceLabel(source, true)}"`)
+    .join("; ");
+  return `Required character cast for this frame: ${cast}. Every @tag named in this frame must be represented by its own matching character sheet. Do not omit, merge, swap, gender-shift, age-shift, or replace these tagged characters. If a tagged character is described as off-screen, keep them off-screen but preserve the correct eyeline and screen direction.`;
+}
+
+function resolveStoryboardCharacterMentions(prompt, characterSources = []) {
+  return characterSources.reduce((value, source) => {
+    const tag = characterTag(source);
+    const replacement = `@${tag} (the character from uploaded reference "${characterReferenceLabel(source, true)}")`;
+    return replacePromptTag(value, tag, replacement);
+  }, String(prompt || ""));
+}
+
+function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
+  const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode);
+  const sceneReferenceSources = storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], incomingByNode);
+  const namedCharacterReferences = characterSources.length > 0;
+  const framePrompt = frame.prompt || frame.beat || sceneDescription || "Storyboard frame";
+  const aspectRatio = storyboardAspectRatioForNode(node);
+  const scenePlanningNote = String(node.data.storyboardNotes || "").trim();
+  const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
+  const frameTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, frameTagText);
+  const sceneTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, sceneDescription);
+  const requiredCharacterSources = frameTaggedCharacterSources.length ? frameTaggedCharacterSources : sceneTaggedCharacterSources;
+  const resolvedPrompt = resolveStoryboardCharacterMentions(framePrompt, characterSources);
+  const resolvedSceneDescription = resolveStoryboardCharacterMentions(sceneDescription, characterSources);
+  const characterReferenceMap = storyboardCharacterReferenceMapPrompt(characterSources);
+  const sceneReferenceMap = storyboardSceneReferenceMapPrompt(sceneReferenceSources);
+  const requiredCastPrompt = storyboardRequiredCastPrompt(requiredCharacterSources);
+  const cameraPieces = [
+    shotPresetPrompts[frame.shot] || "",
+    lensPresetPrompts[frame.lens] || "",
+    typePresetPrompts[frame.angle] || ""
+  ].filter(Boolean);
+  const characterPieces = (requiredCharacterSources.length ? requiredCharacterSources : characterSources).flatMap((source) => characterImagePromptPieces(source, namedCharacterReferences));
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+  const moodBoardConnected = Boolean(storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl);
+  const stylePieces = storyboardStyleEnabled
+    ? [stylePresetPrompts.Storyboard, storyboardBaseInstruction]
+    : (incoming.styleIn || []).flatMap(({ source }) => promptPiecesForSource(source));
+  const moodBoardPieces = storyboardStyleEnabled
+    ? (moodBoardConnected ? [transferPromptSuffix] : [])
+    : (incoming.transferIn || []).flatMap(({ source }) => promptPiecesForSource(source));
+  const sceneContinuityPieces = [
+    resolvedSceneDescription
+      ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
+      : "",
+    options.hasPreviousFrameReference
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as editorial continuity for the immediately preceding story beat, lighting direction, character identity, wardrobe, and recurring objects. Do not copy its rendering style if it looks photographic or overly realistic. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      : "",
+    options.hasSpatialAnchorReference
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the primary spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. Use the anchor for geography only, not rendering style. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
+      : ""
+  ].filter(Boolean);
+  const frameHeader = [
+    `Scene: ${node.data.sceneName || "Scene 1"}.`,
+    `Frame ${String(frame.number || 1).padStart(3, "0")}.`,
+    `Native frame aspect ratio: ${aspectRatio}. Compose specifically for ${aspectRatio}; do not crop, letterbox, pillarbox, add borders, or force this image into any other aspect ratio.`,
+    frame.beat ? `Story beat: ${frame.beat}` : "",
+    scenePlanningNote ? `Scene-level planning note: ${scenePlanningNote}` : "",
+    frame.notes ? `Continuity note: ${frame.notes}` : ""
+  ].filter(Boolean).join(" ");
+
+  return [
+    frameHeader,
+    resolvedPrompt,
+    ...cameraPieces,
+    storyboardContinuityInstruction,
+    characterReferenceMap,
+    sceneReferenceMap,
+    requiredCastPrompt,
+    ...sceneContinuityPieces,
+    ...stylePieces,
+    ...moodBoardPieces,
+    ...characterPieces,
+    storyboardStyleEnabled ? storyboardReferenceStyleGuard : "",
+    "Output only the image. Do not include captions, labels, panel borders, numbering, or text unless specifically requested in the frame prompt."
+  ].filter(Boolean).join("\n\n");
+}
+
+function storyboardFrameOutputItem(source, edge) {
+  if (source?.type !== "storyboard") return null;
+  const frame = storyboardFrameForOutputPort(source, edge?.from?.port);
+  if (!frame?.resultUrl) return null;
+  return {
+    url: frame.exportUrl || frame.resultUrl,
+    type: "image",
+    label: `Frame ${String(frame.number || 1).padStart(3, "0")}`,
+    text: frame.prompt || "",
+    fileName: frame.fileName || ""
+  };
 }
 
 function normalizeModel3DData(data = {}) {
@@ -10855,7 +16028,7 @@ function normalizeModel3DData(data = {}) {
     title: data.title || "3D",
     model: data.model || model3DNames.hunyuanPro,
     generateType: normalizeModel3DGenerateType(data.generateType),
-    enablePbr: Boolean(data.enablePbr),
+    enablePbr: data.enablePbr !== false,
     faceCount: model3DFaceCount(data.faceCount),
     resultType: "model3d",
     batchCount: "1"
@@ -10863,7 +16036,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = data.model || imageModelNames.nanoBananaPro;
+  const model = data.model || imageModelNames.zImage;
   return {
     ...data,
     title: data.title || "Image Model",
@@ -10871,7 +16044,52 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolution(data.resolution),
-    batchCount: data.batchCount || "1"
+    kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
+    batchCount: data.batchCount || "1",
+    settingsOpen: data.settingsOpen !== false
+  };
+}
+
+function normalizeAutoAspectData(data = {}) {
+  const selectedAspectRatios = normalizedAutoAspectRatios(data);
+  const activeKeys = new Set(autoAspectTargetsForData({ selectedAspectRatios }).map(autoAspectTargetKey));
+  const autoAspectResults = normalizedAutoAspectResults(data).filter((result) => activeKeys.has(result.key));
+  const resultItems = autoAspectResultItems({ autoAspectResults });
+  const selectedResultIndex = Math.min(
+    Math.max(0, Math.trunc(Number(data.selectedResultIndex) || 0)),
+    Math.max(0, resultItems.length - 1)
+  );
+  return {
+    ...createDefaultNodeData("autoAspect", data.title || "Auto Aspect", 1),
+    ...data,
+    title: data.title || "Auto Aspect",
+    selectedAspectRatios,
+    autoAspectResults,
+    resultItems,
+    resultUrl: resultItems[selectedResultIndex]?.url || resultItems[0]?.url || data.resultUrl || "",
+    selectedResultIndex,
+    model: normalizeAutoAspectModel(data.model),
+    resolution: normalizeImageModelResolution(data.resolution || "2K"),
+    removeTextGraphics: Boolean(data.removeTextGraphics),
+    advancedOpen: Boolean(data.advancedOpen)
+  };
+}
+
+function normalizeStyleData(data = {}) {
+  const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
+  const customPaletteColors = normalizedCustomPaletteColors(data);
+  return {
+    ...defaultData,
+    ...data,
+    title: data.title || "Style",
+    stylePreset: normalizeChoice(data.stylePreset || "None", stylePresetNames, "None"),
+    customPaletteRgbText: String(data.customPaletteRgbText || ""),
+    customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
+    customPaletteColors,
+    customPalettePreviewUrl: String(data.customPalettePreviewUrl || ""),
+    customPaletteSourceName: String(data.customPaletteSourceName || ""),
+    customPaletteStatus: "",
+    customPaletteError: ""
   };
 }
 
@@ -10921,6 +16139,13 @@ function normalizeCharacterSheetVariants(data = {}) {
     wardrobeFileName: "Existing wardrobe",
     generated
   }];
+}
+
+function textModelTitleFromLegacy(title) {
+  const value = String(title || "").trim();
+  if (!value) return "Smart Text Model";
+  const match = value.match(/^(?:Text(?: Model)?|Smart Text(?: Model)?)( \d+)?$/i);
+  return match ? `Smart Text Model${match[1] || ""}` : value;
 }
 
 function normalizeUtilityData(data = {}) {
@@ -11135,6 +16360,23 @@ function normalizeUtilityData(data = {}) {
   };
 }
 
+function normalizeEditData(data = {}) {
+  const selection = editSelectionFromData(data);
+  const editSettings = editSettingsForEffect(data, selection.effect);
+  return {
+    ...createDefaultNodeData("edit", data.title || "Edit", 1),
+    ...data,
+    title: data.title || "Edit",
+    editGroup: selection.groupId,
+    editEffect: selection.effect.id,
+    editSourceType: selection.sourceType,
+    editSettings,
+    editCropAspectLocked: data.editCropAspectLocked !== false,
+    editOutputFormat: normalizeChoice(data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4"),
+    resultType: selection.sourceType
+  };
+}
+
 function isLegacyDirectionNode(node) {
   return node.type === "direction" || (node.type === "style" && hasLegacyDirectionData(node));
 }
@@ -11168,9 +16410,7 @@ function splitLegacyDirectionNode(node) {
           title: "Camera",
           shotPreset: data.shotPreset || "None",
           lensPreset: data.lensPreset || "None",
-          typePreset: data.typePreset || "None",
-          qwenCameraOpen: false,
-          ...qwenCameraDefaults
+          typePreset: data.typePreset || "None"
         }
       }
     : null;
@@ -11255,6 +16495,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     return null;
   }
 
+  if (target?.type === "edit" && !editInputPortIds(target.data).includes(nextEdge.to.port)) {
+    return null;
+  }
+
   if (source.type === "transfer") {
     nextEdge.from.port = "transferOut";
     if (nextEdge.to.port === "imagePromptIn") nextEdge.to.port = "transferIn";
@@ -11262,14 +16506,9 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "camera") {
-    if (isCameraImageEdge(nextEdge, target)) {
-      nextEdge.from.port = "imageOut";
-      nextEdge.color = portColors.image;
-    } else {
-      if (!hasCameraPreset(source)) return null;
-      nextEdge.from.port = "cameraOut";
-      nextEdge.color = portColors.camera;
-    }
+    if (!hasCameraPreset(source)) return null;
+    nextEdge.from.port = "cameraOut";
+    nextEdge.color = portColors.camera;
   }
 
   if (source.type === "style") {
@@ -11284,6 +16523,16 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "utilityOut";
     }
     nextEdge.color = utilityOutputType(source, nextEdge.from.port) === "video" ? portColors.video : portColors.image;
+  }
+
+  if (source.type === "edit") {
+    nextEdge.from.port = "editOut";
+    nextEdge.color = editOutputType(source) === "video" ? portColors.video : portColors.image;
+  }
+
+  if (source.type === "autoAspect") {
+    if (!autoAspectOutputItem(source, nextEdge)) return null;
+    nextEdge.color = portColors.image;
   }
 
   if (source.type === "composer") {
@@ -11313,6 +16562,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
   if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
+  if (isImageModelUnsupportedInput(target, nextEdge.to.port)) return null;
+  if (isImageModelUnsupportedSource(target, source)) return null;
+  if (isVideoModelUnsupportedCharacterInput(target, nextEdge.to.port)) return null;
+  if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;
 
   return nextEdge;
 }
@@ -11327,6 +16580,7 @@ function isCameraImageEdge(edge, target) {
   if (target?.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(edge.to.port)) return true;
   if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(edge.to.port)) return true;
   if (target?.type === "utility" && utilityImageInputPortIds.includes(edge.to.port)) return true;
+  if (target?.type === "edit" && edge.to.port === "imageIn") return true;
   return false;
 }
 

@@ -3,17 +3,20 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
+  { type: "autoAspect", label: "Auto Aspect" },
+  { type: "storyboard", label: "Storyboard" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "composer", label: "Composer" },
   { type: "style", label: "Style" },
   { type: "transfer", label: "Mood Board" },
   { type: "utility", label: "Utility" },
+  { type: "edit", label: "Edit" },
   { type: "audio", label: "Audio" },
   { type: "model3d", label: "3D" },
   { type: "imageModel", label: "Image Model" },
   { type: "videoModel", label: "Video Model" },
-  { type: "text", label: "Text Model" }
+  { type: "text", label: "Smart Text Model" }
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));

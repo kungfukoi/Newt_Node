@@ -63,6 +63,12 @@ button {
   align-items: center;
   justify-content: flex-start;
   gap: 14px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.app-shell.node-app-shell .topbar {
+  width: min(1280px, calc(100vw - 32px));
 }
 
 .topbar-status {
@@ -985,6 +991,7 @@ textarea::placeholder {
   transition: transform 160ms ease;
 }
 
+.settings-model-toggle .node-toggle.compact.enabled,
 .settings-model-toggle.enabled .node-toggle.compact {
   background: rgba(221, 198, 49, 0.88);
 }
@@ -1528,6 +1535,10 @@ textarea::placeholder {
     align-items: stretch;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .app-shell.node-app-shell .topbar {
+    width: 100%;
   }
 
   .topbar-status {

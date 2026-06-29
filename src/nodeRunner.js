@@ -1,8 +1,9 @@
 import { appendResultItems } from "./mediaResults.js";
 
-export function nodeBatchCount(node) {
+export function nodeBatchCount(node, maxCount = 4) {
   const count = Number(node.data.batchCount || 1);
-  return Math.min(4, Math.max(1, Number.isFinite(count) ? count : 1));
+  const max = Math.max(1, Number(maxCount) || 4);
+  return Math.min(max, Math.max(1, Number.isFinite(count) ? count : 1));
 }
 
 export function formatNodeBatchCount(value) {
@@ -60,7 +61,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
-  return ["text", "imageModel", "videoModel", "utility", "model3d"].includes(node.type) || (node.type === "camera" && node.data.qwenCameraOpen);
+  return ["text", "imageModel", "videoModel", "utility", "edit", "model3d", "storyboard", "autoAspect"].includes(node.type);
 }
 
 export function buildSelectedRunnableDependencies(nodes, edges) {
@@ -77,20 +78,24 @@ export function buildSelectedRunnableDependencies(nodes, edges) {
 
 export function nodeRunPriority(node) {
   if (node?.type === "text") return 0;
-  if (node?.type === "camera") return 1;
   if (node?.type === "imageModel") return 2;
+  if (node?.type === "autoAspect") return 2;
+  if (node?.type === "storyboard") return 2;
   if (node?.type === "model3d") return 3;
   if (node?.type === "utility") return 4;
+  if (node?.type === "edit") return 4;
   if (node?.type === "videoModel") return 4;
   return 3;
 }
 
 export function runStageLabel(type) {
   if (type === "text") return "text model";
-  if (type === "camera") return "camera";
   if (type === "imageModel") return "image";
+  if (type === "autoAspect") return "auto aspect";
+  if (type === "storyboard") return "storyboard";
   if (type === "model3d") return "3D";
   if (type === "utility") return "utility";
+  if (type === "edit") return "edit";
   if (type === "videoModel") return "video";
   return "selected";
 }

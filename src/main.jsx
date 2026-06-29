@@ -27,6 +27,8 @@ import {
   happyHorseDurationOptions,
   imageModelNames,
   imageResolutionOptions,
+  krea2AspectRatios,
+  krea2CreativityOptions,
   lumaImageAspectRatios,
   lumaVideoAspectRatioOptions,
   lumaVideoDurationOptions,
@@ -129,10 +131,11 @@ function App() {
   const [videoBatchCount, setVideoBatchCount] = React.useState("1");
   const [videoHistory, setVideoHistory] = React.useState([]);
   const [imagePrompt, setImagePrompt] = React.useState("");
-  const [imageModel, setImageModel] = React.useState(imageModelNames.nanoBananaPro);
+  const [imageModel, setImageModel] = React.useState(imageModelNames.zImage);
   const [imageReferences, setImageReferences] = React.useState([]);
-  const [imageResolution, setImageResolution] = React.useState("1K");
+  const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
+  const [imageKreaCreativity, setImageKreaCreativity] = React.useState("raw");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);
@@ -336,6 +339,7 @@ function App() {
         model: imageModel,
         aspectRatio: imageAspectRatio,
         resolution: imageResolution,
+        kreaCreativity: imageKreaCreativity,
         imagePromptUrls,
         projectId: "image",
         projectName: "Image",
@@ -473,8 +477,8 @@ function App() {
   return (
     <main className={`app-shell ${workspaceMode === "nodes" ? "node-app-shell" : ""}`}>
       <div className="topbar">
-        <div className="brand-lockup" aria-label="NewtNode">
-          <img src="/newtnode-logo.png" alt="NewtNode" />
+        <div className="brand-lockup" aria-label="Versus NewtNode">
+          <img src="/newtnode-logo.png" alt="Versus NewtNode" />
         </div>
         <div className="mode-switch" aria-label="Workspace mode">
           <button className={workspaceMode === "image" ? "active" : ""} onClick={() => setWorkspaceMode("image")}>
@@ -538,6 +542,10 @@ function App() {
               <div className="control-row">
                 <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={enabledImageOptions} onChange={setImageModel} />
 
+                {isKrea2LargeImageModel(imageModel) && (
+                  <SelectChip value={imageKreaCreativity} options={krea2CreativityOptions} onChange={setImageKreaCreativity} formatter={formatKrea2Creativity} />
+                )}
+
                 <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
@@ -554,6 +562,7 @@ function App() {
 
             <div className="route-strip">
               <span>{imageModel}</span>
+              {isKrea2LargeImageModel(imageModel) && <span>{`Creativity ${formatKrea2Creativity(imageKreaCreativity)}`}</span>}
               <span>{formatBatchCount(Number(imageBatchCount))}</span>
               <span>{imageResolution}</span>
               <span>{imageAspectRatio}</span>
@@ -977,8 +986,19 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
+}
+
+function isKrea2LargeImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("krea") && normalized.includes("large");
+}
+
+function formatKrea2Creativity(value) {
+  const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "raw";
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 function videoSettingsForModel(model) {

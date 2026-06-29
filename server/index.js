@@ -9,12 +9,15 @@ import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, write
 import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
+import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
@@ -36,11 +39,13 @@ const packageMetadata = require("../package.json");
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
+const storyboardAssetsDir = path.join(rootDir, "public", "storyboard");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const workflowAssetsPrefix = "/workflow-assets";
 const workflowPackageInputDirName = "inputs";
 const workflowPackageOutputDirName = "outputs";
 const workflowPackageDependencyDirName = "dependencies";
+const workflowPackageStoryboardDirName = "storyboards";
 const workflowPackageMetadataDirName = ".newtnode";
 const workflowPackageManifestFileName = "manifest.json";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
@@ -71,7 +76,7 @@ const runtimeConfigSources = {
 };
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
-const port = Number(process.env.PORT || 3333);
+const port = Number(process.env.PORT || 3336);
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
 const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
@@ -79,18 +84,62 @@ const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_P
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
 const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_PER_1000_TOKENS || (seedanceFastCostPerSecond / 21.6));
-const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
-const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
+const falNanoBananaCost1K2K = Number(process.env.FAL_NANO_BANANA_PRO_IMAGE_COST_1K_2K || process.env.FAL_NANO_BANANA_IMAGE_COST_1K_2K || process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
+const falNanoBananaCost4K = Number(process.env.FAL_NANO_BANANA_PRO_IMAGE_COST_4K || process.env.FAL_NANO_BANANA_IMAGE_COST_4K || process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
+const googleNanoBananaCost1K2K = Number(process.env.GOOGLE_NANO_BANANA_PRO_IMAGE_COST_1K_2K || process.env.GOOGLE_NANO_BANANA_IMAGE_COST_1K_2K || 0.134);
+const googleNanoBananaCost4K = Number(process.env.GOOGLE_NANO_BANANA_PRO_IMAGE_COST_4K || process.env.GOOGLE_NANO_BANANA_IMAGE_COST_4K || 0.24);
+const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
+const krea2LargeCost = Number(process.env.KREA_2_LARGE_IMAGE_COST || 0.06);
+const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE_REFERENCE_COST || 0.065);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
 const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
+const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
+const krea2CreativityOptions = ["raw", "low", "medium", "high"];
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
+const imageModelNames = {
+  zImage: "Z-Image",
+  nanoBananaPro: "Nano Banana Pro",
+  openAiImage2: "OpenAI Image 2",
+  krea2Large: "Krea 2 Large",
+  lumaDreamMachine: "Luma Dream Machine"
+};
+const imageModelOptions = [
+  imageModelNames.zImage,
+  imageModelNames.nanoBananaPro,
+  imageModelNames.openAiImage2,
+  imageModelNames.krea2Large,
+  imageModelNames.lumaDreamMachine
+];
+const videoModelNames = {
+  seedance: "Seedance 2.0",
+  seedanceFast: "Seedance 2.0 Fast",
+  wan27Reference: "Wan 2.7 Reference-to-Video",
+  happyHorse: "Happy Horse",
+  lumaDreamMachine: "Luma Dream Machine",
+  aurora: "Creatify Aurora"
+};
+const videoModelOptions = [
+  videoModelNames.seedance,
+  videoModelNames.seedanceFast,
+  videoModelNames.wan27Reference,
+  videoModelNames.happyHorse,
+  videoModelNames.lumaDreamMachine,
+  videoModelNames.aurora
+];
+const defaultModelPreferences = {
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.zImage])),
+  video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
+};
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
+const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
+const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -266,7 +315,9 @@ registerCoreRoutes(app, {
   selectWorkflowFileWithDialog,
   readWorkflowFromFilePath,
   saveWorkflowToFilePath,
+  readWorkflowFromPath,
   buildHealthPayload,
+  openProjectOutputFolder,
   timedApi,
   buildStorageDiagnostics,
   readRuntimeSettings,
@@ -300,6 +351,8 @@ function buildHealthPayload() {
       wanWarp: true,
       wan22A14bT2v: true,
       wan22A14bI2v: true,
+      editMedia: true,
+      editPreview: true,
       wanVaceMaskToVideo: true,
       wanVaceInpainting: true,
       wan22VaceDepth: true,
@@ -307,13 +360,15 @@ function buildHealthPayload() {
       wan22VaceInpainting: true,
       composerFrame: true,
       composerPoses: true,
+      previewInpaint: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
       settings: true,
-      comfyWanStatus: true
+      comfyWanStatus: true,
+      projectOutputFolder: true
     },
     ffmpeg: {
       configured: Boolean(ffmpegBinaryPath),
@@ -327,6 +382,7 @@ function buildHealthPayload() {
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
+    falZImageEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
     falLumaRay2Endpoint,
@@ -873,8 +929,20 @@ app.get("/api/stats", async (_req, res) => {
         currency: "USD"
       },
       nanoBananaPro: {
-        cost1K2K: nanoBananaCost1K2K,
-        cost4K: nanoBananaCost4K,
+        cost1K2K: falNanoBananaCost1K2K,
+        cost4K: falNanoBananaCost4K,
+        fal: {
+          cost1K2K: falNanoBananaCost1K2K,
+          cost4K: falNanoBananaCost4K
+        },
+        google: {
+          cost1K2K: googleNanoBananaCost1K2K,
+          cost4K: googleNanoBananaCost4K
+        },
+        currency: "USD"
+      },
+      zImage: {
+        costPerMegapixel: zImageCostPerMegapixel,
         currency: "USD"
       },
       luma: {
@@ -884,6 +952,11 @@ app.get("/api/stats", async (_req, res) => {
       },
       openAiImage2: {
         mediumCost: openAiImage2MediumCost,
+        currency: "USD"
+      },
+      krea2Large: {
+        cost: krea2LargeCost,
+        styleReferenceCost: krea2LargeStyleReferenceCost,
         currency: "USD"
       },
       hunyuan3DPro: {
@@ -1455,6 +1528,62 @@ app.post("/api/node/generate-image", async (req, res) => {
       provider: selectedModel.provider
     });
 
+    if (selectedModel.provider === "fal-z-image") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const zImage = await generateFalZImage({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        resolution: req.body.resolution
+      });
+      const output = await downloadImage(req, zImage.remoteImage.url, "z-image", zImage.remoteImage.content_type || zImage.remoteImage.mimeType);
+      const cost = estimateZImageCost({ endpoint: zImage.endpoint, resolution: zImage.resolution, imageSize: zImage.imageSize });
+
+      await appendHistory({
+        id: zImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: zImage.endpoint,
+        mode: imagePromptUrls.length ? "Z-Image generation with reference" : "Z-Image generation",
+        prompt,
+        submittedPrompt: zImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: zImage.resolution,
+          imageSize: zImage.imageSize,
+          imagePromptCount: imagePromptUrls.length,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: zImage.remoteImage,
+        localImage: output.publicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: zImage.resultText || ""
+      });
+
+      return res.json({
+        text: zImage.resultText || "",
+        cost,
+        image: {
+          ...zImage.remoteImage,
+          localUrl: output.publicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
     if (selectedModel.provider === "fal-openai-image-2") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -1490,7 +1619,7 @@ app.post("/api/node/generate-image", async (req, res) => {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: req.body.resolution || "1K",
+          resolution: req.body.resolution || "2K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
           imagePromptCount: imagePromptUrls.length,
@@ -1570,58 +1699,100 @@ app.post("/api/node/generate-image", async (req, res) => {
       });
     }
 
-    if (selectedModel.provider === "fal-nano-banana-pro") {
+    if (selectedModel.provider === "fal-krea-2-large") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
-      const falImage = await generateFalNanoBananaPro({
+      const kreaImage = await generateFalKrea2Large({
         prompt,
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio,
-        resolution: req.body.resolution
+        creativity: req.body.kreaCreativity
       });
-      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = estimateImageCost({ resolution: req.body.resolution });
+      const output = await downloadImage(req, kreaImage.remoteImage.url, "krea-2-large", kreaImage.remoteImage.content_type || kreaImage.remoteImage.mimeType);
+      const cost = estimateKrea2LargeCost({
+        endpoint: kreaImage.endpoint,
+        creativity: kreaImage.creativity,
+        imageStyleReferenceCount: kreaImage.imageStyleReferenceCount
+      });
 
       await appendHistory({
-        id: randomUUID(),
+        id: kreaImage.requestId || randomUUID(),
         createdAt: new Date().toISOString(),
         mediaType: "image",
         provider: "fal.ai",
         modelName: selectedModel.displayName,
-        endpoint: falImage.endpoint,
-        mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+        endpoint: kreaImage.endpoint,
+        mode: kreaImage.imageStyleReferenceCount ? "Krea 2 Large generation with style references" : "Krea 2 Large generation",
         prompt,
-        submittedPrompt: falImage.submittedPrompt,
+        submittedPrompt: kreaImage.submittedPrompt,
         project: projectFromBody(req.body),
         node: nodeFromBody(req.body),
         settings: {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: falImage.resolution,
+          creativity: kreaImage.creativity,
           imagePromptCount: imagePromptUrls.length,
+          imageStyleReferenceCount: kreaImage.imageStyleReferenceCount,
           imagePromptLabels: cleanReferenceLabels
         },
         cost,
-        remoteImage: falImage.remoteImage,
+        remoteImage: kreaImage.remoteImage,
         localImage: output.publicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
-        text: falImage.description || ""
+        text: kreaImage.resultText || ""
       });
 
       return res.json({
-        text: falImage.description || "",
+        text: kreaImage.resultText || "",
         cost,
         image: {
-          ...falImage.remoteImage,
+          ...kreaImage.remoteImage,
           localUrl: output.publicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
+      });
+    }
+
+    if (selectedModel.provider === "fal-nano-banana-pro") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      return sendFalNanoBananaImageResponse({
+        req,
+        res,
+        selectedModel,
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        requestedAspectRatio,
+        cleanReferenceLabels
+      });
+    }
+
+    if (selectedModel.provider === "google" && req.body.useFalFallback) {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Fal fallback requested, but FAL_KEY is missing." });
+      }
+
+      return sendFalNanoBananaImageResponse({
+        req,
+        res,
+        selectedModel,
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        requestedAspectRatio,
+        cleanReferenceLabels,
+        fallbackRequestedFromGoogle: true
       });
     }
 
@@ -1651,11 +1822,32 @@ app.post("/api/node/generate-image", async (req, res) => {
       });
     }
 
-    const { text, inlineData, attempts } = await generateGeminiImageWithRetries({
-      model,
-      parts,
-      imageConfig
-    });
+    let geminiResult;
+    try {
+      geminiResult = await generateGeminiImageWithRetries({
+        model,
+        parts,
+        imageConfig
+      });
+    } catch (googleError) {
+      if (shouldFallbackFromGoogleImageError(googleError)) {
+        const googleErrorSummary = googleFallbackSummary(googleError);
+        const fallbackSuffix = process.env.FAL_KEY
+          ? " Run again for fal fallback."
+          : " Fal fallback unavailable: missing FAL_KEY.";
+        return res.status(errorStatusCode(googleError)).json({
+          error: `${googleImageErrorDisplayMessage(googleErrorSummary)}${fallbackSuffix}`,
+          text: googleError.text || "",
+          raw: googleError.raw,
+          fallbackAvailable: Boolean(process.env.FAL_KEY),
+          fallbackProvider: process.env.FAL_KEY ? "fal" : "",
+          googleError: googleErrorSummary
+        });
+      }
+      throw googleError;
+    }
+
+    const { text, inlineData, attempts } = geminiResult;
 
     const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
     const extension = extensionForMime(mimeType);
@@ -1663,7 +1855,7 @@ app.post("/api/node/generate-image", async (req, res) => {
     const imageBytes = Buffer.from(inlineData.data, "base64");
     await writeFile(output.filePath, imageBytes);
 
-    const cost = estimateImageCost({ resolution: req.body.resolution });
+    const cost = estimateImageCost({ resolution: req.body.resolution, provider: "Google", endpoint: model });
     await appendHistory({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
@@ -1680,7 +1872,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         model: req.body.model || selectedModel.displayName,
         aspectRatio,
         requestedAspectRatio: requestedAspectRatio || aspectRatio,
-        resolution: req.body.resolution || "1K",
+        resolution: req.body.resolution || "2K",
         imageConfig,
         attempts,
         imagePromptCount: imagePromptUrls.length,
@@ -1703,12 +1895,385 @@ app.post("/api/node/generate-image", async (req, res) => {
       }
     });
   } catch (error) {
-    if (error.status) {
-      return res.status(error.status).json({ error: error.message || "Image generation failed.", text: error.text || "", raw: error.raw });
+    if (error.status || error.statusCode || error.response?.status) {
+      const message = publicErrorMessage(error, error.message || "Image generation failed.");
+      return res.status(errorStatusCode(error)).json({ error: message, text: error.text || "", raw: error.raw });
     }
 
     console.error(error);
     res.status(500).json({ error: error.message || "Image generation failed." });
+  }
+});
+
+async function sendFalNanoBananaImageResponse({
+  req,
+  res,
+  selectedModel,
+  prompt,
+  imagePromptUrls,
+  imagePromptLabels,
+  aspectRatio,
+  requestedAspectRatio,
+  cleanReferenceLabels,
+  fallbackFromGoogleError = null,
+  fallbackRequestedFromGoogle = false
+}) {
+  const falImage = await generateFalNanoBananaPro({
+    prompt,
+    imagePromptUrls,
+    imagePromptLabels,
+    aspectRatio,
+    resolution: req.body.resolution
+  });
+  const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+  const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
+  const fallback = fallbackFromGoogleError
+    ? googleFallbackSummary(fallbackFromGoogleError)
+    : fallbackRequestedFromGoogle
+      ? {
+        from: "google",
+        to: "fal",
+        status: null,
+        providerStatus: "",
+        attempts: null,
+        reason: "manual-fal-fallback",
+        quotaLikely: null,
+        accountLimitLikely: null,
+        message: "Fal fallback requested after a Google image error."
+      }
+      : null;
+
+  await appendHistory({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "fal.ai",
+    modelName: selectedModel.displayName,
+    endpoint: falImage.endpoint,
+    mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+    prompt,
+    submittedPrompt: falImage.submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: req.body.model || selectedModel.displayName,
+      aspectRatio,
+      requestedAspectRatio: requestedAspectRatio || aspectRatio,
+      resolution: falImage.resolution,
+      imagePromptCount: imagePromptUrls.length,
+      imagePromptLabels: cleanReferenceLabels,
+      ...(fallback
+        ? {
+          fallbackFromProvider: "Google",
+          fallbackReason: fallback.reason || fallback.message,
+          fallbackStatus: fallback.status,
+          fallbackProviderStatus: fallback.providerStatus || "",
+          fallbackQuotaLikely: fallback.quotaLikely
+        }
+        : {})
+    },
+    cost,
+    remoteImage: falImage.remoteImage,
+    localImage: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text: falImage.description || ""
+  });
+
+  return res.json({
+    text: falImage.description || "",
+    cost,
+    fallback,
+    image: {
+      ...falImage.remoteImage,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    }
+  });
+}
+
+app.post("/api/node/storyboard-plan", async (req, res) => {
+  try {
+    const sceneDescription = String(req.body.sceneDescription || req.body.prompt || "").trim();
+    if (!sceneDescription) {
+      return res.status(400).json({ error: "Scene description is required." });
+    }
+
+    const requestedFrameCount = normalizeStoryboardFrameCount(req.body.frameCount);
+    const plan = process.env.GOOGLE_API_KEY
+      ? await generateStoryboardPlanWithGemini({
+        sceneDescription,
+        frameCount: requestedFrameCount,
+        characters: Array.isArray(req.body.characters) ? req.body.characters : [],
+        sceneReferences: Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
+        notes: String(req.body.notes || "").trim()
+      })
+      : fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
+
+    res.json({ plan: normalizeStoryboardPlan(plan, sceneDescription, requestedFrameCount) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: error.message || "Storyboard planning failed.",
+      plan: fallbackStoryboardPlan(String(req.body.sceneDescription || req.body.prompt || ""), normalizeStoryboardFrameCount(req.body.frameCount))
+    });
+  }
+});
+
+app.post("/api/node/storyboard-export-frame", async (req, res) => {
+  try {
+    const sourceUrl = String(req.body.sourceUrl || "").trim();
+    if (!sourceUrl) {
+      return res.status(400).json({ error: "Source frame URL is required." });
+    }
+
+    const source = await resolveLocalAssetPath(sourceUrl);
+    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const frameNumber = Math.max(1, Number.parseInt(req.body.frameNumber, 10) || 1);
+    const extension = path.extname(source.fileName || "") || ".png";
+    const fileName = `Frame_${String(frameNumber).padStart(3, "0")}${extension}`;
+    const workflowContext = workflowPackageContextFromBody(req.body);
+    let targetPath;
+    let publicPath;
+
+    if (workflowContext?.packagePath) {
+      await ensureWorkflowPackageDirs(workflowContext.packagePath);
+      const relativePath = path.join(workflowPackageStoryboardDirName, sceneName, fileName);
+      targetPath = path.join(workflowContext.packagePath, relativePath);
+      publicPath = workflowPackagePublicPath(workflowContext.id, relativePath);
+    } else {
+      const projectName = safePathSegment(req.body.projectName || "Untitled-node-project");
+      const relativePath = path.join(workflowPackageStoryboardDirName, projectName, sceneName, fileName);
+      targetPath = path.join(outputsDir, relativePath);
+      publicPath = `/outputs/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+    }
+
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await copyFile(source.filePath, targetPath);
+
+    res.json({
+      frame: {
+        localUrl: publicPath,
+        fileName,
+        storedFileName: publicPath,
+        mimeType: mimeTypeForExtension(extension),
+        mediaType: "image"
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Storyboard frame export failed." });
+  }
+});
+
+app.post("/api/node/storyboard-export-board", async (req, res) => {
+  try {
+    const rawFrames = Array.isArray(req.body.frames) ? req.body.frames : [];
+    const frames = rawFrames
+      .map((frame, index) => ({
+        number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
+        sourceUrl: String(frame.sourceUrl || frame.exportUrl || frame.resultUrl || "").trim(),
+        description: String(frame.description || frame.caption || "").trim(),
+        prompt: String(frame.prompt || "").trim(),
+        beat: String(frame.beat || "").trim(),
+        notes: String(frame.notes || "").trim(),
+        shot: String(frame.shot || "").trim(),
+        lens: String(frame.lens || "").trim(),
+        angle: String(frame.angle || "").trim()
+      }))
+      .filter((frame) => frame.sourceUrl);
+
+    if (!frames.length) {
+      return res.status(400).json({ error: "No completed storyboard frames to export." });
+    }
+
+    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const exportFolderName = `final_boards_${timestampForFileName()}`;
+    const workflowContext = workflowPackageContextFromBody(req.body);
+    const descriptions = req.body.descriptionMode === "visual"
+      ? await storyboardExportVisualDescriptions({
+        sceneName,
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        frames
+      })
+      : req.body.generateDescriptions === false
+      ? frames.map(storyboardFrameDescriptionFallback)
+      : await storyboardExportDescriptions({
+        sceneName,
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        frames
+      });
+    let targetDir;
+    let publicBasePath;
+    const exportDestinationPath = normalizeWorkflowPackagePath(req.body.exportDestinationPath);
+
+    if (exportDestinationPath) {
+      targetDir = path.join(exportDestinationPath, exportFolderName);
+      publicBasePath = "";
+    } else if (workflowContext?.packagePath) {
+      await ensureWorkflowPackageDirs(workflowContext.packagePath);
+      const relativePath = path.join(workflowPackageStoryboardDirName, sceneName, exportFolderName);
+      targetDir = path.join(workflowContext.packagePath, relativePath);
+      publicBasePath = workflowPackagePublicPath(workflowContext.id, relativePath);
+    } else {
+      const projectName = safePathSegment(req.body.projectName || "Untitled-node-project");
+      const relativePath = path.join(workflowPackageStoryboardDirName, projectName, sceneName, exportFolderName);
+      targetDir = path.join(outputsDir, relativePath);
+      publicBasePath = `/outputs/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+    }
+
+    await mkdir(targetDir, { recursive: true });
+
+    const exportedFrames = [];
+    for (const [index, frame] of frames.entries()) {
+      const source = await resolveLocalAssetPath(frame.sourceUrl);
+      const extension = storyboardExportFrameExtension(source.fileName);
+      const fileName = `frame_${index + 1}${extension}`;
+      const targetPath = path.join(targetDir, fileName);
+      await copyFile(source.filePath, targetPath);
+      exportedFrames.push({
+        ...frame,
+        number: index + 1,
+        sourceNumber: frame.number,
+        fileName,
+        filePath: targetPath,
+        localPath: targetPath,
+        localUrl: publicBasePath ? `${publicBasePath}/${encodeURIComponent(fileName)}` : "",
+        description: descriptions[index] || storyboardFrameDescriptionFallback(frame)
+      });
+    }
+
+    let pdf = null;
+    if (req.body.includePdf !== false) {
+      const pdfFileName = "storyboard_boards.pdf";
+      const pdfPath = path.join(targetDir, pdfFileName);
+      await writeFile(pdfPath, await createStoryboardPdf({
+        title: req.body.sceneName || "Storyboard",
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        aspectRatio: normalizeStoryboardAspectRatio(req.body.aspectRatio),
+        frames: exportedFrames
+      }));
+      pdf = {
+        fileName: pdfFileName,
+        localPath: pdfPath,
+        localUrl: publicBasePath ? `${publicBasePath}/${encodeURIComponent(pdfFileName)}` : "",
+        mimeType: "application/pdf"
+      };
+    }
+
+    res.json({
+      export: {
+        folderName: exportFolderName,
+        folderPath: targetDir,
+        publicPath: publicBasePath,
+        frameCount: exportedFrames.length,
+        frames: exportedFrames.map(({ filePath: _filePath, ...frame }) => frame),
+        pdf
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Storyboard board export failed." });
+  }
+});
+
+app.post("/api/node/preview-inpaint", async (req, res) => {
+  try {
+    const prompt = String(req.body.prompt || "").trim();
+    const sourceUrl = String(req.body.sourceUrl || "").trim();
+    const maskDataUrl = String(req.body.maskDataUrl || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ error: "Describe the edit before running inpaint." });
+    }
+    if (!isLocalAssetUrl(sourceUrl)) {
+      return res.status(400).json({ error: "A local Preview image is required for inpainting." });
+    }
+    if (!maskDataUrl) {
+      return res.status(400).json({ error: "Paint a mask before running inpaint." });
+    }
+    if (!process.env.FAL_KEY) {
+      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    }
+
+    const source = await readLocalAsset(sourceUrl);
+    if (!source.mimeType.startsWith("image/")) {
+      return res.status(400).json({ error: "Preview inpainting only supports image assets." });
+    }
+    const mask = imageDataUrlAsset(maskDataUrl, "inpaint-mask.png");
+    const sourceDimensions = imageDimensionsFromBuffer(source.buffer, source.mimeType) || {};
+    const aspectRatio = closestAspectRatio(
+      positiveNumber(sourceDimensions.width) && positiveNumber(sourceDimensions.height)
+        ? sourceDimensions.width / sourceDimensions.height
+        : aspectRatioNumber("16:9"),
+      openAiImageAspectRatios
+    );
+    const inpaintPrompt = [
+      "Edit the original image using the provided black and white inpainting mask. Treat the black area as locked image content.",
+      "The white painted area is the only approximate region allowed to change. Preserve the black area outside the mask exactly in composition, lighting, texture, identity, camera, and style.",
+      `User edit direction: ${prompt}`,
+      "If the user asks to remove, erase, clean up, or paint out an object, fully remove the selected subject and its visible edge artifacts or shadows inside the mask, then reconstruct the hidden background with believable continuity.",
+      "Blend the edit naturally into the original image, matching lighting, perspective, texture, camera quality, style, and scale.",
+      "Do not redesign the whole image, do not change unmasked subjects, and do not add unrelated elements outside the masked region."
+    ].join(" ");
+    const openAiImage = await generateFalOpenAiImage2FromInputs({
+      prompt: inpaintPrompt,
+      imageInputs: [
+        { ...source, label: "Original image to preserve" },
+        { ...mask, label: "Inpainting mask: white area is editable, black area must remain unchanged" }
+      ],
+      aspectRatio,
+      resolution: req.body.resolution || "2K"
+    });
+    const output = await downloadImage(req, openAiImage.remoteImage.url, "preview-inpaint", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+    const cost = estimateOpenAiImage2Cost({
+      resolution: req.body.resolution || "2K",
+      size: openAiImage.size,
+      quality: openAiImage.quality
+    });
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "image",
+      provider: "fal.ai",
+      modelName: imageModelNames.openAiImage2,
+      endpoint: openAiImage.endpoint,
+      mode: "Preview masked image edit",
+      prompt,
+      submittedPrompt: openAiImage.submittedPrompt,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        model: imageModelNames.openAiImage2,
+        aspectRatio,
+        resolution: req.body.resolution || "2K",
+        imageSize: openAiImage.size,
+        quality: openAiImage.quality,
+        imagePromptCount: 2,
+        imagePromptLabels: ["Original image to preserve", "Inpainting mask"]
+      },
+      cost,
+      remoteImage: openAiImage.remoteImage,
+      localImage: output.publicPath,
+      outputFileName: output.fileName,
+      outputBytes: output.bytes,
+      text: openAiImage.resultText || ""
+    });
+
+    return res.json({
+      text: openAiImage.resultText || "",
+      cost,
+      image: {
+        ...openAiImage.remoteImage,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ error: error.message || "Preview inpainting failed." });
   }
 });
 
@@ -2405,6 +2970,38 @@ app.post("/api/node/utility-video", async (req, res) => {
   }
 });
 
+app.post("/api/node/edit-media", async (req, res) => {
+  try {
+    const request = editMediaRequestFromBody(req.body);
+    if (request.error) return res.status(request.status).json({ error: request.error });
+
+    return createEditMediaResult(req, res, {
+      effect: request.effect,
+      sourceMediaType: request.sourceMediaType,
+      sourceUrl: request.sourceUrl
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Edit media failed.");
+  }
+});
+
+app.post("/api/node/edit-preview", async (req, res) => {
+  try {
+    const request = editMediaRequestFromBody(req.body);
+    if (request.error) return res.status(request.status).json({ error: request.error });
+
+    return createEditPreviewResult(req, res, {
+      effect: request.effect,
+      sourceMediaType: request.sourceMediaType,
+      sourceUrl: request.sourceUrl
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Edit preview failed.");
+  }
+});
+
 app.post("/api/node/qwen-camera-edit", async (req, res) => {
   try {
     if (!process.env.FAL_KEY) {
@@ -2935,6 +3532,13 @@ app.post("/api/node/generate-3d", async (req, res) => {
     }
 
     const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const remoteTexturedAssets = {
+      glb: remoteModel,
+      obj: normalizeFalFile(data.model_urls?.obj),
+      mtl: normalizeFalFile(data.model_urls?.mtl),
+      texture: normalizeFalFile(data.model_urls?.texture)
+    };
+    const texturedAssets = await downloadTexturedModelAssets(req, remoteTexturedAssets);
     const remoteThumbnail = normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data);
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
@@ -2977,6 +3581,7 @@ app.post("/api/node/generate-3d", async (req, res) => {
       remoteModel,
       remoteThumbnail,
       modelUrls: data.model_urls || null,
+      localModelAssets: texturedAssets,
       seed: data.seed ?? null,
       localModel: output.publicPath,
       localImage: thumbnailOutput?.publicPath || "",
@@ -2996,7 +3601,16 @@ app.post("/api/node/generate-3d", async (req, res) => {
         label: "Hunyuan 3D model",
         localUrl: output.publicPath,
         fileName: output.fileName,
-        mimeType: output.mimeType
+        mimeType: output.mimeType,
+        assets: {
+          glb: {
+            ...remoteModel,
+            localUrl: output.publicPath,
+            fileName: output.fileName,
+            mimeType: output.mimeType
+          },
+          ...texturedAssets
+        }
       },
       thumbnail: thumbnailOutput
         ? {
@@ -4703,6 +5317,10 @@ function normalizeChoice(value, choices, fallback) {
   return choices.includes(normalized) ? normalized : fallback;
 }
 
+function normalizeKrea2Creativity(value) {
+  return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
+}
+
 function normalizeHunyuan3DImageViewUrls(body = {}) {
   const viewOrder = ["front", "back", "left", "right", "top", "bottom", "leftFront", "rightFront"];
   const viewUrls = body.imageViewUrls && typeof body.imageViewUrls === "object" && !Array.isArray(body.imageViewUrls) ? body.imageViewUrls : {};
@@ -4793,6 +5411,10 @@ function safePathSegment(value) {
     .slice(0, 80) || "mood-board";
 }
 
+function timestampForFileName(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, "-");
+}
+
 function safeWorkflowFileName(value) {
   const fileName = path.basename(String(value || ""));
   if (!fileName.toLowerCase().endsWith(".json")) return "";
@@ -4878,6 +5500,53 @@ async function ensureWorkflowPackageDirs(packagePath) {
   await hideWorkflowPackageMetadataDir(metadataDir);
 }
 
+async function openProjectOutputFolder(body = {}) {
+  const targetPath = await projectOutputDirectoryFromBody(body);
+  await mkdir(targetPath, { recursive: true });
+  await openDirectoryWithSystemShell(targetPath);
+  return { path: targetPath };
+}
+
+async function projectOutputDirectoryFromBody(body = {}) {
+  const packageContext = workflowPackageContextFromBody(body);
+  if (packageContext?.packagePath) {
+    const packagePath = packageContext.packagePath;
+    const registeredWorkflow = packageContext.id ? await findRegisteredWorkflowPackage(packageContext.id).catch(() => null) : null;
+    const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
+    const isRegisteredPackage = registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath);
+    const hasPackageManifest = existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath));
+    const hasPackageDirs = [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
+      existsSync(path.join(packagePath, directoryName))
+    );
+
+    if (!isRegisteredPackage && !hasPackageManifest && !hasPackageDirs) {
+      throw new Error("Workflow package path is not registered or does not look like a NewtNode package.");
+    }
+
+    await ensureWorkflowPackageDirs(packagePath);
+    return path.join(packagePath, workflowPackageOutputDirName);
+  }
+
+  return path.join(outputsDir, localWorkflowAssetDirName(body));
+}
+
+function openDirectoryWithSystemShell(directoryPath) {
+  const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [directoryPath], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
 async function hideWorkflowPackageMetadataDir(metadataDir) {
   if (process.platform !== "win32") return;
   try {
@@ -4887,14 +5556,19 @@ async function hideWorkflowPackageMetadataDir(metadataDir) {
   }
 }
 
-async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName) {
+async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName, options = {}) {
   const body = requestLike?.body || {};
   const packageContext = workflowPackageContextFromBody(body);
   const inputExtension = extension || path.extname(String(kind || ""));
-  const fileName = inputExtension ? uniqueOutputFileName(kind, inputExtension) : safePackageFileName(kind || "asset");
+  const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
 
   if (packageContext?.packagePath) {
     await ensureWorkflowPackageDirs(packageContext.packagePath);
+    const assetDir = path.join(packageContext.packagePath, assetGroup);
+    await mkdir(assetDir, { recursive: true });
+    const fileName = inputExtension
+      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension)
+      : safePackageFileName(kind || "asset");
     const relativePath = path.join(assetGroup, fileName);
     return {
       fileName,
@@ -4910,6 +5584,9 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const targetDir = path.join(root, relativeRoot);
   await mkdir(targetDir, { recursive: true });
 
+  const fileName = inputExtension
+    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension)
+    : safePackageFileName(kind || "asset");
   const relativePath = path.join(relativeRoot, fileName);
   return {
     fileName,
@@ -4926,7 +5603,13 @@ function localWorkflowAssetDirName(body = {}) {
 async function moveUploadedFile(sourcePath, targetPath) {
   await mkdir(path.dirname(targetPath), { recursive: true });
   await rm(targetPath, { force: true }).catch(() => {});
-  await rename(sourcePath, targetPath);
+  try {
+    await rename(sourcePath, targetPath);
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+    await copyFile(sourcePath, targetPath);
+    await rm(sourcePath, { force: true });
+  }
 }
 
 async function hydrateWorkflowPackage(workflow) {
@@ -5325,6 +6008,68 @@ async function saveWorkflowToFilePath(filePath, workflow) {
   };
 }
 
+async function readWorkflowFromPath(selectedPath) {
+  const normalizedPath = normalizeWorkflowPackagePath(selectedPath);
+  if (!normalizedPath || !existsSync(normalizedPath)) {
+    throw new Error("Workflow path is not accessible.");
+  }
+
+  const metadata = await stat(normalizedPath);
+  return metadata.isDirectory()
+    ? readWorkflowFromPackagePath(normalizedPath)
+    : readWorkflowFromFilePath(normalizedPath);
+}
+
+async function readWorkflowFromPackagePath(packagePath) {
+  const normalizedPath = normalizeWorkflowPackagePath(packagePath);
+  if (!normalizedPath || !existsSync(normalizedPath) || !statSync(normalizedPath).isDirectory()) {
+    throw new Error("Workflow package folder is not accessible.");
+  }
+
+  const workflowFileName = await workflowFileNameFromPackageManifest(normalizedPath) || await findWorkflowJsonFileName(normalizedPath);
+  if (!workflowFileName) {
+    throw new Error("That folder does not contain a NewtNode workflow JSON.");
+  }
+
+  return readWorkflowFromFilePath(path.join(normalizedPath, workflowFileName));
+}
+
+async function workflowFileNameFromPackageManifest(packagePath) {
+  const manifestPaths = [workflowPackageManifestPath(packagePath), legacyWorkflowPackageManifestPath(packagePath)];
+
+  for (const manifestPath of manifestPaths) {
+    try {
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const workflowFileName = safeWorkflowFileName(manifest.workflowFileName);
+      if (workflowFileName && existsSync(path.join(packagePath, workflowFileName))) return workflowFileName;
+    } catch {
+      // Ignore missing or invalid package metadata and fall back to scanning.
+    }
+  }
+
+  return "";
+}
+
+async function findWorkflowJsonFileName(packagePath) {
+  const entries = await readdir(packagePath, { withFileTypes: true });
+  const jsonFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .map((entry) => entry.name);
+
+  for (const fileName of jsonFiles) {
+    try {
+      const workflow = JSON.parse(await readFile(path.join(packagePath, fileName), "utf8"));
+      if (workflow?.graph && Array.isArray(workflow.graph.nodes) && Array.isArray(workflow.graph.edges)) {
+        return fileName;
+      }
+    } catch {
+      // Keep scanning for a valid workflow JSON.
+    }
+  }
+
+  return "";
+}
+
 function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
   if (!packagePath) return false;
   if (workflow.packagePath || workflow.package?.rootPath || workflow.package?.workflowFileName) return true;
@@ -5598,9 +6343,11 @@ async function selectFolderWithLinuxDialog({ title, defaultPath }) {
 async function selectWorkflowFileWithMacDialog({ title, defaultPath }) {
   const selectedFile = existingFilePath(defaultPath);
   const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  // Let NewtNode validate the selected JSON after the dialog. AppleScript's
+  // file type filter can gray out valid .json files depending on the Mac's UTI metadata.
   const script = selectedDirectory
-    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"} default location POSIX file ${JSON.stringify(selectedDirectory)})`
-    : `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"})`;
+    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} default location POSIX file ${JSON.stringify(selectedDirectory)})`
+    : `POSIX path of (choose file with prompt ${JSON.stringify(title)})`;
   return runFileDialogCommand("osascript", ["-e", script]);
 }
 
@@ -6834,6 +7581,105 @@ async function createVideoStitchResult({ body, videoUrls = [] }) {
   }
 }
 
+async function createEditMediaResult(req, res, { effect, sourceMediaType, sourceUrl }) {
+  let outputPath = "";
+  try {
+    const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+    const sourceMetadata = sourceMediaType === "video" ? await probeVideoFile(source.filePath) : await probeLocalImageFile(source.filePath, source.fileName);
+    const settings = normalizedEditSettings(effect, req.body.settings, sourceMetadata);
+    const filter = editEffectFilter(effect, settings, { sourceMediaType, sourceMetadata });
+    const outputFormat = normalizeVideoOutputFormat(req.body.outputFormat);
+    const extension = sourceMediaType === "video" ? videoOutputExtension(outputFormat) : ".png";
+    const output = await createManagedAssetTarget(req, `edit-${effect.id}`, extension, workflowPackageOutputDirName);
+    outputPath = output.filePath;
+
+    await applyEditEffectWithFfmpeg({
+      sourcePath: source.filePath,
+      outputPath,
+      sourceMediaType,
+      effect,
+      filter,
+      outputFormat
+    });
+
+    const outputStats = await stat(outputPath);
+    const outputMetadata = sourceMediaType === "video" ? await probeVideoFile(outputPath) : await probeLocalImageFile(outputPath, output.fileName);
+    const localUrl = output.publicPath;
+    const text = `${effect.label} edit.`;
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 1,
+      unit: "local edit",
+      mediaType: sourceMediaType,
+      pricingBasis: "Local ffmpeg edit",
+      pricingSource: "local-ffmpeg"
+    };
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: sourceMediaType,
+      provider: "local",
+      modelName: `Edit: ${effect.label}`,
+      endpoint: "local/edit-media",
+      mode: "FFmpeg edit",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        effectId: effect.id,
+        effect: effect.label,
+        groupId: effect.groupId,
+        sourceMediaType,
+        sourceUrl,
+        effectSettings: settings,
+        outputFormat: sourceMediaType === "video" ? outputFormat : "png",
+        width: outputMetadata.width || null,
+        height: outputMetadata.height || null,
+        fps: outputMetadata.fps || null,
+        duration: outputMetadata.duration || null,
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localImage: sourceMediaType === "image" ? localUrl : undefined,
+      localVideo: sourceMediaType === "video" ? localUrl : undefined,
+      outputFileName: output.fileName,
+      outputBytes: outputStats.size,
+      text
+    });
+
+    const media = {
+      label: effect.label,
+      localUrl,
+      fileName: output.fileName,
+      mimeType: sourceMediaType === "video" ? videoOutputMimeType(outputFormat) : "image/png",
+      bytes: outputStats.size,
+      metadata: outputMetadata
+    };
+
+    return res.json({
+      endpoint: "local/edit-media",
+      modelName: `Edit: ${effect.label}`,
+      text,
+      cost,
+      effect: {
+        id: effect.id,
+        label: effect.label,
+        groupId: effect.groupId,
+        definition: effect.definition
+      },
+      image: sourceMediaType === "image" ? media : undefined,
+      video: sourceMediaType === "video" ? enrichVideoMetadata(media, outputMetadata) : undefined
+    });
+  } catch (error) {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 async function createTransitionBuilderResult({ body, referenceImageUrls = [], startImageUrl = "", startFramesUrl = "", endImageUrl = "", maskVideoUrl = "", depthVideoUrl = "", selectedVideoModel = null }) {
   // TODO legacy cleanup: old per-node WanWarp render path. New WanSegment nodes only emit config; WanWarp runs the full creator prompt.
   return createWanWarpComfyResult({
@@ -7294,6 +8140,308 @@ function transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskS
   return filters.join(",");
 }
 
+function editMediaRequestFromBody(body = {}) {
+  const requestedEffectId = String(body.effectId || "").trim();
+  const effect = findEditEffect(requestedEffectId);
+  if (!requestedEffectId || effect.id !== requestedEffectId) {
+    return {
+      status: 400,
+      error: "Unsupported Edit effect."
+    };
+  }
+
+  const sourceMediaType = normalizeEditSourceType(effect, body.sourceMediaType);
+  const sourceUrls = sourceMediaType === "image" ? body.sourceImageUrls : body.sourceVideoUrls;
+  const sourceUrl = firstLocalOutput(sourceUrls);
+  if (!sourceUrl) {
+    const hasSourceUrl = (Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls]).some((url) => String(url || "").trim());
+    if (hasSourceUrl) {
+      return {
+        status: 400,
+        error: `${effect.label} needs a local NewtNode ${sourceMediaType} asset. Re-run or re-upload the source so it is saved under outputs, uploads, or the workflow package before editing.`
+      };
+    }
+    return {
+      status: 400,
+      error: `${effect.label} requires a connected ${sourceMediaType}.`
+    };
+  }
+
+  return {
+    effect,
+    sourceMediaType,
+    sourceUrl
+  };
+}
+
+async function createEditPreviewResult(req, res, { effect, sourceMediaType, sourceUrl }) {
+  let outputPath = "";
+  try {
+    const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+    const sourceMetadata = sourceMediaType === "video" ? await probeVideoFile(source.filePath) : await probeLocalImageFile(source.filePath, source.fileName);
+    const settings = normalizedEditSettings(effect, req.body.settings, sourceMetadata);
+    const filter = editPreviewEffectFilter(effect, settings, { sourceMediaType, sourceMetadata });
+    const frameTime = sourceMediaType === "video" ? editPreviewFrameTime(effect, settings, sourceMetadata, req.body.previewTime) : 0;
+    outputPath = await createTempPreviewPath("edit-preview", ".png");
+
+    await applyEditPreviewWithFfmpeg({
+      sourcePath: source.filePath,
+      outputPath,
+      sourceMediaType,
+      effect,
+      filter,
+      frameTime
+    });
+
+    const buffer = await readFile(outputPath);
+    const metadata = await probeLocalImageFile(outputPath, path.basename(outputPath));
+    return res.json({
+      endpoint: "local/edit-preview",
+      modelName: `Edit Preview: ${effect.label}`,
+      preview: {
+        dataUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+        mimeType: "image/png",
+        frameTime,
+        metadata
+      },
+      effect: {
+        id: effect.id,
+        label: effect.label,
+        groupId: effect.groupId,
+        definition: effect.definition
+      }
+    });
+  } catch (error) {
+    throw error;
+  } finally {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+  }
+}
+
+function normalizedEditSettings(effect, rawSettings = {}, sourceMetadata = {}) {
+  const defaults = defaultEditEffectSettings(effect, sourceMetadata);
+  const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  return Object.fromEntries((effect.controls || []).map((control) => [control.id, normalizedEditControlValue(control, source[control.id] ?? defaults[control.id])]));
+}
+
+function normalizedEditControlValue(control, value) {
+  if (control.type === "checkbox") return Boolean(value);
+  if (control.type === "select") return (control.options || []).includes(value) ? value : control.defaultValue;
+  const number = Number(value);
+  const fallback = Number(control.defaultValue || 0);
+  const safeNumber = Number.isFinite(number) ? number : fallback;
+  const min = Number(control.min);
+  const max = Number(control.max);
+  const clamped = Math.min(Number.isFinite(max) ? max : safeNumber, Math.max(Number.isFinite(min) ? min : safeNumber, safeNumber));
+  return control.type === "number" && Number(control.step) >= 1 ? Math.round(clamped) : clamped;
+}
+
+function editSetting(settings, key, fallback = 0) {
+  const value = Number(settings[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function editCropDimension(value, sourceValue, fallback, sourceMediaType) {
+  const requested = Math.max(1, Math.round(Number(value || fallback) || fallback));
+  const sourceDimension = Math.round(Number(sourceValue || 0));
+  let dimension = sourceDimension > 0 ? Math.min(requested, sourceDimension) : requested;
+  if (sourceMediaType === "video" && dimension > 2 && dimension % 2 !== 0) {
+    dimension -= 1;
+  }
+  return Math.max(sourceMediaType === "video" ? 2 : 1, dimension);
+}
+
+function editBool(value) {
+  return value ? "1" : "0";
+}
+
+function editEffectFilter(effect, settings = {}, context = {}) {
+  const sourceMetadata = context.sourceMetadata || {};
+  const sourceMediaType = context.sourceMediaType || "video";
+  switch (effect.id) {
+    case "scale":
+      return `scale=${ensureEven(settings.width)}:${ensureEven(settings.height)}:flags=${settings.algorithm},setsar=1`;
+    case "crop": {
+      const width = editCropDimension(settings.width, sourceMetadata.width, 1280, sourceMediaType);
+      const height = editCropDimension(settings.height, sourceMetadata.height, 720, sourceMediaType);
+      return `crop=${width}:${height}:(iw-ow)/2:(ih-oh)/2`;
+    }
+    case "rotate":
+      return `rotate=${(editSetting(settings, "degrees", 0) * Math.PI / 180).toFixed(6)}:fillcolor=black`;
+    case "flip":
+      return settings.direction === "both" ? "hflip,vflip" : settings.direction === "vertical" ? "vflip" : "hflip";
+    case "trim": {
+      const start = Math.max(0, editSetting(settings, "start", 0));
+      const end = Math.max(0, editSetting(settings, "end", 0));
+      return end > start ? `trim=start=${formatFfmpegSeconds(start)}:end=${formatFfmpegSeconds(end)},setpts=PTS-STARTPTS` : `trim=start=${formatFfmpegSeconds(start)},setpts=PTS-STARTPTS`;
+    }
+    case "fps":
+      return `fps=${Math.max(1, Math.round(editSetting(settings, "fps", 24)))}`;
+    case "reverse":
+      return "reverse";
+    case "eq":
+      return `eq=brightness=${editSetting(settings, "brightness", 0)}:contrast=${editSetting(settings, "contrast", 1)}:saturation=${editSetting(settings, "saturation", 1)}:gamma=${editSetting(settings, "gamma", 1)}`;
+    case "hue":
+      return `hue=h=${editSetting(settings, "hue", 0)}:s=${editSetting(settings, "saturation", 1)}`;
+    case "grayscale":
+      return "hue=s=0";
+    case "hqdn3d":
+      return `hqdn3d=luma_spatial=${settings.lumaSpatial}:chroma_spatial=${settings.chromaSpatial}:luma_tmp=${settings.lumaTemporal}:chroma_tmp=${settings.chromaTemporal}`;
+    case "nlmeans":
+      return `nlmeans=s=${settings.strength}:p=${settings.patch}:r=${settings.research}`;
+    case "bm3d":
+      return `bm3d=sigma=${settings.sigma}:block=${settings.block}:group=${settings.group}:range=${settings.range}`;
+    case "atadenoise":
+      return `atadenoise=s=${settings.frames}:0a=${settings.thresholdA}:0b=${settings.thresholdB}:1a=${settings.thresholdA}:1b=${settings.thresholdB}:2a=${settings.thresholdA}:2b=${settings.thresholdB}`;
+    case "fftdnoiz":
+      return `fftdnoiz=sigma=${settings.sigma}:amount=${settings.amount}:method=${settings.method}`;
+    case "vaguedenoiser":
+      return `vaguedenoiser=threshold=${settings.threshold}:method=${settings.method}:percent=${settings.percent}`;
+    case "removegrain":
+      return `removegrain=m0=${settings.mode}:m1=${settings.mode}:m2=${settings.mode}`;
+    case "median":
+      return `median=radius=${settings.radius}:percentile=${settings.percentile}`;
+    case "deflicker":
+      return `deflicker=size=${settings.frames}:mode=${settings.mode}`;
+    case "deband":
+      return `deband=1thr=${settings.threshold}:2thr=${settings.threshold}:3thr=${settings.threshold}:4thr=${settings.threshold}:range=${settings.range}:blur=${editBool(settings.blur)}`;
+    case "deblock":
+      return `deblock=filter=${settings.filter}:block=${settings.block}:alpha=${settings.alpha}:beta=${settings.beta}`;
+    case "dctdnoiz":
+      return `dctdnoiz=sigma=${settings.sigma}`;
+    case "owdenoise":
+      return `owdenoise=depth=${settings.depth}:luma_strength=${settings.luma}:chroma_strength=${settings.chroma}`;
+    case "gblur":
+      return `gblur=sigma=${settings.sigma}`;
+    case "boxblur":
+      return `boxblur=${settings.radius}:${settings.power}`;
+    case "unsharp":
+      return `unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=${settings.amount}`;
+    case "vignette":
+      return `vignette=angle=${settings.angle}`;
+    case "noise":
+      return `noise=alls=${settings.strength}:allf=t`;
+    case "negate":
+      return "negate";
+    case "edgedetect":
+      return `edgedetect=mode=${settings.mode}:low=${settings.low}:high=${settings.high}`;
+    default: {
+      const error = new Error(`Unsupported Edit effect: ${effect.id}`);
+      error.status = 400;
+      throw error;
+    }
+  }
+}
+
+function editEffectKeepsAudio(effect) {
+  return !["trim", "reverse"].includes(effect.id);
+}
+
+function editPreviewEffectFilter(effect, settings = {}, context = {}) {
+  if (["trim", "fps", "reverse"].includes(effect.id)) return "null";
+  return editEffectFilter(effect, settings, context);
+}
+
+function editPreviewFrameTime(effect, settings = {}, metadata = {}, rawTime = 0) {
+  const duration = positiveNumber(metadata.duration) || 0;
+  const requested = Math.max(0, Number(rawTime) || 0);
+  if (effect.id === "trim") {
+    const start = Math.max(0, editSetting(settings, "start", 0));
+    const end = Math.max(0, editSetting(settings, "end", duration || start));
+    const trimTime = requested >= start && (!end || requested <= end) ? requested : start;
+    return extractFrameTime(trimTime, duration);
+  }
+  if (effect.id === "reverse" && duration > 0) {
+    return extractFrameTime(Math.max(0, duration - requested - 0.001), duration);
+  }
+  return extractFrameTime(requested, duration);
+}
+
+function editPreviewScaleFilter() {
+  return "scale='min(720,iw)':-2";
+}
+
+async function createTempPreviewPath(kind, extension = ".png") {
+  const dir = path.join(tmpdir(), "newtnode-previews");
+  await mkdir(dir, { recursive: true });
+  return path.join(dir, `${safeOutputKind(kind)}-${randomUUID()}${extension}`);
+}
+
+async function applyEditEffectWithFfmpeg({ sourcePath, outputPath, sourceMediaType, effect, filter, outputFormat }) {
+  if (sourceMediaType === "image") {
+    const args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      sourcePath,
+      "-vf",
+      filter,
+      "-frames:v",
+      "1",
+      outputPath
+    ];
+    await runFfmpeg(args, `Edit ${effect.label}`, 600000);
+    return;
+  }
+
+  const videoFilter = `${filter},format=yuv420p`;
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    videoFilter
+  ];
+  const keepAudio = editEffectKeepsAudio(effect);
+  if (keepAudio) {
+    args.push("-map", "0:a?");
+  } else {
+    args.push("-an");
+  }
+  addVideoEncoderArgs(args, outputFormat);
+  if (keepAudio) args.push("-c:a", "aac");
+  args.push(outputPath);
+  await runFfmpeg(args, `Edit ${effect.label}`, 600000);
+}
+
+async function applyEditPreviewWithFfmpeg({ sourcePath, outputPath, sourceMediaType, effect, filter, frameTime = 0 }) {
+  const previewFilter = `${filter},${editPreviewScaleFilter()}`;
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y"
+  ];
+
+  if (sourceMediaType === "video") {
+    args.push("-ss", formatFfmpegSeconds(frameTime));
+  }
+
+  args.push(
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    previewFilter,
+    "-frames:v",
+    "1",
+    "-an",
+    "-compression_level",
+    "3",
+    outputPath
+  );
+
+  await runFfmpeg(args, `Preview ${effect.label}`, 90000);
+}
+
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {
   const args = [
     "-hide_banner",
@@ -7678,11 +8826,123 @@ async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
   };
 }
 
+async function downloadTexturedModelAssets(req, remoteAssets = {}) {
+  const objRemote = remoteAssets.obj?.url ? remoteAssets.obj : null;
+  const mtlRemote = remoteAssets.mtl?.url ? remoteAssets.mtl : null;
+  const textureRemote = remoteAssets.texture?.url ? remoteAssets.texture : null;
+  if (!objRemote || !mtlRemote || !textureRemote) return null;
+
+  try {
+    const textureOutput = await downloadImage(req, textureRemote.url, "hunyuan-3d-texture", textureRemote.content_type || textureRemote.mimeType || textureRemote.mime_type);
+    const [objOutput, mtlOutput] = await Promise.all([
+      downloadModelAssetFile(req, objRemote.url, "hunyuan-3d-textured-mesh", objRemote.content_type || objRemote.mimeType || objRemote.mime_type),
+      downloadTextAssetFile(req, mtlRemote.url, "hunyuan-3d-material", ".mtl", (source) => rewriteMtlTextureReferences(source, textureOutput.publicPath))
+    ]);
+
+    return {
+      obj: {
+        ...objRemote,
+        localUrl: objOutput.publicPath,
+        fileName: objOutput.fileName,
+        mimeType: objOutput.mimeType
+      },
+      mtl: {
+        ...mtlRemote,
+        localUrl: mtlOutput.publicPath,
+        fileName: mtlOutput.fileName,
+        mimeType: mtlOutput.mimeType
+      },
+      texture: {
+        ...textureRemote,
+        localUrl: textureOutput.publicPath,
+        fileName: textureOutput.fileName,
+        mimeType: textureOutput.mimeType
+      }
+    };
+  } catch (error) {
+    console.warn("Could not download textured 3D asset package:", error.message);
+    return null;
+  }
+}
+
+async function downloadModelAssetFile(req, url, kind, mimeTypeHint = "") {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated 3D asset: ${response.status} ${response.statusText}`);
+  }
+
+  const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "application/octet-stream", "application/octet-stream");
+  const extension = modelAssetExtensionForUrl(url, mimeType);
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await writeFile(output.filePath, bytes);
+
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    bytes: bytes.length,
+    mimeType
+  };
+}
+
+async function downloadTextAssetFile(req, url, kind, extension = ".txt", transform = (value) => value) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated text asset: ${response.status} ${response.statusText}`);
+  }
+
+  const mimeType = normalizeMimeType(response.headers.get("content-type") || "text/plain", "text/plain");
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+  const text = transform(await response.text());
+  await writeFile(output.filePath, text, "utf8");
+
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    bytes: Buffer.byteLength(text),
+    mimeType
+  };
+}
+
+function rewriteMtlTextureReferences(source, textureUrl) {
+  if (!textureUrl) return source;
+  const normalizedTextureUrl = textureUrl.replace(/\\/g, "/");
+  return String(source || "").replace(/^(\s*(?:map_[A-Za-z0-9_]+|bump)\b).*$/gim, `$1 ${normalizedTextureUrl}`);
+}
+
 function uniqueOutputFileName(kind, extension) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "output").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "output";
   const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
   return `${timestamp}-${safeKind}-${randomUUID().slice(0, 8)}${safeExtension}`;
+}
+
+async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension) {
+  const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
+  if (!preferredBaseName) return uniqueOutputFileName(kind, safeExtension);
+
+  for (let index = 0; index < 500; index += 1) {
+    const suffix = index === 0 ? "" : `-${index + 1}`;
+    const candidate = `${preferredBaseName}${suffix}${safeExtension}`;
+    try {
+      await stat(path.join(targetDir, candidate));
+    } catch (error) {
+      if (error?.code === "ENOENT") return candidate;
+      throw error;
+    }
+  }
+
+  return `${preferredBaseName}-${randomUUID().slice(0, 8)}${safeExtension}`;
+}
+
+function safeOutputFileBaseName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\.[A-Za-z0-9]{1,8}$/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 96);
 }
 
 function imageExtensionForUrl(url, mimeType) {
@@ -7698,6 +8958,14 @@ function modelExtensionForUrl(url, mimeType) {
   if (normalizedMime === "application/octet-stream") return ".glb";
   const inferred = extensionForMime(normalizedMime);
   return inferred === ".png" ? ".glb" : inferred;
+}
+
+function modelAssetExtensionForUrl(url, mimeType) {
+  const extension = path.extname(new URL(url).pathname).toLowerCase();
+  if ([".glb", ".gltf", ".obj", ".mtl"].includes(extension)) return extension;
+  const normalizedMime = normalizeMimeType(mimeType, "application/octet-stream");
+  if (normalizedMime === "text/plain") return ".mtl";
+  return modelExtensionForUrl(url, normalizedMime);
 }
 
 function normalizeMimeType(value, fallback = "image/png") {
@@ -8611,9 +9879,13 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
   };
 }
 
-function estimateImageCost({ resolution }) {
-  const normalized = String(resolution || "1K").toUpperCase();
-  const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
+function estimateImageCost({ resolution, provider, endpoint }) {
+  const normalized = String(resolution || "2K").toUpperCase();
+  const providerKey = String(provider || "").toLowerCase();
+  const isGoogleDirect = providerKey.includes("google") || String(endpoint || "").toLowerCase().includes("gemini");
+  const amountUsd = normalized.includes("4K")
+    ? isGoogleDirect ? googleNanoBananaCost4K : falNanoBananaCost4K
+    : isGoogleDirect ? googleNanoBananaCost1K2K : falNanoBananaCost1K2K;
 
   return {
     amountUsd: roundCurrency(amountUsd),
@@ -8623,8 +9895,33 @@ function estimateImageCost({ resolution }) {
     unit: "image",
     mediaType: "image",
     resolution,
-    pricingBasis: "Nano Banana Pro fal.ai per-image estimate",
-    pricingSource: "fal-model-page-2026-05-15"
+    provider,
+    endpoint,
+    pricingBasis: isGoogleDirect
+      ? "Nano Banana Pro Google Gemini API per-image estimate"
+      : "Nano Banana Pro fal.ai per-image estimate",
+    pricingSource: isGoogleDirect
+      ? "google-gemini-api-pricing-2026-06-11"
+      : "fal-model-page-2026-06-11"
+  };
+}
+
+function estimateZImageCost({ endpoint, resolution, imageSize }) {
+  const width = Number(imageSize?.width || 0);
+  const height = Number(imageSize?.height || 0);
+  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : null;
+  return {
+    amountUsd: megapixels ? roundCurrency(megapixels * zImageCostPerMegapixel) : null,
+    currency: "USD",
+    unitRateUsd: zImageCostPerMegapixel,
+    units: megapixels ? roundUsageUnits(megapixels) : null,
+    unit: "megapixel",
+    mediaType: "image",
+    resolution,
+    imageSize,
+    pricingBasis: "Z-Image Turbo fal.ai per-megapixel estimate at $0.005/MP",
+    pricingSource: "fal-model-page-2026-06-04",
+    endpoint
   };
 }
 
@@ -8704,6 +10001,26 @@ function estimateOpenAiImage2Cost({ resolution, size, quality }) {
     size,
     quality,
     pricingBasis: "OpenAI GPT Image 2 medium image output estimate"
+  };
+}
+
+function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount = 0 }) {
+  const hasStyleReferences = Number(imageStyleReferenceCount) > 0;
+  const amountUsd = hasStyleReferences ? krea2LargeStyleReferenceCost : krea2LargeCost;
+  return {
+    amountUsd: roundCurrency(amountUsd),
+    currency: "USD",
+    unitRateUsd: amountUsd,
+    units: 1,
+    unit: "image",
+    mediaType: "image",
+    creativity,
+    imageStyleReferenceCount,
+    pricingBasis: hasStyleReferences
+      ? "Krea 2 Large fal.ai per-image estimate with image_style_references"
+      : "Krea 2 Large fal.ai text-to-image per-image estimate",
+    pricingSource: "fal-model-page-2026-06-24",
+    endpoint
   };
 }
 
@@ -9221,11 +10538,27 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage")) {
+    return {
+      provider: "fal-z-image",
+      displayName: imageModelNames.zImage,
+      id: falZImageEndpoint
+    };
+  }
+
   if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
     return {
       provider: "fal-openai-image-2",
       displayName: "OpenAI Image 2",
       id: "openai/gpt-image-2"
+    };
+  }
+
+  if (normalized.includes("krea") && normalized.includes("large")) {
+    return {
+      provider: "fal-krea-2-large",
+      displayName: imageModelNames.krea2Large,
+      id: falKrea2LargeEndpoint
     };
   }
 
@@ -9610,11 +10943,12 @@ async function resolveImageGenerationAspectRatio({ value, imagePromptUrls, provi
 }
 
 function normalizeImageAspectRatioForProvider(value, provider) {
-  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  const ratio = String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   return normalizeChoice(ratio, imageAspectRatiosForProvider(provider), "16:9");
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-krea-2-large") return krea2AspectRatios;
   if (provider === "fal-luma-photon") return lumaImageAspectRatios;
   return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
@@ -9741,7 +11075,7 @@ function closestAspectRatio(ratio, options = []) {
 }
 
 function aspectRatioNumber(value) {
-  const [width = 16, height = 9] = String(value || "").match(/\d+:\d+/)?.[0]?.split(":").map(Number) || [];
+  const [width = 16, height = 9] = String(value || "").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0]?.split(":").map(Number) || [];
   return width > 0 && height > 0 ? width / height : 16 / 9;
 }
 
@@ -9751,8 +11085,892 @@ function normalizeGeminiImageAspectRatio(value) {
 }
 
 function normalizeGeminiImageSize(value) {
-  const normalized = String(value || "1K").toUpperCase();
-  return normalizeChoice(normalized, ["1K", "2K", "4K"], "1K");
+  const normalized = String(value || "2K").toUpperCase();
+  return normalizeChoice(normalized, ["1K", "2K", "4K"], "2K");
+}
+
+function normalizeStoryboardFrameCount(value) {
+  const normalized = String(value || "Auto").trim();
+  if (/^auto$/i.test(normalized)) return 6;
+  const parsed = Number.parseInt(normalized, 10);
+  return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
+}
+
+async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], sceneReferences = [], notes = "" }) {
+  const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+  const characterSummary = characters
+    .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
+    .join("\n") || "No character references supplied.";
+  const sceneReferenceSummary = sceneReferences
+    .map((reference, index) => {
+      const tag = cleanReferenceName(reference.tag || reference.label || `Reference${index + 1}`) || `Reference${index + 1}`;
+      const label = cleanImagePromptLabel(reference.label || tag) || tag;
+      return `Reference ${index + 1}: ${label} (@${tag})`;
+    })
+    .join("\n") || "No scene image references supplied.";
+  const prompt = `You are not an image prompt writer first. You are a professional storyboard artist and director's visual planner.
+
+Create a film storyboard shot plan as strict JSON only. Do not include markdown fences.
+
+Scene brief:
+${sceneDescription}
+
+Known characters:
+${characterSummary}
+
+Known scene image references:
+${sceneReferenceSummary}
+
+Additional notes:
+${notes || "None"}
+
+Rules:
+1. Follow industry standard film storyboard practices.
+2. Maintain screen direction and follow the 180 degree rule.
+3. Characters should never look at camera unless specifically stated.
+4. Over-the-Shoulder shots must follow the 180 degree rule.
+5. Use inserts only when they reveal new story information.
+6. Prioritize blocking, eyeline, silhouette, and continuity.
+7. Do not invent props, characters, locations, or action not in the scene brief.
+8. Generate prompts that describe one frame only, not the whole scene.
+9. Follow editorial sequencing principles where each frame builds on the previous frame.
+10. When a known character appears or is implied in a frame prompt, refer to them with their exact @tag from Known characters. Do not replace @tags with generic character descriptions.
+11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
+12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
+13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
+14. When the scene brief references a known scene image reference @tag, preserve that exact @tag in each frame prompt where the referenced product, prop, object, location, environment, brand detail, texture, or design cue appears.
+15. Use known scene image references only for their intended referenced details. Do not turn them into characters, do not force them into unrelated frames, and preserve the final storyboard drawing style.
+
+Return this exact JSON shape:
+{
+  "sceneTitle": "short title",
+  "analysis": "one concise sentence about screen direction and visual continuity",
+  "frames": [
+    {
+      "number": 1,
+      "shot": "CU, MS, WS, ECU, or EWS",
+      "lens": "None, 18mm, 35mm, 50mm, 85mm, 120mm, or Macro",
+      "angle": "None, Low Angle, High Angle, Extreme High, Extreme Low, Portrait, or Profile",
+      "beat": "story beat in one sentence",
+      "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
+      "notes": "continuity note in one short phrase"
+    }
+  ]
+}
+
+Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 24 frames.`;
+
+  const text = await generateGeminiText({
+    model,
+    prompt,
+    responseMimeType: "application/json"
+  });
+
+  return parseStoryboardPlanJson(text);
+}
+
+async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
+  return generateGeminiTextFromParts({
+    model,
+    parts: [{ text: prompt }],
+    responseMimeType
+  });
+}
+
+async function generateGeminiTextFromParts({ model, parts, responseMimeType = "text/plain", temperature = 0.45 }) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": process.env.GOOGLE_API_KEY
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts
+        }
+      ],
+      generationConfig: {
+        temperature,
+        responseMimeType
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw httpError(response.status, data?.error?.message || "Gemini text generation failed.", { raw: data });
+  }
+
+  const parsed = extractGeminiImageData(data);
+  return parsed.text || "";
+}
+
+function parseStoryboardPlanJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("Storyboard planner returned no text.");
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = fenced || raw;
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  const jsonText = firstBrace >= 0 && lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate;
+  return JSON.parse(jsonText);
+}
+
+function normalizeStoryboardPlan(plan = {}, sceneDescription = "", requestedFrameCount = 6) {
+  const fallback = fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
+  const frames = Array.isArray(plan.frames) ? plan.frames : [];
+  const normalizedFrames = frames
+    .slice(0, 24)
+    .map((frame, index) => normalizeStoryboardPlanFrame(frame, index))
+    .filter((frame) => frame.prompt);
+
+  return {
+    sceneTitle: String(plan.sceneTitle || fallback.sceneTitle || "Scene 1").trim().slice(0, 80),
+    analysis: String(plan.analysis || fallback.analysis || "").trim().slice(0, 240),
+    frames: normalizedFrames.length ? normalizedFrames : fallback.frames
+  };
+}
+
+function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
+  return {
+    number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
+    shot: normalizeChoice(String(frame.shot || "None"), ["None", "CU", "MS", "WS", "ECU", "EWS"], "None"),
+    lens: normalizeChoice(String(frame.lens || "None"), ["None", "18mm", "35mm", "50mm", "85mm", "120mm", "Macro"], "None"),
+    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Low Angle", "High Angle", "Extreme High", "Extreme Low", "Portrait", "Profile"], "None"),
+    beat: String(frame.beat || "").trim().slice(0, 240),
+    prompt: String(frame.prompt || "").trim().slice(0, 1400),
+    notes: String(frame.notes || "").trim().slice(0, 240)
+  };
+}
+
+function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
+  const cleanScene = String(sceneDescription || "A clear cinematic scene").trim();
+  const shots = ["WS", "MS", "CU", "MS", "CU", "WS", "OTS", "ECU", "EWS"];
+  const beats = [
+    "Establish the location, subjects, and screen direction.",
+    "Move closer to show the main action and blocking.",
+    "Isolate the key emotional or story detail.",
+    "Show the response or next action while preserving eyelines.",
+    "Use an insert only if it reveals new information.",
+    "Resolve the moment with a wider contextual frame."
+  ];
+  return {
+    sceneTitle: "Scene 1",
+    analysis: "A simple continuity-safe sequence with clear screen direction and escalating visual information.",
+    frames: Array.from({ length: Math.max(1, frameCount) }, (_item, index) => ({
+      number: index + 1,
+      shot: shots[index % shots.length] === "OTS" ? "MS" : shots[index % shots.length],
+      lens: index === 0 ? "35mm" : "None",
+      angle: "None",
+      beat: beats[index % beats.length],
+      prompt: `${beats[index % beats.length]} Single storyboard frame for: ${cleanScene}. Keep characters off-camera gaze unless explicitly described. Preserve screen direction, blocking, silhouette, eyeline, and continuity.`,
+      notes: "Continuity-safe fallback frame"
+    }))
+  };
+}
+
+function storyboardExportFrameExtension(fileName = "") {
+  const extension = path.extname(fileName).toLowerCase();
+  if ([".png", ".jpg", ".jpeg"].includes(extension)) return extension === ".jpeg" ? ".jpg" : extension;
+  return extension || ".png";
+}
+
+async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
+  const fallback = frames.map(storyboardFrameDescriptionFallback);
+  if (!process.env.GOOGLE_API_KEY) return fallback;
+
+  try {
+    const frameText = frames.map((frame, index) => [
+      `Frame ${index + 1}`,
+      frame.description ? `Description: ${frame.description}` : "",
+      frame.beat ? `Beat: ${frame.beat}` : "",
+      frame.prompt ? `Prompt: ${frame.prompt}` : "",
+      frame.notes ? `Continuity note: ${frame.notes}` : "",
+      [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
+    ].filter(Boolean).join("\n")).join("\n\n");
+    const text = await generateGeminiText({
+      model: process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+      responseMimeType: "application/json",
+      prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
+
+Scene: ${sceneName}
+Scene brief: ${sceneDescription || "None"}
+
+Frames:
+${frameText}
+
+Return this exact JSON shape:
+{
+  "descriptions": [
+    "one complete production-board caption for frame 1, 6 to 10 words"
+  ]
+}
+
+Descriptions must be in the same order as the frames. Keep each caption short, complete, readable, and useful below a storyboard panel. Each caption must be a finished sentence or finished noun phrase. Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
+    });
+    const parsed = parseStoryboardPlanJson(text);
+    const descriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
+    return frames.map((frame, index) => {
+      const rawGenerated = String(descriptions[index] || "").trim();
+      const generated = cleanStoryboardDescription(rawGenerated);
+      if (generated && !storyboardCaptionLooksIncomplete(rawGenerated) && !storyboardCaptionLooksIncomplete(generated)) return generated;
+      return fallback[index] || storyboardFrameDescriptionFallback(frame);
+    });
+  } catch (error) {
+    console.warn("Storyboard PDF descriptions used fallback:", error.message);
+    return fallback;
+  }
+}
+
+async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
+  const fallback = frames.map(storyboardFrameDescriptionFallback);
+  if (!process.env.GOOGLE_API_KEY) return fallback;
+
+  const descriptions = [...fallback];
+  const batchSize = 4;
+
+  for (let batchStart = 0; batchStart < frames.length; batchStart += batchSize) {
+    const batch = frames.slice(batchStart, batchStart + batchSize);
+    const parts = [{
+      text: `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
+
+Scene: ${sceneName}
+Scene brief: ${sceneDescription || "None"}
+
+Return this exact JSON shape:
+{
+  "descriptions": [
+    "one complete caption for the first attached frame, 6 to 12 words"
+  ]
+}
+
+Rules:
+- Descriptions must be in the same order as the attached frames.
+- Describe the visible action, subject, or story beat in each image.
+- Keep each caption short, complete, readable, and useful below a storyboard panel.
+- Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
+- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
+    }];
+    const readableFrames = [];
+
+    for (const [offset, frame] of batch.entries()) {
+      try {
+        const asset = await readLocalAsset(frame.sourceUrl);
+        if (!String(asset.mimeType || "").startsWith("image/")) continue;
+        readableFrames.push({ frame, index: batchStart + offset });
+        parts.push({ text: `Frame ${batchStart + offset + 1}:` });
+        parts.push({
+          inlineData: {
+            mimeType: asset.mimeType || "image/png",
+            data: asset.buffer.toString("base64")
+          }
+        });
+      } catch (error) {
+        console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
+      }
+    }
+
+    if (!readableFrames.length) continue;
+
+    try {
+      const text = await generateGeminiTextFromParts({
+        model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+        parts,
+        responseMimeType: "application/json",
+        temperature: 0.28
+      });
+      const parsed = parseStoryboardPlanJson(text);
+      const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
+      readableFrames.forEach(({ index }, localIndex) => {
+        const rawGenerated = String(generatedDescriptions[localIndex] || "").trim();
+        const generated = cleanStoryboardDescription(rawGenerated);
+        if (generated && !storyboardCaptionLooksIncomplete(rawGenerated) && !storyboardCaptionLooksIncomplete(generated)) {
+          descriptions[index] = generated;
+        }
+      });
+    } catch (error) {
+      console.warn("Storyboard visual PDF descriptions used fallback:", error.message);
+    }
+  }
+
+  return descriptions;
+}
+
+function storyboardFrameDescriptionFallback(frame = {}) {
+  return cleanStoryboardDescription(frame.description || frame.beat || frame.prompt || frame.notes || "Storyboard frame.");
+}
+
+function cleanStoryboardDescription(value = "") {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return conciseStoryboardCaption(text);
+}
+
+function conciseStoryboardCaption(value = "", { maxWords = 20, maxChars = 145 } = {}) {
+  const words = String(value || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  const truncatedByWords = words.length > maxWords;
+  let caption = words.slice(0, maxWords).join(" ");
+  const truncatedByChars = caption.length > maxChars;
+  if (truncatedByChars) {
+    const clipped = caption.slice(0, maxChars).trim();
+    caption = clipped.includes(" ") ? clipped.slice(0, clipped.lastIndexOf(" ")).trim() : clipped;
+  }
+  if (truncatedByWords || truncatedByChars) {
+    caption = removeDanglingCaptionEnding(caption);
+    return caption ? `${caption}...` : "";
+  }
+  caption = removeDanglingCaptionEnding(caption);
+  if (!caption) return "";
+  return /[.!?…]$/.test(caption) ? caption : `${caption}.`;
+}
+
+function removeDanglingCaptionEnding(value = "") {
+  let caption = String(value || "").trim().replace(/[,:;–-]+$/g, "").trim();
+  const dangling = new Set([
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+    "within",
+    "upcoming",
+    "developing",
+    "intended",
+    "energetic",
+    "complex",
+    "minimalist",
+    "overall"
+  ]);
+  let words = caption.split(/\s+/).filter(Boolean);
+  while (words.length > 1 && dangling.has(words[words.length - 1].toLowerCase().replace(/[^\w]+$/g, ""))) {
+    words = words.slice(0, -1);
+  }
+  caption = words.join(" ").trim();
+  return caption.replace(/[,:;–-]+$/g, "").trim();
+}
+
+function storyboardCaptionLooksIncomplete(value = "") {
+  const caption = String(value || "").trim();
+  if (!caption) return true;
+  if (/[.!?…]$/.test(caption)) return false;
+  const lower = caption.toLowerCase().replace(/[^\w\s-]+$/g, "");
+  const words = lower.split(/\s+/).filter(Boolean);
+  const last = words[words.length - 1] || "";
+  if (/\b(generated\s+(image|video)|unique\s+id|file\s*name|filename|placeholder)\b/.test(lower)) return true;
+  if (/^frame\s+\d+$/.test(lower)) return true;
+  const weakEndings = new Set([
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+    "within",
+    "upcoming",
+    "developing",
+    "intended",
+    "energetic",
+    "complex",
+    "minimalist",
+    "overall"
+  ]);
+  if (weakEndings.has(last)) return true;
+  if (/\b(awaiting|pending|requiring|needing)\s+[\w-]+$/.test(lower)) return true;
+  if (/\b(ready|soon|yet)\s+(for|to|be)\s+[\w-]*$/.test(lower)) return true;
+  if (/\b(to\s+be|will\s+be|can\s+be|should\s+be)\s+[\w-]*$/.test(lower)) return true;
+  return /\b(featuring|showcasing|suggesting|offering|highlighting|presented as|focusing on|designed to|conveying|revealing|capturing|illustrating)\s+(a|an|the)?\s*\w{0,16}$/.test(lower);
+}
+
+async function createStoryboardPdf({ title = "Storyboard", sceneDescription = "", aspectRatio = "16:9", frames = [] } = {}) {
+  const pdf = new SimplePdfDocument();
+  const normalizedAspectRatio = normalizeStoryboardAspectRatio(aspectRatio);
+  const layout = storyboardPdfLayoutForAspect(normalizedAspectRatio);
+  const pageWidth = 1152;
+  const pageHeight = 648;
+  const marginX = 46;
+  const contentTop = pageHeight - 92;
+  const contentBottom = 38;
+  const panelLayout = storyboardPdfPanelLayout({
+    pageWidth,
+    pageHeight,
+    marginX,
+    contentTop,
+    contentBottom,
+    aspectRatio: normalizedAspectRatio,
+    layout
+  });
+  const framesPerPage = layout.rows * layout.cols;
+  const pdfImages = await Promise.all(frames.map(async (frame) => {
+    try {
+      return await readPdfImage(frame.filePath);
+    } catch (error) {
+      console.warn(`Storyboard PDF skipped image ${frame.fileName}:`, error.message);
+      return null;
+    }
+  }));
+
+  for (let pageStart = 0; pageStart < frames.length; pageStart += framesPerPage) {
+    const pageFrames = frames.slice(pageStart, pageStart + framesPerPage);
+    const pageImages = pdfImages.slice(pageStart, pageStart + framesPerPage);
+    const ops = [];
+    const xobjects = {};
+    const pageNumber = Math.floor(pageStart / framesPerPage) + 1;
+    addPdfRect(ops, 0, 0, pageWidth, pageHeight, { fill: [0.93, 0.93, 0.93] });
+    addPdfText(ops, marginX, pageHeight - 52, "STORYBOARDS", 24, true);
+    addPdfLine(ops, marginX + 224, pageHeight - 45, pageWidth - marginX, pageHeight - 45, { width: 1.7 });
+    const metadata = [title && title !== "Storyboard" ? title : "", normalizedAspectRatio].filter(Boolean).join("  /  ");
+    if (metadata) addPdfText(ops, marginX, pageHeight - 70, metadata, 8.5, true, [0.18, 0.18, 0.18]);
+
+    pageFrames.forEach((frame, index) => {
+      const row = Math.floor(index / layout.cols);
+      const col = index % layout.cols;
+      const x = panelLayout.startX + col * (panelLayout.panelWidth + layout.gapX);
+      const imageTop = panelLayout.startTop - row * (panelLayout.panelHeight + layout.captionHeight + layout.rowGap);
+      const imageY = imageTop - panelLayout.panelHeight;
+      const image = pageImages[index];
+
+      if (image) {
+        const imageName = `Im${pageStart + index + 1}`;
+        const imageObjectId = pdf.addImage(image);
+        xobjects[imageName] = imageObjectId;
+        const fit = fitPdfRect(image.width, image.height, panelLayout.panelWidth, panelLayout.panelHeight);
+        const drawX = x + (panelLayout.panelWidth - fit.width) / 2;
+        const drawY = imageY + (panelLayout.panelHeight - fit.height) / 2;
+        addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { fill: [1, 1, 1] });
+        ops.push(`q ${formatPdfNumber(fit.width)} 0 0 ${formatPdfNumber(fit.height)} ${formatPdfNumber(drawX)} ${formatPdfNumber(drawY)} cm /${imageName} Do Q`);
+      } else {
+        addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { fill: [1, 1, 1] });
+        addPdfText(ops, x + 16, imageY + panelLayout.panelHeight / 2, "Image unavailable", 10);
+      }
+
+      addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { stroke: [0, 0, 0], width: 2 });
+      const badgeWidth = Math.max(17, String(frame.number).length * 8 + 8);
+      addPdfRect(ops, x, imageTop - 17, badgeWidth, 17, { fill: [0, 0, 0] });
+      addPdfText(ops, x + 3.2, imageTop - 14, String(frame.number), 11, true, [1, 1, 1]);
+
+      addWrappedPdfText(ops, x + 9, imageY - 16, frame.description || storyboardFrameDescriptionFallback(frame), {
+        width: panelLayout.panelWidth - 18,
+        height: layout.captionHeight - 10,
+        fontSize: 10.2,
+        minFontSize: 7.2,
+        lineHeightRatio: 1.08
+      });
+    });
+
+    addPdfText(ops, pageWidth - marginX - 18, 13, String(pageNumber), 14, false, [0.32, 0.32, 0.32]);
+    pdf.addPage({ width: pageWidth, height: pageHeight, content: ops.join("\n"), xobjects });
+  }
+
+  return pdf.render();
+}
+
+function normalizeStoryboardAspectRatio(value) {
+  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(ratio, storyboardAspectRatioOptions, "16:9");
+}
+
+function storyboardPdfLayoutForAspect(aspectRatio) {
+  switch (normalizeStoryboardAspectRatio(aspectRatio)) {
+    case "21:9":
+      return { cols: 2, rows: 2, gapX: 12, rowGap: 20, captionHeight: 78 };
+    case "9:16":
+      return { cols: 6, rows: 1, gapX: 8, rowGap: 0, captionHeight: 108 };
+    case "1:1":
+      return { cols: 4, rows: 2, gapX: 8, rowGap: 20, captionHeight: 84 };
+    case "16:9":
+    default:
+      return { cols: 3, rows: 2, gapX: 0, rowGap: 20, captionHeight: 78 };
+  }
+}
+
+function storyboardPdfPanelLayout({ pageWidth, pageHeight, marginX, contentTop, contentBottom, aspectRatio, layout }) {
+  const availableWidth = pageWidth - marginX * 2;
+  const availableHeight = contentTop - contentBottom;
+  const ratio = aspectRatioNumber(aspectRatio);
+  const widthByColumns = (availableWidth - layout.gapX * (layout.cols - 1)) / layout.cols;
+  const heightByRows = (availableHeight - layout.rowGap * (layout.rows - 1) - layout.captionHeight * layout.rows) / layout.rows;
+  const panelWidth = Math.max(1, Math.min(widthByColumns, heightByRows * ratio));
+  const panelHeight = Math.max(1, panelWidth / ratio);
+  const gridWidth = panelWidth * layout.cols + layout.gapX * (layout.cols - 1);
+  const gridHeight = panelHeight * layout.rows + layout.captionHeight * layout.rows + layout.rowGap * (layout.rows - 1);
+
+  return {
+    panelWidth,
+    panelHeight,
+    startX: marginX + Math.max(0, (availableWidth - gridWidth) / 2),
+    startTop: contentTop - Math.max(0, (availableHeight - gridHeight) / 2)
+  };
+}
+
+function fitPdfRect(width, height, maxWidth, maxHeight) {
+  const scale = Math.min(maxWidth / Math.max(1, width), maxHeight / Math.max(1, height));
+  return {
+    width: width * scale,
+    height: height * scale
+  };
+}
+
+function addPdfText(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0]) {
+  addPdfTextColor(ops, x, y, text, size, bold, color);
+}
+
+function addWrappedPdfText(ops, x, y, text, { width, height, fontSize = 10, minFontSize = 8, lineHeightRatio = 1.15, bold = false, color = [0, 0, 0] } = {}) {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) return;
+
+  const fontSteps = [];
+  for (let size = fontSize; size >= minFontSize; size -= 0.35) {
+    fontSteps.push(Number(size.toFixed(2)));
+  }
+  if (!fontSteps.includes(minFontSize)) fontSteps.push(minFontSize);
+
+  let selected = null;
+  for (const size of fontSteps) {
+    const lineHeight = Math.max(8, size * lineHeightRatio);
+    const maxLines = Math.max(1, Math.floor(height / lineHeight));
+    const lines = wrapPdfText(normalizedText, pdfTextMaxCharsForWidth(width, size));
+    selected = { size, lineHeight, maxLines, lines };
+    if (lines.length <= maxLines) break;
+  }
+
+  const visibleLines = selected.lines.slice(0, selected.maxLines);
+  if (selected.lines.length > selected.maxLines && visibleLines.length) {
+    visibleLines[visibleLines.length - 1] = ellipsizePdfText(visibleLines[visibleLines.length - 1], pdfTextMaxCharsForWidth(width, selected.size));
+  }
+
+  visibleLines.forEach((line, lineIndex) => {
+    addPdfText(ops, x, y - lineIndex * selected.lineHeight, line, selected.size, bold, color);
+  });
+}
+
+function addPdfTextColor(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0]) {
+  const font = bold ? "/F2" : "/F1";
+  ops.push(`${formatPdfColor(color)} rg`);
+  ops.push(`BT ${font} ${formatPdfNumber(size)} Tf ${formatPdfNumber(x)} ${formatPdfNumber(y)} Td (${escapePdfText(text)}) Tj ET`);
+}
+
+function addPdfRect(ops, x, y, width, height, { fill = null, stroke = null, lineWidth = 1, width: strokeWidth = null } = {}) {
+  if (fill) ops.push(`${formatPdfColor(fill)} rg`);
+  if (stroke) ops.push(`${formatPdfColor(stroke)} RG ${formatPdfNumber(strokeWidth || lineWidth)} w`);
+  ops.push(`${formatPdfNumber(x)} ${formatPdfNumber(y)} ${formatPdfNumber(width)} ${formatPdfNumber(height)} re ${fill && stroke ? "B" : fill ? "f" : "S"}`);
+}
+
+function addPdfLine(ops, x1, y1, x2, y2, { color = [0, 0, 0], width = 1 } = {}) {
+  ops.push(`${formatPdfColor(color)} RG ${formatPdfNumber(width)} w`);
+  ops.push(`${formatPdfNumber(x1)} ${formatPdfNumber(y1)} m ${formatPdfNumber(x2)} ${formatPdfNumber(y2)} l S`);
+}
+
+function wrapPdfText(text = "", maxChars = 64) {
+  const safeMaxChars = Math.max(8, Math.floor(maxChars));
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const wordParts = splitLongPdfWord(word, safeMaxChars);
+    for (const part of wordParts) {
+      const next = line ? `${line} ${part}` : part;
+      if (next.length > safeMaxChars && line) {
+        lines.push(line);
+        line = part;
+      } else {
+        line = next;
+      }
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function splitLongPdfWord(word, maxChars) {
+  const value = String(word || "");
+  if (value.length <= maxChars) return [value];
+  const chunks = [];
+  for (let index = 0; index < value.length; index += maxChars) {
+    chunks.push(value.slice(index, index + maxChars));
+  }
+  return chunks;
+}
+
+function pdfTextMaxCharsForWidth(width, fontSize) {
+  return Math.max(8, Math.floor(Number(width || 0) / Math.max(4.2, Number(fontSize || 10) * 0.52)));
+}
+
+function ellipsizePdfText(text, maxChars) {
+  const value = String(text || "");
+  if (value.length <= maxChars || maxChars <= 3) return value;
+  return `${value.slice(0, maxChars - 3).trimEnd()}...`;
+}
+
+function escapePdfText(value = "") {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function formatPdfNumber(value) {
+  return Number(value).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatPdfColor(color = [0, 0, 0]) {
+  return color.map((channel) => formatPdfNumber(Math.max(0, Math.min(1, Number(channel) || 0)))).join(" ");
+}
+
+class SimplePdfDocument {
+  constructor() {
+    this.objects = [];
+    this.catalogId = this.reserveObject();
+    this.pagesId = this.reserveObject();
+    this.fontId = this.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    this.boldFontId = this.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    this.pageIds = [];
+  }
+
+  reserveObject() {
+    this.objects.push(null);
+    return this.objects.length;
+  }
+
+  addObject(content) {
+    this.objects.push(Buffer.isBuffer(content) ? content : Buffer.from(String(content)));
+    return this.objects.length;
+  }
+
+  setObject(id, content) {
+    this.objects[id - 1] = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
+  }
+
+  addImage(image) {
+    const stream = Buffer.concat([
+      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /${image.filter} /Length ${image.data.length} >>\nstream\n`),
+      image.data,
+      Buffer.from("\nendstream")
+    ]);
+    return this.addObject(stream);
+  }
+
+  addPage({ width, height, content, xobjects = {} }) {
+    const contentBuffer = Buffer.from(content);
+    const contentId = this.addObject(Buffer.concat([
+      Buffer.from(`<< /Length ${contentBuffer.length} >>\nstream\n`),
+      contentBuffer,
+      Buffer.from("\nendstream")
+    ]));
+    const xobjectEntries = Object.entries(xobjects).map(([name, id]) => `/${name} ${id} 0 R`).join(" ");
+    const pageId = this.addObject(`<< /Type /Page /Parent ${this.pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${this.fontId} 0 R /F2 ${this.boldFontId} 0 R >> ${xobjectEntries ? `/XObject << ${xobjectEntries} >>` : ""} >> /Contents ${contentId} 0 R >>`);
+    this.pageIds.push(pageId);
+    return pageId;
+  }
+
+  render() {
+    this.setObject(this.pagesId, `<< /Type /Pages /Kids [${this.pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${this.pageIds.length} >>`);
+    this.setObject(this.catalogId, `<< /Type /Catalog /Pages ${this.pagesId} 0 R >>`);
+    const chunks = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary")];
+    const offsets = [0];
+    this.objects.forEach((content, index) => {
+      offsets.push(Buffer.concat(chunks).length);
+      chunks.push(Buffer.from(`${index + 1} 0 obj\n`));
+      chunks.push(content || Buffer.from(""));
+      chunks.push(Buffer.from("\nendobj\n"));
+    });
+    const xrefOffset = Buffer.concat(chunks).length;
+    chunks.push(Buffer.from(`xref\n0 ${this.objects.length + 1}\n0000000000 65535 f \n`));
+    offsets.slice(1).forEach((offset) => {
+      chunks.push(Buffer.from(`${String(offset).padStart(10, "0")} 00000 n \n`));
+    });
+    chunks.push(Buffer.from(`trailer\n<< /Size ${this.objects.length + 1} /Root ${this.catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`));
+    return Buffer.concat(chunks);
+  }
+}
+
+async function readPdfImage(filePath) {
+  const buffer = await readFile(filePath);
+  if (isJpegBuffer(buffer)) {
+    const size = jpegSize(buffer);
+    return {
+      width: size.width,
+      height: size.height,
+      filter: "DCTDecode",
+      data: buffer
+    };
+  }
+
+  if (isPngBuffer(buffer)) {
+    const image = pngToRgb(buffer);
+    return {
+      width: image.width,
+      height: image.height,
+      filter: "FlateDecode",
+      data: deflateSync(image.rgb)
+    };
+  }
+
+  throw new Error("Only PNG and JPEG frames are supported in the PDF export.");
+}
+
+function isJpegBuffer(buffer) {
+  return buffer[0] === 0xff && buffer[1] === 0xd8;
+}
+
+function jpegSize(buffer) {
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) break;
+    const marker = buffer[offset + 1];
+    const length = buffer.readUInt16BE(offset + 2);
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7)
+      };
+    }
+    offset += 2 + length;
+  }
+  throw new Error("Could not read JPEG size.");
+}
+
+function isPngBuffer(buffer) {
+  return buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+}
+
+function pngToRgb(buffer) {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let palette = null;
+  const idat = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
+    const data = buffer.slice(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === "PLTE") {
+      palette = data;
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+
+  if (bitDepth !== 8) throw new Error("Only 8-bit PNG frames are supported in the PDF export.");
+  const channels = pngChannelsForColorType(colorType);
+  const inflated = inflateSync(Buffer.concat(idat));
+  const rows = unfilterPngRows(inflated, width, height, channels);
+  const rgb = Buffer.alloc(width * height * 3);
+  let target = 0;
+
+  for (let i = 0; i < rows.length; i += channels) {
+    if (colorType === 0) {
+      const gray = rows[i];
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+    } else if (colorType === 2) {
+      rgb[target++] = rows[i];
+      rgb[target++] = rows[i + 1];
+      rgb[target++] = rows[i + 2];
+    } else if (colorType === 3) {
+      if (!palette) throw new Error("Indexed PNG frame is missing a palette.");
+      const paletteIndex = rows[i] * 3;
+      rgb[target++] = palette[paletteIndex] ?? 255;
+      rgb[target++] = palette[paletteIndex + 1] ?? 255;
+      rgb[target++] = palette[paletteIndex + 2] ?? 255;
+    } else if (colorType === 4) {
+      const alpha = rows[i + 1] / 255;
+      const gray = Math.round(rows[i] * alpha + 255 * (1 - alpha));
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+    } else if (colorType === 6) {
+      const alpha = rows[i + 3] / 255;
+      rgb[target++] = Math.round(rows[i] * alpha + 255 * (1 - alpha));
+      rgb[target++] = Math.round(rows[i + 1] * alpha + 255 * (1 - alpha));
+      rgb[target++] = Math.round(rows[i + 2] * alpha + 255 * (1 - alpha));
+    }
+  }
+
+  return { width, height, rgb };
+}
+
+function pngChannelsForColorType(colorType) {
+  if (colorType === 0) return 1;
+  if (colorType === 2) return 3;
+  if (colorType === 3) return 1;
+  if (colorType === 4) return 2;
+  if (colorType === 6) return 4;
+  throw new Error("Unsupported PNG color type.");
+}
+
+function unfilterPngRows(data, width, height, channels) {
+  const rowLength = width * channels;
+  const output = Buffer.alloc(rowLength * height);
+  let inputOffset = 0;
+
+  for (let row = 0; row < height; row += 1) {
+    const filter = data[inputOffset++];
+    const rowStart = row * rowLength;
+    for (let col = 0; col < rowLength; col += 1) {
+      const raw = data[inputOffset++];
+      const left = col >= channels ? output[rowStart + col - channels] : 0;
+      const up = row > 0 ? output[rowStart - rowLength + col] : 0;
+      const upLeft = row > 0 && col >= channels ? output[rowStart - rowLength + col - channels] : 0;
+      let value = raw;
+      if (filter === 1) value = raw + left;
+      else if (filter === 2) value = raw + up;
+      else if (filter === 3) value = raw + Math.floor((left + up) / 2);
+      else if (filter === 4) value = raw + paethPredictor(left, up, upLeft);
+      else if (filter !== 0) throw new Error("Unsupported PNG filter.");
+      output[rowStart + col] = value & 0xff;
+    }
+  }
+
+  return output;
+}
+
+function paethPredictor(left, up, upLeft) {
+  const p = left + up - upLeft;
+  const pa = Math.abs(p - left);
+  const pb = Math.abs(p - up);
+  const pc = Math.abs(p - upLeft);
+  if (pa <= pb && pa <= pc) return left;
+  if (pb <= pc) return up;
+  return upLeft;
 }
 
 async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
@@ -9783,7 +12001,12 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
 
     const data = await response.json();
     if (!response.ok) {
-      throw httpError(response.status, data?.error?.message || "Image generation failed.", { raw: data });
+      const message = data?.error?.message || "Image generation failed.";
+      if (attempt < maxAttempts && isRetryableGeminiImageError(response.status, data?.error?.status, message)) {
+        await delay(1400 * attempt);
+        continue;
+      }
+      throw httpError(response.status, message, { raw: data, attempts: attempt });
     }
 
     const parsed = extractGeminiImageData(data);
@@ -9808,6 +12031,105 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
     text: lastText,
     raw: lastRaw
   });
+}
+
+function isRetryableGeminiImageError(status, googleStatus, message) {
+  const httpStatus = Number(status || 0);
+  if ([429, 500, 502, 503, 504].includes(httpStatus)) return true;
+  const text = `${googleStatus || ""} ${message || ""}`.toLowerCase();
+  return /resource[_\s-]*exhausted|quota|overload|capacity|high usage|try again later|temporarily unavailable/.test(text);
+}
+
+function shouldFallbackFromGoogleImageError(error) {
+  const message = publicErrorMessage(error, error?.message || "Google image generation failed.");
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  const googleStatus = rawError.status || "";
+  const text = `${googleStatus} ${message}`.toLowerCase();
+
+  if (/permission|unauthenticated|auth|api key|invalid|malformed|content[_\s-]*policy|safety|blocked|prohibited/.test(text)) {
+    return false;
+  }
+
+  return isRetryableGeminiImageError(errorStatusCode(error), googleStatus, message);
+}
+
+function googleFallbackSummary(error) {
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  const status = errorStatusCode(error);
+  const providerStatus = rawError.status || "";
+  const message = publicErrorMessage(error, error?.message || "Google image generation failed.");
+  const diagnosis = googleImageErrorDiagnosis({ status, providerStatus, message });
+
+  return {
+    from: "google",
+    to: "fal",
+    status,
+    providerStatus,
+    attempts: Number(error?.attempts || 0) || null,
+    reason: diagnosis.reason,
+    quotaLikely: diagnosis.quotaLikely,
+    accountLimitLikely: diagnosis.accountLimitLikely,
+    tokenLimitLikely: diagnosis.tokenLimitLikely,
+    imageLimitLikely: diagnosis.imageLimitLikely,
+    message
+  };
+}
+
+function googleImageErrorDiagnosis({ status, providerStatus, message }) {
+  const text = `${providerStatus || ""} ${message || ""}`.toLowerCase();
+  const hasQuotaSignal = /resource[_\s-]*exhausted|quota|rate[_\s-]*limit|too many requests|requests per|tokens per|images per|\brpm\b|\btpm\b|\brpd\b|\bipm\b|exceeded/.test(text);
+  const hasCapacitySignal = /overload|capacity|high usage|high demand|try again later|temporarily unavailable|unavailable/.test(text);
+  const tokenLimitLikely = /token|\btpm\b|\btpd\b/.test(text);
+  const imageLimitLikely = /image|\bipm\b/.test(text);
+
+  if (hasQuotaSignal || providerStatus === "RESOURCE_EXHAUSTED" || status === 429) {
+    return {
+      reason: "quota-or-rate-limit",
+      quotaLikely: true,
+      accountLimitLikely: true,
+      tokenLimitLikely,
+      imageLimitLikely
+    };
+  }
+
+  if (hasCapacitySignal || providerStatus === "UNAVAILABLE" || status === 503) {
+    return {
+      reason: "provider-capacity",
+      quotaLikely: false,
+      accountLimitLikely: false,
+      tokenLimitLikely: false,
+      imageLimitLikely: false
+    };
+  }
+
+  if ([500, 502, 504].includes(Number(status))) {
+    return {
+      reason: "provider-error",
+      quotaLikely: false,
+      accountLimitLikely: false,
+      tokenLimitLikely: false,
+      imageLimitLikely: false
+    };
+  }
+
+  return {
+    reason: "unknown-retryable-google-error",
+    quotaLikely: null,
+    accountLimitLikely: null,
+    tokenLimitLikely: null,
+    imageLimitLikely: null
+  };
+}
+
+function googleImageErrorDisplayMessage(summary) {
+  const providerStatus = summary.providerStatus ? ` ${summary.providerStatus}` : "";
+  const statusLabel = summary.status ? `HTTP ${summary.status}${providerStatus}` : (summary.providerStatus || "Google error");
+  const quotaCheck = summary.quotaLikely === true
+    ? "Google quota check: likely quota/rate limit on the project or billing account."
+    : summary.quotaLikely === false
+      ? "Google quota check: this looks more like Google/model capacity than account quota."
+      : "Google quota check: unclear from the provider response.";
+  return `${quotaCheck} Google error (${statusLabel}): ${summary.message}`;
 }
 
 function extractGeminiImageData(data) {
@@ -9869,6 +12191,52 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
   };
 }
 
+async function generateFalZImage({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const normalizedResolution = normalizeGeminiImageSize(resolution);
+  const imageSize = imageSizeForResolutionAndAspectRatio({ resolution: normalizedResolution, aspectRatio });
+  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs.slice(0, 1));
+  const input = {
+    prompt: submittedPrompt,
+    image_size: imageSize,
+    num_images: 1,
+    enable_safety_checker: true,
+    output_format: "png",
+    sync_mode: false
+  };
+
+  if (imageInputs.length) {
+    input.image_url = await uploadImageInputToFal(imageInputs[0], 0);
+  }
+
+  const result = await subscribeFal(falZImageEndpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Z-Image URL.");
+  }
+
+  return {
+    endpoint: falZImageEndpoint,
+    requestId: result.requestId,
+    remoteImage,
+    resolution: normalizedResolution,
+    imageSize,
+    submittedPrompt,
+    resultText: result?.data?.description || result?.data?.text || ""
+  };
+}
+
 async function generateFalLumaPhoton({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio }) {
   const imageInputs = [];
 
@@ -9910,6 +12278,51 @@ async function generateFalLumaPhoton({ prompt, imagePromptUrls, imagePromptLabel
   };
 }
 
+async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, creativity }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const styleReferences = await Promise.all(
+    imageInputs.slice(0, 10).map(async (asset, index) => ({
+      image_url: await uploadImageInputToFal(asset, index)
+    }))
+  );
+  const normalizedCreativity = normalizeKrea2Creativity(creativity);
+  const input = {
+    prompt: promptWithReferenceLabels(prompt, imageInputs),
+    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-krea-2-large"),
+    creativity: normalizedCreativity,
+    image_style_references: styleReferences,
+    styles: [],
+    moodboards: []
+  };
+
+  const result = await subscribeFal(falKrea2LargeEndpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Krea 2 Large image URL.");
+  }
+
+  return {
+    endpoint: falKrea2LargeEndpoint,
+    requestId: result.requestId,
+    remoteImage,
+    creativity: normalizedCreativity,
+    imageStyleReferenceCount: styleReferences.length,
+    submittedPrompt: input.prompt,
+    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
+  };
+}
+
 function httpError(status, message, extra = {}) {
   return Object.assign(new Error(message), {
     status,
@@ -9933,6 +12346,10 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     });
   }
 
+  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution });
+}
+
+async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const quality = normalizeOpenAiImageQuality(process.env.FAL_OPENAI_IMAGE_2_QUALITY || process.env.OPENAI_IMAGE_2_QUALITY || "medium");
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
@@ -9950,7 +12367,7 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
   }
 
-  const result = await fal.subscribe(endpoint, { input, logs: true });
+  const result = await subscribeFal(endpoint, { input, logs: true });
   const remoteImage = firstFalImageResult(result?.data);
 
   if (!remoteImage?.url) {
@@ -9964,6 +12381,26 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     quality,
     submittedPrompt,
     resultText: result?.data?.revised_prompt || result?.data?.prompt || ""
+  };
+}
+
+function imageDataUrlAsset(dataUrl, fileName = "image.png") {
+  const match = String(dataUrl || "").match(/^data:(image\/(?:png|jpe?g|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) {
+    const error = new Error("Mask must be a PNG, JPEG, or WebP data URL.");
+    error.status = 400;
+    throw error;
+  }
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 24 * 1024 * 1024) {
+    const error = new Error("Mask image is empty or too large.");
+    error.status = 413;
+    throw error;
+  }
+  return {
+    fileName,
+    buffer,
+    mimeType: normalizeMimeType(match[1], "image/png")
   };
 }
 
@@ -9995,7 +12432,7 @@ function normalizeOpenAiImageQuality(value) {
 
 function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
   const ratio = String(aspectRatio || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  const normalizedResolution = String(resolution || "1K").toUpperCase();
+  const normalizedResolution = String(resolution || "2K").toUpperCase();
   const sizeMap = {
     "1K": {
       "21:9": "1344x576",
@@ -10022,7 +12459,7 @@ function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
 
 function openAiImageSizeForAspectRatio(aspectRatio, resolution) {
   const ratio = aspectRatioNumber(aspectRatio);
-  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "1K";
+  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "2K";
   const longSideMap = { "1K": 1280, "2K": 2048, "4K": 3840 };
   const squareSideMap = { "1K": 1024, "2K": 2048, "4K": 2880 };
   const maxPixelsMap = { "1K": 1024 * 1024, "2K": 2048 * 2048, "4K": 3840 * 2160 };
@@ -10046,6 +12483,30 @@ function openAiImageSizeForAspectRatio(aspectRatio, resolution) {
   return `${roundOpenAiImageDimension(width)}x${roundOpenAiImageDimension(height)}`;
 }
 
+function imageSizeForResolutionAndAspectRatio({ resolution, aspectRatio }) {
+  const ratioText = String(aspectRatio || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  const [ratioWidth = 16, ratioHeight = 9] = ratioText.split(":").map(Number);
+  const ratio = ratioWidth > 0 && ratioHeight > 0 ? ratioWidth / ratioHeight : 16 / 9;
+  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "2K";
+  const longSideMap = { "1K": 1280, "2K": 2048, "4K": 3840 };
+  const maxPixelsMap = { "1K": 1280 * 1280, "2K": 2048 * 2048, "4K": 3840 * 2160 };
+  const longSide = longSideMap[normalizedResolution];
+  let width = ratio >= 1 ? longSide : longSide * ratio;
+  let height = ratio >= 1 ? longSide / ratio : longSide;
+  const maxPixels = maxPixelsMap[normalizedResolution];
+
+  if (width * height > maxPixels) {
+    const scale = Math.sqrt(maxPixels / (width * height));
+    width *= scale;
+    height *= scale;
+  }
+
+  return {
+    width: roundOpenAiImageDimension(width),
+    height: roundOpenAiImageDimension(height)
+  };
+}
+
 function roundOpenAiImageDimension(value) {
   return Math.max(256, Math.floor(Number(value || 0) / 16) * 16);
 }
@@ -10057,6 +12518,17 @@ function extensionForMime(mimeType) {
   if (mimeType === "model/gltf+json") return ".gltf";
   if (mimeType === "model/obj") return ".obj";
   return ".png";
+}
+
+function mimeTypeForExtension(extension) {
+  const normalized = String(extension || "").toLowerCase();
+  if (normalized === ".jpg" || normalized === ".jpeg") return "image/jpeg";
+  if (normalized === ".webp") return "image/webp";
+  if (normalized === ".gif") return "image/gif";
+  if (normalized === ".mp4") return "video/mp4";
+  if (normalized === ".webm") return "video/webm";
+  if (normalized === ".mov") return "video/quicktime";
+  return "image/png";
 }
 
 function normalizeDuration(value) {
@@ -10196,7 +12668,12 @@ function isLocalOutputUrl(value) {
 }
 
 function isLocalAssetUrl(value) {
-  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith("/uploads/") || value.startsWith(`${workflowAssetsPrefix}/`));
+  return typeof value === "string" && (
+    value.startsWith("/outputs/") ||
+    value.startsWith("/uploads/") ||
+    value.startsWith("/storyboard/") ||
+    value.startsWith(`${workflowAssetsPrefix}/`)
+  );
 }
 
 async function uploadLocalOutputToFal(publicPath) {
@@ -10235,7 +12712,7 @@ function localPublicPathFromUrl(value) {
     // Fall through to the clear validation error below.
   }
 
-  throw new Error("This action can only read local NewtNode assets from uploads, outputs, or workflow packages.");
+  throw new Error("This action can only read local NewtNode assets from uploads, outputs, bundled storyboard assets, or workflow packages.");
 }
 
 async function resolveLocalAssetPath(publicPath) {
@@ -10279,10 +12756,11 @@ async function resolveLocalAssetPath(publicPath) {
 function localAssetFilePath(publicPath) {
   const isUpload = String(publicPath || "").startsWith("/uploads/");
   const isOutput = String(publicPath || "").startsWith("/outputs/");
-  if (!isUpload && !isOutput) return "";
+  const isStoryboardAsset = String(publicPath || "").startsWith("/storyboard/");
+  if (!isUpload && !isOutput && !isStoryboardAsset) return "";
 
-  const prefix = isUpload ? "/uploads/" : "/outputs/";
-  const root = isUpload ? uploadsDir : outputsDir;
+  const prefix = isUpload ? "/uploads/" : isOutput ? "/outputs/" : "/storyboard/";
+  const root = isUpload ? uploadsDir : isOutput ? outputsDir : storyboardAssetsDir;
   const relativePath = safeRelativeAssetPath(decodeURIComponent(String(publicPath || "").slice(prefix.length)));
   return relativePath ? path.join(root, relativePath) : "";
 }

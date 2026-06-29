@@ -35,9 +35,14 @@ export function useWorkflowPersistence({
   setSelectedEdgeId,
   setProjectMenuOpen,
   setFileMenuOpen,
+  newProjectNodes = [],
+  newProjectEdges = [],
+  newProjectGroups = [],
+  newProjectViewport = { x: 0, y: 0, scale: 1 },
   normalizeEditorGraph,
   dedupeEdges,
   pushUndoSnapshot,
+  clearUndoStack,
   importOffsetForNodes,
   onStatusChange
 }) {
@@ -297,10 +302,14 @@ export function useWorkflowPersistence({
         setGroups(graph.groups);
         setViewport(cleanViewport);
       }
+      void loadProjects().catch((error) => {
+        console.warn("Could not refresh workflow list after save", error);
+      });
       markWorkflowClean({
         nodes: cleanNodes,
         edges: cleanEdges,
         groups: cleanGroups,
+        viewport: cleanViewport,
         projectName: project.name,
         projectPackagePath: nextPackagePath
       });
@@ -381,6 +390,42 @@ export function useWorkflowPersistence({
     }
   }
 
+  async function startNewProject() {
+    try {
+      if (!(await guardUnsavedWorkflowChange("start a new project"))) return false;
+
+      const graph = normalizeEditorGraph(newProjectNodes, newProjectEdges, newProjectGroups);
+      localWorkflowHandleRef.current = null;
+      setLocalWorkflowFileName("");
+      setProjectId(null);
+      setProjectName("Untitled node project");
+      setSavedProjectName(null);
+      setProjectPackagePath("");
+      setWorkflowFilePath("");
+      setNodes(graph.nodes);
+      setEdges(graph.edges);
+      setGroups(graph.groups);
+      setViewport(newProjectViewport);
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(null);
+      clearUndoStack?.();
+      setProjectMenuOpen(false);
+      setFileMenuOpen(false);
+      markWorkflowClean({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        groups: graph.groups,
+        projectName: "Untitled node project",
+        projectPackagePath: ""
+      });
+      setSaveStatus("New project ready");
+      return true;
+    } catch (error) {
+      setSaveStatus(error.message || "Could not start a new project.");
+      return false;
+    }
+  }
+
   function applyWorkflow(project, sourceLabel = "Loaded") {
     const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
     const nextProjectName = project.name || "Untitled node project";
@@ -400,6 +445,7 @@ export function useWorkflowPersistence({
     setViewport(nextViewport);
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
+    clearUndoStack?.();
     setProjectMenuOpen(false);
     markWorkflowClean({
       nodes: graph.nodes,
@@ -516,6 +562,36 @@ export function useWorkflowPersistence({
     }
   }
 
+  async function openWorkflowPackageFolderFromSystemPicker() {
+    try {
+      if (!(await guardUnsavedWorkflowChange("open another workflow package"))) return;
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
+      setSaveStatus("Opening workflow package...");
+      const { response, data } = await systemApi.openWorkflowFile(
+        {
+          title: "Open NewtNode workflow package folder",
+          defaultPath,
+          mode: "folder"
+        },
+        "Open workflow package"
+      );
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Open canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not open workflow package.");
+      }
+
+      applyWorkflow(data, "Opened");
+      rememberOpenedWorkflowPath(data);
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not open workflow package.");
+    }
+  }
+
   async function importWorkflowFromSystemPicker() {
     try {
       const defaultPath = workflowPickerDefaultPath(projectPackagePath);
@@ -541,6 +617,35 @@ export function useWorkflowPersistence({
       await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not import workflow.");
+    }
+  }
+
+  async function importWorkflowPackageFolderFromSystemPicker() {
+    try {
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
+      setSaveStatus("Importing workflow package...");
+      const { response, data } = await systemApi.openWorkflowFile(
+        {
+          title: "Import NewtNode workflow package folder",
+          defaultPath,
+          mode: "folder"
+        },
+        "Import workflow package"
+      );
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Import canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not import workflow package.");
+      }
+
+      importWorkflow(data);
+      rememberOpenedWorkflowPath(data);
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not import workflow package.");
     }
   }
 
@@ -614,11 +719,14 @@ export function useWorkflowPersistence({
     loadProjects,
     createNewWorkflow,
     saveProject,
+    startNewProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
     openWorkflowFromBrowserPicker,
     openWorkflowFromSystemPicker,
+    openWorkflowPackageFolderFromSystemPicker,
     importWorkflowFromSystemPicker,
+    importWorkflowPackageFolderFromSystemPicker,
     loadProject,
     deleteProject
   };

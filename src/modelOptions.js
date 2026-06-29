@@ -1,18 +1,25 @@
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
+export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
+  zImage: "Z-Image",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
+  krea2Large: "Krea 2 Large",
   lumaDreamMachine: "Luma Dream Machine"
 };
 export const imageModelOptions = [
+  imageModelNames.zImage,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.krea2Large,
   imageModelNames.lumaDreamMachine
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
+export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
+export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
@@ -29,7 +36,7 @@ export const stylePresetPrompts = {
   Cinematic:
     "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, high production value, feature film look.",
   Storyboard:
-    "Hand-drawn digital storyboard, line drawing with minimalistic shading, grayscale shading, cinematic composition, production-planning style, loose but intentional drawing, simple tonal blocking, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. No text or numbers unless described. No frame boarders.",
+    "Hand-drawn digital storyboard frame, black ink line drawing with minimal grayscale shading, cinematic composition, production-planning style, loose but intentional drawing, simple tonal blocking, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. Not a realistic black-and-white photograph, not photorealistic grayscale, no photographic skin texture, no photo lighting, no 3D render. No text or numbers unless described. No frame borders.",
   Commercial:
     "Polished commercial image, premium advertising style, clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
   Anime:
@@ -47,7 +54,8 @@ export const stylePresetPrompts = {
   "Sexy as Fuk":
     "High-fashion edgy style, natural, anatomy allure, elegant sensuality, bare skin, bare anatomy, minimal, sculptural, flattering dramatic lighting, skin highlights, premium fashion photography, magnetic presence, sophisticated mood, form and shape, soft skin texture, risky high fashion, edgy.",
   "Strange as Fuk":
-    "Strange surreal style, offbeat visual logic, unexpected shapes, odd proportions, unusual textures, dreamlike atmosphere, slightly unsettling but playful tone, surreal composition, imaginative art direction, weird in a smart and intentional way, strange morphs, unexpected abstract realism."
+    "Strange surreal style, offbeat visual logic, unexpected shapes, odd proportions, unusual textures, dreamlike atmosphere, slightly unsettling but playful tone, surreal composition, imaginative art direction, weird in a smart and intentional way, strange morphs, unexpected abstract realism.",
+  "Custom Palette": ""
 };
 export const stylePresetNames = Object.keys(stylePresetPrompts);
 
@@ -132,6 +140,7 @@ export const model3DDescription =
 
 export const utilityImageModelNames = {
   colorIdMatte: "Color ID Matte",
+  qwenCameraEdit: "Qwen Camera Edit",
   stillFrame: "Grab Still Frame",
   dwpose: "DWPose",
   depthAnything: "Depth Anything",
@@ -240,7 +249,7 @@ export function enabledUtilityVideoModelOptions(preferences) {
   return utilityVideoModelOptions.filter((model) => normalized.utilityVideo[model]);
 }
 export function firstEnabledImageModel(preferences) {
-  return enabledImageModelOptions(preferences)[0] || imageModelNames.nanoBananaPro;
+  return enabledImageModelOptions(preferences)[0] || imageModelNames.zImage;
 }
 export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
   return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
@@ -305,6 +314,7 @@ export const wanVaceTransparencyOptions = ["content_aware", "white", "black"];
 
 export const utilityModelDescriptions = {
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
+  [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
   [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",

@@ -1,6 +1,6 @@
-# Newt Node Development Standards
+# NewtNode Development Standards
 
-This is a living standard for Newt_Node. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
+This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
@@ -51,12 +51,13 @@ Use this quick pass before implementing a feature, and again before committing i
 | Run scheduling and result state | `src/nodeRunner.js`, `src/nodeRunners/*` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong in `nodeRunner.js`. Node-specific API runners and reusable request/result builders belong in focused files under `src/nodeRunners/`. |
 | Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
 | Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
-| Model and utility options | `src/modelOptions.js` | Model names, preset names/prompts, aspect ratios, duration/resolution lists, utility descriptions, and model-control option lists live here. Keep labels stable because saved workflows and UI normalization rely on them. |
+| Model, utility, and edit options | `src/modelOptions.js`, `src/editEffects.js` | Model names, preset names/prompts, aspect ratios, duration/resolution lists, utility descriptions, model-control option lists, and Edit node effect definitions live here. Keep labels stable because saved workflows and UI normalization rely on them. |
 | Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
 | Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
+| Settings page | `src/SettingsPage.jsx`, `server/index.js` settings routes | Runtime API key entry, repository update, restart, branch status, loaded app version, and enabled-model preferences live here. Keep settings data local and avoid exposing secret values in logs, history, or docs. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
 | Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
@@ -96,6 +97,7 @@ Use this placement guide while migrating pre-refactor code:
 | --- | --- |
 | Node catalog entry | `src/nodeRegistry.js`; icon only in `NodeEditor.jsx` |
 | Static model names/options/descriptions | `src/modelOptions.js` |
+| Edit effect groups, labels, controls, and defaults | `src/editEffects.js` |
 | Upload, drag/drop, media accept/type detection | `src/mediaAssets.js` |
 | Result item normalization or append logic | `src/mediaResults.js` |
 | Preview/result/lightbox/output rail UI | `src/components/MediaViews.jsx` or a focused component imported there |
@@ -135,7 +137,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 ## Text Node Roles
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
-- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost.
+- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. The default text and vision-text route is Gemini Flash-class through Fal/OpenRouter route constants in `server/index.js`, with explicit environment overrides for model changes.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
 - The default text-processing provider is Fal via `TEXT_LLM_PROVIDER=fal`. The current default model ids are `google/gemini-2.5-flash` for `FAL_TEXT_MODEL`, `FAL_VISION_TEXT_MODEL`, `FAL_VISION_TEXT_FALLBACK_MODEL`, and `FAL_VIDEO_TEXT_MODEL`.
 - Fal text processing uses `openrouter/router` and should pass the app's text-processing instructions as `system_prompt`. Image and video helper descriptions use the matching OpenRouter vision/video routes before the final text prompt is assembled.
@@ -196,6 +198,7 @@ Nodes should feel like they belong to the same editor.
 - Generation nodes should keep previous results instead of clearing the result pane.
 - Result panes should support image, video, and 3D model display.
 - Videos should loop when played in Video and Preview nodes.
+- Video result panes and video media previews should preserve browser scrub controls. Dragging a video result into another node uses Ctrl+drag so normal left-drag remains available for scrubbing.
 - Preview nodes should preserve existing preview history and update to the latest connected generation result.
 - Preview nodes should support stepping through multiple connected or generated results.
 - Generated outputs should have a node-level download affordance when possible.
@@ -208,7 +211,8 @@ Nodes should feel like they belong to the same editor.
 - Output rail thumbnails should keep layout stable and lazy-load image/video media as they near the visible rail; the full-size lightbox owns eager preview loading after double-click.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
 - Dragging from the output rail onto the canvas should create a matching media node in place. Dragging external files onto the canvas should import supported media into the current workflow package/app storage and create matching Image, Video, Audio, 3D, or Text nodes; text files store file contents in the Text node.
-- Double-clicking an output rail thumbnail should open a lightweight full-size preview modal instead of expanding the rail.
+- Double-clicking an output rail thumbnail should open a lightweight full-size preview modal instead of expanding the rail. The modal must fit the complete image or video in its native aspect ratio rather than cropping it.
+- The output rail should expose an open-folder action for the current project's output folder through the local API.
 
 ## Run And Dependency Standards
 
@@ -218,6 +222,7 @@ Nodes should feel like they belong to the same editor.
 - Image-producing nodes run before nodes that depend on images.
 - 3D nodes should run after their image dependencies are available.
 - Video-producing nodes run after prompt, image, 3D, or utility dependencies they consume.
+- Edit nodes run after their source image or video dependencies and use the same dependency stage as Utility and Video Model work.
 - Independent nodes of the same stage may run concurrently.
 - Nodes should set `status`, `error`, `resultUrl`, `resultItems`, `selectedResultIndex`, and `resultType` consistently.
 - Batch failures should report partial success without discarding successful outputs.
@@ -252,6 +257,8 @@ Local API routes should live in the smallest backend owner that fits the route. 
 - Return local URLs such as `/workflow-assets/<workflow-id>/outputs/file.glb` for packaged assets or `/outputs/<workflow-name>/file.glb` for unpackaged assets.
 - Add a health route flag for new API routes and update `scripts/smokeApp.mjs` required routes when the route is part of startup health.
 - Add browser API wrappers in `src/api/newtApi.js` before UI code calls a route.
+- Edit node media operations live at `/api/node/edit-media`, use local ffmpeg/ffprobe, require a local NewtNode asset URL, and must write managed image/video outputs into the active workflow package or local outputs folder.
+- Edit node live previews live at `/api/node/edit-preview`, render temporary PNG frame previews with local ffmpeg, return inline preview data, and must not append history or create project output files.
 - Composer pose library routes live at `/api/composer-poses`: `GET` lists library poses, `POST` saves or updates pose JSON under `public/models/poses`, and `DELETE /api/composer-poses/:poseId` removes the selected library pose file. Keep file names sanitized server-side.
 - Use `subscribeFal` for Fal calls so queue and failure logging stays consistent.
 - Normalize Fal file responses with `normalizeFalFile` and fallback search helpers where useful.
@@ -407,11 +414,13 @@ Every paid remote model should record cost metadata.
 - Add pricing constants near the top of `server/index.js`.
 - Allow environment overrides for pricing where model pricing may change.
 - Add a local estimator function with a `pricingBasis` and `pricingSource`.
+- Keep provider-specific estimates separate when the same model can route through different providers. Nano Banana Pro should record Google Gemini API pricing for Google-direct runs and Fal pricing for Fal-routed runs.
 - Append history with `mediaType`, `provider`, `modelName`, `endpoint`, `mode`, `settings`, `cost`, and local output paths.
 - Update `/api/stats` pricing payload.
 - Update `StatsDashboard.jsx` so historical and current runs estimate consistently.
 - If cost cannot be estimated, mark it unpriced rather than pretending it is free.
 - Free local operations should record `$0` only when they are truly local and costless.
+- Edit node ffmpeg operations are local and should record `$0` local edit cost metadata in history.
 
 ## Persistence Standards
 
@@ -471,14 +480,22 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 - Fal is the default provider route for remote models.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
-- Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. When it is absent, route the same Google-branded image model through Fal instead.
-- Do not automatically fall back from direct Google to Fal after a Google request fails; if the user supplied a Google key, Google model failures should surface as Google failures.
+- Google image models should use a direct Google API key first when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
+- Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should first display the Google diagnostic on the node. The node can then mark Fal fallback as available so the next run uses the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
+
+## Settings Standards
+
+- The Settings page shows local key status for Fal and Google without revealing stored secret values.
+- The Branch metric shows the current branch state and the loaded package version from `package.json`.
+- Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.
+- Repository update and restart actions belong in Settings and should call local server routes through `src/api/newtApi.js`.
+- Runtime settings should remain local app state. Do not treat `server/data/runtime-settings.json` or generated history files as source fixtures.
 
 ## Cross-Platform App Standards
 
 - Browser and shared helper code must not depend on Windows-only paths, drive letters, hidden-folder behavior, shell commands, or `.exe` names. Use URL helpers in browser code and Node `path`/`fs` APIs server-side.
-- Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
-- Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `NewtNode.app/Contents/Resources/`.
+- Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `Versus_NewtNode.command`, `Versus_NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
+- Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `Versus_NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `Versus_NewtNode.app/Contents/Resources/`.
 - Keep launcher ports, health URLs, package scripts, and README startup instructions aligned. Document platform-specific commands separately rather than baking them into shared code.
 
 ## UI Design Standards
@@ -492,6 +509,28 @@ Portable packages are the default Save As shape for workflows that need to move 
 - For 3D scenes, use Three.js and verify nonblank rendering.
 - Use stable dimensions for boards, previews, result panes, and tool rows so hover or dynamic content does not shift layout.
 - Scrollable tool panels should consume available space before introducing nested scrollbars. When a control list must scroll, make the scrollbar discoverable and verify the first and last controls are reachable.
+
+## Edit Node Standard
+
+The Edit node establishes the standard for local ffmpeg-backed media editing nodes.
+
+- UI label: `Edit`.
+- Internal type: `edit`.
+- Catalog placement: under Utility and above Audio.
+- Output port: `editOut`, colored as image or video based on the selected source type.
+- Inputs: `imageIn` for image effects and `videoIn` for video effects. Switching source type or effect group should remove stale incompatible Edit edges.
+- Visible effect groups are `Transform`, `Time`, `Color`, `Blur`, and `Effects`. Backend support for older hidden cleanup effects may remain for saved-workflow compatibility, but hidden groups should not appear as tabs.
+- Effect definitions, labels, controls, defaults, and definitions live in `src/editEffects.js`. Backend ffmpeg filter mapping lives near `/api/node/edit-media` handling.
+- Edit node operations are local ffmpeg edits. They should not call a paid provider.
+- Source URLs must resolve to local NewtNode assets under `/outputs`, `/uploads`, or `/workflow-assets`; remote or browser-only object URLs should fail with a helpful message.
+- Output files should be managed assets written to the active workflow package `outputs/` folder, or to local `/outputs/<workflow-name>/` when no package is attached.
+- Video output formats are MP4, WebM, and ProRes MOV. Image edits output PNG.
+- The Settings drawer should show a live ffmpeg-backed preview frame for the selected effect and source. Preview requests should debounce control changes, ignore stale responses, and return temporary inline PNG data instead of writing output/history entries.
+- Video previews use a frame-time slider. Time-only effects should still preview a representative frame: Trim previews within the selected start/end range, Reverse maps the selected preview time from the end of the source, and FPS previews the source frame because it does not visibly change a single frame.
+- Transform `Crop Center` uses pixel `Width` and `Height`, seeded from the connected source dimensions when known. It uses sliders plus number inputs and an aspect-lock toggle; do not reintroduce percentage crop controls for this effect.
+- Time `Trim` uses start/end seconds tied to a compact clip timeline. Dragging the head or tail updates the fields, and typing in the fields updates the handles. The default end time should seed from the connected clip duration when metadata is available.
+- Edit outputs should append to `resultItems`, preserve previous results, support download, and connect anywhere a normal image or video output can connect.
+- History entries should use provider `local`, endpoint `local/edit-media`, model name `Edit: <effect label>`, and `$0` local edit cost metadata.
 
 ## 3D Node Standard
 
@@ -521,7 +560,7 @@ Before committing node or UI changes:
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
 - For workflow persistence changes, test New, Save, Save As, Open, Import, Recent workflows, and the unsaved-change guard. Confirm save success is not blocked by background index rebuild failures.
-- When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5174/ http://localhost:3333/api/health`.
+- When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5176/ http://localhost:3336/api/health`.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.
 - Check collapsed and expanded node states.

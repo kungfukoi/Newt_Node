@@ -63,12 +63,12 @@ export default function SettingsPage() {
   async function saveSettings() {
     setBusy("save");
     setMessage("");
-    setUpdateLog("");
-    try {
-      const initialSecrets = initialSecretsRef.current;
-      const nextModelPreferences = normalizeModelPreferences(modelPreferences);
-      const payload = { repository, comfyWanRootPath, modelPreferences: nextModelPreferences };
-      if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
+      setUpdateLog("");
+      try {
+        const initialSecrets = initialSecretsRef.current;
+        const nextModelPreferences = normalizeModelPreferences(modelPreferences);
+        const payload = { repository, comfyWanRootPath, modelPreferences: nextModelPreferences };
+        if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
       if (googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = googleApiKey;
 
       const savedData = await settingsApi.save(payload);
@@ -590,7 +590,7 @@ async function waitForServerAndReload() {
 function localServerHealthUrl() {
   if (typeof window === "undefined") return "/api/health";
   const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
-  if (localHosts.has(window.location.hostname)) return "http://127.0.0.1:3333/api/health";
+  if (localHosts.has(window.location.hostname)) return "http://127.0.0.1:3336/api/health";
   return "/api/health";
 }
 

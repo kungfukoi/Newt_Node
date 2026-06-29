@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   appendedNodeResultState,
   batchRunError,
+  ensureRunSuccesses,
   fulfilledRunValues,
   rejectedRunResults,
   runRunnableNodesByDependencyOrder
@@ -497,4 +498,14 @@ test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
   assert.equal(request.depthAnythingVideo.maxFrames, "120");
   assert.equal(request.depthAnythingVideo.outputFps, "24");
   assert.equal(request.depthAnythingVideo.sideBySide, true);
+});
+
+test("ensureRunSuccesses preserves original error metadata", () => {
+  const error = new Error("google said no");
+  error.nodePatch = { googleImageFallbackAvailable: true };
+
+  assert.throws(
+    () => ensureRunSuccesses([], [{ status: "rejected", reason: error }], "Image generation failed."),
+    (thrown) => thrown === error && thrown.nodePatch.googleImageFallbackAvailable
+  );
 });
