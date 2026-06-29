@@ -1039,15 +1039,19 @@
   position: relative;
   display: block;
   overflow: hidden;
-  width: fit-content;
+  width: auto;
   max-width: 100%;
-  height: fit-content;
+  height: auto;
   max-height: 100%;
 }
 
 .output-lightbox-image-editor > img {
   display: block;
-  max-height: calc(100vh - 126px);
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important;
   user-select: none;
 }
 
@@ -5605,6 +5609,24 @@ video.newtnode-video-fallback {
   background: #ddc631;
 }
 
+.edit-media-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: visible;
+}
+
+.edit-media-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.edit-media-tabs svg {
+  flex: 0 0 auto;
+}
+
 .edit-node-body .result-pane {
   min-height: 260px;
 }
@@ -5886,6 +5908,443 @@ video.newtnode-video-fallback {
   color: #f3a288;
   font-size: 11px;
   line-height: 1.35;
+}
+
+.edit-image-tool-surface {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.edit-image-tool-surface.empty {
+  min-height: 104px;
+  place-items: center;
+  color: rgba(244, 240, 232, 0.52);
+  font-size: 12px;
+  font-weight: 760;
+  text-align: center;
+}
+
+.edit-image-tool-surface.empty svg {
+  color: rgba(221, 198, 49, 0.8);
+}
+
+.edit-image-editor-stage {
+  position: relative;
+  width: 100%;
+  min-height: 120px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #050505;
+  touch-action: none;
+  user-select: none;
+}
+
+.edit-image-editor-stage img,
+.edit-image-paint-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.edit-image-editor-stage img {
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.edit-image-crop-box {
+  position: absolute;
+  border: 2px solid #ddc631;
+  border-radius: 5px;
+  background: rgba(221, 198, 49, 0.08);
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.48);
+  cursor: move;
+  touch-action: none;
+}
+
+.edit-image-crop-box::before,
+.edit-image-crop-box::after {
+  content: "";
+  position: absolute;
+  inset: 33.333% 0 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.38);
+  pointer-events: none;
+}
+
+.edit-image-crop-box::after {
+  inset: 66.666% 0 auto;
+}
+
+.edit-image-crop-handle {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #050505;
+  border-radius: 50%;
+  background: #ddc631;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.edit-image-text-overlay {
+  position: absolute;
+  max-width: 86%;
+  transform: translate(-50%, -50%);
+  font-weight: 860;
+  line-height: 1.1;
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.62);
+  white-space: pre-wrap;
+  cursor: move;
+  touch-action: none;
+}
+
+.edit-image-paint-mask {
+  cursor: crosshair;
+  touch-action: none;
+  opacity: 0.72;
+  mix-blend-mode: screen;
+}
+
+.edit-image-curves-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.edit-image-curves-graph {
+  width: 100%;
+  height: 96px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.26);
+  touch-action: none;
+}
+
+.edit-image-curves-graph rect {
+  fill: transparent;
+}
+
+.edit-image-curves-graph line {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 0.6;
+}
+
+.edit-image-curves-graph .curves-reference-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 0.9;
+}
+
+.edit-image-curves-graph .curves-active-line {
+  fill: none;
+  stroke: #ddc631;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.edit-image-curves-graph circle {
+  fill: #ddc631;
+  stroke: #050505;
+  stroke-width: 1;
+  cursor: grab;
+}
+
+.edit-image-curves-panel button,
+.edit-image-brush-panel button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: rgba(244, 240, 232, 0.76);
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.edit-image-brush-panel button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.edit-image-brush-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.edit-image-brush-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.edit-image-tone-panel,
+.edit-image-brush-panel {
+  display: grid;
+  gap: 7px;
+}
+
+.edit-image-tone-panel label,
+.edit-image-brush-panel label {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+  color: rgba(244, 240, 232, 0.58);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.edit-image-tone-panel input[type="range"],
+.edit-image-brush-panel input[type="range"],
+.edit-image-text-controls input[type="range"] {
+  min-width: 0;
+  accent-color: #ddc631;
+}
+
+.edit-image-tone-panel output,
+.edit-image-brush-panel output {
+  color: rgba(244, 240, 232, 0.7);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.edit-image-text-panel,
+.edit-image-text-controls {
+  display: grid;
+  gap: 7px;
+}
+
+.edit-image-text-controls {
+  grid-template-columns: minmax(0, 1fr) 34px minmax(90px, 1fr);
+  align-items: center;
+}
+
+.edit-image-text-panel textarea,
+.edit-image-brush-panel textarea,
+.edit-image-text-controls select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  outline: 0;
+  color: #f6f1e8;
+  background: rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.edit-image-text-panel textarea,
+.edit-image-brush-panel textarea {
+  min-height: 48px;
+  padding: 8px 9px;
+  resize: vertical;
+}
+
+.edit-image-text-controls select {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.edit-image-text-controls input[type="color"] {
+  width: 34px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.edit-brush-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.66);
+}
+
+.edit-brush-dialog {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(1120px, calc(100vw - 44px));
+  height: min(820px, calc(100vh - 44px));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #f4f0e8;
+  background: #101010;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.58);
+}
+
+.edit-brush-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.edit-brush-dialog header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(244, 240, 232, 0.78);
+  font-size: 12px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-brush-dialog header button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  place-items: center;
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.64);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.edit-brush-dialog-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 0.62fr) auto minmax(120px, 0.42fr);
+  gap: 12px;
+  align-items: end;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    #111;
+}
+
+.edit-brush-dialog-prompt,
+.edit-brush-dialog-slider {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.edit-brush-dialog-prompt span,
+.edit-brush-dialog-slider span,
+.edit-brush-dialog-slider output {
+  color: rgba(244, 240, 232, 0.72);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.edit-brush-dialog-prompt textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.88);
+  background: rgba(0, 0, 0, 0.32);
+  font: inherit;
+  resize: vertical;
+}
+
+.edit-brush-dialog-slider {
+  grid-template-columns: 46px minmax(104px, 1fr) 34px;
+  align-items: center;
+}
+
+.edit-brush-dialog-slider input[type="range"] {
+  width: 100%;
+  accent-color: #ddc631;
+}
+
+.edit-brush-dialog-slider output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.edit-brush-dialog-controls > button {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.82);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.edit-brush-dialog-controls > button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.edit-brush-dialog-controls > small {
+  overflow: hidden;
+  color: rgba(221, 198, 49, 0.72);
+  font-size: 11px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-brush-dialog-stage {
+  position: relative;
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+  padding: 14px;
+  background: #070707;
+}
+
+.edit-brush-dialog-image-editor {
+  position: relative;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.edit-brush-dialog-image-editor > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.edit-brush-dialog-paint-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  opacity: 0.72;
+  mix-blend-mode: screen;
+  touch-action: none;
 }
 
 .edit-checkbox {

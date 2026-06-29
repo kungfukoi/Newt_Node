@@ -209,6 +209,19 @@ const defaultPaintBrushSize = 42;
 const maxCurvePoints = 7;
 const curvePreviewMaxEdge = 1400;
 
+function imageSizeFromItem(item = {}) {
+  const width = Math.round(Number(item?.width || item?.naturalWidth || item?.metadata?.width || 0));
+  const height = Math.round(Number(item?.height || item?.naturalHeight || item?.metadata?.height || 0));
+  return {
+    width: Number.isFinite(width) && width > 0 ? width : 0,
+    height: Number.isFinite(height) && height > 0 ? height : 0
+  };
+}
+
+function imageAspectRatio(size = {}) {
+  return size.width > 0 && size.height > 0 ? size.width / size.height : 1;
+}
+
 function clampCurveNumber(value, min, max) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return min;
@@ -371,6 +384,7 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments) {
 }
 
 export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onRestoreImageEdit }) {
+  const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
   const textDragRef = React.useRef(null);
@@ -402,16 +416,86 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const [curvePreviewUrl, setCurvePreviewUrl] = React.useState("");
   const [tonePreviewUrl, setTonePreviewUrl] = React.useState("");
   const [displayItem, setDisplayItem] = React.useState(item);
+  const [imageNaturalSize, setImageNaturalSize] = React.useState(() => imageSizeFromItem(item));
+  const [imageEditorSize, setImageEditorSize] = React.useState(null);
   const [editBusy, setEditBusy] = React.useState(false);
   const [editError, setEditError] = React.useState("");
   const KindIcon = displayItem.type === "video" ? Film : displayItem.type === "audio" ? FileAudio : displayItem.type === "model3d" ? Box : FileImage;
   const label = displayItem.label || displayItem.fileName || `${capitalizeMediaType(displayItem.type)} preview`;
   const canEditImage = displayItem.type === "image" && displayItem.editContext?.type === "previewLayout" && typeof onApplyImageEdit === "function";
   const inpaintBusy = editBusy && paintMode;
+  const imageEditorStyle = imageEditorSize
+    ? { width: `${imageEditorSize.width}px`, height: `${imageEditorSize.height}px` }
+    : undefined;
 
   React.useEffect(() => {
     activeItemRef.current = displayItem;
   }, [displayItem]);
+
+  React.useEffect(() => {
+    setImageNaturalSize(imageSizeFromItem(displayItem));
+  }, [displayItem?.url, displayItem?.width, displayItem?.height]);
+
+  React.useEffect(() => {
+    if (displayItem.type !== "image" || !displayItem.url) return undefined;
+    let canceled = false;
+    loadPreviewImage(displayItem.url)
+      .then((image) => {
+        if (canceled) return;
+        const width = Math.round(Number(image.naturalWidth || image.width || 0));
+        const height = Math.round(Number(image.naturalHeight || image.height || 0));
+        if (width > 0 && height > 0) {
+          setImageNaturalSize((current) => (
+            current.width === width && current.height === height ? current : { width, height }
+          ));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      canceled = true;
+    };
+  }, [displayItem.type, displayItem.url]);
+
+  React.useEffect(() => {
+    if (displayItem.type !== "image") {
+      setImageEditorSize(null);
+      return undefined;
+    }
+
+    const updateSize = () => {
+      const stage = lightboxStageRef.current;
+      if (!stage) return;
+      const stageStyle = window.getComputedStyle(stage);
+      const horizontalPadding = Number.parseFloat(stageStyle.paddingLeft || "0") + Number.parseFloat(stageStyle.paddingRight || "0");
+      const verticalPadding = Number.parseFloat(stageStyle.paddingTop || "0") + Number.parseFloat(stageStyle.paddingBottom || "0");
+      const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
+      const availableHeight = Math.max(1, stage.clientHeight - verticalPadding);
+      const ratio = imageAspectRatio(imageNaturalSize);
+      let width = availableWidth;
+      let height = width / ratio;
+      if (height > availableHeight) {
+        height = availableHeight;
+        width = height * ratio;
+      }
+      setImageEditorSize({
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height))
+      });
+    };
+
+    updateSize();
+    const frame = window.requestAnimationFrame(updateSize);
+    const observer = typeof ResizeObserver !== "undefined" && lightboxStageRef.current
+      ? new ResizeObserver(updateSize)
+      : null;
+    observer?.observe(lightboxStageRef.current);
+    window.addEventListener("resize", updateSize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [displayItem.type, imageNaturalSize.width, imageNaturalSize.height, cropMode, toneMode, curvesMode, textMode, paintMode]);
 
   function currentEditSnapshot() {
     return {
@@ -429,6 +513,18 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     setCurvePoints(normalizedCurvePoints(snapshot.curvePoints || defaultCurvePoints));
     setTextOverlay(normalizedTextOverlay(snapshot.textOverlay || defaultTextOverlay));
     setEditError("");
+  }
+
+  function handleLightboxImageLoad(event) {
+    const image = event.currentTarget;
+    const width = Math.round(Number(image.naturalWidth || image.width || 0));
+    const height = Math.round(Number(image.naturalHeight || image.height || 0));
+    if (width > 0 && height > 0) {
+      setImageNaturalSize((current) => (
+        current.width === width && current.height === height ? current : { width, height }
+      ));
+    }
+    if (paintMode) window.requestAnimationFrame(() => resizePaintCanvas(true));
   }
 
   function pushEditUndoSnapshot(snapshot = currentEditSnapshot()) {
@@ -1430,10 +1526,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             </label>
           </div>
         )}
-        <div className="output-lightbox-stage">
+        <div className="output-lightbox-stage" ref={lightboxStageRef}>
           {displayItem.type === "image" && (
-            <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""} ${paintMode ? "painting" : ""}`} ref={imageEditorRef}>
-              <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : curvesMode && curvePreviewUrl ? curvePreviewUrl : displayItem.url} alt={label} onError={useNewtNodeImageFallback} />
+            <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""} ${paintMode ? "painting" : ""}`} ref={imageEditorRef} style={imageEditorStyle}>
+              <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : curvesMode && curvePreviewUrl ? curvePreviewUrl : displayItem.url} alt={label} onLoad={handleLightboxImageLoad} onError={useNewtNodeImageFallback} />
               {textMode && normalizedTextOverlay(textOverlay).text.trim() && (
                 <div
                   className="output-text-overlay"

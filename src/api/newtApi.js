@@ -208,11 +208,11 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/utility-image", jsonBody(body), label);
   },
 
-  colorIdMatte(body, label = "Color ID matte") {
+  colorIdMatte(body, label = "Color ID to Matte") {
     return fetchJsonApi("/api/node/color-id-matte", jsonBody(body), label);
   },
 
-  colorIdMatteForm(form, label = "Color ID matte") {
+  colorIdMatteForm(form, label = "Color ID to Matte") {
     return fetchJsonApi("/api/node/color-id-matte", { method: "POST", body: form }, label);
   },
 

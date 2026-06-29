@@ -49,7 +49,7 @@ Measured for `v3.0.0-beta.0` on `main` after adding Edit node live previews, usi
 | Stats dashboard | `src/StatsDashboard.jsx` is loaded through `React.lazy`. |
 | Settings page | `src/SettingsPage.jsx` is loaded through `React.lazy`. |
 | Edit node controls | Edit effect UI and live preview state are part of the lazy node editor chunk; local effect definitions live in `src/editEffects.js` and do not add to the initial shell. |
-| Color ID matte controls | `src/components/ColorIdMatteControls.jsx` is loaded only when the relevant utility controls render. |
+| Color ID to Matte controls | `src/components/ColorIdMatteControls.jsx` is loaded only when the relevant utility controls render. |
 | 3D result viewer | `src/components/Model3DViewer.jsx` is loaded only when a 3D preview/result renders. |
 | Three.js runtime | `vendor-three` is generated as an async chunk from `src/threeRuntime.js`; it is not referenced by `dist/index.html`. |
 

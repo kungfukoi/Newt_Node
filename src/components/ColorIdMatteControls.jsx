@@ -137,7 +137,7 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
         <ColorIdMatteModalPortal>
-          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID matte picker" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID to Matte picker" onPointerDown={(event) => event.stopPropagation()}>
             <div className="color-id-picker-modal-panel">
               <div className="color-id-picker-modal-header">
                 <div className="color-id-selected">

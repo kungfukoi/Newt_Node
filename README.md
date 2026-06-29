@@ -33,7 +33,7 @@ Current release: `v3.0.0-beta.0`
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
 - **Video handling**: Video thumbnails and result panes keep native scrub controls; use Ctrl-drag when dragging video results into another node.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
-- **Color ID Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
+- **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Settings**: Local API keys, repository updates, restart, branch status, loaded version, and enabled model dropdown preferences are managed from the Settings page.
 - **Cross-platform launchers**: Windows and macOS launchers are included for local app-style startup.
 

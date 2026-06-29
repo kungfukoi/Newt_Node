@@ -156,7 +156,7 @@ export function colorIdMatteRunColors(data = {}) {
     ? [
         {
           id: "selected",
-          name: String(data.colorIdMatteName || "Color ID Matte").trim() || "Color ID Matte",
+          name: String(data.colorIdMatteName || "Color ID to Matte").trim() || "Color ID to Matte",
           color
         }
       ]

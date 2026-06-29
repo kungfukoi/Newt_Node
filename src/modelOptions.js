@@ -139,7 +139,8 @@ export const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 
 export const utilityImageModelNames = {
-  colorIdMatte: "Color ID Matte",
+  colorIdMatte: "Color ID to Matte",
+  imageToId: "Image to Color ID",
   qwenCameraEdit: "Qwen Camera Edit",
   stillFrame: "Grab Still Frame",
   dwpose: "DWPose",
@@ -150,6 +151,7 @@ export const utilityImageModelNames = {
 };
 export const utilityImageModelOptions = [
   utilityImageModelNames.colorIdMatte,
+  utilityImageModelNames.imageToId,
   utilityImageModelNames.stillFrame,
   utilityImageModelNames.dwpose,
   utilityImageModelNames.depthAnything,
@@ -157,6 +159,58 @@ export const utilityImageModelOptions = [
   utilityImageModelNames.birefnetImage,
   utilityImageModelNames.sam3Image
 ];
+export const utilityImageToIdPrompt = `Create a professional Cryptomatte-style ID matte / segmentation map from the input image.
+
+Analyze the entire image and separate every distinct object, character, prop, material group, clothing element, foreground object, background object, and environmental region into individual flat-color masks.
+
+CRITICAL REQUIREMENT:
+No two segmented objects with different IDs are allowed to share the exact same edge boundary color contact in an ambiguous way. Adjacent object regions must remain visually and mathematically separable for clean matte extraction.
+
+IMPORTANT EDGE SEPARATION RULES:
+
+* Every object must have its own completely unique solid RGB color.
+* Adjacent objects must NEVER use similar hues or values.
+* Neighboring segmentation regions must maintain crisp separation.
+* Prevent color bleeding between objects.
+* Preserve ultra-clean object boundaries.
+* Prioritize matte extraction usability over artistic appearance.
+* Do not merge touching objects into one region unless they are truly the same object.
+* Create slight separation logic between tightly packed objects so masks remain individually selectable.
+* Ensure thin objects, overlapping objects, and touching surfaces remain independently isolated.
+* Preserve internal negative space and holes accurately.
+* Complex intersections like hair, fingers, cables, reflections, transparent objects, paint splashes, smoke, cloth folds, and layered surfaces should still produce readable isolated IDs.
+
+STYLE RULES:
+
+* Flat colors only.
+* No gradients.
+* No shading.
+* No lighting.
+* No texture.
+* No reflections.
+* No transparency.
+* No glow.
+* No antialiasing blur.
+* No outlines unless necessary for separation clarity.
+* No labels, text, numbers, symbols, or UI.
+* No artistic stylization.
+
+TECHNICAL GOAL:
+The result should function like a real VFX Cryptomatte or segmentation EXR utility pass intended for compositing software such as Nuke, Fusion, or After Effects.
+
+The output should:
+
+* allow fast color-based object selection
+* isolate objects cleanly with magic wand or color picker tools
+* maximize clean keyability
+* maintain stable object regions
+* avoid adjacent same-color contamination
+* preserve original object silhouettes precisely
+
+VISUAL STYLE:
+flat segmentation map, cryptomatte preview, object ID matte, VFX utility render pass, machine vision segmentation map, semantic segmentation visualization, clean RGB object isolation pass.
+
+The final output should resemble a professionally rendered Cryptomatte pass generated from a high-end CG renderer.`;
 export const patinaMapOptions = [
   { id: "basecolor", label: "Basecolor" },
   { id: "normal", label: "Normal" },
@@ -167,7 +221,7 @@ export const patinaMapOptions = [
 export const utilityVideoModelNames = {
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
-  colorIdMatte: "Color ID Matte",
+  colorIdMatte: "Color ID to Matte",
   compositeVideo: "Composite Video",
   depthAnythingVideo: "Depth Anything Video",
   wanBlend: "WanBlend",
@@ -313,7 +367,8 @@ export const wanVaceInterpolatorOptions = ["film", "rife"];
 export const wanVaceTransparencyOptions = ["content_aware", "white", "black"];
 
 export const utilityModelDescriptions = {
-  [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
+  [utilityImageModelNames.colorIdMatte]: "Creates a black and white matte from a picked source-image Color ID.",
+  [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
   [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
@@ -323,7 +378,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
   [utilityVideoModelNames.wanFunControl]: "Legacy Wan Fun Control alias. New runs route to Wan 2.2 VACE Fun A14B Depth.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
-  [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
+  [utilityVideoModelNames.colorIdMatte]: "Creates a black and white matte video from picked source-video Color IDs.",
   [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
   [utilityVideoModelNames.depthAnythingVideo]: "Creates a temporally consistent depth-map video from a connected source video with Video Depth Anything.",
   [utilityVideoModelNames.wanBlend]: "Runs the local ComfyUI context-smashing attention-mask workflow from connected color-region images and a color-mask video.",

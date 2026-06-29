@@ -8,6 +8,46 @@ export const editEffectGroups = [
 
 export const editEffectDefinitions = [
   {
+    id: "imageCrop",
+    groupId: "transform",
+    label: "Crop",
+    mediaTypes: ["image"],
+    definition: "Interactively crops an image using a draggable crop box.",
+    controls: []
+  },
+  {
+    id: "tone",
+    groupId: "color",
+    label: "Brightness / Contrast",
+    mediaTypes: ["image"],
+    definition: "Adjusts image brightness and contrast with a live preview.",
+    controls: []
+  },
+  {
+    id: "curves",
+    groupId: "color",
+    label: "Curves",
+    mediaTypes: ["image"],
+    definition: "Remaps image tones with an editable RGB curve.",
+    controls: []
+  },
+  {
+    id: "textOverlay",
+    groupId: "effects",
+    label: "Text Overlay",
+    mediaTypes: ["image"],
+    definition: "Places editable styled text over the image.",
+    controls: []
+  },
+  {
+    id: "brushInpaint",
+    groupId: "effects",
+    label: "Brush Inpaint",
+    mediaTypes: ["image"],
+    definition: "Uses a painted mask and text prompt to revise part of an image while preserving the rest.",
+    controls: []
+  },
+  {
     id: "scale",
     groupId: "transform",
     label: "Scale",
@@ -17,17 +57,6 @@ export const editEffectDefinitions = [
       { id: "width", label: "Width", type: "number", min: 16, max: 8192, step: 2, defaultValue: 1280 },
       { id: "height", label: "Height", type: "number", min: 16, max: 8192, step: 2, defaultValue: 720 },
       { id: "algorithm", label: "Algorithm", type: "select", defaultValue: "bicubic", options: ["fast_bilinear", "bilinear", "bicubic", "lanczos"] }
-    ]
-  },
-  {
-    id: "crop",
-    groupId: "transform",
-    label: "Crop Center",
-    mediaTypes: ["image", "video"],
-    definition: "Crops the center of the frame to a target pixel width and height.",
-    controls: [
-      { id: "width", label: "Width", type: "number", min: 2, max: 32768, step: 1, defaultValue: 1280, unit: "px" },
-      { id: "height", label: "Height", type: "number", min: 2, max: 32768, step: 1, defaultValue: 720, unit: "px" }
     ]
   },
   {
@@ -318,7 +347,7 @@ export const editEffectDefinitions = [
   {
     id: "negate",
     groupId: "effects",
-    label: "Negate",
+    label: "Invert",
     mediaTypes: ["image", "video"],
     definition: "Inverts pixel values to create a negative image effect.",
     controls: []
@@ -344,12 +373,21 @@ export function editEffectsForGroup(groupId) {
   return editEffectDefinitions.filter((effect) => effect.groupId === normalizeEditGroupId(groupId));
 }
 
+export function editEffectsForSourceType(sourceType = "image") {
+  const type = String(sourceType || "image").toLowerCase();
+  return editEffectDefinitions.filter((effect) => (effect.mediaTypes || []).includes(type));
+}
+
 export function findEditEffect(effectId) {
   return effectsById.get(String(effectId || "")) || editEffectsForGroup(editEffectGroups[0].id)[0];
 }
 
 export function firstEditEffectForGroup(groupId) {
   return editEffectsForGroup(groupId)[0] || editEffectDefinitions[0];
+}
+
+export function firstEditEffectForSourceType(sourceType = "image") {
+  return editEffectsForSourceType(sourceType)[0] || editEffectDefinitions[0];
 }
 
 export function normalizeEditGroupId(groupId) {
@@ -360,6 +398,40 @@ export function normalizeEditGroupId(groupId) {
 export function defaultEditEffectSettings(effectOrId, sourceDimensions = {}) {
   const effect = typeof effectOrId === "string" ? findEditEffect(effectOrId) : effectOrId;
   const settings = Object.fromEntries((effect?.controls || []).map((control) => [control.id, control.defaultValue]));
+  if (effect?.id === "imageCrop") {
+    settings.cropRect = { x: 8, y: 8, width: 84, height: 84 };
+  }
+  if (effect?.id === "tone") {
+    settings.adjustments = { brightness: 0, contrast: 0 };
+  }
+  if (effect?.id === "curves") {
+    settings.points = [
+      { x: 0, y: 100 },
+      { x: 100, y: 0 }
+    ];
+  }
+  if (effect?.id === "textOverlay") {
+    settings.overlay = {
+      text: "",
+      x: 50,
+      y: 50,
+      size: 7,
+      color: "#f4f0e8",
+      font: "Inter"
+    };
+  }
+  if (effect?.id === "brushInpaint") {
+    settings.prompt = "";
+    settings.brushSize = 42;
+    settings.maskDataUrl = "";
+    settings.resolution = "2K";
+  }
+  if (effect?.id === "scale") {
+    const width = normalizedEditDimension(sourceDimensions.width);
+    const height = normalizedEditDimension(sourceDimensions.height);
+    if (width) settings.width = width;
+    if (height) settings.height = height;
+  }
   if (effect?.id === "crop") {
     const width = normalizedEditDimension(sourceDimensions.width);
     const height = normalizedEditDimension(sourceDimensions.height);
@@ -388,6 +460,12 @@ export function normalizeEditSourceType(effectOrId, sourceType = "video") {
   const mediaTypes = effect?.mediaTypes || ["video"];
   const requested = String(sourceType || "").toLowerCase();
   return mediaTypes.includes(requested) ? requested : mediaTypes.includes("video") ? "video" : mediaTypes[0];
+}
+
+export function normalizeEditEffectForSourceType(sourceType = "image", effectId) {
+  const type = String(sourceType || "image").toLowerCase() === "video" ? "video" : "image";
+  const effect = findEditEffect(effectId);
+  return (effect.mediaTypes || []).includes(type) ? effect : firstEditEffectForSourceType(type);
 }
 
 export function normalizeEditEffectForGroup(groupId, effectId) {

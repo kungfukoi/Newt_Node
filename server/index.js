@@ -21,7 +21,7 @@ import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } fr
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
-import { normalizeModelPreferences } from "../src/modelOptions.js";
+import { normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
   normalizeComfyRootPath,
@@ -1333,7 +1333,7 @@ app.post("/api/node/upload-transfer-collage", upload.single("asset"), async (req
 app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: "No Color ID matte uploaded." });
+      return res.status(400).json({ error: "No Color ID to Matte image uploaded." });
     }
 
     const output = await createManagedAssetTarget(req, "color-id-matte", ".png", workflowPackageOutputDirName);
@@ -1346,7 +1346,7 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
     const width = positiveNumber(req.body.width);
     const height = positiveNumber(req.body.height);
     const matchedPixels = positiveNumber(req.body.matchedPixels);
-    const text = `Color ID matte${selectedColor ? ` for ${selectedColor}` : ""}.`;
+    const text = `Color ID to Matte${selectedColor ? ` for ${selectedColor}` : ""}.`;
     const cost = {
       amountUsd: 0,
       currency: "USD",
@@ -1354,7 +1354,7 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
       units: 1,
       unit: "local mask",
       mediaType: "image",
-      pricingBasis: "Local Color ID matte generation",
+      pricingBasis: "Local Color ID to Matte generation",
       pricingSource: "local-color-id-matte"
     };
 
@@ -1363,15 +1363,15 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
       createdAt: new Date().toISOString(),
       mediaType: "image",
       provider: "local",
-      modelName: "Color ID Matte",
+      modelName: "Color ID to Matte",
       endpoint: "local/color-id-matte",
-      mode: "Color ID matte",
+      mode: "Color ID to Matte",
       prompt: text,
       submittedPrompt: text,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
-        model: "Color ID Matte",
+        model: "Color ID to Matte",
         sourceImageUrl: req.body.sourceImageUrl || "",
         selectedColor,
         tolerance,
@@ -1389,11 +1389,11 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
     });
 
     res.json({
-      modelName: "Color ID Matte",
+      modelName: "Color ID to Matte",
       text,
       cost,
       image: {
-        label: "Color ID Matte",
+        label: "Color ID to Matte",
         localUrl: output.publicPath,
         fileName: output.fileName,
         mimeType: "image/png"
@@ -1402,7 +1402,7 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
   } catch (error) {
     if (req.file?.path) await rm(req.file.path, { force: true }).catch(() => {});
     console.error(error);
-    sendApiError(res, error, "Color ID matte failed.");
+    sendApiError(res, error, "Color ID to Matte failed.");
   }
 });
 
@@ -2373,7 +2373,7 @@ app.post("/api/node/utility-image", async (req, res) => {
   try {
     const selectedModel = resolveUtilityImageModel(req.body.model);
     if (selectedModel.provider === "local-color-id-matte") {
-      return res.status(400).json({ error: "Color ID Matte is generated locally from the picker." });
+      return res.status(400).json({ error: "Color ID to Matte is generated locally from the picker." });
     }
 
     if (!process.env.FAL_KEY) {
@@ -2391,6 +2391,10 @@ app.post("/api/node/utility-image", async (req, res) => {
 
     if (selectedModel.provider === "fal-depth-anything") {
       return runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel });
+    }
+
+    if (selectedModel.provider === "fal-openai-image-2-image-to-id") {
+      return runImageToIdUtilityImage(req, res, { imageUrl, selectedModel });
     }
 
     if (selectedModel.provider === "fal-patina") {
@@ -2581,6 +2585,88 @@ async function runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel 
     images: [
       {
         ...remoteImage,
+        label: selectedModel.displayName,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType
+      }
+    ]
+  });
+}
+
+async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
+  const source = await readLocalAsset(imageUrl);
+  if (!source.mimeType.startsWith("image/")) {
+    return res.status(400).json({ error: "Image to Color ID requires a connected image asset." });
+  }
+
+  const sourceDimensions = imageDimensionsFromBuffer(source.buffer, source.mimeType) || {};
+  const aspectRatio = closestAspectRatio(
+    positiveNumber(sourceDimensions.width) && positiveNumber(sourceDimensions.height)
+      ? sourceDimensions.width / sourceDimensions.height
+      : aspectRatioNumber("16:9"),
+    openAiImageAspectRatios
+  );
+  const resolution = normalizeChoice(req.body.resolution, ["1K", "2K", "4K"], "2K");
+  const openAiImage = await generateFalOpenAiImage2FromInputs({
+    prompt: utilityImageToIdPrompt,
+    imageInputs: [{ ...source, label: "Source image for Cryptomatte-style ID matte" }],
+    aspectRatio,
+    resolution
+  });
+  const output = await downloadImage(req, openAiImage.remoteImage.url, "image-to-id", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+  const cost = estimateOpenAiImage2Cost({
+    resolution,
+    size: openAiImage.size,
+    quality: openAiImage.quality
+  });
+  const text = "OpenAI Image 2 Cryptomatte-style ID matte.";
+
+  await appendHistory({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "fal.ai",
+    modelName: selectedModel.displayName,
+    endpoint: openAiImage.endpoint,
+    mode: "Image to Color ID matte",
+    prompt: utilityImageToIdPrompt,
+    submittedPrompt: openAiImage.submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: selectedModel.displayName,
+      baseModel: imageModelNames.openAiImage2,
+      aspectRatio,
+      resolution,
+      imageSize: openAiImage.size,
+      quality: openAiImage.quality,
+      sourceImageCount: 1,
+      imagePromptLabels: ["Source image for Cryptomatte-style ID matte"]
+    },
+    cost,
+    remoteImage: openAiImage.remoteImage,
+    localImage: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text
+  });
+
+  return res.json({
+    endpoint: openAiImage.endpoint,
+    modelName: selectedModel.displayName,
+    text,
+    cost,
+    image: {
+      ...openAiImage.remoteImage,
+      label: selectedModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    },
+    images: [
+      {
+        ...openAiImage.remoteImage,
         label: selectedModel.displayName,
         localUrl: output.publicPath,
         fileName: output.fileName,
@@ -3104,7 +3190,7 @@ async function runExtractFrameUtilityVideo(req, res, { referenceVideoUrls }) {
 async function runColorIdMatteUtilityVideo(req, res, { referenceVideoUrls }) {
   const sourceVideoUrl = referenceVideoUrls.at(-1);
   if (!sourceVideoUrl) {
-    return res.status(400).json({ error: "Color ID Matte requires a connected video." });
+    return res.status(400).json({ error: "Color ID to Matte requires a connected video." });
   }
 
   return res.json(await createColorIdMatteVideoResult({ body: req.body, sourceVideoUrl }));
@@ -7329,7 +7415,7 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: "local",
-      modelName: "Color ID Matte",
+      modelName: "Color ID to Matte",
       endpoint: "local/color-id-video-matte",
       mode: "Color ID video matte",
       prompt: text,
@@ -7337,7 +7423,7 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
       project: projectFromBody(body),
       node: nodeFromBody(body),
       settings: {
-        model: "Color ID Matte",
+        model: "Color ID to Matte",
         sourceVideoUrl,
         mattes: mattes.map((matte) => ({ name: matte.name, selectedColor: matte.color })),
         tolerance,
@@ -7363,7 +7449,7 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
     });
 
     return {
-      modelName: "Color ID Matte",
+      modelName: "Color ID to Matte",
       text,
       cost,
       video: enrichVideoMetadata(videos[0], videos[0]?.metadata),
@@ -8685,7 +8771,7 @@ function normalizedColorIdVideoMattes(options = {}) {
   if (!selectedColor) return [];
   return [
     {
-      name: String(options.matteName || "Color ID Matte").trim() || "Color ID Matte",
+      name: String(options.matteName || "Color ID to Matte").trim() || "Color ID to Matte",
       color: selectedColor
     }
   ];
@@ -10583,8 +10669,16 @@ function resolveUtilityImageModel(model) {
   if (normalized.includes("color") && normalized.includes("matte")) {
     return {
       provider: "local-color-id-matte",
-      displayName: "Color ID Matte",
+      displayName: "Color ID to Matte",
       id: "local/color-id-matte"
+    };
+  }
+
+  if (normalized.includes("cryptomatte") || (normalized.includes("image") && normalized.includes("id"))) {
+    return {
+      provider: "fal-openai-image-2-image-to-id",
+      displayName: "Image to Color ID",
+      id: "openai/gpt-image-2/edit"
     };
   }
 
@@ -10632,7 +10726,7 @@ function resolveUtilityVideoModel(model) {
   if (normalized.includes("color") && normalized.includes("matte")) {
     return {
       provider: "local-color-id-video-matte",
-      displayName: "Color ID Matte",
+      displayName: "Color ID to Matte",
       id: "local/color-id-video-matte",
       requiresPrompt: false
     };

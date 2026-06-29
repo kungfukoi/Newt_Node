@@ -92,13 +92,10 @@ import {
 } from "./colorIdMatte.js";
 import {
   defaultEditEffectSettings,
-  editEffectGroups,
-  editEffectsForGroup,
   findEditEffect,
-  firstEditEffectForGroup,
-  normalizeEditEffectForGroup,
-  normalizeEditGroupId,
-  normalizeEditSourceType
+  editEffectsForSourceType,
+  firstEditEffectForSourceType,
+  normalizeEditEffectForSourceType
 } from "./editEffects.js";
 import {
   allowFileDrop,
@@ -373,6 +370,24 @@ const editVideoOutputOptions = [
   ["webm", "WebM"],
   ["mov", "ProRes MOV"]
 ];
+const editImageSourceTypes = ["image", "video"];
+const editDefaultCropRect = { x: 8, y: 8, width: 84, height: 84 };
+const editDefaultToneAdjustments = { brightness: 0, contrast: 0 };
+const editDefaultCurvePoints = [
+  { x: 0, y: 100 },
+  { x: 100, y: 0 }
+];
+const editTextOverlayFonts = ["Inter", "Arial", "Helvetica", "Georgia", "Times New Roman", "Courier New", "Impact", "Trebuchet MS", "Verdana", "Avenir Next"];
+const editDefaultTextOverlay = {
+  text: "",
+  x: 50,
+  y: 50,
+  size: 7,
+  color: "#f4f0e8",
+  font: "Inter"
+};
+const editDefaultBrushSize = 42;
+const editLocalImageEffectIds = new Set(["imageCrop", "tone", "curves", "textOverlay", "brushInpaint"]);
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -3665,13 +3680,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return inputs[outputKind]?.[target.type] || [];
   }
 
-  function autoConnectionOutputKind(source, from) {
+function autoConnectionOutputKind(source, from) {
     if (source.type === "storyboard") return storyboardFrameForOutputPort(source, from.port)?.resultUrl ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source, from.port);
-    if (source.type === "edit") return editOutputType(source);
+    if (source.type === "edit") return from.port === "editMaskOut" ? "image" : editOutputType(source);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
@@ -3939,7 +3954,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target?.type === "text") {
       if (to.port === "textIn") {
         if (["plainText", "text", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Smart Text Model input accepts text outputs";
+        return "Text Model input accepts text outputs";
       }
 
       if (to.port === "imageIn") {
@@ -4364,16 +4379,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const generated = await runEditNodeGeneration({
           node: currentNode,
           incoming,
-          workflowContext: requestContext
+          workflowContext: requestContext,
+          uploadAsset: uploadNodeAsset
         });
-        const editResultType = generated.type;
-        const { resultItems, firstNewIndex } = appendedNodeResultState(previousEditResults, [generated], editResultType);
+        const generatedItems = Array.isArray(generated) ? generated : [generated];
+        const primaryGenerated = generatedItems[0];
+        const editResultType = primaryGenerated.type;
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousEditResults, generatedItems, editResultType);
         updateNode(currentNode.id, {
           status: "complete",
-          resultUrl: generated.url,
+          resultUrl: primaryGenerated.url,
           resultItems,
           selectedResultIndex: firstNewIndex,
-          resultText: generated.text || "",
+          resultText: resultTextFromItems(generatedItems),
           resultType: editResultType,
           error: ""
         });
@@ -5497,6 +5515,886 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
         <span>{formatTimelineTime(safeStart)}</span>
         <span>{formatTimelineTime(safeEnd)}</span>
       </div>
+    </div>
+  );
+}
+
+function EditDimensionNumberInput({ value, limits, onCommit, ariaLabel }) {
+  const [draft, setDraft] = React.useState(String(value ?? ""));
+  const [editing, setEditing] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!editing) setDraft(String(value ?? ""));
+  }, [value, editing]);
+
+  function commitDraft() {
+    const trimmed = String(draft || "").trim();
+    if (!trimmed || !Number.isFinite(Number(trimmed))) {
+      setDraft(String(value ?? ""));
+      return;
+    }
+    onCommit?.(trimmed);
+  }
+
+  return (
+    <input
+      type="number"
+      min={limits.min}
+      max={limits.max}
+      step={limits.step}
+      value={draft}
+      aria-label={ariaLabel}
+      onFocus={(event) => {
+        setEditing(true);
+        event.currentTarget.select();
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        setEditing(false);
+        commitDraft();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setDraft(String(value ?? ""));
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+function resizeEditBrushCanvas(canvas, target, preserve = true) {
+  const bounds = target?.getBoundingClientRect();
+  if (!canvas || !bounds?.width || !bounds?.height) return false;
+  const previousCanvas = preserve && canvas.width && canvas.height ? document.createElement("canvas") : null;
+  if (previousCanvas) {
+    previousCanvas.width = canvas.width;
+    previousCanvas.height = canvas.height;
+    previousCanvas.getContext("2d")?.drawImage(canvas, 0, 0);
+  }
+  const pixelRatio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const width = Math.max(1, Math.round(bounds.width * pixelRatio));
+  const height = Math.max(1, Math.round(bounds.height * pixelRatio));
+  if (canvas.width === width && canvas.height === height) return true;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context?.clearRect(0, 0, canvas.width, canvas.height);
+  if (previousCanvas && context) context.drawImage(previousCanvas, 0, 0, canvas.width, canvas.height);
+  return true;
+}
+
+async function drawEditBrushMaskDataUrl(canvas, maskDataUrl) {
+  const context = canvas?.getContext("2d", { willReadFrequently: true });
+  if (!canvas || !context) return false;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  if (!maskDataUrl) return false;
+
+  let maskImage;
+  try {
+    maskImage = await loadCanvasImage(maskDataUrl);
+  } catch {
+    return false;
+  }
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = Math.max(1, canvas.width);
+  maskCanvas.height = Math.max(1, canvas.height);
+  const maskContext = maskCanvas.getContext("2d", { willReadFrequently: true });
+  if (!maskContext) return false;
+  maskContext.drawImage(maskImage, 0, 0, maskCanvas.width, maskCanvas.height);
+  const imageData = maskContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+  let hasMask = false;
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const alpha = imageData.data[index + 3];
+    const value = Math.max(imageData.data[index], imageData.data[index + 1], imageData.data[index + 2]);
+    const masked = alpha > 8 && value > 12;
+    imageData.data[index] = 234;
+    imageData.data[index + 1] = 212;
+    imageData.data[index + 2] = 44;
+    imageData.data[index + 3] = masked ? 220 : 0;
+    if (masked) hasMask = true;
+  }
+  if (hasMask) context.putImageData(imageData, 0, 0);
+  return hasMask;
+}
+
+function createEditBrushMaskDataUrl(canvas, image, hasMask = true) {
+  if (!canvas || !image || !hasMask) return "";
+  const width = image.naturalWidth || image.width || canvas.width;
+  const height = image.naturalHeight || image.height || canvas.height;
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = Math.max(1, Math.round(width));
+  maskCanvas.height = Math.max(1, Math.round(height));
+  const context = maskCanvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+  context.drawImage(canvas, 0, 0, maskCanvas.width, maskCanvas.height);
+  const imageData = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+  let hasMaskedPixel = false;
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const masked = imageData.data[index + 3] > 8 || imageData.data[index] > 12 || imageData.data[index + 1] > 12 || imageData.data[index + 2] > 12;
+    imageData.data[index] = masked ? 255 : 0;
+    imageData.data[index + 1] = masked ? 255 : 0;
+    imageData.data[index + 2] = masked ? 255 : 0;
+    imageData.data[index + 3] = 255;
+    if (masked) hasMaskedPixel = true;
+  }
+  if (!hasMaskedPixel) return "";
+  context.putImageData(imageData, 0, 0);
+  return maskCanvas.toDataURL("image/png");
+}
+
+function editBrushCanvasPoint(canvas, event) {
+  const bounds = canvas?.getBoundingClientRect();
+  if (!canvas || !bounds?.width || !bounds?.height) return null;
+  return {
+    x: (event.clientX - bounds.left) * (canvas.width / bounds.width),
+    y: (event.clientY - bounds.top) * (canvas.height / bounds.height)
+  };
+}
+
+function drawEditBrushStroke(canvas, brushSize, from, to) {
+  const context = canvas?.getContext("2d");
+  const bounds = canvas?.getBoundingClientRect();
+  if (!canvas || !context || !bounds?.width) return false;
+  const scale = canvas.width / bounds.width;
+  context.save();
+  context.globalCompositeOperation = "source-over";
+  context.lineWidth = Math.max(4, brushSize * scale);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = "#ead42c";
+  context.beginPath();
+  context.moveTo(from.x, from.y);
+  context.lineTo(to.x, to.y);
+  context.stroke();
+  context.restore();
+  return true;
+}
+
+function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChange }) {
+  const imageEditorRef = React.useRef(null);
+  const cropDragRef = React.useRef(null);
+  const textDragRef = React.useRef(null);
+  const paintCanvasRef = React.useRef(null);
+  const paintDragRef = React.useRef(null);
+  const curveGraphRef = React.useRef(null);
+  const curveDragRef = React.useRef(null);
+  const previewUrlRef = React.useRef("");
+  const [previewUrl, setPreviewUrl] = React.useState("");
+  const [paintHasMask, setPaintHasMask] = React.useState(Boolean(settings.maskDataUrl));
+  const [imageAspect, setImageAspect] = React.useState(16 / 9);
+  const [brushDialogOpen, setBrushDialogOpen] = React.useState(false);
+  const cropRect = normalizeEditCropRect(settings.cropRect);
+  const toneAdjustments = normalizeEditToneAdjustments(settings.adjustments);
+  const curvePoints = normalizeEditCurvePoints(settings.points);
+  const textOverlay = normalizeEditTextOverlay(settings.overlay);
+  const brushSettings = normalizeEditBrushSettings(settings);
+  const isCrop = effect.id === "imageCrop";
+  const isTone = effect.id === "tone";
+  const isCurves = effect.id === "curves";
+  const isText = effect.id === "textOverlay";
+  const isBrush = effect.id === "brushInpaint";
+  const showGeneratedPreview = ["tone", "curves"].includes(effect.id);
+  const displayUrl = previewUrl || sourceUrl;
+
+  React.useEffect(() => {
+    setPaintHasMask(Boolean(settings.maskDataUrl));
+  }, [settings.maskDataUrl]);
+
+  React.useEffect(() => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = "";
+    }
+    setPreviewUrl("");
+    if (!sourceUrl || !showGeneratedPreview) return undefined;
+
+    let canceled = false;
+    const timer = window.setTimeout(() => {
+      createEditedPreviewLayoutImageBlob(sourceUrl, imageEditFromEffectSettings(effect, settings))
+        .then((blob) => {
+          const url = URL.createObjectURL(blob);
+          if (canceled) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = url;
+          setPreviewUrl(url);
+        })
+        .catch(() => setPreviewUrl(""));
+    }, 40);
+
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sourceUrl, showGeneratedPreview, effect.id, JSON.stringify(settings)]);
+
+  React.useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isBrush) return undefined;
+    const frame = window.requestAnimationFrame(() => resizePaintCanvas(false));
+    const target = imageEditorRef.current;
+    const observer = typeof ResizeObserver !== "undefined" && target ? new ResizeObserver(() => resizePaintCanvas(true)) : null;
+    observer?.observe(target);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [isBrush, sourceUrl]);
+
+  React.useEffect(() => {
+    if (!isBrush) return undefined;
+    let canceled = false;
+    const frame = window.requestAnimationFrame(async () => {
+      const canvas = paintCanvasRef.current;
+      if (!canvas) return;
+      resizePaintCanvas(false);
+      const hasMask = await drawEditBrushMaskDataUrl(canvas, brushSettings.maskDataUrl);
+      if (!canceled) setPaintHasMask(hasMask);
+    });
+    return () => {
+      canceled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isBrush, sourceUrl, brushSettings.maskDataUrl, imageAspect]);
+
+  function updateSettings(patch) {
+    onSettingsChange?.(patch);
+  }
+
+  function editorPoint(event) {
+    const bounds = imageEditorRef.current?.getBoundingClientRect();
+    if (!bounds?.width || !bounds?.height) return null;
+    return {
+      x: clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
+      y: clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
+    };
+  }
+
+  function startCropDrag(event, mode) {
+    if (!isCrop || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = editorPoint(event);
+    if (!point) return;
+    cropDragRef.current = { mode, pointerId: event.pointerId, startPoint: point, startRect: cropRect };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleCropPointerMove(event) {
+    const drag = cropDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = editorPoint(event);
+    if (!point) return;
+    const deltaX = point.x - drag.startPoint.x;
+    const deltaY = point.y - drag.startPoint.y;
+    const nextRect = drag.mode === "resize"
+      ? event.ctrlKey
+        ? resizeCropRectWithAspect(drag.startRect, deltaX, deltaY)
+        : normalizeEditCropRect({
+            ...drag.startRect,
+            width: drag.startRect.width + deltaX,
+            height: drag.startRect.height + deltaY
+          })
+      : normalizeEditCropRect({
+          ...drag.startRect,
+          x: drag.startRect.x + deltaX,
+          y: drag.startRect.y + deltaY
+        });
+    updateSettings({ cropRect: nextRect });
+  }
+
+  function resizeCropRectWithAspect(rect, deltaX, deltaY) {
+    const ratio = Math.max(0.01, rect.width / Math.max(1, rect.height));
+    const maxWidth = Math.max(1, 100 - rect.x);
+    const maxHeight = Math.max(1, 100 - rect.y);
+    let width = clamp(rect.width + deltaX, 1, maxWidth);
+    let height = clamp(rect.height + deltaY, 1, maxHeight);
+
+    if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+      height = width / ratio;
+    } else {
+      width = height * ratio;
+    }
+
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = height * ratio;
+    }
+    if (width > maxWidth) {
+      width = maxWidth;
+      height = width / ratio;
+    }
+
+    return normalizeEditCropRect({
+      ...rect,
+      width: Math.max(1, width),
+      height: Math.max(1, height)
+    });
+  }
+
+  function stopCropDrag(event) {
+    const drag = cropDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cropDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(drag.pointerId);
+  }
+
+  function curvePointFromEvent(event) {
+    const bounds = curveGraphRef.current?.getBoundingClientRect();
+    if (!bounds?.width || !bounds?.height) return null;
+    return {
+      x: clamp(((event.clientX - bounds.left) / bounds.width) * 100, 0, 100),
+      y: clamp(((event.clientY - bounds.top) / bounds.height) * 100, 0, 100)
+    };
+  }
+
+  function curvePathForPoints(points = curvePoints) {
+    const lookup = previewCurveLookup(points);
+    const samples = 64;
+    return Array.from({ length: samples + 1 }, (_, index) => {
+      const input = Math.round((index / samples) * 255);
+      const x = (input / 255) * 100;
+      const y = 100 - (lookup[input] / 255) * 100;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    }).join(" ");
+  }
+
+  function visibleCurvePoints(points = curvePoints) {
+    return normalizeEditCurvePoints(points)
+      .map((point, index) => ({ point, index }))
+      .filter(({ index }, _pointIndex, all) => index > 0 && index < all.length - 1);
+  }
+
+  function startCurvePointDrag(event, index) {
+    event.preventDefault();
+    event.stopPropagation();
+    curveDragRef.current = { index, pointerId: event.pointerId };
+    curveGraphRef.current?.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleCurvePointMove(event) {
+    const drag = curveDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = curvePointFromEvent(event);
+    if (!point) return;
+    const next = normalizeEditCurvePoints(curvePoints);
+    const previous = next[drag.index - 1];
+    const following = next[drag.index + 1];
+    next[drag.index] = {
+      x: Math.min((following?.x || 100) - 1, Math.max((previous?.x || 0) + 1, point.x)),
+      y: point.y
+    };
+    updateSettings({ points: normalizeEditCurvePoints(next) });
+  }
+
+  function stopCurvePointDrag(event) {
+    const drag = curveDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    curveDragRef.current = null;
+    curveGraphRef.current?.releasePointerCapture?.(drag.pointerId);
+  }
+
+  function addCurvePoint(event) {
+    if (curveDragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = curvePointFromEvent(event);
+    if (!point) return;
+    const next = normalizeEditCurvePoints(curvePoints);
+    const nearExisting = next.some((existing) => Math.abs(existing.x - point.x) < 4 && Math.abs(existing.y - point.y) < 4);
+    if (nearExisting || next.length >= 12) return;
+    updateSettings({ points: normalizeEditCurvePoints([...next, point]) });
+  }
+
+  function removeCurvePoint(event, index) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (index <= 0 || index >= curvePoints.length - 1) return;
+    updateSettings({ points: normalizeEditCurvePoints(curvePoints.filter((_point, pointIndex) => pointIndex !== index)) });
+  }
+
+  function startTextDrag(event) {
+    if (!isText || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = editorPoint(event);
+    if (!point) return;
+    textDragRef.current = { pointerId: event.pointerId, startPoint: point, startOverlay: textOverlay };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleTextDrag(event) {
+    const drag = textDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = editorPoint(event);
+    if (!point) return;
+    updateSettings({
+      overlay: normalizeEditTextOverlay({
+        ...drag.startOverlay,
+        x: drag.startOverlay.x + point.x - drag.startPoint.x,
+        y: drag.startOverlay.y + point.y - drag.startPoint.y
+      })
+    });
+  }
+
+  function stopTextDrag(event) {
+    const drag = textDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    textDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(drag.pointerId);
+  }
+
+  function resizePaintCanvas(preserve = true) {
+    resizeEditBrushCanvas(paintCanvasRef.current, imageEditorRef.current, preserve);
+  }
+
+  function paintCanvasPoint(event) {
+    return editBrushCanvasPoint(paintCanvasRef.current, event);
+  }
+
+  function drawPaintStroke(from, to) {
+    if (drawEditBrushStroke(paintCanvasRef.current, brushSettings.brushSize, from, to)) setPaintHasMask(true);
+  }
+
+  function startPaintStroke(event) {
+    if (!isBrush || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizePaintCanvas(true);
+    const point = paintCanvasPoint(event);
+    if (!point) return;
+    paintDragRef.current = { pointerId: event.pointerId, point };
+    drawPaintStroke(point, point);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePaintStroke(event) {
+    const drag = paintDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = paintCanvasPoint(event);
+    if (!point) return;
+    drawPaintStroke(drag.point, point);
+    paintDragRef.current = { ...drag, point };
+  }
+
+  function stopPaintStroke(event) {
+    const drag = paintDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    paintDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(drag.pointerId);
+    updateSettings({ maskDataUrl: createPaintMaskDataUrl() });
+  }
+
+  function createPaintMaskDataUrl() {
+    return createEditBrushMaskDataUrl(paintCanvasRef.current, imageEditorRef.current?.querySelector("img"), true);
+  }
+
+  function clearPaintMask() {
+    const canvas = paintCanvasRef.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    setPaintHasMask(false);
+    updateSettings({ maskDataUrl: "" });
+  }
+
+  function updateTextOverlay(patch) {
+    updateSettings({ overlay: normalizeEditTextOverlay({ ...textOverlay, ...patch }) });
+  }
+
+  function handlePreviewImageLoad(event) {
+    const image = event.currentTarget;
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    if (width > 0 && height > 0) setImageAspect(width / height);
+    if (isBrush) window.requestAnimationFrame(() => resizePaintCanvas(true));
+  }
+
+  if (!sourceUrl) {
+    return (
+      <div className="edit-image-tool-surface empty">
+        <FileImage size={18} />
+        <span>Connect an image to use this tool.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`edit-image-tool-surface ${effect.id}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+      {isCurves && (
+        <div className="edit-image-curves-panel">
+          <svg
+            ref={curveGraphRef}
+            className="edit-image-curves-graph"
+            viewBox="-3 -3 106 106"
+            preserveAspectRatio="none"
+            onPointerDown={addCurvePoint}
+            onPointerMove={handleCurvePointMove}
+            onPointerUp={stopCurvePointDrag}
+            onPointerCancel={stopCurvePointDrag}
+          >
+            <rect x="0" y="0" width="100" height="100" />
+            {[25, 50, 75].map((position) => (
+              <React.Fragment key={position}>
+                <line x1={position} y1="0" x2={position} y2="100" />
+                <line x1="0" y1={position} x2="100" y2={position} />
+              </React.Fragment>
+            ))}
+            <path className="curves-reference-line" d="M 0 100 L 100 0" />
+            <path className="curves-active-line" d={curvePathForPoints(curvePoints)} />
+            {visibleCurvePoints(curvePoints).map(({ point, index }) => (
+              <circle
+                key={`edit-curve-${index}`}
+                cx={point.x}
+                cy={point.y}
+                r="2.5"
+                onPointerDown={(event) => startCurvePointDrag(event, index)}
+                onDoubleClick={(event) => removeCurvePoint(event, index)}
+              />
+            ))}
+          </svg>
+          <button type="button" onClick={() => updateSettings({ points: editDefaultCurvePoints })}>Reset</button>
+        </div>
+      )}
+      {isTone && (
+        <div className="edit-image-tone-panel">
+          {["brightness", "contrast"].map((key) => (
+            <label key={key}>
+              <span>{key === "brightness" ? "Brightness" : "Contrast"}</span>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                step="1"
+                value={toneAdjustments[key]}
+                onChange={(event) => updateSettings({ adjustments: normalizeEditToneAdjustments({ ...toneAdjustments, [key]: event.target.value }) })}
+              />
+              <output>{toneAdjustments[key] > 0 ? `+${toneAdjustments[key]}` : toneAdjustments[key]}</output>
+            </label>
+          ))}
+        </div>
+      )}
+      {isText && (
+        <div className="edit-image-text-panel">
+          <textarea value={textOverlay.text} placeholder="Type overlay text" rows={2} maxLength={220} onChange={(event) => updateTextOverlay({ text: event.target.value })} />
+          <div className="edit-image-text-controls">
+            <select value={textOverlay.font} onChange={(event) => updateTextOverlay({ font: event.target.value })}>
+              {editTextOverlayFonts.map((font) => <option key={font} value={font}>{font}</option>)}
+            </select>
+            <input type="color" value={textOverlay.color} onChange={(event) => updateTextOverlay({ color: event.target.value })} />
+            <input type="range" min="2" max="24" step="0.5" value={textOverlay.size} onChange={(event) => updateTextOverlay({ size: event.target.value })} />
+          </div>
+        </div>
+      )}
+      {isBrush && (
+        <div className="edit-image-brush-panel">
+          <textarea value={brushSettings.prompt} placeholder="Describe the image change" rows={2} maxLength={260} onChange={(event) => updateSettings({ prompt: event.target.value })} />
+          <label>
+            <span>Brush</span>
+            <input type="range" min="8" max="120" step="1" value={brushSettings.brushSize} onChange={(event) => updateSettings({ brushSize: event.target.value })} />
+            <output>{brushSettings.brushSize}</output>
+          </label>
+          <div className="edit-image-brush-actions">
+            <button type="button" onClick={() => setBrushDialogOpen(true)} title="Open larger brush editor" aria-label="Open larger brush editor">
+              <Maximize2 size={13} />
+              Enlarge
+            </button>
+            <button type="button" onClick={clearPaintMask} disabled={!paintHasMask}>Clear mask</button>
+          </div>
+        </div>
+      )}
+      <div
+        className={`edit-image-editor-stage ${isCrop ? "cropping" : ""} ${isText ? "texting" : ""} ${isBrush ? "painting" : ""}`}
+        ref={imageEditorRef}
+        style={{ aspectRatio: imageAspect || 16 / 9 }}
+      >
+        <img src={displayUrl} alt={`${effect.label} preview`} draggable={false} onLoad={handlePreviewImageLoad} onError={useNewtNodeImageFallback} />
+        {isText && textOverlay.text.trim() && (
+          <div
+            className="edit-image-text-overlay"
+            style={{
+              left: `${textOverlay.x}%`,
+              top: `${textOverlay.y}%`,
+              color: textOverlay.color,
+              fontFamily: `"${textOverlay.font}", Arial, sans-serif`,
+              fontSize: `${Math.round(8 + textOverlay.size * 1.8)}px`
+            }}
+            onPointerDown={startTextDrag}
+            onPointerMove={handleTextDrag}
+            onPointerUp={stopTextDrag}
+            onPointerCancel={stopTextDrag}
+          >
+            {textOverlay.text}
+          </div>
+        )}
+        {isBrush && (
+          <canvas
+            ref={paintCanvasRef}
+            className="edit-image-paint-mask"
+            onPointerDown={startPaintStroke}
+            onPointerMove={handlePaintStroke}
+            onPointerUp={stopPaintStroke}
+            onPointerCancel={stopPaintStroke}
+          />
+        )}
+        {isCrop && (
+          <div
+            className="edit-image-crop-box"
+            style={{
+              left: `${cropRect.x}%`,
+              top: `${cropRect.y}%`,
+              width: `${cropRect.width}%`,
+              height: `${cropRect.height}%`
+            }}
+            onPointerDown={(event) => startCropDrag(event, "move")}
+            onPointerMove={handleCropPointerMove}
+            onPointerUp={stopCropDrag}
+            onPointerCancel={stopCropDrag}
+          >
+            <span className="edit-image-crop-handle" title="Drag to resize. Hold Ctrl to keep proportions." onPointerDown={(event) => startCropDrag(event, "resize")} />
+          </div>
+        )}
+      </div>
+      {isBrush && brushDialogOpen && (
+        <EditBrushInpaintDialog
+          sourceUrl={sourceUrl}
+          settings={brushSettings}
+          onSettingsChange={updateSettings}
+          onClose={() => setBrushDialogOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, onClose }) {
+  const stageRef = React.useRef(null);
+  const editorRef = React.useRef(null);
+  const imageRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const paintDragRef = React.useRef(null);
+  const brushSettings = normalizeEditBrushSettings(settings);
+  const [imageNaturalSize, setImageNaturalSize] = React.useState({ width: 16, height: 9 });
+  const [editorSize, setEditorSize] = React.useState(null);
+  const [hasMask, setHasMask] = React.useState(Boolean(brushSettings.maskDataUrl));
+  const imageAspect = imageNaturalSize.width > 0 && imageNaturalSize.height > 0 ? imageNaturalSize.width / imageNaturalSize.height : 16 / 9;
+
+  React.useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose?.();
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onClose]);
+
+  React.useEffect(() => {
+    const updateSize = () => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const stageStyle = window.getComputedStyle(stage);
+      const horizontalPadding = Number.parseFloat(stageStyle.paddingLeft || "0") + Number.parseFloat(stageStyle.paddingRight || "0");
+      const verticalPadding = Number.parseFloat(stageStyle.paddingTop || "0") + Number.parseFloat(stageStyle.paddingBottom || "0");
+      const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
+      const availableHeight = Math.max(1, stage.clientHeight - verticalPadding);
+      let width = availableWidth;
+      let height = width / imageAspect;
+      if (height > availableHeight) {
+        height = availableHeight;
+        width = height * imageAspect;
+      }
+      setEditorSize({
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height))
+      });
+    };
+
+    updateSize();
+    const frame = window.requestAnimationFrame(updateSize);
+    const observer = typeof ResizeObserver !== "undefined" && stageRef.current ? new ResizeObserver(updateSize) : null;
+    observer?.observe(stageRef.current);
+    window.addEventListener("resize", updateSize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [imageAspect]);
+
+  React.useEffect(() => {
+    let canceled = false;
+    const frame = window.requestAnimationFrame(async () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      resizeDialogPaintCanvas(false);
+      const nextHasMask = await drawEditBrushMaskDataUrl(canvas, brushSettings.maskDataUrl);
+      if (!canceled) setHasMask(nextHasMask);
+    });
+    return () => {
+      canceled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [sourceUrl, brushSettings.maskDataUrl, editorSize?.width, editorSize?.height]);
+
+  function updateSettings(patch) {
+    onSettingsChange?.(patch);
+  }
+
+  function resizeDialogPaintCanvas(preserve = true) {
+    resizeEditBrushCanvas(canvasRef.current, editorRef.current, preserve);
+  }
+
+  function handleImageLoad(event) {
+    const image = event.currentTarget;
+    const width = Math.round(Number(image.naturalWidth || image.width || 0));
+    const height = Math.round(Number(image.naturalHeight || image.height || 0));
+    if (width > 0 && height > 0) {
+      setImageNaturalSize((current) => (
+        current.width === width && current.height === height ? current : { width, height }
+      ));
+    }
+    window.requestAnimationFrame(() => resizeDialogPaintCanvas(true));
+  }
+
+  function paintCanvasPoint(event) {
+    return editBrushCanvasPoint(canvasRef.current, event);
+  }
+
+  function drawPaintStroke(from, to) {
+    if (drawEditBrushStroke(canvasRef.current, brushSettings.brushSize, from, to)) setHasMask(true);
+  }
+
+  function startPaintStroke(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeDialogPaintCanvas(true);
+    const point = paintCanvasPoint(event);
+    if (!point) return;
+    paintDragRef.current = { pointerId: event.pointerId, point };
+    drawPaintStroke(point, point);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePaintStroke(event) {
+    const drag = paintDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = paintCanvasPoint(event);
+    if (!point) return;
+    drawPaintStroke(drag.point, point);
+    paintDragRef.current = { ...drag, point };
+  }
+
+  function stopPaintStroke(event) {
+    const drag = paintDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    paintDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(drag.pointerId);
+    const maskDataUrl = createEditBrushMaskDataUrl(canvasRef.current, imageRef.current, true);
+    setHasMask(Boolean(maskDataUrl));
+    updateSettings({ maskDataUrl });
+  }
+
+  function clearPaintMask() {
+    const canvas = canvasRef.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    setHasMask(false);
+    updateSettings({ maskDataUrl: "" });
+  }
+
+  return (
+    <div
+      className="edit-brush-dialog-backdrop"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose?.();
+      }}
+    >
+      <section className="edit-brush-dialog" role="dialog" aria-modal="true" aria-label="Brush inpaint editor" onPointerDown={(event) => event.stopPropagation()}>
+        <header>
+          <span>
+            <Maximize2 size={15} />
+            Brush Inpaint
+          </span>
+          <button type="button" onClick={onClose} title="Close brush editor" aria-label="Close brush editor">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="edit-brush-dialog-controls">
+          <label className="edit-brush-dialog-prompt">
+            <span>Edit prompt</span>
+            <textarea
+              value={brushSettings.prompt}
+              placeholder="Describe the image change"
+              rows={2}
+              maxLength={260}
+              onChange={(event) => updateSettings({ prompt: event.target.value })}
+            />
+          </label>
+          <label className="edit-brush-dialog-slider">
+            <span>Brush</span>
+            <input
+              type="range"
+              min="8"
+              max="120"
+              step="1"
+              value={brushSettings.brushSize}
+              onChange={(event) => updateSettings({ brushSize: event.target.value })}
+            />
+            <output>{brushSettings.brushSize}</output>
+          </label>
+          <button type="button" onClick={clearPaintMask} disabled={!hasMask}>Clear mask</button>
+          <small>{hasMask ? "Masked area ready" : "Paint the area to revise"}</small>
+        </div>
+        <div className="edit-brush-dialog-stage" ref={stageRef}>
+          <div
+            className="edit-brush-dialog-image-editor"
+            ref={editorRef}
+            style={editorSize ? { width: `${editorSize.width}px`, height: `${editorSize.height}px` } : { aspectRatio: imageAspect || 16 / 9 }}
+          >
+            <img ref={imageRef} src={sourceUrl} alt="Brush inpaint source" draggable={false} onLoad={handleImageLoad} onError={useNewtNodeImageFallback} />
+            <canvas
+              ref={canvasRef}
+              className="edit-brush-dialog-paint-mask"
+              onPointerDown={startPaintStroke}
+              onPointerMove={handlePaintStroke}
+              onPointerUp={stopPaintStroke}
+              onPointerCancel={stopPaintStroke}
+              aria-label="Paint inpaint mask"
+            />
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -7654,8 +8552,12 @@ function NodeBody({
       event?.preventDefault?.();
       event?.stopPropagation?.();
       if (!item?.url) return;
+      const image = event?.currentTarget?.querySelector?.("img");
+      const width = previewLayoutDimension(item.width || image?.naturalWidth);
+      const height = previewLayoutDimension(item.height || image?.naturalHeight);
       onPreviewOpen?.({
         ...item,
+        ...(width && height ? { width, height } : {}),
         editContext: {
           type: "previewLayout",
           nodeId: node.id,
@@ -7973,9 +8875,10 @@ function NodeBody({
   }
 
   if (node.type === "edit") {
-    const { groupId, effect, sourceType } = editSelectionFromData(node.data);
+    const { effect, sourceType } = editSelectionFromData(node.data);
     const settingsOpen = Boolean(node.data.settingsOpen);
-    const groupEffects = editEffectsForGroup(groupId);
+    const visibleSourceEffects = editEffectsForSourceType(sourceType).filter((item) => item.groupId !== "cleanup");
+    const sourceEffects = visibleSourceEffects.some((item) => item.id === effect.id) ? visibleSourceEffects : [effect, ...visibleSourceEffects];
     const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
     const sourcePort = config.input.find((port) => port.id === inputPortId);
     const outputPort = outputPortDefinitionsForNode(node)[0];
@@ -7987,35 +8890,29 @@ function NodeBody({
     const resultType = node.data.resultType || sourceType;
     const outputFormat = normalizeChoice(node.data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4");
     const cropAspectLocked = node.data.editCropAspectLocked !== false;
+    const scaleAspectLocked = node.data.editScaleAspectLocked !== false;
+    const isLocalImageEffect = sourceType === "image" && editLocalImageEffectIds.has(effect.id);
 
     function updateEditSelection(nextEffect, nextSourceType = sourceType) {
-      const normalizedSourceType = normalizeEditSourceType(nextEffect, nextSourceType);
+      const normalizedSourceType = nextSourceType === "video" ? "video" : "image";
+      const normalizedEffect = normalizeEditEffectForSourceType(normalizedSourceType, nextEffect.id);
       const nextDimensions = normalizedSourceType === sourceType ? sourceDimensions : null;
       onUpdate(node.id, {
-        editEffect: nextEffect.id,
-        editGroup: nextEffect.groupId,
+        editEffect: normalizedEffect.id,
+        editGroup: normalizedEffect.groupId,
         editSourceType: normalizedSourceType,
-        editSettings: defaultEditEffectSettings(nextEffect, nextDimensions || {}),
+        editSettings: defaultEditEffectSettings(normalizedEffect, nextDimensions || {}),
         ...resetEditOutputPatch(normalizedSourceType)
       });
-    }
-
-    function setEditGroup(nextGroupId) {
-      const nextEffect = firstEditEffectForGroup(nextGroupId);
-      updateEditSelection(nextEffect, node.data.editSourceType);
     }
 
     function setEditEffect(nextEffectId) {
-      updateEditSelection(findEditEffect(nextEffectId), sourceType);
+      updateEditSelection(normalizeEditEffectForSourceType(sourceType, nextEffectId), sourceType);
     }
 
     function setEditSourceType(nextSourceType) {
-      const normalizedSourceType = normalizeEditSourceType(effect, nextSourceType);
-      onUpdate(node.id, {
-        editSourceType: normalizedSourceType,
-        editSettings: defaultEditEffectSettings(effect),
-        ...resetEditOutputPatch(normalizedSourceType)
-      });
+      const normalizedSourceType = nextSourceType === "video" ? "video" : "image";
+      updateEditSelection(normalizeEditEffectForSourceType(normalizedSourceType, node.data.editEffect), normalizedSourceType);
     }
 
     function updateEditSourceDimensions(nextDimensions) {
@@ -8045,6 +8942,14 @@ function NodeBody({
         };
       }
 
+      if (effect.id === "scale" && normalizedDimensions.width && normalizedDimensions.height && shouldSeedEditScaleSettings(node.data.editSettings, settings, previousStoredDimensions)) {
+        patch.editSettings = {
+          ...settings,
+          width: normalizedDimensions.width,
+          height: normalizedDimensions.height
+        };
+      }
+
       if (effect.id === "trim" && normalizedDimensions.duration && shouldSeedEditTrimSettings(node.data.editSettings, settings, previousStoredDimensions)) {
         patch.editSettings = {
           ...settings,
@@ -8067,9 +8972,26 @@ function NodeBody({
       });
     }
 
+    function updateEditSettingsPatch(patch) {
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...patch
+        },
+        error: ""
+      });
+    }
+
     function setCropAspectLocked(nextLocked) {
       onUpdate(node.id, {
         editCropAspectLocked: nextLocked,
+        error: ""
+      });
+    }
+
+    function setScaleAspectLocked(nextLocked) {
+      onUpdate(node.id, {
+        editScaleAspectLocked: nextLocked,
         error: ""
       });
     }
@@ -8174,13 +9096,11 @@ function NodeBody({
               value={value}
               onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
             />
-            <input
-              type="number"
-              min={limits.min}
-              max={limits.max}
-              step={limits.step}
+            <EditDimensionNumberInput
               value={value}
-              onChange={(event) => updateEditCropDimension(control.id, event.target.value)}
+              limits={limits}
+              ariaLabel={`${control.label} pixels`}
+              onCommit={(nextValue) => updateEditCropDimension(control.id, nextValue)}
             />
             <span>px</span>
           </div>
@@ -8211,6 +9131,152 @@ function NodeBody({
           </NodeRow>
           {renderEditCropDimensionControl(widthControl)}
           {renderEditCropDimensionControl(heightControl)}
+        </>
+      );
+    }
+
+    function editScaleControl(controlId) {
+      return effect.controls.find((control) => control.id === controlId) || {
+        id: controlId,
+        label: controlId === "width" ? "Width" : "Height",
+        min: 16,
+        max: 8192,
+        step: 2,
+        defaultValue: controlId === "width" ? 1280 : 720,
+        unit: "px"
+      };
+    }
+
+    function editScaleDimensionLimits(control) {
+      const sourceValue = Math.round(Number(sourceDimensions?.[control.id] || 0));
+      const currentValue = Math.round(Number(settings[control.id] || 0));
+      const min = Math.max(1, Math.round(Number(control.min || 1)));
+      const max = Math.max(min, sourceValue, currentValue, Math.round(Number(control.max || 8192)));
+      return {
+        min,
+        max,
+        step: Math.max(1, Math.round(Number(control.step || 1)))
+      };
+    }
+
+    function sanitizeEditScaleDimension(value, limits) {
+      const numeric = Math.round(Number(value));
+      const fallback = limits.max;
+      const clamped = clamp(Number.isFinite(numeric) ? numeric : fallback, limits.min, limits.max);
+      if (limits.step > 1) {
+        const stepped = Math.round(clamped / limits.step) * limits.step;
+        return clamp(stepped, limits.min, limits.max);
+      }
+      return Math.round(clamped);
+    }
+
+    function editScaleDimensionValue(control) {
+      const limits = editScaleDimensionLimits(control);
+      return sanitizeEditScaleDimension(settings[control.id] ?? sourceDimensions?.[control.id] ?? control.defaultValue, limits);
+    }
+
+    function lockedScaleDimensions(changedControlId, rawValue) {
+      const widthControl = editScaleControl("width");
+      const heightControl = editScaleControl("height");
+      const widthLimits = editScaleDimensionLimits(widthControl);
+      const heightLimits = editScaleDimensionLimits(heightControl);
+      const currentWidth = editScaleDimensionValue(widthControl);
+      const currentHeight = editScaleDimensionValue(heightControl);
+      const sourceRatio = sourceDimensions?.width && sourceDimensions?.height ? sourceDimensions.width / sourceDimensions.height : 0;
+      const ratio = sourceRatio || (currentWidth > 0 && currentHeight > 0 ? currentWidth / currentHeight : 16 / 9);
+
+      if (!scaleAspectLocked) {
+        return {
+          width: changedControlId === "width" ? sanitizeEditScaleDimension(rawValue, widthLimits) : currentWidth,
+          height: changedControlId === "height" ? sanitizeEditScaleDimension(rawValue, heightLimits) : currentHeight
+        };
+      }
+
+      if (changedControlId === "width") {
+        let width = sanitizeEditScaleDimension(rawValue, widthLimits);
+        let height = sanitizeEditScaleDimension(width / ratio, heightLimits);
+        if (height >= heightLimits.max && width / ratio > heightLimits.max) {
+          height = heightLimits.max;
+          width = sanitizeEditScaleDimension(height * ratio, widthLimits);
+        }
+        return { width, height };
+      }
+
+      let height = sanitizeEditScaleDimension(rawValue, heightLimits);
+      let width = sanitizeEditScaleDimension(height * ratio, widthLimits);
+      if (width >= widthLimits.max && height * ratio > widthLimits.max) {
+        width = widthLimits.max;
+        height = sanitizeEditScaleDimension(width / ratio, heightLimits);
+      }
+      return { width, height };
+    }
+
+    function updateEditScaleDimension(controlId, value) {
+      const nextDimensions = lockedScaleDimensions(controlId, value);
+      onUpdate(node.id, {
+        editSettings: {
+          ...settings,
+          ...nextDimensions
+        },
+        error: ""
+      });
+    }
+
+    function renderEditScaleDimensionControl(control) {
+      const limits = editScaleDimensionLimits(control);
+      const value = editScaleDimensionValue(control);
+      return (
+        <NodeRow key={control.id} label={control.label}>
+          <div className="edit-crop-dimension-control">
+            <input
+              type="range"
+              min={limits.min}
+              max={limits.max}
+              step={limits.step}
+              value={value}
+              onChange={(event) => updateEditScaleDimension(control.id, event.target.value)}
+            />
+            <EditDimensionNumberInput
+              value={value}
+              limits={limits}
+              ariaLabel={`${control.label} pixels`}
+              onCommit={(nextValue) => updateEditScaleDimension(control.id, nextValue)}
+            />
+            <span>px</span>
+          </div>
+        </NodeRow>
+      );
+    }
+
+    function renderEditScaleControls() {
+      const widthControl = editScaleControl("width");
+      const heightControl = editScaleControl("height");
+      const sourceSizeLabel = sourceDimensions?.width && sourceDimensions?.height ? `${sourceDimensions.width} x ${sourceDimensions.height}` : "";
+      const extraControls = effect.controls.filter((control) => control.id !== "width" && control.id !== "height");
+      return (
+        <>
+          <NodeRow label="Aspect">
+            <div className="edit-crop-toolbar">
+              <button
+                type="button"
+                className={`edit-aspect-lock ${scaleAspectLocked ? "active" : ""}`}
+                onClick={() => setScaleAspectLocked(!scaleAspectLocked)}
+                aria-pressed={scaleAspectLocked}
+                title={scaleAspectLocked ? "Unlock relative dimensions" : "Lock relative dimensions"}
+                aria-label={scaleAspectLocked ? "Unlock relative dimensions" : "Lock relative dimensions"}
+              >
+                {scaleAspectLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+              {sourceSizeLabel && <span>{sourceSizeLabel}</span>}
+            </div>
+          </NodeRow>
+          {renderEditScaleDimensionControl(widthControl)}
+          {renderEditScaleDimensionControl(heightControl)}
+          {extraControls.map((control) => (
+            <NodeRow key={control.id} label={control.label}>
+              {renderEditControl(control)}
+            </NodeRow>
+          ))}
         </>
       );
     }
@@ -8374,17 +9440,18 @@ function NodeBody({
     return (
       <div className="node-body model-node-body edit-node-body">
         <EditSourceDimensionProbe sourceUrl={sourceUrl} sourceType={sourceType} onDimensions={updateEditSourceDimensions} />
-        <div className="edit-effect-tabs" role="tablist" aria-label="Edit effect groups">
-          {editEffectGroups.map((group) => (
+        <div className="edit-effect-tabs edit-media-tabs" role="tablist" aria-label="Edit media type">
+          {editImageSourceTypes.map((mediaType) => (
             <button
-              key={group.id}
-              className={groupId === group.id ? "active" : ""}
+              key={mediaType}
+              className={sourceType === mediaType ? "active" : ""}
               type="button"
               role="tab"
-              aria-selected={groupId === group.id}
-              onClick={() => setEditGroup(group.id)}
+              aria-selected={sourceType === mediaType}
+              onClick={() => setEditSourceType(mediaType)}
             >
-              {group.label}
+              {mediaType === "image" ? <FileImage size={13} /> : <Film size={13} />}
+              <span>{capitalizeMediaType(mediaType)}</span>
             </button>
           ))}
         </div>
@@ -8418,20 +9485,11 @@ function NodeBody({
           <summary>Edit</summary>
           <NodeRow label="Effect">
             <select value={effect.id} onChange={(event) => setEditEffect(event.target.value)}>
-              {groupEffects.map((item) => (
+              {sourceEffects.map((item) => (
                 <option key={item.id} value={item.id}>{item.label}</option>
               ))}
             </select>
           </NodeRow>
-          {effect.mediaTypes.length > 1 && (
-            <NodeRow label="Source">
-              <select value={sourceType} onChange={(event) => setEditSourceType(event.target.value)}>
-                {effect.mediaTypes.map((mediaType) => (
-                  <option key={mediaType} value={mediaType}>{capitalizeMediaType(mediaType)}</option>
-                ))}
-              </select>
-            </NodeRow>
-          )}
           <NodeRow label={capitalizeMediaType(sourceType)} inputPort={settingsOpen ? sourcePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button type="button" className={sourceConnected ? "connected-field" : ""}>{connectedSummary(sourceItems, `Add ${sourceType}`)}</button>
           </NodeRow>
@@ -8444,26 +9502,37 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
-          <EditLivePreview
-            sourceUrl={sourceUrl}
-            sourceType={sourceType}
-            sourceDimensions={sourceDimensions}
-            effect={effect}
-            settings={settings}
-          />
-          {effect.id === "crop" ? (
+          {isLocalImageEffect ? (
+            <EditImageToolSurface
+              sourceUrl={sourceUrl}
+              effect={effect}
+              settings={settings}
+              onSettingsChange={updateEditSettingsPatch}
+            />
+          ) : (
+            <EditLivePreview
+              sourceUrl={sourceUrl}
+              sourceType={sourceType}
+              sourceDimensions={sourceDimensions}
+              effect={effect}
+              settings={settings}
+            />
+          )}
+          {!isLocalImageEffect && effect.id === "scale" ? (
+            renderEditScaleControls()
+          ) : !isLocalImageEffect && effect.id === "crop" ? (
             renderEditCropControls()
-          ) : effect.id === "trim" ? (
+          ) : !isLocalImageEffect && effect.id === "trim" ? (
             renderEditTrimControls()
-          ) : effect.controls.length ? (
+          ) : !isLocalImageEffect && effect.controls.length ? (
             effect.controls.map((control) => (
               <NodeRow key={control.id} label={control.label}>
                 {renderEditControl(control)}
               </NodeRow>
             ))
-          ) : (
+          ) : !isLocalImageEffect ? (
             <div className="edit-empty-controls">No settings for this effect.</div>
-          )}
+          ) : null}
           <p className="edit-effect-description">{effect.definition}</p>
         </details>
       </div>
@@ -8488,6 +9557,7 @@ function NodeBody({
     const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
     const utilityVideoModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel);
     const isColorIdMatte = isUtilityColorIdMatteModel(utilityImageModel);
+    const isImageToId = isUtilityImageToIdModel(utilityImageModel);
     const isQwenCameraEdit = isUtilityQwenCameraEditModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
     const isPatina = isPatinaModel(utilityImageModel);
@@ -8623,6 +9693,8 @@ function NodeBody({
                               : "Run Utility Video"
       : isColorIdMatte
         ? "Run Color Matte"
+        : isImageToId
+          ? "Run Image to Color ID"
         : isQwenCameraEdit
           ? "Run Camera Edit"
         : isSam3Image
@@ -9285,7 +10357,7 @@ function NodeBody({
                     </select>
                   </NodeRow>
                 </>
-              ) : isDepthAnything || isSam3Image ? null : (
+              ) : isDepthAnything || isSam3Image || isImageToId ? null : (
                 <NodeRow label="Draw Mode">
                   <select value={node.data.dwposeDrawMode || "body-pose"} onChange={(event) => onUpdate(node.id, { dwposeDrawMode: event.target.value })}>
                     <option value="body-pose">Body Pose</option>
@@ -11645,14 +12717,15 @@ function createDefaultNodeData(type, label, count) {
     };
   }
   if (type === "edit") {
-    const effect = firstEditEffectForGroup("transform");
+    const effect = firstEditEffectForSourceType("image");
     return {
       title,
-      editGroup: "transform",
+      editGroup: effect.groupId,
       editEffect: effect.id,
-      editSourceType: normalizeEditSourceType(effect, "image"),
+      editSourceType: "image",
       editSettings: defaultEditEffectSettings(effect),
       editCropAspectLocked: true,
+      editScaleAspectLocked: true,
       editOutputFormat: "mp4",
       resultType: "image",
       settingsOpen: true
@@ -11991,6 +13064,11 @@ function isPatinaModel(model) {
 function isUtilityColorIdMatteModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("color") && normalized.includes("matte");
+}
+
+function isUtilityImageToIdModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("cryptomatte") || (normalized.includes("image") && normalized.includes("id"));
 }
 
 function isUtilityQwenCameraEditModel(model) {
@@ -12405,6 +13483,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityImageModelNames.colorIdMatte;
+  if (isUtilityImageToIdModel(normalized)) return utilityImageModelNames.imageToId;
   if (isUtilityQwenCameraEditModel(normalized)) return utilityImageModelNames.qwenCameraEdit;
   if (normalized.includes("still") || normalized.includes("frame")) return utilityImageModelNames.stillFrame;
   if (normalized.includes("sam") && normalized.includes("image")) return utilityImageModelNames.sam3Image;
@@ -12483,9 +13562,11 @@ function transitionWanLoraItemsForData(data = {}) {
 }
 
 function editSelectionFromData(data = {}) {
-  const groupId = normalizeEditGroupId(data.editGroup);
-  const effect = normalizeEditEffectForGroup(groupId, data.editEffect);
-  const sourceType = normalizeEditSourceType(effect, data.editSourceType || data.resultType);
+  const requestedEffect = findEditEffect(data.editEffect);
+  const fallbackSourceType = requestedEffect.mediaTypes?.includes("video") ? "video" : "image";
+  const requestedSourceType = editImageSourceTypes.includes(data.editSourceType) ? data.editSourceType : editImageSourceTypes.includes(data.resultType) ? data.resultType : fallbackSourceType;
+  const sourceType = requestedSourceType === "video" ? "video" : "image";
+  const effect = normalizeEditEffectForSourceType(sourceType, requestedEffect.id);
   return {
     groupId: effect.groupId,
     effect,
@@ -12501,6 +13582,12 @@ function editInputPortIds(data = {}) {
 function editOutputType(nodeOrData = {}) {
   const data = nodeOrData.data || nodeOrData;
   return editSelectionFromData(data).sourceType;
+}
+
+function editHasMaskOutput(nodeOrData = {}) {
+  const data = nodeOrData.data || nodeOrData;
+  const { effect, sourceType } = editSelectionFromData(data);
+  return sourceType === "image" && effect.id === "brushInpaint";
 }
 
 function editSourceDimensionsForItems(items = [], sourceType, sourceUrl, storedDimensions) {
@@ -12560,6 +13647,25 @@ function shouldSeedEditCropSettings(rawSettings = {}, settings = {}, previousDim
   return matchesFallbackDefaults || matchesPreviousDimensions;
 }
 
+function shouldSeedEditScaleSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  const hasWidth = Object.prototype.hasOwnProperty.call(raw, "width");
+  const hasHeight = Object.prototype.hasOwnProperty.call(raw, "height");
+  if (!hasWidth && !hasHeight) return true;
+
+  const defaultScaleSettings = defaultEditEffectSettings("scale");
+  const width = Number(settings.width);
+  const height = Number(settings.height);
+  const matchesFallbackDefaults = width === Number(defaultScaleSettings.width) && height === Number(defaultScaleSettings.height);
+  const matchesPreviousDimensions =
+    previousDimensions?.width &&
+    previousDimensions?.height &&
+    width === previousDimensions.width &&
+    height === previousDimensions.height;
+
+  return matchesFallbackDefaults || matchesPreviousDimensions;
+}
+
 function shouldSeedEditTrimSettings(rawSettings = {}, settings = {}, previousDimensions = null) {
   const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
   const hasStart = Object.prototype.hasOwnProperty.call(raw, "start");
@@ -12579,7 +13685,46 @@ function shouldSeedEditTrimSettings(rawSettings = {}, settings = {}, previousDim
 function editSettingsForEffect(data = {}, effect = findEditEffect(data.editEffect), sourceDimensions = null) {
   const defaults = defaultEditEffectSettings(effect);
   const rawSettings = data.editSettings && typeof data.editSettings === "object" ? data.editSettings : {};
-  const settings = Object.fromEntries((effect.controls || []).map((control) => [control.id, rawSettings[control.id] ?? defaults[control.id]]));
+  const settings = (effect.controls || []).length
+    ? Object.fromEntries((effect.controls || []).map((control) => [control.id, rawSettings[control.id] ?? defaults[control.id]]))
+    : { ...defaults, ...rawSettings };
+  if (effect.id === "imageCrop") {
+    return {
+      ...settings,
+      cropRect: normalizeEditCropRect(rawSettings.cropRect || settings.cropRect)
+    };
+  }
+  if (effect.id === "tone") {
+    return {
+      ...settings,
+      adjustments: normalizeEditToneAdjustments(rawSettings.adjustments || settings.adjustments)
+    };
+  }
+  if (effect.id === "curves") {
+    return {
+      ...settings,
+      points: normalizeEditCurvePoints(rawSettings.points || settings.points)
+    };
+  }
+  if (effect.id === "textOverlay") {
+    return {
+      ...settings,
+      overlay: normalizeEditTextOverlay(rawSettings.overlay || settings.overlay)
+    };
+  }
+  if (effect.id === "brushInpaint") {
+    return normalizeEditBrushSettings(settings);
+  }
+  if (effect.id === "scale" && sourceDimensions?.width && sourceDimensions?.height) {
+    const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
+    if (shouldSeedEditScaleSettings(rawSettings, settings, previousDimensions)) {
+      return {
+        ...settings,
+        width: sourceDimensions.width,
+        height: sourceDimensions.height
+      };
+    }
+  }
   if (effect.id === "crop" && sourceDimensions?.width && sourceDimensions?.height) {
     const previousDimensions = editDimensionsFromValue(data.editSourceDimensions);
     if (shouldSeedEditCropSettings(rawSettings, settings, previousDimensions)) {
@@ -12633,6 +13778,113 @@ function resetEditOutputPatch(resultType) {
   };
 }
 
+function normalizeEditCropRect(rect = editDefaultCropRect) {
+  const source = rect && typeof rect === "object" ? rect : editDefaultCropRect;
+  const rawWidth = Number(source.width);
+  const rawHeight = Number(source.height);
+  const rawX = Number(source.x);
+  const rawY = Number(source.y);
+  const width = clamp(Number.isFinite(rawWidth) ? rawWidth : editDefaultCropRect.width, 1, 100);
+  const height = clamp(Number.isFinite(rawHeight) ? rawHeight : editDefaultCropRect.height, 1, 100);
+  return {
+    x: clamp(Number.isFinite(rawX) ? rawX : editDefaultCropRect.x, 0, 100 - width),
+    y: clamp(Number.isFinite(rawY) ? rawY : editDefaultCropRect.y, 0, 100 - height),
+    width,
+    height
+  };
+}
+
+function normalizeEditToneAdjustments(adjustments = editDefaultToneAdjustments) {
+  return {
+    brightness: Math.round(clamp(Number(adjustments?.brightness) || 0, -100, 100)),
+    contrast: Math.round(clamp(Number(adjustments?.contrast) || 0, -100, 100))
+  };
+}
+
+function normalizeEditCurvePoints(points = editDefaultCurvePoints) {
+  const safePoints = Array.isArray(points) && points.length ? points : editDefaultCurvePoints;
+  const normalized = safePoints
+    .map((point) => ({
+      x: clamp(Number(point?.x) || 0, 0, 100),
+      y: clamp(Number(point?.y) || 0, 0, 100)
+    }))
+    .sort((first, second) => first.x - second.x);
+  const middle = normalized.filter((point) => point.x > 0.5 && point.x < 99.5);
+  const first = normalized.find((point) => point.x <= 0.5) || editDefaultCurvePoints[0];
+  const last = [...normalized].reverse().find((point) => point.x >= 99.5) || editDefaultCurvePoints[1];
+  return [
+    { x: 0, y: first.y },
+    ...middle.slice(0, 10),
+    { x: 100, y: last.y }
+  ];
+}
+
+function normalizeEditTextOverlay(overlay = editDefaultTextOverlay) {
+  const color = String(overlay?.color || editDefaultTextOverlay.color);
+  const rawX = Number(overlay?.x);
+  const rawY = Number(overlay?.y);
+  const rawSize = Number(overlay?.size);
+  return {
+    text: String(overlay?.text || "").slice(0, 220),
+    x: clamp(Number.isFinite(rawX) ? rawX : editDefaultTextOverlay.x, 0, 100),
+    y: clamp(Number.isFinite(rawY) ? rawY : editDefaultTextOverlay.y, 0, 100),
+    size: clamp(Number.isFinite(rawSize) ? rawSize : editDefaultTextOverlay.size, 2, 24),
+    color: /^#[0-9a-f]{6}$/i.test(color) ? color : editDefaultTextOverlay.color,
+    font: editTextOverlayFonts.includes(overlay?.font) ? overlay.font : editDefaultTextOverlay.font
+  };
+}
+
+function normalizeEditBrushSettings(settings = {}) {
+  return {
+    prompt: String(settings.prompt || "").slice(0, 260),
+    brushSize: Math.round(clamp(Number(settings.brushSize) || editDefaultBrushSize, 8, 120)),
+    maskDataUrl: /^data:image\/png;base64,/i.test(String(settings.maskDataUrl || "")) ? String(settings.maskDataUrl) : "",
+    resolution: normalizeChoice(settings.resolution, ["1K", "2K", "4K"], "2K")
+  };
+}
+
+function imageEditFromEffectSettings(effectOrId, settings = {}) {
+  const effectId = typeof effectOrId === "string" ? effectOrId : effectOrId?.id;
+  switch (effectId) {
+    case "imageCrop":
+      return { type: "crop", cropRect: normalizeEditCropRect(settings.cropRect) };
+    case "tone":
+      return { type: "tone", adjustments: normalizeEditToneAdjustments(settings.adjustments) };
+    case "curves":
+      return { type: "curves", points: normalizeEditCurvePoints(settings.points) };
+    case "textOverlay":
+      return { type: "text", overlay: normalizeEditTextOverlay(settings.overlay) };
+    case "brushInpaint": {
+      const brush = normalizeEditBrushSettings(settings);
+      return {
+        type: "inpaint",
+        prompt: brush.prompt,
+        maskDataUrl: brush.maskDataUrl,
+        resolution: brush.resolution
+      };
+    }
+    default:
+      return { type: "" };
+  }
+}
+
+function editImageEffectSuffix(effectId) {
+  switch (effectId) {
+    case "imageCrop":
+      return "crop";
+    case "tone":
+      return "brightness-contrast";
+    case "curves":
+      return "curves";
+    case "textOverlay":
+      return "text";
+    case "brushInpaint":
+      return "inpaint";
+    default:
+      return "edit";
+  }
+}
+
 function patinaMapsForData(data = {}) {
   const selectedMaps = Array.isArray(data.patinaMaps) ? data.patinaMaps : patinaMapOptions.map((option) => option.id);
   const validMaps = selectedMaps.filter((mapId) => patinaMapOptions.some((option) => option.id === mapId));
@@ -12645,7 +13897,7 @@ function visiblePortIdsForNode(node) {
   }
 
   if (node?.type === "edit") {
-    return [...editInputPortIds(node.data), "editOut"];
+    return [...editInputPortIds(node.data), ...outputPortIdsForNode(node)];
   }
 
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
@@ -12676,11 +13928,19 @@ function outputPortDefinitionsForNode(node) {
   }
   if (node?.type === "edit") {
     const outputType = editOutputType(node);
-    return [{
+    const ports = [{
       id: "editOut",
       label: outputType === "image" ? "Image output" : "Video output",
       color: outputType === "image" ? portColors.image : portColors.video
     }];
+    if (editHasMaskOutput(node)) {
+      ports.push({
+        id: "editMaskOut",
+        label: "Mask output",
+        color: portColors.image
+      });
+    }
+    return ports;
   }
   if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
@@ -12738,6 +13998,7 @@ function portKindForNodePort(node, portId, role) {
   if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "utility") return utilityOutputType(node, portId) === "video" ? "video" : "image";
+  if (role === "output" && node.type === "edit" && portId === "editMaskOut") return "image";
   if (role === "output" && node.type === "edit" && portId === "editOut") return editOutputType(node);
   if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
   return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
@@ -13111,12 +14372,13 @@ function connectedOutputItem(source, edge) {
         }
       : null;
   }
-  const url = sourceResultUrlForPort(source, edge?.from?.port);
+  const sourcePort = edge?.from?.port;
+  const url = sourceResultUrlForPort(source, sourcePort);
   if (!url) return null;
   return {
     url,
     type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
-    label: sourceLabel(source),
+    label: sourceResultLabelForPort(source, sourcePort) || sourceLabel(source),
     text: source?.data?.resultText || ""
   };
 }
@@ -13268,6 +14530,11 @@ function sourceResultItemsForPort(source, portId = "", type = "") {
     return item?.url ? [item] : [];
   }
 
+  if (source?.type === "edit" && portId === "editMaskOut") {
+    const item = editMaskResultItem(source);
+    return item?.url ? [item] : [];
+  }
+
   return normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, type);
 }
 
@@ -13275,6 +14542,10 @@ function sourceResultUrlForPort(source, portId = "") {
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     const item = transitionBuilderResultItemForPort(source, portId);
     if (item?.url) return item.url;
+  }
+
+  if (source?.type === "edit" && portId === "editMaskOut") {
+    return editMaskResultItem(source)?.url || "";
   }
 
   return source?.data?.resultUrl || "";
@@ -13285,7 +14556,23 @@ function sourceResultLabelForPort(source, portId = "") {
     return transitionBuilderResultItemForPort(source, portId)?.label || "";
   }
 
+  if (source?.type === "edit" && portId === "editMaskOut") {
+    return editMaskResultItem(source)?.label || "Inpaint Mask";
+  }
+
   return "";
+}
+
+function editMaskResultItem(source) {
+  const items = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, "image");
+  if (!items.length) return null;
+  const isMaskItem = (item) => item?.editRole === "mask" || /\bmask\b/i.test(item?.label || "");
+  const selectedIndex = Math.trunc(Number(source?.data?.selectedResultIndex));
+  if (Number.isFinite(selectedIndex) && selectedIndex >= 0) {
+    const adjacentMask = items.slice(selectedIndex + 1).find(isMaskItem);
+    if (adjacentMask) return adjacentMask;
+  }
+  return [...items].reverse().find(isMaskItem) || null;
 }
 
 function transitionBuilderResultItemForPort(source, portId = "") {
@@ -13605,12 +14892,12 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectN
   form.append("nodeTitle", node.data.title || "");
 
   const { response, data } = await nodeApi.colorIdMatteForm(form);
-  if (!response.ok) throw new Error(data.error || "Color ID matte failed.");
+  if (!response.ok) throw new Error(data.error || "Color ID to Matte failed.");
 
   return {
     url: data.image.localUrl,
     type: "image",
-    label: data.image.label || "Color ID Matte",
+    label: data.image.label || "Color ID to Matte",
     text: data.text || "",
     cost: data.cost
   };
@@ -13933,19 +15220,33 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
   return normalizeUtilityVideoGenerationResult(data, index);
 }
 
-async function runEditNodeGeneration({ node, incoming, projectId, projectName, workflowContext }) {
+async function runEditNodeGeneration({ node, incoming, projectId, projectName, workflowContext, uploadAsset }) {
   const { effect, sourceType } = editSelectionFromData(node.data);
   const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
   const sourceUrl = connectedAssetUrls(incoming[inputPortId]).at(-1);
   if (!sourceUrl) throw new Error(`Connect a ${sourceType} to the Edit node.`);
   const sourceDimensions = editSourceDimensionsForItems(incoming[inputPortId], sourceType, sourceUrl, node.data.editSourceDimensions);
+  const settings = editSettingsForEffect(node.data, effect, sourceDimensions);
+
+  if (sourceType === "image" && editLocalImageEffectIds.has(effect.id)) {
+    return runLocalEditImageGeneration({
+      node,
+      sourceUrl,
+      effect,
+      settings,
+      projectId,
+      projectName,
+      workflowContext,
+      uploadAsset
+    });
+  }
 
   const { response, data } = await nodeApi.editMedia({
     effectId: effect.id,
     sourceMediaType: sourceType,
     sourceImageUrls: sourceType === "image" ? [sourceUrl] : [],
     sourceVideoUrls: sourceType === "video" ? [sourceUrl] : [],
-    settings: editSettingsForEffect(node.data, effect, sourceDimensions),
+    settings,
     outputFormat: node.data.editOutputFormat || "mp4",
     ...workflowContextPayload(workflowContext, projectId, projectName),
     nodeId: node.id,
@@ -13962,6 +15263,63 @@ async function runEditNodeGeneration({ node, incoming, projectId, projectName, w
     text: data.text || "",
     cost: data.cost || null
   };
+}
+
+async function runLocalEditImageGeneration({ node, sourceUrl, effect, settings, projectId, projectName, workflowContext, uploadAsset }) {
+  if (typeof uploadAsset !== "function") throw new Error("Could not save Edit image output.");
+  const edit = imageEditFromEffectSettings(effect, settings);
+  const suffix = editImageEffectSuffix(effect.id);
+  const baseName = safeStillFrameName(fileBaseName(node.data.fileName || node.data.title || effect.label || "edit-image"));
+  let blob;
+  let extraItems = [];
+
+  if (edit.type === "inpaint") {
+    if (!edit.prompt.trim()) throw new Error("Brush Inpaint needs an edit prompt.");
+    if (!edit.maskDataUrl) throw new Error("Paint a mask before running Brush Inpaint.");
+    const { response, data } = await nodeApi.previewInpaint({
+      sourceUrl,
+      prompt: edit.prompt,
+      maskDataUrl: edit.maskDataUrl,
+      resolution: edit.resolution || "2K",
+      ...workflowContextPayload(workflowContext, projectId, projectName),
+      nodeId: node.id,
+      nodeTitle: `${node.data.title || "Edit"} Inpaint`,
+      outputFileNameBase: `${baseName}-${suffix}`
+    }, "Edit image inpaint");
+    if (!response.ok) throw new Error(data.error || "Edit image inpaint failed.");
+    if (!data.image?.localUrl) throw new Error("Edit image inpaint returned no image output.");
+    blob = await createInpaintCompositePreviewLayoutBlob(sourceUrl, data.image.localUrl, edit.maskDataUrl);
+    const maskBlob = await dataUrlToBlob(edit.maskDataUrl);
+    const maskAsset = await uploadAsset(new File([maskBlob], `${baseName}-${suffix}-mask.png`, { type: "image/png" }), "edit");
+    if (!maskAsset?.localUrl) throw new Error("Edit image returned no saved mask output.");
+    extraItems = [{
+      url: maskAsset.localUrl,
+      type: "image",
+      label: "Inpaint Mask",
+      text: "Brush Inpaint black and white mask.",
+      editRole: "mask",
+      cost: null
+    }];
+  } else {
+    blob = await createEditedPreviewLayoutImageBlob(sourceUrl, edit);
+  }
+
+  const asset = await uploadAsset(new File([blob], `${baseName}-${suffix}.png`, { type: "image/png" }), "edit");
+  if (!asset?.localUrl) throw new Error("Edit image returned no saved output.");
+  const primaryItem = {
+    url: asset.localUrl,
+    type: "image",
+    label: effect.label,
+    text: `${effect.label} image edit.`,
+    cost: null
+  };
+  return extraItems.length ? [primaryItem, ...extraItems] : primaryItem;
+}
+
+async function dataUrlToBlob(dataUrl) {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error("Could not prepare mask image.");
+  return response.blob();
 }
 
 function connectedPreviewSources(items = []) {
@@ -14490,7 +15848,7 @@ function previewMediaType(source, edge) {
   if (source.type === "storyboard" && storyboardFrameOutputItem(source, edge)) return "image";
   if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
-  if (source.type === "edit") return editOutputType(source);
+  if (source.type === "edit") return edge?.from?.port === "editMaskOut" ? "image" : editOutputType(source);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
@@ -14684,7 +16042,7 @@ async function createColorIdMatteBlob(imageUrl, color, { tolerance = 0, invert =
           matchedPixels: mask.matchedPixels
         });
       } else {
-        reject(new Error("Could not create Color ID matte."));
+        reject(new Error("Could not create Color ID to Matte."));
       }
     }, "image/png");
   });
@@ -16143,9 +17501,9 @@ function normalizeCharacterSheetVariants(data = {}) {
 
 function textModelTitleFromLegacy(title) {
   const value = String(title || "").trim();
-  if (!value) return "Smart Text Model";
+  if (!value) return "Text Model";
   const match = value.match(/^(?:Text(?: Model)?|Smart Text(?: Model)?)( \d+)?$/i);
-  return match ? `Smart Text Model${match[1] || ""}` : value;
+  return match ? `Text Model${match[1] || ""}` : value;
 }
 
 function normalizeUtilityData(data = {}) {
@@ -16372,6 +17730,7 @@ function normalizeEditData(data = {}) {
     editSourceType: selection.sourceType,
     editSettings,
     editCropAspectLocked: data.editCropAspectLocked !== false,
+    editScaleAspectLocked: data.editScaleAspectLocked !== false,
     editOutputFormat: normalizeChoice(data.editOutputFormat, editVideoOutputOptions.map(([value]) => value), "mp4"),
     resultType: selection.sourceType
   };
@@ -16526,8 +17885,8 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "edit") {
-    nextEdge.from.port = "editOut";
-    nextEdge.color = editOutputType(source) === "video" ? portColors.video : portColors.image;
+    if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "editOut";
+    nextEdge.color = portKindForNodePort(source, nextEdge.from.port, "output") === "video" ? portColors.video : portColors.image;
   }
 
   if (source.type === "autoAspect") {
