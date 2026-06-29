@@ -1617,53 +1617,35 @@ app.post("/api/node/generate-image", async (req, res) => {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
-      const falImage = await generateFalNanoBananaPro({
+      return sendFalNanoBananaImageResponse({
+        req,
+        res,
+        selectedModel,
         prompt,
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio,
-        resolution: req.body.resolution
+        requestedAspectRatio,
+        cleanReferenceLabels
       });
-      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
+    }
 
-      await appendHistory({
-        id: randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "image",
-        provider: "fal.ai",
-        modelName: selectedModel.displayName,
-        endpoint: falImage.endpoint,
-        mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+    if (selectedModel.provider === "google" && req.body.useFalFallback) {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Fal fallback requested, but FAL_KEY is missing." });
+      }
+
+      return sendFalNanoBananaImageResponse({
+        req,
+        res,
+        selectedModel,
         prompt,
-        submittedPrompt: falImage.submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          model: req.body.model || selectedModel.displayName,
-          aspectRatio,
-          requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: falImage.resolution,
-          imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
-        },
-        cost,
-        remoteImage: falImage.remoteImage,
-        localImage: output.publicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes,
-        text: falImage.description || ""
-      });
-
-      return res.json({
-        text: falImage.description || "",
-        cost,
-        image: {
-          ...falImage.remoteImage,
-          localUrl: output.publicPath,
-          fileName: output.fileName,
-          mimeType: output.mimeType
-        }
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        requestedAspectRatio,
+        cleanReferenceLabels,
+        fallbackRequestedFromGoogle: true
       });
     }
 
@@ -1693,11 +1675,32 @@ app.post("/api/node/generate-image", async (req, res) => {
       });
     }
 
-    const { text, inlineData, attempts } = await generateGeminiImageWithRetries({
-      model,
-      parts,
-      imageConfig
-    });
+    let geminiResult;
+    try {
+      geminiResult = await generateGeminiImageWithRetries({
+        model,
+        parts,
+        imageConfig
+      });
+    } catch (googleError) {
+      if (shouldFallbackFromGoogleImageError(googleError)) {
+        const googleErrorSummary = googleFallbackSummary(googleError);
+        const fallbackSuffix = process.env.FAL_KEY
+          ? " Run again for fal fallback."
+          : " Fal fallback unavailable: missing FAL_KEY.";
+        return res.status(errorStatusCode(googleError)).json({
+          error: `${googleImageErrorDisplayMessage(googleErrorSummary)}${fallbackSuffix}`,
+          text: googleError.text || "",
+          raw: googleError.raw,
+          fallbackAvailable: Boolean(process.env.FAL_KEY),
+          fallbackProvider: process.env.FAL_KEY ? "fal" : "",
+          googleError: googleErrorSummary
+        });
+      }
+      throw googleError;
+    }
+
+    const { text, inlineData, attempts } = geminiResult;
 
     const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
     const extension = extensionForMime(mimeType);
@@ -1745,14 +1748,103 @@ app.post("/api/node/generate-image", async (req, res) => {
       }
     });
   } catch (error) {
-    if (error.status) {
-      return res.status(error.status).json({ error: error.message || "Image generation failed.", text: error.text || "", raw: error.raw });
+    if (error.status || error.statusCode || error.response?.status) {
+      const message = publicErrorMessage(error, error.message || "Image generation failed.");
+      return res.status(errorStatusCode(error)).json({ error: message, text: error.text || "", raw: error.raw });
     }
 
     console.error(error);
     res.status(500).json({ error: error.message || "Image generation failed." });
   }
 });
+
+async function sendFalNanoBananaImageResponse({
+  req,
+  res,
+  selectedModel,
+  prompt,
+  imagePromptUrls,
+  imagePromptLabels,
+  aspectRatio,
+  requestedAspectRatio,
+  cleanReferenceLabels,
+  fallbackFromGoogleError = null,
+  fallbackRequestedFromGoogle = false
+}) {
+  const falImage = await generateFalNanoBananaPro({
+    prompt,
+    imagePromptUrls,
+    imagePromptLabels,
+    aspectRatio,
+    resolution: req.body.resolution
+  });
+  const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+  const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
+  const fallback = fallbackFromGoogleError
+    ? googleFallbackSummary(fallbackFromGoogleError)
+    : fallbackRequestedFromGoogle
+      ? {
+        from: "google",
+        to: "fal",
+        status: null,
+        providerStatus: "",
+        attempts: null,
+        reason: "manual-fal-fallback",
+        quotaLikely: null,
+        accountLimitLikely: null,
+        message: "Fal fallback requested after a Google image error."
+      }
+      : null;
+
+  await appendHistory({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "fal.ai",
+    modelName: selectedModel.displayName,
+    endpoint: falImage.endpoint,
+    mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+    prompt,
+    submittedPrompt: falImage.submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: req.body.model || selectedModel.displayName,
+      aspectRatio,
+      requestedAspectRatio: requestedAspectRatio || aspectRatio,
+      resolution: falImage.resolution,
+      imagePromptCount: imagePromptUrls.length,
+      imagePromptLabels: cleanReferenceLabels,
+      ...(fallback
+        ? {
+          fallbackFromProvider: "Google",
+          fallbackReason: fallback.reason || fallback.message,
+          fallbackStatus: fallback.status,
+          fallbackProviderStatus: fallback.providerStatus || "",
+          fallbackQuotaLikely: fallback.quotaLikely
+        }
+        : {})
+    },
+    cost,
+    remoteImage: falImage.remoteImage,
+    localImage: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text: falImage.description || ""
+  });
+
+  return res.json({
+    text: falImage.description || "",
+    cost,
+    fallback,
+    image: {
+      ...falImage.remoteImage,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    }
+  });
+}
 
 app.post("/api/node/storyboard-plan", async (req, res) => {
   try {
@@ -10240,7 +10332,12 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
 
     const data = await response.json();
     if (!response.ok) {
-      throw httpError(response.status, data?.error?.message || "Image generation failed.", { raw: data });
+      const message = data?.error?.message || "Image generation failed.";
+      if (attempt < maxAttempts && isRetryableGeminiImageError(response.status, data?.error?.status, message)) {
+        await delay(1400 * attempt);
+        continue;
+      }
+      throw httpError(response.status, message, { raw: data, attempts: attempt });
     }
 
     const parsed = extractGeminiImageData(data);
@@ -10265,6 +10362,105 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
     text: lastText,
     raw: lastRaw
   });
+}
+
+function isRetryableGeminiImageError(status, googleStatus, message) {
+  const httpStatus = Number(status || 0);
+  if ([429, 500, 502, 503, 504].includes(httpStatus)) return true;
+  const text = `${googleStatus || ""} ${message || ""}`.toLowerCase();
+  return /resource[_\s-]*exhausted|quota|overload|capacity|high usage|try again later|temporarily unavailable/.test(text);
+}
+
+function shouldFallbackFromGoogleImageError(error) {
+  const message = publicErrorMessage(error, error?.message || "Google image generation failed.");
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  const googleStatus = rawError.status || "";
+  const text = `${googleStatus} ${message}`.toLowerCase();
+
+  if (/permission|unauthenticated|auth|api key|invalid|malformed|content[_\s-]*policy|safety|blocked|prohibited/.test(text)) {
+    return false;
+  }
+
+  return isRetryableGeminiImageError(errorStatusCode(error), googleStatus, message);
+}
+
+function googleFallbackSummary(error) {
+  const rawError = error?.raw?.error || error?.body?.error || error?.data?.error || error?.response?.data?.error || {};
+  const status = errorStatusCode(error);
+  const providerStatus = rawError.status || "";
+  const message = publicErrorMessage(error, error?.message || "Google image generation failed.");
+  const diagnosis = googleImageErrorDiagnosis({ status, providerStatus, message });
+
+  return {
+    from: "google",
+    to: "fal",
+    status,
+    providerStatus,
+    attempts: Number(error?.attempts || 0) || null,
+    reason: diagnosis.reason,
+    quotaLikely: diagnosis.quotaLikely,
+    accountLimitLikely: diagnosis.accountLimitLikely,
+    tokenLimitLikely: diagnosis.tokenLimitLikely,
+    imageLimitLikely: diagnosis.imageLimitLikely,
+    message
+  };
+}
+
+function googleImageErrorDiagnosis({ status, providerStatus, message }) {
+  const text = `${providerStatus || ""} ${message || ""}`.toLowerCase();
+  const hasQuotaSignal = /resource[_\s-]*exhausted|quota|rate[_\s-]*limit|too many requests|requests per|tokens per|images per|\brpm\b|\btpm\b|\brpd\b|\bipm\b|exceeded/.test(text);
+  const hasCapacitySignal = /overload|capacity|high usage|high demand|try again later|temporarily unavailable|unavailable/.test(text);
+  const tokenLimitLikely = /token|\btpm\b|\btpd\b/.test(text);
+  const imageLimitLikely = /image|\bipm\b/.test(text);
+
+  if (hasQuotaSignal || providerStatus === "RESOURCE_EXHAUSTED" || status === 429) {
+    return {
+      reason: "quota-or-rate-limit",
+      quotaLikely: true,
+      accountLimitLikely: true,
+      tokenLimitLikely,
+      imageLimitLikely
+    };
+  }
+
+  if (hasCapacitySignal || providerStatus === "UNAVAILABLE" || status === 503) {
+    return {
+      reason: "provider-capacity",
+      quotaLikely: false,
+      accountLimitLikely: false,
+      tokenLimitLikely: false,
+      imageLimitLikely: false
+    };
+  }
+
+  if ([500, 502, 504].includes(Number(status))) {
+    return {
+      reason: "provider-error",
+      quotaLikely: false,
+      accountLimitLikely: false,
+      tokenLimitLikely: false,
+      imageLimitLikely: false
+    };
+  }
+
+  return {
+    reason: "unknown-retryable-google-error",
+    quotaLikely: null,
+    accountLimitLikely: null,
+    tokenLimitLikely: null,
+    imageLimitLikely: null
+  };
+}
+
+function googleImageErrorDisplayMessage(summary) {
+  const providerStatus = summary.providerStatus ? ` ${summary.providerStatus}` : "";
+  const statusLabel = summary.status ? `HTTP ${summary.status}${providerStatus}` : (summary.providerStatus || "Google error");
+  const quotaCheck = summary.quotaLikely === true
+    ? "Google quota check: likely quota/rate limit on the project or billing account."
+    : summary.quotaLikely === false
+      ? "Google quota check: this looks more like Google/model capacity than account quota."
+      : "Google quota check: unclear from the provider response.";
+  return `${quotaCheck} Google error (${statusLabel}): ${summary.message}`;
 }
 
 function extractGeminiImageData(data) {
@@ -10502,7 +10698,7 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
   }
 
-  const result = await fal.subscribe(endpoint, { input, logs: true });
+  const result = await subscribeFal(endpoint, { input, logs: true });
   const remoteImage = firstFalImageResult(result?.data);
 
   if (!remoteImage?.url) {

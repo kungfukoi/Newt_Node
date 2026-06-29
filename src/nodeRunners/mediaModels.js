@@ -9,20 +9,32 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     requestedAspectRatio: node.data.aspectRatio,
     resolution: node.data.resolution,
     kreaCreativity: node.data.kreaCreativity,
+    useFalFallback: Boolean(node.data.googleImageFallbackAvailable),
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
   });
-  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
+  if (!response.ok) {
+    const error = new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
+    if (data.fallbackAvailable) {
+      error.nodePatch = {
+        googleImageFallbackAvailable: true,
+        googleImageFallbackProvider: data.fallbackProvider || "fal",
+        googleImageError: data.googleError || null
+      };
+    }
+    throw error;
+  }
 
   return {
     url: data.image.localUrl,
     type: "image",
     label: `Image ${index + 1}`,
     text: data.text || "",
-    cost: data.cost
+    cost: data.cost,
+    fallback: data.fallback || null
   };
 }
 

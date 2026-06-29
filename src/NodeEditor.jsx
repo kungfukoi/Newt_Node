@@ -4252,6 +4252,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         );
         const successes = fulfilledRunValues(settled);
         const failures = rejectedRunResults(settled);
+        const googleFallbackPatch = failures.find((failure) => failure.reason?.nodePatch?.googleImageFallbackAvailable)?.reason.nodePatch || {
+          googleImageFallbackAvailable: false,
+          googleImageFallbackProvider: "",
+          googleImageError: null
+        };
         ensureRunSuccesses(successes, failures, "Image generation failed.");
         const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
 
@@ -4261,7 +4266,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultItems,
           selectedResultIndex: firstNewIndex,
           resultText: resultTextFromItems(successes),
-          error: batchRunError("image", batchCount, successes, failures)
+          error: batchRunError("image", batchCount, successes, failures),
+          ...googleFallbackPatch
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -4320,8 +4326,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
-      updateNode(currentNode.id, { status: "error", error: error.message });
-      return { status: "error", error };
+      const message = error?.message || String(error || "Node failed.");
+      updateNode(currentNode.id, { status: "error", error: message, ...(error?.nodePatch || {}) });
+      return { status: "error", error: error instanceof Error ? error : new Error(message) };
     }
   }
 
