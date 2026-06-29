@@ -211,6 +211,11 @@ VISUAL STYLE:
 flat segmentation map, cryptomatte preview, object ID matte, VFX utility render pass, machine vision segmentation map, semantic segmentation visualization, clean RGB object isolation pass.
 
 The final output should resemble a professionally rendered Cryptomatte pass generated from a high-end CG renderer.`;
+export const colorIdToMatteImageEditPrompt = `Use the connected image labeled "Original RGB source image" as the original image when it is available. Otherwise, use the user's other connected RGB/source image reference as the original image. Use the connected black-and-white image labeled "Color ID to Matte edit mask" as the edit mask for this Image Model run.
+
+The user's prompt describes the desired change. Apply that change only inside the white matte region. Treat black regions as locked original-image content. Treat gray or softened edge pixels, if present, as feathered transition pixels.
+
+Do not render the matte itself. Do not add visible mask outlines, halos, seams, borders, glow, blur rings, color fringes, or hard edges. Blend the edited region naturally into the original image by matching lighting, color, texture, shadows, reflections, camera perspective, depth of field, grain, and compression. Preserve all unmasked subjects, objects, background areas, framing, resolution, and aspect ratio.`;
 export const patinaMapOptions = [
   { id: "basecolor", label: "Basecolor" },
   { id: "normal", label: "Normal" },

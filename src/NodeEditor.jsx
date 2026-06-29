@@ -122,6 +122,7 @@ import {
   bytedanceUpscalerPresetOptions,
   bytedanceUpscalerResolutionOptions,
   bytedanceUpscalerTierOptions,
+  colorIdToMatteImageEditPrompt,
   depthAnythingVideoColormapOptions,
   depthAnythingVideoModelOptions,
   depthAnythingVideoResolutionOptions,
@@ -363,6 +364,8 @@ const utilityImageInputPortIds = ["startFrameIn", "endFrameIn", "imageIn", "refe
 
 const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
+const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
+const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
 const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
 const editVideoOutputOptions = [
@@ -13066,6 +13069,13 @@ function isUtilityColorIdMatteModel(model) {
   return normalized.includes("color") && normalized.includes("matte");
 }
 
+function isUtilityImageColorIdMatteSource(source) {
+  return source?.type === "utility" &&
+    utilityMode(source) === "image" &&
+    isUtilityColorIdMatteModel(source.data?.utilityImageModel) &&
+    Boolean(source.data?.resultUrl);
+}
+
 function isUtilityImageToIdModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("cryptomatte") || (normalized.includes("image") && normalized.includes("id"));
@@ -14373,13 +14383,16 @@ function connectedOutputItem(source, edge) {
       : null;
   }
   const sourcePort = edge?.from?.port;
-  const url = sourceResultUrlForPort(source, sourcePort);
+  const outputType = previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } });
+  const outputItem = currentOrNewestResultItem(source, sourceResultItemsForPort(source, sourcePort, outputType));
+  const url = outputItem?.url || sourceResultUrlForPort(source, sourcePort);
   if (!url) return null;
   return {
+    ...outputItem,
     url,
-    type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
-    label: sourceResultLabelForPort(source, sourcePort) || sourceLabel(source),
-    text: source?.data?.resultText || ""
+    type: outputItem?.type || outputType,
+    label: sourceResultLabelForPort(source, sourcePort) || sourceLabel(source) || outputItem?.label,
+    text: outputItem?.text || source?.data?.resultText || ""
   };
 }
 
@@ -14593,6 +14606,22 @@ function transitionBuilderResultItemForPort(source, portId = "") {
   const labelMatch = portId === "maskVideoOut" ? /influence\s*mask|mask/i : /raw|lora/i;
   const fallbackIndex = portId === "maskVideoOut" ? 2 : 1;
   return items.find((item) => labelMatch.test(item.label || "")) || items[fallbackIndex] || items[0] || null;
+}
+
+function currentOrNewestResultItem(source, items = []) {
+  if (!items.length) return null;
+  const currentUrl = source?.data?.resultUrl || "";
+  if (currentUrl) {
+    const currentItem = items.find((item) => item.url === currentUrl);
+    if (currentItem) return currentItem;
+  }
+
+  const selectedIndex = Math.trunc(Number(source?.data?.selectedResultIndex));
+  if (Number.isFinite(selectedIndex) && selectedIndex >= 0 && items[selectedIndex]) {
+    return items[selectedIndex];
+  }
+
+  return items.at(-1) || null;
 }
 
 function currentOrNewestResultItemForType(source, items = [], type, labelPattern = null) {
@@ -14834,12 +14863,16 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     return [await runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext })];
   }
 
-  const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+  const imageInputItem = (incoming.imageIn || [])
+    .map(({ source, edge }) => connectedOutputItem(source, edge))
+    .filter((item) => item?.url)
+    .at(-1);
+  const imageUrl = imageInputItem?.url || connectedAssetUrls(incoming.imageIn).at(-1);
   if (!imageUrl) throw new Error("Connect an image to the Utility node.");
   const model = normalizedUtilityImageModelName(node.data.utilityImageModel);
 
   if (isUtilityColorIdMatteModel(model)) {
-    return [await runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName, workflowContext })];
+    return [await runColorIdMatteUtilityImage({ node, imageUrl, imageInputItem, projectId, projectName, workflowContext })];
   }
 
   const { response, data } = await nodeApi.utilityImage({
@@ -14864,11 +14897,13 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     label: image.label || `${data.modelName || "Image"} ${index + 1}`,
     text: data.text || "",
     seed: data.seed,
-    cost: data.cost
+    cost: data.cost,
+    sourceImageUrl: image.sourceImageUrl || "",
+    sourceRgbImageUrl: image.sourceRgbImageUrl || image.sourceImageUrl || ""
   }));
 }
 
-async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName, workflowContext }) {
+async function runColorIdMatteUtilityImage({ node, imageUrl, imageInputItem = null, projectId, projectName, workflowContext }) {
   const color = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   if (!color) throw new Error("Pick a color in the Utility node.");
 
@@ -14893,11 +14928,17 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectN
 
   const { response, data } = await nodeApi.colorIdMatteForm(form);
   if (!response.ok) throw new Error(data.error || "Color ID to Matte failed.");
+  const sourceRgbImageUrl = imageInputItem?.sourceRgbImageUrl || imageInputItem?.sourceImageUrl || "";
 
   return {
     url: data.image.localUrl,
     type: "image",
     label: data.image.label || "Color ID to Matte",
+    imageEditRole: "mask",
+    imageEditInstruction: colorIdToMatteImageEditPrompt,
+    sourceImageUrl: sourceRgbImageUrl,
+    sourceRgbImageUrl,
+    sourceColorIdImageUrl: imageUrl,
     text: data.text || "",
     cost: data.cost
   };
@@ -15881,6 +15922,13 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
           }))
         ];
       }
+      if (isUtilityImageColorIdMatteSource(source)) {
+        const sourceRgbImageUrl = outputItem?.sourceRgbImageUrl || outputItem?.sourceImageUrl || "";
+        return [
+          sourceRgbImageUrl ? { url: sourceRgbImageUrl, label: colorIdToMatteOriginalReferenceLabel } : null,
+          { url: outputUrl, label: colorIdToMatteEditMaskReferenceLabel }
+        ].filter(Boolean);
+      }
       return {
         url: outputUrl,
         label: source.type === "transfer" ? moodBoardOutputFileName : outputItem?.label || sourceLabel(source)
@@ -16057,13 +16105,16 @@ function activeImageInstructionLabels(items = [], incomingByNode = null) {
     ...new Set(
       items
         .filter(({ source }) => isActiveComposerSource(source) || promptPiecesForSource(source).length)
-        .map(({ source }) => ({
-          camera: "Camera",
-          composer: composerCharacterBindingsForSource(source, incomingByNode).length ? "Composer guide + character map" : "Composer guide",
-          style: "Style",
-          transfer: "Mood Board",
-          character: "Character identity"
-        })[source.type])
+        .map(({ source }) => {
+          if (isUtilityImageColorIdMatteSource(source)) return "Color ID matte mask";
+          return ({
+            camera: "Camera",
+            composer: composerCharacterBindingsForSource(source, incomingByNode).length ? "Composer guide + character map" : "Composer guide",
+            style: "Style",
+            transfer: "Mood Board",
+            character: "Character identity"
+          })[source.type];
+        })
         .filter(Boolean)
     )
   ];
@@ -16120,6 +16171,10 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
   if (source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl) {
     return characterImagePromptPieces(source, namedCharacterReferences);
+  }
+
+  if (isUtilityImageColorIdMatteSource(source)) {
+    return [colorIdToMatteImageEditPrompt];
   }
 
   if (source.type !== "transfer" || !source.data.activated || !source.data.resultUrl) return [];

@@ -2662,7 +2662,9 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
       label: selectedModel.displayName,
       localUrl: output.publicPath,
       fileName: output.fileName,
-      mimeType: output.mimeType
+      mimeType: output.mimeType,
+      sourceImageUrl: imageUrl,
+      sourceRgbImageUrl: imageUrl
     },
     images: [
       {
@@ -2670,7 +2672,9 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
         label: selectedModel.displayName,
         localUrl: output.publicPath,
         fileName: output.fileName,
-        mimeType: output.mimeType
+        mimeType: output.mimeType,
+        sourceImageUrl: imageUrl,
+        sourceRgbImageUrl: imageUrl
       }
     ]
   });
