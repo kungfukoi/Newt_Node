@@ -2,25 +2,31 @@ import React from "react";
 
 export let THREE = null;
 export let GLTFLoader = null;
+export let MTLLoader = null;
+export let OBJLoader = null;
 export let cloneSkeleton = null;
 
 let threeRuntimePromise = null;
 
 export function loadThreeRuntime() {
-  if (THREE && GLTFLoader && cloneSkeleton) {
-    return Promise.resolve({ THREE, GLTFLoader, cloneSkeleton });
+  if (THREE && GLTFLoader && MTLLoader && OBJLoader && cloneSkeleton) {
+    return Promise.resolve({ THREE, GLTFLoader, MTLLoader, OBJLoader, cloneSkeleton });
   }
 
   if (!threeRuntimePromise) {
     threeRuntimePromise = Promise.all([
       import("three"),
       import("three/examples/jsm/loaders/GLTFLoader.js"),
+      import("three/examples/jsm/loaders/MTLLoader.js"),
+      import("three/examples/jsm/loaders/OBJLoader.js"),
       import("three/examples/jsm/utils/SkeletonUtils.js")
-    ]).then(([threeModule, loaderModule, skeletonModule]) => {
+    ]).then(([threeModule, gltfLoaderModule, mtlLoaderModule, objLoaderModule, skeletonModule]) => {
       THREE = threeModule;
-      GLTFLoader = loaderModule.GLTFLoader;
+      GLTFLoader = gltfLoaderModule.GLTFLoader;
+      MTLLoader = mtlLoaderModule.MTLLoader;
+      OBJLoader = objLoaderModule.OBJLoader;
       cloneSkeleton = skeletonModule.clone;
-      return { THREE, GLTFLoader, cloneSkeleton };
+      return { THREE, GLTFLoader, MTLLoader, OBJLoader, cloneSkeleton };
     });
   }
 
@@ -28,7 +34,7 @@ export function loadThreeRuntime() {
 }
 
 export function useThreeRuntimeReady() {
-  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && cloneSkeleton));
+  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && MTLLoader && OBJLoader && cloneSkeleton));
 
   React.useEffect(() => {
     if (ready) return undefined;

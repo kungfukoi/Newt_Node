@@ -29,7 +29,7 @@ Current release: `v3.0.0-beta.0`
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
 - **Provider routing**: Fal is the default provider path. When `GOOGLE_API_KEY` exists, supported Google image models use Google directly; otherwise they route through Fal.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
-- **Edit node**: Local ffmpeg edits support scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
+- **Edit node**: Local ffmpeg edits support live frame previews while controls change, plus scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
 - **Video handling**: Video thumbnails and result panes keep native scrub controls; use Ctrl-drag when dragging video results into another node.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.

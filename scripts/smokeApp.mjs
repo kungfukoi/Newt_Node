@@ -6,6 +6,7 @@ const requiredHealthRoutes = [
   "composerFrame",
   "composerPoses",
   "editMedia",
+  "editPreview",
   "extractVideoFrame",
   "generate3d",
   "utilityImage",

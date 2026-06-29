@@ -241,6 +241,7 @@ Local API routes should live in the smallest backend owner that fits the route. 
 - Add a health route flag for new API routes and update `scripts/smokeApp.mjs` required routes when the route is part of startup health.
 - Add browser API wrappers in `src/api/newtApi.js` before UI code calls a route.
 - Edit node media operations live at `/api/node/edit-media`, use local ffmpeg/ffprobe, require a local NewtNode asset URL, and must write managed image/video outputs into the active workflow package or local outputs folder.
+- Edit node live previews live at `/api/node/edit-preview`, render temporary PNG frame previews with local ffmpeg, return inline preview data, and must not append history or create project output files.
 - Composer pose library routes live at `/api/composer-poses`: `GET` lists library poses, `POST` saves or updates pose JSON under `public/models/poses`, and `DELETE /api/composer-poses/:poseId` removes the selected library pose file. Keep file names sanitized server-side.
 - Use `subscribeFal` for Fal calls so queue and failure logging stays consistent.
 - Normalize Fal file responses with `normalizeFalFile` and fallback search helpers where useful.
@@ -361,6 +362,8 @@ The Edit node establishes the standard for local ffmpeg-backed media editing nod
 - Source URLs must resolve to local NewtNode assets under `/outputs`, `/uploads`, or `/workflow-assets`; remote or browser-only object URLs should fail with a helpful message.
 - Output files should be managed assets written to the active workflow package `outputs/` folder, or to local `/outputs/<workflow-name>/` when no package is attached.
 - Video output formats are MP4, WebM, and ProRes MOV. Image edits output PNG.
+- The Settings drawer should show a live ffmpeg-backed preview frame for the selected effect and source. Preview requests should debounce control changes, ignore stale responses, and return temporary inline PNG data instead of writing output/history entries.
+- Video previews use a frame-time slider. Time-only effects should still preview a representative frame: Trim previews within the selected start/end range, Reverse maps the selected preview time from the end of the source, and FPS previews the source frame because it does not visibly change a single frame.
 - Transform `Crop Center` uses pixel `Width` and `Height`, seeded from the connected source dimensions when known. It uses sliders plus number inputs and an aspect-lock toggle; do not reintroduce percentage crop controls for this effect.
 - Time `Trim` uses start/end seconds tied to a compact clip timeline. Dragging the head or tail updates the fields, and typing in the fields updates the handles. The default end time should seed from the connected clip duration when metadata is available.
 - Edit outputs should append to `resultItems`, preserve previous results, support download, and connect anywhere a normal image or video output can connect.

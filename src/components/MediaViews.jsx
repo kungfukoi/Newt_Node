@@ -1493,7 +1493,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             </div>
           )}
           {displayItem.type === "video" && <video src={displayItem.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
-          {displayItem.type === "model3d" && <Model3DViewer url={displayItem.url} label={label} />}
+          {displayItem.type === "model3d" && <Model3DViewer url={displayItem.url} assets={displayItem.assets} label={label} />}
           {displayItem.type === "audio" && (
             <div className="output-lightbox-audio">
               <FileAudio size={34} />
@@ -1563,7 +1563,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
           <div className="result-item" key={activeItem.url}>
             {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} draggable={false} onError={useNewtNodeImageFallback} />}
             {activeItem.type === "video" && <video src={activeItem.url} controls loop draggable={false} onError={useNewtNodeVideoFallback} />}
-            {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
+            {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} assets={activeItem.assets} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
           <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
             <Download size={14} />
@@ -1603,10 +1603,10 @@ export function useNewtNodeVideoFallback(event) {
   video.load();
 }
 
-export function Model3DViewer({ url, label }) {
+export function Model3DViewer({ url, label, assets }) {
   return (
     <React.Suspense fallback={<Model3DViewerFallback label={label} />}>
-      <LazyModel3DViewer url={url} label={label} />
+      <LazyModel3DViewer url={url} assets={assets} label={label} />
     </React.Suspense>
   );
 }

@@ -47,8 +47,8 @@ The strongest version of this post should feel like a guided studio tour:
    Caption: Utility nodes make cleanup, matting, interpolation, upscaling, and extraction part of the same graph.
 
 6. Edit node workflow
-   Capture a Video or Image node connected into an Edit node, with the Trim timeline or Crop Center pixel controls visible.
-   Caption: The Edit node keeps local ffmpeg transforms, trims, color passes, blur, and effects inside the same creative graph.
+   Capture a Video or Image node connected into an Edit node, with the live preview, Trim timeline, or Crop Center pixel controls visible.
+   Caption: The Edit node keeps live-previewed ffmpeg transforms, trims, color passes, blur, and effects inside the same creative graph.
 
 7. Preview node gallery
    Capture a Preview node with multiple results and the next/previous controls visible.
@@ -155,9 +155,9 @@ The newest piece of that continuity is the **Edit** node.
 
 Instead of round-tripping out to another tool for basic media work, I can keep local ffmpeg edits in the graph. Scale, crop, rotate, flip, trim, frame-rate changes, color adjustment, blur, sharpen, vignette, noise, negative, and edge-detect passes can all sit between generation steps.
 
-[IMAGE 08: Edit node with Trim timeline or Crop Center controls]
+[IMAGE 08: Edit node with live preview, Trim timeline, or Crop Center controls]
 
-The interaction matters here. Crop Center works in pixels, starts from the source dimensions, and has sliders plus an aspect-lock toggle. Trim has a small clip timeline, so the start and end fields can be dragged visually instead of guessed numerically.
+The interaction matters here. Crop Center works in pixels, starts from the source dimensions, and has sliders plus an aspect-lock toggle. Trim has a small clip timeline, so the start and end fields can be dragged visually instead of guessed numerically. As controls change, the node renders a quick local preview frame so I can see the effect before committing to a full output.
 
 The result is still a normal NewtNode image or video output. It can go into Preview, another Edit node, a Utility node, an Image Model, a Video Model, or a 3D node if the media type fits.
 

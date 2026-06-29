@@ -233,6 +233,65 @@ import {
 } from "./workflowState.js";
 import "./nodeEditor.css";
 
+class NodeCardBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Node card failed to render", {
+      nodeId: this.props.node?.id,
+      nodeType: this.props.node?.type,
+      error,
+      info
+    });
+  }
+
+  componentDidUpdate(previousProps) {
+    if (this.state.error && previousProps.node !== this.props.node) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    const node = this.props.node || {};
+    const nodeData = node.data || {};
+    const title = nodeData.title || String(node.type || "Unknown node");
+    const x = Number.isFinite(Number(node.x)) ? Number(node.x) : 0;
+    const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0;
+
+    return (
+      <article
+        className="node-card node-card-error"
+        style={{
+          transform: `translate(${x}px, ${y}px)`
+        }}
+        data-node-card-id={node.id}
+      >
+        <div className="node-title">
+          <span className="node-title-label">
+            <Wrench size={15} />
+            <span className="node-title-name">{title}</span>
+          </span>
+          <button onClick={() => this.props.onRemove?.(node.id)} title="Remove node">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="node-body model-node-body">
+          <p className="utility-model-description">This node could not render. Remove it or switch to a branch that supports this node type.</p>
+        </div>
+      </article>
+    );
+  }
+}
+
 const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMattePicker })));
 const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
@@ -4507,54 +4566,55 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </svg>
 
           {nodes.map((node) => (
-            <NodeCard
-              key={node.id}
-              node={node}
-              onDragStart={startNodeDrag}
-              onRemove={removeNode}
-              onUpdate={updateNode}
-              onConnectStart={startConnection}
-              onDisconnectInput={disconnectInputPort}
-              connectedPortKeys={connectedPortKeys}
-              incoming={incomingByNode[node.id] || {}}
-              incomingByNode={incomingByNode}
-              onRun={runNode}
-              onUpload={uploadMediaAsset}
-              onOutputImport={importOutputAssetToMediaNode}
-              onTransferImagesUpload={uploadTransferImages}
-              onTransferOutputImport={importOutputAssetToTransferNode}
-              onTransferImageRemove={removeTransferImage}
-              onTransferActivate={activateTransferNode}
-              onTransferUnlock={unlockTransferNode}
-              onCharacterPortraitUpload={uploadCharacterPortrait}
-              onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
-              onCharacterWardrobesUpload={uploadCharacterWardrobes}
-              onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
-              onCharacterVoicesUpload={uploadCharacterVoices}
-              onCharacterWardrobeRemove={removeCharacterWardrobe}
-              onCharacterVoiceRemove={removeCharacterVoice}
-              onCharacterActivate={activateCharacterNode}
-              onCharacterUnlock={unlockCharacterNode}
-              onStoryboardPlan={planStoryboardNode}
-              onStoryboardGenerateAll={generateStoryboardNode}
-              onStoryboardGenerateFrame={generateStoryboardFrame}
-              onStoryboardExport={exportStoryboardBoard}
-              onStoryboardCharacterUpload={uploadStoryboardCharacter}
-              onStoryboardCharacterImport={importStoryboardCharacter}
-              onStoryboardCharacterUpdate={updateStoryboardCharacter}
-              onStoryboardCharacterRemove={removeStoryboardCharacter}
-              onUndoSnapshot={pushUndoSnapshot}
-              onPreviewResizeStart={startPreviewResize}
-              onPreviewOpen={setPreviewLightboxItem}
-              onPreviewLayoutExport={exportPreviewLayoutBoard}
-              onOpenComposer={setComposerEditorNodeId}
-              running={node.data.status === "running"}
-              transferCompiling={compilingTransferNodeId === node.id}
-              selected={selectedNodeSet.has(node.id)}
-              tagHighlight={referenceTagHighlights.get(node.id)}
-              imageModelOptions={enabledImageModels}
-              videoModelOptions={enabledVideoModels}
-            />
+            <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
+              <NodeCard
+                node={node}
+                onDragStart={startNodeDrag}
+                onRemove={removeNode}
+                onUpdate={updateNode}
+                onConnectStart={startConnection}
+                onDisconnectInput={disconnectInputPort}
+                connectedPortKeys={connectedPortKeys}
+                incoming={incomingByNode[node.id] || {}}
+                incomingByNode={incomingByNode}
+                onRun={runNode}
+                onUpload={uploadMediaAsset}
+                onOutputImport={importOutputAssetToMediaNode}
+                onTransferImagesUpload={uploadTransferImages}
+                onTransferOutputImport={importOutputAssetToTransferNode}
+                onTransferImageRemove={removeTransferImage}
+                onTransferActivate={activateTransferNode}
+                onTransferUnlock={unlockTransferNode}
+                onCharacterPortraitUpload={uploadCharacterPortrait}
+                onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
+                onCharacterWardrobesUpload={uploadCharacterWardrobes}
+                onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
+                onCharacterVoicesUpload={uploadCharacterVoices}
+                onCharacterWardrobeRemove={removeCharacterWardrobe}
+                onCharacterVoiceRemove={removeCharacterVoice}
+                onCharacterActivate={activateCharacterNode}
+                onCharacterUnlock={unlockCharacterNode}
+                onStoryboardPlan={planStoryboardNode}
+                onStoryboardGenerateAll={generateStoryboardNode}
+                onStoryboardGenerateFrame={generateStoryboardFrame}
+                onStoryboardExport={exportStoryboardBoard}
+                onStoryboardCharacterUpload={uploadStoryboardCharacter}
+                onStoryboardCharacterImport={importStoryboardCharacter}
+                onStoryboardCharacterUpdate={updateStoryboardCharacter}
+                onStoryboardCharacterRemove={removeStoryboardCharacter}
+                onUndoSnapshot={pushUndoSnapshot}
+                onPreviewResizeStart={startPreviewResize}
+                onPreviewOpen={setPreviewLightboxItem}
+                onPreviewLayoutExport={exportPreviewLayoutBoard}
+                onOpenComposer={setComposerEditorNodeId}
+                running={node.data?.status === "running"}
+                transferCompiling={compilingTransferNodeId === node.id}
+                selected={selectedNodeSet.has(node.id)}
+                tagHighlight={referenceTagHighlights.get(node.id)}
+                imageModelOptions={enabledImageModels}
+                videoModelOptions={enabledVideoModels}
+              />
+            </NodeCardBoundary>
           ))}
         </div>
         {selectionBounds && (
@@ -4769,30 +4829,31 @@ function NodeCard({
   videoModelOptions
 }) {
   const config = getNodeConfig(node.type);
+  const nodeData = node.data || {};
   const Icon = config.icon;
-  const nodeColor = nodeColorForData(node.data);
+  const nodeColor = nodeColorForData(nodeData);
   const [editingTitle, setEditingTitle] = React.useState(false);
-  const [draftTitle, setDraftTitle] = React.useState(node.data.title || "");
+  const [draftTitle, setDraftTitle] = React.useState(nodeData.title || "");
 
   React.useEffect(() => {
     if (!editingTitle) {
-      setDraftTitle(node.data.title || "");
+      setDraftTitle(nodeData.title || "");
     }
-  }, [node.data.title, editingTitle]);
+  }, [nodeData.title, editingTitle]);
 
   function commitTitleEdit() {
-    const title = draftTitle.trim() || node.data.title || configTitleFallback(node.type);
+    const title = draftTitle.trim() || nodeData.title || configTitleFallback(node.type);
     onUpdate(node.id, { title });
     setDraftTitle(title);
     setEditingTitle(false);
   }
 
   function cancelTitleEdit() {
-    setDraftTitle(node.data.title || "");
+    setDraftTitle(nodeData.title || "");
     setEditingTitle(false);
   }
 
-  const moodBoardScalable = node.type === "transfer" && node.data.locked && node.data.activated && node.data.resultUrl;
+  const moodBoardScalable = node.type === "transfer" && nodeData.locked && nodeData.activated && nodeData.resultUrl;
   const storyboardScalable = node.type === "storyboard";
 
   return (
@@ -4800,10 +4861,10 @@ function NodeCard({
       className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
-        "--preview-scale": node.data.previewScale || 1,
+        "--preview-scale": nodeData.previewScale || 1,
         "--node-color": nodeColor || "transparent",
-        "--mood-board-scale": moodBoardScalable ? node.data.moodBoardScale || 1 : 1,
-        "--storyboard-scale": storyboardScalable ? node.data.storyboardScale || 1 : 1,
+        "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
+        "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
         "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
@@ -4848,7 +4909,7 @@ function NodeCard({
                 }
               }}
             >
-              {node.data.title}
+              {nodeData.title || configTitleFallback(node.type)}
             </span>
           )}
           <NodeColorPicker color={nodeColor} onChange={(color) => onUpdate(node.id, { nodeColor: color })} />
@@ -5100,6 +5161,107 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
         <span>{formatTimelineTime(safeStart)}</span>
         <span>{formatTimelineTime(safeEnd)}</span>
       </div>
+    </div>
+  );
+}
+
+function EditLivePreview({ sourceUrl, sourceType, sourceDimensions, effect, settings }) {
+  const requestSeqRef = React.useRef(0);
+  const duration = finiteNumber(sourceDimensions?.duration, 0);
+  const settingsSignature = JSON.stringify(settings || {});
+  const [frameTime, setFrameTime] = React.useState(0);
+  const [preview, setPreview] = React.useState({
+    status: sourceUrl ? "loading" : "idle",
+    dataUrl: "",
+    error: "",
+    frameTime: 0
+  });
+  const timeBounds = editPreviewTimeBounds(effect, settings, duration);
+  const boundedFrameTime = sourceType === "video" ? clamp(frameTime, timeBounds.min, timeBounds.max) : 0;
+
+  React.useEffect(() => {
+    if (sourceType !== "video") {
+      setFrameTime(0);
+      return;
+    }
+    setFrameTime((current) => clamp(current || timeBounds.min, timeBounds.min, timeBounds.max));
+  }, [sourceType, duration, effect.id, settingsSignature, timeBounds.min, timeBounds.max]);
+
+  React.useEffect(() => {
+    if (!sourceUrl) {
+      requestSeqRef.current += 1;
+      setPreview({ status: "idle", dataUrl: "", error: "", frameTime: 0 });
+      return undefined;
+    }
+
+    const requestId = requestSeqRef.current + 1;
+    requestSeqRef.current = requestId;
+    setPreview((current) => ({
+      ...current,
+      status: "loading",
+      error: ""
+    }));
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const { response, data } = await nodeApi.editPreview({
+          effectId: effect.id,
+          sourceMediaType: sourceType,
+          sourceImageUrls: sourceType === "image" ? [sourceUrl] : [],
+          sourceVideoUrls: sourceType === "video" ? [sourceUrl] : [],
+          settings,
+          previewTime: boundedFrameTime
+        }, "Edit preview");
+        if (requestSeqRef.current !== requestId) return;
+        if (!response.ok) throw new Error(data.error || "Preview failed.");
+        const dataUrl = data.preview?.dataUrl || "";
+        setPreview({
+          status: dataUrl ? "ready" : "error",
+          dataUrl,
+          error: dataUrl ? "" : "Preview failed.",
+          frameTime: finiteNumber(data.preview?.frameTime, boundedFrameTime)
+        });
+      } catch (error) {
+        if (requestSeqRef.current !== requestId) return;
+        setPreview((current) => ({
+          ...current,
+          status: "error",
+          error: error.message || "Preview failed."
+        }));
+      }
+    }, 320);
+
+    return () => window.clearTimeout(timer);
+  }, [sourceUrl, sourceType, effect.id, settingsSignature, boundedFrameTime]);
+
+  const hasPreview = Boolean(preview.dataUrl);
+  const showFrameControl = sourceType === "video" && duration > 0 && timeBounds.max > timeBounds.min;
+  const displayTime = preview.status === "ready" ? preview.frameTime : boundedFrameTime;
+
+  return (
+    <div className={`edit-live-preview ${hasPreview ? "has-preview" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
+      <div className="edit-live-preview-frame">
+        {hasPreview ? (
+          <img src={preview.dataUrl} alt={`${effect.label} preview`} draggable={false} />
+        ) : (
+          <span>{sourceUrl ? preview.status === "loading" ? "Previewing..." : "Preview unavailable" : "Connect source to preview"}</span>
+        )}
+        {preview.status === "loading" && hasPreview && <span className="edit-live-preview-badge">Updating</span>}
+      </div>
+      {showFrameControl && (
+        <div className="edit-live-preview-controls">
+          <input
+            type="range"
+            min={timeBounds.min}
+            max={timeBounds.max}
+            step={0.01}
+            value={boundedFrameTime}
+            onChange={(event) => setFrameTime(Number(event.target.value))}
+          />
+          <span>{formatTimelineTime(displayTime)}</span>
+        </div>
+      )}
+      {preview.error && <small>{preview.error}</small>}
     </div>
   );
 }
@@ -5945,6 +6107,16 @@ function NodeBody({
     if (samePreviewLayoutItems(currentItems, nextItems)) return;
     onUpdate(node.id, { previewLayoutItems: nextItems });
   }, [incoming.sourceIn, node, onUpdate]);
+
+  if (config.unsupported) {
+    return (
+      <div className="node-body model-node-body">
+        <p className="utility-model-description">
+          This saved node type is not available in this branch: {node.type || "unknown"}.
+        </p>
+      </div>
+    );
+  }
 
   if (node.type === "plainText") {
     return (
@@ -7192,7 +7364,7 @@ function NodeBody({
             <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
               {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} draggable={false} onError={useNewtNodeImageFallback} />}
               {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
-              {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
+              {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
             {previewItems.length > 1 && (
@@ -7934,6 +8106,13 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
+          <EditLivePreview
+            sourceUrl={sourceUrl}
+            sourceType={sourceType}
+            sourceDimensions={sourceDimensions}
+            effect={effect}
+            settings={settings}
+          />
           {effect.id === "crop" ? (
             renderEditCropControls()
           ) : effect.id === "trim" ? (
@@ -8650,6 +8829,7 @@ function NodeBody({
     const frontConnected = Boolean(frontInputs.length);
     const generateType = normalizeModel3DGenerateType(node.data.generateType);
     const faceCount = model3DFaceCount(node.data.faceCount);
+    const pbrEnabled = node.data.enablePbr !== false;
 
     return (
       <div
@@ -8738,8 +8918,8 @@ function NodeBody({
           </NodeRow>
           <NodeRow label="PBR">
             <button
-              className={`node-toggle ${node.data.enablePbr && generateType !== "Geometry" ? "enabled" : ""}`}
-              onClick={() => onUpdate(node.id, { enablePbr: !node.data.enablePbr })}
+              className={`node-toggle ${pbrEnabled && generateType !== "Geometry" ? "enabled" : ""}`}
+              onClick={() => onUpdate(node.id, { enablePbr: !pbrEnabled })}
               disabled={generateType === "Geometry"}
               title={generateType === "Geometry" ? "PBR is ignored in Geometry mode" : "Enable PBR textures"}
             >
@@ -9805,7 +9985,17 @@ function getNodeConfig(type) {
     }
   };
 
-  return configs[type];
+  return configs[type] || unsupportedNodeConfig(type);
+}
+
+function unsupportedNodeConfig(type) {
+  return {
+    icon: Wrench,
+    input: [],
+    output: [],
+    unsupported: true,
+    label: nodeTypeLabel(type)
+  };
 }
 
 function createDefaultNodeData(type, label, count) {
@@ -9857,7 +10047,7 @@ function createDefaultNodeData(type, label, count) {
       title,
       model: model3DNames.hunyuanPro,
       generateType: "Normal",
-      enablePbr: false,
+      enablePbr: true,
       faceCount: 500000,
       resultType: "model3d",
       settingsOpen: false
@@ -10605,6 +10795,24 @@ function editSettingsForEffect(data = {}, effect = findEditEffect(data.editEffec
     }
   }
   return settings;
+}
+
+function editPreviewTimeBounds(effect = {}, settings = {}, duration = 0) {
+  const safeDuration = Math.max(0, finiteNumber(duration, 0));
+  if (effect?.id !== "trim") {
+    return {
+      min: 0,
+      max: safeDuration
+    };
+  }
+
+  const fallbackEnd = safeDuration || Math.max(0, finiteNumber(settings.end, 0), finiteNumber(settings.start, 0));
+  const start = clamp(finiteNumber(settings.start, 0), 0, fallbackEnd);
+  const end = clamp(finiteNumber(settings.end, fallbackEnd), start, fallbackEnd);
+  return {
+    min: start,
+    max: Math.max(start, end)
+  };
 }
 
 function resetEditOutputPatch(resultType) {
@@ -13083,7 +13291,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
-  return nextNode;
+  return {
+    ...nextNode,
+    data: {
+      ...data,
+      title: data.title || nodeTypeLabel(nextNode.type)
+    }
+  };
 }
 
 function defaultStoryboardFrames(count = storyboardDefaultFrameCount) {
@@ -13656,7 +13870,7 @@ function normalizeModel3DData(data = {}) {
     title: data.title || "3D",
     model: data.model || model3DNames.hunyuanPro,
     generateType: normalizeModel3DGenerateType(data.generateType),
-    enablePbr: Boolean(data.enablePbr),
+    enablePbr: data.enablePbr !== false,
     faceCount: model3DFaceCount(data.faceCount),
     resultType: "model3d",
     batchCount: "1"

@@ -91,6 +91,7 @@ function canRetryLocalApi(path) {
 
 function localApiRouteKey(path) {
   if (path.includes("open-project-output-folder")) return "projectOutputFolder";
+  if (path.includes("edit-preview")) return "editPreview";
   if (path.includes("edit-media")) return "editMedia";
   if (path.includes("utility-image")) return "utilityImage";
   if (path.includes("utility-video")) return "utilityVideo";
@@ -248,6 +249,10 @@ export const nodeApi = {
 
   editMedia(body, label = "Edit media") {
     return fetchJsonApi("/api/node/edit-media", jsonBody(body), label);
+  },
+
+  editPreview(body, label = "Edit preview") {
+    return fetchJsonApi("/api/node/edit-preview", jsonBody(body), label);
   }
 };
 

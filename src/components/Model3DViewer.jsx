@@ -1,10 +1,13 @@
 import React from "react";
-import { GLTFLoader, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
+import { GLTFLoader, MTLLoader, OBJLoader, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
 
-export function Model3DViewer({ url, label }) {
+export function Model3DViewer({ url, label, assets }) {
   const threeReady = useThreeRuntimeReady();
   const hostRef = React.useRef(null);
   const [state, setState] = React.useState(url ? "loading" : "empty");
+  const objUrl = modelAssetUrl(assets?.obj);
+  const mtlUrl = modelAssetUrl(assets?.mtl);
+  const textureUrl = modelAssetUrl(assets?.texture);
 
   React.useEffect(() => {
     const host = hostRef.current;
@@ -117,33 +120,124 @@ export function Model3DViewer({ url, label }) {
     renderer.domElement.addEventListener("pointercancel", handlePointerUp);
     renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
 
-    new GLTFLoader().load(
-      url,
-      (gltf) => {
-        if (disposed) return;
-        modelRoot = gltf.scene || gltf.scenes?.[0] || null;
-        if (!modelRoot) {
-          setState("error");
+    function prepareMaterial(material) {
+      if (!material) return;
+      ["map", "emissiveMap", "normalMap", "roughnessMap", "metalnessMap", "aoMap"].forEach((key) => {
+        const texture = material[key];
+        if (!texture?.isTexture) return;
+        if (key === "map" || key === "emissiveMap") texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+      });
+      material.side = THREE.DoubleSide;
+      material.needsUpdate = true;
+    }
+
+    function prepareModelMaterials(root) {
+      root.traverse((child) => {
+        const materials = Array.isArray(child.material) ? child.material : child.material ? [child.material] : [];
+        materials.forEach(prepareMaterial);
+      });
+    }
+
+    function attachModel(root) {
+      if (disposed) return;
+      modelRoot = root;
+      if (!modelRoot) {
+        setState("error");
+        return;
+      }
+
+      prepareModelMaterials(modelRoot);
+      const box = new THREE.Box3().setFromObject(modelRoot);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const largestSide = Math.max(size.x, size.y, size.z) || 1;
+      const scale = 2.25 / largestSide;
+      modelRoot.scale.setScalar(scale);
+      modelRoot.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+      rig.add(modelRoot);
+      distance = Math.max(2.4, Math.min(7, 3.1 + largestSide * 0.2));
+      resize();
+      setState("ready");
+    }
+
+    function loadGltfFallback() {
+      new GLTFLoader().load(
+        url,
+        (gltf) => {
+          attachModel(gltf.scene || gltf.scenes?.[0] || null);
+        },
+        undefined,
+        () => {
+          if (!disposed) setState("error");
+        }
+      );
+    }
+
+    function loadObjWithTextureFallback() {
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.setCrossOrigin("anonymous");
+      textureLoader.load(
+        textureUrl,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.72, metalness: 0.05, side: THREE.DoubleSide });
+          new OBJLoader().load(
+            objUrl,
+            (object) => {
+              object.traverse((child) => {
+                if (child.isMesh || child.isSkinnedMesh) child.material = material.clone();
+              });
+              attachModel(object);
+            },
+            undefined,
+            loadGltfFallback
+          );
+        },
+        undefined,
+        loadGltfFallback
+      );
+    }
+
+    function loadTexturedObj() {
+      if (!objUrl || !mtlUrl) {
+        if (objUrl && textureUrl) {
+          loadObjWithTextureFallback();
           return;
         }
-
-        const box = new THREE.Box3().setFromObject(modelRoot);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-        const largestSide = Math.max(size.x, size.y, size.z) || 1;
-        const scale = 2.25 / largestSide;
-        modelRoot.scale.setScalar(scale);
-        modelRoot.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
-        rig.add(modelRoot);
-        distance = Math.max(2.4, Math.min(7, 3.1 + largestSide * 0.2));
-        resize();
-        setState("ready");
-      },
-      undefined,
-      () => {
-        if (!disposed) setState("error");
+        loadGltfFallback();
+        return;
       }
-    );
+
+      const mtlLoader = new MTLLoader();
+      mtlLoader.setCrossOrigin("anonymous");
+      mtlLoader.load(
+        mtlUrl,
+        (materials) => {
+          materials.preload();
+          Object.values(materials.materials || {}).forEach(prepareMaterial);
+          const objLoader = new OBJLoader();
+          objLoader.setMaterials(materials);
+          objLoader.load(
+            objUrl,
+            attachModel,
+            undefined,
+            () => {
+              if (textureUrl) loadObjWithTextureFallback();
+              else loadGltfFallback();
+            }
+          );
+        },
+        undefined,
+        () => {
+          if (textureUrl) loadObjWithTextureFallback();
+          else loadGltfFallback();
+        }
+      );
+    }
+
+    loadTexturedObj();
 
     resize();
     animate();
@@ -161,7 +255,7 @@ export function Model3DViewer({ url, label }) {
       renderer.dispose();
       host.innerHTML = "";
     };
-  }, [url, threeReady]);
+  }, [url, threeReady, objUrl, mtlUrl, textureUrl]);
 
   return (
     <div className={`model-3d-viewer ${state}`} aria-label={label || "3D model viewer"} onPointerDown={(event) => event.stopPropagation()}>
@@ -171,6 +265,10 @@ export function Model3DViewer({ url, label }) {
       {state === "empty" && <span>No 3D model</span>}
     </div>
   );
+}
+
+function modelAssetUrl(asset) {
+  return asset?.localUrl || asset?.url || "";
 }
 
 function disposeThreeObject(root) {

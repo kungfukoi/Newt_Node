@@ -11,6 +11,7 @@ import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
@@ -326,6 +327,7 @@ function buildHealthPayload() {
       colorIdVideoMatte: true,
       compositeVideo: true,
       editMedia: true,
+      editPreview: true,
       wanVaceMaskToVideo: true,
       wanVaceInpainting: true,
       composerFrame: true,
@@ -2660,33 +2662,33 @@ app.post("/api/node/utility-video", async (req, res) => {
 
 app.post("/api/node/edit-media", async (req, res) => {
   try {
-    const requestedEffectId = String(req.body.effectId || "").trim();
-    const effect = findEditEffect(requestedEffectId);
-    if (!requestedEffectId || effect.id !== requestedEffectId) {
-      return res.status(400).json({ error: "Unsupported Edit effect." });
-    }
-
-    const sourceMediaType = normalizeEditSourceType(effect, req.body.sourceMediaType);
-    const sourceUrls = sourceMediaType === "image" ? req.body.sourceImageUrls : req.body.sourceVideoUrls;
-    const sourceUrl = firstLocalOutput(sourceUrls);
-    if (!sourceUrl) {
-      const hasSourceUrl = (Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls]).some((url) => String(url || "").trim());
-      if (hasSourceUrl) {
-        return res.status(400).json({
-          error: `${effect.label} needs a local NewtNode ${sourceMediaType} asset. Re-run or re-upload the source so it is saved under outputs, uploads, or the workflow package before editing.`
-        });
-      }
-      return res.status(400).json({ error: `${effect.label} requires a connected ${sourceMediaType}.` });
-    }
+    const request = editMediaRequestFromBody(req.body);
+    if (request.error) return res.status(request.status).json({ error: request.error });
 
     return createEditMediaResult(req, res, {
-      effect,
-      sourceMediaType,
-      sourceUrl
+      effect: request.effect,
+      sourceMediaType: request.sourceMediaType,
+      sourceUrl: request.sourceUrl
     });
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Edit media failed.");
+  }
+});
+
+app.post("/api/node/edit-preview", async (req, res) => {
+  try {
+    const request = editMediaRequestFromBody(req.body);
+    if (request.error) return res.status(request.status).json({ error: request.error });
+
+    return createEditPreviewResult(req, res, {
+      effect: request.effect,
+      sourceMediaType: request.sourceMediaType,
+      sourceUrl: request.sourceUrl
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Edit preview failed.");
   }
 });
 
@@ -3070,6 +3072,13 @@ app.post("/api/node/generate-3d", async (req, res) => {
     }
 
     const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const remoteTexturedAssets = {
+      glb: remoteModel,
+      obj: normalizeFalFile(data.model_urls?.obj),
+      mtl: normalizeFalFile(data.model_urls?.mtl),
+      texture: normalizeFalFile(data.model_urls?.texture)
+    };
+    const texturedAssets = await downloadTexturedModelAssets(req, remoteTexturedAssets);
     const remoteThumbnail = normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data);
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
@@ -3112,6 +3121,7 @@ app.post("/api/node/generate-3d", async (req, res) => {
       remoteModel,
       remoteThumbnail,
       modelUrls: data.model_urls || null,
+      localModelAssets: texturedAssets,
       seed: data.seed ?? null,
       localModel: output.publicPath,
       localImage: thumbnailOutput?.publicPath || "",
@@ -3131,7 +3141,16 @@ app.post("/api/node/generate-3d", async (req, res) => {
         label: "Hunyuan 3D model",
         localUrl: output.publicPath,
         fileName: output.fileName,
-        mimeType: output.mimeType
+        mimeType: output.mimeType,
+        assets: {
+          glb: {
+            ...remoteModel,
+            localUrl: output.publicPath,
+            fileName: output.fileName,
+            mimeType: output.mimeType
+          },
+          ...texturedAssets
+        }
       },
       thumbnail: thumbnailOutput
         ? {
@@ -6559,6 +6578,84 @@ async function createEditMediaResult(req, res, { effect, sourceMediaType, source
   }
 }
 
+function editMediaRequestFromBody(body = {}) {
+  const requestedEffectId = String(body.effectId || "").trim();
+  const effect = findEditEffect(requestedEffectId);
+  if (!requestedEffectId || effect.id !== requestedEffectId) {
+    return {
+      status: 400,
+      error: "Unsupported Edit effect."
+    };
+  }
+
+  const sourceMediaType = normalizeEditSourceType(effect, body.sourceMediaType);
+  const sourceUrls = sourceMediaType === "image" ? body.sourceImageUrls : body.sourceVideoUrls;
+  const sourceUrl = firstLocalOutput(sourceUrls);
+  if (!sourceUrl) {
+    const hasSourceUrl = (Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls]).some((url) => String(url || "").trim());
+    if (hasSourceUrl) {
+      return {
+        status: 400,
+        error: `${effect.label} needs a local NewtNode ${sourceMediaType} asset. Re-run or re-upload the source so it is saved under outputs, uploads, or the workflow package before editing.`
+      };
+    }
+    return {
+      status: 400,
+      error: `${effect.label} requires a connected ${sourceMediaType}.`
+    };
+  }
+
+  return {
+    effect,
+    sourceMediaType,
+    sourceUrl
+  };
+}
+
+async function createEditPreviewResult(req, res, { effect, sourceMediaType, sourceUrl }) {
+  let outputPath = "";
+  try {
+    const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+    const sourceMetadata = sourceMediaType === "video" ? await probeVideoFile(source.filePath) : await probeLocalImageFile(source.filePath, source.fileName);
+    const settings = normalizedEditSettings(effect, req.body.settings, sourceMetadata);
+    const filter = editPreviewEffectFilter(effect, settings, { sourceMediaType, sourceMetadata });
+    const frameTime = sourceMediaType === "video" ? editPreviewFrameTime(effect, settings, sourceMetadata, req.body.previewTime) : 0;
+    outputPath = await createTempPreviewPath("edit-preview", ".png");
+
+    await applyEditPreviewWithFfmpeg({
+      sourcePath: source.filePath,
+      outputPath,
+      sourceMediaType,
+      effect,
+      filter,
+      frameTime
+    });
+
+    const buffer = await readFile(outputPath);
+    const metadata = await probeLocalImageFile(outputPath, path.basename(outputPath));
+    return res.json({
+      endpoint: "local/edit-preview",
+      modelName: `Edit Preview: ${effect.label}`,
+      preview: {
+        dataUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+        mimeType: "image/png",
+        frameTime,
+        metadata
+      },
+      effect: {
+        id: effect.id,
+        label: effect.label,
+        groupId: effect.groupId,
+        definition: effect.definition
+      }
+    });
+  } catch (error) {
+    throw error;
+  } finally {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+  }
+}
+
 function normalizedEditSettings(effect, rawSettings = {}, sourceMetadata = {}) {
   const defaults = defaultEditEffectSettings(effect, sourceMetadata);
   const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
@@ -6678,6 +6775,36 @@ function editEffectKeepsAudio(effect) {
   return !["trim", "reverse"].includes(effect.id);
 }
 
+function editPreviewEffectFilter(effect, settings = {}, context = {}) {
+  if (["trim", "fps", "reverse"].includes(effect.id)) return "null";
+  return editEffectFilter(effect, settings, context);
+}
+
+function editPreviewFrameTime(effect, settings = {}, metadata = {}, rawTime = 0) {
+  const duration = positiveNumber(metadata.duration) || 0;
+  const requested = Math.max(0, Number(rawTime) || 0);
+  if (effect.id === "trim") {
+    const start = Math.max(0, editSetting(settings, "start", 0));
+    const end = Math.max(0, editSetting(settings, "end", duration || start));
+    const trimTime = requested >= start && (!end || requested <= end) ? requested : start;
+    return extractFrameTime(trimTime, duration);
+  }
+  if (effect.id === "reverse" && duration > 0) {
+    return extractFrameTime(Math.max(0, duration - requested - 0.001), duration);
+  }
+  return extractFrameTime(requested, duration);
+}
+
+function editPreviewScaleFilter() {
+  return "scale='min(720,iw)':-2";
+}
+
+async function createTempPreviewPath(kind, extension = ".png") {
+  const dir = path.join(tmpdir(), "newtnode-previews");
+  await mkdir(dir, { recursive: true });
+  return path.join(dir, `${safeOutputKind(kind)}-${randomUUID()}${extension}`);
+}
+
 async function applyEditEffectWithFfmpeg({ sourcePath, outputPath, sourceMediaType, effect, filter, outputFormat }) {
   if (sourceMediaType === "image") {
     const args = [
@@ -6720,6 +6847,37 @@ async function applyEditEffectWithFfmpeg({ sourcePath, outputPath, sourceMediaTy
   if (keepAudio) args.push("-c:a", "aac");
   args.push(outputPath);
   await runFfmpeg(args, `Edit ${effect.label}`, 600000);
+}
+
+async function applyEditPreviewWithFfmpeg({ sourcePath, outputPath, sourceMediaType, effect, filter, frameTime = 0 }) {
+  const previewFilter = `${filter},${editPreviewScaleFilter()}`;
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y"
+  ];
+
+  if (sourceMediaType === "video") {
+    args.push("-ss", formatFfmpegSeconds(frameTime));
+  }
+
+  args.push(
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    previewFilter,
+    "-frames:v",
+    "1",
+    "-an",
+    "-compression_level",
+    "3",
+    outputPath
+  );
+
+  await runFfmpeg(args, `Preview ${effect.label}`, 90000);
 }
 
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {
@@ -7050,6 +7208,90 @@ async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
   };
 }
 
+async function downloadTexturedModelAssets(req, remoteAssets = {}) {
+  const objRemote = remoteAssets.obj?.url ? remoteAssets.obj : null;
+  const mtlRemote = remoteAssets.mtl?.url ? remoteAssets.mtl : null;
+  const textureRemote = remoteAssets.texture?.url ? remoteAssets.texture : null;
+  if (!objRemote || !mtlRemote || !textureRemote) return null;
+
+  try {
+    const textureOutput = await downloadImage(req, textureRemote.url, "hunyuan-3d-texture", textureRemote.content_type || textureRemote.mimeType || textureRemote.mime_type);
+    const [objOutput, mtlOutput] = await Promise.all([
+      downloadModelAssetFile(req, objRemote.url, "hunyuan-3d-textured-mesh", objRemote.content_type || objRemote.mimeType || objRemote.mime_type),
+      downloadTextAssetFile(req, mtlRemote.url, "hunyuan-3d-material", ".mtl", (source) => rewriteMtlTextureReferences(source, textureOutput.publicPath))
+    ]);
+
+    return {
+      obj: {
+        ...objRemote,
+        localUrl: objOutput.publicPath,
+        fileName: objOutput.fileName,
+        mimeType: objOutput.mimeType
+      },
+      mtl: {
+        ...mtlRemote,
+        localUrl: mtlOutput.publicPath,
+        fileName: mtlOutput.fileName,
+        mimeType: mtlOutput.mimeType
+      },
+      texture: {
+        ...textureRemote,
+        localUrl: textureOutput.publicPath,
+        fileName: textureOutput.fileName,
+        mimeType: textureOutput.mimeType
+      }
+    };
+  } catch (error) {
+    console.warn("Could not download textured 3D asset package:", error.message);
+    return null;
+  }
+}
+
+async function downloadModelAssetFile(req, url, kind, mimeTypeHint = "") {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated 3D asset: ${response.status} ${response.statusText}`);
+  }
+
+  const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "application/octet-stream", "application/octet-stream");
+  const extension = modelAssetExtensionForUrl(url, mimeType);
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await writeFile(output.filePath, bytes);
+
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    bytes: bytes.length,
+    mimeType
+  };
+}
+
+async function downloadTextAssetFile(req, url, kind, extension = ".txt", transform = (value) => value) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated text asset: ${response.status} ${response.statusText}`);
+  }
+
+  const mimeType = normalizeMimeType(response.headers.get("content-type") || "text/plain", "text/plain");
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+  const text = transform(await response.text());
+  await writeFile(output.filePath, text, "utf8");
+
+  return {
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    bytes: Buffer.byteLength(text),
+    mimeType
+  };
+}
+
+function rewriteMtlTextureReferences(source, textureUrl) {
+  if (!textureUrl) return source;
+  const normalizedTextureUrl = textureUrl.replace(/\\/g, "/");
+  return String(source || "").replace(/^(\s*(?:map_[A-Za-z0-9_]+|bump)\b).*$/gim, `$1 ${normalizedTextureUrl}`);
+}
+
 function uniqueOutputFileName(kind, extension) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "output").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "output";
@@ -7098,6 +7340,14 @@ function modelExtensionForUrl(url, mimeType) {
   if (normalizedMime === "application/octet-stream") return ".glb";
   const inferred = extensionForMime(normalizedMime);
   return inferred === ".png" ? ".glb" : inferred;
+}
+
+function modelAssetExtensionForUrl(url, mimeType) {
+  const extension = path.extname(new URL(url).pathname).toLowerCase();
+  if ([".glb", ".gltf", ".obj", ".mtl"].includes(extension)) return extension;
+  const normalizedMime = normalizeMimeType(mimeType, "application/octet-stream");
+  if (normalizedMime === "text/plain") return ".mtl";
+  return modelExtensionForUrl(url, normalizedMime);
 }
 
 function normalizeMimeType(value, fallback = "image/png") {
