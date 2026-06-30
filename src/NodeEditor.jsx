@@ -855,7 +855,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
-    workflowFileInputRef,
     projects,
     selectedProjectName,
     setSaveStatus,
@@ -868,9 +867,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     saveProject,
     startNewProject,
     saveProjectAsLocalFile,
-    openWorkflowFile,
-    openWorkflowFromBrowserPicker,
     openWorkflowFromSystemPicker,
+    openWorkflowPackageFolderFromSystemPicker,
     importWorkflowFromSystemPicker,
     loadProject,
     deleteProject
@@ -4694,9 +4692,13 @@ function autoConnectionOutputKind(source, from) {
                   <Save size={15} />
                   <span>Save As</span>
                 </button>
-                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromBrowserPicker(); }} title="Open workflow JSON">
+                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow JSON from disk">
                   <FolderOpen size={15} />
                   <span>Open</span>
+                </button>
+                <button onClick={() => { setFileMenuOpen(false); openWorkflowPackageFolderFromSystemPicker(); }} title="Open workflow package folder">
+                  <FolderOpen size={15} />
+                  <span>Open Package</span>
                 </button>
                 <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
                   <Download size={15} />
@@ -4705,13 +4707,6 @@ function autoConnectionOutputKind(source, from) {
               </div>
             )}
           </div>
-          <input
-            ref={workflowFileInputRef}
-            className="workflow-file-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => openWorkflowFile(event.target.files?.[0])}
-          />
           <div className="project-picker" ref={projectMenuRef}>
             <button className="project-picker-trigger" onClick={() => setProjectMenuOpen((open) => !open)} title="Load saved workflow">
               <span>Recent Projects</span>
