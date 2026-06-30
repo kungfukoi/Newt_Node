@@ -288,6 +288,7 @@ Hosted utility models should follow the same request, result, history, and stats
 - Luma pricing belongs in server pricing constants and `/api/stats`; support endpoint and pricing overrides with environment variables.
 - Depth Anything Video is a Utility Video model. It requires a connected source video, supports model, colormap, resolution, max-frame, output-FPS, and side-by-side controls, and returns a normal video result item.
 - Depth Anything image and video preprocessors are paid Fal utilities. Estimate cost from the available image/video duration data; mark the cost unpriced when duration is unavailable instead of inventing a fake amount.
+- Topaz Image Upscale and Topaz Video Upscale are paid Fal Utility models. Keep their image/video option lists separate because the Fal schemas differ, and estimate cost from output megapixels for image or output-resolution tier, duration, FPS, and Gaia 2 multiplier for video when that metadata is available.
 - Fal Wan 2.2 LoRA and VACE models stay in Utility Video. Wan 2.1 LoRA text-to-video and image-to-video are retired and should not be added back to callable model lists. Keep provider-specific payload builders in `src/nodeRunners/videoModels.js` and `server/index.js`, not inline inside generic UI rendering.
 - When adding a hosted utility that can also be used as a prepass for a local Comfy workflow, keep the standalone hosted result as ordinary media and let the downstream executor decide how to consume it.
 

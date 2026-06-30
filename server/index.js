@@ -171,6 +171,12 @@ const topazUpscalerCostPerSecond = {
   "720p-1080p": 0.02,
   "above-1080p": 0.08
 };
+const topazImageUpscalerCostByTier = {
+  "up-to-24mp": Number(process.env.TOPAZ_IMAGE_UPSCALER_COST_UP_TO_24MP || 0.08),
+  "up-to-48mp": Number(process.env.TOPAZ_IMAGE_UPSCALER_COST_UP_TO_48MP || 0.16),
+  "up-to-96mp": Number(process.env.TOPAZ_IMAGE_UPSCALER_COST_UP_TO_96MP || 0.32),
+  "up-to-512mp": Number(process.env.TOPAZ_IMAGE_UPSCALER_COST_UP_TO_512MP || 1.36)
+};
 const depthAnythingVideoCostPerSecond = Number(process.env.DEPTH_ANYTHING_VIDEO_COST_PER_SECOND || 0.04);
 const dwposeCostPerComputeSecond = 0.0006;
 const patinaBaseCost = 0.01;
@@ -195,6 +201,22 @@ const bytedanceUpscalerFpsOptions = ["30fps", "60fps"];
 const bytedanceUpscalerPresetOptions = ["general", "ugc", "short_series", "aigc", "old_film"];
 const bytedanceUpscalerTierOptions = ["fast", "standard", "pro"];
 const bytedanceUpscalerFidelityOptions = ["high", "medium"];
+const topazImageUpscalerModelOptions = [
+  "Low Resolution V2",
+  "Standard V2",
+  "CGI",
+  "High Fidelity V2",
+  "Text Refine",
+  "Recovery",
+  "Redefine",
+  "Recovery V2",
+  "Standard MAX",
+  "Wonder",
+  "Wonder 3"
+];
+const topazImageUpscalerSubjectOptions = ["All", "Foreground", "Background"];
+const topazImageUpscalerOutputFormatOptions = ["jpeg", "png"];
+const topazImageUpscalerEnhancementStrengthOptions = ["auto", "low", "medium", "high"];
 const topazUpscalerModelOptions = [
   "Proteus",
   "Artemis HQ",
@@ -1047,6 +1069,13 @@ app.get("/api/stats", async (_req, res) => {
           costPerSecondAbove1080p: topazUpscalerCostPerSecond["above-1080p"],
           fps60Multiplier: 2,
           gaia2Multiplier: 0.5,
+          currency: "USD"
+        },
+        topazImageUpscaler: {
+          costUpTo24MP: topazImageUpscalerCostByTier["up-to-24mp"],
+          costUpTo48MP: topazImageUpscalerCostByTier["up-to-48mp"],
+          costUpTo96MP: topazImageUpscalerCostByTier["up-to-96mp"],
+          costUpTo512MP: topazImageUpscalerCostByTier["up-to-512mp"],
           currency: "USD"
         },
         dwpose: {
@@ -2393,6 +2422,10 @@ app.post("/api/node/utility-image", async (req, res) => {
       return runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel });
     }
 
+    if (selectedModel.provider === "fal-topaz-image-upscaler") {
+      return runTopazImageUpscaler(req, res, { imageUrl, selectedModel });
+    }
+
     if (selectedModel.provider === "fal-openai-image-2-image-to-id") {
       return runImageToIdUtilityImage(req, res, { imageUrl, selectedModel });
     }
@@ -2585,6 +2618,120 @@ async function runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel 
     images: [
       {
         ...remoteImage,
+        label: selectedModel.displayName,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType
+      }
+    ]
+  });
+}
+
+async function runTopazImageUpscaler(req, res, { imageUrl, selectedModel }) {
+  const endpoint = selectedModel.id;
+  const options = req.body.topazImageUpscaler || {};
+  const input = {
+    image_url: await uploadLocalOutputToFal(imageUrl),
+    model: normalizeChoice(options.model, topazImageUpscalerModelOptions, "Standard V2"),
+    upscale_factor: clampNumber(options.upscaleFactor, 1, 4, 2),
+    crop_to_fill: Boolean(options.cropToFill),
+    output_format: normalizeChoice(options.outputFormat, topazImageUpscalerOutputFormatOptions, "png"),
+    subject_detection: normalizeChoice(options.subjectDetection, topazImageUpscalerSubjectOptions, "All"),
+    face_enhancement: options.faceEnhancement !== false,
+    face_enhancement_creativity: clampNumber(options.faceEnhancementCreativity, 0, 1, 0),
+    face_enhancement_strength: clampNumber(options.faceEnhancementStrength, 0, 1, 0.8)
+  };
+
+  addOptionalRangeInput(input, "sharpen", options.sharpen, 0, 1);
+  addOptionalRangeInput(input, "denoise", options.denoise, 0, 1);
+  addOptionalRangeInput(input, "fix_compression", options.fixCompression, 0, 1);
+  addOptionalRangeInput(input, "strength", options.strength, 0.01, 1);
+  addOptionalRangeInput(input, "detail", options.detail, 0, 1);
+
+  const creativity = optionalInteger(options.creativity);
+  if (creativity !== undefined) input.creativity = Math.min(6, Math.max(1, creativity));
+  const texture = optionalInteger(options.texture);
+  if (texture !== undefined) input.texture = Math.min(5, Math.max(1, texture));
+  const prompt = String(options.prompt || "").trim().slice(0, 1024);
+  if (prompt) input.prompt = prompt;
+  if (options.autoprompt) input.autoprompt = true;
+  const enhancementStrength = normalizeChoice(options.enhancementStrength, topazImageUpscalerEnhancementStrengthOptions, "auto");
+  if (enhancementStrength !== "auto") input.enhancement_strength = enhancementStrength;
+
+  const result = await subscribeToFalWithTimeout(endpoint, input, selectedModel.displayName);
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    return res.status(502).json({ error: "Fal returned no Topaz upscaled image URL.", raw: result?.data });
+  }
+
+  const output = await downloadImage(req, remoteImage.url, "topaz-image-upscale", remoteImage.content_type || remoteImage.mimeType);
+  const outputDimensions = { width: output.width, height: output.height };
+  const enrichedRemoteImage = {
+    ...remoteImage,
+    width: remoteImage.width || output.width || undefined,
+    height: remoteImage.height || output.height || undefined
+  };
+  const cost = estimateTopazImageUpscalerCost({ endpoint, remoteImage: enrichedRemoteImage, outputDimensions });
+  const text = topazImageUpscalerPromptLabel(input);
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "fal.ai",
+    modelName: selectedModel.displayName,
+    endpoint,
+    mode: "Topaz image upscale",
+    prompt: text,
+    submittedPrompt: text,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: input.model,
+      upscaleFactor: input.upscale_factor,
+      cropToFill: input.crop_to_fill,
+      outputFormat: input.output_format,
+      subjectDetection: input.subject_detection,
+      faceEnhancement: input.face_enhancement,
+      faceEnhancementCreativity: input.face_enhancement_creativity,
+      faceEnhancementStrength: input.face_enhancement_strength,
+      sharpen: input.sharpen ?? null,
+      denoise: input.denoise ?? null,
+      fixCompression: input.fix_compression ?? null,
+      strength: input.strength ?? null,
+      creativity: input.creativity ?? null,
+      texture: input.texture ?? null,
+      detail: input.detail ?? null,
+      enhancementStrength: input.enhancement_strength || "auto",
+      autoprompt: Boolean(input.autoprompt),
+      prompt: input.prompt || "",
+      sourceImageCount: 1
+    },
+    cost,
+    remoteImage: enrichedRemoteImage,
+    localImage: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedModel.displayName,
+    text,
+    cost,
+    image: {
+      ...enrichedRemoteImage,
+      label: selectedModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    },
+    images: [
+      {
+        ...enrichedRemoteImage,
         label: selectedModel.displayName,
         localUrl: output.publicPath,
         fileName: output.fileName,
@@ -8886,13 +9033,16 @@ async function downloadImage(req, url, kind, mimeTypeHint = "") {
   const extension = imageExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
+  const dimensions = imageDimensionsFromBuffer(bytes, mimeType);
   await writeFile(output.filePath, bytes);
 
   return {
     fileName: output.fileName,
     publicPath: output.publicPath,
     bytes: bytes.length,
-    mimeType
+    mimeType,
+    width: dimensions?.width || null,
+    height: dimensions?.height || null
   };
 }
 
@@ -9902,6 +10052,39 @@ function estimateTopazVideoUpscalerCost({ endpoint, model, targetFps, billingRes
   };
 }
 
+function estimateTopazImageUpscalerCost({ endpoint, remoteImage = {}, outputDimensions = {} }) {
+  const width = Number(remoteImage.width || remoteImage.metadata?.width || outputDimensions.width || 0);
+  const height = Number(remoteImage.height || remoteImage.metadata?.height || outputDimensions.height || 0);
+  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : null;
+  const tier = topazImageUpscalerBillingTier(megapixels);
+  const amountUsd = tier ? topazImageUpscalerCostByTier[tier] : null;
+
+  return {
+    amountUsd,
+    currency: "USD",
+    unitRateUsd: amountUsd,
+    units: megapixels ? roundUsageUnits(megapixels) : null,
+    unit: "output megapixel",
+    mediaType: "image",
+    outputMegapixels: megapixels ? roundUsageUnits(megapixels) : null,
+    billingTier: tier,
+    pricingBasis: tier
+      ? "Topaz Image Upscale fal.ai per-output-resolution-tier estimate"
+      : "Topaz Image Upscale fal.ai per-output-resolution-tier estimate; output dimensions unavailable",
+    pricingSource: "fal-model-page-2026-06-30",
+    endpoint
+  };
+}
+
+function topazImageUpscalerBillingTier(megapixels) {
+  const value = Number(megapixels || 0);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value <= 24) return "up-to-24mp";
+  if (value <= 48) return "up-to-48mp";
+  if (value <= 96) return "up-to-96mp";
+  return "up-to-512mp";
+}
+
 function resolveTopazBillingTier(billingResolutionTier, remoteVideo) {
   const configuredTier = normalizeChoice(billingResolutionTier, topazUpscalerBillingTierOptions, "auto");
   if (configuredTier !== "auto") return configuredTier;
@@ -10699,6 +10882,14 @@ function resolveUtilityImageModel(model) {
       provider: "fal-depth-anything",
       displayName: "Depth Anything",
       id: "fal-ai/image-preprocessors/depth-anything/v2"
+    };
+  }
+
+  if (normalized.includes("topaz")) {
+    return {
+      provider: "fal-topaz-image-upscaler",
+      displayName: "Topaz Image Upscale",
+      id: "fal-ai/topaz/upscale/image"
     };
   }
 
@@ -12700,6 +12891,22 @@ function topazUpscalerPromptLabel(input, billingTier) {
     input.target_fps ? `${input.target_fps}fps` : "source fps",
     input.H264_output ? "H264" : "H265/default",
     billingTier && billingTier !== "auto" ? `billing ${billingTier}` : "auto billing tier"
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function topazImageUpscalerPromptLabel(input) {
+  return [
+    "Topaz image upscale",
+    input.model,
+    `${input.upscale_factor}x`,
+    input.output_format?.toUpperCase(),
+    input.crop_to_fill ? "crop fill" : "",
+    input.subject_detection && input.subject_detection !== "All" ? input.subject_detection : "",
+    input.face_enhancement ? "face enhancement" : "",
+    input.prompt ? "prompted" : "",
+    input.autoprompt ? "autoprompt" : ""
   ]
     .filter(Boolean)
     .join(", ");

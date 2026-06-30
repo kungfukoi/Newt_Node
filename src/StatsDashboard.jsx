@@ -114,6 +114,12 @@ const defaultPricing = {
       fps60Multiplier: 2,
       gaia2Multiplier: 0.5
     },
+    topazImageUpscaler: {
+      costUpTo24MP: 0.08,
+      costUpTo48MP: 0.16,
+      costUpTo96MP: 0.32,
+      costUpTo512MP: 1.36
+    },
     dwpose: {
       costPerComputeSecond: 0.0006
     },
@@ -533,6 +539,10 @@ function estimateItemCost(item, mediaType, pricing) {
       return estimatePatinaStatsCost(item, pricing);
     }
 
+    if (modelKey.includes("topaz")) {
+      return estimateTopazImageUpscalerStatsCost(item, settings, pricing);
+    }
+
     if (modelKey.includes("dwpose")) {
       return null;
     }
@@ -875,6 +885,27 @@ function estimateTopazUpscalerStatsCost(item, settings, pricing) {
   const fpsMultiplier = Number(settings.targetFps || item.cost?.targetFps || 0) >= 60 ? utilityPricing.fps60Multiplier : 1;
   const modelMultiplier = String(settings.model || item.cost?.model || "").toLowerCase() === "gaia 2" ? utilityPricing.gaia2Multiplier : 1;
   return duration * baseRate * fpsMultiplier * modelMultiplier;
+}
+
+function estimateTopazImageUpscalerStatsCost(item, _settings, pricing) {
+  const utilityPricing = pricing.utility?.topazImageUpscaler || defaultPricing.utility.topazImageUpscaler;
+  const tier = item.cost?.billingTier || resolveTopazImageStatsBillingTier(item.remoteImage, item.cost?.outputMegapixels || item.cost?.units);
+  if (tier === "up-to-24mp") return utilityPricing.costUpTo24MP;
+  if (tier === "up-to-48mp") return utilityPricing.costUpTo48MP;
+  if (tier === "up-to-96mp") return utilityPricing.costUpTo96MP;
+  if (tier === "up-to-512mp") return utilityPricing.costUpTo512MP;
+  return null;
+}
+
+function resolveTopazImageStatsBillingTier(remoteImage, fallbackMegapixels) {
+  const width = Number(remoteImage?.width || remoteImage?.metadata?.width || 0);
+  const height = Number(remoteImage?.height || remoteImage?.metadata?.height || 0);
+  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : Number(fallbackMegapixels || 0);
+  if (!Number.isFinite(megapixels) || megapixels <= 0) return "";
+  if (megapixels <= 24) return "up-to-24mp";
+  if (megapixels <= 48) return "up-to-48mp";
+  if (megapixels <= 96) return "up-to-96mp";
+  return "up-to-512mp";
 }
 
 function resolveTopazStatsBillingTier(value, remoteVideo) {

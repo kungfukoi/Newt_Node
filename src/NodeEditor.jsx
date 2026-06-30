@@ -163,6 +163,10 @@ import {
   shotPresetPrompts,
   stylePresetNames,
   stylePresetPrompts,
+  topazImageUpscalerEnhancementStrengthOptions,
+  topazImageUpscalerModelOptions,
+  topazImageUpscalerOutputFormatOptions,
+  topazImageUpscalerSubjectOptions,
   topazUpscalerBillingTierOptions,
   topazUpscalerFpsOptions,
   topazUpscalerModelOptions,
@@ -9558,6 +9562,7 @@ function NodeBody({
     const isImageToId = isUtilityImageToIdModel(utilityImageModel);
     const isQwenCameraEdit = isUtilityQwenCameraEditModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
+    const isTopazImageUpscaler = isUtilityTopazImageUpscalerModel(utilityImageModel);
     const isPatina = isPatinaModel(utilityImageModel);
     const isStillFrame = isUtilityStillFrameModel(utilityImageModel);
     const isSam3Image = isUtilitySam3ImageModel(utilityImageModel);
@@ -9695,6 +9700,8 @@ function NodeBody({
           ? "Run Image to Color ID"
         : isQwenCameraEdit
           ? "Run Camera Edit"
+        : isTopazImageUpscaler
+          ? "Run Topaz Upscale"
         : isSam3Image
         ? "Run SAM 3 Image"
         : isBirefnetImage
@@ -10215,7 +10222,7 @@ function NodeBody({
           ) : (
             <>
               <NodeRow label="Model">
-                <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, { utilityImageModel: event.target.value, resultUrl: "", resultItems: [], resultType: "image", error: "" })}>
+                <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, utilityImageModelSelectionPatch(event.target.value))}>
                   {utilityImageModelOptions.map((model) => (
                     <option key={model}>{model}</option>
                   ))}
@@ -10312,6 +10319,93 @@ function NodeBody({
                       </NodeRow>
                       <NodeRow label="Seed">
                         <input value={node.data.patinaSeed || ""} onChange={(event) => onUpdate(node.id, { patinaSeed: event.target.value })} placeholder="Random" />
+                      </NodeRow>
+                    </>
+                  ) : isTopazImageUpscaler ? (
+                    <>
+                      <NodeRow label="Topaz Model">
+                        <select value={node.data.topazImageUpscalerModel || "Standard V2"} onChange={(event) => onUpdate(node.id, { topazImageUpscalerModel: event.target.value })}>
+                          {topazImageUpscalerModelOptions.map((option) => (
+                            <option key={option}>{option}</option>
+                          ))}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Upscale">
+                        <input type="number" min="1" max="4" step="0.25" value={node.data.topazImageUpscalerFactor || 2} onChange={(event) => onUpdate(node.id, { topazImageUpscalerFactor: event.target.value })} />
+                      </NodeRow>
+                      <NodeRow label="Format">
+                        <select value={node.data.topazImageUpscalerOutputFormat || "png"} onChange={(event) => onUpdate(node.id, { topazImageUpscalerOutputFormat: event.target.value })}>
+                          {topazImageUpscalerOutputFormatOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option.toUpperCase()}
+                            </option>
+                          ))}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Crop Fill">
+                        <button className={`node-toggle ${node.data.topazImageUpscalerCropToFill ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { topazImageUpscalerCropToFill: !node.data.topazImageUpscalerCropToFill })}>
+                          <span />
+                        </button>
+                      </NodeRow>
+                      <NodeRow label="Subject">
+                        <select value={node.data.topazImageUpscalerSubjectDetection || "All"} onChange={(event) => onUpdate(node.id, { topazImageUpscalerSubjectDetection: event.target.value })}>
+                          {topazImageUpscalerSubjectOptions.map((option) => (
+                            <option key={option}>{option}</option>
+                          ))}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Face">
+                        <button className={`node-toggle ${node.data.topazImageUpscalerFaceEnhancement !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { topazImageUpscalerFaceEnhancement: node.data.topazImageUpscalerFaceEnhancement === false })}>
+                          <span />
+                        </button>
+                      </NodeRow>
+                      {node.data.topazImageUpscalerFaceEnhancement !== false && (
+                        <>
+                          <NodeRow label="Face Strength">
+                            <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerFaceEnhancementStrength ?? 0.8} onChange={(event) => onUpdate(node.id, { topazImageUpscalerFaceEnhancementStrength: event.target.value })} />
+                          </NodeRow>
+                          <NodeRow label="Face Creative">
+                            <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerFaceEnhancementCreativity ?? 0} onChange={(event) => onUpdate(node.id, { topazImageUpscalerFaceEnhancementCreativity: event.target.value })} />
+                          </NodeRow>
+                        </>
+                      )}
+                      <NodeRow label="Denoise">
+                        <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerDenoise ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerDenoise: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Sharpen">
+                        <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerSharpen ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerSharpen: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Compression">
+                        <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerFixCompression ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerFixCompression: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Detail">
+                        <input type="number" min="0" max="1" step="0.05" value={node.data.topazImageUpscalerDetail ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerDetail: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Strength">
+                        <input type="number" min="0.01" max="1" step="0.01" value={node.data.topazImageUpscalerStrength ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerStrength: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Creativity">
+                        <input type="number" min="1" max="6" step="1" value={node.data.topazImageUpscalerCreativity ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerCreativity: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Texture">
+                        <input type="number" min="1" max="5" step="1" value={node.data.topazImageUpscalerTexture ?? ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerTexture: event.target.value })} placeholder="Auto" />
+                      </NodeRow>
+                      <NodeRow label="Enhance">
+                        <select value={node.data.topazImageUpscalerEnhancementStrength || "auto"} onChange={(event) => onUpdate(node.id, { topazImageUpscalerEnhancementStrength: event.target.value })}>
+                          {topazImageUpscalerEnhancementStrengthOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option === "auto" ? "Auto" : option}
+                            </option>
+                          ))}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Autoprompt">
+                        <button className={`node-toggle ${node.data.topazImageUpscalerAutoprompt ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { topazImageUpscalerAutoprompt: !node.data.topazImageUpscalerAutoprompt })}>
+                          <span />
+                        </button>
+                      </NodeRow>
+                      <NodeRow label="Prompt">
+                        <textarea value={node.data.topazImageUpscalerPrompt || ""} onChange={(event) => onUpdate(node.id, { topazImageUpscalerPrompt: event.target.value })} placeholder="Optional refine prompt" />
                       </NodeRow>
                     </>
                   ) : isBirefnetImage ? (
@@ -12550,6 +12644,24 @@ function createDefaultNodeData(type, label, count) {
       stillFrameTime: 0,
       ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
+      topazImageUpscalerModel: "Standard V2",
+      topazImageUpscalerFactor: 2,
+      topazImageUpscalerOutputFormat: "png",
+      topazImageUpscalerCropToFill: false,
+      topazImageUpscalerSubjectDetection: "All",
+      topazImageUpscalerFaceEnhancement: true,
+      topazImageUpscalerFaceEnhancementCreativity: 0,
+      topazImageUpscalerFaceEnhancementStrength: 0.8,
+      topazImageUpscalerSharpen: "",
+      topazImageUpscalerDenoise: "",
+      topazImageUpscalerFixCompression: "",
+      topazImageUpscalerStrength: "",
+      topazImageUpscalerCreativity: "",
+      topazImageUpscalerTexture: "",
+      topazImageUpscalerPrompt: "",
+      topazImageUpscalerAutoprompt: false,
+      topazImageUpscalerDetail: "",
+      topazImageUpscalerEnhancementStrength: "auto",
       patinaMaps: patinaMapOptions.map((option) => option.id),
       patinaOutputFormat: "png",
       patinaSeed: "",
@@ -13235,6 +13347,11 @@ function isUtilityBirefnetImageModel(model) {
   return String(model || "").toLowerCase().includes("birefnet");
 }
 
+function isUtilityTopazImageUpscalerModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("topaz") && (!normalized.includes("video") || normalized.includes("image"));
+}
+
 function isUtilityBirefnetVideoModel(model) {
   return String(model || "").toLowerCase().includes("birefnet");
 }
@@ -13294,6 +13411,42 @@ function utilityOutputType(node, portId = "") {
 function utilityResultType(node) {
   if (isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) return "video";
   return node?.data?.resultType || utilityMode(node);
+}
+
+function utilityImageModelSelectionPatch(model) {
+  const patch = {
+    utilityImageModel: model,
+    resultUrl: "",
+    resultItems: [],
+    resultType: "image",
+    error: ""
+  };
+
+  if (isUtilityTopazImageUpscalerModel(model)) {
+    return {
+      ...patch,
+      topazImageUpscalerModel: "Standard V2",
+      topazImageUpscalerFactor: 2,
+      topazImageUpscalerOutputFormat: "png",
+      topazImageUpscalerCropToFill: false,
+      topazImageUpscalerSubjectDetection: "All",
+      topazImageUpscalerFaceEnhancement: true,
+      topazImageUpscalerFaceEnhancementCreativity: 0,
+      topazImageUpscalerFaceEnhancementStrength: 0.8,
+      topazImageUpscalerSharpen: "",
+      topazImageUpscalerDenoise: "",
+      topazImageUpscalerFixCompression: "",
+      topazImageUpscalerStrength: "",
+      topazImageUpscalerCreativity: "",
+      topazImageUpscalerTexture: "",
+      topazImageUpscalerPrompt: "",
+      topazImageUpscalerAutoprompt: false,
+      topazImageUpscalerDetail: "",
+      topazImageUpscalerEnhancementStrength: "auto"
+    };
+  }
+
+  return patch;
 }
 
 function utilityVideoModelSelectionPatch(model) {
@@ -13493,6 +13646,7 @@ function normalizedUtilityImageModelName(model) {
   if (normalized.includes("still") || normalized.includes("frame")) return utilityImageModelNames.stillFrame;
   if (normalized.includes("sam") && normalized.includes("image")) return utilityImageModelNames.sam3Image;
   if (normalized.includes("birefnet")) return utilityImageModelNames.birefnetImage;
+  if (normalized.includes("topaz")) return utilityImageModelNames.topazUpscaler;
   if (normalized.includes("depth") || normalized.includes("anything")) return utilityImageModelNames.depthAnything;
   if (normalized.includes("patina")) return utilityImageModelNames.patina;
   return utilityImageModelNames.dwpose;
@@ -14875,6 +15029,26 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     model,
     imageUrls: [imageUrl],
     dwposeDrawMode: node.data.dwposeDrawMode || "body-pose",
+    topazImageUpscaler: {
+      model: node.data.topazImageUpscalerModel || "Standard V2",
+      upscaleFactor: node.data.topazImageUpscalerFactor || 2,
+      outputFormat: node.data.topazImageUpscalerOutputFormat || "png",
+      cropToFill: Boolean(node.data.topazImageUpscalerCropToFill),
+      subjectDetection: node.data.topazImageUpscalerSubjectDetection || "All",
+      faceEnhancement: node.data.topazImageUpscalerFaceEnhancement !== false,
+      faceEnhancementCreativity: node.data.topazImageUpscalerFaceEnhancementCreativity ?? 0,
+      faceEnhancementStrength: node.data.topazImageUpscalerFaceEnhancementStrength ?? 0.8,
+      sharpen: node.data.topazImageUpscalerSharpen ?? "",
+      denoise: node.data.topazImageUpscalerDenoise ?? "",
+      fixCompression: node.data.topazImageUpscalerFixCompression ?? "",
+      strength: node.data.topazImageUpscalerStrength ?? "",
+      creativity: node.data.topazImageUpscalerCreativity ?? "",
+      texture: node.data.topazImageUpscalerTexture ?? "",
+      prompt: node.data.topazImageUpscalerPrompt || "",
+      autoprompt: Boolean(node.data.topazImageUpscalerAutoprompt),
+      detail: node.data.topazImageUpscalerDetail ?? "",
+      enhancementStrength: node.data.topazImageUpscalerEnhancementStrength || "auto"
+    },
     patinaMaps: patinaMapsForData(node.data),
     patinaOutputFormat: node.data.patinaOutputFormat || "png",
     patinaSeed: node.data.patinaSeed || "",
@@ -17745,6 +17919,24 @@ function normalizeUtilityData(data = {}) {
     depthAnythingVideoMaxFrames: data.depthAnythingVideoMaxFrames ?? "",
     depthAnythingVideoOutputFps: data.depthAnythingVideoOutputFps ?? "",
     depthAnythingVideoSideBySide: Boolean(data.depthAnythingVideoSideBySide),
+    topazImageUpscalerModel: normalizeChoice(data.topazImageUpscalerModel, topazImageUpscalerModelOptions, "Standard V2"),
+    topazImageUpscalerFactor: clampedNumber(data.topazImageUpscalerFactor, 1, 4, 2),
+    topazImageUpscalerOutputFormat: normalizeChoice(data.topazImageUpscalerOutputFormat, topazImageUpscalerOutputFormatOptions, "png"),
+    topazImageUpscalerCropToFill: Boolean(data.topazImageUpscalerCropToFill),
+    topazImageUpscalerSubjectDetection: normalizeChoice(data.topazImageUpscalerSubjectDetection, topazImageUpscalerSubjectOptions, "All"),
+    topazImageUpscalerFaceEnhancement: data.topazImageUpscalerFaceEnhancement !== false,
+    topazImageUpscalerFaceEnhancementCreativity: clampedNumber(data.topazImageUpscalerFaceEnhancementCreativity, 0, 1, 0),
+    topazImageUpscalerFaceEnhancementStrength: clampedNumber(data.topazImageUpscalerFaceEnhancementStrength, 0, 1, 0.8),
+    topazImageUpscalerSharpen: data.topazImageUpscalerSharpen ?? "",
+    topazImageUpscalerDenoise: data.topazImageUpscalerDenoise ?? "",
+    topazImageUpscalerFixCompression: data.topazImageUpscalerFixCompression ?? "",
+    topazImageUpscalerStrength: data.topazImageUpscalerStrength ?? "",
+    topazImageUpscalerCreativity: data.topazImageUpscalerCreativity ?? "",
+    topazImageUpscalerTexture: data.topazImageUpscalerTexture ?? "",
+    topazImageUpscalerPrompt: data.topazImageUpscalerPrompt || "",
+    topazImageUpscalerAutoprompt: Boolean(data.topazImageUpscalerAutoprompt),
+    topazImageUpscalerDetail: data.topazImageUpscalerDetail ?? "",
+    topazImageUpscalerEnhancementStrength: normalizeChoice(data.topazImageUpscalerEnhancementStrength, topazImageUpscalerEnhancementStrengthOptions, "auto"),
     bytedanceUpscalerTargetResolution: data.bytedanceUpscalerTargetResolution || "1080p",
     bytedanceUpscalerTargetFps: data.bytedanceUpscalerTargetFps || "30fps",
     bytedanceUpscalerPreset: data.bytedanceUpscalerPreset || "general",

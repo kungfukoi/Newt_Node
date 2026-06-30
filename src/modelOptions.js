@@ -145,6 +145,7 @@ export const utilityImageModelNames = {
   stillFrame: "Grab Still Frame",
   dwpose: "DWPose",
   depthAnything: "Depth Anything",
+  topazUpscaler: "Topaz Image Upscale",
   patina: "Patina",
   sam3Image: "SAM 3 Image",
   birefnetImage: "BiRefNet Image"
@@ -155,6 +156,7 @@ export const utilityImageModelOptions = [
   utilityImageModelNames.stillFrame,
   utilityImageModelNames.dwpose,
   utilityImageModelNames.depthAnything,
+  utilityImageModelNames.topazUpscaler,
   utilityImageModelNames.patina,
   utilityImageModelNames.birefnetImage,
   utilityImageModelNames.sam3Image
@@ -324,6 +326,22 @@ export const bytedanceUpscalerFpsOptions = ["30fps", "60fps"];
 export const bytedanceUpscalerPresetOptions = ["general", "ugc", "short_series", "aigc", "old_film"];
 export const bytedanceUpscalerTierOptions = ["fast", "standard", "pro"];
 export const bytedanceUpscalerFidelityOptions = ["high", "medium"];
+export const topazImageUpscalerModelOptions = [
+  "Low Resolution V2",
+  "Standard V2",
+  "CGI",
+  "High Fidelity V2",
+  "Text Refine",
+  "Recovery",
+  "Redefine",
+  "Recovery V2",
+  "Standard MAX",
+  "Wonder",
+  "Wonder 3"
+];
+export const topazImageUpscalerOutputFormatOptions = ["png", "jpeg"];
+export const topazImageUpscalerSubjectOptions = ["All", "Foreground", "Background"];
+export const topazImageUpscalerEnhancementStrengthOptions = ["auto", "low", "medium", "high"];
 export const topazUpscalerModelOptions = [
   "Proteus",
   "Artemis HQ",
@@ -378,6 +396,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
   [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",
+  [utilityImageModelNames.topazUpscaler]: "Upscales and enhances a connected image with Topaz image enhancement models.",
   [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
   [utilityImageModelNames.sam3Image]: "Segments prompted objects in an image and returns the masked result.",
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
