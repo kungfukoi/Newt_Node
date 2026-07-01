@@ -493,12 +493,6 @@ async function pullRuntimeUpdate(body = {}) {
     throw error;
   }
 
-  if (!["win32", "darwin"].includes(process.platform)) {
-    const error = new Error("Replacement updates currently support Windows and macOS launchers.");
-    error.status = 501;
-    throw error;
-  }
-
   const repository = normalizeUpdateRepository(body.repository) || await resolveUpdateRepository();
   if (!repository) {
     const error = new Error("Enter a repository URL before updating.");
@@ -513,20 +507,79 @@ async function pullRuntimeUpdate(body = {}) {
 
   const branch = await currentGitBranch() || "main";
   const startedAt = new Date().toISOString();
+  updatePromise = runRuntimeUpdate({
+    repository,
+    branch,
+    startedAt
+  });
+
+  try {
+    return await updatePromise;
+  } finally {
+    updatePromise = null;
+  }
+}
+
+async function runRuntimeUpdate({ repository, branch, startedAt }) {
+  try {
+    const pullResult = await pullFastForwardUpdate(repository, branch);
+    return {
+      ok: true,
+      repository,
+      branch,
+      branchStatus: await resolveBranchStatus(repository, branch),
+      restartRequested,
+      relaunching: false,
+      updateMethod: "git-pull",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      stdout: String(pullResult.stdout || "").trim(),
+      stderr: String(pullResult.stderr || "").trim(),
+      message: fastForwardUpdateMessage(pullResult, branch)
+    };
+  } catch (pullError) {
+    return stageReplacementRuntimeUpdate({ repository, branch, startedAt, pullError });
+  }
+}
+
+function pullFastForwardUpdate(repository, branch) {
+  return execFile("git", ["pull", "--ff-only", repository, branch], {
+    cwd: rootDir,
+    timeout: 300000,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true
+  });
+}
+
+function fastForwardUpdateMessage(result, branch) {
+  const output = `${result?.stdout || ""}\n${result?.stderr || ""}`.toLowerCase();
+  if (output.includes("already up to date") || output.includes("already up-to-date")) {
+    return "Already up to date.";
+  }
+  return `Updated ${branch || "current branch"} with fast-forward pull.`;
+}
+
+async function stageReplacementRuntimeUpdate({ repository, branch, startedAt, pullError }) {
+  if (!["win32", "darwin"].includes(process.platform)) {
+    const error = new Error("Fast-forward git pull failed, and replacement updates currently support Windows and macOS launchers.");
+    error.status = 501;
+    throw error;
+  }
+
   const updateId = timestampForFileName(new Date(startedAt));
   const stagingRoot = path.join(tmpdir(), `newtnode-update-${updateId}-${randomUUID().slice(0, 8)}`);
   const cloneDir = path.join(stagingRoot, "next");
   const backupRoot = path.join(path.dirname(rootDir), `${path.basename(rootDir)}.previous-update-${updateId}`);
-  updatePromise = stageReplacementUpdate({
-    repository,
-    branch,
-    stagingRoot,
-    cloneDir,
-    backupRoot
-  });
 
   try {
-    const staged = await updatePromise;
+    const staged = await stageReplacementUpdate({
+      repository,
+      branch,
+      stagingRoot,
+      cloneDir,
+      backupRoot,
+      pullError
+    });
     restartRequested = true;
     return {
       ok: true,
@@ -540,6 +593,8 @@ async function pullRuntimeUpdate(body = {}) {
       },
       restartRequested: true,
       relaunching: true,
+      updateMethod: "replacement",
+      fallbackFrom: "git-pull",
       delayMs: staged.delayMs,
       preservedPaths: [
         ...updatePreservedDirectories,
@@ -550,20 +605,19 @@ async function pullRuntimeUpdate(body = {}) {
       finishedAt: new Date().toISOString(),
       stdout: staged.stdout,
       stderr: staged.stderr,
-      message: "Update staged. NewtNode will relaunch from the replacement install."
+      message: "Fast-forward pull failed. Replacement update staged; NewtNode will relaunch from the replacement install."
     };
   } catch (error) {
     error.status = error.status || 500;
     if (existsSync(stagingRoot)) {
       await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
     }
+    error.message = `Fast-forward git pull failed, then replacement update failed: ${error.message}`;
     throw error;
-  } finally {
-    updatePromise = null;
   }
 }
 
-async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDir, backupRoot }) {
+async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDir, backupRoot, pullError = null }) {
   await mkdir(stagingRoot, { recursive: true });
   const cloneResult = await execFile("git", ["clone", "--depth", "1", "--branch", branch, repository, cloneDir], {
     cwd: path.dirname(rootDir),
@@ -614,11 +668,16 @@ async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDi
     delayMs,
     logPath,
     stagedHead,
-    stdout: commandOutputSummary([
-      ["git clone", cloneResult],
-      ["npm install", installResult]
-    ]),
+    stdout: [
+      pullError ? "git pull --ff-only failed; staging replacement update." : "",
+      commandOutputSummary([
+        ["git pull --ff-only", pullError],
+        ["git clone", cloneResult],
+        ["npm install", installResult]
+      ])
+    ].filter(Boolean).join("\n\n"),
     stderr: commandErrorSummary([
+      ["git pull --ff-only", pullError],
       ["git clone", cloneResult],
       ["npm install", installResult]
     ])
