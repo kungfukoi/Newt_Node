@@ -77,6 +77,15 @@ const runtimeConfigSources = {
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
+const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
+const updatePreservedDirectories = [
+  "saved_workflows",
+  "inputs",
+  "outputs",
+  "uploads",
+  path.join("server", "data")
+];
+const updatePreservedFiles = [".env"];
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
 const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
@@ -484,6 +493,12 @@ async function pullRuntimeUpdate(body = {}) {
     throw error;
   }
 
+  if (!["win32", "darwin"].includes(process.platform)) {
+    const error = new Error("Replacement updates currently support Windows and macOS launchers.");
+    error.status = 501;
+    throw error;
+  }
+
   const repository = normalizeUpdateRepository(body.repository) || await resolveUpdateRepository();
   if (!repository) {
     const error = new Error("Enter a repository URL before updating.");
@@ -498,31 +513,508 @@ async function pullRuntimeUpdate(body = {}) {
 
   const branch = await currentGitBranch() || "main";
   const startedAt = new Date().toISOString();
-  updatePromise = execFile("git", ["pull", "--ff-only", repository, branch], {
-    cwd: rootDir,
-    timeout: 300000,
-    maxBuffer: 1024 * 1024,
-    windowsHide: true
+  const updateId = timestampForFileName(new Date(startedAt));
+  const stagingRoot = path.join(tmpdir(), `newtnode-update-${updateId}-${randomUUID().slice(0, 8)}`);
+  const cloneDir = path.join(stagingRoot, "next");
+  const backupRoot = path.join(path.dirname(rootDir), `${path.basename(rootDir)}.previous-update-${updateId}`);
+  updatePromise = stageReplacementUpdate({
+    repository,
+    branch,
+    stagingRoot,
+    cloneDir,
+    backupRoot
   });
 
   try {
-    const { stdout = "", stderr = "" } = await updatePromise;
+    const staged = await updatePromise;
+    restartRequested = true;
     return {
       ok: true,
       repository,
       branch,
-      branchStatus: await resolveBranchStatus(repository, branch),
+      branchStatus: {
+        state: "update-scheduled",
+        label: "Update staged",
+        detail: branch,
+        remoteHead: shortCommit(staged.stagedHead)
+      },
+      restartRequested: true,
+      relaunching: true,
+      delayMs: staged.delayMs,
+      preservedPaths: [
+        ...updatePreservedDirectories,
+        ...updatePreservedFiles
+      ],
+      logPath: staged.logPath,
       startedAt,
       finishedAt: new Date().toISOString(),
-      stdout: String(stdout).trim(),
-      stderr: String(stderr).trim()
+      stdout: staged.stdout,
+      stderr: staged.stderr,
+      message: "Update staged. NewtNode will relaunch from the replacement install."
     };
   } catch (error) {
     error.status = error.status || 500;
+    if (existsSync(stagingRoot)) {
+      await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+    }
     throw error;
   } finally {
     updatePromise = null;
   }
+}
+
+async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDir, backupRoot }) {
+  await mkdir(stagingRoot, { recursive: true });
+  const cloneResult = await execFile("git", ["clone", "--depth", "1", "--branch", branch, repository, cloneDir], {
+    cwd: path.dirname(rootDir),
+    timeout: 300000,
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true
+  });
+  const installResult = await installStagedDependencies(cloneDir);
+  const stagedHead = await gitHeadForDirectory(cloneDir);
+  const delayMs = 2500;
+  const stopPorts = updateStopPorts();
+  const logPath = path.join(stagingRoot, "newtnode-update.log");
+  const scriptPath = path.join(stagingRoot, process.platform === "win32" ? "Apply-NewtNodeUpdate.ps1" : "apply-newtnode-update.sh");
+  const scriptContent = process.platform === "win32" ? buildWindowsReplacementUpdateScript({
+    rootPath: rootDir,
+    stagedPath: cloneDir,
+    backupPath: backupRoot,
+    logPath,
+    currentPid: process.pid,
+    healthUrl: `http://127.0.0.1:${port}/api/health`,
+    stopPorts,
+    delayMs
+  }) : buildMacReplacementUpdateScript({
+    rootPath: rootDir,
+    stagedPath: cloneDir,
+    backupPath: backupRoot,
+    logPath,
+    currentPid: process.pid,
+    currentParentPid: process.ppid,
+    healthUrl: `http://127.0.0.1:${port}/api/health`,
+    stopPorts,
+    delayMs
+  });
+  await writeFile(scriptPath, scriptContent, "utf8");
+  const updaterCommand = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
+  const updaterArgs = process.platform === "win32"
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]
+    : [scriptPath];
+  const updater = spawn(updaterCommand, updaterArgs, {
+    cwd: stagingRoot,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  updater.unref();
+
+  return {
+    delayMs,
+    logPath,
+    stagedHead,
+    stdout: commandOutputSummary([
+      ["git clone", cloneResult],
+      ["npm install", installResult]
+    ]),
+    stderr: commandErrorSummary([
+      ["git clone", cloneResult],
+      ["npm install", installResult]
+    ])
+  };
+}
+
+async function installStagedDependencies(directory) {
+  if (!existsSync(path.join(directory, "package.json"))) {
+    return {
+      stdout: "",
+      stderr: "No package.json found in replacement repository; skipped npm install."
+    };
+  }
+
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  return execFile(npmCommand, ["install", "--no-audit", "--no-fund"], {
+    cwd: directory,
+    timeout: 600000,
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true
+  });
+}
+
+async function gitHeadForDirectory(directory) {
+  try {
+    const { stdout = "" } = await execFile("git", ["rev-parse", "HEAD"], {
+      cwd: directory,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return String(stdout).trim();
+  } catch {
+    return "";
+  }
+}
+
+function buildWindowsReplacementUpdateScript({ rootPath, stagedPath, backupPath, logPath, currentPid, healthUrl, stopPorts, delayMs }) {
+  const preservedDirectories = updatePreservedDirectories.map(powershellQuote).join(", ");
+  const preservedFiles = updatePreservedFiles.map(powershellQuote).join(", ");
+  const ports = updateStopPorts(stopPorts).join(", ");
+  const handoffDelaySeconds = Math.max(1, Math.ceil(Number(delayMs || 0) / 1000));
+  return `$ErrorActionPreference = "Stop"
+
+$root = ${powershellQuote(rootPath)}
+$stagedRoot = ${powershellQuote(stagedPath)}
+$backupRoot = ${powershellQuote(backupPath)}
+$logPath = ${powershellQuote(logPath)}
+$currentPid = ${Number(currentPid) || 0}
+$healthUrl = ${powershellQuote(healthUrl)}
+$ports = @(${ports})
+$preservedDirectories = @(${preservedDirectories})
+$preservedFiles = @(${preservedFiles})
+
+function Write-UpdateLog($message) {
+  $line = "[$((Get-Date).ToString('o'))] $message"
+  Add-Content -LiteralPath $logPath -Value $line
+}
+
+function Stop-NewtNodeProcesses {
+  $processIds = New-Object System.Collections.Generic.HashSet[int]
+
+  foreach ($port in $ports) {
+    $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    foreach ($connection in $connections) {
+      if ($connection.OwningProcess -and $connection.OwningProcess -ne 0) {
+        [void]$processIds.Add([int]$connection.OwningProcess)
+      }
+    }
+  }
+
+  if ($currentPid -gt 0) {
+    [void]$processIds.Add([int]$currentPid)
+  }
+
+  foreach ($processId in $processIds) {
+    try {
+      $process = Get-Process -Id $processId -ErrorAction Stop
+      Write-UpdateLog "Stopping PID $processId ($($process.ProcessName))"
+      Stop-Process -Id $processId -Force -ErrorAction Stop
+    } catch {
+      Write-UpdateLog "PID $processId is already stopped."
+    }
+  }
+}
+
+function Move-PreservedDirectory($relativePath) {
+  $source = Join-Path $backupRoot $relativePath
+  if (-not (Test-Path -LiteralPath $source)) {
+    return
+  }
+
+  $destination = Join-Path $root $relativePath
+  $destinationParent = Split-Path -Parent $destination
+  if ($destinationParent) {
+    New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+  }
+  if (Test-Path -LiteralPath $destination) {
+    Remove-Item -LiteralPath $destination -Recurse -Force
+  }
+  Move-Item -LiteralPath $source -Destination $destination
+  Write-UpdateLog "Preserved $relativePath"
+}
+
+function Copy-PreservedFile($relativePath) {
+  $source = Join-Path $backupRoot $relativePath
+  if (-not (Test-Path -LiteralPath $source)) {
+    return
+  }
+
+  $destination = Join-Path $root $relativePath
+  $destinationParent = Split-Path -Parent $destination
+  if ($destinationParent) {
+    New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+  }
+  Copy-Item -LiteralPath $source -Destination $destination -Force
+  Write-UpdateLog "Preserved $relativePath"
+}
+
+try {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $logPath) | Out-Null
+  Write-UpdateLog "Waiting ${handoffDelaySeconds}s before replacement."
+  Start-Sleep -Seconds ${handoffDelaySeconds}
+  Stop-NewtNodeProcesses
+  Start-Sleep -Seconds 1
+
+  if (-not (Test-Path -LiteralPath $stagedRoot)) {
+    throw "Replacement repository is missing: $stagedRoot"
+  }
+
+  Write-UpdateLog "Moving current install to $backupRoot"
+  Move-Item -LiteralPath $root -Destination $backupRoot
+  Write-UpdateLog "Moving replacement install to $root"
+  Move-Item -LiteralPath $stagedRoot -Destination $root
+
+  foreach ($relativePath in $preservedDirectories) {
+    Move-PreservedDirectory $relativePath
+  }
+  foreach ($relativePath in $preservedFiles) {
+    Copy-PreservedFile $relativePath
+  }
+
+  $launcher = Join-Path $root "Launch_NewtNode.ps1"
+  if (Test-Path -LiteralPath $launcher) {
+    Write-UpdateLog "Launching NewtNode with Launch_NewtNode.ps1"
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $launcher) -WorkingDirectory $root -WindowStyle Minimized
+  } else {
+    Write-UpdateLog "Launch_NewtNode.ps1 missing; falling back to npm run dev."
+    Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "dev") -WorkingDirectory $root -WindowStyle Minimized
+  }
+
+  $healthy = $false
+  $deadline = (Get-Date).AddSeconds(90)
+  while (-not $healthy -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 2
+      $healthy = $response.StatusCode -eq 200
+    } catch {
+      $healthy = $false
+    }
+  }
+
+  if ($healthy) {
+    Write-UpdateLog "Replacement is healthy. Removing old install backup."
+    Remove-Item -LiteralPath $backupRoot -Recurse -Force
+  } else {
+    Write-UpdateLog "Replacement did not report healthy before timeout. Backup left at $backupRoot"
+  }
+} catch {
+  Write-UpdateLog "Update failed: $($_.Exception.Message)"
+  if (-not (Test-Path -LiteralPath $root) -and (Test-Path -LiteralPath $backupRoot)) {
+    Write-UpdateLog "Restoring backup to $root"
+    Move-Item -LiteralPath $backupRoot -Destination $root
+  }
+  throw
+}
+`;
+}
+
+function buildMacReplacementUpdateScript({ rootPath, stagedPath, backupPath, logPath, currentPid, currentParentPid, healthUrl, stopPorts, delayMs }) {
+  const preservedDirectories = updatePreservedDirectories.map(shellQuote).join(" ");
+  const preservedFiles = updatePreservedFiles.map(shellQuote).join(" ");
+  const ports = updateStopPorts(stopPorts).join(" ");
+  const handoffDelaySeconds = Math.max(1, Math.ceil(Number(delayMs || 0) / 1000));
+  return `#!/bin/bash
+set -e
+
+root=${shellQuote(rootPath)}
+staged_root=${shellQuote(stagedPath)}
+backup_root=${shellQuote(backupPath)}
+log_path=${shellQuote(logPath)}
+current_pid=${Number(currentPid) || 0}
+current_parent_pid=${Number(currentParentPid) || 0}
+health_url=${shellQuote(healthUrl)}
+stop_ports=(${ports})
+preserved_directories=(${preservedDirectories})
+preserved_files=(${preservedFiles})
+
+write_update_log() {
+  mkdir -p "$(dirname "$log_path")"
+  printf '[%s] %s\\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$1" >> "$log_path"
+}
+
+add_pid() {
+  local pid="$1"
+  case "$pid" in
+    ''|*[!0-9]*) return ;;
+  esac
+  case " $process_ids " in
+    *" $pid "*) ;;
+    *) process_ids="$process_ids $pid" ;;
+  esac
+}
+
+stop_pid() {
+  local pid="$1"
+  if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    return
+  fi
+  local name
+  name="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+  write_update_log "Stopping PID $pid ${name}"
+  kill "$pid" >/dev/null 2>&1 || true
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.1
+  done
+  kill -9 "$pid" >/dev/null 2>&1 || true
+}
+
+stop_newtnode_processes() {
+  process_ids=""
+  if command -v lsof >/dev/null 2>&1; then
+    for port in "\${stop_ports[@]}"; do
+      for pid in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true); do
+        add_pid "$pid"
+      done
+    done
+  fi
+
+  if [ "$current_pid" -gt 0 ]; then
+    add_pid "$current_pid"
+  fi
+
+  if [ "$current_parent_pid" -gt 0 ]; then
+    local parent_command
+    parent_command="$(ps -p "$current_parent_pid" -o command= 2>/dev/null || true)"
+    case "$parent_command" in
+      *localServerSupervisor.mjs*) add_pid "$current_parent_pid" ;;
+    esac
+  fi
+
+  for pid in $process_ids; do
+    stop_pid "$pid"
+  done
+}
+
+move_preserved_directory() {
+  local relative_path="$1"
+  local source="$backup_root/$relative_path"
+  if [ ! -e "$source" ]; then
+    return
+  fi
+
+  local destination="$root/$relative_path"
+  mkdir -p "$(dirname "$destination")"
+  if [ -e "$destination" ]; then
+    rm -rf "$destination"
+  fi
+  mv "$source" "$destination"
+  write_update_log "Preserved $relative_path"
+}
+
+copy_preserved_file() {
+  local relative_path="$1"
+  local source="$backup_root/$relative_path"
+  if [ ! -e "$source" ]; then
+    return
+  fi
+
+  local destination="$root/$relative_path"
+  mkdir -p "$(dirname "$destination")"
+  cp -f "$source" "$destination"
+  write_update_log "Preserved $relative_path"
+}
+
+launch_newtnode() {
+  local launcher="$root/NewtNode.command"
+  local alternate_launcher="$root/Versus_NewtNode.command"
+  local app_bundle="$root/Versus_NewtNode.app"
+
+  if [ -f "$launcher" ]; then
+    chmod +x "$launcher" || true
+    write_update_log "Launching NewtNode with NewtNode.command"
+    nohup "$launcher" >/dev/null 2>&1 &
+  elif [ -f "$alternate_launcher" ]; then
+    chmod +x "$alternate_launcher" || true
+    write_update_log "Launching NewtNode with Versus_NewtNode.command"
+    nohup "$alternate_launcher" >/dev/null 2>&1 &
+  elif [ -d "$app_bundle" ]; then
+    write_update_log "Launching NewtNode with Versus_NewtNode.app"
+    open -n "$app_bundle"
+  else
+    write_update_log "NewtNode command launcher missing; falling back to npm run dev."
+    (cd "$root" && nohup npm run dev >/dev/null 2>&1 &)
+  fi
+}
+
+restore_backup_if_needed() {
+  if [ ! -e "$root" ] && [ -e "$backup_root" ]; then
+    write_update_log "Restoring backup to $root"
+    mv "$backup_root" "$root"
+  fi
+}
+
+trap 'write_update_log "Update failed."; restore_backup_if_needed' ERR
+
+write_update_log "Waiting ${handoffDelaySeconds}s before replacement."
+sleep ${handoffDelaySeconds}
+stop_newtnode_processes
+sleep 1
+
+if [ ! -e "$staged_root" ]; then
+  write_update_log "Replacement repository is missing: $staged_root"
+  exit 1
+fi
+
+write_update_log "Moving current install to $backup_root"
+mv "$root" "$backup_root"
+write_update_log "Moving replacement install to $root"
+mv "$staged_root" "$root"
+
+for relative_path in "\${preserved_directories[@]}"; do
+  move_preserved_directory "$relative_path"
+done
+
+for relative_path in "\${preserved_files[@]}"; do
+  copy_preserved_file "$relative_path"
+done
+
+launch_newtnode
+
+healthy=0
+deadline=$((SECONDS + 90))
+while [ "$SECONDS" -lt "$deadline" ]; do
+  sleep 2
+  if curl -fsS "$health_url" >/dev/null 2>&1; then
+    healthy=1
+    break
+  fi
+done
+
+if [ "$healthy" -eq 1 ]; then
+  write_update_log "Replacement is healthy. Removing old install backup."
+  rm -rf "$backup_root"
+else
+  write_update_log "Replacement did not report healthy before timeout. Backup left at $backup_root"
+fi
+`;
+}
+
+function commandOutputSummary(commands) {
+  return commands
+    .map(([label, result]) => {
+      const output = String(result?.stdout || "").trim();
+      return output ? `${label}:\n${output}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function commandErrorSummary(commands) {
+  return commands
+    .map(([label, result]) => {
+      const output = String(result?.stderr || "").trim();
+      return output ? `${label}:\n${output}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function updateStopPorts(values = [port, clientPort]) {
+  const ports = (Array.isArray(values) ? values : [values])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0 && value < 65536);
+  return [...new Set(ports.length ? ports : [3336, 5176])];
+}
+
+function powershellQuote(value) {
+  return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+function shellQuote(value) {
+  return `'${String(value || "").replace(/'/g, "'\\''")}'`;
 }
 
 async function requestServerRestart() {
@@ -766,9 +1258,10 @@ async function resolveBranchStatus(repository, branch) {
   }
 
   try {
-    const [localHead, remoteHead] = await Promise.all([
+    const [localHead, remoteHead, hasLocalChanges] = await Promise.all([
       currentGitHead(),
-      remoteBranchHead(cleanRepository, cleanBranch)
+      remoteBranchHead(cleanRepository, cleanBranch),
+      hasGitWorkingTreeChanges()
     ]);
 
     if (!localHead || !remoteHead) {
@@ -780,9 +1273,50 @@ async function resolveBranchStatus(repository, branch) {
     }
 
     if (localHead === remoteHead) {
+      if (hasLocalChanges) {
+        return {
+          state: "local-changes",
+          label: "Local changes",
+          detail: cleanBranch,
+          localHead: shortCommit(localHead),
+          remoteHead: shortCommit(remoteHead)
+        };
+      }
+
       return {
         state: "up-to-date",
         label: "Up-to-date",
+        detail: cleanBranch,
+        localHead: shortCommit(localHead),
+        remoteHead: shortCommit(remoteHead)
+      };
+    }
+
+    if (hasLocalChanges) {
+      return {
+        state: "local-changes",
+        label: "Local changes",
+        detail: cleanBranch,
+        localHead: shortCommit(localHead),
+        remoteHead: shortCommit(remoteHead)
+      };
+    }
+
+    const relation = await gitCommitRelation(localHead, remoteHead);
+    if (relation === "local-ahead") {
+      return {
+        state: "local-ahead",
+        label: "Local ahead",
+        detail: cleanBranch,
+        localHead: shortCommit(localHead),
+        remoteHead: shortCommit(remoteHead)
+      };
+    }
+
+    if (relation === "diverged") {
+      return {
+        state: "different-history",
+        label: "Repository differs",
         detail: cleanBranch,
         localHead: shortCommit(localHead),
         remoteHead: shortCommit(remoteHead)
@@ -815,6 +1349,63 @@ async function currentGitHead() {
     return String(stdout).trim();
   } catch {
     return "";
+  }
+}
+
+async function hasGitWorkingTreeChanges() {
+  try {
+    const { stdout = "" } = await execFile("git", ["status", "--porcelain"], {
+      cwd: rootDir,
+      timeout: 10000,
+      maxBuffer: 512 * 1024,
+      windowsHide: true
+    });
+    return Boolean(String(stdout || "").trim());
+  } catch {
+    return false;
+  }
+}
+
+async function gitCommitRelation(localHead, remoteHead) {
+  const localKnown = await gitCommitKnown(localHead);
+  const remoteKnown = await gitCommitKnown(remoteHead);
+  if (!localKnown || !remoteKnown) return "unknown";
+
+  const [localIsAncestor, remoteIsAncestor] = await Promise.all([
+    gitCommitIsAncestor(localHead, remoteHead),
+    gitCommitIsAncestor(remoteHead, localHead)
+  ]);
+
+  if (localIsAncestor && !remoteIsAncestor) return "remote-ahead";
+  if (remoteIsAncestor && !localIsAncestor) return "local-ahead";
+  if (!localIsAncestor && !remoteIsAncestor) return "diverged";
+  return "unknown";
+}
+
+async function gitCommitKnown(commit) {
+  if (!/^[a-f0-9]{40}$/i.test(String(commit || ""))) return false;
+  try {
+    await execFile("git", ["cat-file", "-e", `${commit}^{commit}`], {
+      cwd: rootDir,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function gitCommitIsAncestor(ancestor, descendant) {
+  try {
+    await execFile("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: rootDir,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 

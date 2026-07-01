@@ -3,8 +3,8 @@ set -e
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$ROOT_DIR/.newtnode_logs"
-CLIENT_PORT=5176
-API_PORT=3336
+CLIENT_PORT="${VITE_CLIENT_PORT:-5176}"
+API_PORT="${PORT:-${VITE_API_PORT:-3336}}"
 URL="http://127.0.0.1:$CLIENT_PORT/"
 API_HEALTH_URL="http://127.0.0.1:$API_PORT/api/health"
 

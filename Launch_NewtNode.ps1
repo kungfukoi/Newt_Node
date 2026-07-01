@@ -2,9 +2,24 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $clientLog = Join-Path $env:TEMP "newtnode-vite-client.log"
+$apiPort = 3336
+$clientPort = 5176
+
+if ($env:PORT -match '^\d+$') {
+  $apiPort = [int]$env:PORT
+} elseif ($env:VITE_API_PORT -match '^\d+$') {
+  $apiPort = [int]$env:VITE_API_PORT
+}
+
+if ($env:VITE_CLIENT_PORT -match '^\d+$') {
+  $clientPort = [int]$env:VITE_CLIENT_PORT
+}
 
 Set-Location $root
 Remove-Item -LiteralPath $clientLog -Force -ErrorAction SilentlyContinue
+$env:PORT = "$apiPort"
+$env:VITE_API_PORT = "$apiPort"
+$env:VITE_CLIENT_PORT = "$clientPort"
 
 function Test-NewtNodeUrl($url) {
   try {
@@ -16,7 +31,7 @@ function Test-NewtNodeUrl($url) {
 }
 
 function Find-NewtNodeUrl {
-  foreach ($port in 5176..5199) {
+  foreach ($port in $clientPort..($clientPort + 23)) {
     $url = "http://127.0.0.1:$port/"
     if (Test-NewtNodeUrl $url) {
       return $url
@@ -27,10 +42,10 @@ function Find-NewtNodeUrl {
 }
 
 try {
-  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:3336/api/health" -TimeoutSec 1 | Out-Null
-  Write-Host "NewtNode server is already running."
+  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$apiPort/api/health" -TimeoutSec 1 | Out-Null
+  Write-Host "NewtNode server is already running on port $apiPort."
 } catch {
-  Write-Host "Starting NewtNode server..."
+  Write-Host "Starting NewtNode server on port $apiPort..."
   Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "server") -WorkingDirectory $root -WindowStyle Minimized
 }
 
@@ -39,7 +54,7 @@ $appUrl = Find-NewtNodeUrl
 if ($appUrl) {
   Write-Host "NewtNode client is already running at $appUrl"
 } else {
-  Write-Host "Starting NewtNode client..."
+  Write-Host "Starting NewtNode client on port $clientPort..."
   $clientCommand = "npm run client > `"$clientLog`" 2>&1"
   Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $clientCommand) -WorkingDirectory $root -WindowStyle Minimized
 

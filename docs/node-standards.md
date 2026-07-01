@@ -138,6 +138,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
 - `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. The default text and vision-text route is Gemini Flash-class through Fal/OpenRouter route constants in `server/index.js`, with explicit environment overrides for model changes.
+- Text and Text Model prompts may mention nodes by name with `@Node Name`. Mentions match exact node titles, including spaces, and compact aliases such as `@NodeName` or `@Node-Name`. Text Model sends referenced text, image, and video nodes as structured model context; Image and Video Model prompts that consume referenced Text output also receive referenced media nodes as prompt-side references when compatible.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
 - The default text-processing provider is Fal via `TEXT_LLM_PROVIDER=fal`. The current default model ids are `google/gemini-2.5-flash` for `FAL_TEXT_MODEL`, `FAL_VISION_TEXT_MODEL`, `FAL_VISION_TEXT_FALLBACK_MODEL`, and `FAL_VIDEO_TEXT_MODEL`.
 - Fal text processing uses `openrouter/router` and should pass the app's text-processing instructions as `system_prompt`. Image and video helper descriptions use the matching OpenRouter vision/video routes before the final text prompt is assembled.
@@ -274,8 +275,8 @@ Settings is a local runtime control surface, not an account system.
 - Secrets can be loaded into Settings with `includeSecrets=1`, but UI fields must remain password-style by default with explicit reveal buttons.
 - Runtime settings live in `server/data/runtime-settings.json`. Treat that file as local state: ignored by git, not a fixture, and not a source of defaults for another machine.
 - `.env` remains a valid source for keys and update repository values. Settings overrides should be reflected in `process.env` through the runtime config refresh path, and the UI should show whether each key came from `.env` or Settings.
-- The update action must stay constrained to the configured repository and the currently checked-out branch. Keep it fast-forward only; do not add merge, reset, or branch-changing behavior to the Settings button.
-- Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, or check failed.
+- The update action must stay constrained to the configured repository and the currently checked-out branch. It should stage a fresh replacement clone, install dependencies, preserve local `.env`, `server/data`, workflows, inputs, uploads, and outputs, swap the app folder, relaunch through the platform launcher, and remove the old install only after the replacement reports healthy. Keep Windows PowerShell and macOS bash handoff scripts aligned; do not add merge, reset, or branch-changing behavior to the Settings button.
+- Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, local changes, local ahead, repository differs, or check failed.
 - Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
 - If the Settings branch tile or health payload shows the app version, derive it from package metadata so release bumps update the display automatically.
 
@@ -496,6 +497,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 - Browser and shared helper code must not depend on Windows-only paths, drive letters, hidden-folder behavior, shell commands, or `.exe` names. Use URL helpers in browser code and Node `path`/`fs` APIs server-side.
 - Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `Versus_NewtNode.command`, `Versus_NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
+- Launch and restart entry points must honor `PORT`, `VITE_API_PORT`, and `VITE_CLIENT_PORT` so side-by-side update tests do not stop, relaunch, or health-check the default NewtNode instance.
 - Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `Versus_NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `Versus_NewtNode.app/Contents/Resources/`.
 - Keep launcher ports, health URLs, package scripts, and README startup instructions aligned. Document platform-specific commands separately rather than baking them into shared code.
 
@@ -530,6 +532,7 @@ The Edit node establishes the standard for local ffmpeg-backed media editing nod
 - Video previews use a frame-time slider. Time-only effects should still preview a representative frame: Trim previews within the selected start/end range, Reverse maps the selected preview time from the end of the source, and FPS previews the source frame because it does not visibly change a single frame.
 - Transform `Crop Center` uses pixel `Width` and `Height`, seeded from the connected source dimensions when known. It uses sliders plus number inputs and an aspect-lock toggle; do not reintroduce percentage crop controls for this effect.
 - Time `Trim` uses start/end seconds tied to a compact clip timeline. Dragging the head or tail updates the fields, and typing in the fields updates the handles. The default end time should seed from the connected clip duration when metadata is available.
+- Brush Inpaint exposes `Create mask` in the compact and enlarged brush controls. It saves the current painted region as a black-background, white-region PNG result without calling the inpaint provider, and the Edit mask output port emits the newest mask result.
 - Edit outputs should append to `resultItems`, preserve previous results, support download, and connect anywhere a normal image or video output can connect.
 - History entries should use provider `local`, endpoint `local/edit-media`, model name `Edit: <effect label>`, and `$0` local edit cost metadata.
 

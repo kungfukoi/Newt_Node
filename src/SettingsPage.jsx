@@ -100,18 +100,27 @@ export default function SettingsPage() {
     setUpdateLog("");
     try {
       const data = await settingsApi.update({ repository });
-      const output = [data.stdout, data.stderr].filter(Boolean).join("\n").trim() || "Already up to date.";
+      const output = [data.stdout, data.stderr].filter(Boolean).join("\n").trim()
+        || (data.relaunching ? "Replacement update staged. NewtNode will relaunch." : "Already up to date.");
       setSettings((current) => ({
         ...(current || {}),
         repository: data.repository || repository,
         branch: data.branch || current?.branch || "",
         branchStatus: data.branchStatus || current?.branchStatus,
-        updateInProgress: false
+        updateInProgress: false,
+        restartRequested: Boolean(data.restartRequested) || current?.restartRequested
       }));
       setRepository(data.repository || repository);
       setUpdateLog(output);
-      setMessage(data.branchStatus?.label || `Updated ${data.branch || "current branch"}.`);
+      setMessage(data.message || data.branchStatus?.label || `Updated ${data.branch || "current branch"}.`);
       setLastUpdated(new Date());
+      if (data.relaunching) {
+        await waitForServerAndReload({
+          waitForDisconnect: true,
+          initialDelayMs: Number(data.delayMs || 0),
+          timeoutMs: 120000
+        });
+      }
     } catch (error) {
       setMessage(error.message || "Update failed.");
     } finally {
@@ -208,7 +217,7 @@ export default function SettingsPage() {
       <div className="stats-metrics settings-metrics">
         <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={settings?.falKeyConfigured ? "Configured" : "Not set"} detail={keyDetail(settings?.keySources?.fal, status)} tone={settings?.falKeyConfigured ? "good" : ""} />
         <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={settings?.googleApiKeyConfigured ? "Configured" : "Not set"} detail={keyDetail(settings?.keySources?.google, status)} tone={settings?.googleApiKeyConfigured ? "good" : ""} />
-        <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={settings?.branchStatus?.state === "up-to-date" ? "good" : settings?.branchStatus?.state === "update-available" ? "warn" : ""} />
+        <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={branchMetricTone(settings?.branchStatus?.state)} />
         <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
       </div>
 
@@ -533,6 +542,12 @@ function branchMetricValue(settings) {
   return settings.branchStatus.label || settings.branch || "Unknown";
 }
 
+function branchMetricTone(state) {
+  if (state === "up-to-date") return "good";
+  if (["update-available", "local-changes", "local-ahead", "different-history"].includes(state)) return "warn";
+  return "";
+}
+
 function branchMetricDetail(settings) {
   const branchDetail = settings?.branchStatus
     ? settings.branchStatus.detail || settings.branch || "Ready"
@@ -569,19 +584,26 @@ function timeLabel(date) {
   });
 }
 
-async function waitForServerAndReload() {
+async function waitForServerAndReload({ waitForDisconnect = false, initialDelayMs = 0, timeoutMs = 45000 } = {}) {
   const healthUrl = localServerHealthUrl();
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 45000) {
+  let serverCycled = !waitForDisconnect;
+  if (initialDelayMs > 0) {
+    await delay(initialDelayMs);
+  }
+
+  while (Date.now() - startedAt < timeoutMs) {
     await delay(900);
     try {
       const response = await fetch(`${healthUrl}?restart=${Date.now()}`, { cache: "no-store" });
-      if (response.ok && Date.now() - startedAt > 1600) {
+      if (response.ok && serverCycled && Date.now() - startedAt > 1600) {
         window.location.reload();
         return;
       }
+      if (!response.ok) serverCycled = true;
     } catch {
       // Keep polling while the server process is between shutdown and startup.
+      serverCycled = true;
     }
   }
   window.location.reload();
@@ -590,7 +612,8 @@ async function waitForServerAndReload() {
 function localServerHealthUrl() {
   if (typeof window === "undefined") return "/api/health";
   const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
-  if (localHosts.has(window.location.hostname)) return "http://127.0.0.1:3336/api/health";
+  const apiPort = import.meta.env.VITE_API_PORT || "3336";
+  if (localHosts.has(window.location.hostname)) return `http://127.0.0.1:${apiPort}/api/health`;
   return "/api/health";
 }
 

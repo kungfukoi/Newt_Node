@@ -113,6 +113,7 @@ import {
   outputItemFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
+import { findNodeReferenceMentions } from "./nodeReferences.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -2298,6 +2299,57 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
+  async function createEditBrushMaskOutput(node, maskDataUrlOverride = "") {
+    const currentNode = nodesRef.current.find((item) => item.id === node?.id) || node;
+    if (!currentNode || currentNode.type !== "edit") return { status: "skipped" };
+    if (currentNode.data?.status === "running") return { status: "skipped" };
+
+    const { effect, sourceType } = editSelectionFromData(currentNode.data);
+    if (sourceType !== "image" || effect.id !== "brushInpaint") {
+      const message = "Select Brush Inpaint before creating a mask.";
+      updateNode(currentNode.id, { status: "error", error: message });
+      return { status: "error", error: new Error(message) };
+    }
+
+    const incoming = buildIncomingByNode(nodesRef.current, edgesRef.current)[currentNode.id] || {};
+    const sourceUrl = connectedAssetUrls(incoming.imageIn).at(-1) || "";
+    const sourceDimensions = sourceUrl ? editSourceDimensionsForItems(incoming.imageIn, "image", sourceUrl, currentNode.data.editSourceDimensions) : null;
+    const settings = editSettingsForEffect(currentNode.data, effect, sourceDimensions);
+    const overrideMask = normalizeEditBrushSettings({ maskDataUrl: maskDataUrlOverride }).maskDataUrl;
+    const brushSettings = normalizeEditBrushSettings({
+      ...settings,
+      maskDataUrl: overrideMask || settings.maskDataUrl
+    });
+    const previousEditResults = existingResultItemsForNode(currentNode, "image");
+
+    try {
+      if (!brushSettings.maskDataUrl) throw new Error("Paint a mask before creating one.");
+      updateNode(currentNode.id, { status: "running", error: "" });
+      const generated = await createBrushInpaintMaskResult({
+        node: currentNode,
+        settings: brushSettings,
+        uploadAsset: uploadNodeAsset
+      });
+      const { resultItems, firstNewIndex } = appendedNodeResultState(previousEditResults, [generated], "image");
+      updateNode(currentNode.id, {
+        status: "complete",
+        resultUrl: generated.url,
+        resultItems,
+        selectedResultIndex: firstNewIndex,
+        resultText: generated.text || "",
+        resultType: "image",
+        editSettings: brushSettings.maskDataUrl !== settings.maskDataUrl ? brushSettings : currentNode.data.editSettings,
+        error: ""
+      });
+      loadOutputHistory();
+      return { status: "complete", item: generated };
+    } catch (error) {
+      const message = error?.message || "Could not create mask.";
+      updateNode(currentNode.id, { status: "error", error: message });
+      return { status: "error", error: error instanceof Error ? error : new Error(message) };
+    }
+  }
+
   function removeTransferImage(nodeId, imageId) {
     pushUndoSnapshot();
     updateNode(nodeId, {
@@ -4220,7 +4272,8 @@ function autoConnectionOutputKind(source, from) {
 
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    const basePrompt = connectedText(incoming.promptIn) || currentNode.data.prompt;
+    const nodeReferenceContext = { nodes: nodesRef.current };
+    const basePrompt = connectedText(incoming.promptIn, nodeReferenceContext) || resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
       (currentNode.type === "videoModel" && isSam3VideoModel(currentNode.data.model)) ||
@@ -4264,7 +4317,8 @@ function autoConnectionOutputKind(source, from) {
           incoming,
           workflowContext: requestContext,
           sourceLabel,
-          promptPiecesForSource
+          promptPiecesForSource,
+          nodeReferences: textModelNodeReferenceInputs(currentNode, incoming, nodesRef.current)
         });
         updateNode(currentNode.id, {
           status: "complete",
@@ -4407,10 +4461,11 @@ function autoConnectionOutputKind(source, from) {
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
-        const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
-        const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
+        const imageIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
+        const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
+        const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, imageIncoming);
         const imagePromptItems = connectedImagePromptItems(
-          isSegmentation ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
+          isSegmentation ? zImageSupportedReferenceConnections(imageIncoming.imagePromptIn || []) : imageReferenceConnectionsForModel(currentNode.data.model, imageIncoming),
           currentIncomingByNode,
           { includeComposerCharacterBindings: !isZImage }
         );
@@ -4477,9 +4532,10 @@ function autoConnectionOutputKind(source, from) {
         return { status: "complete" };
       }
 
+      const promptReferencedVideoIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
       const videoIncoming = videoModelSupportsCharacterInput(currentNode.data.model)
-        ? incoming
-        : { ...incoming, characterIn: [] };
+        ? promptReferencedVideoIncoming
+        : { ...promptReferencedVideoIncoming, characterIn: [] };
       const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
@@ -4816,6 +4872,7 @@ function autoConnectionOutputKind(source, from) {
                 incoming={incomingByNode[node.id] || {}}
                 incomingByNode={incomingByNode}
                 onRun={runNode}
+                onCreateBrushMask={createEditBrushMaskOutput}
                 onUpload={uploadMediaAsset}
                 onOutputImport={importOutputAssetToMediaNode}
                 onTransferImagesUpload={uploadTransferImages}
@@ -5144,6 +5201,7 @@ function NodeCard({
   incoming,
   incomingByNode,
   onRun,
+  onCreateBrushMask,
   onUpload,
   onOutputImport,
   onTransferImagesUpload,
@@ -5279,6 +5337,7 @@ function NodeCard({
         incoming={incoming}
         incomingByNode={incomingByNode}
         onRun={onRun}
+        onCreateBrushMask={onCreateBrushMask}
         running={running}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
@@ -5591,6 +5650,12 @@ function resizeEditBrushCanvas(canvas, target, preserve = true) {
   return true;
 }
 
+function isPaintedInpaintMaskPixel(data, index) {
+  const alpha = data[index + 3];
+  const value = Math.max(data[index], data[index + 1], data[index + 2]);
+  return alpha > 8 && value > 12;
+}
+
 async function drawEditBrushMaskDataUrl(canvas, maskDataUrl) {
   const context = canvas?.getContext("2d", { willReadFrequently: true });
   if (!canvas || !context) return false;
@@ -5613,9 +5678,7 @@ async function drawEditBrushMaskDataUrl(canvas, maskDataUrl) {
   const imageData = maskContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
   let hasMask = false;
   for (let index = 0; index < imageData.data.length; index += 4) {
-    const alpha = imageData.data[index + 3];
-    const value = Math.max(imageData.data[index], imageData.data[index + 1], imageData.data[index + 2]);
-    const masked = alpha > 8 && value > 12;
+    const masked = isPaintedInpaintMaskPixel(imageData.data, index);
     imageData.data[index] = 234;
     imageData.data[index + 1] = 212;
     imageData.data[index + 2] = 44;
@@ -5639,7 +5702,7 @@ function createEditBrushMaskDataUrl(canvas, image, hasMask = true) {
   const imageData = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
   let hasMaskedPixel = false;
   for (let index = 0; index < imageData.data.length; index += 4) {
-    const masked = imageData.data[index + 3] > 8 || imageData.data[index] > 12 || imageData.data[index + 1] > 12 || imageData.data[index + 2] > 12;
+    const masked = isPaintedInpaintMaskPixel(imageData.data, index);
     imageData.data[index] = masked ? 255 : 0;
     imageData.data[index + 1] = masked ? 255 : 0;
     imageData.data[index + 2] = masked ? 255 : 0;
@@ -5679,7 +5742,7 @@ function drawEditBrushStroke(canvas, brushSize, from, to) {
   return true;
 }
 
-function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChange }) {
+function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChange, onCreateMask }) {
   const imageEditorRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
   const textDragRef = React.useRef(null);
@@ -5692,6 +5755,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   const [paintHasMask, setPaintHasMask] = React.useState(Boolean(settings.maskDataUrl));
   const [imageAspect, setImageAspect] = React.useState(16 / 9);
   const [brushDialogOpen, setBrushDialogOpen] = React.useState(false);
+  const [maskCreateBusy, setMaskCreateBusy] = React.useState(false);
   const cropRect = normalizeEditCropRect(settings.cropRect);
   const toneAdjustments = normalizeEditToneAdjustments(settings.adjustments);
   const curvePoints = normalizeEditCurvePoints(settings.points);
@@ -6026,6 +6090,18 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
     updateSettings({ maskDataUrl: "" });
   }
 
+  async function handleCreateMask(maskDataUrlOverride = "") {
+    if (!onCreateMask || maskCreateBusy) return;
+    const maskDataUrl = maskDataUrlOverride || createPaintMaskDataUrl() || brushSettings.maskDataUrl;
+    if (maskDataUrl && maskDataUrl !== brushSettings.maskDataUrl) updateSettings({ maskDataUrl });
+    setMaskCreateBusy(true);
+    try {
+      await onCreateMask(maskDataUrl);
+    } finally {
+      setMaskCreateBusy(false);
+    }
+  }
+
   function updateTextOverlay(patch) {
     updateSettings({ overlay: normalizeEditTextOverlay({ ...textOverlay, ...patch }) });
   }
@@ -6127,6 +6203,10 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
               <Maximize2 size={13} />
               Enlarge
             </button>
+            <button type="button" className="edit-brush-create-mask" onClick={() => handleCreateMask()} disabled={!paintHasMask || maskCreateBusy}>
+              <FileImage size={13} />
+              {maskCreateBusy ? "Creating..." : "Create mask"}
+            </button>
             <button type="button" onClick={clearPaintMask} disabled={!paintHasMask}>Clear mask</button>
           </div>
         </div>
@@ -6188,6 +6268,8 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
           sourceUrl={sourceUrl}
           settings={brushSettings}
           onSettingsChange={updateSettings}
+          onCreateMask={handleCreateMask}
+          creatingMask={maskCreateBusy}
           onClose={() => setBrushDialogOpen(false)}
         />
       )}
@@ -6195,7 +6277,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   );
 }
 
-function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, onClose }) {
+function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, onCreateMask, creatingMask = false, onClose }) {
   const stageRef = React.useRef(null);
   const editorRef = React.useRef(null);
   const imageRef = React.useRef(null);
@@ -6334,6 +6416,15 @@ function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, on
     updateSettings({ maskDataUrl: "" });
   }
 
+  async function handleCreateMask() {
+    const maskDataUrl = createEditBrushMaskDataUrl(canvasRef.current, imageRef.current, true) || brushSettings.maskDataUrl;
+    if (maskDataUrl && maskDataUrl !== brushSettings.maskDataUrl) {
+      setHasMask(true);
+      updateSettings({ maskDataUrl });
+    }
+    await onCreateMask?.(maskDataUrl);
+  }
+
   return (
     <div
       className="edit-brush-dialog-backdrop"
@@ -6375,8 +6466,12 @@ function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, on
             />
             <output>{brushSettings.brushSize}</output>
           </label>
+          <button type="button" className="edit-brush-create-mask" onClick={handleCreateMask} disabled={!hasMask || creatingMask}>
+            <FileImage size={13} />
+            {creatingMask ? "Creating..." : "Create mask"}
+          </button>
           <button type="button" onClick={clearPaintMask} disabled={!hasMask}>Clear mask</button>
-          <small>{hasMask ? "Masked area ready" : "Paint the area to revise"}</small>
+          <small>{creatingMask ? "Creating mask..." : hasMask ? "Masked area ready" : "Paint the area to revise"}</small>
         </div>
         <div className="edit-brush-dialog-stage" ref={stageRef}>
           <div
@@ -7291,6 +7386,7 @@ function NodeBody({
   onUpdate,
   incoming,
   onRun,
+  onCreateBrushMask,
   running,
   onConnectStart,
   onDisconnectInput,
@@ -9510,6 +9606,7 @@ function NodeBody({
               effect={effect}
               settings={settings}
               onSettingsChange={updateEditSettingsPatch}
+              onCreateMask={(maskDataUrl) => onCreateBrushMask?.(node, maskDataUrl)}
             />
           ) : (
             <EditLivePreview
@@ -14431,12 +14528,18 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
 
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
+    const textNodePrompt = node.type === "plainText"
+      ? node.data.text || ""
+      : node.type === "text"
+        ? [node.data.text || "", node.data.resultText || ""].join("\n")
+        : "";
     const prompt = node.type === "storyboard"
       ? [
           storyboardSceneDescriptionForNode(node, incoming),
           ...normalizedStoryboardFrames(node.data.storyboardFrames).map((frame) => frame.prompt || "")
         ].join("\n")
       : connectedText(incoming.promptIn) || node.data.prompt || "";
+    const nodeReferenceMatches = textNodePrompt ? nodeReferenceMentionsForText(textNodePrompt, nodes, node.id) : [];
     const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isImageModelUnsupportedInput(node, "characterIn")
       ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
       : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
@@ -14445,7 +14548,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
           ? storyboardSceneTagMatches(prompt, node, incoming, incomingByNode)
           : [];
 
-    matches.forEach((match) => {
+    [...matches, ...nodeReferenceMatches].forEach((match) => {
       if (!highlights.has(match.nodeId)) {
         highlights.set(match.nodeId, match);
       }
@@ -14505,16 +14608,247 @@ function buildInactiveEdgeIds(nodes, edges) {
   );
 }
 
-function connectedText(items = []) {
+function connectedText(items = [], referenceContext = null) {
   return items
     .map(({ source }) => {
-      if (source.type === "text") return source.data.resultText || source.data.text;
-      if (source.type === "plainText") return source.data.text;
-      if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
-      return source.data.title;
+      const text = rawConnectedTextForSource(source);
+      return resolveNodeReferencesInText(text, referenceContext, source.id);
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function rawConnectedTextForSource(source) {
+  if (source.type === "text") return source.data.resultText || source.data.text;
+  if (source.type === "plainText") return source.data.text;
+  if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
+  return source.data.title;
+}
+
+function resolveNodeReferencesInText(text, referenceContext = null, ownerNodeId = "") {
+  const value = String(text || "");
+  const nodes = referenceContext?.nodes || [];
+  if (!value || !nodes.length) return value;
+  const referenceInputs = nodeReferenceInputsForText(value, nodes, ownerNodeId);
+  const context = nodeReferenceContextText(referenceInputs);
+  return context ? `${value}\n\n${context}` : value;
+}
+
+function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "") {
+  const currentNodeId = typeof ownerNodeOrId === "string" ? ownerNodeOrId : ownerNodeOrId?.id || "";
+  const mentions = nodeReferenceMentionsForText(text, nodes, currentNodeId);
+  const uniqueMentions = new Map();
+  mentions.forEach((mention) => {
+    if (!uniqueMentions.has(mention.nodeId)) uniqueMentions.set(mention.nodeId, mention);
+  });
+
+  const textInputs = [];
+  const imageInputs = [];
+  const videoInputs = [];
+
+  uniqueMentions.forEach((mention) => {
+    const label = `@${mention.name}`;
+    const textInput = nodeReferenceTextInput(mention.node, label);
+    const mediaInput = nodeReferenceMediaInput(mention.node, label);
+    if (textInput) textInputs.push(textInput);
+    if (mediaInput?.type === "image") imageInputs.push(mediaInput);
+    if (mediaInput?.type === "video") videoInputs.push(mediaInput);
+  });
+
+  return { textInputs, imageInputs, videoInputs, mentions: [...uniqueMentions.values()] };
+}
+
+function textModelNodeReferenceInputs(node, incoming = {}, nodes = []) {
+  const merged = emptyNodeReferenceInputs();
+  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node));
+  (incoming.textIn || []).forEach(({ source }) => {
+    mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source.id));
+  });
+  return merged;
+}
+
+function emptyNodeReferenceInputs() {
+  return {
+    textInputs: [],
+    imageInputs: [],
+    videoInputs: [],
+    mentions: []
+  };
+}
+
+function mergeNodeReferenceInputs(target, source = {}) {
+  appendUniqueReferenceItems(target.textInputs, source.textInputs, "label");
+  appendUniqueReferenceItems(target.imageInputs, source.imageInputs, "url");
+  appendUniqueReferenceItems(target.videoInputs, source.videoInputs, "url");
+  appendUniqueReferenceItems(target.mentions, source.mentions, "nodeId");
+  return target;
+}
+
+function appendUniqueReferenceItems(targetItems, sourceItems = [], key) {
+  const existing = new Set(targetItems.map((item) => item?.[key]).filter(Boolean));
+  (sourceItems || []).forEach((item) => {
+    const value = item?.[key];
+    if (!value || existing.has(value)) return;
+    existing.add(value);
+    targetItems.push(item);
+  });
+}
+
+function nodeReferenceMentionsForText(text, nodes = [], currentNodeId = "") {
+  return findNodeReferenceMentions(text, nodes, {
+    currentNodeId,
+    labelForNode: nodeReferenceLabel
+  }).map((mention, index) => ({
+    ...mention,
+    tag: mention.name,
+    color: nodeReferenceColor(mention.node, index),
+    type: "node-reference"
+  }));
+}
+
+function nodeReferenceLabel(node) {
+  return String(node?.data?.title || sourceLabel(node) || node?.type || "").trim();
+}
+
+function nodeReferenceColor(node, index = 0) {
+  const mediaType = nodeResultMediaType(node);
+  if (mediaType && portColors[mediaType]) return portColors[mediaType];
+  if (node?.type && portColors[node.type]) return portColors[node.type];
+  return referenceTagPalette[index % referenceTagPalette.length];
+}
+
+function nodeReferenceTextInput(node, label) {
+  const text = nodeReferenceText(node);
+  return text ? { label, text } : null;
+}
+
+function nodeReferenceText(node) {
+  if (!node) return "";
+  if (node.type === "plainText") return String(node.data?.text || "").trim();
+  if (node.type === "text") return String(node.data?.resultText || node.data?.text || "").trim();
+
+  const outputItem = nodeReferenceOutputItem(node);
+  const mediaType = nodeResultMediaType(node);
+  const promptPieces = promptPiecesForSource(node).join("\n\n");
+  const parts = [
+    node.data?.resultText,
+    node.data?.prompt,
+    outputItem?.text,
+    promptPieces,
+    outputItem?.url && mediaType ? `${capitalizeMediaType(mediaType)} output: ${outputItem.label || nodeReferenceLabel(node)} (${outputItem.url})` : ""
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  return [...new Set(parts)].join("\n\n");
+}
+
+function nodeReferenceMediaInput(node, label) {
+  if (node?.type === "audio") return null;
+  const edge = nodeReferenceSyntheticEdge(node);
+  const outputType = previewMediaType(node, edge);
+  if (outputType !== "image" && outputType !== "video") return null;
+  const outputItem = connectedOutputItem(node, edge);
+  const url = outputItem?.url || sourceResultUrlForPort(node, edge.from.port) || node?.data?.resultUrl || "";
+  if (!url) return null;
+  return {
+    url,
+    label,
+    type: outputType
+  };
+}
+
+function nodeReferenceOutputItem(node) {
+  const edge = nodeReferenceSyntheticEdge(node);
+  return connectedOutputItem(node, edge);
+}
+
+function nodeReferenceSyntheticEdge(node) {
+  return {
+    nodeReferenceLabel: `@${nodeReferenceLabel(node)}`,
+    from: {
+      nodeId: node?.id || "",
+      port: nodeReferenceOutputPort(node)
+    },
+    to: {
+      nodeId: "node-reference",
+      port: "nodeReferenceIn"
+    }
+  };
+}
+
+function nodeReferenceOutputPort(node) {
+  if (!node) return "";
+  if (node.type === "plainText" || node.type === "text") return "promptOut";
+  if (node.type === "image") return "imageOut";
+  if (node.type === "video") return "videoOut";
+  if (node.type === "audio") return "audioOut";
+  if (node.type === "imageModel") return "imageOut";
+  if (node.type === "videoModel") return "videoOut";
+  if (node.type === "camera") return "cameraOut";
+  if (node.type === "style") return "styleOut";
+  if (node.type === "transfer") return "transferOut";
+  if (node.type === "character") return "characterOut";
+  if (node.type === "composer") return "imageOut";
+  if (node.type === "model3d") return "modelOut";
+  if (node.type === "edit") return "editOut";
+  if (node.type === "utility") return utilityOutputType(node) === "video" ? "generatedVideoOut" : "utilityOut";
+  return outputPortDefinitionsForNode(node)[0]?.id || "";
+}
+
+function nodeReferenceContextText(referenceInputs = {}) {
+  const lines = [];
+  (referenceInputs.textInputs || []).forEach((item) => {
+    lines.push(`Referenced node ${item.label}:\n${item.text}`);
+  });
+  (referenceInputs.imageInputs || []).forEach((item) => {
+    lines.push(`Referenced image node ${item.label}: ${item.url}`);
+  });
+  (referenceInputs.videoInputs || []).forEach((item) => {
+    lines.push(`Referenced video node ${item.label}: ${item.url}`);
+  });
+  return lines.length ? `Node reference context:\n${lines.join("\n\n")}` : "";
+}
+
+function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes = [], targetNode = null) {
+  const mentions = nodeReferenceMentionsForText(prompt, nodes, targetNode?.id || "");
+  if (!mentions.length) return incoming;
+
+  const nextIncoming = { ...incoming };
+  const seen = new Set();
+  mentions.forEach((mention) => {
+    const source = mention.node;
+    if (!source?.id || seen.has(source.id)) return;
+    seen.add(source.id);
+    const edge = nodeReferenceSyntheticEdge(source);
+    const targetPort = nodeReferenceTargetPortForPromptReference(targetNode, source, edge);
+    if (!targetPort) return;
+    nextIncoming[targetPort] = [...(nextIncoming[targetPort] || []), { source, edge }];
+  });
+  return nextIncoming;
+}
+
+function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
+  if (!targetNode || !source) return "";
+  const outputType = previewMediaType(source, edge);
+
+  if (targetNode.type === "imageModel") {
+    if (source.type === "audio") return "";
+    if (source.type === "camera") return "cameraIn";
+    if (source.type === "style") return "styleIn";
+    if (source.type === "transfer") return "transferIn";
+    if (source.type === "character") return "characterIn";
+    return outputType === "image" ? "imagePromptIn" : "";
+  }
+
+  if (targetNode.type === "videoModel") {
+    if (source.type === "character") return "characterIn";
+    if (source.type === "audio") return "referenceAudioIn";
+    if (outputType === "image") return "referenceImageIn";
+    if (outputType === "video") return "referenceVideoIn";
+  }
+
+  return "";
 }
 
 function connectedOutputItem(source, edge) {
@@ -14650,7 +14984,7 @@ function connectedAssetItems(items = []) {
 function connectedAssetLabels(items = []) {
   return items
     .filter(({ source, edge }) => connectedOutputUrl(source, edge))
-    .map(({ source, edge }) => connectedOutputItem(source, edge)?.label || source.data.title || sourceLabel(source));
+    .map(({ source, edge }) => edge?.nodeReferenceLabel || connectedOutputItem(source, edge)?.label || source.data.title || sourceLabel(source));
 }
 
 function connectedWanWarpSegments(items = [], incomingByNode = {}) {
@@ -15499,8 +15833,8 @@ async function runLocalEditImageGeneration({ node, sourceUrl, effect, settings, 
     if (!response.ok) throw new Error(data.error || "Edit image inpaint failed.");
     if (!data.image?.localUrl) throw new Error("Edit image inpaint returned no image output.");
     blob = await createInpaintCompositePreviewLayoutBlob(sourceUrl, data.image.localUrl, edit.maskDataUrl);
-    const maskBlob = await dataUrlToBlob(edit.maskDataUrl);
-    const maskAsset = await uploadAsset(new File([maskBlob], `${baseName}-${suffix}-mask.png`, { type: "image/png" }), "edit");
+    const mask = await createBrushInpaintMaskBlob(edit.maskDataUrl);
+    const maskAsset = await uploadAsset(new File([mask.blob], `${baseName}-${suffix}-mask.png`, { type: "image/png" }), "edit");
     if (!maskAsset?.localUrl) throw new Error("Edit image returned no saved mask output.");
     extraItems = [{
       url: maskAsset.localUrl,
@@ -15508,6 +15842,11 @@ async function runLocalEditImageGeneration({ node, sourceUrl, effect, settings, 
       label: "Inpaint Mask",
       text: "Brush Inpaint black and white mask.",
       editRole: "mask",
+      imageEditRole: "mask",
+      fileName: maskAsset.fileName,
+      mimeType: maskAsset.mimeType || "image/png",
+      width: mask.width,
+      height: mask.height,
       cost: null
     }];
   } else {
@@ -15526,10 +15865,56 @@ async function runLocalEditImageGeneration({ node, sourceUrl, effect, settings, 
   return extraItems.length ? [primaryItem, ...extraItems] : primaryItem;
 }
 
-async function dataUrlToBlob(dataUrl) {
-  const response = await fetch(dataUrl);
-  if (!response.ok) throw new Error("Could not prepare mask image.");
-  return response.blob();
+async function createBrushInpaintMaskResult({ node, settings, uploadAsset }) {
+  if (typeof uploadAsset !== "function") throw new Error("Could not save mask output.");
+  const brush = normalizeEditBrushSettings(settings);
+  if (!brush.maskDataUrl) throw new Error("Paint a mask before creating one.");
+  const mask = await createBrushInpaintMaskBlob(brush.maskDataUrl);
+  const baseName = safeStillFrameName(fileBaseName(node.data.fileName || node.data.title || "brush-inpaint"));
+  const asset = await uploadAsset(new File([mask.blob], `${baseName}-mask.png`, { type: "image/png" }), "edit");
+  if (!asset?.localUrl) throw new Error("Edit image returned no saved mask output.");
+  return {
+    url: asset.localUrl,
+    type: "image",
+    label: "Inpaint Mask",
+    text: "Brush Inpaint black and white mask.",
+    editRole: "mask",
+    imageEditRole: "mask",
+    fileName: asset.fileName,
+    mimeType: asset.mimeType || "image/png",
+    width: mask.width,
+    height: mask.height,
+    cost: null
+  };
+}
+
+async function createBrushInpaintMaskBlob(maskDataUrl) {
+  const maskImage = await loadCanvasImage(maskDataUrl);
+  const width = Math.max(1, Math.round(maskImage.naturalWidth || maskImage.width || 1));
+  const height = Math.max(1, Math.round(maskImage.naturalHeight || maskImage.height || 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Could not prepare mask image.");
+  context.drawImage(maskImage, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+  let hasMaskedPixel = false;
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const masked = isPaintedInpaintMaskPixel(imageData.data, index);
+    imageData.data[index] = masked ? 255 : 0;
+    imageData.data[index + 1] = masked ? 255 : 0;
+    imageData.data[index + 2] = masked ? 255 : 0;
+    imageData.data[index + 3] = 255;
+    if (masked) hasMaskedPixel = true;
+  }
+  if (!hasMaskedPixel) throw new Error("Paint a mask before creating one.");
+  context.putImageData(imageData, 0, 0);
+  return {
+    blob: await canvasToBlob(canvas, "image/png", "Could not prepare mask image."),
+    width,
+    height
+  };
 }
 
 function connectedPreviewSources(items = []) {
@@ -15805,7 +16190,7 @@ function createSoftInpaintMaskCanvas(maskImage, width, height) {
   binaryContext.drawImage(maskImage, 0, 0, width, height);
   const imageData = binaryContext.getImageData(0, 0, width, height);
   for (let index = 0; index < imageData.data.length; index += 4) {
-    const masked = imageData.data[index + 3] > 8 || imageData.data[index] > 12 || imageData.data[index + 1] > 12 || imageData.data[index + 2] > 12;
+    const masked = isPaintedInpaintMaskPixel(imageData.data, index);
     imageData.data[index] = 255;
     imageData.data[index + 1] = 255;
     imageData.data[index + 2] = 255;
@@ -16076,15 +16461,16 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
       const outputItem = connectedOutputItem(source, edge);
       const outputUrl = outputItem?.url || connectedOutputUrl(source, edge);
       if (!outputUrl) return null;
+      const referenceLabel = edge?.nodeReferenceLabel || "";
       if (source.type === "character") {
-        return { url: outputUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
+        return { url: outputUrl, label: referenceLabel || characterReferenceLabel(source, namedCharacterReferences) };
       }
       if (source.type === "composer") {
         if (!includeComposerCharacterBindings) {
-          return { url: outputUrl, label: sourceLabel(source) };
+          return { url: outputUrl, label: referenceLabel || sourceLabel(source) };
         }
         return [
-          { url: outputUrl, label: "Input guide image" },
+          { url: outputUrl, label: referenceLabel || "Input guide image" },
           ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
             url: binding.source.data.resultUrl,
             label: composerCharacterReferenceLabel(binding, namedCharacterReferences)
@@ -16100,7 +16486,7 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
       }
       return {
         url: outputUrl,
-        label: source.type === "transfer" ? moodBoardOutputFileName : outputItem?.label || sourceLabel(source)
+        label: referenceLabel || (source.type === "transfer" ? moodBoardOutputFileName : outputItem?.label || sourceLabel(source))
       };
     })
     .filter(Boolean)

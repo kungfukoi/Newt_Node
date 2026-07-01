@@ -6,16 +6,24 @@ export async function runTextNodeProcessing({
   incoming,
   workflowContext,
   sourceLabel,
-  promptPiecesForSource
+  promptPiecesForSource,
+  nodeReferences = {}
 }) {
   const { response, data } = await nodeApi.processText({
     text: node.data.text,
     textInputs: [
+      ...normalizedReferenceInputs(nodeReferences.textInputs),
       ...connectedTextInputItems(incoming.textIn, sourceLabel),
       ...connectedStyleInputItems(incoming.styleIn, sourceLabel, promptPiecesForSource)
     ],
-    imageInputs: connectedMediaInputItems(incoming.imageIn, "image", sourceLabel),
-    videoInputs: connectedMediaInputItems(incoming.videoIn, "video", sourceLabel),
+    imageInputs: [
+      ...connectedMediaInputItems(incoming.imageIn, "image", sourceLabel),
+      ...normalizedReferenceInputs(nodeReferences.imageInputs)
+    ],
+    videoInputs: [
+      ...connectedMediaInputItems(incoming.videoIn, "video", sourceLabel),
+      ...normalizedReferenceInputs(nodeReferences.videoInputs)
+    ],
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
@@ -26,6 +34,10 @@ export async function runTextNodeProcessing({
     text: data.text || "",
     model: data.model || ""
   };
+}
+
+function normalizedReferenceInputs(items = []) {
+  return Array.isArray(items) ? items.filter((item) => item && (item.text || item.url)) : [];
 }
 
 function connectedTextInputItems(items = [], sourceLabel) {
