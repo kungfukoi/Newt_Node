@@ -3579,7 +3579,10 @@ video.newtnode-video-fallback {
   color: rgba(244, 240, 232, 0.86);
   background: rgba(0, 0, 0, 0.34);
   font-size: 12px;
+  font-weight: 650;
   line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .storyboard-scene-field .tagged-prompt-editor,
@@ -3611,15 +3614,15 @@ video.newtnode-video-fallback {
 
 .storyboard-tagged-editor textarea {
   padding: 9px;
-  color: transparent;
+  color: rgba(244, 240, 232, 0.88);
   caret-color: #f6f1e8;
-  -webkit-text-fill-color: transparent;
+  -webkit-text-fill-color: rgba(244, 240, 232, 0.88);
 }
 
 .storyboard-tagged-editor textarea::selection {
-  color: transparent;
+  color: #f6f1e8;
   background: rgba(221, 198, 49, 0.26);
-  -webkit-text-fill-color: transparent;
+  -webkit-text-fill-color: #f6f1e8;
 }
 
 .storyboard-tagged-editor textarea::placeholder {
@@ -3628,11 +3631,11 @@ video.newtnode-video-fallback {
 }
 
 .storyboard-tagged-editor .tagged-prompt-highlighter {
-  color: rgba(244, 240, 232, 0.88);
+  color: transparent;
 }
 
 .storyboard-tagged-editor .prompt-tag-mark {
-  color: var(--tag-color);
+  color: transparent;
   background: color-mix(in srgb, var(--tag-color), transparent 84%);
   font-weight: inherit;
 }
@@ -6550,12 +6553,17 @@ video.newtnode-video-fallback {
 }
 
 .tagged-prompt-editor textarea {
+  display: block;
   position: relative;
   z-index: 2;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
   font: inherit;
   color: #f6f1e8;
   background: transparent;
   caret-color: #f6f1e8;
+  overflow: auto;
   tab-size: 2;
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -6573,7 +6581,7 @@ video.newtnode-video-fallback {
   inset: 0;
   box-sizing: border-box;
   overflow: auto;
-  padding: 9px;
+  padding: 9px calc(9px + var(--tagged-scrollbar-width, 0px)) 9px 9px;
   border: 1px solid transparent;
   border-radius: 7px;
   font: inherit;
@@ -6592,8 +6600,8 @@ video.newtnode-video-fallback {
 }
 
 .tagged-prompt-editor.storyboard-tagged-editor textarea {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  color: rgba(244, 240, 232, 0.88);
+  -webkit-text-fill-color: rgba(244, 240, 232, 0.88);
   font: inherit;
   letter-spacing: 0;
   white-space: pre-wrap;
@@ -6602,9 +6610,9 @@ video.newtnode-video-fallback {
 }
 
 .tagged-prompt-editor.storyboard-tagged-editor textarea::selection {
-  color: transparent;
+  color: #f6f1e8;
   background: rgba(221, 198, 49, 0.26);
-  -webkit-text-fill-color: transparent;
+  -webkit-text-fill-color: #f6f1e8;
 }
 
 .tagged-prompt-editor.storyboard-tagged-editor .tagged-prompt-highlighter {

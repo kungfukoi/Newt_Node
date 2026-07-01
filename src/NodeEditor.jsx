@@ -11236,12 +11236,34 @@ function NodeBody({
 
 function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [], placeholder = "" }) {
   const highlighterRef = React.useRef(null);
+  const textareaRef = React.useRef(null);
   const parts = React.useMemo(() => promptHighlightParts(value, tagMatches), [value, tagMatches]);
 
-  function syncScroll(event) {
-    if (!highlighterRef.current) return;
-    highlighterRef.current.scrollTop = event.currentTarget.scrollTop;
-    highlighterRef.current.scrollLeft = event.currentTarget.scrollLeft;
+  const syncHighlighter = React.useCallback((textarea = textareaRef.current) => {
+    const highlighter = highlighterRef.current;
+    if (!highlighter || !textarea) return;
+    const styles = typeof window !== "undefined" ? window.getComputedStyle(textarea) : null;
+    const borderLeft = parseFloat(styles?.borderLeftWidth || "0") || 0;
+    const borderRight = parseFloat(styles?.borderRightWidth || "0") || 0;
+    const scrollbarWidth = Math.max(0, textarea.offsetWidth - textarea.clientWidth - borderLeft - borderRight);
+    highlighter.style.setProperty("--tagged-scrollbar-width", `${scrollbarWidth}px`);
+    highlighter.scrollTop = textarea.scrollTop;
+    highlighter.scrollLeft = textarea.scrollLeft;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return undefined;
+    syncHighlighter(textarea);
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => syncHighlighter(textarea));
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [syncHighlighter, value]);
+
+  function handleChange(event) {
+    syncHighlighter(event.currentTarget);
+    onChange?.(event);
   }
 
   return (
@@ -11258,7 +11280,7 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
         )}
         {String(value || "").endsWith("\n") ? "\u00a0" : null}
       </div>
-      <textarea value={value} readOnly={readOnly} placeholder={placeholder} onChange={onChange} onScroll={syncScroll} />
+      <textarea ref={textareaRef} value={value} readOnly={readOnly} placeholder={placeholder} onChange={handleChange} onScroll={(event) => syncHighlighter(event.currentTarget)} />
     </div>
   );
 }
