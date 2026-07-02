@@ -1419,10 +1419,30 @@ async function hasGitWorkingTreeChanges() {
       maxBuffer: 512 * 1024,
       windowsHide: true
     });
-    return Boolean(String(stdout || "").trim());
+    return gitStatusHasRelevantChanges(stdout);
   } catch {
     return false;
   }
+}
+
+function gitStatusHasRelevantChanges(output = "") {
+  return String(output || "")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .some((line) => !isIgnoredRuntimeScratchStatusLine(line));
+}
+
+function isIgnoredRuntimeScratchStatusLine(line = "") {
+  if (String(line).slice(0, 2) !== "??") return false;
+  return /^\.tmp-(?:cdp|chrome)-newtnode(?:-[^/\\]+)?(?:[/\\]|$)/.test(gitPorcelainPath(line));
+}
+
+function gitPorcelainPath(line = "") {
+  let value = String(line).slice(3).trim();
+  if (value.startsWith("\"") && value.endsWith("\"")) {
+    value = value.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+  }
+  return value.replace(/\\/g, "/");
 }
 
 async function gitCommitRelation(localHead, remoteHead) {

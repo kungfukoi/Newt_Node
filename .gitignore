@@ -21,6 +21,8 @@ server/data/*.log
 public/models/poses/.*.tmp
 .vs_ai_logs/
 .newtnode_logs/
+.tmp-cdp-newtnode*/
+.tmp-chrome-newtnode*/
 *.app/Contents/_CodeSignature/
 !uploads/.gitkeep
 !outputs/.gitkeep
