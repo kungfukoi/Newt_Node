@@ -6991,167 +6991,22 @@ async function selectFolderWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
   const script = `
 $ErrorActionPreference = 'Stop'
-$typeDefinition = @"
-using System;
-using System.Runtime.InteropServices;
-
-[ComImport]
-[Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
-internal class FileOpenDialogRCW
-{
-}
-
-[ComImport]
-[Guid("d57c7288-d4ad-4768-be02-9d969532d960")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IFileOpenDialog
-{
-  [PreserveSig]
-  int Show(IntPtr parent);
-  void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
-  void SetFileTypeIndex(uint iFileType);
-  void GetFileTypeIndex(out uint piFileType);
-  void Advise(IntPtr pfde, out uint pdwCookie);
-  void Unadvise(uint dwCookie);
-  void SetOptions(uint fos);
-  void GetOptions(out uint pfos);
-  void SetDefaultFolder(IShellItem psi);
-  void SetFolder(IShellItem psi);
-  void GetFolder(out IShellItem ppsi);
-  void GetCurrentSelection(out IShellItem ppsi);
-  void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-  void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
-  void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
-  void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
-  void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
-  void GetResult(out IShellItem ppsi);
-  void AddPlace(IShellItem psi, int fdap);
-  void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
-  void Close(int hr);
-  void SetClientGuid(ref Guid guid);
-  void ClearClientData();
-  void SetFilter(IntPtr pFilter);
-  void GetResults(out IntPtr ppenum);
-  void GetSelectedItems(out IntPtr ppsai);
-}
-
-[ComImport]
-[Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IShellItem
-{
-  void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
-  void GetParent(out IShellItem ppsi);
-  void GetDisplayName(uint sigdnName, out IntPtr ppszName);
-  void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
-  void Compare(IShellItem psi, uint hint, out int piOrder);
-}
-
-public static class NativeFolderPicker
-{
-  private const uint FOS_PICKFOLDERS = 0x00000020;
-  private const uint FOS_FORCEFILESYSTEM = 0x00000040;
-  private const uint FOS_PATHMUSTEXIST = 0x00000800;
-  private const uint SIGDN_FILESYSPATH = 0x80058000;
-  private const int ERROR_CANCELLED = unchecked((int)0x800704C7);
-
-  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
-  private static extern int SHCreateItemFromParsingName(
-    [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
-    IntPtr pbc,
-    ref Guid riid,
-    [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
-
-  [DllImport("ole32.dll")]
-  private static extern void CoTaskMemFree(IntPtr pv);
-
-  public static string PickFolder(string title, string defaultPath)
-  {
-    object dialogObject = new FileOpenDialogRCW();
-    IFileOpenDialog dialog = (IFileOpenDialog)dialogObject;
-    IShellItem defaultFolder = null;
-    IShellItem result = null;
-
-    try
-    {
-      uint options;
-      dialog.GetOptions(out options);
-      dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-      if (!String.IsNullOrWhiteSpace(title))
-      {
-        dialog.SetTitle(title);
-      }
-      dialog.SetOkButtonLabel("Select Folder");
-
-      if (!String.IsNullOrWhiteSpace(defaultPath) && System.IO.Directory.Exists(defaultPath))
-      {
-        Guid shellItemGuid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-        if (SHCreateItemFromParsingName(defaultPath, IntPtr.Zero, ref shellItemGuid, out defaultFolder) == 0)
-        {
-          dialog.SetFolder(defaultFolder);
-        }
-      }
-
-      int hr = dialog.Show(IntPtr.Zero);
-      if (hr == ERROR_CANCELLED)
-      {
-        return null;
-      }
-      if (hr != 0)
-      {
-        Marshal.ThrowExceptionForHR(hr);
-      }
-
-      dialog.GetResult(out result);
-      IntPtr pathPointer;
-      result.GetDisplayName(SIGDN_FILESYSPATH, out pathPointer);
-      try
-      {
-        return Marshal.PtrToStringUni(pathPointer);
-      }
-      finally
-      {
-        CoTaskMemFree(pathPointer);
-      }
-    }
-    finally
-    {
-      if (result != null) Marshal.ReleaseComObject(result);
-      if (defaultFolder != null) Marshal.ReleaseComObject(defaultFolder);
-      Marshal.ReleaseComObject(dialogObject);
-    }
-  }
-}
-"@
-
 $selectedPath = ${powershellStringLiteral(selectedPath)}
 $title = ${powershellStringLiteral(title)}
-
-try {
-  Add-Type -TypeDefinition $typeDefinition
-  $path = [NativeFolderPicker]::PickFolder($title, $selectedPath)
-  if ($path) {
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-    Write-Output $path
-    exit 0
-  }
-  exit 2
-} catch {
-  Add-Type -AssemblyName System.Windows.Forms
-  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-  $dialog.Description = $title
-  $dialog.ShowNewFolderButton = $true
-  if ($selectedPath -and (Test-Path -LiteralPath $selectedPath)) {
-    $dialog.SelectedPath = $selectedPath
-  }
-  $result = $dialog.ShowDialog()
-  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-    Write-Output $dialog.SelectedPath
-    exit 0
-  }
-  exit 2
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = $title
+$dialog.ShowNewFolderButton = $true
+if ($selectedPath -and (Test-Path -LiteralPath $selectedPath -PathType Container)) {
+  $dialog.SelectedPath = $selectedPath
 }
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+  Write-Output $dialog.SelectedPath
+  exit 0
+}
+exit 2
 `;
 
   return runFolderDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
@@ -7337,12 +7192,12 @@ async function runFolderDialogCommand(command, args) {
     }
     return selectedPath;
   } catch (error) {
-    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+    if (isDialogCanceledError(error)) {
       const canceled = new Error("Folder selection canceled.");
       canceled.code = "DIALOG_CANCELED";
       throw canceled;
     }
-    throw error;
+    throw dialogCommandError(error, "Folder selection failed.");
   }
 }
 
@@ -7357,13 +7212,28 @@ async function runFileDialogCommand(command, args) {
     }
     return selectedPath;
   } catch (error) {
-    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+    if (isDialogCanceledError(error)) {
       const canceled = new Error("File selection canceled.");
       canceled.code = "DIALOG_CANCELED";
       throw canceled;
     }
-    throw error;
+    throw dialogCommandError(error, "File selection failed.");
   }
+}
+
+function isDialogCanceledError(error) {
+  if (error?.code === "DIALOG_CANCELED" || error?.code === 2) return true;
+  const output = `${error?.stderr || ""}\n${error?.stdout || ""}\n${error?.message || ""}`.toLowerCase();
+  return output.includes("user canceled") || output.includes("user cancelled") || output.includes("(-128)");
+}
+
+function dialogCommandError(error, fallbackMessage) {
+  const detail = String(error?.stderr || error?.stdout || "").trim();
+  const cleanDetail = detail.replace(/\s+/g, " ").slice(0, 500);
+  const message = cleanDetail ? `${fallbackMessage} ${cleanDetail}` : fallbackMessage;
+  const next = new Error(message);
+  next.code = error?.code || "DIALOG_FAILED";
+  return next;
 }
 
 function safeComposerPoseFileName(value) {
