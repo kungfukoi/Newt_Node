@@ -1957,6 +1957,59 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
+  async function uploadCharacterSheetReplacement(node, file) {
+    if (!file || !file.type.startsWith("image/")) return;
+
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const activeWardrobe = activeCharacterWardrobe(currentNode);
+    const targetWardrobeId = characterWardrobeVariantId(activeWardrobe);
+    const activeVoice = activeCharacterVoice(currentNode);
+
+    pushUndoSnapshot();
+    updateNode(currentNode.id, { status: "uploading", error: "" });
+
+    try {
+      const asset = await uploadNodeAsset(file, "character");
+      const generated = {
+        url: asset.localUrl,
+        type: "image",
+        label: `@${characterTag(currentNode)} Character Sheet`,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        text: "Uploaded character sheet.",
+        cost: null
+      };
+      const replacementVariant = {
+        wardrobeId: targetWardrobeId,
+        wardrobeUrl: activeWardrobe?.localUrl || "",
+        wardrobeFileName: activeWardrobe?.fileName || "Uploaded character sheet",
+        generated
+      };
+      const existingVariants = normalizeCharacterSheetVariants(currentNode.data);
+      const nextVariants = existingVariants.some((variant) => variant.wardrobeId === targetWardrobeId)
+        ? existingVariants.map((variant) => (variant.wardrobeId === targetWardrobeId ? replacementVariant : variant))
+        : [...existingVariants, replacementVariant];
+
+      updateNode(currentNode.id, {
+        activated: true,
+        locked: true,
+        characterTab: "sheet",
+        characterSheetVariants: nextVariants,
+        activeWardrobeId: targetWardrobeId === characterDefaultWardrobeId ? "" : targetWardrobeId,
+        compiledTraitPrompt: characterTraitPrompt(currentNode.data),
+        compiledVoicePrompt: activeVoice ? characterVoicePrompt : "",
+        characterBatchProgress: null,
+        characterVariantNotice: "",
+        ...characterVariantDisplayPatch(replacementVariant),
+        status: "ready",
+        error: ""
+      });
+      setSaveStatus("Replaced character sheet image");
+    } catch (error) {
+      updateNode(currentNode.id, { status: "error", error: error.message });
+    }
+  }
+
   async function uploadCharacterWardrobes(node, fileList) {
     const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const files = Array.from(fileList || [])
@@ -4882,6 +4935,7 @@ function autoConnectionOutputKind(source, from) {
                 onTransferUnlock={unlockTransferNode}
                 onCharacterPortraitUpload={uploadCharacterPortrait}
                 onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
+                onCharacterSheetReplace={uploadCharacterSheetReplacement}
                 onCharacterWardrobesUpload={uploadCharacterWardrobes}
                 onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
                 onCharacterVoicesUpload={uploadCharacterVoices}
@@ -5211,6 +5265,7 @@ function NodeCard({
   onTransferUnlock,
   onCharacterPortraitUpload,
   onCharacterPortraitImport,
+  onCharacterSheetReplace,
   onCharacterWardrobesUpload,
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
@@ -5351,6 +5406,7 @@ function NodeCard({
         onTransferUnlock={onTransferUnlock}
         onCharacterPortraitUpload={onCharacterPortraitUpload}
         onCharacterPortraitImport={onCharacterPortraitImport}
+        onCharacterSheetReplace={onCharacterSheetReplace}
         onCharacterWardrobesUpload={onCharacterWardrobesUpload}
         onCharacterWardrobeImport={onCharacterWardrobeImport}
         onCharacterVoicesUpload={onCharacterVoicesUpload}
@@ -7400,6 +7456,7 @@ function NodeBody({
   onTransferUnlock,
   onCharacterPortraitUpload,
   onCharacterPortraitImport,
+  onCharacterSheetReplace,
   onCharacterWardrobesUpload,
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
@@ -7562,6 +7619,11 @@ function NodeBody({
       if (zone === "portrait") {
         const file = firstAcceptedFile(event.dataTransfer.files, "image");
         if (file) onCharacterPortraitUpload(node, file);
+        return;
+      }
+      if (zone === "sheet") {
+        const file = firstAcceptedFile(event.dataTransfer.files, "image");
+        if (file) onCharacterSheetReplace?.(node, file);
         return;
       }
       if (zone === "wardrobe") {
@@ -7755,7 +7817,7 @@ function NodeBody({
             </div>
           </section>
         ) : (
-          <section className="character-sheet-view">
+          <section className={`character-sheet-view ${node.data.resultUrl ? "has-image" : ""} drop-enabled`} onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "sheet")}>
             {node.data.resultUrl ? (
               <img src={node.data.resultUrl} alt={`${node.data.characterName || "Character"} sheet`} />
             ) : (
@@ -7764,6 +7826,11 @@ function NodeBody({
                 <span>Generate a character sheet from Character Build</span>
               </div>
             )}
+            <label className="character-sheet-replace-button" title={node.data.resultUrl ? "Replace character sheet image" : "Upload character sheet image"} onPointerDown={(event) => event.stopPropagation()}>
+              <ImagePlus size={14} />
+              <span>{node.data.resultUrl ? "Replace Sheet" : "Upload Sheet"}</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onCharacterSheetReplace?.(node, event.target.files?.[0])} />
+            </label>
           </section>
         )}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}

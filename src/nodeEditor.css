@@ -4758,8 +4758,18 @@ video.newtnode-video-fallback {
 }
 
 .character-sheet-view {
+  position: relative;
   display: grid;
   place-items: center;
+}
+
+.character-sheet-view.drop-enabled {
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.character-sheet-view.drop-enabled:hover {
+  border-color: rgba(39, 213, 232, 0.28);
+  background: rgba(39, 213, 232, 0.035);
 }
 
 .character-sheet-view img {
@@ -4768,6 +4778,36 @@ video.newtnode-video-fallback {
   height: 100%;
   object-fit: contain;
   background: #fff;
+}
+
+.character-sheet-replace-button {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: rgba(244, 240, 232, 0.88);
+  background: rgba(8, 8, 8, 0.78);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  font-size: 11px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.character-sheet-replace-button:hover {
+  border-color: rgba(39, 213, 232, 0.44);
+  color: #f4f0e8;
+  background: rgba(18, 18, 18, 0.92);
+}
+
+.character-sheet-replace-button input {
+  display: none;
 }
 
 .character-sheet-empty {
