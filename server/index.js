@@ -6991,19 +6991,152 @@ async function selectFolderWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
   const script = `
 $ErrorActionPreference = 'Stop'
+$typeDefinition = @"
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
+internal class FileOpenDialogRCW
+{
+}
+
+[ComImport]
+[Guid("d57c7288-d4ad-4768-be02-9d969532d960")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IFileOpenDialog
+{
+  [PreserveSig]
+  int Show(IntPtr parent);
+  void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+  void SetFileTypeIndex(uint iFileType);
+  void GetFileTypeIndex(out uint piFileType);
+  void Advise(IntPtr pfde, out uint pdwCookie);
+  void Unadvise(uint dwCookie);
+  void SetOptions(uint fos);
+  void GetOptions(out uint pfos);
+  void SetDefaultFolder(IShellItem psi);
+  void SetFolder(IShellItem psi);
+  void GetFolder(out IShellItem ppsi);
+  void GetCurrentSelection(out IShellItem ppsi);
+  void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+  void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+  void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+  void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+  void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+  void GetResult(out IShellItem ppsi);
+  void AddPlace(IShellItem psi, int fdap);
+  void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+  void Close(int hr);
+  void SetClientGuid(ref Guid guid);
+  void ClearClientData();
+  void SetFilter(IntPtr pFilter);
+  void GetResults(out IntPtr ppenum);
+  void GetSelectedItems(out IntPtr ppsai);
+}
+
+[ComImport]
+[Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IShellItem
+{
+  void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+  void GetParent(out IShellItem ppsi);
+  void GetDisplayName(uint sigdnName, out IntPtr ppszName);
+  void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+  void Compare(IShellItem psi, uint hint, out int piOrder);
+}
+
+public static class NativeExplorerFolderBrowser
+{
+  private const uint FOS_PICKFOLDERS = 0x00000020;
+  private const uint FOS_FORCEFILESYSTEM = 0x00000040;
+  private const uint FOS_NOCHANGEDIR = 0x00000008;
+  private const uint FOS_PATHMUSTEXIST = 0x00000800;
+  private const uint SIGDN_FILESYSPATH = 0x80058000;
+  private const int ERROR_CANCELLED = unchecked((int)0x800704C7);
+
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+  private static extern int SHCreateItemFromParsingName(
+    [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+    IntPtr pbc,
+    ref Guid riid,
+    [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
+
+  [DllImport("ole32.dll")]
+  private static extern void CoTaskMemFree(IntPtr pv);
+
+  public static string PickFolder(string title, string defaultPath, IntPtr ownerHandle)
+  {
+    object dialogObject = new FileOpenDialogRCW();
+    IFileOpenDialog dialog = (IFileOpenDialog)dialogObject;
+    IShellItem defaultFolder = null;
+    IShellItem result = null;
+
+    try
+    {
+      uint options;
+      dialog.GetOptions(out options);
+      dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_PATHMUSTEXIST);
+      if (!String.IsNullOrWhiteSpace(title))
+      {
+        dialog.SetTitle(title);
+      }
+      dialog.SetOkButtonLabel("Select Folder");
+
+      if (!String.IsNullOrWhiteSpace(defaultPath) && System.IO.Directory.Exists(defaultPath))
+      {
+        Guid shellItemGuid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+        if (SHCreateItemFromParsingName(defaultPath, IntPtr.Zero, ref shellItemGuid, out defaultFolder) == 0)
+        {
+          dialog.SetFolder(defaultFolder);
+        }
+      }
+
+      int hr = dialog.Show(ownerHandle);
+      if (hr == ERROR_CANCELLED)
+      {
+        return null;
+      }
+      if (hr != 0)
+      {
+        Marshal.ThrowExceptionForHR(hr);
+      }
+
+      dialog.GetResult(out result);
+      IntPtr pathPointer;
+      result.GetDisplayName(SIGDN_FILESYSPATH, out pathPointer);
+      try
+      {
+        return Marshal.PtrToStringUni(pathPointer);
+      }
+      finally
+      {
+        CoTaskMemFree(pathPointer);
+      }
+    }
+    finally
+    {
+      if (result != null) Marshal.ReleaseComObject(result);
+      if (defaultFolder != null) Marshal.ReleaseComObject(defaultFolder);
+      Marshal.ReleaseComObject(dialogObject);
+    }
+  }
+}
+"@
 $selectedPath = ${powershellStringLiteral(selectedPath)}
 $title = ${powershellStringLiteral(title)}
 Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = $title
-$dialog.ShowNewFolderButton = $true
-if ($selectedPath -and (Test-Path -LiteralPath $selectedPath -PathType Container)) {
-  $dialog.SelectedPath = $selectedPath
+Add-Type -TypeDefinition $typeDefinition
+${windowsDialogOwnerScript()}
+try {
+  $path = [NativeExplorerFolderBrowser]::PickFolder($title, $selectedPath, $owner.Handle)
+} finally {
+  $owner.Dispose()
 }
-$result = $dialog.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+if ($path) {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-  Write-Output $dialog.SelectedPath
+  Write-Output $path
   exit 0
 }
 exit 2
@@ -7033,7 +7166,12 @@ if ($selectedPath) {
   }
 }
 
-$result = $dialog.ShowDialog()
+${windowsDialogOwnerScript()}
+try {
+  $result = $dialog.ShowDialog($owner)
+} finally {
+  $owner.Dispose()
+}
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
   Write-Output $dialog.FileName
@@ -7066,7 +7204,12 @@ if ($selectedPath) {
   }
 }
 
-$result = $dialog.ShowDialog()
+${windowsDialogOwnerScript()}
+try {
+  $result = $dialog.ShowDialog($owner)
+} finally {
+  $owner.Dispose()
+}
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
   Write-Output $dialog.FileName
@@ -7080,6 +7223,21 @@ exit 2
 
 function powershellStringLiteral(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+function windowsDialogOwnerScript() {
+  return `
+Add-Type -AssemblyName System.Drawing
+$owner = New-Object System.Windows.Forms.Form
+$owner.Text = 'NewtNode'
+$owner.StartPosition = 'CenterScreen'
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Opacity = 0.01
+$owner.Show()
+$owner.Activate()
+`;
 }
 
 async function selectFolderWithMacDialog({ title, defaultPath }) {
@@ -7918,7 +8076,7 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
     const format = normalizeExtractFrameFormat(options.format);
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
     const extension = format === "jpeg" ? ".jpg" : ".png";
-    const frameTime = extractFrameTime(options.frameTime, metadata.duration);
+    const frameTime = extractFrameTime(options.frameTime, metadata.duration, metadata.fps);
     const output = await createManagedAssetTarget({ body }, "video-frame", extension, workflowPackageOutputDirName);
     outputPath = output.filePath;
 
@@ -7993,10 +8151,12 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
 
 async function createVideoFrameOutputFromFile({ body, sourcePath, kind = "video-frame", frameTime = 0 }) {
   const output = await createManagedAssetTarget({ body }, kind, ".png", workflowPackageOutputDirName);
+  const metadata = await probeVideoFile(sourcePath);
+  const safeFrameTime = extractFrameTime(frameTime, metadata.duration, metadata.fps);
   await extractVideoFrameWithFfmpeg({
     sourcePath,
     outputPath: output.filePath,
-    frameTime,
+    frameTime: safeFrameTime,
     format: "png"
   });
   const outputStats = await stat(output.filePath);
@@ -9242,6 +9402,15 @@ async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, 
 
   args.push(outputPath);
   await runFfmpeg(args, "Extract frame");
+  const outputStats = await stat(outputPath).catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!outputStats?.size) {
+    const error = new Error("Extract frame failed: no frame was found at the selected time. Try moving the time slightly earlier in the clip.");
+    error.status = 422;
+    throw error;
+  }
 }
 
 async function extractVideoClipWithFfmpeg({ sourcePath, outputPath, startFrame = 0, frameCount = 1, fps = 16, outputFormat = "mp4" }) {
@@ -9530,11 +9699,13 @@ function tailText(value, maxLength) {
   return text.length > maxLength ? text.slice(text.length - maxLength) : text;
 }
 
-function extractFrameTime(value, duration) {
+function extractFrameTime(value, duration, fps) {
   const requested = Math.max(0, Number(value) || 0);
   const safeDuration = positiveNumber(duration);
   if (!safeDuration) return requested;
-  return Math.min(requested, Math.max(0, safeDuration - 0.001));
+  const frameInterval = positiveNumber(fps) ? 1 / positiveNumber(fps) : 0.05;
+  const tailSafety = Math.max(0.001, Math.min(0.1, frameInterval));
+  return Math.min(requested, Math.max(0, safeDuration - tailSafety));
 }
 
 function normalizeExtractFrameFormat(value) {

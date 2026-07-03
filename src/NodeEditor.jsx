@@ -12324,7 +12324,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const selectedTime = Math.max(0, finiteNumber(node.data.extractFrameTime, 0));
   const selectedFormat = node.data.extractFrameFormat === "jpeg" ? "jpeg" : "png";
-  const sliderMax = duration ? Math.max(0, duration - 0.01) : Math.max(1, selectedTime);
+  const sliderMax = duration ? extractFrameMaxTime(duration) : Math.max(1, selectedTime);
   const sliderValue = clamp(selectedTime, 0, sliderMax);
 
   React.useEffect(() => {
@@ -12348,7 +12348,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
 
   function syncVideoTime(video, time) {
     if (!video || !Number.isFinite(time)) return;
-    const upper = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.01) : time;
+    const upper = Number.isFinite(video.duration) ? extractFrameMaxTime(video.duration) : time;
     const nextTime = clamp(time, 0, upper);
     if (Math.abs(video.currentTime - nextTime) > 0.05) {
       try {
@@ -12366,7 +12366,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
 
   function commitTime(value) {
     const unclampedTime = Math.max(0, Number(value) || 0);
-    const boundedTime = duration ? clamp(unclampedTime, 0, Math.max(0, duration - 0.01)) : unclampedTime;
+    const boundedTime = duration ? clamp(unclampedTime, 0, extractFrameMaxTime(duration)) : unclampedTime;
     const nextTime = Math.round(boundedTime * 100) / 100;
     if (Math.abs(nextTime - selectedTime) < 0.005) return;
     onUpdate(node.id, {
@@ -12379,7 +12379,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
     const video = event.currentTarget;
     const nextDuration = Number.isFinite(video.duration) ? Math.max(0, video.duration) : 0;
     setDuration(nextDuration);
-    const clampedTime = nextDuration ? clamp(selectedTime, 0, Math.max(0, nextDuration - 0.01)) : selectedTime;
+    const clampedTime = nextDuration ? clamp(selectedTime, 0, extractFrameMaxTime(nextDuration)) : selectedTime;
     if (Math.abs(clampedTime - selectedTime) >= 0.005) {
       commitTime(clampedTime);
     }
@@ -12477,6 +12477,12 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
       )}
     </>
   );
+}
+
+function extractFrameMaxTime(duration) {
+  const value = Math.max(0, Number(duration) || 0);
+  if (!value) return 0;
+  return Math.max(0, value - Math.min(0.05, value / 2));
 }
 
 function formatFrameTimeDisplay(value) {
