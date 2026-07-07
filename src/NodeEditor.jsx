@@ -873,7 +873,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     startNewProject,
     saveProjectAsLocalFile,
     openWorkflowFromSystemPicker,
-    openWorkflowPackageFolderFromSystemPicker,
     importWorkflowFromSystemPicker,
     loadProject,
     deleteProject
@@ -4808,10 +4807,6 @@ function autoConnectionOutputKind(source, from) {
                 <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow JSON from disk">
                   <FolderOpen size={15} />
                   <span>Open</span>
-                </button>
-                <button onClick={() => { setFileMenuOpen(false); openWorkflowPackageFolderFromSystemPicker(); }} title="Open workflow package folder">
-                  <FolderOpen size={15} />
-                  <span>Open Package</span>
                 </button>
                 <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
                   <Download size={15} />
