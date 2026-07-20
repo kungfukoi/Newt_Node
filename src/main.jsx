@@ -1222,7 +1222,7 @@ function batchStatusMessage(mediaType, total, completed, failures) {
 }
 
 createRoot(document.getElementById("root")).render(
-  <AppErrorBoundary>
+  <WorkspaceErrorBoundary label="NewtNode" onRetry={() => window.location.reload()}>
     <App />
-  </AppErrorBoundary>
+  </WorkspaceErrorBoundary>
 );
