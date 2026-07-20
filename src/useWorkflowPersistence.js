@@ -44,6 +44,7 @@ export function useWorkflowPersistence({
   pushUndoSnapshot,
   clearUndoStack,
   importOffsetForNodes,
+  prepareNodesForSave,
   onStatusChange
 }) {
   const workflowFileInputRef = React.useRef(null);
@@ -145,14 +146,18 @@ export function useWorkflowPersistence({
     setProjects((current) => [summary, ...current.filter((item) => !projectListItemsMatch(item, summary))]);
   }
 
-  function currentWorkflowDocument({ id = projectId || createNodeId("workflow"), name = projectName, fileName = null, createdAt = null } = {}) {
+  function nodesForSave() {
+    return typeof prepareNodesForSave === "function" ? prepareNodesForSave(nodes) : nodes;
+  }
+
+  function currentWorkflowDocument({ id = projectId || createNodeId("workflow"), name = projectName, fileName = null, createdAt = null, graphNodes = nodes } = {}) {
     return buildWorkflowDocument({
       id,
       name,
       fileName,
       packagePath: projectPackagePath || "",
       createdAt,
-      nodes,
+      nodes: graphNodes,
       edges,
       groups,
       viewport
@@ -208,10 +213,12 @@ export function useWorkflowPersistence({
   async function saveProjectToLocalHandle(handle) {
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
     const id = projectId || createNodeId("workflow");
+    const saveNodes = nodesForSave();
     const workflow = currentWorkflowDocument({
       id,
       name: cleanProjectName,
-      fileName: handle.name || localWorkflowFileName || workflowFileNameForProject(cleanProjectName)
+      fileName: handle.name || localWorkflowFileName || workflowFileNameForProject(cleanProjectName),
+      graphNodes: saveNodes
     });
 
     if (!(await ensureWritableWorkflowHandle(handle))) {
@@ -224,7 +231,7 @@ export function useWorkflowPersistence({
     setSavedProjectName(workflow.name);
     setLocalWorkflowFileName(handle.name || workflow.fileName);
     setWorkflowFilePath(workflowDisplayPath(workflow, handle.name || workflow.fileName));
-    markWorkflowClean({ projectName: workflow.name });
+    markWorkflowClean({ nodes: saveNodes, projectName: workflow.name });
     setSaveStatus(`Saved ${workflowDisplayPath(workflow, handle.name || workflow.fileName)}`);
     return true;
   }
@@ -266,6 +273,7 @@ export function useWorkflowPersistence({
       const cleanProjectName = String(options.name || projectName || "").trim() || "Untitled node project";
       const lastSavedName = String(savedProjectName || selectedProjectName || "").trim();
       const shouldCreateNewProject = Boolean(!projectPackagePath && projectId && lastSavedName && cleanProjectName !== lastSavedName);
+      const saveNodes = nodesForSave();
 
       setSaveStatus(options.saveAsPackage ? "Saving workflow package..." : "Saving...");
       const project = await workflowApi.save({
@@ -273,7 +281,7 @@ export function useWorkflowPersistence({
         name: cleanProjectName,
         packageParentPath: options.packageParentPath || "",
         packagePath: options.packageParentPath ? "" : options.packagePath || projectPackagePath || "",
-        nodes,
+        nodes: saveNodes,
         edges,
         groups,
         viewport

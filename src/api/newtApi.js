@@ -100,6 +100,8 @@ function localApiRouteKey(path) {
   if (path.includes("composer-frame")) return "composerFrame";
   if (path.includes("composer-poses")) return "composerPoses";
   if (path.includes("preview-inpaint")) return "previewInpaint";
+  if (path.includes("run-skill-director")) return "skillDirector";
+  if (path.includes("storyboard-qc")) return "storyboardQc";
   if (path.includes("generate-3d")) return "generate3d";
   if (path.includes("settings")) return "settings";
   if (path.includes("comfy-wan")) return "comfyWanStatus";
@@ -200,6 +202,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
 
+  runSkillDirector(body, label = "Film Director") {
+    return fetchJsonApi("/api/node/run-skill-director", jsonBody(body), label);
+  },
+
   qwenCameraEdit(body, label = "Camera edit") {
     return fetchJsonApi("/api/node/qwen-camera-edit", jsonBody(body), label);
   },
@@ -226,6 +232,10 @@ export const nodeApi = {
 
   planStoryboard(body, label = "Storyboard planning") {
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
+  },
+
+  reviewStoryboardFrame(body, label = "Storyboard frame QC") {
+    return fetchJsonApi("/api/node/storyboard-qc", jsonBody(body), label);
   },
 
   exportStoryboardFrame(body, label = "Storyboard frame export") {
@@ -264,6 +274,10 @@ export const systemApi = {
 
   selectLoraFile(body) {
     return fetchJsonApi("/api/system/select-lora-file", jsonBody(body), "LoRA file picker");
+  },
+
+  selectSavePath(body) {
+    return fetchJsonApi("/api/system/select-save-path", jsonBody(body), "Save picker");
   },
 
   openWorkflowFile(body, label = "Open workflow") {

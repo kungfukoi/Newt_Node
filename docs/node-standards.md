@@ -478,16 +478,40 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Importing a workflow must remap node, edge, and group IDs and place the imported graph in a clear canvas area rather than directly on top of the current graph.
 - Do not use browser-only object URLs or absolute machine-local paths as saved graph dependencies.
 
+## Film Director And Storyboard Standards
+
+- Film Director uses internal type `skillDirector` and emits a built scene package from `directorOut`. Its reusable run logic belongs in `src/nodeRunners/skillDirector.js`; shot-limit, coverage, and revision helpers belong in the focused `src/filmDirector*.js` modules.
+- A Film Director scene package may connect to supported Video Model `directorIn` ports and to Storyboard `directorIn`. Unsupported video models must not serialize or receive a director package.
+- Building a scene locks its setup references until the user explicitly unlocks it. Revisions preserve the existing package, keep bounded revision history, and treat the user's revision note as the requested delta.
+- Film Director references remain typed as character, location, prop/image, and style inputs. Expanding a director package for a downstream node must preserve direct downstream inputs and deduplicate inherited references.
+- Storyboard accepts either its normal scene-description/reference inputs or a built Film Director package. When Film Director controls the scene, derive the scene description, characters, references, and requested shot count from that package without duplicating Film Director's visual-style boilerplate.
+- Storyboard frame count supports `Auto` and explicit bounded counts. A Film Director shot count may drive Auto, but the editor-wide Storyboard frame cap remains authoritative.
+- Storyboard frame outputs and the locked-board output are distinct connection targets. Use the shared Storyboard output resolver for previews, drag/drop, connection checks, and saved-edge migration so older frame ports remain compatible.
+- Locking a Storyboard board creates the board output; generating or importing a frame creates a frame output. Lightweight thumbnails are display-only and must never replace the full-resolution URL used for dragging, editing, export, or downstream generation.
+
+## Frame It Standard
+
+- Frame It uses internal type `frameIt` and owns a camera-plus-mannequin composition that captures an image result for normal image connections.
+- Frame It UI and Three.js behavior live in `src/components/FrameItNodeBody.jsx`, `src/components/FrameItViewport.jsx`, and `src/frameItState.js`; keep reusable pose, normalization, joint-limit, and composition logic out of `NodeEditor.jsx`.
+- Camera and figure state must normalize on load. Built-in and saved poses must respect anatomical joint limits and preserve complete compositions.
+- Ordinary canvas navigation passes through the Frame It surface; only Frame It-specific modified gestures should control its camera. The node's scale is persisted independently from Storyboard and Mood Board scale.
+- The bundled mannequin asset and its license remain versioned together under `public/models`.
+
 ## Provider Key Routing
 
 - Fal is the default provider route for remote models.
+- Fal, Google, Krea, and OpenAI providers can be enabled or disabled independently in Settings. A disabled provider must be removed from effective runtime routing without deleting its stored local secret.
+- Seedance prefers Fal when available and may fall back to Krea according to the provider-routing helper. Provider choice, endpoint, and provider-specific cost must be recorded in history.
+- GPT Image 2 uses the enabled OpenAI key and preserves its quality-specific generation/edit pricing metadata.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
 - Google image models should use a direct Google API key first when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
 - Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should first display the Google diagnostic on the node. The node can then mark Fal fallback as available so the next run uses the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
 
 ## Settings Standards
 
-- The Settings page shows local key status for Fal and Google without revealing stored secret values.
+- The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values.
+- Each provider has an independent enabled switch. Saving model preferences, provider preferences, and ComfyUI root configuration must preserve unchanged secret values.
+- Local ComfyUI configuration and preflight status remain available alongside the remote-provider controls.
 - The Branch metric shows the current branch state and the loaded package version from `package.json`.
 - Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.
 - Repository update and restart actions belong in Settings and should call local server routes through `src/api/newtApi.js`.

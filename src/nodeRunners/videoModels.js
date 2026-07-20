@@ -1,4 +1,12 @@
 import { workflowContextPayload } from "../workflowContext.js";
+import { isGeminiOmniModel } from "../geminiOmni.js";
+
+export function videoModelSupportsFilmDirector(model) {
+  const normalized = String(model || "").toLowerCase();
+  const isStandardSeedance = normalized.includes("seedance") && !normalized.includes("fast");
+  const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
+  return isStandardSeedance || isKlingO3 || isGeminiOmniModel(model);
+}
 
 function defaultedField(value, fallback) {
   return value === "" || value === undefined || value === null ? fallback : value;
@@ -14,9 +22,12 @@ export function buildVideoGenerationRequest({
   endFrameUrls = [],
   referenceImageUrls = [],
   referenceImageLabels = [],
+  characterReferenceUrls = [],
+  characterReferenceLabels = [],
   referenceVideoUrls = [],
   referenceVideoLabels = [],
-  referenceAudioUrls = []
+  referenceAudioUrls = [],
+  filmDirector = null
 }) {
   return {
     prompt,
@@ -25,6 +36,8 @@ export function buildVideoGenerationRequest({
     resolution: node.data.resolution,
     aspectRatio: node.data.aspectRatio,
     generateAudio: node.data.generateAudio,
+    klingCfgScale: node.data.klingCfgScale ?? 0.5,
+    negativePrompt: node.data.negativePrompt || "",
     loop: Boolean(node.data.loop),
     seed: node.data.seed || "",
     enableSafetyChecker: node.data.enableSafetyChecker !== false,
@@ -32,9 +45,12 @@ export function buildVideoGenerationRequest({
     endFrameUrls,
     referenceImageUrls,
     referenceImageLabels,
+    characterReferenceUrls,
+    characterReferenceLabels,
     referenceVideoUrls,
     referenceVideoLabels,
     referenceAudioUrls,
+    filmDirector: videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null,
     wan27Reference: {
       negativePrompt: node.data.negativePrompt || "",
       multiShots: Boolean(node.data.multiShots)

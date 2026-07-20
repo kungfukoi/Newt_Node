@@ -27,7 +27,11 @@ Current release: `v3.0.0-beta.0`
 
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
-- **Provider routing**: Fal is the default provider path. When `GOOGLE_API_KEY` exists, supported Google image models use Google directly first. If Google returns a transient capacity or quota error, the node shows Google's diagnostic and the next run can fall back to Fal when `FAL_KEY` is configured.
+- **Provider routing**: Enable or disable Fal, Google, Krea, and OpenAI independently in Settings. Supported Google image models use Google directly first when configured; transient Google capacity errors remain visible and can fall back to Fal on the next run. Seedance prefers Fal when enabled and falls back to Krea when Fal is disabled.
+- **Film Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
+- **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
+- **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
+- **Current image models**: Work with GPT Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, Krea 2 Large, Z-Image, and Luma from the same reference-aware image workflow.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
 - **Edit node**: Local ffmpeg edits support live frame previews while controls change, plus scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
@@ -41,17 +45,24 @@ Current release: `v3.0.0-beta.0`
 
 - Node.js 20 or newer is recommended.
 - npm.
-- A Fal API key for most remote model features.
-- Optional Google API key for direct Google image model routing.
+- At least one supported provider API key for remote generation.
+- Fal is required for Fal-hosted models and utilities.
+- Google, Krea, and OpenAI keys are optional and can be enabled independently.
 
 ## Setup
 
-Add your API keys to `.env` after copying it from `.env.example`:
+The easiest setup is inside **Settings > API Providers**. Paste each key, enable the providers you want, and save. Keys and enable/disable preferences are stored locally and are ignored by git.
+
+You can alternatively copy `.env.example` to `.env` and add keys there:
 
 ```bash
 FAL_KEY=your_fal_key_here
 GOOGLE_API_KEY=your_google_api_key_here
+KREA_API_KEY=your_krea_key_here
+OPENAI_API_KEY=your_openai_key_here
 ```
+
+Settings takes priority for providers explicitly enabled or disabled there. Disabling a provider prevents NewtNode from using its `.env` key until it is enabled again.
 
 ### macOS
 
