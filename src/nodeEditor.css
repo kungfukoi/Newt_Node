@@ -1268,10 +1268,9 @@
   top: 0;
   left: 0;
   z-index: 1;
-  width: 1px;
-  height: 1px;
-  overflow: visible;
+  overflow: hidden;
   pointer-events: none;
+  shape-rendering: geometricPrecision;
 }
 
 .edge-path .edge-visible {

@@ -1,10 +1,9 @@
 import React from "react";
 import { Hand, Play, Plus } from "lucide-react";
-import { normalizeRect } from "../nodeGeometry.js";
+import { edgePathData, normalizeRect } from "../nodeGeometry.js";
 
 export const EdgePath = React.memo(function EdgePath({ edgeId, from, to, color, draft, selected, active, inactive, onSelect }) {
-  const curve = Math.max(80, Math.abs(to.x - from.x) * 0.42);
-  const path = `M ${from.x} ${from.y} C ${from.x + curve} ${from.y}, ${to.x - curve} ${to.y}, ${to.x} ${to.y}`;
+  const path = edgePathData(from, to);
   return (
     <g className={`edge-path ${draft ? "draft" : ""} ${selected ? "selected" : ""} ${active ? "active" : ""} ${inactive ? "inactive" : ""}`}>
       <path className="edge-visible" d={path} stroke={color} strokeWidth={draft ? 3 : 4} fill="none" opacity={draft ? 0.62 : 0.42} strokeLinecap="round" />

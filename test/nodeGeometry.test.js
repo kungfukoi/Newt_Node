@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   clamp,
   clampContextMenuPosition,
+  edgeLayerBounds,
+  edgePathData,
   graphBoundsForNodes,
   positiveModulo,
   rectsOverlap
@@ -28,4 +30,20 @@ test("clamp helpers bound values predictably", () => {
   assert.equal(clamp(-4, 0, 10), 0);
   assert.equal(positiveModulo(-3, 28), 25);
   assert.deepEqual(clampContextMenuPosition(500, -20, { width: 320, height: 180 }, { width: 100, height: 80, inset: 8 }), { x: 212, y: 8 });
+});
+
+test("edge geometry creates a padded SVG viewport around paths", () => {
+  assert.equal(edgePathData({ x: 100, y: 20 }, { x: 300, y: 140 }), "M 100 20 C 184 20, 216 140, 300 140");
+  assert.deepEqual(
+    edgeLayerBounds(
+      [{ from: { x: 100, y: 20 }, to: { x: 300, y: 140 } }],
+      [{ x: -10, y: 50 }],
+      10
+    ),
+    { left: -20, top: 10, width: 330, height: 140, viewBox: "-20 10 330 140" }
+  );
+});
+
+test("edge geometry keeps an addressable viewport when no wires exist", () => {
+  assert.deepEqual(edgeLayerBounds(), { left: 0, top: 0, width: 1, height: 1, viewBox: "0 0 1 1" });
 });

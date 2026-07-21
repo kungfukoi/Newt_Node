@@ -226,6 +226,7 @@ import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2R
 import {
   clamp,
   clampContextMenuPosition,
+  edgeLayerBounds,
   estimatedNodeHeight,
   estimatedNodeRect,
   estimatedNodeWidth,
@@ -5793,6 +5794,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  const renderedEdges = edges.map((edge) => ({
+    edge,
+    from: getPortPoint(edge.from.nodeId, edge.from.port),
+    to: getPortPoint(edge.to.nodeId, edge.to.port)
+  }));
+  const draftConnection = draftEdge
+    ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y } }
+    : null;
+  const marqueePoints = dragState?.type === "marquee" ? [dragState.start, dragState.current] : [];
+  const wireLayerBounds = edgeLayerBounds(
+    [...renderedEdges, ...(draftConnection ? [draftConnection] : [])],
+    marqueePoints
+  );
+
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
       {composerEditorNode && (
@@ -5950,10 +5965,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             />
           ))}
 
-          <svg className="edge-layer">
-            {edges.map((edge) => {
-              const from = getPortPoint(edge.from.nodeId, edge.from.port);
-              const to = getPortPoint(edge.to.nodeId, edge.to.port);
+          <svg
+            className="edge-layer"
+            style={{
+              left: wireLayerBounds.left,
+              top: wireLayerBounds.top,
+              width: wireLayerBounds.width,
+              height: wireLayerBounds.height
+            }}
+            viewBox={wireLayerBounds.viewBox}
+            preserveAspectRatio="none"
+          >
+            {renderedEdges.map(({ edge, from, to }) => {
               return (
                 <EdgePath
                   key={edge.id}
@@ -5968,7 +5991,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 />
               );
             })}
-          {draftEdge && <EdgePath from={draftEdge.start} to={{ x: draftEdge.x, y: draftEdge.y }} color={draftEdge.color} draft />}
+          {draftConnection && <EdgePath from={draftConnection.from} to={draftConnection.to} color={draftEdge.color} draft />}
           {dragState?.type === "marquee" && <SelectionMarquee start={dragState.start} current={dragState.current} />}
           </svg>
 

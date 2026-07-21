@@ -56,6 +56,54 @@ export function normalizeRect(start, current) {
   };
 }
 
+export function edgeCurveOffset(from, to) {
+  return Math.max(80, Math.abs(Number(to?.x || 0) - Number(from?.x || 0)) * 0.42);
+}
+
+export function edgePathData(from, to) {
+  const curve = edgeCurveOffset(from, to);
+  return `M ${from.x} ${from.y} C ${from.x + curve} ${from.y}, ${to.x - curve} ${to.y}, ${to.x} ${to.y}`;
+}
+
+export function edgeLayerBounds(connections = [], points = [], padding = 32) {
+  const coordinates = [];
+
+  connections.forEach(({ from, to } = {}) => {
+    if (![from?.x, from?.y, to?.x, to?.y].every(Number.isFinite)) return;
+    const curve = edgeCurveOffset(from, to);
+    coordinates.push(
+      from,
+      { x: from.x + curve, y: from.y },
+      { x: to.x - curve, y: to.y },
+      to
+    );
+  });
+
+  points.forEach((point) => {
+    if ([point?.x, point?.y].every(Number.isFinite)) coordinates.push(point);
+  });
+
+  if (!coordinates.length) {
+    return { left: 0, top: 0, width: 1, height: 1, viewBox: "0 0 1 1" };
+  }
+
+  const inset = Math.max(0, Number(padding) || 0);
+  const left = Math.floor(Math.min(...coordinates.map((point) => point.x)) - inset);
+  const top = Math.floor(Math.min(...coordinates.map((point) => point.y)) - inset);
+  const right = Math.ceil(Math.max(...coordinates.map((point) => point.x)) + inset);
+  const bottom = Math.ceil(Math.max(...coordinates.map((point) => point.y)) + inset);
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    viewBox: `${left} ${top} ${width} ${height}`
+  };
+}
+
 export function rectsIntersect(first, second) {
   return first.left <= second.right && first.right >= second.left && first.top <= second.bottom && first.bottom >= second.top;
 }
