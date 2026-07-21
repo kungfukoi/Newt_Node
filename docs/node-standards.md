@@ -271,10 +271,10 @@ Local API routes should live in the smallest backend owner that fits the route. 
 Settings is a local runtime control surface, not an account system.
 
 - The Settings page is lazy-loaded by `src/main.jsx` and should use `settingsApi` from `src/api/newtApi.js` for every request.
-- The current Settings routes are `GET /api/settings`, `POST /api/settings`, `POST /api/settings/update`, and `POST /api/settings/restart`; `/api/health` must advertise `routes.settings: true`.
+- The current Settings routes are `GET /api/settings`, `POST /api/settings`, `POST /api/settings/validate-keys`, `POST /api/settings/update`, and `POST /api/settings/restart`; `/api/health` must advertise `routes.settings: true` and `routes.settingsKeyValidation: true`.
 - Secrets can be loaded into Settings with `includeSecrets=1`, but UI fields must remain password-style by default with explicit reveal buttons.
 - Runtime settings live in `server/data/runtime-settings.json`. Treat that file as local state: ignored by git, not a fixture, and not a source of defaults for another machine.
-- `.env` remains a valid source for keys and update repository values. Settings overrides should be reflected in `process.env` through the runtime config refresh path, and the UI should show whether each key came from `.env` or Settings.
+- `.env` remains a valid source for keys and update repository values. Each provider's credential-source switch chooses either its stored Settings override or `.env`; the selected value should be reflected in `process.env` through the runtime config refresh path, and the UI should show which source is active.
 - The update action must stay constrained to the configured repository and the currently checked-out branch. It should first try `git pull --ff-only` against that repository and branch. If that fast-forward pull fails, it should stage a fresh replacement clone, install dependencies, preserve local `.env`, `server/data`, workflows, inputs, uploads, and outputs, swap the app folder, relaunch through the platform launcher, and remove the old install only after the replacement reports healthy. Keep Windows PowerShell and macOS bash handoff scripts aligned; do not add merge, reset, or branch-changing behavior to the Settings button.
 - Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, local changes, local ahead, repository differs, or check failed.
 - Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
@@ -488,6 +488,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Storyboard frame count supports `Auto` and explicit bounded counts. A Film Director shot count may drive Auto, but the editor-wide Storyboard frame cap remains authoritative.
 - Storyboard frame outputs and the locked-board output are distinct connection targets. Use the shared Storyboard output resolver for previews, drag/drop, connection checks, and saved-edge migration so older frame ports remain compatible.
 - Locking a Storyboard board creates the board output; generating or importing a frame creates a frame output. Lightweight thumbnails are display-only and must never replace the full-resolution URL used for dragging, editing, export, or downstream generation.
+- Saved Storyboard frame images live in a filesystem-safe subfolder derived from the node's scene name. Frame filenames repeat that scene name and preserve the frame's board number with at least two digits, for example `Scene_01/Scene_01_Frame_01.png`; explicit frame exports use the same filename convention. Never overwrite an earlier frame on rerun or re-export: append a version suffix starting at `_v02` when the preferred filename already exists.
 
 ## Frame It Standard
 
@@ -500,17 +501,17 @@ Portable packages are the default Save As shape for workflows that need to move 
 ## Provider Key Routing
 
 - Fal is the default provider route for remote models.
-- Fal, Google, Krea, and OpenAI providers can be enabled or disabled independently in Settings. A disabled provider must be removed from effective runtime routing without deleting its stored local secret.
+- Fal, Google, Krea, and OpenAI each have a credential-source switch in Settings. The on state selects the stored Settings override; the off state selects `.env`. Switching sources must not delete either credential.
 - Seedance prefers Fal when available and may fall back to Krea according to the provider-routing helper. Provider choice, endpoint, and provider-specific cost must be recorded in history.
-- GPT Image 2 uses the enabled OpenAI key and preserves its quality-specific generation/edit pricing metadata.
+- GPT Image 2 uses the selected OpenAI key and preserves its quality-specific generation/edit pricing metadata.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
 - Google image models should use a direct Google API key first when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
 - Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should first display the Google diagnostic on the node. The node can then mark Fal fallback as available so the next run uses the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
 
 ## Settings Standards
 
-- The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values.
-- Each provider has an independent enabled switch. Saving model preferences, provider preferences, and ComfyUI root configuration must preserve unchanged secret values.
+- The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values. A configured key turns green only after a no-generation provider request verifies the selected credential, whether it came from `.env` or a Settings override; provider outages and timeouts remain unverified rather than being reported as invalid.
+- Each provider has an independent credential-source switch. Saving model preferences, source preferences, and ComfyUI root configuration must preserve unchanged secret values.
 - Local ComfyUI configuration and preflight status remain available alongside the remote-provider controls.
 - The Branch metric shows the current branch state and the loaded package version from `package.json`.
 - Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.

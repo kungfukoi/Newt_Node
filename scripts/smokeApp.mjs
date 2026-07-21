@@ -9,6 +9,7 @@ const requiredHealthRoutes = [
   "editPreview",
   "extractVideoFrame",
   "generate3d",
+  "settingsKeyValidation",
   "utilityImage",
   "utilityVideo"
 ];

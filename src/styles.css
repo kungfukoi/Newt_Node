@@ -868,6 +868,15 @@ textarea::placeholder {
   color: #f0c83b;
 }
 
+.settings-metric.tone-bad {
+  border-color: rgba(255, 91, 105, 0.26);
+}
+
+.settings-metric.tone-bad .metric-icon,
+.settings-metric.tone-bad strong {
+  color: #ff5b69;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

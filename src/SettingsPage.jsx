@@ -19,8 +19,9 @@ import {
   utilityVideoModelOptions,
   videoModelOptions
 } from "./modelOptions.js";
+import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 
-const defaultProviderPreferences = Object.freeze({ fal: true, google: true, krea: true, openAi: true });
+const defaultProviderPreferences = Object.freeze({ fal: false, google: false, krea: false, openAi: false });
 
 export default function SettingsPage() {
   const [settings, setSettings] = React.useState(null);
@@ -41,6 +42,7 @@ export default function SettingsPage() {
   const [comfyOpen, setComfyOpen] = React.useState(false);
   const [providerPreferences, setProviderPreferences] = React.useState(defaultProviderPreferences);
   const [status, setStatus] = React.useState("loading");
+  const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [updateLog, setUpdateLog] = React.useState("");
@@ -64,6 +66,7 @@ export default function SettingsPage() {
       setStatus("ready");
       setMessage(data.apiKeysFound ? "" : "No API keys found.");
       setLastUpdated(new Date());
+      await refreshKeyValidation();
       refreshComfyWanStatus(data.comfyWanRootPath || "", { quiet: true });
     } catch (error) {
       setStatus("error");
@@ -110,6 +113,7 @@ export default function SettingsPage() {
       dispatchModelPreferences(savedModelPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
+      await refreshKeyValidation();
       refreshComfyWanStatus(data.comfyWanRootPath || comfyWanRootPath, { quiet: true });
     } catch (error) {
       setMessage(error.message || "Could not save settings.");
@@ -218,6 +222,25 @@ export default function SettingsPage() {
     }
   }
 
+  async function refreshKeyValidation() {
+    setKeyValidationBusy(true);
+    try {
+      const validation = await settingsApi.validateKeys();
+      setSettings((current) => ({
+        ...(current || {}),
+        keyValidation: validation?.providers || {},
+        keyValidationCheckedAt: validation?.checkedAt || ""
+      }));
+    } catch {
+      setSettings((current) => ({
+        ...(current || {}),
+        keyValidation: unverifiedKeyValidation(current)
+      }));
+    } finally {
+      setKeyValidationBusy(false);
+    }
+  }
+
   function updateModelPreference(kind, model, enabled) {
     setModelPreferences((current) =>
       normalizeModelPreferences({
@@ -251,10 +274,10 @@ export default function SettingsPage() {
       </header>
 
       <div className="stats-metrics settings-metrics">
-        <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={providerMetricValue(settings?.falKeyConfigured, providerPreferences.fal)} detail={keyDetail(settings?.keySources?.fal, status, providerPreferences.fal)} tone={providerMetricTone(settings?.falKeyConfigured, providerPreferences.fal)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, providerPreferences.google)} detail={keyDetail(settings?.keySources?.google, status, providerPreferences.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, providerPreferences.google)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, providerPreferences.krea)} detail={keyDetail(settings?.keySources?.krea, status, providerPreferences.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, providerPreferences.krea)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} detail={keyDetail(settings?.keySources?.openAi, status, providerPreferences.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={providerMetricValue(settings?.falKeyConfigured, settings?.keyValidation?.fal, keyValidationBusy)} detail={keyDetail(settings?.keySources?.fal, status, providerPreferences.fal, settings?.keyValidation?.fal)} tone={providerMetricTone(settings?.falKeyConfigured, settings?.keyValidation?.fal)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, settings?.keyValidation?.google, keyValidationBusy)} detail={keyDetail(settings?.keySources?.google, status, providerPreferences.google, settings?.keyValidation?.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, settings?.keyValidation?.google)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, settings?.keyValidation?.krea, keyValidationBusy)} detail={keyDetail(settings?.keySources?.krea, status, providerPreferences.krea, settings?.keyValidation?.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, settings?.keyValidation?.krea)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, settings?.keyValidation?.openAi, keyValidationBusy)} detail={keyDetail(settings?.keySources?.openAi, status, providerPreferences.openAi, settings?.keyValidation?.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, settings?.keyValidation?.openAi)} />
         <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={branchMetricTone(settings?.branchStatus?.state)} />
         <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
       </div>
@@ -538,12 +561,13 @@ export default function SettingsPage() {
 }
 
 function SettingsKeyHeading({ label, enabled, onToggle }) {
+  const nextSource = enabled ? ".env" : "Settings override";
   return (
     <div className="settings-key-heading">
       <span>{label}</span>
-      <button type="button" className={`settings-key-toggle ${enabled ? "enabled" : ""}`} role="switch" aria-checked={enabled} aria-label={`${enabled ? "Disable" : "Enable"} ${label}`} title={`${enabled ? "Disable" : "Enable"} ${label}`} onClick={() => onToggle(!enabled)}>
+      <button type="button" className={`settings-key-toggle ${enabled ? "enabled" : ""}`} role="switch" aria-checked={enabled} aria-label={`Use ${nextSource} for ${label}`} title={`Currently using ${enabled ? "the Settings override" : ".env"}. Switch to ${nextSource}.`} onClick={() => onToggle(!enabled)}>
         <span className="settings-key-toggle-track" aria-hidden="true"><span /></span>
-        <em>{enabled ? "Enabled" : "Disabled"}</em>
+        <em>{enabled ? "Override" : ".env"}</em>
       </button>
     </div>
   );
@@ -644,22 +668,6 @@ function normalizeProviderPreferences(value = {}) {
   );
 }
 
-function providerMetricValue(configured, enabled) {
-  if (!enabled) return "Disabled";
-  return configured ? "Configured" : "Not set";
-}
-
-function providerMetricTone(configured, enabled) {
-  return configured && enabled ? "good" : "";
-}
-
-function keyDetail(source, status, enabled = true) {
-  if (!enabled) return "Key retained locally";
-  if (source === "env") return ".env";
-  if (source === "settings") return "Settings";
-  return statusLabel(status);
-}
-
 function secretPlaceholder(source, label) {
   if (source === "env") return "Using .env key";
   if (source === "settings") return "Settings override";
@@ -698,12 +706,6 @@ function SettingsPanelTitle({ title, aside }) {
       {aside && <small>{aside}</small>}
     </div>
   );
-}
-
-function statusLabel(status) {
-  if (status === "loading") return "Loading";
-  if (status === "error") return "Check server";
-  return "Ready";
 }
 
 function timeLabel(date) {

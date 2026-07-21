@@ -17,6 +17,7 @@ export function registerCoreRoutes(
     buildStorageDiagnostics,
     readRuntimeSettings,
     saveRuntimeSettings,
+    validateRuntimeApiKeys,
     pullRuntimeUpdate,
     requestServerRestart,
     readComfyWanStatus
@@ -140,6 +141,12 @@ export function registerCoreRoutes(
   app.post("/api/settings", async (req, res) => {
     await timedApi("settings:save", async () => {
       res.json(await saveRuntimeSettings(req.body || {}));
+    });
+  });
+
+  app.post("/api/settings/validate-keys", async (_req, res) => {
+    await timedApi("settings:validate-keys", async () => {
+      res.json(await validateRuntimeApiKeys());
     });
   });
 

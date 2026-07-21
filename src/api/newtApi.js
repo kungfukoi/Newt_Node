@@ -310,6 +310,10 @@ export const settingsApi = {
     return postJson("/api/settings", body, "Could not save settings.");
   },
 
+  validateKeys() {
+    return postJson("/api/settings/validate-keys", {}, "Could not validate API keys.");
+  },
+
   update(body) {
     return postJson("/api/settings/update", body, "Could not update NewtNode.");
   },

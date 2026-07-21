@@ -22,6 +22,9 @@ import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
+import { selectProviderCredential } from "./provider-credentials.js";
+import { validateProviderKeys } from "./provider-key-validation.js";
+import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
@@ -125,11 +128,17 @@ const runtimeConfigSources = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "runtime" : "",
   [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
 };
+const startupProviderCredentials = Object.freeze({
+  FAL_KEY: process.env.FAL_KEY || "",
+  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || "",
+  KREA_API_KEY: process.env.KREA_API_KEY || "",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || ""
+});
 const defaultApiProviderPreferences = Object.freeze({
-  fal: true,
-  google: true,
-  krea: true,
-  openAi: true
+  fal: false,
+  google: false,
+  krea: false,
+  openAi: false
 });
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
@@ -466,6 +475,7 @@ registerCoreRoutes(app, {
   buildStorageDiagnostics,
   readRuntimeSettings,
   saveRuntimeSettings,
+  validateRuntimeApiKeys,
   pullRuntimeUpdate,
   requestServerRestart,
   readComfyWanStatus
@@ -516,6 +526,7 @@ function buildHealthPayload() {
       extractVideoFrame: true,
       generate3d: true,
       settings: true,
+      settingsKeyValidation: true,
       comfyWanStatus: true,
       projectOutputFolder: true,
       skillDirector: true,
@@ -640,14 +651,20 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
   const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
+  const selectedCredentials = {
+    fal: selectProviderCredential({ settingsValue: settingsValues.falKey, envValue: envValues.FAL_KEY, runtimeValue: startupProviderCredentials.FAL_KEY, useSettingsOverride: providerPreferences.fal }),
+    google: selectProviderCredential({ settingsValue: settingsValues.googleApiKey, envValue: envValues.GOOGLE_API_KEY, runtimeValue: startupProviderCredentials.GOOGLE_API_KEY, useSettingsOverride: providerPreferences.google }),
+    krea: selectProviderCredential({ settingsValue: settingsValues.kreaApiKey, envValue: envValues.KREA_API_KEY, runtimeValue: startupProviderCredentials.KREA_API_KEY, useSettingsOverride: providerPreferences.krea }),
+    openAi: selectProviderCredential({ settingsValue: settingsValues.openAiApiKey, envValue: envValues.OPENAI_API_KEY, runtimeValue: startupProviderCredentials.OPENAI_API_KEY, useSettingsOverride: providerPreferences.openAi })
+  };
   const configuredKeys = {
-    fal: Boolean(settingsValues.falKey || envValues.FAL_KEY || process.env.FAL_KEY),
-    google: Boolean(settingsValues.googleApiKey || envValues.GOOGLE_API_KEY || process.env.GOOGLE_API_KEY),
-    krea: Boolean(settingsValues.kreaApiKey || envValues.KREA_API_KEY || process.env.KREA_API_KEY),
-    openAi: Boolean(settingsValues.openAiApiKey || envValues.OPENAI_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_TEXT_API_KEY)
+    fal: Boolean(selectedCredentials.fal.value),
+    google: Boolean(selectedCredentials.google.value),
+    krea: Boolean(selectedCredentials.krea.value),
+    openAi: Boolean(selectedCredentials.openAi.value || process.env.OPENAI_TEXT_API_KEY)
   };
   const apiKeysFound = Object.values(configuredKeys).some(Boolean);
-  const activeApiKeysFound = Object.entries(configuredKeys).some(([provider, configured]) => configured && providerPreferences[provider]);
+  const activeApiKeysFound = apiKeysFound;
 
   const payload = {
     version: appVersion,
@@ -657,12 +674,12 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     openAiApiKeyConfigured: configuredKeys.openAi,
     apiKeysFound,
     activeApiKeysFound,
-    apiKeyStatus: activeApiKeysFound ? "API keys configured" : apiKeysFound ? "API keys configured but disabled" : "No API keys found",
+    apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     keySources: {
-      fal: credentialSource(settingsValues.falKey, envValues.FAL_KEY, runtimeConfigSources.FAL_KEY),
-      google: credentialSource(settingsValues.googleApiKey, envValues.GOOGLE_API_KEY, runtimeConfigSources.GOOGLE_API_KEY),
-      krea: credentialSource(settingsValues.kreaApiKey, envValues.KREA_API_KEY, runtimeConfigSources.KREA_API_KEY),
-      openAi: credentialSource(settingsValues.openAiApiKey, envValues.OPENAI_API_KEY, runtimeConfigSources.OPENAI_API_KEY)
+      fal: selectedCredentials.fal.source,
+      google: selectedCredentials.google.source,
+      krea: selectedCredentials.krea.source,
+      openAi: selectedCredentials.openAi.source
     },
     providerPreferences,
     repository,
@@ -709,6 +726,20 @@ async function saveRuntimeSettings(body = {}) {
 
   await refreshRuntimeConfigFromEnvFile();
   return readRuntimeSettings();
+}
+
+async function validateRuntimeApiKeys() {
+  const [settingsValues, envValues] = await Promise.all([
+    readRuntimeSettingsStore(),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+  ]);
+  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
+  return validateProviderKeys({
+    fal: selectProviderCredential({ settingsValue: settingsValues.falKey, envValue: envValues.FAL_KEY, runtimeValue: startupProviderCredentials.FAL_KEY, useSettingsOverride: providerPreferences.fal }).value,
+    google: selectProviderCredential({ settingsValue: settingsValues.googleApiKey, envValue: envValues.GOOGLE_API_KEY, runtimeValue: startupProviderCredentials.GOOGLE_API_KEY, useSettingsOverride: providerPreferences.google }).value,
+    krea: selectProviderCredential({ settingsValue: settingsValues.kreaApiKey, envValue: envValues.KREA_API_KEY, runtimeValue: startupProviderCredentials.KREA_API_KEY, useSettingsOverride: providerPreferences.krea }).value,
+    openAi: selectProviderCredential({ settingsValue: settingsValues.openAiApiKey, envValue: envValues.OPENAI_API_KEY, runtimeValue: startupProviderCredentials.OPENAI_API_KEY, useSettingsOverride: providerPreferences.openAi }).value
+  });
 }
 
 async function pullRuntimeUpdate(body = {}) {
@@ -1334,20 +1365,15 @@ async function refreshRuntimeConfigFromEnvFile() {
     readRuntimeSettingsStore()
   ]);
 
-  applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
-  applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
+  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
+  applyRuntimeProviderCredential("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, providerPreferences.fal);
+  applyRuntimeProviderCredential("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, providerPreferences.google);
   applyRuntimeConfigValue("COMFYUI_ROOT", envValues.COMFYUI_ROOT, settingsValues.comfyWanRootPath, { preferSettings: true });
-  applyRuntimeConfigValue("KREA_API_KEY", envValues.KREA_API_KEY, settingsValues.kreaApiKey, { preferSettings: true });
-  applyRuntimeConfigValue("OPENAI_API_KEY", envValues.OPENAI_API_KEY, settingsValues.openAiApiKey, { preferSettings: true });
+  applyRuntimeProviderCredential("KREA_API_KEY", envValues.KREA_API_KEY, settingsValues.kreaApiKey, providerPreferences.krea);
+  applyRuntimeProviderCredential("OPENAI_API_KEY", envValues.OPENAI_API_KEY, settingsValues.openAiApiKey, providerPreferences.openAi);
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
 
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  applyApiProviderPreference("FAL_KEY", providerPreferences.fal);
-  applyApiProviderPreference("GOOGLE_API_KEY", providerPreferences.google);
-  applyApiProviderPreference("KREA_API_KEY", providerPreferences.krea);
-  applyApiProviderPreference("OPENAI_API_KEY", providerPreferences.openAi);
-
-  openAiTextApiKey = providerPreferences.openAi ? process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY : "";
+  openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY || "";
 
   if (process.env.FAL_KEY) {
     fal.config({ credentials: process.env.FAL_KEY });
@@ -1392,16 +1418,20 @@ function normalizeApiProviderPreferences(value = {}) {
   );
 }
 
-function applyApiProviderPreference(key, enabled) {
-  if (enabled) return;
+function applyRuntimeProviderCredential(key, envValue, settingsValue, useSettingsOverride) {
+  const selected = selectProviderCredential({
+    settingsValue,
+    envValue,
+    runtimeValue: startupProviderCredentials[key],
+    useSettingsOverride
+  });
+  if (selected.value) {
+    process.env[key] = selected.value;
+    runtimeConfigSources[key] = selected.source;
+    return;
+  }
   delete process.env[key];
-  runtimeConfigSources[key] = "disabled";
-}
-
-function credentialSource(settingsValue, envValue, runtimeSource) {
-  if (optionalRuntimeSetting(settingsValue)) return "settings";
-  if (optionalRuntimeSetting(envValue)) return "env";
-  return runtimeSource === "runtime" ? "runtime" : "";
+  runtimeConfigSources[key] = "";
 }
 
 async function readEnvFileValues(keys) {
@@ -3328,28 +3358,29 @@ app.post("/api/node/storyboard-export-frame", async (req, res) => {
     }
 
     const source = await resolveLocalAssetPath(sourceUrl);
-    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const sceneName = safeStoryboardSceneName(req.body.sceneName || "Scene 1");
     const frameNumber = Math.max(1, Number.parseInt(req.body.frameNumber, 10) || 1);
     const extension = path.extname(source.fileName || "") || ".png";
-    const fileName = `Frame_${String(frameNumber).padStart(3, "0")}${extension}`;
+    const preferredFileName = storyboardFrameFileName(sceneName, frameNumber, extension);
     const workflowContext = workflowPackageContextFromBody(req.body);
-    let targetPath;
-    let publicPath;
+    let targetDir;
+    let publicBasePath;
 
     if (workflowContext?.packagePath) {
       await ensureWorkflowPackageDirs(workflowContext.packagePath);
-      const relativePath = path.join(workflowPackageStoryboardDirName, sceneName, fileName);
-      targetPath = path.join(workflowContext.packagePath, relativePath);
-      publicPath = workflowPackagePublicPath(workflowContext.id, relativePath);
+      const relativeDirectory = path.join(workflowPackageStoryboardDirName, sceneName);
+      targetDir = path.join(workflowContext.packagePath, relativeDirectory);
+      publicBasePath = workflowPackagePublicPath(workflowContext.id, relativeDirectory);
     } else {
       const projectName = safePathSegment(req.body.projectName || "Untitled-node-project");
-      const relativePath = path.join(workflowPackageStoryboardDirName, projectName, sceneName, fileName);
-      targetPath = path.join(outputsDir, relativePath);
-      publicPath = `/outputs/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+      const relativeDirectory = path.join(workflowPackageStoryboardDirName, projectName, sceneName);
+      targetDir = path.join(outputsDir, relativeDirectory);
+      publicBasePath = `/outputs/${relativeDirectory.split(path.sep).map(encodeURIComponent).join("/")}`;
     }
 
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await copyFile(source.filePath, targetPath);
+    const copiedFrame = await copyStoryboardFrameWithVersion(source.filePath, targetDir, preferredFileName);
+    const fileName = copiedFrame.fileName;
+    const publicPath = `${publicBasePath}/${encodeURIComponent(fileName)}`;
 
     res.json({
       frame: {
@@ -3387,7 +3418,7 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
       return res.status(400).json({ error: "No completed storyboard frames to export." });
     }
 
-    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const sceneName = safeStoryboardSceneName(req.body.sceneName || "Scene 1");
     let exportFolderName = `final_boards_${timestampForFileName()}`;
     const workflowContext = workflowPackageContextFromBody(req.body);
     const includePdf = req.body.includePdf !== false;
@@ -3442,14 +3473,17 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
     for (const [index, frame] of frames.entries()) {
       const source = await resolveLocalAssetPath(frame.sourceUrl);
       const extension = storyboardExportFrameExtension(source.fileName);
-      const fileName = `frame_${index + 1}${extension}`;
-      const targetPath = includeFrames ? path.join(targetDir, fileName) : source.filePath;
-      if (includeFrames) await copyFile(source.filePath, targetPath);
+      const preferredFileName = storyboardFrameFileName(sceneName, frame.number, extension);
+      const copiedFrame = includeFrames
+        ? await copyStoryboardFrameWithVersion(source.filePath, targetDir, preferredFileName)
+        : null;
+      const fileName = copiedFrame?.fileName || source.fileName;
+      const targetPath = copiedFrame?.filePath || source.filePath;
       exportedFrames.push({
         ...frame,
-        number: index + 1,
+        number: frame.number,
         sourceNumber: frame.number,
-        fileName: includeFrames ? fileName : source.fileName,
+        fileName,
         filePath: targetPath,
         localPath: includeFrames ? targetPath : "",
         localUrl: includeFrames && publicBasePath ? `${publicBasePath}/${encodeURIComponent(fileName)}` : "",
