@@ -475,6 +475,8 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Packaged assets must be served through `/workflow-assets/<workflow-id>/...`.
 - Vite development proxy config must include `/workflow-assets` anywhere it includes `/uploads` and `/outputs`.
 - Opening a packaged workflow must register its package path with the local server before packaged assets are expected to preview or run.
+- Save As must assign a new workflow ID so the new package has an independent `/workflow-assets/<workflow-id>/...` namespace. Legacy copied packages that share an ID must remain addressable by searching every registered package root for that ID.
+- Packaged asset resolution must search every registered package root for a workflow ID and may recover a uniquely matched file that was reorganized into a nested subfolder inside that package. Cache and coalesce registry reads so a canvas full of previews does not reload every workflow package per image; invalidate that cache when a registry workflow is written. Ambiguous or genuinely missing files must fail with an actionable missing-file message rather than being reported as an unregistered package.
 - Importing a workflow must remap node, edge, and group IDs and place the imported graph in a clear canvas area rather than directly on top of the current graph.
 - Do not use browser-only object URLs or absolute machine-local paths as saved graph dependencies.
 

@@ -27,6 +27,12 @@ import { validateProviderKeys } from "./provider-key-validation.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import {
+  exactWorkflowPackageAssetFilePath,
+  registeredWorkflowPackageCandidates,
+  relocatedWorkflowPackageAssetFilePath,
+  workflowSaveIdentity
+} from "./workflowPackageAssets.js";
 import { normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -118,6 +124,10 @@ let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
 const runtimeThumbnailJobs = new Map();
+let registeredWorkflowPackageCache = null;
+let registeredWorkflowPackageLoadPromise = null;
+let registeredWorkflowPackageCacheGeneration = 0;
+const registeredWorkflowPackageCandidateCache = new Map();
 const execFile = promisify(execFileCallback);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
 const runtimeConfigSources = {
@@ -2127,9 +2137,15 @@ app.post("/api/saved-workflows", async (req, res) => {
       await migrateLegacyNodeProjectsToSavedWorkflows();
       const workflows = await readSavedWorkflowSummaryFiles();
       const now = new Date().toISOString();
-      const id = String(req.body.id || randomUUID()).trim();
+      const requestedId = String(req.body.id || randomUUID()).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
-      const existing = workflows.find((item) => item.id === id);
+      const identity = workflowSaveIdentity({
+        requestedId,
+        existingWorkflow: workflows.find((item) => item.id === requestedId),
+        packageParentPath: req.body.packageParentPath,
+        createId: randomUUID
+      });
+      const { id, existingWorkflow: existing } = identity;
       const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
       const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
       const workflow = {
@@ -7903,8 +7919,44 @@ async function hydrateWorkflowPackage(workflow) {
 }
 
 async function findRegisteredWorkflowPackage(workflowId) {
-  const workflows = await readSavedWorkflows({ includeAll: true });
-  return workflows.find((workflow) => String(workflow.id || "") === String(workflowId || "") && workflow.packagePath);
+  return (await findRegisteredWorkflowPackages(workflowId))[0];
+}
+
+async function findRegisteredWorkflowPackages(workflowId) {
+  const cacheKey = String(workflowId || "");
+  if (!cacheKey) return [];
+  if (registeredWorkflowPackageCandidateCache.has(cacheKey)) {
+    return registeredWorkflowPackageCandidateCache.get(cacheKey);
+  }
+
+  const workflows = await readRegisteredWorkflowPackages();
+  const candidates = registeredWorkflowPackageCandidates(workflows, cacheKey);
+  registeredWorkflowPackageCandidateCache.set(cacheKey, candidates);
+  return candidates;
+}
+
+async function readRegisteredWorkflowPackages() {
+  if (registeredWorkflowPackageCache) return registeredWorkflowPackageCache;
+  if (registeredWorkflowPackageLoadPromise) return registeredWorkflowPackageLoadPromise;
+
+  const loadGeneration = registeredWorkflowPackageCacheGeneration;
+  registeredWorkflowPackageLoadPromise = readSavedWorkflows({ includeAll: true })
+    .then((workflows) => {
+      if (registeredWorkflowPackageCacheGeneration === loadGeneration) {
+        registeredWorkflowPackageCache = workflows;
+      }
+      return workflows;
+    })
+    .finally(() => {
+      registeredWorkflowPackageLoadPromise = null;
+    });
+  return registeredWorkflowPackageLoadPromise;
+}
+
+function invalidateRegisteredWorkflowPackageCache() {
+  registeredWorkflowPackageCacheGeneration += 1;
+  registeredWorkflowPackageCache = null;
+  registeredWorkflowPackageCandidateCache.clear();
 }
 
 function normalizeWorkflowPackageRegistration(value) {
@@ -9114,6 +9166,7 @@ async function writeWorkflowFile(workflow) {
     fileName: safeWorkflowFileName(workflowData.fileName) || workflowFileNameForName(workflowData.name || "workflow")
   };
   await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
+  invalidateRegisteredWorkflowPackageCache();
   await addRecentWorkflowFileName(registryWorkflow.fileName);
   return {
     ...registryWorkflow,
@@ -16792,15 +16845,29 @@ async function resolveLocalAssetPath(publicPath) {
   if (packageMatch) {
     const workflowId = decodeURIComponent(packageMatch[1] || "");
     const relativePath = safeRelativeAssetPath(decodeURIComponent(packageMatch[2] || ""));
-    const workflow = await findRegisteredWorkflowPackage(workflowId);
     if (!relativePath) throw new Error("Workflow package asset is not registered.");
 
-    const packageFilePath = workflow?.packagePath ? path.join(workflow.packagePath, relativePath) : "";
-    if (packageFilePath && existsSync(packageFilePath)) {
-      return {
-        fileName: path.basename(relativePath),
-        filePath: packageFilePath
-      };
+    const workflows = await findRegisteredWorkflowPackages(workflowId);
+    for (const workflow of workflows) {
+      const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+      const exactFilePath = await exactWorkflowPackageAssetFilePath(packagePath, relativePath);
+      if (exactFilePath) {
+        return {
+          fileName: path.basename(exactFilePath),
+          filePath: exactFilePath
+        };
+      }
+    }
+
+    for (const workflow of workflows) {
+      const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+      const relocatedFilePath = await relocatedWorkflowPackageAssetFilePath(packagePath, relativePath);
+      if (relocatedFilePath) {
+        return {
+          fileName: path.basename(relocatedFilePath),
+          filePath: relocatedFilePath
+        };
+      }
     }
 
     const fallbackFilePath = await workflowAssetFallbackFilePath(relativePath);
@@ -16811,7 +16878,10 @@ async function resolveLocalAssetPath(publicPath) {
       };
     }
 
-    throw new Error("Workflow package asset is not registered.");
+    if (!workflows.length) {
+      throw new Error("Workflow package is not registered. Reopen the workflow package, then try again.");
+    }
+    throw new Error(`Workflow package asset could not be found: ${path.basename(relativePath)}. Restore the file inside the package or reconnect the source asset.`);
   }
 
   const localPath = localAssetFilePath(publicPath);

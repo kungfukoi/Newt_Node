@@ -8949,7 +8949,7 @@ function NodeBody({
                 <span className="character-section-label">Portrait Reference</span>
                 <label className={`character-main-preview ${portrait ? "has-image" : ""}`} title={portrait ? "Replace portrait image" : "Upload portrait image"}>
                   {portrait?.localUrl ? (
-                    <img src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" />
+                    <img src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                   ) : (
                     <UserRound size={28} />
                   )}
@@ -8998,7 +8998,7 @@ function NodeBody({
                           onClick={() => selectWardrobe(wardrobe)}
                           title={locked && hasSheet ? `Use ${wardrobe.fileName || "this wardrobe"} character sheet` : locked ? "No generated sheet for this wardrobe" : wardrobe.fileName}
                         >
-                          <img src={previewImageUrl(wardrobe)} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" />
+                          <img src={previewImageUrl(wardrobe)} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                           <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterWardrobeRemove(node.id, wardrobe.id); }}>
                             <X size={10} />
                           </span>
@@ -9064,7 +9064,7 @@ function NodeBody({
                     </div>
                     <label className="character-custom-sheet-upload" title={customSheet?.localUrl ? "Replace custom character sheet" : "Upload custom character sheet"}>
                       {customSheet?.localUrl ? (
-                        <img src={previewImageUrl(customSheet)} alt="Custom character sheet" loading="lazy" decoding="async" />
+                        <img src={previewImageUrl(customSheet)} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                       ) : (
                         <>
                           <ImagePlus size={20} />
@@ -9183,7 +9183,7 @@ function NodeBody({
                 onDragEnd={(event) => finishOutputItemDragData(characterSheetItem, event)}
                 title="Drag the full-resolution character sheet into another node"
               >
-                <img src={previewImageUrl(characterSheetItem)} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" />
+                <img src={previewImageUrl(characterSheetItem)} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
               </div>
             ) : (
               <div className="character-sheet-empty">
@@ -9535,7 +9535,7 @@ function NodeBody({
                   storyboardCharacters.length ? storyboardCharacters.map((character) => (
                     <div className={`storyboard-character-card ${character.sheetUrl ? "ready" : ""} ${character.status === "error" ? "error" : ""}`} key={character.id}>
                       <div className="storyboard-character-thumb">
-                        {character.portrait?.localUrl ? <img src={previewImageUrl(character.portrait)} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" /> : <UserRound size={20} />}
+                        {character.portrait?.localUrl ? <img src={previewImageUrl(character.portrait)} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} /> : <UserRound size={20} />}
                       </div>
                       <div className="storyboard-character-name-row">
                         <input value={character.name || ""} placeholder="Name becomes @Name" disabled={storyboardLocked} onChange={(event) => onStoryboardCharacterUpdate?.(node.id, character.id, { name: event.target.value, error: "", status: character.status === "error" ? "ready" : character.status })} />
