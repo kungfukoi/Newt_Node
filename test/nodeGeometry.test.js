@@ -6,6 +6,7 @@ import {
   edgeLayerBounds,
   edgePathData,
   graphBoundsForNodes,
+  pastedNodePositions,
   positiveModulo,
   rectsOverlap
 } from "../src/nodeGeometry.js";
@@ -30,6 +31,20 @@ test("clamp helpers bound values predictably", () => {
   assert.equal(clamp(-4, 0, 10), 0);
   assert.equal(positiveModulo(-3, 28), 25);
   assert.deepEqual(clampContextMenuPosition(500, -20, { width: 320, height: 180 }, { width: 100, height: 80, inset: 8 }), { x: 212, y: 8 });
+});
+
+test("pasted nodes anchor at the cursor while preserving relative spacing", () => {
+  assert.deepEqual(
+    pastedNodePositions(
+      [{ x: 100, y: 80 }, { x: 340, y: 210 }],
+      { x: 900, y: 500 }
+    ),
+    [{ x: 900, y: 500 }, { x: 1140, y: 630 }]
+  );
+});
+
+test("pasted nodes retain the legacy offset when no canvas cursor is available", () => {
+  assert.deepEqual(pastedNodePositions([{ x: 100, y: 80 }]), [{ x: 142, y: 122 }]);
 });
 
 test("edge geometry creates a padded SVG viewport around paths", () => {

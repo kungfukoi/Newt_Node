@@ -27,7 +27,7 @@ Current release: `v3.0.0-beta.0`
 
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
-- **Provider routing**: Enable or disable Fal, Google, Krea, and OpenAI independently in Settings. Supported Google image models use Google directly first when configured; transient Google capacity errors remain visible and can fall back to Fal on the next run. Seedance prefers Fal when enabled and falls back to Krea when Fal is disabled.
+- **Provider routing**: Store multiple named Fal, Google, Krea, and OpenAI credentials, select one active key per service, and explicitly route Seedance, Google video/Veo, and Nano Banana Pro image generation to their supported provider.
 - **Film Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
 - **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
@@ -38,7 +38,7 @@ Current release: `v3.0.0-beta.0`
 - **Video handling**: Video thumbnails and result panes keep native scrub controls; use Ctrl-drag when dragging video results into another node.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
-- **Settings**: Local API keys, repository updates, restart, branch status, loaded version, and enabled model dropdown preferences are managed from the Settings page.
+- **Settings**: Local API keys, provider routing, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page.
 - **Cross-platform launchers**: Windows and macOS launchers are included for local app-style startup.
 
 ## Requirements
@@ -51,18 +51,9 @@ Current release: `v3.0.0-beta.0`
 
 ## Setup
 
-The easiest setup is inside **Settings > API Providers**. Paste each key, enable the providers you want, and save. Keys and enable/disable preferences are stored locally and are ignored by git.
+Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, and OpenAI values into the local gitignored `.env` file automatically.
 
-You can alternatively copy `.env.example` to `.env` and add keys there:
-
-```bash
-FAL_KEY=your_fal_key_here
-GOOGLE_API_KEY=your_google_api_key_here
-KREA_API_KEY=your_krea_key_here
-OPENAI_API_KEY=your_openai_key_here
-```
-
-Settings takes priority for providers explicitly enabled or disabled there. Disabling a provider prevents NewtNode from using its `.env` key until it is enabled again.
+Models available through multiple services use the separate **Model Providers** setting. Seedance 2.0 can be routed through Fal or Krea, while Google video/Veo and Nano Banana Pro image generation can be routed through Google or Fal without changing which credentials are saved.
 
 ### macOS
 
@@ -70,8 +61,6 @@ From Terminal in the repository folder:
 
 ```bash
 npm install
-cp .env.example .env
-open -e .env
 npm run dev
 ```
 
@@ -85,8 +74,6 @@ From PowerShell in the repository folder:
 
 ```powershell
 npm.cmd install
-Copy-Item .env.example .env
-notepad .env
 npm.cmd run dev
 ```
 

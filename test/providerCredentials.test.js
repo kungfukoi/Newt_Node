@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectProviderCredential } from "../server/provider-credentials.js";
+import {
+  activeProviderCredentials,
+  legacyProviderCredentialStore,
+  normalizeActiveCredentialIds,
+  normalizeProviderCredentialStore,
+  selectProviderCredential
+} from "../server/provider-credentials.js";
 
 test("disabled local override selects the env credential", () => {
   assert.deepEqual(selectProviderCredential({
@@ -41,4 +47,26 @@ test("env selection may fall back to a startup runtime credential", () => {
     value: "runtime-key",
     source: "runtime"
   });
+});
+
+test("multi-key credentials keep only one active key per provider", () => {
+  const credentials = normalizeProviderCredentialStore({
+    fal: [
+      { id: "personal", label: "Personal", key: "fal-one" },
+      { id: "production", label: "Production", key: "fal-two" }
+    ]
+  });
+  const activeIds = normalizeActiveCredentialIds({ fal: "production" }, credentials);
+  assert.equal(activeProviderCredentials(credentials, activeIds).fal.key, "fal-two");
+  assert.equal(activeIds.google, "");
+});
+
+test("legacy Settings and env keys migrate without duplicates and preserve the selected source", () => {
+  const migrated = legacyProviderCredentialStore({
+    settings: { falKey: "settings-fal", providerPreferences: { fal: false } },
+    env: { FAL_KEY: "env-fal" },
+    runtime: { FAL_KEY: "env-fal" }
+  });
+  assert.equal(migrated.credentials.fal.length, 2);
+  assert.equal(activeProviderCredentials(migrated.credentials, migrated.activeCredentialIds).fal.key, "env-fal");
 });

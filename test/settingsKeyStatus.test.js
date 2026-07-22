@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { keyDetail, providerMetricTone, providerMetricValue } from "../src/settingsKeyStatus.js";
 
-test("valid env keys stay green when the local override is disabled", () => {
+test("valid active credentials stay green and show their label", () => {
   const validation = { status: "valid" };
   assert.equal(providerMetricValue(true, validation), "Valid");
   assert.equal(providerMetricTone(true, validation), "good");
-  assert.equal(keyDetail("env", "ready", false, validation), "Verified / .env");
+  assert.equal(keyDetail("Production", "ready", validation), "Verified / Production");
 });
 
 test("configured keys are not green until validation succeeds", () => {

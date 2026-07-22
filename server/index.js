@@ -20,10 +20,19 @@ import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
+import { apiErrorMessage } from "../src/apiErrors.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
-import { selectProviderCredential } from "./provider-credentials.js";
-import { validateProviderKeys } from "./provider-key-validation.js";
+import {
+  activeProviderCredentials,
+  legacyProviderCredentialStore,
+  normalizeActiveCredentialIds,
+  normalizeProviderCredentialStore,
+  providerCredentialNames,
+  providerCredentialSummaries,
+  providerEnvironmentKey
+} from "./provider-credentials.js";
+import { validateProviderKey } from "./provider-key-validation.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
@@ -34,6 +43,7 @@ import {
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
 import { normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
   normalizeComfyRootPath,
@@ -61,7 +71,6 @@ import {
   geminiOmniGoogleModel as defaultGeminiOmniGoogleModel,
   normalizeGeminiOmniAspectRatio,
   normalizeGeminiOmniDuration,
-  shouldFallbackGeminiOmniToFal,
   uniqueGeminiOmniReferences
 } from "../src/geminiOmni.js";
 import {
@@ -73,9 +82,11 @@ import {
   restoreKlingDirectorPrompt
 } from "../src/klingDirectorPromptOptimization.js";
 import {
+  compactKreaSeedancePrompt,
   estimateKreaSeedanceCost,
   extractKreaJobResultUrl,
   kreaApiBaseUrl,
+  kreaReferenceImageTarget,
   kreaSeedanceEndpoint,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
@@ -144,12 +155,7 @@ const startupProviderCredentials = Object.freeze({
   KREA_API_KEY: process.env.KREA_API_KEY || "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || ""
 });
-const defaultApiProviderPreferences = Object.freeze({
-  fal: false,
-  google: false,
-  krea: false,
-  openAi: false
-});
+let runtimeModelProviderPreferences = defaultModelProviderPreferences;
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
@@ -303,7 +309,7 @@ const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_
 const klingReferenceMaximumBytes = 9.5 * 1024 * 1024;
 const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENERATION_CONCURRENCY, 1, 6, 3);
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
-let openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
+let openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
 const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
 const skillDirectorLlmEndpoint = "openrouter/router";
@@ -660,21 +666,23 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  const selectedCredentials = {
-    fal: selectProviderCredential({ settingsValue: settingsValues.falKey, envValue: envValues.FAL_KEY, runtimeValue: startupProviderCredentials.FAL_KEY, useSettingsOverride: providerPreferences.fal }),
-    google: selectProviderCredential({ settingsValue: settingsValues.googleApiKey, envValue: envValues.GOOGLE_API_KEY, runtimeValue: startupProviderCredentials.GOOGLE_API_KEY, useSettingsOverride: providerPreferences.google }),
-    krea: selectProviderCredential({ settingsValue: settingsValues.kreaApiKey, envValue: envValues.KREA_API_KEY, runtimeValue: startupProviderCredentials.KREA_API_KEY, useSettingsOverride: providerPreferences.krea }),
-    openAi: selectProviderCredential({ settingsValue: settingsValues.openAiApiKey, envValue: envValues.OPENAI_API_KEY, runtimeValue: startupProviderCredentials.OPENAI_API_KEY, useSettingsOverride: providerPreferences.openAi })
-  };
+  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const selectedCredentials = activeProviderCredentials(
+    credentialConfiguration.credentials,
+    credentialConfiguration.activeCredentialIds
+  );
   const configuredKeys = {
-    fal: Boolean(selectedCredentials.fal.value),
-    google: Boolean(selectedCredentials.google.value),
-    krea: Boolean(selectedCredentials.krea.value),
-    openAi: Boolean(selectedCredentials.openAi.value || process.env.OPENAI_TEXT_API_KEY)
+    fal: Boolean(selectedCredentials.fal?.key),
+    google: Boolean(selectedCredentials.google?.key),
+    krea: Boolean(selectedCredentials.krea?.key),
+    openAi: Boolean(selectedCredentials.openAi?.key)
   };
   const apiKeysFound = Object.values(configuredKeys).some(Boolean);
   const activeApiKeysFound = apiKeysFound;
+  const modelProviderPreferences = normalizeModelProviderPreferences(
+    settingsValues.modelProviderPreferences,
+    configuredKeys
+  );
 
   const payload = {
     version: appVersion,
@@ -685,13 +693,14 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     apiKeysFound,
     activeApiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
-    keySources: {
-      fal: selectedCredentials.fal.source,
-      google: selectedCredentials.google.source,
-      krea: selectedCredentials.krea.source,
-      openAi: selectedCredentials.openAi.source
-    },
-    providerPreferences,
+    keySources: Object.fromEntries(providerCredentialNames.map((provider) => [provider, selectedCredentials[provider] ? "settings" : ""])),
+    activeCredentialIds: credentialConfiguration.activeCredentialIds,
+    activeCredentialLabels: Object.fromEntries(providerCredentialNames.map((provider) => [provider, selectedCredentials[provider]?.label || ""])),
+    credentialProfiles: providerCredentialSummaries(
+      credentialConfiguration.credentials,
+      credentialConfiguration.activeCredentialIds
+    ),
+    modelProviderPreferences,
     repository,
     branch,
     branchStatus,
@@ -703,10 +712,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
   if (includeSecrets) {
     payload.secrets = {
-      falKey: settingsValues.falKey || "",
-      googleApiKey: settingsValues.googleApiKey || "",
-      kreaApiKey: settingsValues.kreaApiKey || "",
-      openAiApiKey: settingsValues.openAiApiKey || ""
+      credentials: credentialConfiguration.credentials
     };
   }
 
@@ -714,22 +720,43 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 }
 
 async function saveRuntimeSettings(body = {}) {
-  const falKey = submittedRuntimeSetting(body.falKey);
-  const googleApiKey = submittedRuntimeSetting(body.googleApiKey);
-  const kreaApiKey = submittedRuntimeSetting(body.kreaApiKey);
-  const openAiApiKey = submittedRuntimeSetting(body.openAiApiKey);
   const repository = normalizeUpdateRepository(body.repository);
+  const [settingsValues, envValues] = await Promise.all([
+    readRuntimeSettingsStore(),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+  ]);
+  const currentConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const credentials = body.credentials !== undefined
+    ? normalizeProviderCredentialStore(body.credentials)
+    : currentConfiguration.credentials;
+  const activeCredentialIds = body.activeCredentialIds !== undefined
+    ? normalizeActiveCredentialIds(body.activeCredentialIds, credentials)
+    : normalizeActiveCredentialIds(currentConfiguration.activeCredentialIds, credentials);
+  const selectedCredentials = activeProviderCredentials(credentials, activeCredentialIds);
   const updates = {};
 
-  if (falKey !== undefined) updates.falKey = falKey;
-  if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
-  if (kreaApiKey !== undefined) updates.kreaApiKey = kreaApiKey;
-  if (openAiApiKey !== undefined) updates.openAiApiKey = openAiApiKey;
+  if (body.credentials !== undefined || body.activeCredentialIds !== undefined || !settingsValues.hasCredentialStore) {
+    updates.credentials = credentials;
+    updates.activeCredentialIds = activeCredentialIds;
+  }
   if (repository) updates.repository = repository;
   if (body.comfyWanRootPath !== undefined) updates.comfyWanRootPath = normalizeComfyRootPath(body.comfyWanRootPath);
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
-  if (body.providerPreferences !== undefined) updates.providerPreferences = normalizeApiProviderPreferences(body.providerPreferences);
+  if (body.modelProviderPreferences !== undefined || Object.keys(defaultModelProviderPreferences).some((key) => !settingsValues.modelProviderPreferences?.[key])) {
+    const requestedProviderPreferences = body.modelProviderPreferences !== undefined
+      ? body.modelProviderPreferences
+      : settingsValues.modelProviderPreferences;
+    updates.modelProviderPreferences = normalizeModelProviderPreferences(requestedProviderPreferences, {
+      fal: Boolean(selectedCredentials.fal?.key),
+      google: Boolean(selectedCredentials.google?.key),
+      krea: Boolean(selectedCredentials.krea?.key)
+    });
+  }
 
+  await updateEnvFileValues(Object.fromEntries(providerCredentialNames.map((provider) => [
+    providerEnvironmentKey(provider),
+    selectedCredentials[provider]?.key || ""
+  ])));
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
   }
@@ -743,13 +770,20 @@ async function validateRuntimeApiKeys() {
     readRuntimeSettingsStore(),
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  return validateProviderKeys({
-    fal: selectProviderCredential({ settingsValue: settingsValues.falKey, envValue: envValues.FAL_KEY, runtimeValue: startupProviderCredentials.FAL_KEY, useSettingsOverride: providerPreferences.fal }).value,
-    google: selectProviderCredential({ settingsValue: settingsValues.googleApiKey, envValue: envValues.GOOGLE_API_KEY, runtimeValue: startupProviderCredentials.GOOGLE_API_KEY, useSettingsOverride: providerPreferences.google }).value,
-    krea: selectProviderCredential({ settingsValue: settingsValues.kreaApiKey, envValue: envValues.KREA_API_KEY, runtimeValue: startupProviderCredentials.KREA_API_KEY, useSettingsOverride: providerPreferences.krea }).value,
-    openAi: selectProviderCredential({ settingsValue: settingsValues.openAiApiKey, envValue: envValues.OPENAI_API_KEY, runtimeValue: startupProviderCredentials.OPENAI_API_KEY, useSettingsOverride: providerPreferences.openAi }).value
-  });
+  const configuration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const checkedAt = new Date().toISOString();
+  const credentials = Object.fromEntries(await Promise.all(providerCredentialNames.map(async (provider) => {
+    const results = await Promise.all(configuration.credentials[provider].map(async (credential) => [
+      credential.id,
+      await validateProviderKey(provider, credential.key)
+    ]));
+    return [provider, Object.fromEntries(results)];
+  })));
+  const providers = Object.fromEntries(providerCredentialNames.map((provider) => {
+    const activeId = configuration.activeCredentialIds[provider];
+    return [provider, credentials[provider]?.[activeId] || { status: "missing" }];
+  }));
+  return { checkedAt, providers, credentials };
 }
 
 async function pullRuntimeUpdate(body = {}) {
@@ -1375,15 +1409,23 @@ async function refreshRuntimeConfigFromEnvFile() {
     readRuntimeSettingsStore()
   ]);
 
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  applyRuntimeProviderCredential("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, providerPreferences.fal);
-  applyRuntimeProviderCredential("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, providerPreferences.google);
+  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const selectedCredentials = activeProviderCredentials(
+    credentialConfiguration.credentials,
+    credentialConfiguration.activeCredentialIds
+  );
+  for (const provider of providerCredentialNames) {
+    applyActiveRuntimeCredential(providerEnvironmentKey(provider), selectedCredentials[provider]);
+  }
   applyRuntimeConfigValue("COMFYUI_ROOT", envValues.COMFYUI_ROOT, settingsValues.comfyWanRootPath, { preferSettings: true });
-  applyRuntimeProviderCredential("KREA_API_KEY", envValues.KREA_API_KEY, settingsValues.kreaApiKey, providerPreferences.krea);
-  applyRuntimeProviderCredential("OPENAI_API_KEY", envValues.OPENAI_API_KEY, settingsValues.openAiApiKey, providerPreferences.openAi);
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
+  runtimeModelProviderPreferences = normalizeModelProviderPreferences(settingsValues.modelProviderPreferences, {
+    fal: Boolean(selectedCredentials.fal?.key),
+    google: Boolean(selectedCredentials.google?.key),
+    krea: Boolean(selectedCredentials.krea?.key)
+  });
 
-  openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY || "";
+  openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 
   if (process.env.FAL_KEY) {
     fal.config({ credentials: process.env.FAL_KEY });
@@ -1400,7 +1442,13 @@ async function readRuntimeSettingsStore() {
     repository: normalizeUpdateRepository(data?.repository),
     comfyWanRootPath: normalizeComfyRootPath(data?.comfyWanRootPath),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences),
-    providerPreferences: normalizeApiProviderPreferences(data?.providerPreferences)
+    providerPreferences: data?.providerPreferences && typeof data.providerPreferences === "object" ? data.providerPreferences : {},
+    credentials: normalizeProviderCredentialStore(data?.credentials),
+    activeCredentialIds: normalizeActiveCredentialIds(data?.activeCredentialIds, data?.credentials),
+    hasCredentialStore: Object.prototype.hasOwnProperty.call(data || {}, "credentials"),
+    modelProviderPreferences: data?.modelProviderPreferences && typeof data.modelProviderPreferences === "object"
+      ? data.modelProviderPreferences
+      : {}
   };
 }
 
@@ -1417,27 +1465,42 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.comfyWanRootPath !== undefined) next.comfyWanRootPath = normalizeComfyRootPath(patch.comfyWanRootPath);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
-  if (patch.providerPreferences !== undefined) next.providerPreferences = normalizeApiProviderPreferences(patch.providerPreferences);
+  if (patch.credentials !== undefined) {
+    next.credentials = normalizeProviderCredentialStore(patch.credentials);
+    delete next.falKey;
+    delete next.googleApiKey;
+    delete next.kreaApiKey;
+    delete next.openAiApiKey;
+    delete next.providerPreferences;
+  }
+  if (patch.activeCredentialIds !== undefined) {
+    next.activeCredentialIds = normalizeActiveCredentialIds(patch.activeCredentialIds, patch.credentials ?? next.credentials);
+  }
+  if (patch.modelProviderPreferences !== undefined) {
+    next.modelProviderPreferences = normalizeModelProviderPreferences(patch.modelProviderPreferences);
+  }
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
 
-function normalizeApiProviderPreferences(value = {}) {
-  const incoming = value && typeof value === "object" ? value : {};
-  return Object.fromEntries(
-    Object.entries(defaultApiProviderPreferences).map(([provider, defaultValue]) => [provider, Boolean(incoming[provider] ?? defaultValue)])
-  );
+function readProviderCredentialConfiguration(settingsValues = {}, envValues = {}) {
+  if (settingsValues.hasCredentialStore) {
+    const credentials = normalizeProviderCredentialStore(settingsValues.credentials);
+    return {
+      credentials,
+      activeCredentialIds: normalizeActiveCredentialIds(settingsValues.activeCredentialIds, credentials)
+    };
+  }
+  return legacyProviderCredentialStore({
+    settings: settingsValues,
+    env: envValues,
+    runtime: startupProviderCredentials
+  });
 }
 
-function applyRuntimeProviderCredential(key, envValue, settingsValue, useSettingsOverride) {
-  const selected = selectProviderCredential({
-    settingsValue,
-    envValue,
-    runtimeValue: startupProviderCredentials[key],
-    useSettingsOverride
-  });
-  if (selected.value) {
-    process.env[key] = selected.value;
-    runtimeConfigSources[key] = selected.source;
+function applyActiveRuntimeCredential(key, credential) {
+  if (credential?.key) {
+    process.env[key] = credential.key;
+    runtimeConfigSources[key] = "settings";
     return;
   }
   delete process.env[key];
@@ -1876,7 +1939,14 @@ async function updateEnvFileValues(updates) {
     if (!usedKeys.has(key)) nextLines.push(`${key}=${formatEnvValue(updates[key])}`);
   }
 
-  await writeFile(envFilePath, `${trimTrailingBlankLines(nextLines).join("\n")}\n`, "utf8");
+  const temporaryPath = `${envFilePath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${trimTrailingBlankLines(nextLines).join("\n")}\n`, "utf8");
+    await rename(temporaryPath, envFilePath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 function formatEnvValue(value) {
@@ -2679,7 +2749,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-z-image") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const zImage = await generateFalZImage({
@@ -2737,7 +2807,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-seedream-5-pro") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const seedreamImage = await generateFalSeedream5Pro({
@@ -2828,7 +2898,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-openai-image-2") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const openAiImage = await generateFalOpenAiImage2({
@@ -2893,7 +2963,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-luma-photon") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const lumaImage = await generateFalLumaPhoton({
@@ -2949,7 +3019,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-krea-2-large") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const kreaImage = await generateFalKrea2Large({
@@ -3011,7 +3081,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-nano-banana-2") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const falImage = await generateFalNanoBanana2({
@@ -3069,7 +3139,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
 
     if (selectedModel.provider === "fal-nano-banana-pro") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       return sendFalNanoBananaImageResponse({
@@ -3085,27 +3155,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "google" && req.body.useFalFallback) {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Fal fallback requested, but FAL_KEY is missing." });
-      }
-
-      return sendFalNanoBananaImageResponse({
-        req,
-        res,
-        selectedModel,
-        prompt,
-        imagePromptUrls,
-        imagePromptLabels,
-        aspectRatio,
-        requestedAspectRatio,
-        cleanReferenceLabels,
-        fallbackRequestedFromGoogle: true
-      });
-    }
-
     if (!process.env.GOOGLE_API_KEY) {
-      return res.status(400).json({ error: "Missing GOOGLE_API_KEY in .env." });
+      return res.status(400).json({ error: "No active Google API key is selected in Settings." });
     }
 
     const model = selectedModel.id;
@@ -3140,15 +3191,10 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     } catch (googleError) {
       if (shouldFallbackFromGoogleImageError(googleError)) {
         const googleErrorSummary = googleFallbackSummary(googleError);
-        const fallbackSuffix = process.env.FAL_KEY
-          ? " Run again for fal fallback."
-          : " Fal fallback unavailable: missing FAL_KEY.";
         return res.status(errorStatusCode(googleError)).json({
-          error: `${googleImageErrorDisplayMessage(googleErrorSummary)}${fallbackSuffix}`,
+          error: `${googleImageErrorDisplayMessage(googleErrorSummary)} Switch Image Generation to Fal in Settings to use the Fal route.`,
           text: googleError.text || "",
           raw: googleError.raw,
-          fallbackAvailable: Boolean(process.env.FAL_KEY),
-          fallbackProvider: process.env.FAL_KEY ? "fal" : "",
           googleError: googleErrorSummary
         });
       }
@@ -3185,6 +3231,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         imageConfig,
         thinkingLevel: nanoBananaProThinkingConfig.thinkingLevel,
         attempts,
+        providerPreference: "google",
         imagePromptCount: imagePromptUrls.length,
         imagePromptLabels: cleanReferenceLabels
       },
@@ -3226,9 +3273,7 @@ async function sendFalNanoBananaImageResponse({
   imagePromptLabels,
   aspectRatio,
   requestedAspectRatio,
-  cleanReferenceLabels,
-  fallbackFromGoogleError = null,
-  fallbackRequestedFromGoogle = false
+  cleanReferenceLabels
 }) {
   const falImage = await generateFalNanoBananaPro({
     prompt,
@@ -3239,22 +3284,6 @@ async function sendFalNanoBananaImageResponse({
   });
   const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
   const cost = estimateImageCost({ resolution: req.body.resolution, provider: "fal.ai", endpoint: falImage.endpoint });
-  const fallback = fallbackFromGoogleError
-    ? googleFallbackSummary(fallbackFromGoogleError)
-    : fallbackRequestedFromGoogle
-      ? {
-        from: "google",
-        to: "fal",
-        status: null,
-        providerStatus: "",
-        attempts: null,
-        reason: "manual-fal-fallback",
-        quotaLikely: null,
-        accountLimitLikely: null,
-        message: "Fal fallback requested after a Google image error."
-      }
-      : null;
-
   await appendHistory({
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -3272,17 +3301,9 @@ async function sendFalNanoBananaImageResponse({
       aspectRatio,
       requestedAspectRatio: requestedAspectRatio || aspectRatio,
       resolution: falImage.resolution,
+      providerPreference: "fal",
       imagePromptCount: imagePromptUrls.length,
-      imagePromptLabels: cleanReferenceLabels,
-      ...(fallback
-        ? {
-          fallbackFromProvider: "Google",
-          fallbackReason: fallback.reason || fallback.message,
-          fallbackStatus: fallback.status,
-          fallbackProviderStatus: fallback.providerStatus || "",
-          fallbackQuotaLikely: fallback.quotaLikely
-        }
-        : {})
+      imagePromptLabels: cleanReferenceLabels
     },
     cost,
     remoteImage: falImage.remoteImage,
@@ -3295,7 +3316,6 @@ async function sendFalNanoBananaImageResponse({
   return res.json({
     text: falImage.description || "",
     cost,
-    fallback,
     image: {
       ...falImage.remoteImage,
       localUrl: output.publicPath,
@@ -3556,7 +3576,7 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
       return res.status(400).json({ error: "Paint a mask before running inpaint." });
     }
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
     }
 
     const source = await readLocalAsset(sourceUrl);
@@ -3643,7 +3663,7 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
 
 async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, imagePromptLabels }) {
   if (!process.env.FAL_KEY) {
-    return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
   }
 
   const imageUrl = firstLocalOutput(imagePromptUrls);
@@ -3741,7 +3761,7 @@ app.post("/api/node/utility-image", async (req, res) => {
     }
 
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
     }
 
     const imageUrl = firstLocalOutput(req.body.imageUrls);
@@ -4430,7 +4450,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     }
 
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
     }
 
     if (!prompt && selectedVideoModel.requiresPrompt) {
@@ -4577,7 +4597,7 @@ app.post("/api/node/edit-preview", async (req, res) => {
 app.post("/api/node/qwen-camera-edit", async (req, res) => {
   try {
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
     }
 
     const imageUrl = firstLocalOutput(req.body.imageUrls);
@@ -4861,8 +4881,11 @@ app.post("/api/node/generate-video", async (req, res) => {
     const selectedVideoModel = resolveVideoModel(req.body.model);
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
-      if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Gemini Omni Flash needs a Google API key or Fal API key in Settings." });
+      const videoProvider = runtimeModelProviderPreferences.veo;
+      const videoKey = videoProvider === "fal" ? process.env.FAL_KEY : process.env.GOOGLE_API_KEY;
+      if (!videoKey) {
+        const providerLabel = providerPreferenceLabel(videoProvider);
+        return res.status(400).json({ error: `Google video is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
       }
       return runGeminiOmniVideo(req, res, { prompt, selectedVideoModel });
     }
@@ -4968,11 +4991,13 @@ app.post("/api/node/generate-video", async (req, res) => {
     const aspectRatio = normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = Boolean(req.body.generateAudio);
     const runtimeProvider = resolveSeedanceRuntimeProvider({
+      preferredProvider: runtimeModelProviderPreferences.seedance,
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY
     });
     if (!runtimeProvider) {
-      return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
+      const providerLabel = runtimeModelProviderPreferences.seedance === "krea" ? "Krea" : "Fal";
+      return res.status(400).json({ error: `Seedance is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
     }
 
     let routeKind = "text-to-video";
@@ -4982,13 +5007,16 @@ app.post("/api/node/generate-video", async (req, res) => {
       routeKind = "reference-to-video";
     }
 
-    const submittedPrompt =
+    let submittedPrompt =
       routeKind === "reference-to-video"
         ? rewriteReferenceMentions(prompt, {
             imageNames: referenceImageNames,
             videoNames: referenceVideoNames
           })
         : prompt;
+    if (runtimeProvider === "krea") {
+      submittedPrompt = compactKreaSeedancePrompt(submittedPrompt);
+    }
     let endpoint;
     let requestId;
     let resultSeed = null;
@@ -5038,12 +5066,12 @@ app.post("/api/node/generate-video", async (req, res) => {
       };
 
       if (routeKind === "image-to-video") {
-        input.start_image = await uploadLocalOutputToKrea(startFrameUrl);
-        if (endFrameUrl) input.end_image = await uploadLocalOutputToKrea(endFrameUrl);
+        input.start_image = await uploadKreaReferenceImage(startFrameUrl);
+        if (endFrameUrl) input.end_image = await uploadKreaReferenceImage(endFrameUrl);
       }
 
       if (routeKind === "reference-to-video") {
-        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, 9).map(uploadLocalOutputToKrea));
+        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, 9).map(uploadKreaReferenceImage));
         if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, 3).map(uploadLocalOutputToKrea));
         if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToKrea));
       }
@@ -5149,33 +5177,24 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   ];
   const task = references.length ? "reference_to_video" : startFrameUrl ? "image_to_video" : "text_to_video";
 
-  let provider = "Google";
-  let endpoint = googleGeminiOmniModel;
+  const preferredProvider = runtimeModelProviderPreferences.veo;
+  let provider = preferredProvider === "fal" ? "fal.ai" : "Google";
+  let endpoint = preferredProvider === "fal" ? falGeminiOmniReferenceEndpoint : googleGeminiOmniModel;
   let requestId = "";
   let remoteVideo = null;
   let output = null;
-  let fallbackReason = "";
 
-  if (process.env.GOOGLE_API_KEY) {
-    try {
-      const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
-      requestId = direct.requestId;
-      remoteVideo = direct.remoteVideo;
-      output = direct.output;
-    } catch (error) {
-      if (!process.env.FAL_KEY || !shouldFallbackGeminiOmniToFal(error)) throw error;
-      fallbackReason = error.message || "Google direct access was unavailable.";
-      console.warn(`Gemini Omni Google direct unavailable; using fal fallback: ${fallbackReason}`);
-    }
-  }
-
-  if (!output) {
+  if (preferredProvider === "fal") {
     const fallback = await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
-    provider = "fal.ai";
     endpoint = fallback.endpoint;
     requestId = fallback.requestId;
     remoteVideo = fallback.remoteVideo;
     output = await downloadVideo(req, remoteVideo.url, "gemini-omni");
+  } else {
+    const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
+    requestId = direct.requestId;
+    remoteVideo = direct.remoteVideo;
+    output = direct.output;
   }
 
   const cost = estimateGeminiOmniCost({ durationSeconds, provider, endpoint });
@@ -5201,8 +5220,7 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
       referenceImageCount: references.length,
       referenceImageNames: references.map((item) => item.label).filter(Boolean),
       googleDirect: provider === "Google",
-      falFallback: provider === "fal.ai" && Boolean(process.env.GOOGLE_API_KEY),
-      fallbackReason
+      providerPreference: preferredProvider
     },
     cost,
     remoteVideo,
@@ -5330,7 +5348,7 @@ async function downloadGoogleGeminiOmniFile(uri) {
 }
 
 async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
-  if (!process.env.FAL_KEY) throw httpError(400, "Gemini Omni fal fallback needs a Fal API key in Settings.");
+  if (!process.env.FAL_KEY) throw httpError(400, "Gemini Omni is routed through Fal, but no active Fal API key is selected in Settings.");
   const endpoint = media.length ? falGeminiOmniReferenceEndpoint : falGeminiOmniTextEndpoint;
   const input = {
     prompt: submittedPrompt,
@@ -5712,7 +5730,7 @@ function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant
 app.post("/api/node/generate-3d", async (req, res) => {
   try {
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
     }
 
     const imageViewUrls = normalizeHunyuan3DImageViewUrls(req.body);
@@ -7365,11 +7383,13 @@ app.post(
       }
 
       const runtimeProvider = resolveSeedanceRuntimeProvider({
+        preferredProvider: runtimeModelProviderPreferences.seedance,
         falKey: process.env.FAL_KEY,
         kreaKey: process.env.KREA_API_KEY
       });
       if (!runtimeProvider) {
-        return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
+        const providerLabel = runtimeModelProviderPreferences.seedance === "krea" ? "Krea" : "Fal";
+        return res.status(400).json({ error: `Seedance is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
       }
 
       const startFrame = req.files?.startFrame?.[0];
@@ -10142,7 +10162,7 @@ async function createLegacyTransitionBuilderResult({ body, referenceImageUrls = 
       throw error;
     }
     if (!process.env.FAL_KEY) {
-      const error = new Error("WanWarp requires FAL_KEY in .env.");
+      const error = new Error("WanWarp requires an active Fal API key in Settings.");
       error.status = 400;
       throw error;
     }
@@ -12850,7 +12870,7 @@ function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], v
 
 async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }) {
   if (!process.env.FAL_KEY) {
-    throw new Error("Missing FAL_KEY in .env.");
+    throw new Error("No active Fal API key is selected in Settings.");
   }
 
   const model = falTextModel;
@@ -13486,7 +13506,7 @@ async function runSkillDirectorWithFal({
   durationSeconds = "15"
 }) {
   if (!process.env.FAL_KEY) {
-    throw new Error("Missing FAL_KEY in .env.");
+    throw new Error("No active Fal API key is selected in Settings.");
   }
 
   const model = skillDirectorFalModel;
@@ -13726,7 +13746,7 @@ async function runSkillDirectorWithFal({
 
 async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) {
   if (!openAiTextApiKey) {
-    throw new Error("Missing OPENAI_TEXT_API_KEY in .env.");
+    throw new Error("No OpenAI text API key is configured.");
   }
 
   const model = openAiTextModel;
@@ -14136,7 +14156,7 @@ function resolveImageModel(model) {
     };
   }
 
-  const useGoogleDirect = Boolean(process.env.GOOGLE_API_KEY);
+  const useGoogleDirect = runtimeModelProviderPreferences.imageGeneration === "google";
   return {
     provider: useGoogleDirect ? "google" : "fal-nano-banana-pro",
     displayName: "Nano Banana Pro",
@@ -16762,7 +16782,41 @@ async function responseJson(response) {
 }
 
 function kreaErrorMessage(data, fallback) {
-  return String(data?.error?.message || data?.error || data?.message || data?.detail || fallback).trim();
+  const errorCode = String(data?.error?.code || data?.code || "").trim().toLowerCase();
+  const hasMessage = Boolean(data?.error?.message || data?.message || data?.detail || data?.errors);
+  if (errorCode === "internal" && !hasMessage) {
+    return "Krea Seedance failed internally after accepting the request. Retry once, or select Fal for Seedance in Settings if Krea continues to fail.";
+  }
+  return apiErrorMessage(data?.error ?? data?.message ?? data?.detail ?? data?.errors, fallback);
+}
+
+async function uploadKreaReferenceImage(publicPath) {
+  const asset = await resolveLocalAssetPath(publicPath);
+  const metadata = await probeLocalImageFile(asset.filePath, asset.fileName);
+  const target = kreaReferenceImageTarget(metadata.width, metadata.height);
+  if (!target.needsNormalization) return uploadLocalOutputToKrea(publicPath);
+
+  const temporaryPath = path.join(tmpdir(), `newtnode-krea-reference-${randomUUID()}.jpg`);
+  try {
+    await runFfmpeg([
+      "-hide_banner",
+      "-loglevel", "error",
+      "-y",
+      "-i", asset.filePath,
+      "-vf", `scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease,pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1,format=yuvj420p`,
+      "-frames:v", "1",
+      "-q:v", "3",
+      "-map_metadata", "-1",
+      temporaryPath
+    ], "Krea reference image normalization", 60000);
+    return uploadAssetBufferToKrea({
+      fileName: `${path.basename(asset.fileName, path.extname(asset.fileName))}-krea-reference.jpg`,
+      buffer: await readFile(temporaryPath),
+      mimeType: "image/jpeg"
+    });
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 async function uploadKlingReferenceImageToFal(publicPath) {

@@ -8,6 +8,14 @@ export function videoModelSupportsFilmDirector(model) {
   return isStandardSeedance || isKlingO3 || isGeminiOmniModel(model);
 }
 
+export function composeVideoPrompt({ directorPrompt, connectedPrompt, fallbackPrompt } = {}) {
+  const director = String(directorPrompt || "").trim();
+  const supplemental = String(connectedPrompt || fallbackPrompt || "").trim();
+  if (!director) return supplemental;
+  if (!supplemental || supplemental === director || director.includes(supplemental)) return director;
+  return `${director}\n\nAdditional direction:\n${supplemental}`;
+}
+
 function defaultedField(value, fallback) {
   return value === "" || value === undefined || value === null ? fallback : value;
 }

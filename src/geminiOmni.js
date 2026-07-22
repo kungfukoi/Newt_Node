@@ -59,13 +59,6 @@ export function buildGeminiOmniPrompt({ prompt, hasStartFrame = false, reference
   return [declarations.join(" "), rewrittenPrompt, guidance.join(" ")].filter(Boolean).join("\n\n");
 }
 
-export function shouldFallbackGeminiOmniToFal(error) {
-  const status = Number(error?.status || 0);
-  const message = String(error?.message || "").toLowerCase();
-  if (/safety|policy|blocked|recognizable|likeness|person|copyright|prohibited/.test(message)) return false;
-  return status === 403 || status === 404 || status === 429 || status >= 500;
-}
-
 function cleanGeminiOmniTag(value) {
   return String(value || "")
     .replace(/^@+/, "")

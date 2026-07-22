@@ -10,7 +10,6 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     resolution: node.data.resolution,
     quality: node.data.quality,
     kreaCreativity: node.data.kreaCreativity,
-    useFalFallback: Boolean(node.data.googleImageFallbackAvailable),
     seedreamLayers: Boolean(node.data.seedreamLayers),
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
@@ -19,15 +18,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     nodeTitle: node.data.title
   });
   if (!response.ok) {
-    const error = new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
-    if (data.fallbackAvailable) {
-      error.nodePatch = {
-        googleImageFallbackAvailable: true,
-        googleImageFallbackProvider: data.fallbackProvider || "fal",
-        googleImageError: data.googleError || null
-      };
-    }
-    throw error;
+    throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
   }
 
   const images = Array.isArray(data.images) && data.images.length ? data.images : [data.image].filter(Boolean);
@@ -38,7 +29,6 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     label: image.label || (data.layerSeparation ? `Layer ${imageIndex + 1}` : `Image ${index + 1}`),
     text: data.text || "",
     cost: imageIndex === 0 ? data.cost : null,
-    fallback: imageIndex === 0 ? data.fallback || null : null,
     layerIndex: image.layerIndex || null
   }));
 }

@@ -1,9 +1,11 @@
+import { apiErrorMessage } from "../apiErrors.js";
+
 const localApiPort = import.meta.env.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
-    throw new Error(data?.error || fallbackMessage || "Request failed.");
+    throw new Error(apiErrorMessage(data?.error ?? data, fallbackMessage || "Request failed."));
   }
 
   return data;

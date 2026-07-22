@@ -44,6 +44,7 @@ import {
   X
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { apiErrorMessage } from "./apiErrors.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -233,6 +234,7 @@ import {
   graphBoundsForNodes,
   groupToRect,
   normalizeRect,
+  pastedNodePositions,
   pointInRect,
   positiveModulo,
   rectsIntersect,
@@ -265,6 +267,7 @@ import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
+  composeVideoPrompt,
   normalizeUtilityVideoGenerationResult,
   normalizeVideoGenerationResult,
   videoModelSupportsFilmDirector
@@ -1001,6 +1004,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const viewportRenderFrameRef = React.useRef(null);
   const viewportCommitTimerRef = React.useRef(null);
   const clipboardRef = React.useRef(null);
+  const lastPointerClientRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
   const outputHistoryLoadedRef = React.useRef(false);
   const mouseWheelZoomAccumulatorRef = React.useRef(0);
@@ -1364,6 +1368,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, workflowFilePath]);
+
+  React.useEffect(() => {
+    if (!active) return undefined;
+    function trackPointer(event) {
+      lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
+    }
+
+    window.addEventListener("pointermove", trackPointer, true);
+    return () => window.removeEventListener("pointermove", trackPointer, true);
+  }, [active]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -5093,6 +5107,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     pushUndoSnapshot();
     const stamp = Date.now();
     const idMap = new Map();
+    const pastePositions = pastedNodePositions(clipboard.nodes, currentCanvasPointerPosition());
     const pastedNodes = clipboard.nodes.map((node, index) => {
       const nextId = createNodeId(node.type, `${stamp}-${index}`);
       const nextNode = cloneNode(node);
@@ -5100,8 +5115,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return {
         ...nextNode,
         id: nextId,
-        x: node.x + 42,
-        y: node.y + 42,
+        x: pastePositions[index].x,
+        y: pastePositions[index].y,
         data: resetCopiedNodeRuntime({
           ...nextNode.data,
           title: `${node.data.title || node.type} Copy`
@@ -5131,6 +5146,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSelectedNodeIds(pastedNodes.map((node) => node.id));
     setSelectedEdgeId(null);
     setSaveStatus(`${pastedNodes.length} node${pastedNodes.length === 1 ? "" : "s"} pasted`);
+  }
+
+  function currentCanvasPointerPosition() {
+    const canvas = canvasRef.current;
+    const pointer = lastPointerClientRef.current;
+    if (!canvas || !pointer) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    if (pointer.x < rect.left || pointer.x > rect.right || pointer.y < rect.top || pointer.y > rect.bottom) return null;
+    return screenToScene(pointer.x, pointer.y);
   }
 
   async function loadOutputHistory() {
@@ -5263,7 +5288,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const fallbackPrompt = resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
     const basePrompt =
       currentNode.type === "videoModel"
-        ? [directorPackagePrompt, connectedPrompt || fallbackPrompt].filter(Boolean).join("\n\n")
+        ? composeVideoPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
         : connectedPrompt || fallbackPrompt;
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
@@ -5600,11 +5625,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         );
         const successes = fulfilledRunValues(settled, { flatten: true });
         const failures = rejectedRunResults(settled);
-        const googleFallbackPatch = failures.find((failure) => failure.reason?.nodePatch?.googleImageFallbackAvailable)?.reason.nodePatch || {
-          googleImageFallbackAvailable: false,
-          googleImageFallbackProvider: "",
-          googleImageError: null
-        };
         ensureRunSuccesses(successes, failures, "Image generation failed.");
         const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
 
@@ -5614,8 +5634,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultItems,
           selectedResultIndex: firstNewIndex,
           resultText: resultTextFromItems(successes),
-          error: batchRunError("image", batchCount, successes, failures),
-          ...googleFallbackPatch
+          error: batchRunError("image", batchCount, successes, failures)
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -5652,7 +5671,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const videoIncoming = expandVideoDirectorPackageIncoming(compatibleVideoIncoming, currentIncomingByNode, {
         includeCharacters: supportsVideoCharacters
       });
-      const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming);
+      const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming, {
+        includeCharacterInstructions: !directorPackagePrompt
+      });
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
           node: currentNode,
@@ -12962,7 +12983,7 @@ function NodeBody({
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
       {isLumaVideo && <small className="upload-status model-status-note">Luma Ray2 via Fal</small>}
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
-      {isGeminiOmni && <small className="upload-status model-status-note">Google direct with fal fallback · preview</small>}
+      {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings · preview</small>}
       {isKlingO3 && <small className="upload-status model-status-note">Film Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
@@ -17708,7 +17729,9 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
     filmDirector: directorPackageForVideo(directorSource, incomingByNode)
   }));
-  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Video generation failed."}`);
+  if (!response.ok) {
+    throw new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`);
+  }
 
   return normalizeVideoGenerationResult(data, index);
 }
@@ -19050,15 +19073,15 @@ function colorDistance(first, second) {
   );
 }
 
-function buildEffectiveVideoPrompt(prompt, incoming = {}) {
+function buildEffectiveVideoPrompt(prompt, incoming = {}, { includeCharacterInstructions = true } = {}) {
   const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...connectedCharacterVoiceUrls(incoming.characterIn)])];
-  const characterInstructions = (incoming.characterIn || [])
+  const characterInstructions = includeCharacterInstructions ? (incoming.characterIn || [])
     .flatMap(({ source }) => {
       const voiceUrl = activeCharacterVoice(source)?.localUrl;
       const audioIndex = voiceUrl ? audioUrls.indexOf(voiceUrl) + 1 : null;
       return characterVideoPromptPieces(source, audioIndex);
     })
-    .filter(Boolean);
+    .filter(Boolean) : [];
   return [prompt, ...characterInstructions, storyboardVideoReferencePromptPiece(incoming.referenceImageIn)].filter(Boolean).join("\n\n");
 }
 

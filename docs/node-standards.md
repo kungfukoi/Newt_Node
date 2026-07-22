@@ -179,6 +179,7 @@ Nodes should feel like they belong to the same editor.
 - Avoid nested cards and large marketing-style blocks inside node UI.
 - Use the app yellow for primary run actions.
 - Use icon buttons for small actions such as download, step, delete, and navigation.
+- Pasting copied nodes on the canvas anchors the copied selection's top-left at the current mouse position. Multi-node pastes must preserve the copied nodes' relative spacing and internal edges.
 
 ## Port And Connection Standards
 
@@ -274,7 +275,7 @@ Settings is a local runtime control surface, not an account system.
 - The current Settings routes are `GET /api/settings`, `POST /api/settings`, `POST /api/settings/validate-keys`, `POST /api/settings/update`, and `POST /api/settings/restart`; `/api/health` must advertise `routes.settings: true` and `routes.settingsKeyValidation: true`.
 - Secrets can be loaded into Settings with `includeSecrets=1`, but UI fields must remain password-style by default with explicit reveal buttons.
 - Runtime settings live in `server/data/runtime-settings.json`. Treat that file as local state: ignored by git, not a fixture, and not a source of defaults for another machine.
-- `.env` remains a valid source for keys and update repository values. Each provider's credential-source switch chooses either its stored Settings override or `.env`; the selected value should be reflected in `process.env` through the runtime config refresh path, and the UI should show which source is active.
+- Settings is the source of truth for Fal, Google, Krea, and OpenAI credentials. Each provider may store multiple locally named credentials, with at most one active credential selected by radio control; choosing `None` disables that provider. Saving Settings atomically materializes only the four active provider values into `.env` for runtime compatibility while preserving unrelated environment configuration. Existing single Settings keys and `.env` provider keys are imported as named profiles during migration, after which users should not need to edit `.env` directly.
 - The update action must stay constrained to the configured repository and the currently checked-out branch. It should first try `git pull --ff-only` against that repository and branch. If that fast-forward pull fails, it should stage a fresh replacement clone, install dependencies, preserve local `.env`, `server/data`, workflows, inputs, uploads, and outputs, swap the app folder, relaunch through the platform launcher, and remove the old install only after the replacement reports healthy. Keep Windows PowerShell and macOS bash handoff scripts aligned; do not add merge, reset, or branch-changing behavior to the Settings button.
 - Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, local changes, local ahead, repository differs, or check failed.
 - Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
@@ -484,6 +485,10 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 - Film Director uses internal type `skillDirector` and emits a built scene package from `directorOut`. Its reusable run logic belongs in `src/nodeRunners/skillDirector.js`; shot-limit, coverage, and revision helpers belong in the focused `src/filmDirector*.js` modules.
 - A Film Director scene package may connect to supported Video Model `directorIn` ports and to Storyboard `directorIn`. Unsupported video models must not serialize or receive a director package.
+- When a supported Video Model also receives a Text prompt, append that text to the Film Director output as clearly labeled supplemental direction. Keep the effective prompt a string, do not repeat character instructions already present in the Director package, and preserve all inherited visual references.
+- Provider validation failures must surface nested error details as readable text. Never render object-shaped API errors as `[object Object]`.
+- Krea Seedance submissions must stay within the provider-safe prompt budget. When Director plus supplemental Text exceeds it, preserve reference definitions, camera/shot-list detail, and the supplemental instruction while compacting lower-priority Director prose; the history `submittedPrompt` must record the actual bounded prompt sent to Krea.
+- Krea Seedance reference images may use the API's multi-image array, but panoramic storyboard/contact-sheet images must be normalized to an opaque standard-ratio JPEG canvas before upload. Preserve the entire storyboard strip with padding; do not crop panels or replace the saved source asset.
 - Building a scene locks its setup references until the user explicitly unlocks it. Revisions preserve the existing package, keep bounded revision history, and treat the user's revision note as the requested delta.
 - Film Director references remain typed as character, location, prop/image, and style inputs. Expanding a director package for a downstream node must preserve direct downstream inputs and deduplicate inherited references.
 - Storyboard accepts either its normal scene-description/reference inputs or a built Film Director package. When Film Director controls the scene, derive the scene description, characters, references, and requested shot count from that package without duplicating Film Director's visual-style boilerplate.
@@ -502,18 +507,20 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 ## Provider Key Routing
 
-- Fal is the default provider route for remote models.
-- Fal, Google, Krea, and OpenAI each have a credential-source switch in Settings. The on state selects the stored Settings override; the off state selects `.env`. Switching sources must not delete either credential.
-- Seedance prefers Fal when available and may fall back to Krea according to the provider-routing helper. Provider choice, endpoint, and provider-specific cost must be recorded in history.
+- Fal is the default provider route for remote models that do not expose an explicit provider choice.
+- Fal, Google, Krea, and OpenAI each support multiple named credentials in Settings. One credential or `None` is active per provider; selecting a different credential must not delete the others.
+- Models available from more than one service must expose a separate provider-routing preference. Seedance has an explicit Fal/Krea choice; Google video/Veo and Nano Banana Pro image generation have explicit Google/Fal choices. A run must not silently switch away from the selected provider when that provider lacks an active key or returns an error. Provider choice, endpoint, and provider-specific cost must be recorded in history.
 - GPT Image 2 uses the selected OpenAI key and preserves its quality-specific generation/edit pricing metadata.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
-- Google image models should use a direct Google API key first when `GOOGLE_API_KEY` exists. Nano Banana Pro currently routes directly to Google when that key is present and otherwise routes through the configured Fal Nano Banana Pro endpoint.
-- Transient Google image provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should first display the Google diagnostic on the node. The node can then mark Fal fallback as available so the next run uses the Fal Nano Banana Pro route when `FAL_KEY` is configured. Do not fall back for Google auth, invalid request, safety, or content-policy failures.
+- Nano Banana Pro must follow the explicit Image Generation provider preference: direct Google for Google or the configured Fal Nano Banana Pro endpoint for Fal.
+- Provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should display the selected provider's diagnostic on the node. The user may switch the relevant Model Providers setting before retrying; the runtime must not silently fall back.
 
 ## Settings Standards
 
-- The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values. A configured key turns green only after a no-generation provider request verifies the selected credential, whether it came from `.env` or a Settings override; provider outages and timeouts remain unverified rather than being reported as invalid.
-- Each provider has an independent credential-source switch. Saving model preferences, source preferences, and ComfyUI root configuration must preserve unchanged secret values.
+- The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values by default. Every saved credential has its own validation badge, and the active provider metric turns green only after a no-generation provider request verifies that selected credential; provider outages and timeouts remain unverified rather than being reported as invalid.
+- Credential activation uses mutually exclusive radio controls, including a `None` option, rather than independent toggles. Saving model preferences, provider routing, and ComfyUI root configuration must preserve unchanged credential profiles.
+- Every Settings content panel must have an arrow-button header and independent collapsed state. Keep API Credentials and Model Providers open initially for first-glance clarity; secondary panels may start collapsed.
+- Model Providers must show the explicit Seedance Fal/Krea route plus the Google/Fal routes for Google video/Veo and Nano Banana Pro image generation. The selected option remains authoritative until the user changes it.
 - Local ComfyUI configuration and preflight status remain available alongside the remote-provider controls.
 - The Branch metric shows the current branch state and the loaded package version from `package.json`.
 - Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.

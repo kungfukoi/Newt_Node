@@ -5,7 +5,6 @@ import {
   buildGeminiOmniPrompt,
   normalizeGeminiOmniAspectRatio,
   normalizeGeminiOmniDuration,
-  shouldFallbackGeminiOmniToFal,
   uniqueGeminiOmniReferences
 } from "../src/geminiOmni.js";
 
@@ -32,11 +31,4 @@ test("Gemini Omni limits preview controls and de-duplicates references", () => {
   assert.equal(normalizeGeminiOmniDuration("15 seconds"), 10);
   assert.equal(normalizeGeminiOmniAspectRatio("9:16 (Portrait)"), "9:16");
   assert.deepEqual(uniqueGeminiOmniReferences([{ url: "a" }, { url: "a" }, { url: "b" }]), [{ url: "a" }, { url: "b" }]);
-});
-
-test("Gemini Omni never routes policy failures through fal fallback", () => {
-  assert.equal(shouldFallbackGeminiOmniToFal({ status: 429, message: "Quota exceeded" }), true);
-  assert.equal(shouldFallbackGeminiOmniToFal({ status: 503, message: "Unavailable" }), true);
-  assert.equal(shouldFallbackGeminiOmniToFal({ status: 403, message: "Content policy blocked a recognizable person" }), false);
-  assert.equal(shouldFallbackGeminiOmniToFal({ status: 400, message: "Invalid input" }), false);
 });

@@ -15,8 +15,7 @@ export function providerMetricTone(configured, validation) {
   return "";
 }
 
-export function keyDetail(source, status, useSettingsOverride = false, validation) {
-  const sourceLabel = source === "env" ? ".env" : source === "settings" ? "Settings" : "";
+export function keyDetail(activeLabel, status, validation) {
   const validationLabel = validation?.status === "valid"
     ? "Verified"
     : validation?.status === "invalid"
@@ -24,10 +23,9 @@ export function keyDetail(source, status, useSettingsOverride = false, validatio
       : validation?.status === "unverified"
         ? "Could not verify"
         : "";
-  const details = [validationLabel, sourceLabel].filter(Boolean);
+  const details = [validationLabel, String(activeLabel || "").trim()].filter(Boolean);
   if (details.length) return details.join(" / ");
-  if (useSettingsOverride) return "Settings override not set";
-  if (status !== "loading" && status !== "error") return ".env key not set";
+  if (status !== "loading" && status !== "error") return "No active key";
   return statusLabel(status);
 }
 

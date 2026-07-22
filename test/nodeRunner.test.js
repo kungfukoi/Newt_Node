@@ -8,7 +8,22 @@ import {
   rejectedRunResults,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
-import { buildUtilityVideoRequest } from "../src/nodeRunners/videoModels.js";
+import { buildUtilityVideoRequest, composeVideoPrompt } from "../src/nodeRunners/videoModels.js";
+
+test("composeVideoPrompt appends connected text as Director supplemental direction", () => {
+  assert.equal(
+    composeVideoPrompt({
+      directorPrompt: "Director scene package",
+      connectedPrompt: "Hold the last shot for two seconds.",
+      fallbackPrompt: "unused local prompt"
+    }),
+    "Director scene package\n\nAdditional direction:\nHold the last shot for two seconds."
+  );
+  assert.equal(
+    composeVideoPrompt({ directorPrompt: "Director scene package", fallbackPrompt: "Local note" }),
+    "Director scene package\n\nAdditional direction:\nLocal note"
+  );
+});
 
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [
@@ -502,10 +517,10 @@ test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
 
 test("ensureRunSuccesses preserves original error metadata", () => {
   const error = new Error("google said no");
-  error.nodePatch = { googleImageFallbackAvailable: true };
+  error.providerDiagnostic = { provider: "google", status: 429 };
 
   assert.throws(
     () => ensureRunSuccesses([], [{ status: "rejected", reason: error }], "Image generation failed."),
-    (thrown) => thrown === error && thrown.nodePatch.googleImageFallbackAvailable
+    (thrown) => thrown === error && thrown.providerDiagnostic.status === 429
   );
 });

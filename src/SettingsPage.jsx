@@ -6,9 +6,11 @@ import {
   FolderOpen,
   GitPullRequest,
   KeyRound,
+  Plus,
   RefreshCcw,
   RotateCcw,
-  Save
+  Save,
+  Trash2
 } from "lucide-react";
 import { settingsApi, systemApi } from "./api/newtApi.js";
 import {
@@ -19,39 +21,45 @@ import {
   utilityVideoModelOptions,
   videoModelOptions
 } from "./modelOptions.js";
+import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 
-const defaultProviderPreferences = Object.freeze({ fal: false, google: false, krea: false, openAi: false });
+const providerDefinitions = Object.freeze([
+  Object.freeze({ id: "fal", label: "Fal" }),
+  Object.freeze({ id: "google", label: "Google" }),
+  Object.freeze({ id: "krea", label: "Krea" }),
+  Object.freeze({ id: "openAi", label: "OpenAI" })
+]);
+
+const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [] });
+const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "" });
 
 export default function SettingsPage() {
   const [settings, setSettings] = React.useState(null);
-  const [falKey, setFalKey] = React.useState("");
-  const [falKeyVisible, setFalKeyVisible] = React.useState(false);
-  const [googleApiKey, setGoogleApiKey] = React.useState("");
-  const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
-  const [kreaApiKey, setKreaApiKey] = React.useState("");
-  const [kreaApiKeyVisible, setKreaApiKeyVisible] = React.useState(false);
-  const [openAiApiKey, setOpenAiApiKey] = React.useState("");
-  const [openAiApiKeyVisible, setOpenAiApiKeyVisible] = React.useState(false);
+  const [credentials, setCredentials] = React.useState(emptyCredentialState);
+  const [activeCredentialIds, setActiveCredentialIds] = React.useState(emptyActiveCredentialIds);
+  const [visibleCredentialIds, setVisibleCredentialIds] = React.useState({});
+  const [modelProviderPreferences, setModelProviderPreferences] = React.useState(defaultModelProviderPreferences);
   const [repository, setRepository] = React.useState("");
   const [comfyWanRootPath, setComfyWanRootPath] = React.useState("");
   const [comfyWanStatus, setComfyWanStatus] = React.useState(null);
   const [comfyWanBusy, setComfyWanBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
-  const [modelsOpen, setModelsOpen] = React.useState(false);
-  const [comfyOpen, setComfyOpen] = React.useState(false);
-  const [providerPreferences, setProviderPreferences] = React.useState(defaultProviderPreferences);
+  const [openSections, setOpenSections] = React.useState({
+    credentials: true,
+    providers: true,
+    models: false,
+    repository: false,
+    restart: false,
+    status: true,
+    comfy: false
+  });
   const [status, setStatus] = React.useState("loading");
   const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [updateLog, setUpdateLog] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState(null);
-  const initialSecretsRef = React.useRef({ falKey: "", googleApiKey: "", kreaApiKey: "", openAiApiKey: "" });
-  const falKeyInputRef = React.useRef(null);
-  const googleApiKeyInputRef = React.useRef(null);
-  const kreaApiKeyInputRef = React.useRef(null);
-  const openAiApiKeyInputRef = React.useRef(null);
   const actionsDisabled = status === "loading" || Boolean(busy);
 
   React.useEffect(() => {
@@ -75,28 +83,20 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
-    const submittedSecrets = {
-      falKey: falKeyInputRef.current?.value ?? falKey,
-      googleApiKey: googleApiKeyInputRef.current?.value ?? googleApiKey,
-      kreaApiKey: kreaApiKeyInputRef.current?.value ?? kreaApiKey,
-      openAiApiKey: openAiApiKeyInputRef.current?.value ?? openAiApiKey
-    };
     setBusy("save");
     setMessage("");
     setUpdateLog("");
     try {
-      const initialSecrets = initialSecretsRef.current;
       const nextModelPreferences = normalizeModelPreferences(modelPreferences);
+      const credentialPayload = normalizedCredentialPayload(credentials, activeCredentialIds);
       const payload = {
         repository,
         comfyWanRootPath,
         modelPreferences: nextModelPreferences,
-        providerPreferences: normalizeProviderPreferences(providerPreferences)
+        credentials: credentialPayload.credentials,
+        activeCredentialIds: credentialPayload.activeCredentialIds,
+        modelProviderPreferences: normalizeModelProviderPreferences(modelProviderPreferences)
       };
-      if (submittedSecrets.falKey !== initialSecrets.falKey) payload.falKey = submittedSecrets.falKey;
-      if (submittedSecrets.googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = submittedSecrets.googleApiKey;
-      if (submittedSecrets.kreaApiKey !== initialSecrets.kreaApiKey) payload.kreaApiKey = submittedSecrets.kreaApiKey;
-      if (submittedSecrets.openAiApiKey !== initialSecrets.openAiApiKey) payload.openAiApiKey = submittedSecrets.openAiApiKey;
 
       const savedData = await settingsApi.save(payload);
       const loadedData = await settingsApi.load();
@@ -169,22 +169,14 @@ export default function SettingsPage() {
   }
 
   function applyLoadedSettings(data) {
-    const secrets = {
-      falKey: data.secrets?.falKey || "",
-      googleApiKey: data.secrets?.googleApiKey || "",
-      kreaApiKey: data.secrets?.kreaApiKey || "",
-      openAiApiKey: data.secrets?.openAiApiKey || ""
-    };
-    initialSecretsRef.current = secrets;
     setSettings(data);
-    setFalKey(secrets.falKey);
-    setGoogleApiKey(secrets.googleApiKey);
-    setKreaApiKey(secrets.kreaApiKey);
-    setOpenAiApiKey(secrets.openAiApiKey);
+    setCredentials(normalizeCredentialsForUi(data.secrets?.credentials));
+    setActiveCredentialIds(normalizeActiveCredentialIdsForUi(data.activeCredentialIds));
+    setVisibleCredentialIds({});
+    setModelProviderPreferences(normalizeModelProviderPreferences(data.modelProviderPreferences));
     setRepository(data.repository || "");
     setComfyWanRootPath(data.comfyWanRootPath || "");
     setModelPreferences(normalizeModelPreferences(data.modelPreferences));
-    setProviderPreferences(normalizeProviderPreferences(data.providerPreferences));
   }
 
   async function chooseComfyWanRoot() {
@@ -229,6 +221,7 @@ export default function SettingsPage() {
       setSettings((current) => ({
         ...(current || {}),
         keyValidation: validation?.providers || {},
+        keyValidationByCredential: validation?.credentials || {},
         keyValidationCheckedAt: validation?.checkedAt || ""
       }));
     } catch {
@@ -253,11 +246,54 @@ export default function SettingsPage() {
     );
   }
 
-  function updateProviderPreference(provider, enabled) {
-    setProviderPreferences((current) => ({
-      ...normalizeProviderPreferences(current),
-      [provider]: enabled
+  function addCredential(provider) {
+    const id = newCredentialId(provider);
+    setCredentials((current) => ({
+      ...current,
+      [provider]: [...(current[provider] || []), {
+        id,
+        label: `${providerDefinitions.find((item) => item.id === provider)?.label || "API"} key ${(current[provider] || []).length + 1}`,
+        key: ""
+      }]
     }));
+    setActiveCredentialIds((current) => ({ ...current, [provider]: current[provider] || id }));
+  }
+
+  function updateCredential(provider, id, patch) {
+    setCredentials((current) => ({
+      ...current,
+      [provider]: (current[provider] || []).map((credential) => credential.id === id ? { ...credential, ...patch } : credential)
+    }));
+    setSettings((current) => ({
+      ...(current || {}),
+      keyValidationByCredential: {
+        ...(current?.keyValidationByCredential || {}),
+        [provider]: {
+          ...(current?.keyValidationByCredential?.[provider] || {}),
+          [id]: undefined
+        }
+      }
+    }));
+  }
+
+  function removeCredential(provider, id) {
+    setCredentials((current) => ({
+      ...current,
+      [provider]: (current[provider] || []).filter((credential) => credential.id !== id)
+    }));
+    setActiveCredentialIds((current) => ({
+      ...current,
+      [provider]: current[provider] === id ? "" : current[provider]
+    }));
+  }
+
+  function toggleCredentialVisibility(provider, id) {
+    const key = `${provider}:${id}`;
+    setVisibleCredentialIds((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleSection(section) {
+    setOpenSections((current) => ({ ...current, [section]: !current[section] }));
   }
 
   return (
@@ -274,150 +310,113 @@ export default function SettingsPage() {
       </header>
 
       <div className="stats-metrics settings-metrics">
-        <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={providerMetricValue(settings?.falKeyConfigured, settings?.keyValidation?.fal, keyValidationBusy)} detail={keyDetail(settings?.keySources?.fal, status, providerPreferences.fal, settings?.keyValidation?.fal)} tone={providerMetricTone(settings?.falKeyConfigured, settings?.keyValidation?.fal)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, settings?.keyValidation?.google, keyValidationBusy)} detail={keyDetail(settings?.keySources?.google, status, providerPreferences.google, settings?.keyValidation?.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, settings?.keyValidation?.google)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, settings?.keyValidation?.krea, keyValidationBusy)} detail={keyDetail(settings?.keySources?.krea, status, providerPreferences.krea, settings?.keyValidation?.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, settings?.keyValidation?.krea)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, settings?.keyValidation?.openAi, keyValidationBusy)} detail={keyDetail(settings?.keySources?.openAi, status, providerPreferences.openAi, settings?.keyValidation?.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, settings?.keyValidation?.openAi)} />
+        {providerDefinitions.map((provider) => {
+          const configured = Boolean(settings?.[providerConfiguredField(provider.id)]);
+          const validation = settings?.keyValidation?.[provider.id];
+          return (
+            <SettingsMetric
+              key={provider.id}
+              icon={<KeyRound size={20} />}
+              label={`${provider.label} API`}
+              value={providerMetricValue(configured, validation, keyValidationBusy)}
+              detail={keyDetail(settings?.activeCredentialLabels?.[provider.id], status, validation)}
+              tone={providerMetricTone(configured, validation)}
+            />
+          );
+        })}
         <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={branchMetricTone(settings?.branchStatus?.state)} />
         <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
       </div>
 
       <div className="settings-grid">
-        <section className="stats-panel settings-panel wide">
-          <SettingsPanelTitle title="API Keys" aside="Stored locally" />
-          <div className="settings-form-grid">
-            <div className="settings-field">
-              <SettingsKeyHeading label="Fal Key" enabled={providerPreferences.fal} onToggle={(enabled) => updateProviderPreference("fal", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={falKeyInputRef}
-                  type={falKeyVisible ? "text" : "password"}
-                  value={falKey}
-                  onInput={(event) => setFalKey(event.currentTarget.value)}
-                  onChange={(event) => setFalKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.fal, "Fal")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Fal Key"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setFalKeyVisible((value) => !value)}
-                  disabled={!falKey}
-                  title={falKeyVisible ? "Hide Fal key" : "Show Fal key"}
-                  aria-label={falKeyVisible ? "Hide Fal key" : "Show Fal key"}
-                >
-                  {falKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="Google API" enabled={providerPreferences.google} onToggle={(enabled) => updateProviderPreference("google", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={googleApiKeyInputRef}
-                  type={googleApiKeyVisible ? "text" : "password"}
-                  value={googleApiKey}
-                  onInput={(event) => setGoogleApiKey(event.currentTarget.value)}
-                  onChange={(event) => setGoogleApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.google, "Google API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Google API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setGoogleApiKeyVisible((value) => !value)}
-                  disabled={!googleApiKey}
-                  title={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
-                  aria-label={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
-                >
-                  {googleApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="Krea API" enabled={providerPreferences.krea} onToggle={(enabled) => updateProviderPreference("krea", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={kreaApiKeyInputRef}
-                  type={kreaApiKeyVisible ? "text" : "password"}
-                  value={kreaApiKey}
-                  onInput={(event) => setKreaApiKey(event.currentTarget.value)}
-                  onChange={(event) => setKreaApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.krea, "Krea API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Krea API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setKreaApiKeyVisible((value) => !value)}
-                  disabled={!kreaApiKey}
-                  title={kreaApiKeyVisible ? "Hide Krea API key" : "Show Krea API key"}
-                  aria-label={kreaApiKeyVisible ? "Hide Krea API key" : "Show Krea API key"}
-                >
-                  {kreaApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="OpenAI API" enabled={providerPreferences.openAi} onToggle={(enabled) => updateProviderPreference("openAi", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={openAiApiKeyInputRef}
-                  type={openAiApiKeyVisible ? "text" : "password"}
-                  value={openAiApiKey}
-                  onInput={(event) => setOpenAiApiKey(event.currentTarget.value)}
-                  onChange={(event) => setOpenAiApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.openAi, "OpenAI API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="OpenAI API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setOpenAiApiKeyVisible((value) => !value)}
-                  disabled={!openAiApiKey}
-                  title={openAiApiKeyVisible ? "Hide OpenAI API key" : "Show OpenAI API key"}
-                  aria-label={openAiApiKeyVisible ? "Hide OpenAI API key" : "Show OpenAI API key"}
-                >
-                  {openAiApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
+        <CollapsibleSettingsSection
+          title="API Credentials"
+          aside="One active key per service"
+          open={openSections.credentials}
+          onToggle={() => toggleSection("credentials")}
+          wide
+        >
+          <div className="settings-credential-grid">
+            {providerDefinitions.map((provider) => (
+              <CredentialProviderCard
+                key={provider.id}
+                provider={provider}
+                credentials={credentials[provider.id] || []}
+                activeId={activeCredentialIds[provider.id] || ""}
+                validation={settings?.keyValidationByCredential?.[provider.id] || {}}
+                visibleCredentialIds={visibleCredentialIds}
+                onAdd={() => addCredential(provider.id)}
+                onActivate={(id) => setActiveCredentialIds((current) => ({ ...current, [provider.id]: id }))}
+                onChange={(id, next) => updateCredential(provider.id, id, next)}
+                onRemove={(id) => removeCredential(provider.id, id)}
+                onToggleVisibility={(id) => toggleCredentialVisibility(provider.id, id)}
+              />
+            ))}
           </div>
           <div className="settings-actions">
             <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
               <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save"}</span>
+              <span>{busy === "save" ? "Saving" : "Save & Validate"}</span>
             </button>
           </div>
-        </section>
+        </CollapsibleSettingsSection>
 
-        <section className={`stats-panel settings-panel wide settings-collapsible-panel settings-model-panel ${modelsOpen ? "open" : ""}`}>
-          <button
-            type="button"
-            className="settings-panel-toggle"
-            onClick={() => setModelsOpen((value) => !value)}
-            aria-expanded={modelsOpen}
-          >
-            <span className="panel-title settings-toggle-title">Enabled Models</span>
-            <ChevronDown size={16} />
-          </button>
-          {modelsOpen && (
-            <>
+        <CollapsibleSettingsSection
+          title="Model Providers"
+          aside="Explicit runtime routing"
+          open={openSections.providers}
+          onToggle={() => toggleSection("providers")}
+          wide
+        >
+          <div className="settings-provider-routing">
+            <label className="settings-field">
+              <span>Seedance 2.0</span>
+              <select
+                value={modelProviderPreferences.seedance}
+                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, seedance: event.target.value }))}
+              >
+                <option value="fal">Fal</option>
+                <option value="krea">Krea</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.seedance, activeCredentialIds, "Seedance")}</small>
+            </label>
+            <label className="settings-field">
+              <span>Veo / Google Video</span>
+              <select
+                value={modelProviderPreferences.veo}
+                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, veo: event.target.value }))}
+              >
+                <option value="google">Google</option>
+                <option value="fal">Fal</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "Google video")}</small>
+            </label>
+            <label className="settings-field">
+              <span>Image Generation</span>
+              <select
+                value={modelProviderPreferences.imageGeneration}
+                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, imageGeneration: event.target.value }))}
+              >
+                <option value="google">Google</option>
+                <option value="fal">Fal</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "Nano Banana Pro")}</small>
+            </label>
+          </div>
+          <div className="settings-actions">
+            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+              <Save size={15} />
+              <span>{busy === "save" ? "Saving" : "Save Routing"}</span>
+            </button>
+          </div>
+        </CollapsibleSettingsSection>
+
+        <CollapsibleSettingsSection
+          title="Enabled Models"
+          open={openSections.models}
+          onToggle={() => toggleSection("models")}
+          wide
+        >
               <div className="settings-model-grid">
                 <ModelToggleGroup
                   title="Image Models"
@@ -456,12 +455,14 @@ export default function SettingsPage() {
                   <span>{busy === "save" ? "Saving" : "Save Models"}</span>
                 </button>
               </div>
-            </>
-          )}
-        </section>
+        </CollapsibleSettingsSection>
 
-        <section className="stats-panel settings-panel">
-          <SettingsPanelTitle title="Repository" aside={settings?.branch || "Current branch"} />
+        <CollapsibleSettingsSection
+          title="Repository"
+          aside={settings?.branch || "Current branch"}
+          open={openSections.repository}
+          onToggle={() => toggleSection("repository")}
+        >
           <label className="settings-field">
             <span>Repository Field</span>
             <input
@@ -478,10 +479,14 @@ export default function SettingsPage() {
               <span>{busy === "update" ? "Updating" : "Update"}</span>
             </button>
           </div>
-        </section>
+        </CollapsibleSettingsSection>
 
-        <section className="stats-panel settings-panel">
-          <SettingsPanelTitle title="Restart" aside={settings?.restartRequested ? "Queued" : "Ready"} />
+        <CollapsibleSettingsSection
+          title="Restart"
+          aside={settings?.restartRequested ? "Queued" : "Ready"}
+          open={openSections.restart}
+          onToggle={() => toggleSection("restart")}
+        >
           <div className="settings-restart-panel">
             <RotateCcw size={28} />
             <strong>{busy === "restart" ? "Restarting" : "Server restart"}</strong>
@@ -492,31 +497,29 @@ export default function SettingsPage() {
               <span>{busy === "restart" ? "Restarting" : "Restart"}</span>
             </button>
           </div>
-        </section>
+        </CollapsibleSettingsSection>
 
         {(message || updateLog) && (
-          <section className="stats-panel settings-panel wide">
-            <SettingsPanelTitle title="Status" aside={busy || status} />
+          <CollapsibleSettingsSection
+            title="Status"
+            aside={busy || status}
+            open={openSections.status}
+            onToggle={() => toggleSection("status")}
+            wide
+          >
             {message && <p className="settings-message">{message}</p>}
             {updateLog && <pre className="settings-log">{updateLog}</pre>}
-          </section>
+          </CollapsibleSettingsSection>
         )}
 
-        <section className={`stats-panel settings-panel wide settings-collapsible-panel settings-comfy-panel ${comfyOpen ? "open" : ""}`}>
-          <button
-            type="button"
-            className="settings-panel-toggle"
-            onClick={() => setComfyOpen((value) => !value)}
-            aria-expanded={comfyOpen}
-          >
-            <span className="panel-title settings-toggle-title">
-              <span>Comfy Engine</span>
-              <small>{comfyWanAside(comfyWanStatus, comfyWanBusy)}</small>
-            </span>
-            <ChevronDown size={16} />
-          </button>
-          {comfyOpen && (
-            <>
+        <CollapsibleSettingsSection
+          title="Comfy Engine"
+          aside={comfyWanAside(comfyWanStatus, comfyWanBusy)}
+          open={openSections.comfy}
+          onToggle={() => toggleSection("comfy")}
+          wide
+          className="settings-comfy-panel"
+        >
               <label className="settings-field">
                 <span>ComfyUI Root</span>
                 <div className="settings-input-row path">
@@ -552,25 +555,118 @@ export default function SettingsPage() {
                   <span>{busy === "save" ? "Saving" : "Save ComfyUI"}</span>
                 </button>
               </div>
-            </>
-          )}
-        </section>
+        </CollapsibleSettingsSection>
       </div>
     </section>
   );
 }
 
-function SettingsKeyHeading({ label, enabled, onToggle }) {
-  const nextSource = enabled ? ".env" : "Settings override";
+function CredentialProviderCard({
+  provider,
+  credentials,
+  activeId,
+  validation,
+  visibleCredentialIds,
+  onAdd,
+  onActivate,
+  onChange,
+  onRemove,
+  onToggleVisibility
+}) {
   return (
-    <div className="settings-key-heading">
-      <span>{label}</span>
-      <button type="button" className={`settings-key-toggle ${enabled ? "enabled" : ""}`} role="switch" aria-checked={enabled} aria-label={`Use ${nextSource} for ${label}`} title={`Currently using ${enabled ? "the Settings override" : ".env"}. Switch to ${nextSource}.`} onClick={() => onToggle(!enabled)}>
-        <span className="settings-key-toggle-track" aria-hidden="true"><span /></span>
-        <em>{enabled ? "Override" : ".env"}</em>
-      </button>
-    </div>
+    <section className="settings-credential-provider">
+      <header>
+        <div>
+          <strong>{provider.label}</strong>
+          <small>{credentials.length ? `${credentials.length} saved` : "No credentials"}</small>
+        </div>
+        <button type="button" onClick={onAdd} title={`Add ${provider.label} key`}>
+          <Plus size={14} />
+          <span>Add key</span>
+        </button>
+      </header>
+      <label className={`settings-credential-off ${activeId ? "" : "active"}`}>
+        <input type="radio" name={`${provider.id}-active-key`} checked={!activeId} onChange={() => onActivate("")} />
+        <span>None</span>
+        <small>Service disabled</small>
+      </label>
+      <div className="settings-credential-list">
+        {credentials.map((credential) => {
+          const visibleKey = `${provider.id}:${credential.id}`;
+          const visible = Boolean(visibleCredentialIds[visibleKey]);
+          const result = validation?.[credential.id];
+          return (
+            <article key={credential.id} className={`settings-credential-row ${activeId === credential.id ? "active" : ""}`}>
+              <label className="settings-credential-radio" title={`Use ${credential.label || provider.label}`}>
+                <input
+                  type="radio"
+                  name={`${provider.id}-active-key`}
+                  checked={activeId === credential.id}
+                  onChange={() => onActivate(credential.id)}
+                />
+              </label>
+              <div className="settings-credential-fields">
+                <input
+                  className="settings-credential-name"
+                  type="text"
+                  value={credential.label}
+                  onChange={(event) => onChange(credential.id, { label: event.target.value })}
+                  placeholder={`${provider.label} key name`}
+                  aria-label={`${provider.label} credential name`}
+                />
+                <div className="settings-input-row secret">
+                  <KeyRound size={15} />
+                  <input
+                    type={visible ? "text" : "password"}
+                    value={credential.key}
+                    onChange={(event) => onChange(credential.id, { key: event.target.value })}
+                    placeholder={`Paste ${provider.label} key`}
+                    autoComplete="off"
+                    spellCheck="false"
+                    aria-label={`${provider.label} API key`}
+                  />
+                  <button
+                    type="button"
+                    className="settings-secret-toggle"
+                    onClick={() => onToggleVisibility(credential.id)}
+                    disabled={!credential.key}
+                    title={visible ? "Hide key" : "Show key"}
+                    aria-label={visible ? "Hide key" : "Show key"}
+                  >
+                    {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+              <CredentialValidationBadge validation={result} hasKey={Boolean(credential.key.trim())} />
+              <button
+                type="button"
+                className="settings-credential-delete"
+                onClick={() => onRemove(credential.id)}
+                title={`Delete ${credential.label || provider.label}`}
+                aria-label={`Delete ${credential.label || provider.label}`}
+              >
+                <Trash2 size={15} />
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
+}
+
+function CredentialValidationBadge({ validation, hasKey }) {
+  const status = hasKey ? validation?.status || "pending" : "missing";
+  const label = status === "valid"
+    ? "Valid"
+    : status === "invalid"
+      ? "Invalid"
+      : status === "unverified"
+        ? "Unverified"
+        : status === "missing"
+          ? "Key needed"
+          : "Save to check";
+  return <span className={`settings-credential-status ${status}`}>{label}</span>;
 }
 
 function ComfyWanStatusCard({ status, busy }) {
@@ -661,17 +757,85 @@ function SettingsMetric({ icon, label, value, detail, tone = "" }) {
   );
 }
 
-function normalizeProviderPreferences(value = {}) {
+function normalizeCredentialsForUi(value = {}) {
   const incoming = value && typeof value === "object" ? value : {};
-  return Object.fromEntries(
-    Object.entries(defaultProviderPreferences).map(([provider, defaultValue]) => [provider, Boolean(incoming[provider] ?? defaultValue)])
+  return Object.fromEntries(providerDefinitions.map((provider) => [
+    provider.id,
+    Array.isArray(incoming[provider.id])
+      ? incoming[provider.id].map((credential, index) => ({
+          id: String(credential?.id || `${provider.id}-${index + 1}`),
+          label: String(credential?.label || `${provider.label} key ${index + 1}`),
+          key: String(credential?.key || "")
+        }))
+      : []
+  ]));
+}
+
+function CollapsibleSettingsSection({ title, aside, open, onToggle, wide = false, className = "", children }) {
+  const panelClassName = [
+    "stats-panel",
+    "settings-panel",
+    "settings-collapsible-panel",
+    wide ? "wide" : "",
+    open ? "open" : "",
+    className
+  ].filter(Boolean).join(" ");
+
+  return (
+    <section className={panelClassName}>
+      <button type="button" className="settings-panel-toggle" onClick={onToggle} aria-expanded={open}>
+        <span className="panel-title settings-toggle-title">
+          <span>{title}</span>
+          {aside && <small>{aside}</small>}
+        </span>
+        <ChevronDown size={16} />
+      </button>
+      {open && children}
+    </section>
   );
 }
 
-function secretPlaceholder(source, label) {
-  if (source === "env") return "Using .env key";
-  if (source === "settings") return "Settings override";
-  return `Paste ${label} key`;
+function normalizeActiveCredentialIdsForUi(value = {}) {
+  const incoming = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(providerDefinitions.map((provider) => [provider.id, String(incoming[provider.id] || "")]));
+}
+
+function normalizedCredentialPayload(credentials = {}, activeCredentialIds = {}) {
+  const normalized = Object.fromEntries(providerDefinitions.map((provider) => [
+    provider.id,
+    (credentials[provider.id] || [])
+      .map((credential, index) => ({
+        id: String(credential.id || `${provider.id}-${index + 1}`),
+        label: String(credential.label || "").trim() || `${provider.label} key ${index + 1}`,
+        key: String(credential.key || "").trim()
+      }))
+      .filter((credential) => credential.key)
+  ]));
+  const active = Object.fromEntries(providerDefinitions.map((provider) => {
+    const requested = String(activeCredentialIds[provider.id] || "");
+    const exists = normalized[provider.id].some((credential) => credential.id === requested);
+    return [provider.id, exists ? requested : ""];
+  }));
+  return { credentials: normalized, activeCredentialIds: active };
+}
+
+function newCredentialId(provider) {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${provider}-${suffix}`;
+}
+
+function providerConfiguredField(provider) {
+  if (provider === "fal") return "falKeyConfigured";
+  if (provider === "google") return "googleApiKeyConfigured";
+  if (provider === "krea") return "kreaApiKeyConfigured";
+  return "openAiApiKeyConfigured";
+}
+
+function modelProviderDetail(provider, activeCredentialIds, modelLabel) {
+  const providerLabel = providerPreferenceLabel(provider);
+  return activeCredentialIds?.[provider]
+    ? `${providerLabel} will render ${modelLabel}`
+    : `Select an active ${providerLabel} key above`;
 }
 
 function branchMetricValue(settings) {
@@ -697,15 +861,6 @@ function versionLabel(version) {
   const value = String(version || "").trim();
   if (!value) return "";
   return value.startsWith("v") ? value : `v${value}`;
-}
-
-function SettingsPanelTitle({ title, aside }) {
-  return (
-    <div className="panel-title">
-      <span>{title}</span>
-      {aside && <small>{aside}</small>}
-    </div>
-  );
 }
 
 function timeLabel(date) {

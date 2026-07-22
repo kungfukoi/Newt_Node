@@ -43,6 +43,33 @@ export function graphBoundsForNodes(nodes = []) {
   };
 }
 
+export function pastedNodePositions(nodes = [], anchor = null, fallbackOffset = 42) {
+  const positions = nodes.map((node) => ({
+    x: finiteCoordinate(node?.x),
+    y: finiteCoordinate(node?.y)
+  }));
+  if (!positions.length) return [];
+
+  const anchorX = Number(anchor?.x);
+  const anchorY = Number(anchor?.y);
+  if (Number.isFinite(anchorX) && Number.isFinite(anchorY)) {
+    const left = Math.min(...positions.map((position) => position.x));
+    const top = Math.min(...positions.map((position) => position.y));
+    return positions.map((position) => ({
+      x: position.x + anchorX - left,
+      y: position.y + anchorY - top
+    }));
+  }
+
+  const offset = Number.isFinite(Number(fallbackOffset)) ? Number(fallbackOffset) : 42;
+  return positions.map((position) => ({ x: position.x + offset, y: position.y + offset }));
+}
+
+function finiteCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
 export function rectsOverlap(first, second) {
   return first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
 }
