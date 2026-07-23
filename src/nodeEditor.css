@@ -915,7 +915,7 @@
 .output-text-copy textarea {
   min-height: 48px;
   padding: 8px 10px;
-  resize: none;
+  resize: both;
 }
 
 .output-text-control select {
@@ -993,7 +993,7 @@
   color: rgba(244, 240, 232, 0.88);
   background: rgba(0, 0, 0, 0.32);
   font: inherit;
-  resize: none;
+  resize: both;
 }
 
 .output-paint-slider {
@@ -2398,7 +2398,7 @@
   font-size: 14px;
   line-height: 1.38;
   letter-spacing: 0;
-  resize: vertical;
+  resize: both;
 }
 
 .text-node-body {
@@ -2452,7 +2452,7 @@
 
 .text-split-panel .text-field-group textarea {
   min-height: 112px;
-  resize: vertical;
+  resize: both;
 }
 
 .text-node-body small {
@@ -2641,7 +2641,7 @@
   min-height: 124px;
   max-height: none;
   overflow-y: auto;
-  resize: vertical;
+  resize: both;
   white-space: pre-wrap;
   font-size: 12px;
   line-height: 1.45;
@@ -2791,7 +2791,7 @@
   width: 100%;
   min-height: 112px;
   padding: 9px 10px;
-  resize: vertical;
+  resize: both;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   outline: 0;
@@ -4471,7 +4471,7 @@ video.newtnode-video-fallback {
 .storyboard-notes-field textarea {
   width: 100%;
   min-height: 146px;
-  resize: vertical;
+  resize: both;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 7px;
   color: rgba(244, 240, 232, 0.86);
@@ -5028,7 +5028,7 @@ video.newtnode-video-fallback {
 .storyboard-frame-card textarea {
   width: 100%;
   min-height: 62px;
-  resize: vertical;
+  resize: both;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 6px;
   color: rgba(244, 240, 232, 0.84);
@@ -5260,7 +5260,7 @@ video.newtnode-video-fallback {
   background: rgba(0, 0, 0, 0.32);
   font-size: 11px;
   line-height: 1.4;
-  resize: none;
+  resize: both;
 }
 
 .character-physical-details textarea::placeholder {
@@ -5326,7 +5326,7 @@ video.newtnode-video-fallback {
   background: rgba(0, 0, 0, 0.27);
   font-size: 11px;
   line-height: 1.42;
-  resize: none;
+  resize: both;
 }
 
 .character-reference-notes textarea::placeholder {
@@ -7203,7 +7203,7 @@ video.newtnode-video-fallback {
 .edit-image-brush-panel textarea {
   min-height: 48px;
   padding: 8px 9px;
-  resize: vertical;
+  resize: both;
 }
 
 .edit-image-text-controls select {
@@ -7314,7 +7314,7 @@ video.newtnode-video-fallback {
   color: rgba(244, 240, 232, 0.88);
   background: rgba(0, 0, 0, 0.32);
   font: inherit;
-  resize: vertical;
+  resize: both;
 }
 
 .edit-brush-dialog-slider {
@@ -8084,7 +8084,6 @@ video.newtnode-video-fallback {
 
 .node-row > input,
 .node-row > select,
-.node-row > textarea,
 .node-row > button,
 .node-row > .inline-two-fields,
 .node-row > .color-id-slider,
@@ -8095,6 +8094,12 @@ video.newtnode-video-fallback {
 .node-row > .transition-keyframe-sheet {
   max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+}
+
+.node-row > textarea {
+  max-width: none;
+  min-width: 120px;
   box-sizing: border-box;
 }
 

@@ -1126,7 +1126,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     pushUndoSnapshot,
     clearUndoStack,
     importOffsetForNodes: clearImportOffset,
-    prepareNodesForSave: captureTextareaHeightsForSave,
+    prepareNodesForSave: captureTextareaLayoutsForSave,
     onStatusChange
   });
   const draftSnapshot = React.useMemo(
@@ -1992,8 +1992,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  function captureTextareaHeightsForSave(currentNodes = nodesRef.current) {
-    const preparedNodes = mergeTextareaHeightsFromCanvas(currentNodes, canvasRef.current);
+  function captureTextareaLayoutsForSave(currentNodes = nodesRef.current) {
+    const preparedNodes = mergeTextareaLayoutsFromCanvas(currentNodes, canvasRef.current);
     if (preparedNodes === currentNodes) return currentNodes;
     nodesRef.current = preparedNodes;
     setNodes(preparedNodes);
@@ -6377,6 +6377,15 @@ function normalizedTextareaHeights(value) {
   );
 }
 
+function normalizedTextareaWidths(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, width]) => [key, Number(width)])
+      .filter(([key, width]) => key && Number.isFinite(width) && width >= 120 && width <= 2400)
+  );
+}
+
 function textareaLayoutHeight(textarea) {
   const inlineHeight = Number.parseFloat(textarea.style.height || "");
   if (Number.isFinite(inlineHeight) && inlineHeight > 0) return inlineHeight;
@@ -6385,7 +6394,12 @@ function textareaLayoutHeight(textarea) {
   return textarea.offsetHeight;
 }
 
-function mergeTextareaHeightsFromCanvas(nodes = [], canvas) {
+function textareaLayoutWidth(textarea) {
+  const inlineWidth = Number.parseFloat(textarea.style.width || "");
+  return Number.isFinite(inlineWidth) && inlineWidth > 0 ? inlineWidth : null;
+}
+
+function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
   if (!canvas) return nodes;
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const captured = new Map();
@@ -6393,30 +6407,43 @@ function mergeTextareaHeightsFromCanvas(nodes = [], canvas) {
     const nodeId = card.getAttribute("data-node-card-id");
     if (!nodeMap.has(nodeId)) return;
     const heights = normalizedTextareaHeights(nodeMap.get(nodeId)?.data?.textareaHeights);
+    const widths = normalizedTextareaWidths(nodeMap.get(nodeId)?.data?.textareaWidths);
     card.querySelectorAll("textarea").forEach((textarea, index) => {
+      const storageKey = nodeTextareaStorageKey(textarea, index);
       const height = Math.round(textareaLayoutHeight(textarea));
-      if (!Number.isFinite(height) || height < 40 || height > 1400) return;
-      heights[nodeTextareaStorageKey(textarea, index)] = height;
+      if (Number.isFinite(height) && height >= 40 && height <= 1400) {
+        heights[storageKey] = height;
+      }
+      const width = Math.round(textareaLayoutWidth(textarea));
+      if (Number.isFinite(width) && width >= 120 && width <= 2400) {
+        widths[storageKey] = width;
+      }
     });
-    captured.set(nodeId, heights);
+    captured.set(nodeId, { heights, widths });
   });
 
   if (!captured.size) return nodes;
   let changed = false;
   const nextNodes = nodes.map((node) => {
-    const heights = captured.get(node.id);
-    if (!heights) return node;
+    const layout = captured.get(node.id);
+    if (!layout) return node;
+    const { heights, widths } = layout;
     const currentHeights = normalizedTextareaHeights(node.data?.textareaHeights);
-    const same =
+    const currentWidths = normalizedTextareaWidths(node.data?.textareaWidths);
+    const sameHeights =
       Object.keys(heights).length === Object.keys(currentHeights).length &&
       Object.entries(heights).every(([key, value]) => currentHeights[key] === value);
-    if (same) return node;
+    const sameWidths =
+      Object.keys(widths).length === Object.keys(currentWidths).length &&
+      Object.entries(widths).every(([key, value]) => currentWidths[key] === value);
+    if (sameHeights && sameWidths) return node;
     changed = true;
     return {
       ...node,
       data: {
         ...node.data,
-        textareaHeights: heights
+        textareaHeights: heights,
+        textareaWidths: widths
       }
     };
   });
@@ -6501,12 +6528,15 @@ function NodeCard({
     const card = cardRef.current;
     if (!card) return;
     const savedHeights = normalizedTextareaHeights(node.data.textareaHeights);
+    const savedWidths = normalizedTextareaWidths(node.data.textareaWidths);
     card.querySelectorAll("textarea").forEach((textarea, index) => {
-      const savedHeight = savedHeights[nodeTextareaStorageKey(textarea, index)];
-      if (!savedHeight) return;
-      textarea.style.height = `${savedHeight}px`;
+      const storageKey = nodeTextareaStorageKey(textarea, index);
+      const savedHeight = savedHeights[storageKey];
+      const savedWidth = savedWidths[storageKey];
+      if (savedHeight) textarea.style.height = `${savedHeight}px`;
+      if (savedWidth) textarea.style.width = `${savedWidth}px`;
     });
-  }, [node.id, node.type, node.data.textareaHeights]);
+  }, [node.id, node.type, node.data.textareaHeights, node.data.textareaWidths]);
 
   React.useEffect(() => {
     if (!infoOpen) return undefined;
@@ -13003,6 +13033,8 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
     const borderRight = parseFloat(styles?.borderRightWidth || "0") || 0;
     const scrollbarWidth = Math.max(0, textarea.offsetWidth - textarea.clientWidth - borderLeft - borderRight);
     highlighter.style.setProperty("--tagged-scrollbar-width", `${scrollbarWidth}px`);
+    highlighter.style.width = `${textarea.offsetWidth}px`;
+    highlighter.style.height = `${textarea.offsetHeight}px`;
     highlighter.scrollTop = textarea.scrollTop;
     highlighter.scrollLeft = textarea.scrollLeft;
   }, []);

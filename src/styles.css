@@ -380,7 +380,7 @@ button {
 textarea {
   width: 100%;
   min-height: 130px;
-  resize: vertical;
+  resize: both;
   border: 0;
   outline: 0;
   color: #f3f0e9;
