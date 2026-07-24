@@ -231,6 +231,8 @@ import {
   estimatedNodeHeight,
   estimatedNodeRect,
   estimatedNodeWidth,
+  normalizedNodeHeight,
+  normalizedNodeWidth,
   graphBoundsForNodes,
   groupToRect,
   normalizeRect,
@@ -4001,6 +4003,53 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  function startNodeResize(event, node) {
+    event.preventDefault();
+    event.stopPropagation();
+    pushUndoSnapshot();
+    const pointer = screenToScene(event.clientX, event.clientY);
+    const card = event.currentTarget.closest("[data-node-card-id]");
+    const computedStyle = card ? window.getComputedStyle(card) : null;
+    const startWidth =
+      normalizedNodeWidth(node.data?.nodeWidth, node.type) ||
+      Math.round(Number.parseFloat(computedStyle?.width || "") || estimatedNodeWidth(node.type));
+    const startHeight =
+      normalizedNodeHeight(node.data?.nodeHeight) ||
+      Math.round(Number.parseFloat(computedStyle?.height || "") || estimatedNodeHeight(node.type));
+    card?.querySelectorAll("textarea").forEach((textarea) => {
+      textarea.style.width = "";
+      textarea.style.height = "";
+    });
+    setNodes((current) =>
+      current.map((item) =>
+        item.id === node.id
+          ? {
+              ...item,
+              data: {
+                ...item.data,
+                nodeWidth: startWidth,
+                nodeHeight: startHeight,
+                textareaWidths: {},
+                textareaHeights: {}
+              }
+            }
+          : item
+      )
+    );
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setSelectedNodeIds([node.id]);
+    setSelectedEdgeId(null);
+    setDragState({
+      type: "nodeResize",
+      nodeId: node.id,
+      nodeType: node.type,
+      startPointer: pointer,
+      startWidth,
+      startHeight
+    });
+  }
+
   function startSelectionMove(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -4116,6 +4165,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 height: Math.round(Math.max(groupSizeFloor, dragState.group.height + deltaY))
               }
             : group
+        )
+      );
+      return;
+    }
+
+    if (dragState?.type === "nodeResize") {
+      const deltaX = pointer.x - dragState.startPointer.x;
+      const deltaY = pointer.y - dragState.startPointer.y;
+      const nextWidth = normalizedNodeWidth(
+        dragState.startWidth + deltaX,
+        dragState.nodeType
+      );
+      const nextHeight = normalizedNodeHeight(dragState.startHeight + deltaY);
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === dragState.nodeId
+            ? {
+                ...node,
+                data: { ...node.data, nodeWidth: nextWidth, nodeHeight: nextHeight }
+              }
+            : node
         )
       );
       return;
@@ -6021,6 +6091,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               <NodeCard
                 node={node}
                 onDragStart={startNodeDrag}
+                onNodeResizeStart={startNodeResize}
                 onRemove={removeNode}
                 onUpdate={updateNode}
                 onConnectStart={startConnection}
@@ -6453,6 +6524,7 @@ function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
 function NodeCard({
   node,
   onDragStart,
+  onNodeResizeStart,
   onRemove,
   onUpdate,
   onConnectStart,
@@ -6538,6 +6610,15 @@ function NodeCard({
     });
   }, [node.id, node.type, node.data.textareaHeights, node.data.textareaWidths]);
 
+  function beginTextareaResize(event) {
+    const textarea = event.target.closest?.("textarea");
+    if (!textarea || !cardRef.current?.contains(textarea)) return;
+    const rect = textarea.getBoundingClientRect();
+    const gripSize = 20;
+    if (event.clientX < rect.right - gripSize || event.clientY < rect.bottom - gripSize) return;
+    onNodeResizeStart(event, node);
+  }
+
   React.useEffect(() => {
     if (!infoOpen) return undefined;
     function handleKeyDown(event) {
@@ -6569,13 +6650,18 @@ function NodeCard({
   const moodBoardScalable = node.type === "transfer" && nodeData.locked && nodeData.activated && nodeData.resultUrl;
   const storyboardScalable = node.type === "storyboard";
   const frameItScalable = node.type === "frameIt";
+  const customNodeWidth = normalizedNodeWidth(nodeData.nodeWidth, node.type);
+  const customNodeHeight = normalizedNodeHeight(nodeData.nodeHeight);
+  const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
 
   return (
     <article
       ref={cardRef}
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
+        width: customNodeWidth ? `${customNodeWidth}px` : undefined,
+        height: customNodeHeight ? `${customNodeHeight}px` : undefined,
         "--preview-scale": nodeData.previewScale || 1,
         "--node-color": nodeColor || "transparent",
         "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
@@ -6584,6 +6670,7 @@ function NodeCard({
         "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
+      onPointerDownCapture={beginTextareaResize}
       onPointerDown={(event) => onDragStart(event, node)}
     >
       <div className="node-title">
@@ -6711,6 +6798,15 @@ function NodeCard({
         utilityImageModelOptions={utilityImageModelOptions}
         utilityVideoModelOptions={utilityVideoModelOptions}
       />
+      <button
+        type="button"
+        className="node-width-resize-handle"
+        onPointerDown={(event) => onNodeResizeStart(event, node)}
+        title="Resize node"
+        aria-label="Resize node"
+      >
+        <Maximize2 size={11} />
+      </button>
     </article>
   );
 }

@@ -5,6 +5,10 @@ import {
   clampContextMenuPosition,
   edgeLayerBounds,
   edgePathData,
+  estimatedNodeRect,
+  estimatedNodeWidth,
+  normalizedNodeWidth,
+  normalizedNodeHeight,
   graphBoundsForNodes,
   pastedNodePositions,
   positiveModulo,
@@ -18,6 +22,27 @@ test("graphBoundsForNodes uses estimated node dimensions", () => {
       { type: "character", x: 500, y: -30 }
     ]),
     { left: 10, top: -30, right: 1260, bottom: 490 }
+  );
+});
+
+test("custom node sizes are clamped and included in estimated bounds", () => {
+  assert.equal(normalizedNodeWidth(640, "text"), 640);
+  assert.equal(normalizedNodeWidth(120, "text"), estimatedNodeWidth("text"));
+  assert.equal(normalizedNodeWidth(500, "storyboard"), 920);
+  assert.equal(normalizedNodeWidth(5000, "text"), 2400);
+  assert.equal(normalizedNodeWidth("not-a-width", "text"), null);
+  assert.equal(normalizedNodeHeight(640), 640);
+  assert.equal(normalizedNodeHeight(80), 180);
+  assert.equal(normalizedNodeHeight(5000), 3000);
+  assert.equal(normalizedNodeHeight("not-a-height"), null);
+  assert.deepEqual(
+    estimatedNodeRect({
+      type: "text",
+      x: 25,
+      y: 40,
+      data: { nodeWidth: 640, nodeHeight: 480 }
+    }),
+    { left: 25, top: 40, right: 665, bottom: 520 }
   );
 });
 

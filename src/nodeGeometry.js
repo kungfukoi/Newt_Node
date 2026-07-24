@@ -2,6 +2,7 @@ export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 
 export function estimatedNodeWidth(type) {
   if (type === "frameIt") return 980;
+  if (type === "storyboard") return 920;
   if (type === "autoAspect") return 390;
   if (type === "skillDirector") return 760;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d") return 370;
@@ -9,6 +10,20 @@ export function estimatedNodeWidth(type) {
   if (type === "camera" || type === "style") return 360;
   if (type === "transfer" || type === "preview") return 335;
   return 310;
+}
+
+export function normalizedNodeWidth(value, type, maximum = 2400) {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return null;
+  const minimum = estimatedNodeWidth(type);
+  return Math.round(clamp(width, minimum, Math.max(minimum, Number(maximum) || 2400)));
+}
+
+export function normalizedNodeHeight(value, minimum = 180, maximum = 3000) {
+  const height = Number(value);
+  if (!Number.isFinite(height)) return null;
+  const safeMinimum = Math.max(120, Number(minimum) || 180);
+  return Math.round(clamp(height, safeMinimum, Math.max(safeMinimum, Number(maximum) || 3000)));
 }
 
 export function estimatedNodeHeight(type) {
@@ -24,11 +39,13 @@ export function estimatedNodeHeight(type) {
 }
 
 export function estimatedNodeRect(node, padding = 0) {
+  const width = normalizedNodeWidth(node?.data?.nodeWidth, node?.type) || estimatedNodeWidth(node?.type);
+  const height = normalizedNodeHeight(node?.data?.nodeHeight) || estimatedNodeHeight(node?.type);
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + estimatedNodeWidth(node?.type) + padding,
-    bottom: Number(node?.y || 0) + estimatedNodeHeight(node?.type) + padding
+    right: Number(node?.x || 0) + width + padding,
+    bottom: Number(node?.y || 0) + height + padding
   };
 }
 
