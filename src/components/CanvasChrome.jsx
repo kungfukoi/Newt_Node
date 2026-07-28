@@ -15,6 +15,7 @@ export const EdgePath = React.memo(function EdgePath({ edgeId, from, to, color, 
           stroke="transparent"
           strokeWidth="18"
           strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
           onPointerDown={(event) => onSelect?.(event, edgeId)}
         />
       )}

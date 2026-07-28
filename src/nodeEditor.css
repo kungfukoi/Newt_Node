@@ -1242,20 +1242,32 @@
   left: 0;
   width: 0;
   height: 0;
+  transform: var(--viewport-transform, translate3d(0, 0, 0) scale(1));
   transform-origin: 0 0;
 }
 
-.node-canvas.is-navigating .node-scene {
+.edge-scene {
+  transform: var(--viewport-transform, translate3d(0, 0, 0) scale(1));
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+
+.node-group-scene {
+  z-index: 0;
+}
+
+.node-node-scene {
+  z-index: 2;
+}
+
+.node-canvas.is-navigating .node-scene,
+.node-canvas.is-navigating .edge-scene {
   will-change: transform;
 }
 
 .node-canvas.is-navigating .node-card,
 .node-canvas.is-navigating .group-backdrop {
   pointer-events: none;
-}
-
-.node-canvas.is-navigating .edge-path.active .edge-visible {
-  animation-play-state: paused;
 }
 
 .node-canvas.is-navigating .selection-action-bar {
@@ -1266,11 +1278,16 @@
 .edge-layer {
   position: absolute;
   top: 0;
+  right: 0;
+  bottom: 0;
   left: 0;
+  width: 100%;
+  height: 100%;
   z-index: 1;
+  display: block;
   overflow: hidden;
   pointer-events: none;
-  shape-rendering: geometricPrecision;
+  shape-rendering: auto;
 }
 
 .edge-path .edge-visible {
@@ -1665,6 +1682,22 @@
   min-height: 0;
   max-height: 100%;
   overflow: auto;
+}
+
+.node-card.custom-node-size > :not(.node-title):not(.node-width-resize-handle) button {
+  flex-grow: 0;
+  align-self: center;
+}
+
+.node-card.custom-node-size .run-node-button {
+  height: 38px;
+  width: 100%;
+  max-width: calc(var(--node-default-width, 310px) - 44px);
+  align-self: center;
+  justify-self: center;
+  min-height: 38px;
+  max-height: 38px;
+  flex: 0 0 38px;
 }
 
 .node-card.has-node-color {
@@ -2482,6 +2515,61 @@
 .text-split-panel .text-field-group textarea {
   min-height: 112px;
   resize: both;
+}
+
+.node-card.custom-node-size:is(.node-type-text, .node-type-plainText) > .text-node-body {
+  display: flex;
+  flex-direction: column;
+  align-content: normal;
+}
+
+.node-card.custom-node-size:is(.node-type-text, .node-type-plainText) > .text-node-body > :is(.text-single-panel, .text-split-panel) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.node-card.node-type-text.custom-node-size .text-field-group {
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.node-card.node-type-plainText.custom-node-size .text-field-group {
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.node-card.custom-node-size:is(.node-type-text, .node-type-plainText) > .text-node-body > .text-single-panel {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.node-card.node-type-text.custom-node-size > .text-node-body > .text-split-panel {
+  align-items: stretch;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.node-card.custom-node-size:is(.node-type-text, .node-type-plainText) .text-field-group textarea {
+  align-self: stretch;
+  height: 100%;
+  min-height: 40px;
+  max-height: 100%;
+}
+
+.node-card.node-type-text.custom-node-size.custom-textarea-size > .text-node-body > .text-split-panel {
+  align-content: start;
+  grid-template-rows: auto auto;
+}
+
+.node-card.node-type-text.custom-node-size.custom-textarea-size .text-split-panel .text-field-group {
+  height: auto;
+  grid-template-rows: auto auto;
+}
+
+.node-card.node-type-text.custom-node-size.custom-textarea-size .text-split-panel .text-field-group textarea {
+  height: auto;
 }
 
 .text-node-body small {

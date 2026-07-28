@@ -5090,7 +5090,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       cost.routeKind = routeKind;
     }
 
-    const output = await downloadVideo(req, remoteVideo.url, routeKind);
+    const output = await downloadVideo(req, remoteVideo.url, routeKind, { stripAudio: !generateAudio });
     await appendHistory({
       id: requestId || randomUUID(),
       createdAt: new Date().toISOString(),
@@ -7514,7 +7514,7 @@ app.post(
         cost.routeKind = route.kind;
       }
 
-      const output = await downloadVideo(req, remoteVideo.url, route.kind);
+      const output = await downloadVideo(req, remoteVideo.url, route.kind, { stripAudio: !generateAudio });
       const historyItem = {
         id: requestId || randomUUID(),
         createdAt: new Date().toISOString(),
@@ -9318,7 +9318,7 @@ async function uploadToFal(file) {
   return fal.storage.upload(falFile);
 }
 
-async function downloadVideo(req, url, kind) {
+async function downloadVideo(req, url, kind, { stripAudio = false } = {}) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
@@ -9328,13 +9328,31 @@ async function downloadVideo(req, url, kind) {
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFile(output.filePath, bytes);
+  const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
 
   return {
     fileName: output.fileName,
     publicPath: output.publicPath,
     filePath: output.filePath,
-    bytes: bytes.length
+    bytes: outputBytes
   };
+}
+
+async function removeVideoAudioTrack(filePath) {
+  const extension = path.extname(filePath) || ".mp4";
+  const silentPath = `${filePath.slice(0, -extension.length)}-silent-${randomUUID()}${extension}`;
+
+  try {
+    await execFile(
+      ffmpegBinaryPath,
+      ["-y", "-i", filePath, "-map", "0:v:0", "-c:v", "copy", "-an", silentPath],
+      { windowsHide: true, timeout: 120000 }
+    );
+    await copyFile(silentPath, filePath);
+    return (await stat(filePath)).size;
+  } finally {
+    await rm(silentPath, { force: true }).catch(() => {});
+  }
 }
 
 async function probeVideoFile(filePath) {

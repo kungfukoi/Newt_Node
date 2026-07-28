@@ -227,7 +227,6 @@ import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2R
 import {
   clamp,
   clampContextMenuPosition,
-  edgeLayerBounds,
   estimatedNodeHeight,
   estimatedNodeRect,
   estimatedNodeWidth,
@@ -995,7 +994,6 @@ function sameRect(left, right, tolerance = 0.25) {
 
 export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
-  const sceneRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -1470,13 +1468,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function applyViewportToCanvas(nextViewport) {
-    const scene = sceneRef.current;
     const canvas = canvasRef.current;
-    if (scene) {
-      scene.style.transform = `translate3d(${nextViewport.x}px, ${nextViewport.y}px, 0) scale(${nextViewport.scale})`;
-    }
     if (canvas) {
       const gridSize = 28 * nextViewport.scale;
+      const cssTransform = `translate3d(${nextViewport.x}px, ${nextViewport.y}px, 0) scale(${nextViewport.scale})`;
+      canvas.style.setProperty("--viewport-transform", cssTransform);
       canvas.style.setProperty("--grid-size", `${gridSize}px`);
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
@@ -4003,23 +3999,38 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  function startNodeResize(event, node) {
+  function startNodeResize(event, node, resizeTarget = null) {
     event.preventDefault();
     event.stopPropagation();
     pushUndoSnapshot();
     const pointer = screenToScene(event.clientX, event.clientY);
     const card = event.currentTarget.closest("[data-node-card-id]");
     const computedStyle = card ? window.getComputedStyle(card) : null;
+    const textarea = resizeTarget?.textarea || null;
+    const textareas = textarea && card ? [...card.querySelectorAll("textarea")] : [];
+    const textareaIndex = textarea ? textareas.indexOf(textarea) : -1;
+    const textareaKey = textarea && textareaIndex >= 0
+      ? nodeTextareaStorageKey(textarea, textareaIndex)
+      : "";
+    const textareaStyle = textarea ? window.getComputedStyle(textarea) : null;
     const startWidth =
       normalizedNodeWidth(node.data?.nodeWidth, node.type) ||
       Math.round(Number.parseFloat(computedStyle?.width || "") || estimatedNodeWidth(node.type));
     const startHeight =
       normalizedNodeHeight(node.data?.nodeHeight) ||
       Math.round(Number.parseFloat(computedStyle?.height || "") || estimatedNodeHeight(node.type));
-    card?.querySelectorAll("textarea").forEach((textarea) => {
-      textarea.style.width = "";
-      textarea.style.height = "";
-    });
+    const startTextareaWidth = textarea
+      ? Number.parseFloat(textareaStyle?.width || "") || textarea.clientWidth
+      : 0;
+    const startTextareaHeight = textarea
+      ? Number.parseFloat(textareaStyle?.height || "") || textarea.clientHeight
+      : 0;
+    if (!textarea) {
+      card?.querySelectorAll("textarea").forEach((field) => {
+        field.style.width = "";
+        field.style.height = "";
+      });
+    }
     setNodes((current) =>
       current.map((item) =>
         item.id === node.id
@@ -4029,8 +4040,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ...item.data,
                 nodeWidth: startWidth,
                 nodeHeight: startHeight,
-                textareaWidths: {},
-                textareaHeights: {}
+                ...(textarea ? {} : { textareaWidths: {}, textareaHeights: {}, textareaResizeMode: false })
               }
             }
           : item
@@ -4044,9 +4054,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       type: "nodeResize",
       nodeId: node.id,
       nodeType: node.type,
+      resizeSource: textarea ? "textarea" : "node",
+      textareaKey,
       startPointer: pointer,
       startWidth,
-      startHeight
+      startHeight,
+      startTextareaWidth,
+      startTextareaHeight
     });
   }
 
@@ -4077,8 +4091,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function handlePointerMove(event) {
-    const pointer = screenToScene(event.clientX, event.clientY);
-
     if (dragState?.type === "pan") {
       event.preventDefault();
       renderTransientViewport({
@@ -4088,6 +4100,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
       return;
     }
+
+    const pointer = screenToScene(event.clientX, event.clientY);
 
     if (dragState?.type === "nodes") {
       const deltaX = pointer.x - dragState.startPointer.x;
@@ -4173,18 +4187,42 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (dragState?.type === "nodeResize") {
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
+      const resizingTextarea = dragState.resizeSource === "textarea" && dragState.textareaKey;
+      const nextTextareaWidth = resizingTextarea
+        ? Math.round(clamp(dragState.startTextareaWidth + deltaX, 120, 2400))
+        : null;
+      const nextTextareaHeight = resizingTextarea
+        ? Math.round(clamp(dragState.startTextareaHeight + deltaY, 40, 1400))
+        : null;
+      const appliedDeltaX = resizingTextarea
+        ? nextTextareaWidth - dragState.startTextareaWidth
+        : deltaX;
+      const appliedDeltaY = resizingTextarea
+        ? nextTextareaHeight - dragState.startTextareaHeight
+        : deltaY;
       const nextWidth = normalizedNodeWidth(
-        dragState.startWidth + deltaX,
+        dragState.startWidth + appliedDeltaX,
         dragState.nodeType
       );
-      const nextHeight = normalizedNodeHeight(dragState.startHeight + deltaY);
+      const nextHeight = normalizedNodeHeight(dragState.startHeight + appliedDeltaY);
       setNodes((current) =>
         current.map((node) =>
           node.id === dragState.nodeId
-            ? {
-                ...node,
-                data: { ...node.data, nodeWidth: nextWidth, nodeHeight: nextHeight }
-              }
+            ? (() => {
+                const data = { ...node.data, nodeWidth: nextWidth, nodeHeight: nextHeight };
+                if (resizingTextarea) {
+                  data.textareaWidths = {
+                    ...normalizedTextareaWidths(node.data?.textareaWidths),
+                    [dragState.textareaKey]: nextTextareaWidth
+                  };
+                  data.textareaResizeMode = true;
+                  data.textareaHeights = {
+                    ...normalizedTextareaHeights(node.data?.textareaHeights),
+                    [dragState.textareaKey]: nextTextareaHeight
+                  };
+                }
+                return { ...node, data };
+              })()
             : node
         )
       );
@@ -5893,11 +5931,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const draftConnection = draftEdge
     ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y } }
     : null;
-  const marqueePoints = dragState?.type === "marquee" ? [dragState.start, dragState.current] : [];
-  const wireLayerBounds = edgeLayerBounds(
-    [...renderedEdges, ...(draftConnection ? [draftConnection] : [])],
-    marqueePoints
-  );
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
@@ -6026,6 +6059,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         ref={canvasRef}
         className="node-canvas"
         style={{
+          "--viewport-transform": `translate3d(${viewportRef.current.x}px, ${viewportRef.current.y}px, 0) scale(${viewportRef.current.scale})`,
           "--grid-size": `${28 * viewportRef.current.scale}px`,
           "--grid-x": `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px`,
           "--grid-y": `${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
@@ -6038,13 +6072,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
-        <div
-          ref={sceneRef}
-          className="node-scene"
-          style={{
-            transform: `translate3d(${viewportRef.current.x}px, ${viewportRef.current.y}px, 0) scale(${viewportRef.current.scale})`
-          }}
-        >
+        <div className="node-scene node-group-scene">
           {groups.map((group) => (
             <GroupBackdrop
               key={group.id}
@@ -6055,18 +6083,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onRemove={removeGroup}
             />
           ))}
+        </div>
 
-          <svg
-            className="edge-layer"
-            style={{
-              left: wireLayerBounds.left,
-              top: wireLayerBounds.top,
-              width: wireLayerBounds.width,
-              height: wireLayerBounds.height
-            }}
-            viewBox={wireLayerBounds.viewBox}
-            preserveAspectRatio="none"
-          >
+          <svg className="edge-layer">
+            <g className="edge-scene">
             {renderedEdges.map(({ edge, from, to }) => {
               return (
                 <EdgePath
@@ -6084,7 +6104,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             })}
           {draftConnection && <EdgePath from={draftConnection.from} to={draftConnection.to} color={draftEdge.color} draft />}
           {dragState?.type === "marquee" && <SelectionMarquee start={dragState.start} current={dragState.current} />}
+            </g>
           </svg>
+        <div className="node-scene node-node-scene">
 
           {nodes.map((node) => (
             <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
@@ -6616,7 +6638,7 @@ function NodeCard({
     const rect = textarea.getBoundingClientRect();
     const gripSize = 20;
     if (event.clientX < rect.right - gripSize || event.clientY < rect.bottom - gripSize) return;
-    onNodeResizeStart(event, node);
+    onNodeResizeStart(event, node, { textarea });
   }
 
   React.useEffect(() => {
@@ -6654,10 +6676,11 @@ function NodeCard({
   const customNodeHeight = normalizedNodeHeight(nodeData.nodeHeight);
   const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
 
+  const customTextareaSize = Boolean(nodeData.textareaResizeMode);
   return (
     <article
       ref={cardRef}
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
         width: customNodeWidth ? `${customNodeWidth}px` : undefined,
@@ -6667,7 +6690,8 @@ function NodeCard({
         "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
         "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
         "--frame-it-scale": frameItScalable ? nodeData.frameItScale || 1 : 1,
-        "--reference-tag-color": tagHighlight?.color || "#4d8dff"
+        "--reference-tag-color": tagHighlight?.color || "#4d8dff",
+        "--node-default-width": `${estimatedNodeWidth(node.type)}px`,
       }}
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}

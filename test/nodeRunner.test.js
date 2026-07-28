@@ -8,7 +8,7 @@ import {
   rejectedRunResults,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
-import { buildUtilityVideoRequest, composeVideoPrompt } from "../src/nodeRunners/videoModels.js";
+import { buildUtilityVideoRequest, buildVideoGenerationRequest, composeVideoPrompt } from "../src/nodeRunners/videoModels.js";
 
 test("composeVideoPrompt appends connected text as Director supplemental direction", () => {
   assert.equal(
@@ -23,6 +23,25 @@ test("composeVideoPrompt appends connected text as Director supplemental directi
     composeVideoPrompt({ directorPrompt: "Director scene package", fallbackPrompt: "Local note" }),
     "Director scene package\n\nAdditional direction:\nLocal note"
   );
+});
+
+test("buildVideoGenerationRequest preserves disabled Seedance audio", () => {
+  const request = buildVideoGenerationRequest({
+    node: {
+      id: "seedance-video",
+      data: {
+        title: "Video Model",
+        model: "Seedance 2.0",
+        generateAudio: false
+      }
+    },
+    prompt: "Silent scene",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project"
+  });
+
+  assert.equal(request.generateAudio, false);
 });
 
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
