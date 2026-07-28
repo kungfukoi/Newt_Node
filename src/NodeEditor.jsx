@@ -228,6 +228,7 @@ import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2R
 import {
   clamp,
   clampContextMenuPosition,
+  edgeLayerBounds,
   estimatedNodeHeight,
   estimatedNodeRect,
   estimatedNodeWidth,
@@ -235,6 +236,7 @@ import {
   normalizedNodeWidth,
   graphBoundsForNodes,
   groupToRect,
+  mergeMeasuredPortPositions,
   normalizeRect,
   pastedNodePositions,
   pointInRect,
@@ -1018,6 +1020,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
+  const connectedPortKeysRef = React.useRef(emptyPortSet);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
   const [groups, setGroups] = React.useState(savedDraft.groups);
@@ -1160,6 +1163,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [edges]);
 
   React.useLayoutEffect(() => {
+    connectedPortKeysRef.current = connectedPortKeys;
+    if (active) schedulePortPositionRefresh();
+  }, [active, connectedPortKeys]);
+
+  React.useLayoutEffect(() => {
     viewportRef.current = viewport;
     applyViewportToCanvas(viewport);
   }, [viewport]);
@@ -1193,6 +1201,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useLayoutEffect(() => {
     if (!active) return undefined;
 
+    updatePortPositions();
+    updateSelectionBounds();
     const frame = window.requestAnimationFrame(() => {
       updatePortPositions();
       updateSelectionBounds();
@@ -1205,13 +1215,29 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
+    const observedElements = new WeakSet();
     const observer = new ResizeObserver(() => schedulePortPositionRefresh());
-    observer.observe(canvas);
-    canvas.querySelectorAll("[data-node-card-id]").forEach((element) => observer.observe(element));
-    canvas.querySelectorAll("[data-port-key]").forEach((element) => observer.observe(element));
+    const observeWireTargets = () => {
+      [canvas, ...canvas.querySelectorAll("[data-node-card-id], [data-port-key]")].forEach((element) => {
+        if (!element || observedElements.has(element)) return;
+        observedElements.add(element);
+        observer.observe(element);
+      });
+    };
+    observeWireTargets();
+    const mutationObserver = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => {
+          observeWireTargets();
+          schedulePortPositionRefresh();
+        })
+      : null;
+    mutationObserver?.observe(canvas, { childList: true, subtree: true });
     schedulePortPositionRefresh();
 
-    return () => observer.disconnect();
+    return () => {
+      mutationObserver?.disconnect();
+      observer.disconnect();
+    };
   }, [active, nodes.map((node) => node.id).join("|"), selectedNodeIds.join("|")]);
 
   React.useEffect(() => () => {
@@ -1529,12 +1555,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const activeViewport = viewportRef.current;
     canvas.querySelectorAll("[data-port-key]").forEach((element) => {
       const rect = element.getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
       nextPositions[element.dataset.portKey] = {
         x: (rect.left - canvasRect.left + rect.width / 2 - activeViewport.x) / activeViewport.scale,
         y: (rect.top - canvasRect.top + rect.height / 2 - activeViewport.y) / activeViewport.scale
       };
     });
-    setPortPositions((current) => (samePointMap(current, nextPositions) ? current : nextPositions));
+    setPortPositions((current) => {
+      const stablePositions = mergeMeasuredPortPositions(current, nextPositions, connectedPortKeysRef.current);
+      return samePointMap(current, stablePositions) ? current : stablePositions;
+    });
   }
 
   function updateSelectionBounds() {
@@ -5932,6 +5962,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const draftConnection = draftEdge
     ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y } }
     : null;
+  const marqueePoints = dragState?.type === "marquee" ? [dragState.start, dragState.current] : [];
+  const wireLayerBounds = edgeLayerBounds(
+    [...renderedEdges, ...(draftConnection ? [draftConnection] : [])],
+    marqueePoints
+  );
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
@@ -6086,8 +6121,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ))}
         </div>
 
-          <svg className="edge-layer">
-            <g className="edge-scene">
+        <div className="node-scene node-edge-scene">
+          <svg
+            className="edge-layer"
+            style={{
+              left: wireLayerBounds.left,
+              top: wireLayerBounds.top,
+              width: wireLayerBounds.width,
+              height: wireLayerBounds.height
+            }}
+            viewBox={wireLayerBounds.viewBox}
+            preserveAspectRatio="none"
+          >
+            <g>
             {renderedEdges.map(({ edge, from, to }) => {
               return (
                 <EdgePath
@@ -6107,6 +6153,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           {dragState?.type === "marquee" && <SelectionMarquee start={dragState.start} current={dragState.current} />}
             </g>
           </svg>
+        </div>
         <div className="node-scene node-node-scene">
 
           {nodes.map((node) => (

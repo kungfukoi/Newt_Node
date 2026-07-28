@@ -1246,22 +1246,19 @@
   transform-origin: 0 0;
 }
 
-.edge-scene {
-  transform: var(--viewport-transform, translate3d(0, 0, 0) scale(1));
-  transform-box: view-box;
-  transform-origin: 0 0;
-}
-
 .node-group-scene {
   z-index: 0;
+}
+
+.node-edge-scene {
+  z-index: 1;
 }
 
 .node-node-scene {
   z-index: 2;
 }
 
-.node-canvas.is-navigating .node-scene,
-.node-canvas.is-navigating .edge-scene {
+.node-canvas.is-navigating .node-scene {
   will-change: transform;
 }
 
@@ -1278,16 +1275,11 @@
 .edge-layer {
   position: absolute;
   top: 0;
-  right: 0;
-  bottom: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
   z-index: 1;
-  display: block;
   overflow: hidden;
   pointer-events: none;
-  shape-rendering: auto;
+  shape-rendering: geometricPrecision;
 }
 
 .edge-path .edge-visible {

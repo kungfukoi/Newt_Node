@@ -148,6 +148,15 @@ export function edgeLayerBounds(connections = [], points = [], padding = 32) {
   };
 }
 
+export function mergeMeasuredPortPositions(current = {}, measured = {}, connectedKeys = []) {
+  const next = { ...(measured || {}) };
+  const keys = connectedKeys instanceof Set ? connectedKeys : new Set(connectedKeys || []);
+  keys.forEach((key) => {
+    if (!next[key] && current?.[key]) next[key] = current[key];
+  });
+  return next;
+}
+
 export function rectsIntersect(first, second) {
   return first.left <= second.right && first.right >= second.left && first.top <= second.bottom && first.bottom >= second.top;
 }

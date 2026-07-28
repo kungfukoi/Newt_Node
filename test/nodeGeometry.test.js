@@ -10,6 +10,7 @@ import {
   normalizedNodeWidth,
   normalizedNodeHeight,
   graphBoundsForNodes,
+  mergeMeasuredPortPositions,
   pastedNodePositions,
   positiveModulo,
   rectsOverlap
@@ -86,4 +87,23 @@ test("edge geometry creates a padded SVG viewport around paths", () => {
 
 test("edge geometry keeps an addressable viewport when no wires exist", () => {
   assert.deepEqual(edgeLayerBounds(), { left: 0, top: 0, width: 1, height: 1, viewBox: "0 0 1 1" });
+});
+
+test("port measurements keep connected endpoints when a port is briefly missing", () => {
+  const current = {
+    "source:imageOut": { x: 320, y: 180 },
+    "target:imageIn": { x: 640, y: 220 },
+    "unused:promptOut": { x: 120, y: 80 }
+  };
+  const measured = {
+    "source:imageOut": { x: 322, y: 181 }
+  };
+
+  assert.deepEqual(
+    mergeMeasuredPortPositions(current, measured, new Set(["source:imageOut", "target:imageIn"])),
+    {
+      "source:imageOut": { x: 322, y: 181 },
+      "target:imageIn": { x: 640, y: 220 }
+    }
+  );
 });
