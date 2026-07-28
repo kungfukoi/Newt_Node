@@ -113,6 +113,7 @@ import {
   fileNameFromLocalUrl,
   finishOutputItemDragData,
   firstAcceptedFile,
+  fullResolutionImageUrl,
   hasOutputItemDragData,
   hasSupportedDroppedFile,
   isOutputItemCompatibleWithNode,
@@ -10469,7 +10470,7 @@ function NodeBody({
         {activePreviewTab === "preview" ? (
           <>
             <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
-              {previewItem?.type === "image" && <img key={previewItem.url} src={previewImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+              {previewItem?.type === "image" && <img key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
               {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}

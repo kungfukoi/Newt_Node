@@ -63,6 +63,17 @@ export function previewImageUrl(itemOrUrl, thumbnailUrl = "") {
   return `/api/media-thumbnail?url=${encodeURIComponent(sourceUrl)}`;
 }
 
+export function fullResolutionImageUrl(itemOrUrl) {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  if (item) {
+    const fullItem = fullResolutionOutputItem({ ...item, type: item.type || "image" });
+    if (fullItem?.url) return fullItem.url;
+    return String(item.url || item.localUrl || item.resultUrl || "").trim();
+  }
+
+  return String(itemOrUrl || "").trim();
+}
+
 export function hasOutputItemDragData(dataTransfer) {
   const types = Array.from(dataTransfer?.types || []);
   return types.includes(outputDragMime)

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   fullResolutionOutputItem,
+  fullResolutionImageUrl,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
   previewImageUrl
@@ -45,6 +46,26 @@ test("local canvas images use the runtime thumbnail endpoint", () => {
   assert.equal(
     previewImageUrl("/uploads/reference.jpg?v=2"),
     "/api/media-thumbnail?url=%2Fuploads%2Freference.jpg%3Fv%3D2"
+  );
+});
+
+test("full-resolution image display never swaps to a proxy thumbnail", () => {
+  assert.equal(
+    fullResolutionImageUrl({
+      type: "image",
+      url: "/outputs/Test/full-resolution.png",
+      thumbnailUrl: "/outputs/Test/thumbnails/full-resolution-preview.jpg"
+    }),
+    "/outputs/Test/full-resolution.png"
+  );
+  assert.equal(
+    fullResolutionImageUrl({
+      type: "image",
+      url: "/outputs/Test/thumbnails/full-resolution-preview.jpg",
+      fullResolutionUrl: "/outputs/Test/full-resolution.png",
+      thumbnailUrl: "/outputs/Test/thumbnails/full-resolution-preview.jpg"
+    }),
+    "/outputs/Test/full-resolution.png"
   );
 });
 
