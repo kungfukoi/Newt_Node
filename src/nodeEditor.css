@@ -2687,6 +2687,40 @@
   flex: 0 0 auto;
 }
 
+.skill-director-stage-heading > .skill-director-collapsed-port-rail {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skill-director-collapsed-port {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 92px;
+  min-width: 0;
+  color: rgba(244, 240, 232, 0.58);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.skill-director-collapsed-port .inline-port {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  border-width: 2px;
+}
+
+.skill-director-collapsed-port > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .skill-director-collapse {
   display: inline-flex;
   align-items: center;

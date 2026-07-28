@@ -188,6 +188,29 @@ function SkillDirectorCollapseButton({ collapsed, onClick, label }) {
   );
 }
 
+function SkillDirectorCollapsedPortRail({ node, ports = [], onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const connectedPorts = ports.filter((port) => port && connectedPortKeys.has(`${node.id}:${port.id}`));
+  if (!connectedPorts.length) return null;
+
+  return (
+    <div className="skill-director-collapsed-port-rail" aria-label="Connected collapsed inputs">
+      {connectedPorts.map((port) => (
+        <span key={port.id} className="skill-director-collapsed-port" title={port.label}>
+          <PortHandle
+            node={node}
+            port={port}
+            side="input"
+            onConnectStart={onConnectStart}
+            onDisconnectInput={onDisconnectInput}
+            connectedPortKeys={connectedPortKeys}
+          />
+          <span>{port.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function SkillDirectorNodeBody({
   node,
   config,
@@ -424,6 +447,15 @@ export function SkillDirectorNodeBody({
             <strong>1. Scene Setup</strong>
             <small>{locks.setup ? "Locked" : "Add scene basics and references first"}</small>
           </div>
+          {isStageCollapsed("setup") && (
+            <SkillDirectorCollapsedPortRail
+              node={node}
+              ports={inputPorts}
+              onConnectStart={onConnectStart}
+              onDisconnectInput={onDisconnectInput}
+              connectedPortKeys={connectedPortKeys}
+            />
+          )}
           <div className="skill-director-stage-actions">
             {locks.setup && (
               <SkillDirectorCollapseButton
