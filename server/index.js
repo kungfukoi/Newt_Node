@@ -65,10 +65,16 @@ import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.j
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
 import {
+  buildGeminiOmniEditPrompt,
+  buildGeminiOmniFalInput,
+  buildGeminiOmniGoogleRequestBody,
   buildGeminiOmniPrompt,
+  geminiOmniFalEditEndpoint as defaultGeminiOmniFalEditEndpoint,
+  geminiOmniFalImageEndpoint as defaultGeminiOmniFalImageEndpoint,
   geminiOmniFalReferenceEndpoint as defaultGeminiOmniFalReferenceEndpoint,
   geminiOmniFalTextEndpoint as defaultGeminiOmniFalTextEndpoint,
   geminiOmniGoogleModel as defaultGeminiOmniGoogleModel,
+  normalizeGeminiOmniGoogleText,
   normalizeGeminiOmniAspectRatio,
   normalizeGeminiOmniDuration,
   uniqueGeminiOmniReferences
@@ -263,7 +269,9 @@ const falKlingO34kImageEndpoint = process.env.FAL_KLING_O3_4K_IMAGE_ENDPOINT || 
 const falKlingO34kReferenceEndpoint = process.env.FAL_KLING_O3_4K_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/4k/reference-to-video";
 const googleGeminiOmniModel = process.env.GOOGLE_GEMINI_OMNI_MODEL || defaultGeminiOmniGoogleModel;
 const falGeminiOmniTextEndpoint = process.env.FAL_GEMINI_OMNI_TEXT_ENDPOINT || defaultGeminiOmniFalTextEndpoint;
+const falGeminiOmniImageEndpoint = process.env.FAL_GEMINI_OMNI_IMAGE_ENDPOINT || defaultGeminiOmniFalImageEndpoint;
 const falGeminiOmniReferenceEndpoint = process.env.FAL_GEMINI_OMNI_REFERENCE_ENDPOINT || defaultGeminiOmniFalReferenceEndpoint;
+const falGeminiOmniEditEndpoint = process.env.FAL_GEMINI_OMNI_EDIT_ENDPOINT || defaultGeminiOmniFalEditEndpoint;
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -4881,7 +4889,8 @@ app.post("/api/node/generate-video", async (req, res) => {
     const selectedVideoModel = resolveVideoModel(req.body.model);
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
-      const videoProvider = runtimeModelProviderPreferences.veo;
+      const hasReferenceVideo = Array.isArray(req.body.referenceVideoUrls) && req.body.referenceVideoUrls.some(isLocalAssetUrl);
+      const videoProvider = geminiOmniRuntimeProviderForRequest({ hasVideoReference: hasReferenceVideo });
       const videoKey = videoProvider === "fal" ? process.env.FAL_KEY : process.env.GOOGLE_API_KEY;
       if (!videoKey) {
         const providerLabel = providerPreferenceLabel(videoProvider);
@@ -5157,44 +5166,73 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
   const rawCharacterUrls = Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : [];
   const rawCharacterLabels = Array.isArray(req.body.characterReferenceLabels) ? req.body.characterReferenceLabels : [];
-  const references = uniqueGeminiOmniReferences([
+  const rawReferenceVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls : [];
+  const rawReferenceVideoLabels = Array.isArray(req.body.referenceVideoLabels) ? req.body.referenceVideoLabels : [];
+  const imageReferences = uniqueGeminiOmniReferences([
     ...directorReferences.map((item) => ({ url: item?.url, label: item?.tag || item?.label })),
     ...rawCharacterUrls.map((url, index) => ({ url, label: rawCharacterLabels[index] })),
     ...rawReferenceImageUrls.map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
   ].filter((item) => isLocalAssetUrl(item.url) && item.url !== startFrameUrl));
-  const submittedPrompt = [
-    buildGeminiOmniPrompt({
-      prompt,
-      hasStartFrame: Boolean(startFrameUrl),
-      references,
-      generateAudio
-    }),
-    `Create a ${durationSeconds}-second video in ${aspectRatio}.`
-  ].filter(Boolean).join("\n\n");
+  const videoReferences = uniqueGeminiOmniReferences(
+    rawReferenceVideoUrls
+      .map((url, index) => ({ url, label: rawReferenceVideoLabels[index], type: "video" }))
+      .filter((item) => isLocalAssetUrl(item.url))
+  );
+  const hasVideoEditReference = videoReferences.length > 0;
+  const references = [...imageReferences, ...videoReferences];
+  const submittedPrompt = hasVideoEditReference
+    ? buildGeminiOmniEditPrompt({ prompt, generateAudio })
+    : [
+        buildGeminiOmniPrompt({
+          prompt,
+          hasStartFrame: Boolean(startFrameUrl),
+          references,
+          generateAudio
+        }),
+        `Create a ${durationSeconds}-second video in ${aspectRatio}.`
+      ].filter(Boolean).join("\n\n");
   const media = [
-    ...(startFrameUrl ? [{ url: startFrameUrl, label: "First Frame", role: "first-frame" }] : []),
+    ...(startFrameUrl ? [{ url: startFrameUrl, label: "First Frame", role: "first-frame", type: "image" }] : []),
     ...references.map((item) => ({ ...item, role: "reference" }))
   ];
-  const task = references.length ? "reference_to_video" : startFrameUrl ? "image_to_video" : "text_to_video";
+  const task = hasVideoEditReference ? "video_edit" : references.length ? "reference_to_video" : startFrameUrl ? "image_to_video" : "text_to_video";
 
   const preferredProvider = runtimeModelProviderPreferences.veo;
-  let provider = preferredProvider === "fal" ? "fal.ai" : "Google";
-  let endpoint = preferredProvider === "fal" ? falGeminiOmniReferenceEndpoint : googleGeminiOmniModel;
+  const runtimeProvider = geminiOmniRuntimeProviderForRequest({ hasVideoReference: hasVideoEditReference });
+  let provider = runtimeProvider === "fal" ? "fal.ai" : "Google";
+  let endpoint = runtimeProvider === "fal" ? geminiOmniFalEndpointForMedia({ hasVideoReference: hasVideoEditReference, hasImageReference: Boolean(imageReferences.length), hasStartFrame: Boolean(startFrameUrl) }) : googleGeminiOmniModel;
   let requestId = "";
   let remoteVideo = null;
   let output = null;
 
-  if (preferredProvider === "fal") {
-    const fallback = await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
+  if (runtimeProvider === "fal") {
+    let fallback;
+    try {
+      fallback = await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds, requestLike: req });
+    } catch (error) {
+      if (hasVideoEditReference && errorStatusCode(error) === 422) {
+        const nextError = httpError(
+          422,
+          "Gemini Omni Flash received the reference video, but the provider rejected this edit. The video was prepared as a 720p H.264 source before upload; try a simpler style/color edit, or use VOID/Wan VACE video inpainting for object-removal edits.",
+          { cause: error }
+        );
+        throw nextError;
+      }
+      throw error;
+    }
     endpoint = fallback.endpoint;
     requestId = fallback.requestId;
     remoteVideo = fallback.remoteVideo;
-    output = await downloadVideo(req, remoteVideo.url, "gemini-omni");
+    output = await downloadVideo(req, remoteVideo.url, "gemini-omni", { stripAudio: !generateAudio });
   } else {
     const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
     requestId = direct.requestId;
     remoteVideo = direct.remoteVideo;
     output = direct.output;
+    if (!generateAudio) {
+      const outputBytes = await removeVideoAudioTrack(output.filePath);
+      output = { ...output, bytes: outputBytes };
+    }
   }
 
   const cost = estimateGeminiOmniCost({ durationSeconds, provider, endpoint });
@@ -5217,10 +5255,13 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
       generateAudio,
       task,
       startFrameCount: startFrameUrl ? 1 : 0,
-      referenceImageCount: references.length,
-      referenceImageNames: references.map((item) => item.label).filter(Boolean),
+      referenceImageCount: imageReferences.length,
+      referenceImageNames: imageReferences.map((item) => item.label).filter(Boolean),
+      referenceVideoCount: videoReferences.length,
+      referenceVideoNames: videoReferences.map((item) => item.label).filter(Boolean),
       googleDirect: provider === "Google",
-      providerPreference: preferredProvider
+      providerPreference: preferredProvider,
+      runtimeProvider
     },
     cost,
     remoteVideo,
@@ -5244,18 +5285,42 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   });
 }
 
+function geminiOmniRuntimeProviderForRequest({ hasVideoReference = false } = {}) {
+  if (hasVideoReference && process.env.GOOGLE_API_KEY) return "google";
+  return runtimeModelProviderPreferences.veo;
+}
+
 async function generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req }) {
-  const input = [];
+  const googleMedia = [];
   for (const item of media) {
-    const asset = await readLocalAsset(item.url);
-    if (!String(asset.mimeType || "").startsWith("image/")) continue;
-    input.push({
-      type: "image",
-      mime_type: asset.mimeType,
-      data: asset.buffer.toString("base64")
-    });
+    if (item?.type === "video") {
+      const prepared = await prepareGeminiOmniEditVideo(item.url, req);
+      const asset = await readLocalAsset(prepared.publicPath);
+      if (!String(asset.mimeType || "").startsWith("video/")) continue;
+      googleMedia.push({
+        type: "video",
+        mimeType: asset.mimeType,
+        data: asset.buffer.toString("base64")
+      });
+    } else {
+      const asset = await readLocalAsset(item.url);
+      if (!String(asset.mimeType || "").startsWith("image/")) continue;
+      googleMedia.push({
+        type: "image",
+        mimeType: asset.mimeType,
+        data: asset.buffer.toString("base64")
+      });
+    }
   }
-  input.push({ type: "text", text: submittedPrompt });
+  const hasVideoReference = googleMedia.some((item) => item.type === "video");
+  const googlePrompt = normalizeGeminiOmniGoogleText(submittedPrompt);
+  const body = buildGeminiOmniGoogleRequestBody({
+    model: googleGeminiOmniModel,
+    prompt: googlePrompt,
+    media: googleMedia,
+    aspectRatio,
+    task
+  });
 
   const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
     method: "POST",
@@ -5263,19 +5328,12 @@ async function generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRat
       "Content-Type": "application/json",
       "x-goog-api-key": process.env.GOOGLE_API_KEY
     },
-    body: JSON.stringify({
-      model: googleGeminiOmniModel,
-      input,
-      generation_config: { video_config: { task } },
-      response_format: { type: "video", aspect_ratio: aspectRatio, delivery: "uri" },
-      background: false,
-      store: true,
-      stream: false
-    })
+    body: JSON.stringify(body)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || data?.message || "Gemini Omni direct generation failed.", { raw: data });
+    const action = hasVideoReference ? "edit" : "generation";
+    throw httpError(response.status, data?.error?.message || data?.message || `Gemini Omni direct ${action} failed.`, { raw: data });
   }
 
   const videoPart = extractGeminiOmniVideoPart(data);
@@ -5347,21 +5405,73 @@ async function downloadGoogleGeminiOmniFile(uri) {
   return Buffer.from(await downloadResponse.arrayBuffer());
 }
 
-async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
+async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds, requestLike = null }) {
   if (!process.env.FAL_KEY) throw httpError(400, "Gemini Omni is routed through Fal, but no active Fal API key is selected in Settings.");
-  const endpoint = media.length ? falGeminiOmniReferenceEndpoint : falGeminiOmniTextEndpoint;
-  const input = {
-    prompt: submittedPrompt,
-    aspect_ratio: aspectRatio,
-    duration: durationSeconds
-  };
-  if (media.length) {
-    input.image_urls = await Promise.all(media.map((item) => uploadLocalOutputToFal(item.url)));
-  }
+  const uploadedMedia = await Promise.all(media.map(async (item) => ({
+    ...item,
+    url: item.type === "video"
+      ? await uploadPreparedGeminiOmniEditVideoToFal(item.url, requestLike)
+      : await uploadLocalOutputToFal(item.url)
+  })));
+  const endpoint = geminiOmniFalEndpointForMedia({
+    hasVideoReference: uploadedMedia.some((item) => item.type === "video"),
+    hasImageReference: uploadedMedia.some((item) => item.type !== "video" && item.role !== "first-frame"),
+    hasStartFrame: uploadedMedia.some((item) => item.role === "first-frame")
+  });
+  const input = buildGeminiOmniFalInput({ prompt: submittedPrompt, aspectRatio, durationSeconds, media: uploadedMedia });
   const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-video", model: videoModelNames.geminiOmni });
   const remoteVideo = result?.data?.video;
   if (!remoteVideo?.url) throw httpError(502, "Fal returned no Gemini Omni video URL.", { raw: result?.data });
   return { endpoint, requestId: result.requestId, remoteVideo };
+}
+
+async function uploadPreparedGeminiOmniEditVideoToFal(publicPath, requestLike) {
+  const prepared = await prepareGeminiOmniEditVideo(publicPath, requestLike);
+  return uploadLocalOutputToFal(prepared.publicPath);
+}
+
+async function prepareGeminiOmniEditVideo(publicPath, requestLike) {
+  const source = await resolveLocalAssetPathFromUrl(publicPath);
+  const metadata = await probeVideoFile(source.filePath);
+  const width = positiveNumber(metadata.width);
+  const height = positiveNumber(metadata.height);
+  const isPortrait = height > width;
+  const maxWidth = isPortrait ? 720 : 1280;
+  const maxHeight = isPortrait ? 1280 : 720;
+  const sourceBaseName = path.basename(source.fileName || "source-video", path.extname(source.fileName || ""));
+  const target = await createManagedAssetTarget(
+    requestLike || { body: {} },
+    "gemini-omni-edit-source",
+    ".mp4",
+    workflowPackageDependencyDirName,
+    { fileNameBase: `${sourceBaseName}-gemini-omni-edit` }
+  );
+
+  await runFfmpeg([
+    "-y",
+    "-i", source.filePath,
+    "-map", "0:v:0",
+    "-vf", `scale='min(${maxWidth},iw)':'min(${maxHeight},ih)':force_original_aspect_ratio=decrease,setsar=1`,
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "18",
+    "-profile:v", "high",
+    "-level", "4.1",
+    "-pix_fmt", "yuv420p",
+    "-tag:v", "avc1",
+    "-movflags", "+faststart",
+    "-an",
+    target.filePath
+  ], "Gemini Omni edit video prep", 600000);
+
+  return target;
+}
+
+function geminiOmniFalEndpointForMedia({ hasVideoReference = false, hasImageReference = false, hasStartFrame = false } = {}) {
+  if (hasVideoReference) return falGeminiOmniEditEndpoint;
+  if (hasImageReference) return falGeminiOmniReferenceEndpoint;
+  if (hasStartFrame) return falGeminiOmniImageEndpoint;
+  return falGeminiOmniTextEndpoint;
 }
 
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {

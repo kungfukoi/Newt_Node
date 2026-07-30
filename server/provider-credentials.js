@@ -159,5 +159,14 @@ function uniqueCredentialId(baseId, usedIds) {
 }
 
 function normalizedCredential(value) {
-  return String(value || "").trim();
+  const text = String(value || "").trim();
+  if (!text || !credentialCanBeUsedAsHeader(text)) return "";
+  return text;
+}
+
+function credentialCanBeUsedAsHeader(value) {
+  return Array.from(String(value || "")).every((character) => {
+    const code = character.codePointAt(0);
+    return code >= 32 && code <= 255;
+  });
 }

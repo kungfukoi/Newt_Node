@@ -282,6 +282,15 @@ import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersist
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import {
+  createWorkflowClipboardPayload,
+  normalizeWorkflowClipboardPayload,
+  readWorkflowClipboardFromStorage,
+  readWorkflowClipboardFromSystemClipboard,
+  workflowClipboardStorageKey,
+  writeWorkflowClipboardToStorage,
+  writeWorkflowClipboardToSystemClipboard
+} from "./workflowClipboard.js";
+import {
   clearStaleRunningState,
   cloneEdge,
   cloneGraphState,
@@ -1380,7 +1389,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       if (commandKey && key === "v") {
         event.preventDefault();
-        pasteSelection();
+        void pasteSelection();
         return;
       }
 
@@ -1395,6 +1404,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, workflowFilePath]);
+
+  React.useEffect(() => {
+    if (!active) return undefined;
+
+    function handleWorkflowClipboardStorage(event) {
+      if (event.key !== workflowClipboardStorageKey) return;
+      const clipboard = normalizeWorkflowClipboardPayload(event.newValue);
+      if (clipboard?.nodes?.length) clipboardRef.current = clipboard;
+    }
+
+    window.addEventListener("storage", handleWorkflowClipboardStorage);
+    return () => window.removeEventListener("storage", handleWorkflowClipboardStorage);
+  }, [active]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -5232,21 +5254,45 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!selectedNodeIds.length) return;
 
     const ids = new Set(selectedNodeIds);
-    clipboardRef.current = {
+    const clipboard = createWorkflowClipboardPayload({
       nodes: nodes.filter((node) => ids.has(node.id)).map((node) => cloneNode(node)),
-      edges: edges.filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId)).map((edge) => cloneEdge(edge))
-    };
+      edges: edges.filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId)).map((edge) => cloneEdge(edge)),
+      groups: getSelectedGroupsForNodeIds(selectedNodeIds).map((group) => ({
+        ...group,
+        nodeIds: getNodeIdsInsideGroup(group).filter((nodeId) => ids.has(nodeId))
+      }))
+    });
+    if (!clipboard) return;
+
+    clipboardRef.current = clipboard;
+    writeWorkflowClipboardToStorage(clipboard);
+    void writeWorkflowClipboardToSystemClipboard(clipboard);
     setSaveStatus(`${selectedNodeIds.length} node${selectedNodeIds.length === 1 ? "" : "s"} copied`);
   }
 
-  function pasteSelection() {
-    const clipboard = clipboardRef.current;
+  async function readWorkflowClipboardSelection() {
+    const storageClipboard = readWorkflowClipboardFromStorage();
+    if (storageClipboard?.nodes?.length) return storageClipboard;
+
+    const memoryClipboard = normalizeWorkflowClipboardPayload(clipboardRef.current);
+    if (memoryClipboard?.nodes?.length) return memoryClipboard;
+
+    return readWorkflowClipboardFromSystemClipboard();
+  }
+
+  async function pasteSelection() {
+    const clipboard = await readWorkflowClipboardSelection();
     if (!clipboard?.nodes?.length) return;
 
+    clipboardRef.current = clipboard;
     pushUndoSnapshot();
     const stamp = Date.now();
     const idMap = new Map();
     const pastePositions = pastedNodePositions(clipboard.nodes, currentCanvasPointerPosition());
+    const pasteDelta = {
+      x: pastePositions[0].x - (Number(clipboard.nodes[0]?.x) || 0),
+      y: pastePositions[0].y - (Number(clipboard.nodes[0]?.y) || 0)
+    };
     const pastedNodes = clipboard.nodes.map((node, index) => {
       const nextId = createNodeId(node.type, `${stamp}-${index}`);
       const nextNode = cloneNode(node);
@@ -5279,9 +5325,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }))
       .map((edge) => normalizeEdgeForCurrentGraph(edge, pastedNodeMap))
       .filter(Boolean);
+    const pastedGroups = (clipboard.groups || [])
+      .map((group, index) => {
+        const nodeIds = (group.nodeIds || []).map((nodeId) => idMap.get(nodeId)).filter(Boolean);
+        if (!nodeIds.length) return null;
+        return {
+          ...group,
+          id: `group-${stamp}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+          x: Math.round((Number(group.x) || 0) + pasteDelta.x),
+          y: Math.round((Number(group.y) || 0) + pasteDelta.y),
+          nodeIds
+        };
+      })
+      .filter(Boolean);
 
     setNodes((current) => [...current, ...pastedNodes]);
     setEdges((current) => [...current, ...pastedEdges]);
+    if (pastedGroups.length) setGroups((current) => [...current, ...pastedGroups]);
     setSelectedNodeIds(pastedNodes.map((node) => node.id));
     setSelectedEdgeId(null);
     setSaveStatus(`${pastedNodes.length} node${pastedNodes.length === 1 ? "" : "s"} pasted`);
@@ -12770,7 +12830,7 @@ function NodeBody({
     : isKlingO3
       ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, characterPort]
     : isGeminiOmni
-      ? [promptPort, activeDirectorPort, startFramePort, referenceImagePort, characterPort]
+      ? [promptPort, activeDirectorPort, startFramePort, referenceImagePort, referenceVideoPort, characterPort]
     : isSam3Video
       ? [promptPort, activeDirectorPort, referenceVideoPort]
       : [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
@@ -13048,6 +13108,9 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.referenceImageIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="Reference Video" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Optional video")}</button>
             </NodeRow>
             <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.characterIn, "Optional character")}</button>
@@ -15268,7 +15331,7 @@ function isVideoModelUnsupportedCharacterInput(node, portId) {
 function isVideoModelUnsupportedInput(node, portId) {
   if (isVideoModelUnsupportedCharacterInput(node, portId)) return true;
   if (node?.type === "videoModel" && portId === "directorIn" && !videoModelSupportsFilmDirector(node.data?.model)) return true;
-  if (node?.type === "videoModel" && isGeminiOmniModel(node.data?.model) && ["endFrameIn", "referenceVideoIn", "referenceAudioIn"].includes(portId)) return true;
+  if (node?.type === "videoModel" && isGeminiOmniModel(node.data?.model) && ["endFrameIn", "referenceAudioIn"].includes(portId)) return true;
   return node?.type === "videoModel" && isKlingO3Model(node.data?.model) && portId === "referenceAudioIn";
 }
 
@@ -15277,7 +15340,6 @@ function videoModelUnsupportedInputMessage(model, portId) {
     return "Film Director is available only for Seedance 2.0, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
-  if (isGeminiOmniModel(model) && portId === "referenceVideoIn") return "Gemini Omni Flash preview video references are not reliable yet.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
   if (isKlingO3Model(model) && portId === "referenceAudioIn") return `${isKlingO34kModel(model) ? "Kling O3 4K" : "Kling O3 Pro"} generates native audio but does not accept reference audio files.`;
   return videoModelUnsupportedCharacterMessage(model);
