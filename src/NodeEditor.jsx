@@ -5464,7 +5464,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
-      storedNode && node?.type === "skillDirector"
+      storedNode && ["skillDirector", "text"].includes(node?.type)
         ? {
             ...storedNode,
             data: {
