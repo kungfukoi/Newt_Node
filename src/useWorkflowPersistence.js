@@ -295,7 +295,7 @@ export function useWorkflowPersistence({
       setWorkflowFilePath(savedPath);
       setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       upsertProject(project);
-      let cleanNodes = nodes;
+      let cleanNodes = saveNodes;
       let cleanEdges = edges;
       let cleanGroups = groups;
       let cleanViewport = viewport;
@@ -332,10 +332,12 @@ export function useWorkflowPersistence({
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
     const id = projectId || createNodeId("workflow");
     const fileName = workflowFileNameFromPath(filePath) || localWorkflowFileName || workflowFileNameForProject(cleanProjectName);
+    const saveNodes = nodesForSave();
     const workflow = currentWorkflowDocument({
       id,
       name: cleanProjectName,
-      fileName
+      fileName,
+      graphNodes: saveNodes
     });
 
     setSaveStatus("Saving...");
@@ -357,6 +359,7 @@ export function useWorkflowPersistence({
     setProjectPackagePath(nextPackagePath);
     setWorkflowFilePath(savedPath || filePath);
     markWorkflowClean({
+      nodes: saveNodes,
       projectName: savedWorkflow.name || workflow.name,
       projectPackagePath: nextPackagePath
     });

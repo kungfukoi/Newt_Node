@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Box, ChevronDown, ChevronRight, Lock, MessageSquareText, Unlock, WandSparkles } from "lucide-react";
 import { allowFileDrop, firstAcceptedFile, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
@@ -17,86 +17,20 @@ export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, 
   );
 }
 
-const textModelDraftCommitDelayMs = 300;
-
 export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const nodeText = String(node.data.text || "");
   const nodeResultText = String(node.data.resultText || "");
-  const [draftText, setDraftText] = useState(nodeText);
-  const [draftResultText, setDraftResultText] = useState(nodeResultText);
-  const committedTextRef = useRef(nodeText);
-  const committedResultTextRef = useRef(nodeResultText);
-  const textCommitTimerRef = useRef(null);
-  const resultCommitTimerRef = useRef(null);
-  const hasOutputPanel = Boolean(draftResultText) || node.data.status === "running" || node.data.status === "complete";
+  const hasOutputPanel = Boolean(nodeResultText) || node.data.status === "running" || node.data.status === "complete";
   const textPort = config.input.find((port) => port.id === "textIn");
   const imagePort = config.input.find((port) => port.id === "imageIn");
   const videoPort = config.input.find((port) => port.id === "videoIn");
   const stylePort = config.input.find((port) => port.id === "styleIn");
   const hasRunInput =
-    Boolean(draftText.trim()) ||
+    Boolean(nodeText.trim()) ||
     Boolean(incoming.textIn?.length) ||
     Boolean(incoming.imageIn?.length) ||
     Boolean(incoming.videoIn?.length) ||
     Boolean(incoming.styleIn?.length);
-
-  useEffect(() => {
-    if (nodeText === committedTextRef.current) return;
-    committedTextRef.current = nodeText;
-    setDraftText(nodeText);
-  }, [node.id, nodeText]);
-
-  useEffect(() => {
-    if (nodeResultText === committedResultTextRef.current) return;
-    committedResultTextRef.current = nodeResultText;
-    setDraftResultText(nodeResultText);
-  }, [node.id, nodeResultText]);
-
-  useEffect(() => () => {
-    clearTimeout(textCommitTimerRef.current);
-    clearTimeout(resultCommitTimerRef.current);
-  }, []);
-
-  const commitText = useCallback((value) => {
-    clearTimeout(textCommitTimerRef.current);
-    if (value === committedTextRef.current) return;
-    committedTextRef.current = value;
-    onUpdate(node.id, { text: value });
-  }, [node.id, onUpdate]);
-
-  const commitResultText = useCallback((value) => {
-    clearTimeout(resultCommitTimerRef.current);
-    if (value === committedResultTextRef.current) return;
-    committedResultTextRef.current = value;
-    onUpdate(node.id, { resultText: value });
-  }, [node.id, onUpdate]);
-
-  function scheduleTextCommit(value) {
-    clearTimeout(textCommitTimerRef.current);
-    textCommitTimerRef.current = setTimeout(() => commitText(value), textModelDraftCommitDelayMs);
-  }
-
-  function scheduleResultTextCommit(value) {
-    clearTimeout(resultCommitTimerRef.current);
-    resultCommitTimerRef.current = setTimeout(() => commitResultText(value), textModelDraftCommitDelayMs);
-  }
-
-  function flushDrafts() {
-    commitText(draftText);
-    commitResultText(draftResultText);
-  }
-
-  function runWithLatestDraft() {
-    flushDrafts();
-    onRun({
-      ...node,
-      data: {
-        ...node.data,
-        text: draftText,
-        resultText: draftResultText
-      }
-    });
-  }
 
   return (
     <div className="node-body text-node-body">
@@ -119,32 +53,22 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
           <span>Original prompt</span>
           <textarea
             aria-label="Text Model prompt"
-            value={draftText}
-            onChange={(event) => {
-              const value = event.target.value;
-              setDraftText(value);
-              scheduleTextCommit(value);
-            }}
-            onBlur={() => commitText(draftText)}
+            value={nodeText}
+            onChange={(event) => onUpdate(node.id, { text: event.target.value })}
           />
         </label>
         {hasOutputPanel && (
           <label className="text-field-group">
             <span>Output</span>
             <textarea
-              value={draftResultText}
+              value={nodeResultText}
               placeholder={running ? "Running..." : "Output will appear here"}
-              onChange={(event) => {
-                const value = event.target.value;
-                setDraftResultText(value);
-                scheduleResultTextCommit(value);
-              }}
-              onBlur={() => commitResultText(draftResultText)}
+              onChange={(event) => onUpdate(node.id, { resultText: event.target.value })}
             />
           </label>
         )}
       </div>
-      <button className="run-node-button" onClick={runWithLatestDraft} disabled={running || !hasRunInput}>
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
         {running ? "Running..." : "Run Text Model"}
       </button>
       {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}

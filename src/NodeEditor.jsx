@@ -946,11 +946,13 @@ const initialViewport = {
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
 const viewportZoomStep = 1.16;
-const wheelZoomDeltaPerStep = 100;
+const wheelPageDeltaScale = 100;
 const wheelLineDeltaScale = 40;
 const trackpadZoomDeltaThreshold = 8;
-const mouseWheelZoomResetMs = 180;
-const mouseWheelZoomStepCooldownMs = 70;
+const trackpadZoomSensitivity = 0.006;
+const mouseWheelZoomSensitivity = 0.00135;
+const wheelZoomDeltaClamp = 240;
+const nodeDraftCommitDelayMs = 300;
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const previewLayoutDragMime = "application/x-newtnode-preview-layout-item";
@@ -988,6 +990,25 @@ function sameViewport(left, right, tolerance = 0.000001) {
   );
 }
 
+const draftableInputTypes = new Set(["", "text", "search", "url", "email", "password", "tel", "number"]);
+
+function isDraftableTextControl(element) {
+  const tagName = element?.tagName;
+  if (tagName === "TEXTAREA") return true;
+  if (tagName !== "INPUT") return false;
+  return draftableInputTypes.has(String(element.type || "").toLowerCase());
+}
+
+function draftValuesMatch(left, right) {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 function samePointMap(left, right, tolerance = 0.25) {
   const leftKeys = Object.keys(left || {});
   const rightKeys = Object.keys(right || {});
@@ -1019,10 +1040,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const lastPointerClientRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
   const outputHistoryLoadedRef = React.useRef(false);
-  const mouseWheelZoomAccumulatorRef = React.useRef(0);
-  const mouseWheelZoomDirectionRef = React.useRef(0);
-  const mouseWheelZoomLastEventAtRef = React.useRef(0);
-  const mouseWheelZoomLastStepAtRef = React.useRef(0);
+  const nodeDraftPatchesRef = React.useRef({});
   const outputHistoryLoadPromiseRef = React.useRef(null);
   const outputHistoryReloadRequestedRef = React.useRef(false);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
@@ -2043,8 +2061,42 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  const updateNodeDraftPatch = React.useCallback((nodeId, patch) => {
+    if (!nodeId) return;
+    if (!patch || !Object.keys(patch).length) {
+      const { [nodeId]: _removed, ...rest } = nodeDraftPatchesRef.current;
+      nodeDraftPatchesRef.current = rest;
+      return;
+    }
+    nodeDraftPatchesRef.current = {
+      ...nodeDraftPatchesRef.current,
+      [nodeId]: patch
+    };
+  }, []);
+
+  function mergeNodeDraftPatches(currentNodes = nodesRef.current) {
+    const draftEntries = Object.entries(nodeDraftPatchesRef.current);
+    if (!draftEntries.length) return currentNodes;
+    const draftById = new Map(draftEntries);
+    let changed = false;
+    const mergedNodes = currentNodes.map((node) => {
+      const patch = draftById.get(node.id);
+      if (!patch || !Object.keys(patch).length) return node;
+      changed = true;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          ...patch
+        }
+      };
+    });
+    return changed ? mergedNodes : currentNodes;
+  }
+
   function captureTextareaLayoutsForSave(currentNodes = nodesRef.current) {
-    const preparedNodes = mergeTextareaLayoutsFromCanvas(currentNodes, canvasRef.current);
+    const nodesWithDrafts = mergeNodeDraftPatches(currentNodes);
+    const preparedNodes = mergeTextareaLayoutsFromCanvas(nodesWithDrafts, canvasRef.current);
     if (preparedNodes === currentNodes) return currentNodes;
     nodesRef.current = preparedNodes;
     setNodes(preparedNodes);
@@ -4427,7 +4479,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const rawDelta = event.deltaY || event.deltaX;
     if (!rawDelta) return 0;
     if (event.deltaMode === 1) return rawDelta * wheelLineDeltaScale;
-    if (event.deltaMode === 2) return rawDelta * wheelZoomDeltaPerStep;
+    if (event.deltaMode === 2) return rawDelta * wheelPageDeltaScale;
     return rawDelta;
   }
 
@@ -4436,27 +4488,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return Math.abs(event.deltaX || 0) > 0 || Math.abs(wheelDelta) <= trackpadZoomDeltaThreshold;
   }
 
-  function discreteMouseWheelZoomStep(event, wheelDelta) {
-    const direction = wheelDelta > 0 ? 1 : -1;
-    const timestamp = Number.isFinite(event.timeStamp) ? event.timeStamp : performance.now();
-    const lastDirection = mouseWheelZoomDirectionRef.current;
-    const lastEventAt = mouseWheelZoomLastEventAtRef.current;
-    const directionChanged = lastDirection !== 0 && lastDirection !== direction;
-    const resetGesture = directionChanged || !lastEventAt || timestamp - lastEventAt > mouseWheelZoomResetMs;
-
-    if (resetGesture) mouseWheelZoomAccumulatorRef.current = 0;
-    mouseWheelZoomDirectionRef.current = direction;
-    mouseWheelZoomLastEventAtRef.current = timestamp;
-    mouseWheelZoomAccumulatorRef.current += Math.abs(wheelDelta);
-
-    if (mouseWheelZoomAccumulatorRef.current < wheelZoomDeltaPerStep) return 0;
-    mouseWheelZoomAccumulatorRef.current = 0;
-
-    const lastStepAt = mouseWheelZoomLastStepAtRef.current;
-    if (!directionChanged && lastStepAt && timestamp - lastStepAt < mouseWheelZoomStepCooldownMs) return 0;
-
-    mouseWheelZoomLastStepAtRef.current = timestamp;
-    return direction;
+  function zoomFactorForWheelDelta(event, wheelDelta) {
+    const sensitivity = isLikelyTrackpadZoom(event, wheelDelta) ? trackpadZoomSensitivity : mouseWheelZoomSensitivity;
+    return Math.exp(-clamp(wheelDelta, -wheelZoomDeltaClamp, wheelZoomDeltaClamp) * sensitivity);
   }
 
   function handleCanvasWheel(event) {
@@ -4549,13 +4583,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.ctrlKey || event.metaKey || event.altKey) {
       const wheelDelta = normalizedWheelZoomDelta(event);
       if (wheelDelta) {
-        if (isLikelyTrackpadZoom(event, wheelDelta)) {
-          zoomViewportAtPoint(pointer, Math.exp(-wheelDelta * 0.006));
-          return;
-        }
-
-        const zoomStep = discreteMouseWheelZoomStep(event, wheelDelta);
-        if (zoomStep) zoomViewportAtCanvasCenter(Math.pow(viewportZoomStep, -zoomStep));
+        zoomViewportAtPoint(pointer, zoomFactorForWheelDelta(event, wheelDelta));
       }
       return;
     }
@@ -5464,7 +5492,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
-      storedNode && ["skillDirector", "text"].includes(node?.type)
+      storedNode
         ? {
             ...storedNode,
             data: {
@@ -6224,6 +6252,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onNodeResizeStart={startNodeResize}
                 onRemove={removeNode}
                 onUpdate={updateNode}
+                onDraftPatchChange={updateNodeDraftPatch}
                 onConnectStart={startConnection}
                 onDisconnectInput={disconnectInputPort}
                 connectedPortKeys={connectedPortKeys}
@@ -6657,6 +6686,7 @@ function NodeCard({
   onNodeResizeStart,
   onRemove,
   onUpdate,
+  onDraftPatchChange,
   onConnectStart,
   onDisconnectInput,
   connectedPortKeys,
@@ -6708,7 +6738,16 @@ function NodeCard({
   utilityVideoModelOptions
 }) {
   const config = getNodeConfig(node.type);
-  const nodeData = node.data || {};
+  const rawNodeData = node.data || {};
+  const [draftData, setDraftData] = React.useState({});
+  const draftDataRef = React.useRef({});
+  const pendingDraftPatchRef = React.useRef({});
+  const draftCommitTimerRef = React.useRef(null);
+  const nodeData = React.useMemo(() => ({ ...rawNodeData, ...draftData }), [rawNodeData, draftData]);
+  const renderedNode = React.useMemo(
+    () => (Object.keys(draftData).length ? { ...node, data: nodeData } : node),
+    [draftData, node, nodeData]
+  );
   const Icon = config.icon;
   const nodeColor = nodeColorForData(nodeData);
   const nodeHelp = nodeHelpContent[node.type] || {
@@ -6717,20 +6756,102 @@ function NodeCard({
   };
   const [editingTitle, setEditingTitle] = React.useState(false);
   const [infoOpen, setInfoOpen] = React.useState(false);
-  const [draftTitle, setDraftTitle] = React.useState(nodeData.title || "");
+  const [draftTitle, setDraftTitle] = React.useState(rawNodeData.title || "");
   const cardRef = React.useRef(null);
 
   React.useEffect(() => {
     if (!editingTitle) {
-      setDraftTitle(nodeData.title || "");
+      setDraftTitle(rawNodeData.title || "");
     }
-  }, [nodeData.title, editingTitle]);
+  }, [rawNodeData.title, editingTitle]);
+
+  React.useEffect(() => {
+    const currentDraft = draftDataRef.current;
+    const draftKeys = Object.keys(currentDraft);
+    if (!draftKeys.length) return;
+
+    const nextDraft = {};
+    draftKeys.forEach((key) => {
+      if (!draftValuesMatch(rawNodeData[key], currentDraft[key])) nextDraft[key] = currentDraft[key];
+    });
+
+    if (Object.keys(nextDraft).length === draftKeys.length) return;
+    draftDataRef.current = nextDraft;
+    onDraftPatchChange?.(node.id, nextDraft);
+    setDraftData(nextDraft);
+  }, [rawNodeData, node.id, onDraftPatchChange]);
+
+  React.useEffect(() => () => {
+    if (draftCommitTimerRef.current) window.clearTimeout(draftCommitTimerRef.current);
+    onDraftPatchChange?.(node.id, {});
+  }, [node.id, onDraftPatchChange]);
+
+  const commitDraftUpdates = React.useCallback(() => {
+    if (draftCommitTimerRef.current) {
+      window.clearTimeout(draftCommitTimerRef.current);
+      draftCommitTimerRef.current = null;
+    }
+    const patch = pendingDraftPatchRef.current;
+    if (!Object.keys(patch).length) return;
+    pendingDraftPatchRef.current = {};
+    onUpdate(node.id, patch);
+  }, [node.id, onUpdate]);
+
+  function scheduleDraftCommit() {
+    if (draftCommitTimerRef.current) window.clearTimeout(draftCommitTimerRef.current);
+    draftCommitTimerRef.current = window.setTimeout(commitDraftUpdates, nodeDraftCommitDelayMs);
+  }
+
+  function shouldDraftNodeUpdate(nodeId, patch) {
+    if (nodeId !== node.id || !patch || typeof patch !== "object" || Array.isArray(patch)) return false;
+    const activeElement = document.activeElement;
+    return Boolean(cardRef.current?.contains(activeElement) && isDraftableTextControl(activeElement));
+  }
+
+  function updateDraftData(patch) {
+    pendingDraftPatchRef.current = {
+      ...pendingDraftPatchRef.current,
+      ...patch
+    };
+    draftDataRef.current = {
+      ...draftDataRef.current,
+      ...patch
+    };
+    onDraftPatchChange?.(node.id, draftDataRef.current);
+    setDraftData(draftDataRef.current);
+    scheduleDraftCommit();
+  }
+
+  function handleNodeUpdate(nodeId, patch) {
+    if (shouldDraftNodeUpdate(nodeId, patch)) {
+      updateDraftData(patch);
+      return;
+    }
+    if (nodeId === node.id) commitDraftUpdates();
+    onUpdate(nodeId, patch);
+  }
+
+  function handleNodeRun(runNode) {
+    commitDraftUpdates();
+    onRun({
+      ...runNode,
+      data: {
+        ...runNode.data,
+        ...draftDataRef.current,
+        ...pendingDraftPatchRef.current
+      }
+    });
+  }
+
+  function handleBlurCapture(event) {
+    if (isDraftableTextControl(event.target)) commitDraftUpdates();
+  }
 
   React.useLayoutEffect(() => {
     const card = cardRef.current;
     if (!card) return;
-    const savedHeights = normalizedTextareaHeights(node.data.textareaHeights);
-    const savedWidths = normalizedTextareaWidths(node.data.textareaWidths);
+    const savedHeights = normalizedTextareaHeights(rawNodeData.textareaHeights);
+    const savedWidths = normalizedTextareaWidths(rawNodeData.textareaWidths);
     card.querySelectorAll("textarea").forEach((textarea, index) => {
       const storageKey = nodeTextareaStorageKey(textarea, index);
       const savedHeight = savedHeights[storageKey];
@@ -6738,7 +6859,7 @@ function NodeCard({
       if (savedHeight) textarea.style.height = `${savedHeight}px`;
       if (savedWidth) textarea.style.width = `${savedWidth}px`;
     });
-  }, [node.id, node.type, node.data.textareaHeights, node.data.textareaWidths]);
+  }, [node.id, node.type, rawNodeData.textareaHeights, rawNodeData.textareaWidths]);
 
   function beginTextareaResize(event) {
     const textarea = event.target.closest?.("textarea");
@@ -6767,13 +6888,13 @@ function NodeCard({
 
   function commitTitleEdit() {
     const title = draftTitle.trim() || nodeData.title || configTitleFallback(node.type);
-    onUpdate(node.id, { title });
+    handleNodeUpdate(node.id, { title });
     setDraftTitle(title);
     setEditingTitle(false);
   }
 
   function cancelTitleEdit() {
-    setDraftTitle(nodeData.title || "");
+    setDraftTitle(rawNodeData.title || "");
     setEditingTitle(false);
   }
 
@@ -6803,7 +6924,8 @@ function NodeCard({
       }}
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}
-      onPointerDown={(event) => onDragStart(event, node)}
+      onBlurCapture={handleBlurCapture}
+      onPointerDown={(event) => onDragStart(event, renderedNode)}
     >
       <div className="node-title">
         <span className="node-title-label">
@@ -6847,7 +6969,7 @@ function NodeCard({
               {nodeData.title || configTitleFallback(node.type)}
             </span>
           )}
-          <NodeColorPicker color={nodeColor} onChange={(color) => onUpdate(node.id, { nodeColor: color })} />
+          <NodeColorPicker color={nodeColor} onChange={(color) => handleNodeUpdate(node.id, { nodeColor: color })} />
         </span>
         <span className="node-title-actions" onPointerDown={(event) => event.stopPropagation()}>
           <span className="node-info-wrap">
@@ -6881,11 +7003,11 @@ function NodeCard({
       </div>
 
       <NodeBody
-        node={node}
-        onUpdate={onUpdate}
+        node={renderedNode}
+        onUpdate={handleNodeUpdate}
         incoming={incoming}
         incomingByNode={incomingByNode}
-        onRun={onRun}
+        onRun={handleNodeRun}
         onCreateBrushMask={onCreateBrushMask}
         running={running}
         onConnectStart={onConnectStart}
@@ -6933,7 +7055,7 @@ function NodeCard({
       <button
         type="button"
         className="node-width-resize-handle"
-        onPointerDown={(event) => onNodeResizeStart(event, node)}
+        onPointerDown={(event) => onNodeResizeStart(event, renderedNode)}
         title="Resize node"
         aria-label="Resize node"
       >
