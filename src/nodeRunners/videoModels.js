@@ -115,6 +115,7 @@ export function buildUtilityVideoRequest({
   return {
     prompt,
     model,
+    dwposeDrawMode: node.data.dwposeDrawMode || "body-pose",
     startFrameUrls,
     endFrameUrls,
     referenceImageUrls,

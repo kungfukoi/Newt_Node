@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  compositeVideoBlendModeOptions,
   utilityImageModelNames,
   utilityImageModelOptions,
   utilityVideoModelNames,
@@ -12,4 +13,21 @@ test("Topaz upscalers are exposed in both Utility model tabs", () => {
   assert.equal(utilityVideoModelNames.topazUpscaler, "Topaz Video Upscale");
   assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.topazUpscaler));
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazUpscaler));
+});
+
+test("DWPose Video is exposed in Utility video models", () => {
+  assert.equal(utilityVideoModelNames.dwposeVideo, "DWPose Video");
+  assert.ok(
+    utilityVideoModelOptions.includes(utilityVideoModelNames.dwposeVideo)
+  );
+});
+
+test("Composite Video exposes standard blend modes", () => {
+  const modes = Object.fromEntries(compositeVideoBlendModeOptions);
+
+  assert.equal(modes.normal, "Normal");
+  assert.equal(modes.multiply, "Multiply");
+  assert.equal(modes.screen, "Screen");
+  assert.equal(modes.overlay, "Overlay");
+  assert.equal(modes.addition, "Add");
 });

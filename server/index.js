@@ -42,7 +42,7 @@ import {
   relocatedWorkflowPackageAssetFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
-import { normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -4535,6 +4535,13 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "fal-dwpose-video") {
+      return runDwposeUtilityVideo(req, res, {
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
     if (selectedVideoModel.provider === "fal-depth-anything-video") {
       return runDepthAnythingUtilityVideo(req, res, {
         referenceVideoUrls,
@@ -4715,17 +4722,12 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
     return res.status(400).json({ error: "Composite Video requires a base video and a layer video connected to Video." });
   }
 
-  const maskVideoUrl = firstLocalOutput(maskVideoUrls);
-  if (!maskVideoUrl) {
-    return res.status(400).json({ error: "Composite Video requires a connected mask video." });
-  }
-
   return res.json(
     await createCompositeVideoResult({
       body: req.body,
       baseVideoUrl: firstLocalOutput(referenceVideoUrls),
       layerVideoUrl: firstLocalOutput(referenceVideoUrls.slice(-1)),
-      maskVideoUrl
+      maskVideoUrl: firstLocalOutput(maskVideoUrls) || ""
     })
   );
 }
@@ -7137,6 +7139,98 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
       localUrl: output.publicPath,
       fileName: output.fileName
     }))
+  });
+}
+
+async function runDwposeUtilityVideo(req, res, { referenceVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: "DWPose Video requires a connected video." });
+  }
+
+  const endpoint = selectedVideoModel.id;
+  const drawMode = normalizeChoice(
+    req.body.dwposeDrawMode,
+    [
+      "full-pose",
+      "body-pose",
+      "face-pose",
+      "hand-pose",
+      "face-hand-mask",
+      "face-mask",
+      "hand-mask"
+    ],
+    "body-pose"
+  );
+  const input = {
+    video_url: await uploadLocalOutputToFal(videoUrl),
+    draw_mode: drawMode
+  };
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo =
+    normalizeFalFile(result?.data?.video) ||
+    findFalMediaFile(result?.data, "video/");
+
+  if (!remoteVideo?.url) {
+    return res.status(502).json({
+      error: "Fal returned no DWPose Video URL.",
+      raw: result?.data
+    });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, "dwpose-video");
+  const outputVideo = enrichVideoMetadata(
+    remoteVideo,
+    await probeVideoFile(output.filePath)
+  );
+  const timingSeconds = falTimingSeconds(result);
+  const cost = estimateFalVideoUtilityCost({
+    endpoint,
+    amountUsd: costFromTiming(result, dwposeCostPerComputeSecond),
+    unitRateUsd: dwposeCostPerComputeSecond,
+    units: timingSeconds,
+    unit: "compute second",
+    pricingBasis:
+      "DWPose fal.ai video utility estimate at $0.0006 per compute second",
+    pricingSource: "fal-model-page-2026-07-31"
+  });
+  const text = `DWPose ${drawMode.replace(/-/g, " ")} video pose map.`;
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "DWPose video pose preprocessor",
+    prompt: text,
+    submittedPrompt: text,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      drawMode,
+      sourceVideoCount: 1,
+      computeSeconds: timingSeconds || null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
   });
 }
 
@@ -9938,12 +10032,15 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
   try {
     const baseVideo = await resolveLocalAssetPathFromUrl(baseVideoUrl);
     const layerVideo = await resolveLocalAssetPathFromUrl(layerVideoUrl);
-    const maskVideo = await resolveLocalAssetPathFromUrl(maskVideoUrl);
+    const maskVideo = maskVideoUrl ? await resolveLocalAssetPathFromUrl(maskVideoUrl) : null;
     const baseMetadata = await probeVideoFile(baseVideo.filePath);
     const options = body.compositeVideo && typeof body.compositeVideo === "object" ? body.compositeVideo : {};
     const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
     const output = await createManagedAssetTarget({ body }, "composite-video", videoOutputExtension(outputFormat), workflowPackageOutputDirName);
     outputPath = output.filePath;
+    const blendMode = normalizeChoice(options.blendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal");
+    const blendLabel = compositeVideoBlendModeOptions.find(([value]) => value === blendMode)?.[1] || "Normal";
+    const mixAmount = clampNumber(options.mixAmount, 0, 100, 100);
     const invertMask = Boolean(options.invertMask);
     const maskBlur = clampNumber(options.maskBlur, 0, 24, 0);
     const maskExpand = clampInteger(options.maskExpand, -12, 12, 0);
@@ -9951,9 +10048,11 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
     await compositeVideoWithFfmpeg({
       basePath: baseVideo.filePath,
       layerPath: layerVideo.filePath,
-      maskPath: maskVideo.filePath,
+      maskPath: maskVideo?.filePath || "",
       outputPath,
       baseMetadata,
+      blendMode,
+      mixAmount,
       invertMask,
       maskBlur,
       maskExpand,
@@ -9963,7 +10062,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
     const outputStats = await stat(outputPath);
     const outputMetadata = await probeVideoFile(outputPath);
     const localUrl = output.publicPath;
-    const text = "Composite video.";
+    const text = `${blendLabel} video mix at ${mixAmount}%${maskVideo ? " with mask" : ""}.`;
     const cost = {
       amountUsd: 0,
       currency: "USD",
@@ -9971,7 +10070,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
       units: 1,
       unit: "local composite",
       mediaType: "video",
-      pricingBasis: "Local ffmpeg masked video composite",
+      pricingBasis: "Local ffmpeg video layer mix",
       pricingSource: "local-composite-video"
     };
 
@@ -9982,7 +10081,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
       provider: "local",
       modelName: "Composite Video",
       endpoint: "local/composite-video",
-      mode: "Masked video composite",
+      mode: maskVideo ? "Masked video layer mix" : "Video layer mix",
       prompt: text,
       submittedPrompt: text,
       project: projectFromBody(body),
@@ -9991,7 +10090,9 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
         model: "Composite Video",
         baseVideoUrl,
         layerVideoUrl,
-        maskVideoUrl,
+        maskVideoUrl: maskVideoUrl || null,
+        blendMode,
+        mixAmount,
         invertMask,
         maskBlur,
         maskExpand,
@@ -11083,20 +11184,82 @@ async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selec
   await runFfmpeg(args, "Color ID video matte", 600000);
 }
 
-async function compositeVideoWithFfmpeg({ basePath, layerPath, maskPath, outputPath, baseMetadata, invertMask, maskBlur, maskExpand, outputFormat }) {
+async function compositeVideoWithFfmpeg({
+  basePath,
+  layerPath,
+  maskPath,
+  outputPath,
+  baseMetadata,
+  blendMode,
+  mixAmount,
+  invertMask,
+  maskBlur,
+  maskExpand,
+  outputFormat
+}) {
   const width = Math.max(2, Math.round(Number(baseMetadata.width || 0)) || 1280);
   const height = Math.max(2, Math.round(Number(baseMetadata.height || 0)) || 720);
-  const maskFilters = ["setpts=PTS-STARTPTS", `scale=${width}:${height}:flags=bicubic`, "format=gray"];
-  if (invertMask) maskFilters.push("negate");
-  maskFilters.push(...matteCleanupFilterParts({ blur: maskBlur, expand: maskExpand }));
+  const normalizedBlendMode = normalizeChoice(
+    blendMode,
+    compositeVideoBlendModeOptions.map(([value]) => value),
+    "normal"
+  );
+  const opacity = clampNumber(mixAmount, 0, 100, 100) / 100;
+  const hasMask = Boolean(maskPath);
+  const ffmpegBlendMode = {
+    overlay: "hardlight",
+    hardlight: "overlay"
+  }[normalizedBlendMode] || normalizedBlendMode;
+  const swapBlendInputs = ["softlight", "subtract", "divide"].includes(normalizedBlendMode);
+  const blendTop = swapBlendInputs ? "base_blend" : "layer";
+  const blendBottom = swapBlendInputs ? "layer" : "base_blend";
+  const layerWeight = opacity.toFixed(6);
+  const baseWeight = (1 - opacity).toFixed(6);
 
-  const filter = [
-    `[0:v]setpts=PTS-STARTPTS,format=rgba[base]`,
-    `[1:v]setpts=PTS-STARTPTS,scale=${width}:${height}:flags=bicubic,format=rgb24[layer]`,
-    `[2:v]${maskFilters.join(",")}[mask]`,
-    "[layer][mask]alphamerge[layer_alpha]",
-    "[base][layer_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
-  ].join(";");
+  // FFmpeg's blend filter needs planar RGB; packed RGB shifts color channels.
+  const baseFilters = [
+    "setpts=PTS-STARTPTS",
+    `scale=${width}:${height}:flags=bicubic`,
+    "setsar=1",
+    "format=gbrp"
+  ];
+  const layerFilters = [
+    "setpts=PTS-STARTPTS",
+    `scale=${width}:${height}:flags=bicubic`,
+    "setsar=1",
+    "format=gbrp"
+  ];
+  const filter = [];
+  const baseSplitCount = hasMask ? 3 : 2;
+  const baseSplitLabels = hasMask
+    ? "[base_blend][base_mix][base_output]"
+    : "[base_blend][base_mix]";
+
+  filter.push(
+    `[0:v]${baseFilters.join(",")},split=${baseSplitCount}${baseSplitLabels}`,
+    `[1:v]${layerFilters.join(",")}[layer]`,
+    `[${blendTop}][${blendBottom}]blend=all_mode=${ffmpegBlendMode}:all_opacity=1:shortest=1[blended]`,
+    `[blended][base_mix]blend=all_expr=A*${layerWeight}+B*${baseWeight}:shortest=1[mixed]`
+  );
+
+  if (hasMask) {
+    const maskFilters = [
+      "setpts=PTS-STARTPTS",
+      `scale=${width}:${height}:flags=bicubic`,
+      "setsar=1",
+      "format=gray"
+    ];
+    if (invertMask) maskFilters.push("negate");
+    maskFilters.push(...matteCleanupFilterParts({ blur: maskBlur, expand: maskExpand }));
+    filter.push(
+      `[2:v]${maskFilters.join(",")}[mask]`,
+      "[mixed][mask]alphamerge[mixed_alpha]",
+      "[base_output][mixed_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
+    );
+  } else {
+    filter.push("[mixed]format=yuv420p[out]");
+  }
+
   const args = [
     "-hide_banner",
     "-loglevel",
@@ -11105,17 +11268,18 @@ async function compositeVideoWithFfmpeg({ basePath, layerPath, maskPath, outputP
     "-i",
     basePath,
     "-i",
-    layerPath,
-    "-i",
-    maskPath,
+    layerPath
+  ];
+  if (hasMask) args.push("-i", maskPath);
+  args.push(
     "-filter_complex",
-    filter,
+    filter.join(";"),
     "-map",
     "[out]",
     "-map",
     "0:a?",
     "-shortest"
-  ];
+  );
 
   addVideoEncoderArgs(args, outputFormat);
   args.push("-c:a", "aac", outputPath);
@@ -14419,6 +14583,15 @@ function resolveUtilityVideoModel(model) {
       displayName: "SAM 3 Video",
       id: "fal-ai/sam-3/video",
       requiresPrompt: true
+    };
+  }
+
+  if (normalized.includes("dwpose") && normalized.includes("video")) {
+    return {
+      provider: "fal-dwpose-video",
+      displayName: "DWPose Video",
+      id: "fal-ai/dwpose/video",
+      requiresPrompt: false
     };
   }
 

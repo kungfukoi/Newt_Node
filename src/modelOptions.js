@@ -251,6 +251,7 @@ export const utilityVideoModelNames = {
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID to Matte",
   compositeVideo: "Composite Video",
+  dwposeVideo: "DWPose Video",
   depthAnythingVideo: "Depth Anything Video",
   wanBlend: "WanBlend",
   videoStitch: "WanWarp",
@@ -274,6 +275,7 @@ export const utilityVideoModelOptions = [
   utilityVideoModelNames.extractFrame,
   utilityVideoModelNames.colorIdMatte,
   utilityVideoModelNames.compositeVideo,
+  utilityVideoModelNames.dwposeVideo,
   utilityVideoModelNames.depthAnythingVideo,
   utilityVideoModelNames.wanBlend,
   utilityVideoModelNames.videoStitch,
@@ -399,6 +401,23 @@ export const colorIdMatteVideoOutputOptions = [
   ["webm", "WebM mask"],
   ["mov", "ProRes mask"]
 ];
+export const compositeVideoBlendModeOptions = [
+  ["normal", "Normal"],
+  ["multiply", "Multiply"],
+  ["screen", "Screen"],
+  ["overlay", "Overlay"],
+  ["softlight", "Soft Light"],
+  ["hardlight", "Hard Light"],
+  ["darken", "Darken"],
+  ["lighten", "Lighten"],
+  ["dodge", "Color Dodge"],
+  ["burn", "Color Burn"],
+  ["difference", "Difference"],
+  ["exclusion", "Exclusion"],
+  ["addition", "Add"],
+  ["subtract", "Subtract"],
+  ["divide", "Divide"]
+];
 export const wan22A14bResolutionOptions = ["480p", "580p", "720p"];
 export const wan22A14bT2vAspectRatioOptions = ["16:9", "9:16", "1:1"];
 export const wan22A14bI2vAspectRatioOptions = ["auto", "16:9", "9:16", "1:1"];
@@ -427,7 +446,8 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.wanFunControl]: "Legacy Wan Fun Control alias. New runs route to Wan 2.2 VACE Fun A14B Depth.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white matte video from picked source-video Color IDs.",
-  [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
+  [utilityVideoModelNames.compositeVideo]: "Mixes a layer video over a base video with standard blend modes and an optional mask.",
+  [utilityVideoModelNames.dwposeVideo]: "Creates a pose/control-map video from a connected source video with selectable body, face, hand, or mask drawing modes.",
   [utilityVideoModelNames.depthAnythingVideo]: "Creates a temporally consistent depth-map video from a connected source video with Video Depth Anything.",
   [utilityVideoModelNames.wanBlend]: "Runs the local ComfyUI context-smashing attention-mask workflow from connected color-region images and a color-mask video.",
   [utilityVideoModelNames.videoStitch]: "Runs the local ComfyUI WanWarp workflow from connected WanSegment configs or refines a WanBlend video with motion/depth controls.",

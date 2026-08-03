@@ -143,6 +143,7 @@ import {
   depthAnythingVideoResolutionOptions,
   characterTraitOptions,
   colorIdMatteVideoOutputOptions,
+  compositeVideoBlendModeOptions,
   enabledImageModelOptions,
   enabledUtilityImageModelOptions,
   enabledUtilityVideoModelOptions,
@@ -5524,6 +5525,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         utilityMode(currentNode) === "video" &&
         (isUtilitySam3VideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityBirefnetVideoModel(currentNode.data.utilityVideoModel) ||
+          isUtilityDwposeVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
@@ -11669,6 +11671,7 @@ function NodeBody({
     const isSam3Video = isUtilitySam3VideoModel(utilityVideoModel);
     const isVoidVideo = isUtilityVoidVideoModel(utilityVideoModel);
     const isBirefnetVideo = isUtilityBirefnetVideoModel(utilityVideoModel);
+    const isDWPoseVideo = isUtilityDwposeVideoModel(utilityVideoModel);
     const isDepthAnythingVideo = isUtilityDepthAnythingVideoModel(utilityVideoModel);
     const isRifeVideo = isUtilityRifeVideoModel(utilityVideoModel);
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
@@ -11737,6 +11740,7 @@ function NodeBody({
     const canRun = isVideoMode
       ? hasRequiredReferenceVideo &&
         (isBirefnetVideo ||
+          isDWPoseVideo ||
           isDepthAnythingVideo ||
           isRifeVideo ||
           isExtractFrameVideo ||
@@ -11749,7 +11753,7 @@ function NodeBody({
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
-        (!isCompositeVideo || Boolean(incoming.maskVideoIn?.length) && (incoming.referenceVideoIn?.length || 0) >= 2) &&
+        (!isCompositeVideo || (incoming.referenceVideoIn?.length || 0) >= 2) &&
         (!isWanBlend || Boolean(incoming.referenceVideoIn?.length) && wanBlendImageCount > 0) &&
         (!isVideoStitch || wanWarpSegmentCount >= 1 || wanWarpBlendRefineReady) &&
         (!isTransitionBuilder || hasWanSegmentInputs && Boolean(promptValue.trim())) &&
@@ -11766,8 +11770,10 @@ function NodeBody({
           ? "Run VOID"
           : isBirefnetVideo
             ? "Run BiRefNet Video"
-            : isDepthAnythingVideo
-              ? "Run Depth Video"
+            : isDWPoseVideo
+              ? "Run DWPose Video"
+              : isDepthAnythingVideo
+                ? "Run Depth Video"
               : isRifeVideo
                 ? "Run RIFE"
                 : isExtractFrameVideo
@@ -11814,14 +11820,14 @@ function NodeBody({
                 : "Run DWPose";
     const utilityDescription = utilityModelDescription(isVideoMode ? utilityVideoModel : utilityImageModel);
     const referenceVideoLabel = isCompositeVideo
-      ? "Base + Layer"
+      ? "Base + Layer 1"
       : isWanBlend
         ? "Color Map"
       : isVideoStitch
         ? "WanBlend / Segments"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isSam3Video || isBirefnetVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
+        : isSam3Video || isBirefnetVideo || isDWPoseVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
           ? "Video"
           : isVoidVideo
             ? "Source Video"
@@ -11909,12 +11915,12 @@ function NodeBody({
                   {!utilityVideoModelOptions.includes(utilityVideoModel) && <option hidden>{utilityVideoModel}</option>}
                 </select>
               </NodeRow>
-              {!isBirefnetVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
+              {!isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -11930,7 +11936,22 @@ function NodeBody({
                   <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
                 </NodeRow>
               )}
-              {isSam3Video ? (
+              {isDWPoseVideo ? (
+                <NodeRow label="Draw Mode">
+                  <select
+                    value={node.data.dwposeDrawMode || "body-pose"}
+                    onChange={(event) => onUpdate(node.id, { dwposeDrawMode: event.target.value })}
+                  >
+                    <option value="body-pose">Body Pose</option>
+                    <option value="full-pose">Full Pose</option>
+                    <option value="face-pose">Face Pose</option>
+                    <option value="hand-pose">Hand Pose</option>
+                    <option value="face-hand-mask">Face + Hand Mask</option>
+                    <option value="face-mask">Face Mask</option>
+                    <option value="hand-mask">Hand Mask</option>
+                  </select>
+                </NodeRow>
+              ) : isSam3Video ? (
                 <NodeRow label="Threshold">
                   <input type="number" min="0" max="1" step="0.05" value={node.data.sam3VideoDetectionThreshold ?? 0.5} onChange={(event) => onUpdate(node.id, { sam3VideoDetectionThreshold: event.target.value })} />
                 </NodeRow>
@@ -13431,36 +13452,52 @@ function CompositeVideoControls({ incoming, maskVideoPort, settingsOpen, node, o
   const maskConnected = Boolean(incoming.maskVideoIn?.length);
   const blur = colorIdMatteBlur(node.data.compositeMaskBlur);
   const expand = colorIdMatteExpand(node.data.compositeMaskExpand);
+  const blendMode = normalizeChoice(node.data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal");
+  const mixAmount = clampedNumber(node.data.compositeMixAmount, 0, 100, 100);
   const outputFormat = normalizeChoice(node.data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4");
 
   return (
     <>
       <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
+        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Optional mask")}</button>
       </NodeRow>
-      <NodeRow label="Mode">
-        <div className="utility-mini-note">Reference image and mask video are required. Source video is optional.</div>
+      <NodeRow label="Layers">
+        <div className="utility-mini-note">{videoCount >= 2 ? "First: Base | Last: Layer 1" : "Connect Base, then Layer 1."}</div>
       </NodeRow>
-      <NodeRow label="Inputs">
-        <div className="utility-mini-note">{videoCount >= 2 ? "First video is base, last video is layer." : "Connect base and layer videos to the Video input."}</div>
+      <NodeRow label="Blend Mode">
+        <select value={blendMode} onChange={(event) => onUpdate(node.id, { compositeBlendMode: event.target.value })}>
+          {compositeVideoBlendModeOptions.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
       </NodeRow>
-      <NodeRow label="Invert Mask">
-        <button className={`node-toggle ${node.data.compositeInvertMask ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { compositeInvertMask: !node.data.compositeInvertMask })}>
-          <span />
-        </button>
-      </NodeRow>
-      <NodeRow label="Mask Blur">
+      <NodeRow label="Mix">
         <div className="color-id-slider">
-          <input type="range" min="0" max="24" step="0.5" value={blur} onChange={(event) => onUpdate(node.id, { compositeMaskBlur: event.target.value })} />
-          <span>{blur}</span>
+          <input type="range" min="0" max="100" step="1" value={mixAmount} onChange={(event) => onUpdate(node.id, { compositeMixAmount: event.target.value })} />
+          <span>{mixAmount}%</span>
         </div>
       </NodeRow>
-      <NodeRow label="Expand">
-        <div className="color-id-slider">
-          <input type="range" min="-12" max="12" step="1" value={expand} onChange={(event) => onUpdate(node.id, { compositeMaskExpand: event.target.value })} />
-          <span>{expand}</span>
-        </div>
-      </NodeRow>
+      {maskConnected && (
+        <>
+        <NodeRow label="Invert Mask">
+          <button className={`node-toggle ${node.data.compositeInvertMask ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { compositeInvertMask: !node.data.compositeInvertMask })}>
+            <span />
+          </button>
+        </NodeRow>
+        <NodeRow label="Mask Blur">
+          <div className="color-id-slider">
+            <input type="range" min="0" max="24" step="0.5" value={blur} onChange={(event) => onUpdate(node.id, { compositeMaskBlur: event.target.value })} />
+            <span>{blur}</span>
+          </div>
+        </NodeRow>
+        <NodeRow label="Expand">
+          <div className="color-id-slider">
+            <input type="range" min="-12" max="12" step="1" value={expand} onChange={(event) => onUpdate(node.id, { compositeMaskExpand: event.target.value })} />
+            <span>{expand}</span>
+          </div>
+        </NodeRow>
+        </>
+      )}
       <NodeRow label="Format">
         <select value={outputFormat} onChange={(event) => onUpdate(node.id, { compositeOutputFormat: event.target.value })}>
           {colorIdMatteVideoOutputOptions.map(([value, label]) => (
@@ -15027,6 +15064,8 @@ function createDefaultNodeData(type, label, count) {
       colorIdMatteStartTime: "",
       colorIdMatteEndTime: "",
       colorIdMatteOutputFormat: "mp4",
+      compositeBlendMode: "normal",
+      compositeMixAmount: 100,
       compositeInvertMask: false,
       compositeMaskBlur: 0,
       compositeMaskExpand: 0,
@@ -15789,6 +15828,11 @@ function isUtilityBirefnetVideoModel(model) {
   return String(model || "").toLowerCase().includes("birefnet");
 }
 
+function isUtilityDwposeVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("dwpose") && normalized.includes("video");
+}
+
 function isUtilityDepthAnythingVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("depth") && normalized.includes("anything") && normalized.includes("video");
@@ -15984,6 +16028,18 @@ function utilityVideoModelSelectionPatch(model) {
     };
   }
 
+  if (isUtilityCompositeVideoModel(model)) {
+    return {
+      ...patch,
+      compositeBlendMode: "normal",
+      compositeMixAmount: 100,
+      compositeInvertMask: false,
+      compositeMaskBlur: 0,
+      compositeMaskExpand: 0,
+      compositeOutputFormat: "mp4"
+    };
+  }
+
   if (isUtilityWanBlendModel(model)) {
     return {
       ...patch,
@@ -16053,6 +16109,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   }
 
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
+  if (isUtilityDwposeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -16110,6 +16167,7 @@ function normalizedUtilityVideoModelName(model) {
   if (normalized.includes("vace") && normalized.includes("inpaint")) return utilityVideoModelNames.wanVaceInpainting;
   if (normalized.includes("vace")) return utilityVideoModelNames.wanVaceMaskToVideo;
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
+  if (isUtilityDwposeVideoModel(normalized)) return utilityVideoModelNames.dwposeVideo;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
   if (isUtilityDepthAnythingVideoModel(normalized)) return utilityVideoModelNames.depthAnythingVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
@@ -18224,6 +18282,8 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
       outputFormat: node.data.colorIdMatteOutputFormat || "mp4"
     },
     compositeVideo: {
+      blendMode: normalizeChoice(node.data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal"),
+      mixAmount: clampedNumber(node.data.compositeMixAmount, 0, 100, 100),
       invertMask: Boolean(node.data.compositeInvertMask),
       maskBlur: colorIdMatteBlur(node.data.compositeMaskBlur),
       maskExpand: colorIdMatteExpand(node.data.compositeMaskExpand),
@@ -21089,6 +21149,8 @@ function normalizeUtilityData(data = {}) {
     colorIdMatteStartTime: data.colorIdMatteStartTime ?? "",
     colorIdMatteEndTime: data.colorIdMatteEndTime ?? "",
     colorIdMatteOutputFormat: normalizeChoice(data.colorIdMatteOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
+    compositeBlendMode: normalizeChoice(data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal"),
+    compositeMixAmount: clampedNumber(data.compositeMixAmount, 0, 100, 100),
     compositeInvertMask: Boolean(data.compositeInvertMask),
     compositeMaskBlur: colorIdMatteBlur(data.compositeMaskBlur),
     compositeMaskExpand: colorIdMatteExpand(data.compositeMaskExpand),

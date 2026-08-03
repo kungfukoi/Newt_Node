@@ -534,6 +534,50 @@ test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
   assert.equal(request.depthAnythingVideo.sideBySide, true);
 });
 
+test("buildUtilityVideoRequest preserves DWPose Video draw mode", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-dwpose-video",
+      data: {
+        title: "Utility",
+        dwposeDrawMode: "full-pose"
+      }
+    },
+    prompt: "",
+    model: "DWPose Video",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project"
+  });
+
+  assert.equal(request.dwposeDrawMode, "full-pose");
+});
+
+test("buildUtilityVideoRequest preserves Composite Video mix settings", () => {
+  const compositeVideo = {
+    blendMode: "multiply",
+    mixAmount: 65,
+    invertMask: false,
+    maskBlur: 0,
+    maskExpand: 0,
+    outputFormat: "mp4"
+  };
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-composite-video",
+      data: { title: "Utility" }
+    },
+    prompt: "",
+    model: "Composite Video",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    compositeVideo
+  });
+
+  assert.deepEqual(request.compositeVideo, compositeVideo);
+});
+
 test("ensureRunSuccesses preserves original error metadata", () => {
   const error = new Error("google said no");
   error.providerDiagnostic = { provider: "google", status: 429 };
