@@ -22,6 +22,11 @@ test("DWPose Video is exposed in Utility video models", () => {
   );
 });
 
+test("legacy Wan Fun Control is hidden from Utility video models", () => {
+  assert.equal(utilityVideoModelNames.wanFunControl, "Wan Fun Control");
+  assert.equal(utilityVideoModelOptions.includes(utilityVideoModelNames.wanFunControl), false);
+});
+
 test("Composite Video exposes standard blend modes", () => {
   const modes = Object.fromEntries(compositeVideoBlendModeOptions);
 

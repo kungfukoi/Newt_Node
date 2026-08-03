@@ -290,7 +290,6 @@ export const utilityVideoModelNames = {
   topazUpscaler: "Topaz Video Upscale"
 };
 export const utilityVideoModelOptions = [
-  utilityVideoModelNames.wanFunControl,
   utilityVideoModelNames.extractFrame,
   utilityVideoModelNames.colorIdMatte,
   utilityVideoModelNames.compositeVideo,
