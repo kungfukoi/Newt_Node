@@ -1,3 +1,5 @@
+export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
+
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
 export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
@@ -8,8 +10,8 @@ export const imageModelNames = {
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
-  krea2Large: "Krea 2 Large",
-  lumaDreamMachine: "Luma Dream Machine"
+  reve21: "REVE 2.1",
+  krea2Large: "Krea 2 Large"
 };
 export const imageModelOptions = [
   imageModelNames.zImage,
@@ -17,19 +19,17 @@ export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.krea2Large,
-  imageModelNames.lumaDreamMachine
+  imageModelNames.reve21,
+  imageModelNames.krea2Large
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
 export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
 export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
-export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedream5ResolutionOptions = ["2K", "1K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
 export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
-export const seedanceFastVideoResolutionOptions = ["720p", "480p"];
 export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
 export const klingO3ProDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const klingO3ProResolutionOptions = ["1080p"];
@@ -40,20 +40,35 @@ export const klingO34kAspectRatioOptions = klingO3ProAspectRatioOptions;
 export const geminiOmniDurationOptions = Array.from({ length: 8 }, (_value, index) => `${index + 3} seconds`);
 export const geminiOmniResolutionOptions = ["720p"];
 export const geminiOmniAspectRatioOptions = ["16:9", "9:16"];
-export const lumaVideoDurationOptions = ["5 seconds", "9 seconds"];
-export const lumaVideoResolutionOptions = ["540p", "720p", "1080p"];
-export const lumaVideoAspectRatioOptions = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 export const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 
 export const stylePresetPrompts = {
   None: "",
-  Cinematic:
+  "Cinematic Indie":
+    "High-end cinematic still frame from an indie film, shot on 35mm film, soft prime lens, high dynamic range. High quality refurbished vintage lens. Any captured motion within the composition needs to have realistic motion blur based off of a 24fps film. Must have dynamic framing, atmospheric cinematography, subtle halation. Realistic low contrast and muted color grade. Shallow depth of field, gentle lens bloom, heavy 35mm film grain, realistic lens edge distortions, atmospheric haze, imperfect real-camera texture, high production value, classic film look.",
+  "Cinematic Standard":
     "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, gentle lens bloom, fine film grain, realistic lens softness, slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.",
+  "Cinematic Commercial":
+    "Polished commercial image, premium advertising style, shot on ARRI Alexa, high quality prime lens, high dynamic range clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
+  "UGC Device":
+    "UGC, Low-end phone photo, shot on iPhone, standard lens, realistic, imperfect real-phone capture, low production value, social media look, User Generated Content. No graphics. No foreground phone seen.",
+  "Photography Color":
+    "High-end digital color photography image, shot on a mirrorless medium-format body, high quality vintage lens, high dynamic range, fine film grain, realistic lens softness, high end print campaign, slight atmospheric haze, imperfect real-camera texture, high production value, high resolution system, polished commercial image, premium advertising style.",
+  "Photography B&W":
+    "High-end digital black and white photography image, shot on a mirrorless medium-format body, high quality refurbished vintage lens, high contrast, film grain, realistic lens softness, high end print campaign, slight atmospheric haze, imperfect real-camera texture, high production value, high resolution system, polished commercial image, unique style.",
+  "Photography Film":
+    "High-end color photography image with refurbished vintage lens, shot on real analog camera with real photography film, fine film grain, realistic lens softness, slight atmospheric haze, imperfect real-camera texture, natural and authentic artistic image with unique compositions and style.",
+  "Painterly 3D":
+    "Cinematic painterly 3D animation with expressive hand-painted textures, graphic 2D accents layered over dimensional animation, sculpted features, slightly exaggerated proportions, visible brushwork, dramatic chiaroscuro lighting, rich jewel tones contrasted with smoky shadows, atmospheric haze, elegant steampunk-fantasy design, emotionally intense, dynamic asymmetrical composition, concept-art finish, sophisticated prestige-animation aesthetic, no text, no watermark.",
+  "80s Animation":
+    "Hand-drawn 2D animation inspired by 1980s Saturday-morning cartoons, bold black outlines, simplified features, airbrushed cel shading, saturated color palette, painted background, very subtle film grain, very subtle analog VHS softness, retro-futuristic atmosphere, dynamic composition, authentic animation-cel appearance, no text, no watermark.",
+  "90s Animation":
+    "Hand-drawn 2D animation inspired by 1990s television cartoons, clean varied linework, angular and expressive design, bright flat colors, minimal cel shading, exaggerated action, colorful painted background, playful attitude, crisp animation-frame composition, very subtle broadcast-era texture, no text, no watermark.",
+  "Pixel Art":
+    "Polished 16-bit pixel art, crisp deliberate pixel clusters, limited color palette, strong readable silhouette, detailed sprite shading, dramatic pixel lighting, retro video-game environment, layered background, authentic 1990s console aesthetic, nearest-neighbor sharpness, no smoothing, no anti-aliasing, no text, no watermark.",
   Storyboard:
     "Minimal hand-drawn digital storyboard frame, clean black ink line drawing, simple shapes, light grayscale blocking only, open white negative space, production-planning clarity, readable silhouettes, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. Not a realistic black-and-white photograph, not photorealistic grayscale, no photographic skin texture, no photo lighting, no heavy shading, no dense detail, no 3D render. No text or numbers unless described. No frame borders.",
-  Commercial:
-    "Polished commercial image, premium advertising style, clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
   Anime:
     "Stylized anime illustration, clean linework, expressive design, cinematic art lighting, vibrant controlled color palette, detailed background art, dynamic framing, polished animated look, emotionally engaging atmosphere.",
   Claymation:
@@ -74,6 +89,11 @@ export const stylePresetPrompts = {
 };
 export const stylePresetNames = Object.keys(stylePresetPrompts);
 
+export function normalizeStylePresetName(value, fallback = "None") {
+  const migratedValue = value === "Cinematic" ? "Cinematic Standard" : value;
+  return stylePresetNames.includes(migratedValue) ? migratedValue : fallback;
+}
+
 export const shotPresetPrompts = {
   None: "",
   CU: "A close up shot.",
@@ -84,21 +104,24 @@ export const shotPresetPrompts = {
 };
 export const lensPresetPrompts = {
   None: "",
+  "8mm": "Shot on a very wide fisheye 8mm prime lens.",
   "18mm": "Shot on a wide 18mm prime lens.",
   "35mm": "Shot on a wide 35mm prime lens.",
   "50mm": "Shot on a 50mm prime lens.",
   "85mm": "Shot on a long 85mm prime lens.",
-  "120mm": "Shot on a long 120mm prime lens.",
-  Macro: "Shot on a macro probe lens."
+  "120mm": "Shot on a long 120mm prime lens."
 };
 export const typePresetPrompts = {
   None: "",
+  Macro: "Shot on a macro probe lens. Extremely close with very shallow depth of field and extremely detailed textures.",
   "Low Angle": "A low angle shot.",
   "High Angle": "A high angle shot.",
-  "Extreme High": "A bird's eye view from extremely high angled shot.",
+  "Extreme High": "A top view from extremely high angled shot.",
+  "Bird's Eye View": "A TRUE BIRD'S EYE VIEW: THE CAMERA POSITIONED DIRECTLY ABOVE THE SUBJECT, POINTING STRAIGHT DOWN, SO WE LOOK directly DOWN ONTO THE TOP OF the subject AND THE FLOOR FILLS MOST OF THE FRAME. THE SUBJECT IS SEEN FROM DIRECTLY OVERHEAD, FORESHORTENED, ON THE GROUND BELOW.",
   "Extreme Low": "A worm's eye view from extremely low angled shot.",
   Portrait: "A portrait shot.",
-  Profile: "A profile shot."
+  Profile: "A profile shot.",
+  Selfie: "A selfie taken from a mobile device. We do not see the device, only the person/s taking the selfie picture."
 };
 export const shotPresetNames = Object.keys(shotPresetPrompts);
 export const lensPresetNames = Object.keys(lensPresetPrompts);
@@ -116,11 +139,9 @@ export const qwenCameraDefaults = {
 
 export const videoModelNames = {
   seedance: "Seedance 2.0",
-  seedanceFast: "Seedance 2.0 Fast",
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
-  lumaDreamMachine: "Luma Dream Machine",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
   wan27Reference: "Wan 2.7 Reference-to-Video",
@@ -129,13 +150,11 @@ export const videoModelNames = {
 };
 export const videoModelOptions = [
   videoModelNames.seedance,
-  videoModelNames.seedanceFast,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
-  videoModelNames.lumaDreamMachine,
   videoModelNames.aurora
 ];
 export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
@@ -304,7 +323,7 @@ export const modelPreferenceGroups = {
 export const defaultModelPreferences = Object.fromEntries(
   Object.entries(modelPreferenceGroups).map(([kind, options]) => [
     kind,
-    Object.fromEntries(options.map((model) => [model, model !== imageModelNames.nanoBanana2]))
+    Object.fromEntries(options.map((model) => [model, model !== imageModelNames.nanoBanana2 && model !== imageModelNames.reve21]))
   ])
 );
 export function normalizeModelPreferences(value = {}) {

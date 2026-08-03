@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
-import { capitalizeMediaType, finishOutputItemDragData, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
+import { capitalizeMediaType, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
@@ -68,7 +68,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
         }}
         title="Drag image into another node or double-click to edit"
       >
-        <img src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt={node.data.fileName || "Uploaded image"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+        <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt={node.data.fileName || "Uploaded image"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       </div>
     );
   }
@@ -167,7 +167,7 @@ const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDrag
       onDoubleClick={() => onPreviewOpen?.(item)}
       title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
     >
-      {item.type === "image" && mediaSrc && <img src={mediaSrc} alt={item.label || item.fileName || "Generated output"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+      {item.type === "image" && mediaSrc && <img {...fullResolutionImageProps(item)} src={mediaSrc} alt={item.label || item.fileName || "Generated output"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
       {item.type === "video" && mediaSrc && <video src={mediaSrc} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
       {(item.type === "model3d" || item.type === "audio" || !mediaSrc) && (
         <div className="project-output-placeholder">
@@ -288,6 +288,12 @@ function curveControlPoints(points = defaultCurvePoints) {
 
 function interpolatedCurveOutput(points, input) {
   if (points.length < 2) return input;
+  if (points.length === 2) {
+    const [start, end] = points;
+    const range = Math.max(1, end.input - start.input);
+    const t = clampCurveNumber((input - start.input) / range, 0, 1);
+    return Math.round(clampCurveNumber(start.output + (end.output - start.output) * t, 0, 255));
+  }
   let segmentIndex = 0;
   while (segmentIndex < points.length - 2 && input > points[segmentIndex + 1].input) {
     segmentIndex += 1;
@@ -1798,6 +1804,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
           >
             {activeItem.type === "image" && (
               <StableResultImage
+                item={activeItem}
                 src={previewImageUrl(activeItem)}
                 alt={activeItem.label || `Generated image ${activeIndex + 1}`}
               />
@@ -1835,7 +1842,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   );
 }
 
-function StableResultImage({ src, alt }) {
+function StableResultImage({ item, src, alt }) {
   const [displaySrc, setDisplaySrc] = React.useState(src);
 
   React.useEffect(() => {
@@ -1864,6 +1871,7 @@ function StableResultImage({ src, alt }) {
 
   return (
     <img
+      {...fullResolutionImageProps(item)}
       src={displaySrc || src}
       alt={alt}
       draggable={false}

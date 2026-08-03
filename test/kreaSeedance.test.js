@@ -29,7 +29,6 @@ test("Krea Seedance endpoints reflect speed", () => {
 
 test("Krea Seedance pricing uses resolution and video-reference tier", () => {
   const cost = estimateKreaSeedanceCost({
-    speed: "standard",
     durationSeconds: 15,
     resolution: "720p",
     hasVideoReference: true

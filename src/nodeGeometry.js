@@ -4,6 +4,7 @@ export function estimatedNodeWidth(type) {
   if (type === "frameIt") return 980;
   if (type === "storyboard") return 920;
   if (type === "autoAspect") return 390;
+  if (type === "coverage") return 390;
   if (type === "skillDirector") return 760;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d") return 370;
   if (type === "character") return 760;
@@ -31,7 +32,7 @@ export function estimatedNodeHeight(type) {
   if (type === "character") return 520;
   if (type === "composer") return 410;
   if (type === "skillDirector") return 940;
-  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d" || type === "autoAspect") return 430;
+  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d" || type === "autoAspect" || type === "coverage") return 430;
   if (type === "transfer" || type === "preview") return 360;
   if (type === "camera") return 380;
   if (type === "style") return 520;

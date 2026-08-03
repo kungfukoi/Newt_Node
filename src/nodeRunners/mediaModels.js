@@ -33,6 +33,46 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
   }));
 }
 
+export async function runCoverageGeneration({
+  node,
+  sourceImageUrl,
+  shot,
+  aspectRatio,
+  workflowContext,
+  index
+}) {
+  const { response, data } = await nodeApi.generateImage({
+    prompt: shot.prompt,
+    model: node.data.model,
+    aspectRatio,
+    requestedAspectRatio: aspectRatio,
+    resolution: node.data.resolution,
+    quality: node.data.quality,
+    seedreamLayers: false,
+    imagePromptUrls: [sourceImageUrl],
+    imagePromptLabels: ["Coverage base image"],
+    ...workflowContextPayload(workflowContext),
+    nodeId: node.id,
+    nodeTitle: `${node.data.title || "Coverage"} ${String(index + 1).padStart(2, "0")}`,
+    outputFileNameBase: coverageOutputFileNameBase(node.data.title, index, shot.label)
+  });
+  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Coverage generation failed."}`);
+
+  const image = Array.isArray(data.images) && data.images.length ? data.images[0] : data.image;
+  if (!image?.localUrl) throw new Error(`Run ${index + 1}: Coverage generation returned no image.`);
+
+  return {
+    url: image.localUrl,
+    thumbnailUrl: image.thumbnailUrl || "",
+    type: "image",
+    label: `${String(index + 1).padStart(2, "0")} ${shot.label}`,
+    text: data.text || "",
+    cost: data.cost,
+    sourceUrl: image.localUrl,
+    shotId: shot.id
+  };
+}
+
 export async function runAutoAspectGeneration({
   node,
   sourceImageUrl,
@@ -95,6 +135,21 @@ function autoAspectOutputFileNameBase(title, aspectRatio) {
   return safeRatio ? `${safeTitle}_${safeRatio}` : safeTitle;
 }
 
+function coverageOutputFileNameBase(title, index, label) {
+  const safeTitle = String(title || "coverage")
+    .trim()
+    .replace(/\.[A-Za-z0-9]{1,8}$/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56) || "coverage";
+  const safeLabel = String(label || `angle_${index + 1}`)
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || `angle_${index + 1}`;
+  return `${safeTitle}_${String(index + 1).padStart(2, "0")}_${safeLabel}`;
+}
+
 export async function run3DModelGeneration({ node, imageViewUrls, workflowContext, model, generateType, faceCount }) {
   if (!imageViewUrls.front) throw new Error("Connect a front image to the 3D node.");
 
@@ -122,7 +177,8 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
   };
 }
 
-export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag }) {
+export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag, sheetKind = "image" }) {
+  const isVideoSheet = sheetKind === "video";
   const references = [
     { url: portrait.localUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
@@ -136,7 +192,7 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     imagePromptLabels: references.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
-    nodeTitle: `${node.data.title || "Character"} Character Sheet`
+    nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Character Sheet`
   }, "Character sheet generation");
   if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
 
@@ -144,7 +200,7 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     url: data.image.localUrl,
     thumbnailUrl: data.image.thumbnailUrl || "",
     type: "image",
-    label: `@${characterTag} Character Sheet`,
+    label: `@${characterTag}${isVideoSheet ? " CU Video" : ""} Character Sheet`,
     fileName: data.image.fileName,
     text: data.text || "",
     cost: data.cost

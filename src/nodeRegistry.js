@@ -7,6 +7,7 @@ export const nodeTypeDefinitions = [
   { type: "autoAspect", label: "Auto Aspect" },
   { type: "skillDirector", label: "Film Director" },
   { type: "storyboard", label: "Storyboard" },
+  { type: "coverage", label: "Coverage" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "composer", label: "Composer" },

@@ -1,4 +1,9 @@
-export const kreaApiBaseUrl = "https://api.krea.ai";
+import {
+  extractKreaJobResultUrl,
+  kreaApiBaseUrl
+} from "./kreaApi.js";
+
+export { extractKreaJobResultUrl, kreaApiBaseUrl };
 export const kreaSeedancePromptBudget = 4000;
 
 const additionalDirectionMarker = "\n\nAdditional direction:\n";
@@ -133,7 +138,7 @@ function clipUtf8End(value, maxBytes) {
 
 export function estimateKreaSeedanceCost({ speed, durationSeconds, resolution, hasVideoReference }) {
   const tier = speed === "fast" ? "fast" : "standard";
-  const fallbackResolution = tier === "fast" ? "720p" : "720p";
+  const fallbackResolution = "720p";
   const normalizedResolution = kreaSeedanceRates[tier][resolution] ? resolution : fallbackResolution;
   const rate = kreaSeedanceRates[tier][normalizedResolution][
     hasVideoReference ? "withVideoReference" : "withoutVideoReference"
@@ -149,32 +154,9 @@ export function estimateKreaSeedanceCost({ speed, durationSeconds, resolution, h
     mediaType: "video",
     resolution: normalizedResolution,
     durationSeconds: seconds,
-    pricingBasis: `Krea Seedance 2 ${tier} per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
+    pricingBasis: `Krea Seedance 2 standard per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
     pricingSource: "krea-api-pricing-2026-07-12"
   };
-}
-
-export function extractKreaJobResultUrl(job) {
-  const urls = job?.result?.urls;
-  if (typeof urls === "string" && urls.trim()) return urls.trim();
-
-  if (Array.isArray(urls)) {
-    const preferred = urls.find((item) => item?.type === "model" && typeof item?.url === "string");
-    if (preferred?.url) return preferred.url;
-    for (const item of urls) {
-      if (typeof item === "string" && item.trim()) return item.trim();
-      if (typeof item?.url === "string" && item.url.trim()) return item.url.trim();
-    }
-  }
-
-  if (urls && typeof urls === "object") {
-    for (const value of Object.values(urls)) {
-      if (typeof value === "string" && value.trim()) return value.trim();
-      if (typeof value?.url === "string" && value.url.trim()) return value.url.trim();
-    }
-  }
-
-  return "";
 }
 
 function roundCurrency(value) {

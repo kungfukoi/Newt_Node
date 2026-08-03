@@ -5,7 +5,10 @@ import {
   batchRunError,
   ensureRunSuccesses,
   fulfilledRunValues,
+  isRunnableNode,
+  nodeRunPriority,
   rejectedRunResults,
+  runStageLabel,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
 import { buildUtilityVideoRequest, buildVideoGenerationRequest, composeVideoPrompt } from "../src/nodeRunners/videoModels.js";
@@ -42,6 +45,13 @@ test("buildVideoGenerationRequest preserves disabled Seedance audio", () => {
   });
 
   assert.equal(request.generateAudio, false);
+});
+
+test("Coverage participates in batch graph runs as an image-stage node", () => {
+  const node = { id: "coverage", type: "coverage", data: {} };
+  assert.equal(isRunnableNode(node), true);
+  assert.equal(nodeRunPriority(node), 2);
+  assert.equal(runStageLabel(node.type), "coverage");
 });
 
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {

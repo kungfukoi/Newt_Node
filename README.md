@@ -31,7 +31,7 @@ Current release: `v3.0.0-beta.0`
 - **Film Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
 - **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
-- **Current image models**: Work with GPT Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, Krea 2 Large, Z-Image, and Luma from the same reference-aware image workflow.
+- **Current image models**: Work with GPT Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, REVE 2.1, Krea 2 Large, and Z-Image from the same reference-aware image workflow.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
 - **Edit node**: Local ffmpeg edits support live frame previews while controls change, plus scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
