@@ -47,7 +47,7 @@ import {
 import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { apiErrorMessage } from "./apiErrors.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
-import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
+import { EdgeCanvas, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import {
@@ -998,6 +998,11 @@ const trackpadZoomSensitivity = 0.006;
 const mouseWheelZoomSensitivity = 0.00135;
 const wheelZoomDeltaClamp = 240;
 const nodeDraftCommitDelayMs = 300;
+const largeCanvasNodeCountThreshold = 80;
+const overviewNodeScaleThreshold = 0.2;
+const canvasCullBufferPx = 460;
+const canvasCullBufferSceneFloor = 900;
+const defaultCanvasSize = { width: 1, height: 1 };
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const previewLayoutDragMime = "application/x-newtnode-preview-layout-item";
@@ -1068,8 +1073,39 @@ function sameRect(left, right, tolerance = 0.25) {
   return ["left", "top", "right", "bottom", "width", "height"].every((key) => Math.abs(left[key] - right[key]) <= tolerance);
 }
 
+function sameSize(left, right, tolerance = 1) {
+  if (!left || !right) return left === right;
+  return Math.abs(left.width - right.width) <= tolerance && Math.abs(left.height - right.height) <= tolerance;
+}
+
+function viewportSceneRect(viewport, canvasSize, paddingPx = 0) {
+  const scale = Math.max(Number(viewport?.scale) || 1, viewportScaleFloor);
+  const x = Number(viewport?.x) || 0;
+  const y = Number(viewport?.y) || 0;
+  const width = Math.max(1, Number(canvasSize?.width) || 1);
+  const height = Math.max(1, Number(canvasSize?.height) || 1);
+  const padding = Math.max(0, Number(paddingPx) || 0);
+  return {
+    left: (-x - padding) / scale,
+    top: (-y - padding) / scale,
+    right: (width - x + padding) / scale,
+    bottom: (height - y + padding) / scale
+  };
+}
+
+function expandedViewportSceneRect(viewport, canvasSize) {
+  const scale = Math.max(Number(viewport?.scale) || 1, viewportScaleFloor);
+  const paddingPx = Math.max(canvasCullBufferPx, canvasCullBufferSceneFloor * scale);
+  return viewportSceneRect(viewport, canvasSize, paddingPx);
+}
+
+function shouldUseOverviewRendering(nodes, viewport) {
+  return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
+}
+
 export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
+  const edgeCanvasRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -1089,6 +1125,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
+  const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
   const connectedPortKeysRef = React.useRef(emptyPortSet);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
@@ -1099,6 +1136,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [portPositions, setPortPositions] = React.useState({});
   const [selectionBounds, setSelectionBounds] = React.useState(null);
   const [viewport, setViewport] = React.useState(savedDraft.viewport);
+  const [canvasSize, setCanvasSize] = React.useState(defaultCanvasSize);
   const [selectedNodeIds, setSelectedNodeIds] = React.useState([]);
   const [projectName, setProjectName] = React.useState(savedDraft.projectName);
   const [projectId, setProjectId] = React.useState(savedDraft.projectId);
@@ -1119,6 +1157,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [comfyWanDialog, setComfyWanDialog] = React.useState(null);
 
+  const nodeMap = React.useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
@@ -1154,6 +1193,33 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, selectedNodeSet, incomingByNode]
   );
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
+  const largeCanvasMode = nodes.length >= largeCanvasNodeCountThreshold;
+  const overviewRendering = shouldUseOverviewRendering(nodes, viewport);
+  const visibleSceneRect = React.useMemo(
+    () => (largeCanvasMode ? expandedViewportSceneRect(viewport, canvasSize) : null),
+    [canvasSize, largeCanvasMode, viewport]
+  );
+  const renderedNodeIds = React.useMemo(() => {
+    if (!largeCanvasMode || !visibleSceneRect) return null;
+    const forcedNodeIds = new Set(selectedNodeIds);
+    if (draftEdge?.from?.nodeId) forcedNodeIds.add(draftEdge.from.nodeId);
+
+    return new Set(
+      nodes
+        .filter(
+          (node) =>
+            forcedNodeIds.has(node.id) ||
+            node.data?.status === "running" ||
+            rectsIntersect(estimatedNodeRect(node), visibleSceneRect)
+        )
+        .map((node) => node.id)
+    );
+  }, [draftEdge?.from?.nodeId, largeCanvasMode, nodes, selectedNodeIds, visibleSceneRect]);
+  const renderedNodes = React.useMemo(
+    () => (renderedNodeIds ? nodes.filter((node) => renderedNodeIds.has(node.id)) : nodes),
+    [nodes, renderedNodeIds]
+  );
+  const renderedNodeKey = React.useMemo(() => renderedNodes.map((node) => node.id).join("|"), [renderedNodes]);
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
     projects,
@@ -1228,18 +1294,55 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, outputHistory, projectId, projectName]
   );
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     nodesRef.current = nodes;
-  }, [nodes]);
+    nodeMapRef.current = nodeMap;
+  }, [nodeMap, nodes]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  React.useLayoutEffect(() => {
+    if (!active) return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    let frame = null;
+    const updateCanvasSize = () => {
+      frame = null;
+      const rect = canvas.getBoundingClientRect();
+      const nextSize = {
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height))
+      };
+      setCanvasSize((current) => (sameSize(current, nextSize) ? current : nextSize));
+    };
+    const scheduleCanvasSizeUpdate = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(updateCanvasSize);
+    };
+
+    updateCanvasSize();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleCanvasSizeUpdate) : null;
+    observer?.observe(canvas);
+    window.addEventListener("resize", scheduleCanvasSizeUpdate);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleCanvasSizeUpdate);
+    };
+  }, [active]);
 
   React.useLayoutEffect(() => {
     connectedPortKeysRef.current = connectedPortKeys;
     if (active) schedulePortPositionRefresh();
   }, [active, connectedPortKeys]);
+
+  React.useLayoutEffect(() => {
+    if (active) schedulePortPositionRefresh();
+  }, [active, overviewRendering, renderedNodeKey]);
 
   React.useLayoutEffect(() => {
     viewportRef.current = viewport;
@@ -1601,6 +1704,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
     }
+    edgeCanvasRef.current?.draw?.(nextViewport);
     if (zoomReadoutRef.current) {
       zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
     }
@@ -4642,6 +4746,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function startCanvasPointerDown(event) {
     if (!isCanvasSurface(event.target, event.currentTarget)) return;
     setContextMenu(null);
+
+    if (event.button === 0 && !event.shiftKey) {
+      const hitEdgeId = edgeCanvasRef.current?.hitTest?.(event.clientX, event.clientY);
+      if (hitEdgeId) {
+        selectEdge(event, hitEdgeId);
+        return;
+      }
+    }
+
     setSelectedEdgeId(null);
     const pointer = screenToScene(event.clientX, event.clientY);
 
@@ -4945,9 +5058,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function getNodeBounds(nodeId) {
+    const node = nodeMap.get(nodeId) || nodeMapRef.current.get(nodeId) || nodesRef.current.find((item) => item.id === nodeId);
+    const fallbackBounds = node ? estimatedNodeRect(node) : { left: 0, top: 0, right: 0, bottom: 0 };
     const canvas = canvasRef.current;
     const element = canvas?.querySelector(`[data-node-card-id="${nodeId}"]`);
-    if (!canvas || !element) return { left: 0, top: 0, right: 0, bottom: 0 };
+    if (!canvas || !element) return fallbackBounds;
 
     const canvasRect = canvas.getBoundingClientRect();
     const rect = element.getBoundingClientRect();
@@ -5503,19 +5618,22 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function getPortPoint(nodeId, port) {
+    if (shouldUseOverviewRendering(nodesRef.current, viewportRef.current)) return estimatePortPoint(nodeId, port);
     return portPositions[`${nodeId}:${port}`] || estimatePortPoint(nodeId, port);
   }
 
   function estimatePortPoint(nodeId, portId) {
-    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const node = nodeMap.get(nodeId) || nodeMapRef.current.get(nodeId) || nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return { x: 0, y: 0 };
 
-    const bounds = getNodeBounds(nodeId);
+    const measuredBounds = shouldUseOverviewRendering(nodesRef.current, viewportRef.current) ? null : getNodeBounds(nodeId);
+    const estimatedBounds = estimatedNodeRect(node);
+    const bounds = measuredBounds || estimatedBounds;
     const hasMeasuredBounds = bounds.right > bounds.left && bounds.bottom > bounds.top;
-    const left = hasMeasuredBounds ? bounds.left : node.x;
-    const right = hasMeasuredBounds ? bounds.right : node.x + estimatedNodeWidth(node.type);
-    const top = hasMeasuredBounds ? bounds.top : node.y;
-    const bottom = hasMeasuredBounds ? bounds.bottom : node.y + 260;
+    const left = hasMeasuredBounds ? bounds.left : estimatedBounds.left;
+    const right = hasMeasuredBounds ? bounds.right : estimatedBounds.right;
+    const top = hasMeasuredBounds ? bounds.top : estimatedBounds.top;
+    const bottom = hasMeasuredBounds ? bounds.bottom : estimatedBounds.bottom;
     const ports = visiblePortIdsForNode(node);
     const portIndex = Math.max(0, ports.findIndex((id) => id === portId));
     const portCount = Math.max(ports.length, 1);
@@ -6397,18 +6515,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  const renderedEdges = edges.map((edge) => ({
-    edge,
-    from: getPortPoint(edge.from.nodeId, edge.from.port),
-    to: getPortPoint(edge.to.nodeId, edge.to.port)
-  }));
-  const draftConnection = draftEdge
-    ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y } }
-    : null;
-  const marqueePoints = dragState?.type === "marquee" ? [dragState.start, dragState.current] : [];
-  const wireLayerBounds = edgeLayerBounds(
-    [...renderedEdges, ...(draftConnection ? [draftConnection] : [])],
-    marqueePoints
+  const renderedEdges = React.useMemo(
+    () =>
+      edges.map((edge) => ({
+        edge,
+        from: getPortPoint(edge.from.nodeId, edge.from.port),
+        to: getPortPoint(edge.to.nodeId, edge.to.port)
+      })),
+    [edges, nodeMap, overviewRendering, portPositions]
+  );
+  const draftConnection = React.useMemo(
+    () => (draftEdge ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y }, color: draftEdge.color } : null),
+    [draftEdge]
+  );
+  const marqueePoints = React.useMemo(
+    () => (dragState?.type === "marquee" ? [dragState.start, dragState.current] : []),
+    [dragState]
+  );
+  const marqueeLayerBounds = React.useMemo(
+    () => edgeLayerBounds([], marqueePoints),
+    [marqueePoints]
   );
 
   return (
@@ -6551,6 +6677,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        <EdgeCanvas
+          ref={edgeCanvasRef}
+          edges={renderedEdges}
+          draftConnection={draftConnection}
+          viewportRef={viewportRef}
+          canvasSize={canvasSize}
+          selectedEdgeId={selectedEdgeId}
+          activeEdgeIds={activeEdgeIds}
+          inactiveEdgeIds={inactiveEdgeIds}
+        />
         <div className="node-scene node-group-scene">
           {groups.map((group) => (
             <GroupBackdrop
@@ -6564,42 +6700,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ))}
         </div>
 
-        <div className="node-scene node-edge-scene">
+        {dragState?.type === "marquee" && (
+        <div className="node-scene node-marquee-scene">
           <svg
-            className="edge-layer"
+            className="selection-layer"
             style={{
-              left: wireLayerBounds.left,
-              top: wireLayerBounds.top,
-              width: wireLayerBounds.width,
-              height: wireLayerBounds.height
+              left: marqueeLayerBounds.left,
+              top: marqueeLayerBounds.top,
+              width: marqueeLayerBounds.width,
+              height: marqueeLayerBounds.height
             }}
-            viewBox={wireLayerBounds.viewBox}
+            viewBox={marqueeLayerBounds.viewBox}
             preserveAspectRatio="none"
           >
-            <g>
-            {renderedEdges.map(({ edge, from, to }) => {
-              return (
-                <EdgePath
-                  key={edge.id}
-                  edgeId={edge.id}
-                  from={from}
-                  to={to}
-                  color={edge.color}
-                  selected={selectedEdgeId === edge.id}
-                  active={activeEdgeIds.has(edge.id)}
-                  inactive={inactiveEdgeIds.has(edge.id)}
-                  onSelect={selectEdge}
-                />
-              );
-            })}
-          {draftConnection && <EdgePath from={draftConnection.from} to={draftConnection.to} color={draftEdge.color} draft />}
-          {dragState?.type === "marquee" && <SelectionMarquee start={dragState.start} current={dragState.current} />}
-            </g>
+            <SelectionMarquee start={dragState.start} current={dragState.current} />
           </svg>
         </div>
+        )}
         <div className="node-scene node-node-scene">
 
-          {nodes.map((node) => (
+          {renderedNodes.map((node) => (
             <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
               <NodeCard
                 node={node}
@@ -6935,7 +7055,16 @@ function NodeColorPicker({ color, onChange }) {
 }
 
 function isCanvasSurface(target, canvas) {
-  return target === canvas || target.classList?.contains("node-scene") || target.classList?.contains("edge-layer") || target.classList?.contains("node-group-backdrop") || target.classList?.contains("frame-it-canvas");
+  return (
+    target === canvas ||
+    target.classList?.contains("node-scene") ||
+    target.classList?.contains("edge-layer") ||
+    target.classList?.contains("edge-canvas-layer") ||
+    target.classList?.contains("selection-layer") ||
+    target.classList?.contains("node-marquee-scene") ||
+    target.classList?.contains("node-group-backdrop") ||
+    target.classList?.contains("frame-it-canvas")
+  );
 }
 
 function textareaCanConsumeWheel(textarea, deltaY) {
@@ -7263,22 +7392,25 @@ function NodeCard({
   const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
 
   const customTextareaSize = Boolean(nodeData.textareaResizeMode);
+  const cardClassName = `node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
+  const cardStyle = {
+    transform: `translate(${node.x}px, ${node.y}px)`,
+    width: customNodeWidth ? `${customNodeWidth}px` : undefined,
+    height: customNodeHeight ? `${customNodeHeight}px` : undefined,
+    "--preview-scale": nodeData.previewScale || 1,
+    "--node-color": nodeColor || "transparent",
+    "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
+    "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
+    "--frame-it-scale": frameItScalable ? nodeData.frameItScale || 1 : 1,
+    "--reference-tag-color": tagHighlight?.color || "#4d8dff",
+    "--node-default-width": `${estimatedNodeWidth(node.type)}px`,
+  };
+
   return (
     <article
       ref={cardRef}
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`}
-      style={{
-        transform: `translate(${node.x}px, ${node.y}px)`,
-        width: customNodeWidth ? `${customNodeWidth}px` : undefined,
-        height: customNodeHeight ? `${customNodeHeight}px` : undefined,
-        "--preview-scale": nodeData.previewScale || 1,
-        "--node-color": nodeColor || "transparent",
-        "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
-        "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
-        "--frame-it-scale": frameItScalable ? nodeData.frameItScale || 1 : 1,
-        "--reference-tag-color": tagHighlight?.color || "#4d8dff",
-        "--node-default-width": `${estimatedNodeWidth(node.type)}px`,
-      }}
+      className={cardClassName}
+      style={cardStyle}
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}
       onBlurCapture={handleBlurCapture}
