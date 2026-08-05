@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { createOutputTargetAsset, previewOutputTargetAsset } from "../server/outputTargets.js";
+import {
+  createOutputTargetAsset,
+  externalOutputFilePathFromPublicPath,
+  externalOutputPublicPath,
+  previewOutputTargetAsset
+} from "../server/outputTargets.js";
 
 async function withTempOutputDir(callback) {
   const directory = await mkdtemp(path.join(tmpdir(), "newtnode-output-"));
@@ -104,5 +109,15 @@ test("Output filename preview resolves tokens without creating the target file",
 
     assert.equal(target.fileName, "Preview Output_2026-08-05_01.png");
     await assert.rejects(stat(target.filePath), { code: "ENOENT" });
+  });
+});
+
+test("external output public paths round-trip filenames with spaces", async () => {
+  await withTempOutputDir(async (directory) => {
+    const filePath = path.join(directory, "Output Copy_02.mp4");
+    const publicPath = externalOutputPublicPath(filePath);
+
+    assert.match(publicPath, /\/Output%20Copy_02\.mp4$/);
+    assert.equal(externalOutputFilePathFromPublicPath(publicPath), path.resolve(filePath));
   });
 });

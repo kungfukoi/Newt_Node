@@ -4,6 +4,7 @@ export const fullResolutionContextPreparedAttribute = "data-full-resolution-cont
 export const fullResolutionPreviewSourceAttribute = "data-full-resolution-preview-source";
 const outputDragWindowKey = "__newtNodeDraggedOutputItem";
 const externalOutputsPrefix = "/external-outputs/";
+const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
 
 const outputMediaTypes = new Set(["image", "video", "audio", "model3d", "text"]);
 
@@ -77,6 +78,26 @@ export function fullResolutionImageUrl(itemOrUrl) {
   }
 
   return String(itemOrUrl || "").trim();
+}
+
+export function displayMediaUrl(itemOrUrl) {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const sourceUrl = String(
+    item?.url
+      || item?.localUrl
+      || item?.resultUrl
+      || itemOrUrl
+      || ""
+  ).trim();
+  if (!sourceUrl || /^(?:blob:|data:|https?:)/i.test(sourceUrl)) return sourceUrl;
+  if (!sourceUrl.startsWith(externalOutputsPrefix)) return sourceUrl;
+  if (typeof window === "undefined" || !window.location) return sourceUrl;
+
+  const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
+  if (!localHosts.has(window.location.hostname)) return sourceUrl;
+  if (!localApiPort || window.location.port === localApiPort) return sourceUrl;
+
+  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${sourceUrl}`;
 }
 
 export function fullResolutionImageProps(itemOrUrl, fileName = "") {

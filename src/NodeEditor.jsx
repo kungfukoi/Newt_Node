@@ -56,7 +56,8 @@ import {
   ProjectOutputDrawer,
   ResultPane,
   useNewtNodeImageFallback,
-  useNewtNodeVideoFallback
+  useNewtNodeVideoFallback,
+  useNewtNodeVideoReady
 } from "./components/MediaViews.jsx";
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
@@ -116,6 +117,7 @@ import {
   capitalizeMediaType,
   clearOutputItemDragData,
   currentDraggedOutputItem,
+  displayMediaUrl,
   fileBaseName,
   fileNameFromLocalUrl,
   finishOutputItemDragData,
@@ -6303,7 +6305,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(autoAspectResults),
           error: batchRunError("image", autoAspectTargets.length, successes, failures)
         });
-        markOutputTargetSaved(outputTarget, resultItems, "image");
+        markOutputTargetSaved(outputTarget, autoAspectResults, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6354,7 +6356,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", shots.length, successes, failures)
         });
-        markOutputTargetSaved(outputTarget, resultItems, "image");
+        markOutputTargetSaved(outputTarget, successes, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6379,7 +6381,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             resultType: "image",
             error: ""
           });
-          markOutputTargetSaved(outputTarget, resultItems, "image");
+          markOutputTargetSaved(outputTarget, generatedItems, "image");
           loadOutputHistory();
           return { status: "complete" };
         }
@@ -6414,7 +6416,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: utilityResultType,
           error: batchRunError(utilityResultType, batchCount, successes, failures)
         });
-        markOutputTargetSaved(outputTarget, resultItems, utilityResultType);
+        markOutputTargetSaved(outputTarget, successes, utilityResultType);
         if (wanWarpSourceSegments.length) {
           syncWanSegmentPreviewVideos(wanWarpSourceSegments, successes);
         }
@@ -6442,7 +6444,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: editResultType,
           error: ""
         });
-        markOutputTargetSaved(outputTarget, resultItems, editResultType);
+        markOutputTargetSaved(outputTarget, generatedItems, editResultType);
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6488,7 +6490,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", batchCount, successes, failures)
         });
-        markOutputTargetSaved(outputTarget, resultItems, "image");
+        markOutputTargetSaved(outputTarget, successes, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6512,7 +6514,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: "model3d",
           error: ""
         });
-        markOutputTargetSaved(outputTarget, resultItems, "model3d");
+        markOutputTargetSaved(outputTarget, [generated], "model3d");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6552,7 +6554,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         resultText: "",
         error: batchRunError("video", batchCount, successes, failures)
       });
-      markOutputTargetSaved(outputTarget, resultItems, "video");
+      markOutputTargetSaved(outputTarget, successes, "video");
       loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
@@ -11634,8 +11636,8 @@ function NodeBody({
         {activePreviewTab === "preview" ? (
           <>
             <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
-              {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-              {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+              {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
@@ -11665,8 +11667,8 @@ function NodeBody({
                       title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
                       aria-label={`Select preview ${index + 1}`}
                     >
-                      {item.type === "image" && <img {...fullResolutionImageProps(item)} src={previewImageUrl(item)} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                      {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+                      {item.type === "video" && <video src={displayMediaUrl(item.url)} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
                           <Box size={18} />
@@ -11714,7 +11716,7 @@ function NodeBody({
                     >
                       <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
-                      }} {...fullResolutionImageProps(item)} src={previewImageUrl(item)} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
                       <figcaption>{index + 1}</figcaption>
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
@@ -20822,7 +20824,7 @@ function sourceLabel(source) {
   if (source.type === "style") return styleGradeLabel(source.data);
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
   if (source.type === "edit" && source.data.resultUrl) return editOutputType(source) === "video" ? "Edit video" : "Edit image";
-  if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
+  if (source.data.resultUrl) return fileNameFromLocalUrl(source.data.resultUrl);
   if (source.data.fileName) return source.data.fileName;
   return source.data.title || source.type;
 }
@@ -20981,6 +20983,7 @@ function formatSkillDirectorShotListForClient(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
+    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

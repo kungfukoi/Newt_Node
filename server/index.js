@@ -6155,9 +6155,9 @@ function rewriteKlingReferenceMentions(text = "", mentionMap = new Map()) {
 
 function parseKlingFilmDirectorCuts(shotList = "") {
   return sanitizeSkillDirectorShotListFormatting(shotList)
-    .split(/(?=\bCUT\s+\d{1,2}\s+â€”)/gi)
+    .split(/(?=\bCUT\s+\d{1,2}(?:\s+[^\w\s]+)?\s+shot frame:)/gi)
     .map((block) => {
-      const match = block.match(/^CUT\s+(\d{1,2})\s+â€”\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):\s*([\s\S]*)$/i);
+      const match = block.match(/^CUT\s+(\d{1,2})(?:\s+[^\w\s]+)?\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):\s*([\s\S]*)$/i);
       if (!match) return null;
       return {
         number: Number(match[1]),
@@ -13986,7 +13986,7 @@ function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
   const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
   if (!source) return "";
   return source
-    .split(/(?=\bCUT\s+\d{1,2}\s+â€”)/gi)
+    .split(/(?=\bCUT\s+\d{1,2}(?:\s+[^\w\s]+)?\s+shot frame:)/gi)
     .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
     .filter(Boolean)
     .join("\n\n");
@@ -13996,6 +13996,7 @@ function sanitizeSkillDirectorShotListFormatting(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
+    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -14151,7 +14152,7 @@ function skillDirectorShotPlanFromOutput(outputText = "") {
     const declaredShotCount = skillDirectorStructuredNumber(parsed, ["recommendedShotCount", "recommended_shot_count", "shotCount", "shot_count"]);
     return {
       shotList: cuts
-        .map((cut) => `CUT ${cut.number} â€” shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
+        .map((cut) => `CUT ${cut.number} shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
         .join("\n\n"),
       shotListNotes: [
         continuityLedger ? `Continuity ledger: ${continuityLedger}` : "",
@@ -14210,7 +14211,7 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
       );
     }
   }
-  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)\s+â€”\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
+  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)(?:\s+[^\w\s]+)?\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
   for (let index = 1; index < setupMatches.length; index += 1) {
     const previous = setupMatches[index - 1];
     const current = setupMatches[index];
@@ -14385,7 +14386,7 @@ function buildSkillDirectorPrompt({
     skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
     filmDirectorShotDetailDirective(shotCount, durationSeconds),
     "Each CUT must follow this format exactly:",
-    "CUT 1 â€” shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
+    "CUT 1 shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
     "the generated shot description",
     "Do not use square brackets anywhere in SHOT_LIST.",
     "",

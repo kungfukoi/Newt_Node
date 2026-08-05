@@ -96,6 +96,7 @@ function formatSkillDirectorShotListDisplay(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
+    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

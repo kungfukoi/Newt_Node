@@ -167,7 +167,7 @@ function createComposerImagePlane(plane, renderer, scene, camera, options = {}) 
 function composerTextureUrl(url) {
   if (!url || /^(blob:|data:|https?:)/i.test(url)) return url;
   if (typeof window === "undefined") return url;
-  if (/^\/(?:uploads|outputs|workflow-assets)\//i.test(url)) {
+  if (/^\/(?:uploads|outputs|external-outputs|workflow-assets)\//i.test(url)) {
     const mediaOrigin = ["127.0.0.1", "localhost"].includes(window.location.hostname)
       ? `${window.location.protocol}//${window.location.hostname}:${localApiPort}`
       : window.location.origin;
