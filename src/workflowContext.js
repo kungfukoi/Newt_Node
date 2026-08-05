@@ -4,7 +4,14 @@ export function workflowContextPayload(workflowContext = {}, projectId = "", pro
     projectName: workflowContext.projectName || projectName || "Untitled node project",
     workflowName: workflowContext.workflowName || workflowContext.projectName || projectName || "Untitled node project",
     workflowPackageId: workflowContext.workflowPackageId || "",
-    workflowPackagePath: workflowContext.workflowPackagePath || ""
+    workflowPackagePath: workflowContext.workflowPackagePath || "",
+    outputTargetPath: workflowContext.outputTargetPath || "",
+    outputTargetFileName: workflowContext.outputTargetFileName || "",
+    outputTargetNodeId: workflowContext.outputTargetNodeId || "",
+    outputTargetNodeTitle: workflowContext.outputTargetNodeTitle || "",
+    outputTargetSourceNodeId: workflowContext.outputTargetSourceNodeId || "",
+    outputTargetSourceNodeTitle: workflowContext.outputTargetSourceNodeTitle || "",
+    outputTargetIndex: workflowContext.outputTargetIndex || ""
   };
 }
 

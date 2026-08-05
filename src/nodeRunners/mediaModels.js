@@ -15,6 +15,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
+    outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
     nodeTitle: node.data.title
   });
@@ -28,6 +29,9 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     thumbnailUrl: image.thumbnailUrl || "",
     type: "image",
     label: image.label || (data.layerSeparation ? `Layer ${imageIndex + 1}` : `Image ${index + 1}`),
+    fileName: image.fileName || "",
+    filePath: image.filePath || "",
+    mimeType: image.mimeType || "",
     text: data.text || "",
     cost: imageIndex === 0 ? data.cost : null,
     layerIndex: image.layerIndex || null
@@ -53,6 +57,7 @@ export async function runCoverageGeneration({
     imagePromptUrls: [sourceImageUrl],
     imagePromptLabels: ["Coverage base image"],
     ...workflowContextPayload(workflowContext),
+    outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
     nodeTitle: `${node.data.title || "Coverage"} ${String(index + 1).padStart(2, "0")}`,
     outputFileNameBase: coverageOutputFileNameBase(node.data.title, index, shot.label)
@@ -67,6 +72,9 @@ export async function runCoverageGeneration({
     thumbnailUrl: image.thumbnailUrl || "",
     type: "image",
     label: `${String(index + 1).padStart(2, "0")} ${shot.label}`,
+    fileName: image.fileName || "",
+    filePath: image.filePath || "",
+    mimeType: image.mimeType || "",
     text: data.text || "",
     cost: data.cost,
     sourceUrl: image.localUrl,
@@ -103,6 +111,7 @@ export async function runAutoAspectGeneration({
     imagePromptUrls: [sourceImageUrl],
     imagePromptLabels: ["Original image to reformat"],
     ...workflowContextPayload(workflowContext),
+    outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
     nodeTitle: `${node.data.title || "Auto Aspect"} ${aspectRatio}`,
     outputFileNameBase
@@ -114,6 +123,9 @@ export async function runAutoAspectGeneration({
     thumbnailUrl: data.image.thumbnailUrl || "",
     type: "image",
     label: outputLabel,
+    fileName: data.image.fileName || "",
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     text: data.text || "",
     cost: data.cost,
     aspectRatio,
@@ -170,6 +182,9 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
     url: data.model.localUrl,
     type: "model3d",
     label: data.model.label || data.model.fileName || "3D model",
+    fileName: data.model.fileName || "",
+    filePath: data.model.filePath || "",
+    mimeType: data.model.mimeType || "",
     assets: data.model.assets || null,
     text: data.text || "",
     thumbnailUrl: data.thumbnail?.localUrl || "",
@@ -203,6 +218,8 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     type: "image",
     label: `@${characterTag}${isVideoSheet ? " CU Video" : ""} Character Sheet`,
     fileName: data.image.fileName,
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     text: data.text || "",
     cost: data.cost
   };

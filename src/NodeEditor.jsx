@@ -1185,8 +1185,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
   const selectedRunnableNodes = React.useMemo(
-    () => nodes.filter((node) => selectedNodeSet.has(node.id) && isRunnableNode(node) && node.data.status !== "running"),
-    [nodes, selectedNodeSet]
+    () => nodes.filter((node) => {
+      if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
+      if (node.type !== "output") return true;
+      return !(incomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedNodeSet.has(source.id) && isRunnableNode(source));
+    }),
+    [incomingByNode, nodes, selectedNodeSet]
   );
   const selectedPlayablePreviewNodes = React.useMemo(
     () => nodes.filter((node) => selectedNodeSet.has(node.id) && previewVideoSourceForNode(node, incomingByNode)),
@@ -5911,6 +5915,123 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
+  function connectedOutputNodesForSource(sourceNodeId, currentNodes = nodesRef.current, currentEdges = edgesRef.current) {
+    const nodeMap = new Map(currentNodes.map((node) => [node.id, node]));
+    return currentEdges
+      .filter((edge) => edge.from.nodeId === sourceNodeId && edge.to.port === "sourceIn")
+      .map((edge) => nodeMap.get(edge.to.nodeId))
+      .filter((node) => node?.type === "output");
+  }
+
+  function outputTargetContextFromOutputNode(outputNode, sourceNode, outputIndex = "") {
+    const outputPath = String(outputNode?.data?.outputPath || "").trim();
+    if (!outputPath) {
+      const error = new Error(`Set a Path on ${outputNode?.data?.title || "Output"} before running.`);
+      error.outputTargetNodeId = outputNode?.id || "";
+      throw error;
+    }
+
+    return {
+      outputTargetPath: outputPath,
+      outputTargetFileName: String(outputNode?.data?.outputFileName || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+      outputTargetNodeId: outputNode.id,
+      outputTargetNodeTitle: outputNode.data?.title || "Output",
+      outputTargetSourceNodeId: sourceNode?.id || "",
+      outputTargetSourceNodeTitle: sourceNode?.data?.title || nodeTypeLabel(sourceNode?.type) || "output",
+      outputTargetIndex: outputIndex ? String(outputIndex) : ""
+    };
+  }
+
+  function outputTargetForSourceNode(sourceNode) {
+    if (!sourceNode || sourceNode.type === "output") return null;
+    const outputNode = connectedOutputNodesForSource(sourceNode.id).at(0);
+    if (!outputNode) return null;
+    return {
+      node: outputNode,
+      context: outputTargetContextFromOutputNode(outputNode, sourceNode)
+    };
+  }
+
+  function markOutputTargetRunning(outputTarget) {
+    if (!outputTarget?.node?.id) return;
+    updateNode(outputTarget.node.id, { status: "running", error: "" });
+  }
+
+  function markOutputTargetFailed(outputTarget, message) {
+    if (!outputTarget?.node?.id) return;
+    updateNode(outputTarget.node.id, { status: "error", error: message || "Output save failed." });
+  }
+
+  function markOutputTargetSaved(outputTarget, generatedItems = [], resultType = "") {
+    if (!outputTarget?.node?.id) return;
+    const items = (Array.isArray(generatedItems) ? generatedItems : [generatedItems]).filter((item) => item?.url);
+    const primary = items[0] || null;
+    const mediaType = resultType || primary?.type || "";
+    updateNode(outputTarget.node.id, {
+      status: "complete",
+      error: "",
+      resultUrl: primary?.url || "",
+      resultType: mediaType,
+      resultItems: items,
+      selectedResultIndex: 0,
+      lastSavedAt: new Date().toISOString(),
+      lastSavedFileName: primary?.fileName || fileNameFromLocalUrl(primary?.url || "") || "",
+      lastSavedPath: primary?.filePath || primary?.savedPath || ""
+    });
+  }
+
+  async function runOutputNodeSave(outputNode, incoming, requestContext) {
+    const connection = (incoming.sourceIn || []).at(-1);
+    if (!connection?.source) throw new Error("Connect a source to Output.");
+    const sourceNode = connection.source;
+    const outputItem = connectedOutputItem(sourceNode, connection.edge);
+    const sourceText = outputItem?.url ? "" : rawConnectedTextForSource(sourceNode);
+    if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
+    const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode);
+    const { response, data } = await nodeApi.saveOutput({
+      sourceUrl: outputItem?.url || "",
+      sourceText,
+      sourceFileName: outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || ""),
+      mediaType: outputItem?.type || (sourceText ? "text" : ""),
+      ...workflowContextPayload({ ...requestContext, ...outputContext }),
+      nodeId: outputNode.id,
+      nodeTitle: outputNode.data.title || "Output"
+    });
+    if (!response.ok) throw new Error(data.error || "Output save failed.");
+    const output = data.output || {};
+    return {
+      url: output.localUrl || "",
+      type: output.mediaType || outputItem?.type || (sourceText ? "text" : ""),
+      label: output.fileName || outputItem?.label || sourceLabel(sourceNode),
+      fileName: output.fileName || "",
+      filePath: output.filePath || "",
+      mimeType: output.mimeType || outputItem?.mimeType || "",
+      thumbnailUrl: output.thumbnailUrl || ""
+    };
+  }
+
+  async function saveTextToOutputTarget(outputTarget, sourceNode, text, requestContext) {
+    if (!outputTarget?.node?.id || !String(text || "").trim()) return null;
+    const { response, data } = await nodeApi.saveOutput({
+      sourceText: text,
+      sourceFileName: `${safeStillFrameName(sourceNode?.data?.title || sourceNode?.type || "output")}.txt`,
+      mediaType: "text",
+      ...workflowContextPayload(requestContext),
+      nodeId: outputTarget.node.id,
+      nodeTitle: outputTarget.node.data?.title || "Output"
+    }, "Output text save");
+    if (!response.ok) throw new Error(data.error || "Output text save failed.");
+    const output = data.output || {};
+    return {
+      url: output.localUrl || "",
+      type: "text",
+      label: output.fileName || sourceLabel(sourceNode),
+      fileName: output.fileName || "",
+      filePath: output.filePath || "",
+      mimeType: output.mimeType || "text/plain"
+    };
+  }
+
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
@@ -5955,7 +6076,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
     const previousEditResults = existingResultItemsForNode(currentNode, currentNode.type === "edit" ? editOutputType(currentNode) : "video");
-    const requestContext = workflowRequestContext();
+    let outputTarget = null;
+    let requestContext = workflowRequestContext();
     const hasBasePrompt = Boolean(String(basePrompt || "").trim());
 
     if (currentNode.type === "videoModel" && !hasBasePrompt) {
@@ -5965,8 +6087,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
+      outputTarget = outputTargetForSourceNode(currentNode);
+      requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
       updateNode(currentNode.id, { status: "running", error: "" });
+      markOutputTargetRunning(outputTarget);
 
       if (currentNode.type === "camera") {
         const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
@@ -5980,7 +6105,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           seed: generated.seed,
           error: ""
         });
+        markOutputTargetSaved(outputTarget, [generated], "image");
         loadOutputHistory();
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "output") {
+        const saved = await runOutputNodeSave(currentNode, incoming, requestContext);
+        const resultItems = saved.url ? [saved] : [];
+        updateNode(currentNode.id, {
+          status: "complete",
+          error: "",
+          resultUrl: saved.url || "",
+          resultType: saved.type || "",
+          resultItems,
+          selectedResultIndex: 0,
+          lastSavedAt: new Date().toISOString(),
+          lastSavedFileName: saved.fileName || fileNameFromLocalUrl(saved.url || "") || "",
+          lastSavedPath: saved.filePath || ""
+        });
         return { status: "complete" };
       }
 
@@ -5999,6 +6142,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: processed.text,
           lastRunModel: processed.model
         });
+        if (outputTarget) {
+          const saved = await saveTextToOutputTarget(outputTarget, currentNode, processed.text, requestContext);
+          if (saved) markOutputTargetSaved(outputTarget, [saved], "text");
+        }
         return { status: "complete" };
       }
 
@@ -6156,6 +6303,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(autoAspectResults),
           error: batchRunError("image", autoAspectTargets.length, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, resultItems, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6206,6 +6354,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", shots.length, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, resultItems, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6230,6 +6379,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             resultType: "image",
             error: ""
           });
+          markOutputTargetSaved(outputTarget, resultItems, "image");
           loadOutputHistory();
           return { status: "complete" };
         }
@@ -6264,6 +6414,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: utilityResultType,
           error: batchRunError(utilityResultType, batchCount, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, resultItems, utilityResultType);
         if (wanWarpSourceSegments.length) {
           syncWanSegmentPreviewVideos(wanWarpSourceSegments, successes);
         }
@@ -6291,6 +6442,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: editResultType,
           error: ""
         });
+        markOutputTargetSaved(outputTarget, resultItems, editResultType);
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6336,6 +6488,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", batchCount, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, resultItems, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6359,6 +6512,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: "model3d",
           error: ""
         });
+        markOutputTargetSaved(outputTarget, resultItems, "model3d");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6398,12 +6552,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         resultText: "",
         error: batchRunError("video", batchCount, successes, failures)
       });
+      markOutputTargetSaved(outputTarget, resultItems, "video");
       loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
       showComfyWanDialogForError(error, currentNode);
       const message = error?.message || String(error || "Node failed.");
       updateNode(currentNode.id, { status: "error", error: message, ...(error?.nodePatch || {}) });
+      markOutputTargetFailed(outputTarget || (error?.outputTargetNodeId ? { node: { id: error.outputTargetNodeId } } : null), message);
       return { status: "error", error: error instanceof Error ? error : new Error(message) };
     }
   }
@@ -6474,7 +6630,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runSelectedNodes() {
     const selectedIds = new Set(selectedNodeIds);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
-    const runnable = nodesRef.current.filter((node) => selectedIds.has(node.id) && isRunnableNode(node) && node.data.status !== "running");
+    const runnable = nodesRef.current.filter((node) => {
+      if (!selectedIds.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
+      if (node.type !== "output") return true;
+      return !(currentIncomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedIds.has(source.id) && isRunnableNode(source));
+    });
     const playablePreviewNodes = nodesRef.current.filter((node) => selectedIds.has(node.id) && previewVideoSourceForNode(node, currentIncomingByNode));
     const previewPlayback = playablePreviewNodes.length ? playSelectedPreviewVideos(playablePreviewNodes.map((node) => node.id)) : null;
 
@@ -9555,6 +9715,138 @@ function formatComposerControlValue(value, precision) {
   return Number(value).toFixed(Math.max(0, precision));
 }
 
+function OutputNodeBody({
+  node,
+  config,
+  incoming,
+  onUpdate,
+  onRun,
+  running,
+  onConnectStart,
+  onDisconnectInput,
+  connectedPortKeys
+}) {
+  const sourcePort = config.input.find((port) => port.id === "sourceIn");
+  const sourceSummary = outputSourceSummary(incoming.sourceIn);
+  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn);
+  const [filenamePreview, setFilenamePreview] = React.useState({ status: "idle", fileName: "", filePath: "", error: "" });
+
+  React.useEffect(() => {
+    const outputPath = String(node.data.outputPath || "").trim();
+    if (!outputPath) {
+      setFilenamePreview({ status: "idle", fileName: "", filePath: "", error: "" });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const body = {
+      outputTargetPath: outputPath,
+      outputTargetFileName: String(node.data.outputFileName || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+      outputTargetNodeId: node.id,
+      outputTargetNodeTitle: node.data.title || "Output",
+      outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
+      sourceFileName: sourceInfo.sourceFileName || "",
+      mediaType: sourceInfo.mediaType || ""
+    };
+
+    setFilenamePreview((current) => ({ ...current, status: current.fileName ? "ready" : "loading", error: "" }));
+    const timer = window.setTimeout(async () => {
+      try {
+        const { response, data } = await nodeApi.previewOutput(body);
+        if (cancelled) return;
+        if (!response.ok) {
+          setFilenamePreview({ status: "error", fileName: "", filePath: "", error: data.error || "Could not resolve filename." });
+          return;
+        }
+        const preview = data.preview || {};
+        setFilenamePreview({
+          status: "ready",
+          fileName: preview.fileName || "",
+          filePath: preview.filePath || "",
+          error: ""
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setFilenamePreview({ status: "error", fileName: "", filePath: "", error: error?.message || "Could not resolve filename." });
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    node.data.outputPath,
+    node.data.outputFileName,
+    node.data.title,
+    node.id,
+    sourceInfo.mediaType,
+    sourceInfo.sourceFileName,
+    sourceInfo.sourceTitle
+  ]);
+
+  async function pickOutputFolder() {
+    const folderSelection = await systemApi.selectFolder({
+      title: "Choose Output folder",
+      defaultPath: node.data.outputPath || ""
+    });
+    if (!folderSelection.response.ok) return;
+    if (folderSelection.data?.path) onUpdate(node.id, { outputPath: folderSelection.data.path });
+  }
+
+  const savedAt = node.data.lastSavedAt ? new Date(node.data.lastSavedAt) : null;
+  const savedTime = savedAt && Number.isFinite(savedAt.getTime()) ? savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const resolvedFilename = filenamePreview.fileName || node.data.lastSavedFileName || "";
+  const statusText =
+    node.data.error ||
+    filenamePreview.error ||
+    (running && resolvedFilename ? `Saving as ${resolvedFilename}` : "") ||
+    (resolvedFilename ? `Filename: ${resolvedFilename}` : "") ||
+    (node.data.lastSavedFileName ? `Saved ${node.data.lastSavedFileName}${savedTime ? ` at ${savedTime}` : ""}` : "") ||
+    (filenamePreview.status === "loading" ? "Resolving filename..." : "Set a path to preview the filename.");
+  const statusTitle = filenamePreview.filePath || node.data.lastSavedPath || "";
+
+  return (
+    <div className="node-body output-node-body">
+      <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button type="button" className={incoming.sourceIn?.length ? "connected-field" : ""}>{sourceSummary}</button>
+      </NodeRow>
+      <NodeRow label="Path">
+        <div className="output-path-control">
+          <input
+            value={node.data.outputPath || ""}
+            placeholder="C:\\Exports\\$date"
+            onChange={(event) => onUpdate(node.id, { outputPath: event.target.value })}
+          />
+          <button type="button" onClick={pickOutputFolder} title="Choose folder" aria-label="Choose output folder">
+            <FolderOpen size={15} />
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Filename">
+        <input
+          className="connected-field"
+          value={node.data.outputFileName || ""}
+          placeholder="$node_name_$date_$time"
+          onChange={(event) => onUpdate(node.id, { outputFileName: event.target.value })}
+        />
+      </NodeRow>
+      <div className="output-token-strip" aria-label="Output filename tokens">
+        <code>$node_name</code>
+        <code>$date</code>
+        <code>$time</code>
+        <code>$index</code>
+      </div>
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
+        {running ? "Saving..." : "Run Output"}
+      </button>
+      <small className={`output-save-status ${node.data.error || filenamePreview.status === "error" ? "error" : ""}`} title={statusTitle}>
+        {statusText}
+      </small>
+    </div>
+  );
+}
+
 function NodeBody({
   node,
   onUpdate,
@@ -9707,6 +9999,22 @@ function NodeBody({
         imageOutputPort={imageOutputPort}
         composerInputPorts={composerInputPorts}
         onOpenComposer={onOpenComposer}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
+    );
+  }
+
+  if (node.type === "output") {
+    return (
+      <OutputNodeBody
+        node={node}
+        config={config}
+        incoming={incoming}
+        onUpdate={onUpdate}
+        onRun={onRun}
+        running={running}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
@@ -15427,6 +15735,11 @@ function getNodeConfig(type) {
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
       output: []
     },
+    output: {
+      icon: Save,
+      input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
+      output: []
+    },
     autoAspect: {
       icon: Maximize2,
       input: [{ id: "imageIn", label: "Image", color: portColors.image }],
@@ -15550,6 +15863,21 @@ function createDefaultNodeData(type, label, count) {
   }
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0, previewTab: "preview", previewLayoutItems: [] };
+  if (type === "output") {
+    return {
+      title,
+      outputPath: "",
+      outputFileName: "$node_name_$date_$time",
+      resultUrl: "",
+      resultItems: [],
+      selectedResultIndex: 0,
+      resultType: "",
+      lastSavedAt: "",
+      lastSavedFileName: "",
+      lastSavedPath: "",
+      error: ""
+    };
+  }
   if (type === "autoAspect") {
     return {
       title,
@@ -17314,6 +17642,7 @@ function portKindFromColor(color) {
 function portKindForNodePort(node, portId, role) {
   if (!node || !portId) return "";
   if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
+  if (role === "input" && node.type === "output" && portId === "sourceIn") return "output";
   if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
   if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
@@ -17327,6 +17656,7 @@ function portKindForNodePort(node, portId, role) {
 function acceptedInputPortKinds(node, portId) {
   const inputKind = portKindForNodePort(node, portId, "input");
   if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  if (inputKind === "output") return ["image", "video", "audio", "model3d", "transfer", "character", "prompt", "director"];
   return inputKind ? [inputKind] : [];
 }
 
@@ -17341,6 +17671,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
   if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Film Director, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -17357,7 +17688,8 @@ function humanPortKindLabel(kind) {
     video: "Video",
     audio: "Audio",
     model3d: "3D",
-    preview: "Preview"
+    preview: "Preview",
+    output: "Output"
   }[kind] || "matching";
 }
 
@@ -17580,6 +17912,7 @@ function nodeResultMediaType(node) {
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "edit") return editOutputType(node);
+  if (node.type === "output") return node.data?.resultType || "";
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
   if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
@@ -18125,6 +18458,41 @@ function connectedOutputUrl(source, edge) {
   return connectedOutputItem(source, edge)?.url || "";
 }
 
+function outputSourceSummary(items = []) {
+  const connection = items.at(-1);
+  if (!connection?.source) return "Connect output";
+  const outputItem = connectedOutputItem(connection.source, connection.edge);
+  if (outputItem?.label) return outputItem.label;
+  if (outputItem?.url) return fileNameFromLocalUrl(outputItem.url) || sourceLabel(connection.source);
+  const text = rawConnectedTextForSource(connection.source);
+  if (text) return sourceLabel(connection.source);
+  return sourceLabel(connection.source) || "Connected";
+}
+
+function outputPreviewSourceInfo(items = []) {
+  const connection = items.at(-1);
+  const source = connection?.source;
+  if (!source) return { sourceTitle: "", sourceFileName: "", mediaType: "" };
+  const outputItem = connectedOutputItem(source, connection.edge);
+  const isTextSource = ["plainText", "text", "skillDirector"].includes(source.type);
+  const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
+  const outputFileName = outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || "");
+  const sourceTitle = sourceLabel(source) || source.data?.title || nodeTypeLabel(source.type) || "source";
+  return {
+    sourceTitle,
+    sourceFileName: outputFileName || `${safeStillFrameName(sourceTitle)}${outputPreviewDefaultExtension(mediaType)}`,
+    mediaType
+  };
+}
+
+function outputPreviewDefaultExtension(mediaType) {
+  if (mediaType === "video") return ".mp4";
+  if (mediaType === "audio") return ".mp3";
+  if (mediaType === "model3d") return ".glb";
+  if (mediaType === "text" || mediaType === "prompt" || mediaType === "director") return ".txt";
+  return ".png";
+}
+
 function connectedAssetUrls(items = []) {
   return items.map(({ source, edge }) => connectedOutputUrl(source, edge)).filter(Boolean);
 }
@@ -18580,6 +18948,9 @@ async function runCameraQwenEdit({ node, incoming, projectId, projectName, workf
     url: data.image.localUrl,
     type: "image",
     label: "Camera image",
+    fileName: data.image.fileName || "",
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     prompt: data.prompt || "",
     seed: data.seed,
     cost: data.cost
@@ -18656,6 +19027,9 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     url: image.localUrl,
     type: "image",
     label: image.label || `${data.modelName || "Image"} ${index + 1}`,
+    fileName: image.fileName || "",
+    filePath: image.filePath || "",
+    mimeType: image.mimeType || "",
     text: data.text || "",
     seed: data.seed,
     cost: data.cost,
@@ -18695,6 +19069,9 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, imageInputItem = nu
     url: data.image.localUrl,
     type: "image",
     label: data.image.label || "Color ID to Matte",
+    fileName: data.image.fileName || "",
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     imageEditRole: "mask",
     imageEditInstruction: colorIdToMatteImageEditPrompt,
     sourceImageUrl: sourceRgbImageUrl,
@@ -18869,7 +19246,8 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     referenceVideoUrls: referenceVideoItems.map((item) => item.url),
     referenceVideoLabels: referenceVideoItems.map((item) => item.label),
     referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode)
+    filmDirector: directorPackageForVideo(directorSource, incomingByNode),
+    outputTargetIndex: String((Number(index) || 0) + 1)
   }));
   if (!response.ok) {
     throw new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`);
@@ -19016,7 +19394,8 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
       wanBlendFrameIndices: node.data.videoStitchWanBlendFrameIndices || "",
       wanWarpSegments
     },
-    voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames)
+    voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames),
+    outputTargetIndex: String((Number(index) || 0) + 1)
   }), "Utility video");
   if (!response.ok) {
     const error = new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);
@@ -19075,6 +19454,9 @@ async function runEditNodeGeneration({ node, incoming, projectId, projectName, w
     url: media.localUrl,
     type: sourceType,
     label: media.label || data.modelName || effect.label,
+    fileName: media.fileName || "",
+    filePath: media.filePath || "",
+    mimeType: media.mimeType || "",
     text: data.text || "",
     cost: data.cost || null
   };
@@ -20731,6 +21113,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "output") {
+    return {
+      ...nextNode,
+      data: normalizeOutputData(data)
+    };
+  }
+
   if (nextNode.type === "storyboard") {
     return {
       ...nextNode,
@@ -20856,6 +21245,24 @@ function normalizeStoryboardFrameCountValue(value) {
   const parsed = Number.parseInt(normalized, 10);
   if (!Number.isFinite(parsed)) return storyboardAutoFrameCount;
   return String(Math.min(storyboardMaxFrameCount, Math.max(1, parsed)));
+}
+
+function normalizeOutputData(data = {}) {
+  return {
+    ...createDefaultNodeData("output", data.title || "Output", 1),
+    ...data,
+    title: data.title || "Output",
+    outputPath: String(data.outputPath || data.path || "").trim(),
+    outputFileName: String(data.outputFileName || data.fileNameTemplate || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+    resultUrl: String(data.resultUrl || "").trim(),
+    resultItems: Array.isArray(data.resultItems) ? data.resultItems : [],
+    selectedResultIndex: Math.max(0, Number(data.selectedResultIndex) || 0),
+    resultType: String(data.resultType || "").trim(),
+    lastSavedAt: String(data.lastSavedAt || "").trim(),
+    lastSavedFileName: String(data.lastSavedFileName || "").trim(),
+    lastSavedPath: String(data.lastSavedPath || "").trim(),
+    error: String(data.error || "").trim()
+  };
 }
 
 function storyboardFrameCountNumber(value, fallback = storyboardDefaultFrameCount) {

@@ -35,7 +35,8 @@ export function buildVideoGenerationRequest({
   referenceVideoUrls = [],
   referenceVideoLabels = [],
   referenceAudioUrls = [],
-  filmDirector = null
+  filmDirector = null,
+  outputTargetIndex = ""
 }) {
   return {
     prompt,
@@ -75,6 +76,7 @@ export function buildVideoGenerationRequest({
       seed: node.data.seed || ""
     },
     ...workflowContextPayload(workflowContext, projectId, projectName),
+    outputTargetIndex: workflowContext?.outputTargetPath ? String(outputTargetIndex || "") : "",
     nodeId: node.id,
     nodeTitle: node.data.title
   };
@@ -85,6 +87,9 @@ export function normalizeVideoGenerationResult(data, index) {
     url: data.video.localUrl,
     type: "video",
     label: `Video ${index + 1}`,
+    fileName: data.video.fileName || "",
+    filePath: data.video.filePath || "",
+    mimeType: data.video.mimeType || "",
     seed: data.seed,
     cost: data.cost
   };
@@ -109,7 +114,8 @@ export function buildUtilityVideoRequest({
   colorIdMatte,
   compositeVideo,
   videoStitch,
-  voidNumFrames
+  voidNumFrames,
+  outputTargetIndex = ""
 }) {
   return {
     prompt,
@@ -377,6 +383,7 @@ export function buildUtilityVideoRequest({
       videoWriteMode: node.data.birefnetVideoWriteMode || "balanced"
     },
     ...workflowContextPayload(workflowContext, projectId, projectName),
+    outputTargetIndex: workflowContext?.outputTargetPath ? String(outputTargetIndex || "") : "",
     nodeId: node.id,
     nodeTitle: node.data.title
   };
@@ -392,6 +399,7 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
         type: item.type || "video",
         label: item.label || `${data.modelName || "Result"} ${itemIndex + 1}`,
         fileName: item.fileName || "",
+        filePath: item.filePath || "",
         mimeType: item.mimeType || "",
         seed: data.seed,
         text: itemIndex === 0 ? data.text || "" : "",
@@ -416,6 +424,9 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
         url: video.localUrl,
         type: "video",
         label: video.label || `${data.modelName || "Video"} ${itemIndex + 1}`,
+        fileName: video.fileName || "",
+        filePath: video.filePath || "",
+        mimeType: video.mimeType || "",
         seed: data.seed,
         cost: itemIndex === 0 ? data.cost : null
       }));
@@ -425,6 +436,9 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
     url: data.video.localUrl,
     type: "video",
     label: data.modelName || `Video ${index + 1}`,
+    fileName: data.video.fileName || "",
+    filePath: data.video.filePath || "",
+    mimeType: data.video.mimeType || "",
     seed: data.seed,
     cost: data.cost
   };
