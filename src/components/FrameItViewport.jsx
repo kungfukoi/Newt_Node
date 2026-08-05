@@ -622,14 +622,15 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
 
   const ratio = frameItAspectRatioNumber(aspectRatio);
   const portraitWidth = ratio < 0.85 ? `${Math.round(ratio * 82)}%` : ratio < 1.15 ? "78%" : "100%";
+  const viewportStyle = { aspectRatio: String(ratio), width: portraitWidth, "--frame-it-aspect": String(ratio) };
   return (
     <div className="frame-it-stage">
       <div
         ref={mountRef}
         className="frame-it-viewport"
-        style={{ aspectRatio: String(ratio), width: portraitWidth }}
+        style={viewportStyle}
       />
-      {showGuides && <div className="frame-it-guides" style={{ aspectRatio: String(ratio), width: portraitWidth }} aria-hidden="true" />}
+      {showGuides && <div className="frame-it-guides" style={viewportStyle} aria-hidden="true" />}
       {showShotLabel && <div className="frame-it-shot-label">{shotLabel || "Frame It"}</div>}
       <div className="frame-it-camera-hint">Drag a joint to pose. Option-drag: orbit. Command-drag: pan. Command-scroll: zoom.</div>
     </div>

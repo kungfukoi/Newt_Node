@@ -1700,6 +1700,10 @@
   overflow: auto;
 }
 
+.node-card.custom-node-size > .node-body {
+  min-height: 0;
+}
+
 .node-card.custom-node-size > :not(.node-title):not(.node-width-resize-handle) button {
   flex-grow: 0;
   align-self: center;
@@ -1714,6 +1718,167 @@
   min-height: 38px;
   max-height: 38px;
   flex: 0 0 38px;
+}
+
+.node-card.custom-node-height > :is(.model-node-body, .media-node-body, .composer-node-body, .preview-node-body, .storyboard-node-body, .character-node-body, .frame-it-node-body) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.node-card.custom-node-height > :is(.model-node-body, .media-node-body, .composer-node-body, .preview-node-body, .storyboard-node-body, .character-node-body, .frame-it-node-body) > :is(.port-row, .node-row, .run-node-button, .media-upload-card, .composer-input-list, .preview-tabs, .preview-frame-nav, .preview-result-browser, .storyboard-topbar, .character-topbar, .frame-it-view-tabs, small) {
+  flex: 0 0 auto;
+}
+
+.node-card.custom-node-height > .model-node-body > .model-settings-drawer {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.node-card.custom-node-height > .model-node-body > .result-pane,
+.node-card.custom-node-height > .media-node-body > .media-preview,
+.node-card.custom-node-height > .composer-node-body > .composer-preview-slot,
+.node-card.custom-node-height > .preview-node-body > .preview-stage,
+.node-card.custom-node-height > .storyboard-node-body > :is(.storyboard-setup, .storyboard-view, .storyboard-advanced),
+.node-card.custom-node-height > .character-node-body > :is(.character-build-view, .character-sheet-view),
+.node-card.custom-node-height > .frame-it-node-body > .frame-it-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.node-card.custom-node-height > .preview-node-body > .preview-stage,
+.node-card.custom-node-height > .character-node-body > :is(.character-build-view, .character-sheet-view) {
+  aspect-ratio: auto;
+}
+
+.node-card.custom-node-height > .media-node-body > .media-preview img,
+.node-card.custom-node-height > .media-node-body > .media-preview video,
+.node-card.custom-node-height .composer-node-preview img,
+.node-card.custom-node-height > .preview-node-body > .preview-stage img,
+.node-card.custom-node-height > .preview-node-body > .preview-stage video,
+.node-card.custom-node-height .result-item img,
+.node-card.custom-node-height .result-item video,
+.node-card.custom-node-height .result-item .model-3d-viewer {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
+
+.node-card.custom-node-height > .model-node-body > .result-pane.has-result {
+  place-items: stretch;
+}
+
+.node-card.custom-node-height .result-carousel,
+.node-card.custom-node-height .result-item {
+  height: 100%;
+  min-height: 0;
+}
+
+.node-card.custom-node-height > .storyboard-node-body > .storyboard-view > .storyboard-frame-grid {
+  align-content: start;
+}
+
+.node-card.custom-node-height .storyboard-frame-card {
+  min-height: 0;
+}
+
+.node-card.custom-node-height .character-layout,
+.node-card.custom-node-height .character-sheet-panel,
+.node-card.custom-node-height .character-editor,
+.node-card.custom-node-height .character-sheet-drag-source {
+  min-height: 0;
+}
+
+.node-card.custom-node-height .character-main-preview img,
+.node-card.custom-node-height .character-sheet-view img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.node-card.custom-node-height > .composer-node-body > .composer-preview-slot {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  container-type: size;
+}
+
+.node-card.custom-node-height > .composer-node-body > .composer-preview-slot > .composer-node-preview {
+  width: min(100%, calc(100cqh * 16 / 9));
+  max-height: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.node-card.custom-node-height > .frame-it-node-body > .frame-it-workspace {
+  align-items: stretch;
+}
+
+.node-card.custom-node-height .frame-it-canvas-panel,
+.node-card.custom-node-height .frame-it-stage,
+.node-card.custom-node-height .frame-it-birds-eye,
+.node-card.custom-node-height .frame-it-controls {
+  min-height: 0;
+  height: 100%;
+}
+
+.node-card.custom-node-height .frame-it-canvas-panel {
+  display: grid;
+}
+
+.node-card.custom-node-height .frame-it-stage {
+  container-type: size;
+}
+
+.node-card.custom-node-height .frame-it-controls {
+  overflow: auto;
+}
+
+.node-card.custom-node-height .frame-it-viewport,
+.node-card.custom-node-height .frame-it-guides {
+  width: min(100%, calc(100cqh * var(--frame-it-aspect, 1.7777778))) !important;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: var(--frame-it-aspect, 1.7777778);
+}
+
+.node-card.transfer.custom-node-height > .style-node-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.node-card.transfer.custom-node-height > .style-node-body > :is(.port-row, .style-output-placeholder, .style-actions, .style-meta, small) {
+  flex: 0 0 auto;
+}
+
+.node-card.transfer.custom-node-height > .style-node-body > .style-collage {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.node-card.transfer.custom-node-height .style-collage-cell,
+.node-card.transfer.custom-node-height .transfer-output-preview .style-collage-cell {
+  min-height: 0;
+}
+
+.node-card.transfer.custom-node-height .transfer-output-preview .style-collage-cell,
+.node-card.transfer.custom-node-height .transfer-output-preview .style-collage-cell img {
+  width: 100%;
+  height: 100%;
+}
+
+.node-card.transfer.custom-node-height .transfer-output-preview .style-collage-cell img {
+  object-fit: contain;
 }
 
 .node-card.has-node-color {
@@ -3762,6 +3927,13 @@ video.newtnode-video-fallback {
 }
 
 .composer-node-body .port-row {
+  width: 100%;
+}
+
+.composer-preview-slot {
+  display: grid;
+  min-height: 0;
+  place-items: center;
   width: 100%;
 }
 

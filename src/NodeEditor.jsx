@@ -7552,9 +7552,11 @@ function NodeCard({
   const customNodeWidth = normalizedNodeWidth(nodeData.nodeWidth, node.type);
   const customNodeHeight = normalizedNodeHeight(nodeData.nodeHeight);
   const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
+  const customNodeWidthClass = Boolean(customNodeWidth);
+  const customNodeHeightClass = Boolean(customNodeHeight);
 
   const customTextareaSize = Boolean(nodeData.textareaResizeMode);
-  const cardClassName = `node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
+  const cardClassName = `node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
   const cardStyle = {
     transform: `translate(${node.x}px, ${node.y}px)`,
     width: customNodeWidth ? `${customNodeWidth}px` : undefined,

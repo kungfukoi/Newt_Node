@@ -923,15 +923,17 @@ export function ComposerNodeBody({ node, imageOutputPort, composerInputPorts, on
   return (
     <div className="node-body composer-node-body">
       {imageOutputPort && <OutputPortRow node={node} port={imageOutputPort} label="Frame output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
-      <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
-        {node.data.resultUrl ? (
-          <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt="Composer frame" />
-        ) : (
-          <>
-            <Box size={28} />
-            <span>No frame captured</span>
-          </>
-        )}
+      <div className="composer-preview-slot">
+        <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
+          {node.data.resultUrl ? (
+            <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt="Composer frame" />
+          ) : (
+            <>
+              <Box size={28} />
+              <span>No frame captured</span>
+            </>
+          )}
+        </div>
       </div>
       <button className="run-node-button" onClick={() => onOpenComposer?.(node.id)}>
         Open Composer
