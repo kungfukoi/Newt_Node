@@ -19,12 +19,12 @@ async function withTempOutputDir(callback) {
   }
 }
 
-test("Output filename tokens use the Output node name, date, and timestamp", async () => {
+test("Output filename tokens use the input node name, date, and timestamp", async () => {
   await withTempOutputDir(async (directory) => {
     const target = await createOutputTargetAsset(
       {
         outputTargetPath: path.join(directory, "$date"),
-        outputTargetFileName: "$node_name_$date_$time",
+        outputTargetFileName: "$node_$date_$time",
         outputTargetNodeTitle: "Final Output",
         outputTargetSourceNodeTitle: "Video Model"
       },
@@ -34,21 +34,60 @@ test("Output filename tokens use the Output node name, date, and timestamp", asy
       { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
     );
 
-    assert.equal(target.fileName, "Final Output_2026-08-05_14-03-09.mp4");
+    assert.equal(target.fileName, "Video Model_2026-08-05_14-03-09.mp4");
     assert.equal(path.basename(path.dirname(target.filePath)), "2026-08-05");
     await stat(target.filePath);
   });
 });
 
+test("legacy $node_name resolves to the input node name", async () => {
+  await withTempOutputDir(async (directory) => {
+    const target = await createOutputTargetAsset(
+      {
+        outputTargetPath: directory,
+        outputTargetFileName: "$node_name",
+        outputTargetNodeTitle: "Final Output",
+        outputTargetSourceNodeTitle: "Image Model"
+      },
+      "image",
+      ".png",
+      "",
+      { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
+    );
+
+    assert.equal(target.fileName, "Image Model.png");
+  });
+});
+
+test("Output node name remains available through explicit output tokens", async () => {
+  await withTempOutputDir(async (directory) => {
+    const target = await createOutputTargetAsset(
+      {
+        outputTargetPath: directory,
+        outputTargetFileName: "$output_node_$index",
+        outputTargetNodeTitle: "Final Output",
+        outputTargetSourceNodeTitle: "Video Model"
+      },
+      "video",
+      ".mp4",
+      "",
+      { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
+    );
+
+    assert.equal(target.fileName, "Final Output_01.mp4");
+  });
+});
+
 test("Output $index token picks the next available filename number", async () => {
   await withTempOutputDir(async (directory) => {
-    await writeFile(path.join(directory, "Final Output_01.mp4"), "existing");
+    await writeFile(path.join(directory, "Video Model_01.mp4"), "existing");
 
     const firstTarget = await createOutputTargetAsset(
       {
         outputTargetPath: directory,
-        outputTargetFileName: "$node_name_$index",
-        outputTargetNodeTitle: "Final Output"
+        outputTargetFileName: "$node_$index",
+        outputTargetNodeTitle: "Final Output",
+        outputTargetSourceNodeTitle: "Video Model"
       },
       "video",
       ".mp4",
@@ -58,8 +97,9 @@ test("Output $index token picks the next available filename number", async () =>
     const secondTarget = await createOutputTargetAsset(
       {
         outputTargetPath: directory,
-        outputTargetFileName: "$node_name_$index",
-        outputTargetNodeTitle: "Final Output"
+        outputTargetFileName: "$node_$index",
+        outputTargetNodeTitle: "Final Output",
+        outputTargetSourceNodeTitle: "Video Model"
       },
       "video",
       ".mp4",
@@ -67,20 +107,21 @@ test("Output $index token picks the next available filename number", async () =>
       { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
     );
 
-    assert.equal(firstTarget.fileName, "Final Output_02.mp4");
-    assert.equal(secondTarget.fileName, "Final Output_03.mp4");
+    assert.equal(firstTarget.fileName, "Video Model_02.mp4");
+    assert.equal(secondTarget.fileName, "Video Model_03.mp4");
   });
 });
 
 test("Output saves without $index still avoid overwriting existing files", async () => {
   await withTempOutputDir(async (directory) => {
-    await writeFile(path.join(directory, "Final Output.mp4"), "existing");
+    await writeFile(path.join(directory, "Video Model.mp4"), "existing");
 
     const target = await createOutputTargetAsset(
       {
         outputTargetPath: directory,
-        outputTargetFileName: "$node_name",
-        outputTargetNodeTitle: "Final Output"
+        outputTargetFileName: "$node",
+        outputTargetNodeTitle: "Final Output",
+        outputTargetSourceNodeTitle: "Video Model"
       },
       "video",
       ".mp4",
@@ -88,7 +129,7 @@ test("Output saves without $index still avoid overwriting existing files", async
       { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
     );
 
-    assert.equal(target.fileName, "Final Output-2.mp4");
+    assert.equal(target.fileName, "Video Model-2.mp4");
     await stat(target.filePath);
   });
 });
@@ -98,8 +139,9 @@ test("Output filename preview resolves tokens without creating the target file",
     const target = await previewOutputTargetAsset(
       {
         outputTargetPath: directory,
-        outputTargetFileName: "$node_name_$date_$index",
-        outputTargetNodeTitle: "Preview Output"
+        outputTargetFileName: "$node_$date_$index",
+        outputTargetNodeTitle: "Preview Output",
+        outputTargetSourceNodeTitle: "Image Model"
       },
       "image",
       ".png",
@@ -107,7 +149,7 @@ test("Output filename preview resolves tokens without creating the target file",
       { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
     );
 
-    assert.equal(target.fileName, "Preview Output_2026-08-05_01.png");
+    assert.equal(target.fileName, "Image Model_2026-08-05_01.png");
     await assert.rejects(stat(target.filePath), { code: "ENOENT" });
   });
 });

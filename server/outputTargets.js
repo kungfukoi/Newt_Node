@@ -23,7 +23,7 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
 
   const now = options.now || new Date();
   const extensionWithDot = normalizedOutputExtension(extension || path.extname(String(kind || "")) || ".bin");
-  const fileNameTemplate = String(body.outputTargetFileName || body.outputFileName || "").trim() || "$node_name_$date_$time";
+  const fileNameTemplate = String(body.outputTargetFileName || body.outputFileName || "").trim() || "$node_$date_$time";
   const hasIndexToken = outputTemplateHasIndexToken(rawDirectory) || outputTemplateHasIndexToken(fileNameTemplate);
 
   if (hasIndexToken) {
@@ -104,19 +104,21 @@ function outputTokenContext(body = {}, now = new Date(), outputIndex = 1) {
   const outputNodeName = safeOutputTokenValue(body.outputTargetNodeTitle || body.nodeTitle || "Output");
   const sourceNodeName = safeOutputTokenValue(body.outputTargetSourceNodeTitle || body.sourceTitle || "source");
   return {
-    node_name: outputNodeName,
+    node: sourceNodeName,
+    node_name: sourceNodeName,
     source_node_name: sourceNodeName,
     date: formatOutputDate(now),
     time: formatOutputTime(now),
     index: String(Math.max(1, Number(outputIndex) || 1)).padStart(2, "0"),
     workflow_name: safeOutputTokenValue(body.workflowName || body.projectName || "workflow"),
+    output_node: outputNodeName,
     output_node_name: outputNodeName
   };
 }
 
 function expandOutputTokens(value, tokenContext = {}) {
   return String(value || "").replace(
-    /\$(source_node_name|output_node_name|workflow_name|node_name|date|time|index)(?=$|[^A-Za-z0-9])/g,
+    /\$(source_node_name|output_node_name|output_node|workflow_name|node_name|node|date|time|index)(?=$|[^A-Za-z0-9])/g,
     (_match, token) => tokenContext[token] || ""
   );
 }
@@ -151,7 +153,7 @@ function resolveOutputDirectory(value, rootDir) {
 }
 
 function outputTargetFileName(template, extension, tokenContext = {}) {
-  const expanded = expandOutputTokens(template || "$node_name_$date_$time", tokenContext);
+  const expanded = expandOutputTokens(template || "$node_$date_$time", tokenContext);
   const cleanBaseName = path.basename(expanded).replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_").replace(/[. ]+$/g, "").trim() || "output";
   const parsed = path.parse(cleanBaseName);
   const explicitExtension = parsed.ext ? normalizedOutputExtension(parsed.ext) : "";

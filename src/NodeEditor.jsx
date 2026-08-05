@@ -5935,7 +5935,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     return {
       outputTargetPath: outputPath,
-      outputTargetFileName: String(outputNode?.data?.outputFileName || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+      outputTargetFileName: String(outputNode?.data?.outputFileName || "$node_$date_$time").trim() || "$node_$date_$time",
       outputTargetNodeId: outputNode.id,
       outputTargetNodeTitle: outputNode.data?.title || "Output",
       outputTargetSourceNodeId: sourceNode?.id || "",
@@ -9743,7 +9743,7 @@ function OutputNodeBody({
     let cancelled = false;
     const body = {
       outputTargetPath: outputPath,
-      outputTargetFileName: String(node.data.outputFileName || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+      outputTargetFileName: String(node.data.outputFileName || "$node_$date_$time").trim() || "$node_$date_$time",
       outputTargetNodeId: node.id,
       outputTargetNodeTitle: node.data.title || "Output",
       outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
@@ -9829,15 +9829,16 @@ function OutputNodeBody({
         <input
           className="connected-field"
           value={node.data.outputFileName || ""}
-          placeholder="$node_name_$date_$time"
+          placeholder="$node_$date_$time"
           onChange={(event) => onUpdate(node.id, { outputFileName: event.target.value })}
         />
       </NodeRow>
       <div className="output-token-strip" aria-label="Output filename tokens">
-        <code>$node_name</code>
+        <code>$node</code>
         <code>$date</code>
         <code>$time</code>
         <code>$index</code>
+        <code>$output_node</code>
       </div>
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
         {running ? "Saving..." : "Run Output"}
@@ -15869,7 +15870,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       outputPath: "",
-      outputFileName: "$node_name_$date_$time",
+      outputFileName: "$node_$date_$time",
       resultUrl: "",
       resultItems: [],
       selectedResultIndex: 0,
@@ -21256,7 +21257,7 @@ function normalizeOutputData(data = {}) {
     ...data,
     title: data.title || "Output",
     outputPath: String(data.outputPath || data.path || "").trim(),
-    outputFileName: String(data.outputFileName || data.fileNameTemplate || "$node_name_$date_$time").trim() || "$node_name_$date_$time",
+    outputFileName: String(data.outputFileName || data.fileNameTemplate || "$node_$date_$time").trim() || "$node_$date_$time",
     resultUrl: String(data.resultUrl || "").trim(),
     resultItems: Array.isArray(data.resultItems) ? data.resultItems : [],
     selectedResultIndex: Math.max(0, Number(data.selectedResultIndex) || 0),
