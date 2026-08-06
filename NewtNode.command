@@ -45,6 +45,18 @@ for _ in {1..80}; do
   sleep 0.25
 done
 
+if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
+  echo "Could not start the NewtNode API at $API_HEALTH_URL"
+  echo "See $LOG_DIR/server.log for details."
+  exit 1
+fi
+
+if ! curl -fsS "$URL" >/dev/null 2>&1; then
+  echo "Could not start the NewtNode client at $URL"
+  echo "See $LOG_DIR/client.log for details."
+  exit 1
+fi
+
 if [ -d "/Applications/Google Chrome.app" ]; then
   open -na "Google Chrome" --args --new-window "$URL" --window-size=1280,900 --window-position=120,80 --disable-pinch
 elif [ -d "/Applications/Microsoft Edge.app" ]; then

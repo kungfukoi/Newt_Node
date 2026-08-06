@@ -51,7 +51,7 @@ Current release: `v3.0.0-beta.0`
 
 ## Setup
 
-Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, and OpenAI values into the local gitignored `.env` file automatically.
+Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, and OpenAI values into the local gitignored `.env` file automatically. Disabled keys remain saved as commented `.env` entries and are restored into Settings without being activated.
 
 Models available through multiple services use the separate **Model Providers** setting. Seedance 2.0 can be routed through Fal or Krea, while Google video/Veo and Nano Banana Pro image generation can be routed through Google or Fal without changing which credentials are saved.
 

@@ -19,6 +19,7 @@ $env:PORT = "$apiPort"
 $env:VITE_API_PORT = "$apiPort"
 $env:VITE_CLIENT_PORT = "$clientPort"
 $appUrl = "http://127.0.0.1:$clientPort/"
+$apiHealthUrl = "http://127.0.0.1:$apiPort/api/health"
 
 $distIndex = Join-Path $root "dist\index.html"
 $sourcePaths = @(
@@ -50,11 +51,30 @@ if ($buildRequired) {
 }
 
 try {
-  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$apiPort/api/health" -TimeoutSec 1 | Out-Null
+  Invoke-WebRequest -UseBasicParsing -Uri $apiHealthUrl -TimeoutSec 1 | Out-Null
   Write-Host "NewtNode server is already running on port $apiPort."
 } catch {
   Write-Host "Starting NewtNode server on port $apiPort..."
   Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "server") -WorkingDirectory $root -WindowStyle Minimized
+}
+
+Write-Host "Waiting for the NewtNode API..."
+$apiReady = $false
+$apiDeadline = (Get-Date).AddSeconds(20)
+while (-not $apiReady -and (Get-Date) -lt $apiDeadline) {
+  try {
+    $apiResponse = Invoke-WebRequest -UseBasicParsing -Uri $apiHealthUrl -TimeoutSec 1
+    $apiReady = $apiResponse.StatusCode -eq 200
+  } catch {
+    Start-Sleep -Milliseconds 250
+  }
+}
+
+if (-not $apiReady) {
+  Write-Host "Could not start the NewtNode API at $apiHealthUrl"
+  Write-Host "The client will not open without a healthy API server."
+  Read-Host "Press Enter to close"
+  exit 1
 }
 
 try {

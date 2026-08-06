@@ -48,6 +48,41 @@ export function providerCredentialSummaries(credentials = {}, activeCredentialId
   ]));
 }
 
+export function mergeProviderCredentialsWithEnv({
+  credentials = {},
+  activeCredentialIds = {},
+  env = {},
+  disabledEnv = {}
+} = {}) {
+  const mergedCredentials = normalizeProviderCredentialStore(credentials);
+  const mergedActiveCredentialIds = normalizeActiveCredentialIds(activeCredentialIds, mergedCredentials);
+
+  for (const provider of providerCredentialNames) {
+    const envKey = providerEnvironmentKey(provider);
+    const activeKey = normalizedCredential(env?.[envKey]);
+    const disabledKey = normalizedCredential(disabledEnv?.[envKey]);
+    const key = activeKey || disabledKey;
+    if (!key) continue;
+
+    let credential = mergedCredentials[provider].find((item) => item.key === key);
+    if (!credential) {
+      const usedIds = new Set(mergedCredentials[provider].map((item) => item.id));
+      credential = {
+        id: uniqueCredentialId(`${provider}-env`, usedIds),
+        label: "Imported from .env",
+        key
+      };
+      mergedCredentials[provider].push(credential);
+    }
+    mergedActiveCredentialIds[provider] = activeKey ? credential.id : "";
+  }
+
+  return {
+    credentials: normalizeProviderCredentialStore(mergedCredentials),
+    activeCredentialIds: normalizeActiveCredentialIds(mergedActiveCredentialIds, mergedCredentials)
+  };
+}
+
 export function legacyProviderCredentialStore({ settings = {}, env = {}, runtime = {} } = {}) {
   const credentials = {};
   const activeCredentialIds = {};

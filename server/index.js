@@ -26,6 +26,7 @@ import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import {
   activeProviderCredentials,
   legacyProviderCredentialStore,
+  mergeProviderCredentialsWithEnv,
   normalizeActiveCredentialIds,
   normalizeProviderCredentialStore,
   providerCredentialNames,
@@ -132,7 +133,11 @@ import {
   storyboardDirectorExpansionInstruction,
   storyboardDirectorFramePlan
 } from "../src/storyboardShotExpansion.js";
-import "./restart-marker.js";
+const restartMarkerPath = fileURLToPath(new URL("./restart-marker.js", import.meta.url));
+if (!existsSync(restartMarkerPath)) {
+  await writeFile(restartMarkerPath, 'export const restartMarker = "";\n', "utf8");
+}
+await import("./restart-marker.js");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -720,14 +725,15 @@ function diagnosticNumber(value) {
 }
 
 async function readRuntimeSettings({ includeSecrets = false } = {}) {
-  const [repository, branch, settingsValues, envValues] = await Promise.all([
+  const [repository, branch, settingsValues, envValues, disabledEnvValues] = await Promise.all([
     resolveUpdateRepository(),
     currentGitBranch(),
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
-  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
   const selectedCredentials = activeProviderCredentials(
     credentialConfiguration.credentials,
     credentialConfiguration.activeCredentialIds
@@ -782,11 +788,16 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
 async function saveRuntimeSettings(body = {}) {
   const repository = normalizeUpdateRepository(body.repository);
-  const [settingsValues, envValues] = await Promise.all([
+  const [settingsValues, envValues, disabledEnvValues] = await Promise.all([
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
-  const currentConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const currentConfiguration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
+  const currentSelectedCredentials = activeProviderCredentials(
+    currentConfiguration.credentials,
+    currentConfiguration.activeCredentialIds
+  );
   const credentials = body.credentials !== undefined
     ? normalizeProviderCredentialStore(body.credentials)
     : currentConfiguration.credentials;
@@ -814,10 +825,19 @@ async function saveRuntimeSettings(body = {}) {
     });
   }
 
-  await updateEnvFileValues(Object.fromEntries(providerCredentialNames.map((provider) => [
-    providerEnvironmentKey(provider),
-    selectedCredentials[provider]?.key || ""
-  ])));
+  await updateEnvFileValues(Object.fromEntries(providerCredentialNames.map((provider) => {
+    const selectedCredential = selectedCredentials[provider];
+    return [
+      providerEnvironmentKey(provider),
+      {
+        value: selectedCredential?.key
+          || currentSelectedCredentials[provider]?.key
+          || credentials[provider].at(-1)?.key
+          || "",
+        commented: !selectedCredential
+      }
+    ];
+  })));
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
   }
@@ -827,11 +847,12 @@ async function saveRuntimeSettings(body = {}) {
 }
 
 async function validateRuntimeApiKeys() {
-  const [settingsValues, envValues] = await Promise.all([
+  const [settingsValues, envValues, disabledEnvValues] = await Promise.all([
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
-  const configuration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const configuration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
   const checkedAt = new Date().toISOString();
   const credentials = Object.fromEntries(await Promise.all(providerCredentialNames.map(async (provider) => {
     const results = await Promise.all(configuration.credentials[provider].map(async (credential) => [
@@ -1465,12 +1486,13 @@ async function requestServerRestart() {
 }
 
 async function refreshRuntimeConfigFromEnvFile() {
-  const [envValues, settingsValues] = await Promise.all([
+  const [envValues, disabledEnvValues, settingsValues] = await Promise.all([
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "COMFYUI_ROOT", "KREA_API_KEY", "OPENAI_API_KEY", updateRepositoryEnvKey]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"]),
     readRuntimeSettingsStore()
   ]);
 
-  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues);
+  const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
   const selectedCredentials = activeProviderCredentials(
     credentialConfiguration.credentials,
     credentialConfiguration.activeCredentialIds
@@ -1543,18 +1565,24 @@ async function writeRuntimeSettingsStore(patch) {
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
 
-function readProviderCredentialConfiguration(settingsValues = {}, envValues = {}) {
+function readProviderCredentialConfiguration(settingsValues = {}, envValues = {}, disabledEnvValues = {}) {
   if (settingsValues.hasCredentialStore) {
-    const credentials = normalizeProviderCredentialStore(settingsValues.credentials);
-    return {
-      credentials,
-      activeCredentialIds: normalizeActiveCredentialIds(settingsValues.activeCredentialIds, credentials)
-    };
+    return mergeProviderCredentialsWithEnv({
+      credentials: settingsValues.credentials,
+      activeCredentialIds: settingsValues.activeCredentialIds,
+      env: envValues,
+      disabledEnv: disabledEnvValues
+    });
   }
-  return legacyProviderCredentialStore({
+  const legacyConfiguration = legacyProviderCredentialStore({
     settings: settingsValues,
     env: envValues,
     runtime: startupProviderCredentials
+  });
+  return mergeProviderCredentialsWithEnv({
+    ...legacyConfiguration,
+    env: envValues,
+    disabledEnv: disabledEnvValues
   });
 }
 
@@ -1574,6 +1602,18 @@ async function readEnvFileValues(keys) {
   const values = {};
   for (const line of text.split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match || !keys.includes(match[1])) continue;
+    values[match[1]] = parseEnvValue(match[2]);
+  }
+  return values;
+}
+
+async function readCommentedEnvFileValues(keys) {
+  if (!existsSync(envFilePath)) return {};
+  const text = await readFile(envFilePath, "utf8");
+  const values = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*#\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
     if (!match || !keys.includes(match[1])) continue;
     values[match[1]] = parseEnvValue(match[2]);
   }
@@ -1623,7 +1663,7 @@ function applyRuntimeConfigValue(key, envValue, settingsValue, { preferSettings 
 async function writeRestartMarker() {
   const timestamp = new Date().toISOString();
   await writeFile(
-    path.join(__dirname, "restart-marker.js"),
+    restartMarkerPath,
     `export const restartMarker = ${JSON.stringify(timestamp)};\n`,
     "utf8"
   );
@@ -1984,20 +2024,38 @@ async function updateEnvFileValues(updates) {
     text = await readFile(envFilePath, "utf8");
   }
 
+  const normalizedUpdates = Object.fromEntries(keys.map((key) => {
+    const update = updates[key] && typeof updates[key] === "object"
+      ? updates[key]
+      : { value: updates[key], commented: false };
+    return [key, {
+      value: String(update.value || ""),
+      commented: Boolean(update.commented)
+    }];
+  }));
   const usedKeys = new Set();
   const lines = text ? text.split(/\r?\n/) : [];
-  const nextLines = lines.map((line) => {
-    for (const key of keys) {
-      if (new RegExp(`^\\s*${key}\\s*=`).test(line)) {
-        usedKeys.add(key);
-        return `${key}=${formatEnvValue(updates[key])}`;
-      }
+  const nextLines = [];
+
+  for (const line of lines) {
+    const key = keys.find((candidate) => new RegExp(`^\\s*(?:#\\s*)?${candidate}\\s*=`).test(line));
+    if (!key) {
+      nextLines.push(line);
+      continue;
     }
-    return line;
-  });
+    if (usedKeys.has(key)) continue;
+
+    usedKeys.add(key);
+    const update = normalizedUpdates[key];
+    const existingValue = parseEnvValue(line.replace(new RegExp(`^\\s*(?:#\\s*)?${key}\\s*=\\s*`), ""));
+    const value = update.value || existingValue;
+    nextLines.push(`${update.commented ? "# " : ""}${key}=${formatEnvValue(value)}`);
+  }
 
   for (const key of keys) {
-    if (!usedKeys.has(key)) nextLines.push(`${key}=${formatEnvValue(updates[key])}`);
+    if (usedKeys.has(key)) continue;
+    const update = normalizedUpdates[key];
+    nextLines.push(`${update.commented ? "# " : ""}${key}=${formatEnvValue(update.value)}`);
   }
 
   const temporaryPath = `${envFilePath}.${randomUUID()}.tmp`;
