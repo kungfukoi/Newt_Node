@@ -553,6 +553,7 @@ registerCoreRoutes(app, {
   readWorkflowFromPath,
   buildHealthPayload,
   openProjectOutputFolder,
+  resolveProjectOutputPath,
   timedApi,
   buildStorageDiagnostics,
   readRuntimeSettings,
@@ -613,6 +614,7 @@ function buildHealthPayload() {
       settingsKeyValidation: true,
       comfyWanStatus: true,
       projectOutputFolder: true,
+      projectOutputPath: true,
       skillDirector: true,
       storyboardQc: true,
       mediaThumbnail: true,
@@ -8704,6 +8706,12 @@ async function openProjectOutputFolder(body = {}) {
   await mkdir(targetPath, { recursive: true });
   await openDirectoryWithSystemShell(targetPath);
   return { path: targetPath };
+}
+
+async function resolveProjectOutputPath(body = {}) {
+  return {
+    path: path.join(await projectOutputDirectoryFromBody(body), "$date")
+  };
 }
 
 async function projectOutputDirectoryFromBody(body = {}) {

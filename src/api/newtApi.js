@@ -310,6 +310,10 @@ export const systemApi = {
 
   openProjectOutputFolder(body, label = "Open output folder") {
     return fetchJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
+  },
+
+  projectOutputPath(body) {
+    return fetchJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
   }
 };
 

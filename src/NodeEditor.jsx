@@ -308,6 +308,7 @@ import {
   videoModelSupportsFilmDirector
 } from "./nodeRunners/videoModels.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
+import { insertOutputToken, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
@@ -1152,6 +1153,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
   const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
   const [outputHistory, setOutputHistory] = React.useState([]);
+  const [defaultProjectOutputPath, setDefaultProjectOutputPath] = React.useState("");
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
@@ -1279,6 +1281,24 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     prepareNodesForSave: captureTextareaLayoutsForSave,
     onStatusChange
   });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setDefaultProjectOutputPath("");
+    systemApi.projectOutputPath(workflowRequestContext())
+      .then(({ response, data }) => {
+        if (cancelled) return;
+        if (!response.ok) throw new Error(data?.error || "Could not resolve the project output path.");
+        setDefaultProjectOutputPath(String(data?.path || "").trim());
+      })
+      .catch(() => {
+        if (!cancelled) setDefaultProjectOutputPath("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, projectName, projectPackagePath, savedProjectName, selectedProjectName]);
+
   const draftSnapshot = React.useMemo(
     () =>
       nodeEditorDraftSnapshot({
@@ -1894,6 +1914,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return {
         ...data,
         ...videoModelSelectionPatch(data, model)
+      };
+    }
+    if (type === "output") {
+      return {
+        ...data,
+        outputPath: defaultProjectOutputPath,
+        outputPathMode: "project-default"
       };
     }
     return data;
@@ -6885,6 +6912,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
               <NodeCard
                 node={node}
+                defaultOutputPath={defaultProjectOutputPath}
                 onDragStart={startNodeDrag}
                 onNodeResizeStart={startNodeResize}
                 onRemove={removeNode}
@@ -7329,6 +7357,7 @@ function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
 
 function NodeCard({
   node,
+  defaultOutputPath,
   onDragStart,
   onNodeResizeStart,
   onRemove,
@@ -7657,6 +7686,7 @@ function NodeCard({
 
       <NodeBody
         node={renderedNode}
+        defaultOutputPath={defaultOutputPath}
         onUpdate={handleNodeUpdate}
         incoming={incoming}
         incomingByNode={incomingByNode}
@@ -9721,6 +9751,7 @@ function formatComposerControlValue(value, precision) {
 
 function OutputNodeBody({
   node,
+  defaultOutputPath,
   config,
   incoming,
   onUpdate,
@@ -9734,6 +9765,21 @@ function OutputNodeBody({
   const sourceSummary = outputSourceSummary(incoming.sourceIn);
   const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn);
   const [filenamePreview, setFilenamePreview] = React.useState({ status: "idle", fileName: "", filePath: "", error: "" });
+  const pathInputRef = React.useRef(null);
+  const filenameInputRef = React.useRef(null);
+  const initialFilenameLength = String(node.data.outputFileName || "").length;
+  const tokenTargetRef = React.useRef({ field: "filename", start: initialFilenameLength, end: initialFilenameLength });
+
+  React.useEffect(() => {
+    const currentPath = String(node.data.outputPath || "").trim();
+    const pathMode = String(node.data.outputPathMode || "");
+    if (!defaultOutputPath || pathMode === "custom" || (!pathMode && currentPath)) return;
+    if (currentPath === defaultOutputPath && pathMode === "project-default") return;
+    onUpdate(node.id, {
+      outputPath: defaultOutputPath,
+      outputPathMode: "project-default"
+    });
+  }, [defaultOutputPath, node.data.outputPath, node.data.outputPathMode, node.id, onUpdate]);
 
   React.useEffect(() => {
     const outputPath = String(node.data.outputPath || "").trim();
@@ -9792,10 +9838,45 @@ function OutputNodeBody({
   async function pickOutputFolder() {
     const folderSelection = await systemApi.selectFolder({
       title: "Choose Output folder",
-      defaultPath: node.data.outputPath || ""
+      defaultPath: node.data.outputPath || defaultOutputPath || ""
     });
     if (!folderSelection.response.ok) return;
-    if (folderSelection.data?.path) onUpdate(node.id, { outputPath: folderSelection.data.path });
+    if (folderSelection.data?.path) {
+      onUpdate(node.id, {
+        outputPath: folderSelection.data.path,
+        outputPathMode: "custom"
+      });
+    }
+  }
+
+  function rememberTokenTarget(field, event) {
+    const input = event.currentTarget;
+    const fallback = String(input.value || "").length;
+    tokenTargetRef.current = {
+      field,
+      start: input.selectionStart ?? fallback,
+      end: input.selectionEnd ?? input.selectionStart ?? fallback
+    };
+  }
+
+  function insertToken(token) {
+    const target = tokenTargetRef.current;
+    const field = target.field === "path" ? "path" : "filename";
+    const dataKey = field === "path" ? "outputPath" : "outputFileName";
+    const inputRef = field === "path" ? pathInputRef : filenameInputRef;
+    const insertion = insertOutputToken(node.data[dataKey] || "", token, target.start, target.end);
+    const patch = { [dataKey]: insertion.value };
+    if (field === "path") patch.outputPathMode = "custom";
+    onUpdate(node.id, patch);
+    navigator.clipboard?.writeText(token).catch(() => {});
+
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(insertion.cursor, insertion.cursor);
+      tokenTargetRef.current = { field, start: insertion.cursor, end: insertion.cursor };
+    });
   }
 
   const savedAt = node.data.lastSavedAt ? new Date(node.data.lastSavedAt) : null;
@@ -9818,9 +9899,20 @@ function OutputNodeBody({
       <NodeRow label="Path">
         <div className="output-path-control">
           <input
+            ref={pathInputRef}
             value={node.data.outputPath || ""}
-            placeholder="C:\\Exports\\$date"
-            onChange={(event) => onUpdate(node.id, { outputPath: event.target.value })}
+            placeholder="Project outputs\\$date"
+            onFocus={(event) => rememberTokenTarget("path", event)}
+            onSelect={(event) => rememberTokenTarget("path", event)}
+            onKeyUp={(event) => rememberTokenTarget("path", event)}
+            onClick={(event) => rememberTokenTarget("path", event)}
+            onChange={(event) => {
+              rememberTokenTarget("path", event);
+              onUpdate(node.id, {
+                outputPath: event.target.value,
+                outputPathMode: "custom"
+              });
+            }}
           />
           <button type="button" onClick={pickOutputFolder} title="Choose folder" aria-label="Choose output folder">
             <FolderOpen size={15} />
@@ -9829,18 +9921,32 @@ function OutputNodeBody({
       </NodeRow>
       <NodeRow label="Filename">
         <input
+          ref={filenameInputRef}
           className="connected-field"
           value={node.data.outputFileName || ""}
           placeholder="$node_$date_$time"
-          onChange={(event) => onUpdate(node.id, { outputFileName: event.target.value })}
+          onFocus={(event) => rememberTokenTarget("filename", event)}
+          onSelect={(event) => rememberTokenTarget("filename", event)}
+          onKeyUp={(event) => rememberTokenTarget("filename", event)}
+          onClick={(event) => rememberTokenTarget("filename", event)}
+          onChange={(event) => {
+            rememberTokenTarget("filename", event);
+            onUpdate(node.id, { outputFileName: event.target.value });
+          }}
         />
       </NodeRow>
-      <div className="output-token-strip" aria-label="Output filename tokens">
-        <code>$node</code>
-        <code>$date</code>
-        <code>$time</code>
-        <code>$index</code>
-        <code>$output_node</code>
+      <div className="output-token-strip" aria-label="Output path and filename tokens">
+        {outputTokenOptions.map((token) => (
+          <button
+            key={token}
+            type="button"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => insertToken(token)}
+            title={`Insert ${token}`}
+          >
+            <code>{token}</code>
+          </button>
+        ))}
       </div>
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
         {running ? "Saving..." : "Run Output"}
@@ -9854,6 +9960,7 @@ function OutputNodeBody({
 
 function NodeBody({
   node,
+  defaultOutputPath,
   onUpdate,
   incoming,
   onRun,
@@ -10015,6 +10122,7 @@ function NodeBody({
     return (
       <OutputNodeBody
         node={node}
+        defaultOutputPath={defaultOutputPath}
         config={config}
         incoming={incoming}
         onUpdate={onUpdate}
@@ -15872,6 +15980,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       outputPath: "",
+      outputPathMode: "project-default",
       outputFileName: "$node_$date_$time",
       resultUrl: "",
       resultItems: [],

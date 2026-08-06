@@ -13,6 +13,7 @@ export function registerCoreRoutes(
     readWorkflowFromPath,
     buildHealthPayload,
     openProjectOutputFolder,
+    resolveProjectOutputPath,
     timedApi,
     buildStorageDiagnostics,
     readRuntimeSettings,
@@ -114,6 +115,15 @@ export function registerCoreRoutes(
       res.json(await openProjectOutputFolder(req.body || {}));
     } catch (error) {
       res.status(500).json({ error: error.message || "Could not open output folder." });
+    }
+  });
+
+  app.post("/api/system/project-output-path", async (req, res) => {
+    try {
+      if (!resolveProjectOutputPath) throw new Error("Resolving the project output path is not available.");
+      res.json(await resolveProjectOutputPath(req.body || {}));
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Could not resolve the project output path." });
     }
   });
 

@@ -6801,11 +6801,24 @@ video.newtnode-video-fallback {
   gap: 5px;
 }
 
-.output-token-strip code {
-  padding: 4px 7px;
+.output-token-strip button {
+  min-height: 26px;
+  border: 0;
   border-radius: 6px;
+  padding: 4px 7px;
   color: rgba(244, 240, 232, 0.76);
   background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+
+.output-token-strip button:hover,
+.output-token-strip button:focus-visible {
+  color: #111;
+  background: #ddc631;
+}
+
+.output-token-strip code {
+  color: inherit;
   font-size: 11px;
 }
 
