@@ -4,6 +4,7 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
+  { type: "output", label: "Output" },
   { type: "autoAspect", label: "Auto Aspect" },
   { type: "skillDirector", label: "Film Director" },
   { type: "storyboard", label: "Storyboard" },

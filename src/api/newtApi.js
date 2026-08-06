@@ -105,6 +105,8 @@ function localApiRouteKey(path) {
   if (path.includes("run-skill-director")) return "skillDirector";
   if (path.includes("storyboard-qc")) return "storyboardQc";
   if (path.includes("generate-3d")) return "generate3d";
+  if (path.includes("preview-output")) return "previewOutput";
+  if (path.includes("save-output")) return "saveOutput";
   if (path.includes("settings")) return "settings";
   if (path.includes("comfy-wan")) return "comfyWanStatus";
   return "";
@@ -258,6 +260,14 @@ export const nodeApi = {
 
   utilityVideo(body, label = "Utility video generation") {
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
+  },
+
+  saveOutput(body, label = "Output save") {
+    return fetchJsonApi("/api/node/save-output", jsonBody(body), label);
+  },
+
+  previewOutput(body, label = "Output filename preview") {
+    return fetchJsonApi("/api/node/preview-output", jsonBody(body), label);
   },
 
   editMedia(body, label = "Edit media") {

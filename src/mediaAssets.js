@@ -3,12 +3,14 @@ export const outputDragEndEvent = "newtnode-output-drag-end";
 export const fullResolutionContextPreparedAttribute = "data-full-resolution-context-prepared";
 export const fullResolutionPreviewSourceAttribute = "data-full-resolution-preview-source";
 const outputDragWindowKey = "__newtNodeDraggedOutputItem";
+const externalOutputsPrefix = "/external-outputs/";
+const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
 
-const outputMediaTypes = new Set(["image", "video", "audio", "model3d"]);
+const outputMediaTypes = new Set(["image", "video", "audio", "model3d", "text"]);
 
 export function isLocalOutputUrl(value) {
   if (typeof value !== "string") return false;
-  return value.startsWith("/outputs/") || /^\/workflow-assets\/[^/]+\/outputs\//.test(value);
+  return value.startsWith("/outputs/") || value.startsWith(externalOutputsPrefix) || /^\/workflow-assets\/[^/]+\/outputs\//.test(value);
 }
 
 export function isLocalThumbnailUrl(value) {
@@ -23,6 +25,7 @@ export function isLocalDraggableMediaUrl(value) {
   if (isLocalThumbnailUrl(value)) return false;
   return value.startsWith("/uploads/")
     || value.startsWith("/outputs/")
+    || value.startsWith(externalOutputsPrefix)
     || /^\/workflow-assets\/[^/]+\//.test(value);
 }
 
@@ -31,6 +34,7 @@ export function outputMediaTypeForUrl(url, fallbackType) {
   if (/\.(glb|gltf)$/.test(extension)) return "model3d";
   if (/\.(mp4|mov|webm)$/.test(extension)) return "video";
   if (/\.(mp3|wav|m4a|aac|ogg)$/.test(extension)) return "audio";
+  if (/\.(txt|md|markdown|json|csv|tsv|xml|yaml|yml)$/.test(extension)) return "text";
   if (/\.(png|jpe?g|webp|gif)$/.test(extension)) return "image";
   return outputMediaTypes.has(fallbackType) ? fallbackType : "";
 }
@@ -74,6 +78,26 @@ export function fullResolutionImageUrl(itemOrUrl) {
   }
 
   return String(itemOrUrl || "").trim();
+}
+
+export function displayMediaUrl(itemOrUrl) {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const sourceUrl = String(
+    item?.url
+      || item?.localUrl
+      || item?.resultUrl
+      || itemOrUrl
+      || ""
+  ).trim();
+  if (!sourceUrl || /^(?:blob:|data:|https?:)/i.test(sourceUrl)) return sourceUrl;
+  if (!sourceUrl.startsWith(externalOutputsPrefix)) return sourceUrl;
+  if (typeof window === "undefined" || !window.location) return sourceUrl;
+
+  const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
+  if (!localHosts.has(window.location.hostname)) return sourceUrl;
+  if (!localApiPort || window.location.port === localApiPort) return sourceUrl;
+
+  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${sourceUrl}`;
 }
 
 export function fullResolutionImageProps(itemOrUrl, fileName = "") {
@@ -298,6 +322,7 @@ export function mimeForOutputItem(item) {
   if (lower.endsWith(".aac")) return "audio/aac";
   if (lower.endsWith(".ogg")) return "audio/ogg";
   if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
   if (item?.type === "video") return "video/mp4";
   if (item?.type === "audio") return "audio/mpeg";
   if (item?.type === "model3d") return "model/gltf-binary";

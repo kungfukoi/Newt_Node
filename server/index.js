@@ -37,6 +37,11 @@ import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFram
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import {
+  createOutputTargetAsset,
+  externalOutputFilePathFromPublicPath,
+  previewOutputTargetAsset
+} from "./outputTargets.js";
+import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
@@ -110,6 +115,7 @@ import {
   kreaSeedanceEndpoint,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
+import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
 import {
   buildKreaImageInput,
   estimateKreaImageCost,
@@ -140,6 +146,7 @@ const runtimeThumbnailsDir = path.join(outputsDir, "thumbnails", "runtime");
 const storyboardAssetsDir = path.join(rootDir, "public", "storyboard");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const workflowAssetsPrefix = "/workflow-assets";
+const externalOutputsPrefix = "/external-outputs";
 const workflowPackageInputDirName = "inputs";
 const workflowPackageOutputDirName = "outputs";
 const workflowPackageDependencyDirName = "dependencies";
@@ -500,6 +507,16 @@ app.use(cors());
 app.use(express.json({ limit: "16mb" }));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
+app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
+  try {
+    const filePath = externalOutputFilePathFromPublicPath(req.path);
+    res.sendFile(filePath, (error) => {
+      if (error && !res.headersSent) res.status(error.statusCode || 404).send("Output file not found.");
+    });
+  } catch (error) {
+    if (!res.headersSent) res.status(400).send(error.message || "Invalid output file path.");
+  }
+});
 app.get("/api/media-thumbnail", runtimeThumbnailRequestLimiter, async (req, res) => {
   try {
     const sourceUrl = String(req.query.url || "").trim();
@@ -585,6 +602,8 @@ function buildHealthPayload() {
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
+      previewOutput: true,
+      saveOutput: true,
       settings: true,
       settingsKeyValidation: true,
       comfyWanStatus: true,
@@ -2391,6 +2410,107 @@ app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
     res.status(500).json({ error: error.message || "Upload failed." });
   }
 });
+
+app.post("/api/node/preview-output", async (req, res) => {
+  try {
+    if (!String(req.body.outputTargetPath || "").trim()) {
+      return res.status(400).json({ error: "Set an Output path to preview the filename." });
+    }
+
+    const sourceFileName = String(req.body.sourceFileName || "").trim();
+    const mediaType = String(req.body.mediaType || "").trim();
+    const extension = path.extname(sourceFileName) || outputPreviewExtensionForMediaType(mediaType);
+    const target = await previewOutputTargetAsset(
+      req.body,
+      sourceFileName || mediaType || "output",
+      extension,
+      "",
+      { rootDir, outputPrefix: externalOutputsPrefix }
+    );
+    if (!target) return res.status(400).json({ error: "Set an Output path to preview the filename." });
+
+    res.json({
+      preview: {
+        fileName: target.fileName,
+        filePath: target.filePath,
+        directory: path.dirname(target.filePath),
+        localUrl: target.publicPath
+      }
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Could not preview Output filename." });
+  }
+});
+
+app.post("/api/node/save-output", async (req, res) => {
+  try {
+    if (!String(req.body.outputTargetPath || "").trim()) {
+      return res.status(400).json({ error: "Set an Output path before saving." });
+    }
+
+    const sourceUrl = String(req.body.sourceUrl || "").trim();
+    const sourceText = String(req.body.sourceText || "");
+    const sourceTitle = String(req.body.outputTargetSourceNodeTitle || req.body.sourceTitle || req.body.nodeTitle || "output").trim() || "output";
+    let sourceFileName = String(req.body.sourceFileName || "").trim();
+    let extension = path.extname(sourceFileName);
+    let mimeType = "";
+    let mediaType = String(req.body.mediaType || "").trim();
+    let sourcePath = "";
+
+    if (sourceUrl) {
+      const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+      sourcePath = source.filePath;
+      sourceFileName ||= source.fileName;
+      extension ||= path.extname(source.fileName);
+      mimeType = mimeForExtension(extension.toLowerCase());
+      mediaType ||= mediaTypeForMime(mimeType);
+    } else if (sourceText.trim()) {
+      extension ||= ".txt";
+      mimeType = "text/plain";
+      mediaType ||= "text";
+      sourceFileName ||= `${safeOutputFileBaseName(sourceTitle) || "output"}.txt`;
+    } else {
+      return res.status(400).json({ error: "Connect a source with output before saving." });
+    }
+
+    const target = await createManagedAssetTarget(req, sourceFileName || sourceTitle, extension || ".bin", workflowPackageOutputDirName);
+    if (!target.outputTarget) {
+      return res.status(400).json({ error: "Set an Output path before saving." });
+    }
+
+    if (sourcePath) {
+      if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
+        await copyFile(sourcePath, target.filePath);
+      }
+    } else {
+      await writeFile(target.filePath, sourceText, "utf8");
+    }
+
+    const outputStats = await stat(target.filePath);
+    const thumbnail = mediaType === "image" ? await createImagePreview(req, target, "output") : null;
+    res.json({
+      output: {
+        localUrl: target.publicPath,
+        fileName: target.fileName,
+        filePath: target.filePath,
+        mimeType,
+        mediaType,
+        bytes: outputStats.size,
+        thumbnailUrl: thumbnail?.publicPath || ""
+      }
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Could not save Output node." });
+  }
+});
+
+function outputPreviewExtensionForMediaType(mediaType) {
+  if (mediaType === "video") return ".mp4";
+  if (mediaType === "audio") return ".mp3";
+  if (mediaType === "model3d") return ".glb";
+  if (mediaType === "text" || mediaType === "prompt" || mediaType === "director") return ".txt";
+  return ".png";
+}
 
 app.post("/api/node/composer-frame", async (req, res) => {
   try {
@@ -5162,10 +5282,15 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
-    const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
-    const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
-    const referenceImages = rawReferenceImageUrls
-      .map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
+    const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
+    const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+    const mergedReferenceImages = mergeSeedanceDirectorReferences({
+      directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
+      directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
+      directorReferences
+    });
+    const referenceImages = mergedReferenceImages.urls
+      .map((url, index) => ({ url, label: mergedReferenceImages.labels[index] }))
       .filter(({ url }) => isLocalAssetUrl(url));
     const referenceImageUrls = referenceImages.map(({ url }) => url);
     const referenceImageNames = normalizeReferenceNames(referenceImages.map(({ label }) => label), referenceImageUrls.length);
@@ -6030,9 +6155,9 @@ function rewriteKlingReferenceMentions(text = "", mentionMap = new Map()) {
 
 function parseKlingFilmDirectorCuts(shotList = "") {
   return sanitizeSkillDirectorShotListFormatting(shotList)
-    .split(/(?=\bCUT\s+\d{1,2}\s+â€”)/gi)
+    .split(/(?=\bCUT\s+\d{1,2}(?:\s+[^\w\s]+)?\s+shot frame:)/gi)
     .map((block) => {
-      const match = block.match(/^CUT\s+(\d{1,2})\s+â€”\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):\s*([\s\S]*)$/i);
+      const match = block.match(/^CUT\s+(\d{1,2})(?:\s+[^\w\s]+)?\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):\s*([\s\S]*)$/i);
       if (!match) return null;
       return {
         number: Number(match[1]),
@@ -8577,6 +8702,10 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const packageContext = workflowPackageContextFromBody(body);
   const inputExtension = extension || path.extname(String(kind || ""));
   const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
+  const outputTarget = assetGroup === workflowPackageOutputDirName
+    ? await createOutputTargetAsset(body, kind, inputExtension, preferredBaseName, { rootDir, outputPrefix: externalOutputsPrefix })
+    : null;
+  if (outputTarget) return outputTarget;
 
   if (packageContext?.packagePath) {
     await ensureWorkflowPackageDirs(packageContext.packagePath);
@@ -10053,6 +10182,8 @@ async function downloadVideo(req, url, kind, { stripAudio = false } = {}) {
     fileName: output.fileName,
     publicPath: output.publicPath,
     filePath: output.filePath,
+    externalPath: output.externalPath || "",
+    outputTarget: Boolean(output.outputTarget),
     bytes: outputBytes
   };
 }
@@ -12059,6 +12190,9 @@ async function downloadImage(req, url, kind, mimeTypeHint = "") {
   return {
     fileName: output.fileName,
     publicPath: output.publicPath,
+    filePath: output.filePath,
+    externalPath: output.externalPath || "",
+    outputTarget: Boolean(output.outputTarget),
     bytes: outputStats.size,
     mimeType,
     thumbnailPublicPath: thumbnail?.publicPath || "",
@@ -12157,6 +12291,9 @@ async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
   return {
     fileName: output.fileName,
     publicPath: output.publicPath,
+    filePath: output.filePath,
+    externalPath: output.externalPath || "",
+    outputTarget: Boolean(output.outputTarget),
     bytes: bytes.length,
     mimeType
   };
@@ -13849,7 +13986,7 @@ function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
   const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
   if (!source) return "";
   return source
-    .split(/(?=\bCUT\s+\d{1,2}\s+â€”)/gi)
+    .split(/(?=\bCUT\s+\d{1,2}(?:\s+[^\w\s]+)?\s+shot frame:)/gi)
     .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
     .filter(Boolean)
     .join("\n\n");
@@ -13859,6 +13996,7 @@ function sanitizeSkillDirectorShotListFormatting(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
+    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -14014,7 +14152,7 @@ function skillDirectorShotPlanFromOutput(outputText = "") {
     const declaredShotCount = skillDirectorStructuredNumber(parsed, ["recommendedShotCount", "recommended_shot_count", "shotCount", "shot_count"]);
     return {
       shotList: cuts
-        .map((cut) => `CUT ${cut.number} â€” shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
+        .map((cut) => `CUT ${cut.number} shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
         .join("\n\n"),
       shotListNotes: [
         continuityLedger ? `Continuity ledger: ${continuityLedger}` : "",
@@ -14073,7 +14211,7 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
       );
     }
   }
-  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)\s+â€”\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
+  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)(?:\s+[^\w\s]+)?\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
   for (let index = 1; index < setupMatches.length; index += 1) {
     const previous = setupMatches[index - 1];
     const current = setupMatches[index];
@@ -14248,7 +14386,7 @@ function buildSkillDirectorPrompt({
     skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
     filmDirectorShotDetailDirective(shotCount, durationSeconds),
     "Each CUT must follow this format exactly:",
-    "CUT 1 â€” shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
+    "CUT 1 shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
     "the generated shot description",
     "Do not use square brackets anywhere in SHOT_LIST.",
     "",
@@ -17510,12 +17648,13 @@ function firstLocalOutput(value) {
 }
 
 function isLocalOutputUrl(value) {
-  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith(`${workflowAssetsPrefix}/`));
+  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith(`${externalOutputsPrefix}/`) || value.startsWith(`${workflowAssetsPrefix}/`));
 }
 
 function isLocalAssetUrl(value) {
   return typeof value === "string" && (
     value.startsWith("/outputs/") ||
+    value.startsWith(`${externalOutputsPrefix}/`) ||
     value.startsWith("/uploads/") ||
     value.startsWith("/storyboard/") ||
     value.startsWith(`${workflowAssetsPrefix}/`)
@@ -17758,10 +17897,21 @@ function localPublicPathFromUrl(value) {
     // Fall through to the clear validation error below.
   }
 
-  throw new Error("This action can only read local NewtNode assets from uploads, outputs, bundled storyboard assets, or workflow packages.");
+  throw new Error("This action can only read local NewtNode assets from uploads, outputs, Output nodes, bundled storyboard assets, or workflow packages.");
 }
 
 async function resolveLocalAssetPath(publicPath) {
+  if (String(publicPath || "").startsWith(`${externalOutputsPrefix}/`)) {
+    const filePath = externalOutputFilePathFromPublicPath(publicPath);
+    if (!existsSync(filePath)) {
+      throw httpError(400, `The referenced external output is no longer available: ${path.basename(filePath)}.`);
+    }
+    return {
+      fileName: path.basename(filePath),
+      filePath
+    };
+  }
+
   const packageMatch = String(publicPath || "").match(/^\/workflow-assets\/([^/]+)\/(.+)$/);
   if (packageMatch) {
     const workflowId = decodeURIComponent(packageMatch[1] || "");
@@ -17928,6 +18078,7 @@ function mimeForExtension(extension) {
   if (extension === ".mp3") return "audio/mpeg";
   if (extension === ".wav") return "audio/wav";
   if (extension === ".m4a") return "audio/mp4";
+  if (extension === ".txt" || extension === ".md") return "text/plain";
   return "image/png";
 }
 
@@ -17935,6 +18086,7 @@ function mediaTypeForMime(mimeType = "") {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";
   if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("text/")) return "text";
   if (mimeType.startsWith("model/")) return "model3d";
   return "file";
 }

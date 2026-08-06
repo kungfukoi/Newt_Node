@@ -47,7 +47,7 @@ import {
 import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { apiErrorMessage } from "./apiErrors.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
-import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
+import { EdgeCanvas, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import {
@@ -56,7 +56,8 @@ import {
   ProjectOutputDrawer,
   ResultPane,
   useNewtNodeImageFallback,
-  useNewtNodeVideoFallback
+  useNewtNodeVideoFallback,
+  useNewtNodeVideoReady
 } from "./components/MediaViews.jsx";
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
@@ -87,6 +88,7 @@ import {
 import {
   defaultFrameItPoseId,
   defaultFrameItScene,
+  frameItGenerationPrompt,
   normalizeFrameItSavedPoses,
   normalizeFrameItScene
 } from "./frameItState.js";
@@ -115,6 +117,7 @@ import {
   capitalizeMediaType,
   clearOutputItemDragData,
   currentDraggedOutputItem,
+  displayMediaUrl,
   fileBaseName,
   fileNameFromLocalUrl,
   finishOutputItemDragData,
@@ -141,6 +144,7 @@ import {
   characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
+import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -240,6 +244,13 @@ import {
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
+import {
+  analyzeColorLookPalette,
+  buildColorGradePrompt,
+  gradePresetNames,
+  gradePresetPrompts,
+  normalizeGradePresetName
+} from "./colorLook.js";
 import {
   clamp,
   clampContextMenuPosition,
@@ -989,6 +1000,11 @@ const trackpadZoomSensitivity = 0.006;
 const mouseWheelZoomSensitivity = 0.00135;
 const wheelZoomDeltaClamp = 240;
 const nodeDraftCommitDelayMs = 300;
+const largeCanvasNodeCountThreshold = 80;
+const overviewNodeScaleThreshold = 0.2;
+const canvasCullBufferPx = 460;
+const canvasCullBufferSceneFloor = 900;
+const defaultCanvasSize = { width: 1, height: 1 };
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const previewLayoutDragMime = "application/x-newtnode-preview-layout-item";
@@ -1059,8 +1075,39 @@ function sameRect(left, right, tolerance = 0.25) {
   return ["left", "top", "right", "bottom", "width", "height"].every((key) => Math.abs(left[key] - right[key]) <= tolerance);
 }
 
+function sameSize(left, right, tolerance = 1) {
+  if (!left || !right) return left === right;
+  return Math.abs(left.width - right.width) <= tolerance && Math.abs(left.height - right.height) <= tolerance;
+}
+
+function viewportSceneRect(viewport, canvasSize, paddingPx = 0) {
+  const scale = Math.max(Number(viewport?.scale) || 1, viewportScaleFloor);
+  const x = Number(viewport?.x) || 0;
+  const y = Number(viewport?.y) || 0;
+  const width = Math.max(1, Number(canvasSize?.width) || 1);
+  const height = Math.max(1, Number(canvasSize?.height) || 1);
+  const padding = Math.max(0, Number(paddingPx) || 0);
+  return {
+    left: (-x - padding) / scale,
+    top: (-y - padding) / scale,
+    right: (width - x + padding) / scale,
+    bottom: (height - y + padding) / scale
+  };
+}
+
+function expandedViewportSceneRect(viewport, canvasSize) {
+  const scale = Math.max(Number(viewport?.scale) || 1, viewportScaleFloor);
+  const paddingPx = Math.max(canvasCullBufferPx, canvasCullBufferSceneFloor * scale);
+  return viewportSceneRect(viewport, canvasSize, paddingPx);
+}
+
+function shouldUseOverviewRendering(nodes, viewport) {
+  return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
+}
+
 export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
+  const edgeCanvasRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -1080,6 +1127,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
+  const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
   const connectedPortKeysRef = React.useRef(emptyPortSet);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
@@ -1090,6 +1138,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [portPositions, setPortPositions] = React.useState({});
   const [selectionBounds, setSelectionBounds] = React.useState(null);
   const [viewport, setViewport] = React.useState(savedDraft.viewport);
+  const [canvasSize, setCanvasSize] = React.useState(defaultCanvasSize);
   const [selectedNodeIds, setSelectedNodeIds] = React.useState([]);
   const [projectName, setProjectName] = React.useState(savedDraft.projectName);
   const [projectId, setProjectId] = React.useState(savedDraft.projectId);
@@ -1110,6 +1159,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [comfyWanDialog, setComfyWanDialog] = React.useState(null);
 
+  const nodeMap = React.useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
@@ -1137,14 +1187,45 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
   const selectedRunnableNodes = React.useMemo(
-    () => nodes.filter((node) => selectedNodeSet.has(node.id) && isRunnableNode(node) && node.data.status !== "running"),
-    [nodes, selectedNodeSet]
+    () => nodes.filter((node) => {
+      if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
+      if (node.type !== "output") return true;
+      return !(incomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedNodeSet.has(source.id) && isRunnableNode(source));
+    }),
+    [incomingByNode, nodes, selectedNodeSet]
   );
   const selectedPlayablePreviewNodes = React.useMemo(
     () => nodes.filter((node) => selectedNodeSet.has(node.id) && previewVideoSourceForNode(node, incomingByNode)),
     [nodes, selectedNodeSet, incomingByNode]
   );
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
+  const largeCanvasMode = nodes.length >= largeCanvasNodeCountThreshold;
+  const overviewRendering = shouldUseOverviewRendering(nodes, viewport);
+  const visibleSceneRect = React.useMemo(
+    () => (largeCanvasMode ? expandedViewportSceneRect(viewport, canvasSize) : null),
+    [canvasSize, largeCanvasMode, viewport]
+  );
+  const renderedNodeIds = React.useMemo(() => {
+    if (!largeCanvasMode || !visibleSceneRect) return null;
+    const forcedNodeIds = new Set(selectedNodeIds);
+    if (draftEdge?.from?.nodeId) forcedNodeIds.add(draftEdge.from.nodeId);
+
+    return new Set(
+      nodes
+        .filter(
+          (node) =>
+            forcedNodeIds.has(node.id) ||
+            node.data?.status === "running" ||
+            rectsIntersect(estimatedNodeRect(node), visibleSceneRect)
+        )
+        .map((node) => node.id)
+    );
+  }, [draftEdge?.from?.nodeId, largeCanvasMode, nodes, selectedNodeIds, visibleSceneRect]);
+  const renderedNodes = React.useMemo(
+    () => (renderedNodeIds ? nodes.filter((node) => renderedNodeIds.has(node.id)) : nodes),
+    [nodes, renderedNodeIds]
+  );
+  const renderedNodeKey = React.useMemo(() => renderedNodes.map((node) => node.id).join("|"), [renderedNodes]);
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
     projects,
@@ -1219,18 +1300,55 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, outputHistory, projectId, projectName]
   );
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     nodesRef.current = nodes;
-  }, [nodes]);
+    nodeMapRef.current = nodeMap;
+  }, [nodeMap, nodes]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  React.useLayoutEffect(() => {
+    if (!active) return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    let frame = null;
+    const updateCanvasSize = () => {
+      frame = null;
+      const rect = canvas.getBoundingClientRect();
+      const nextSize = {
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height))
+      };
+      setCanvasSize((current) => (sameSize(current, nextSize) ? current : nextSize));
+    };
+    const scheduleCanvasSizeUpdate = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(updateCanvasSize);
+    };
+
+    updateCanvasSize();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleCanvasSizeUpdate) : null;
+    observer?.observe(canvas);
+    window.addEventListener("resize", scheduleCanvasSizeUpdate);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleCanvasSizeUpdate);
+    };
+  }, [active]);
 
   React.useLayoutEffect(() => {
     connectedPortKeysRef.current = connectedPortKeys;
     if (active) schedulePortPositionRefresh();
   }, [active, connectedPortKeys]);
+
+  React.useLayoutEffect(() => {
+    if (active) schedulePortPositionRefresh();
+  }, [active, overviewRendering, renderedNodeKey]);
 
   React.useLayoutEffect(() => {
     viewportRef.current = viewport;
@@ -1592,6 +1710,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
     }
+    edgeCanvasRef.current?.draw?.(nextViewport);
     if (zoomReadoutRef.current) {
       zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
     }
@@ -2174,7 +2293,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     let nextSkillDirectorData = null;
     let nextVideoModelData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
-    const styleOutputMaybeChanged = ["stylePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -2458,6 +2577,128 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       loadOutputHistory();
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
+      throw error;
+    }
+  }
+
+  async function generateFrameItMedia(node, imageDataUrl, mode = "image") {
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const frameItScene = normalizeFrameItScene(node.data.frameItScene);
+      const { response: guideResponse, data: guideData } = await nodeApi.composerFrame({
+        ...workflowRequestContext(),
+        imageDataUrl,
+        captureKind: "frame-it-guide",
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        aspectRatio: node.data.frameItAspectRatio || "16:9",
+        figureCount: frameItScene.figures.length
+      }, "Frame It guide");
+      if (!guideResponse.ok) throw new Error(guideData.error || "Frame It guide capture failed.");
+
+      updateNode(node.id, { status: "running", error: "" });
+      const prompt = frameItGenerationPrompt({
+        mode,
+        shotPresetId: node.data.frameItShotPreset,
+        subject: node.data.frameItSubjectPrompt,
+        environment: node.data.frameItEnvironmentPrompt,
+        style: node.data.frameItStylePrompt,
+        prompt: node.data.frameItPrompt,
+        cameraMotion: node.data.frameItCameraMotion,
+        useCharacterSheet: node.data.frameItCharacterSheet !== false,
+        useEnvironmentSheet: node.data.frameItEnvironmentSheet !== false
+      });
+      const workflowContext = workflowRequestContext();
+      let generatedItem;
+
+      if (mode === "video") {
+        const syntheticVideoNode = {
+          ...node,
+          data: {
+            ...node.data,
+            model: node.data.frameItVideoModel || enabledVideoModels[0] || videoModelNames.seedance,
+            duration: node.data.frameItDuration || "5 seconds",
+            resolution: node.data.frameItVideoResolution || "720p",
+            aspectRatio: node.data.frameItAspectRatio || "16:9",
+            generateAudio: false
+          }
+        };
+        const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
+          node: syntheticVideoNode,
+          prompt,
+          workflowContext,
+          projectId,
+          projectName,
+          referenceImageUrls: [guideData.image.localUrl],
+          referenceImageLabels: ["Frame It camera, composition, and blocking guide"]
+        }), "Frame It video");
+        if (!response.ok) throw new Error(data.error || "Frame It video generation failed.");
+        generatedItem = {
+          id: `frame-it-result-${Date.now()}`,
+          url: data.video.localUrl,
+          thumbnailUrl: data.video.thumbnailUrl || "",
+          type: "video",
+          label: "Frame It video",
+          cost: data.cost
+        };
+      } else {
+        const model = node.data.frameItImageModel || enabledImageModels[0] || imageModelNames.openAiImage2;
+        const { response, data } = await nodeApi.generateImage({
+          prompt,
+          model,
+          aspectRatio: node.data.frameItAspectRatio || "16:9",
+          requestedAspectRatio: node.data.frameItAspectRatio || "16:9",
+          resolution: node.data.frameItImageResolution || "2K",
+          quality: openAiImage2Quality,
+          seedreamLayers: false,
+          imagePromptUrls: [guideData.image.localUrl],
+          imagePromptLabels: ["Frame It camera, composition, and blocking guide"],
+          ...workflowContextPayload(workflowContext),
+          nodeId: node.id,
+          nodeTitle: node.data.title
+        }, "Frame It image");
+        if (!response.ok) throw new Error(data.error || "Frame It image generation failed.");
+        const image = Array.isArray(data.images) && data.images.length ? data.images[0] : data.image;
+        if (!image?.localUrl) throw new Error("Frame It image generation returned no image.");
+        generatedItem = {
+          id: `frame-it-result-${Date.now()}`,
+          url: image.localUrl,
+          thumbnailUrl: image.thumbnailUrl || "",
+          type: "image",
+          label: "Frame It image",
+          cost: data.cost
+        };
+      }
+
+      const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+      const existingGuides = existingResultItemsForNode(currentNode, "image");
+      const nextGuides = appendResultItems(existingGuides, [{
+        url: guideData.image.localUrl,
+        type: "image",
+        label: `Frame It guide ${existingGuides.length + 1}`,
+        fileName: guideData.image.fileName,
+        mimeType: guideData.image.mimeType,
+        cost: guideData.cost
+      }], "image");
+      const generatedItems = [...(Array.isArray(currentNode.data.frameItGeneratedItems) ? currentNode.data.frameItGeneratedItems : []), generatedItem].slice(-12);
+
+      updateNode(node.id, {
+        fileName: guideData.image.fileName,
+        mimeType: guideData.image.mimeType,
+        mediaType: "image",
+        resultUrl: guideData.image.localUrl,
+        resultItems: nextGuides,
+        selectedResultIndex: Math.max(0, nextGuides.length - 1),
+        frameItGeneratedItems: generatedItems,
+        status: "complete",
+        error: ""
+      });
+      setSaveStatus(`Frame It ${mode} created`);
+      loadOutputHistory();
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message || "Frame It generation failed." });
       throw error;
     }
   }
@@ -4511,6 +4752,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function startCanvasPointerDown(event) {
     if (!isCanvasSurface(event.target, event.currentTarget)) return;
     setContextMenu(null);
+
+    if (event.button === 0 && !event.shiftKey) {
+      const hitEdgeId = edgeCanvasRef.current?.hitTest?.(event.clientX, event.clientY);
+      if (hitEdgeId) {
+        selectEdge(event, hitEdgeId);
+        return;
+      }
+    }
+
     setSelectedEdgeId(null);
     const pointer = screenToScene(event.clientX, event.clientY);
 
@@ -4814,9 +5064,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function getNodeBounds(nodeId) {
+    const node = nodeMap.get(nodeId) || nodeMapRef.current.get(nodeId) || nodesRef.current.find((item) => item.id === nodeId);
+    const fallbackBounds = node ? estimatedNodeRect(node) : { left: 0, top: 0, right: 0, bottom: 0 };
     const canvas = canvasRef.current;
     const element = canvas?.querySelector(`[data-node-card-id="${nodeId}"]`);
-    if (!canvas || !element) return { left: 0, top: 0, right: 0, bottom: 0 };
+    if (!canvas || !element) return fallbackBounds;
 
     const canvasRect = canvas.getBoundingClientRect();
     const rect = element.getBoundingClientRect();
@@ -5130,8 +5382,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (source?.type === "style") {
-      if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
-      if ((source.data.stylePreset || "None") === "Custom Palette" && !customPalettePromptPiece(source.data)) return "Add palette colors before connecting";
+      if (!styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
+      if (
+        normalizeGradePresetName(source.data.gradePreset || "None") === "Custom"
+        && !customGradePromptPiece(source.data)
+        && (!source.data.stylePreset || source.data.stylePreset === "None")
+      ) return "Add custom grade colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (target.type === "text" && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -5368,19 +5624,22 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function getPortPoint(nodeId, port) {
+    if (shouldUseOverviewRendering(nodesRef.current, viewportRef.current)) return estimatePortPoint(nodeId, port);
     return portPositions[`${nodeId}:${port}`] || estimatePortPoint(nodeId, port);
   }
 
   function estimatePortPoint(nodeId, portId) {
-    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const node = nodeMap.get(nodeId) || nodeMapRef.current.get(nodeId) || nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return { x: 0, y: 0 };
 
-    const bounds = getNodeBounds(nodeId);
+    const measuredBounds = shouldUseOverviewRendering(nodesRef.current, viewportRef.current) ? null : getNodeBounds(nodeId);
+    const estimatedBounds = estimatedNodeRect(node);
+    const bounds = measuredBounds || estimatedBounds;
     const hasMeasuredBounds = bounds.right > bounds.left && bounds.bottom > bounds.top;
-    const left = hasMeasuredBounds ? bounds.left : node.x;
-    const right = hasMeasuredBounds ? bounds.right : node.x + estimatedNodeWidth(node.type);
-    const top = hasMeasuredBounds ? bounds.top : node.y;
-    const bottom = hasMeasuredBounds ? bounds.bottom : node.y + 260;
+    const left = hasMeasuredBounds ? bounds.left : estimatedBounds.left;
+    const right = hasMeasuredBounds ? bounds.right : estimatedBounds.right;
+    const top = hasMeasuredBounds ? bounds.top : estimatedBounds.top;
+    const bottom = hasMeasuredBounds ? bounds.bottom : estimatedBounds.bottom;
     const ports = visiblePortIdsForNode(node);
     const portIndex = Math.max(0, ports.findIndex((id) => id === portId));
     const portCount = Math.max(ports.length, 1);
@@ -5658,6 +5917,123 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
+  function connectedOutputNodesForSource(sourceNodeId, currentNodes = nodesRef.current, currentEdges = edgesRef.current) {
+    const nodeMap = new Map(currentNodes.map((node) => [node.id, node]));
+    return currentEdges
+      .filter((edge) => edge.from.nodeId === sourceNodeId && edge.to.port === "sourceIn")
+      .map((edge) => nodeMap.get(edge.to.nodeId))
+      .filter((node) => node?.type === "output");
+  }
+
+  function outputTargetContextFromOutputNode(outputNode, sourceNode, outputIndex = "") {
+    const outputPath = String(outputNode?.data?.outputPath || "").trim();
+    if (!outputPath) {
+      const error = new Error(`Set a Path on ${outputNode?.data?.title || "Output"} before running.`);
+      error.outputTargetNodeId = outputNode?.id || "";
+      throw error;
+    }
+
+    return {
+      outputTargetPath: outputPath,
+      outputTargetFileName: String(outputNode?.data?.outputFileName || "$node_$date_$time").trim() || "$node_$date_$time",
+      outputTargetNodeId: outputNode.id,
+      outputTargetNodeTitle: outputNode.data?.title || "Output",
+      outputTargetSourceNodeId: sourceNode?.id || "",
+      outputTargetSourceNodeTitle: sourceNode?.data?.title || nodeTypeLabel(sourceNode?.type) || "output",
+      outputTargetIndex: outputIndex ? String(outputIndex) : ""
+    };
+  }
+
+  function outputTargetForSourceNode(sourceNode) {
+    if (!sourceNode || sourceNode.type === "output") return null;
+    const outputNode = connectedOutputNodesForSource(sourceNode.id).at(0);
+    if (!outputNode) return null;
+    return {
+      node: outputNode,
+      context: outputTargetContextFromOutputNode(outputNode, sourceNode)
+    };
+  }
+
+  function markOutputTargetRunning(outputTarget) {
+    if (!outputTarget?.node?.id) return;
+    updateNode(outputTarget.node.id, { status: "running", error: "" });
+  }
+
+  function markOutputTargetFailed(outputTarget, message) {
+    if (!outputTarget?.node?.id) return;
+    updateNode(outputTarget.node.id, { status: "error", error: message || "Output save failed." });
+  }
+
+  function markOutputTargetSaved(outputTarget, generatedItems = [], resultType = "") {
+    if (!outputTarget?.node?.id) return;
+    const items = (Array.isArray(generatedItems) ? generatedItems : [generatedItems]).filter((item) => item?.url);
+    const primary = items[0] || null;
+    const mediaType = resultType || primary?.type || "";
+    updateNode(outputTarget.node.id, {
+      status: "complete",
+      error: "",
+      resultUrl: primary?.url || "",
+      resultType: mediaType,
+      resultItems: items,
+      selectedResultIndex: 0,
+      lastSavedAt: new Date().toISOString(),
+      lastSavedFileName: primary?.fileName || fileNameFromLocalUrl(primary?.url || "") || "",
+      lastSavedPath: primary?.filePath || primary?.savedPath || ""
+    });
+  }
+
+  async function runOutputNodeSave(outputNode, incoming, requestContext) {
+    const connection = (incoming.sourceIn || []).at(-1);
+    if (!connection?.source) throw new Error("Connect a source to Output.");
+    const sourceNode = connection.source;
+    const outputItem = connectedOutputItem(sourceNode, connection.edge);
+    const sourceText = outputItem?.url ? "" : rawConnectedTextForSource(sourceNode);
+    if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
+    const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode);
+    const { response, data } = await nodeApi.saveOutput({
+      sourceUrl: outputItem?.url || "",
+      sourceText,
+      sourceFileName: outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || ""),
+      mediaType: outputItem?.type || (sourceText ? "text" : ""),
+      ...workflowContextPayload({ ...requestContext, ...outputContext }),
+      nodeId: outputNode.id,
+      nodeTitle: outputNode.data.title || "Output"
+    });
+    if (!response.ok) throw new Error(data.error || "Output save failed.");
+    const output = data.output || {};
+    return {
+      url: output.localUrl || "",
+      type: output.mediaType || outputItem?.type || (sourceText ? "text" : ""),
+      label: output.fileName || outputItem?.label || sourceLabel(sourceNode),
+      fileName: output.fileName || "",
+      filePath: output.filePath || "",
+      mimeType: output.mimeType || outputItem?.mimeType || "",
+      thumbnailUrl: output.thumbnailUrl || ""
+    };
+  }
+
+  async function saveTextToOutputTarget(outputTarget, sourceNode, text, requestContext) {
+    if (!outputTarget?.node?.id || !String(text || "").trim()) return null;
+    const { response, data } = await nodeApi.saveOutput({
+      sourceText: text,
+      sourceFileName: `${safeStillFrameName(sourceNode?.data?.title || sourceNode?.type || "output")}.txt`,
+      mediaType: "text",
+      ...workflowContextPayload(requestContext),
+      nodeId: outputTarget.node.id,
+      nodeTitle: outputTarget.node.data?.title || "Output"
+    }, "Output text save");
+    if (!response.ok) throw new Error(data.error || "Output text save failed.");
+    const output = data.output || {};
+    return {
+      url: output.localUrl || "",
+      type: "text",
+      label: output.fileName || sourceLabel(sourceNode),
+      fileName: output.fileName || "",
+      filePath: output.filePath || "",
+      mimeType: output.mimeType || "text/plain"
+    };
+  }
+
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
@@ -5702,7 +6078,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
     const previousEditResults = existingResultItemsForNode(currentNode, currentNode.type === "edit" ? editOutputType(currentNode) : "video");
-    const requestContext = workflowRequestContext();
+    let outputTarget = null;
+    let requestContext = workflowRequestContext();
     const hasBasePrompt = Boolean(String(basePrompt || "").trim());
 
     if (currentNode.type === "videoModel" && !hasBasePrompt) {
@@ -5712,8 +6089,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
+      outputTarget = outputTargetForSourceNode(currentNode);
+      requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
       updateNode(currentNode.id, { status: "running", error: "" });
+      markOutputTargetRunning(outputTarget);
 
       if (currentNode.type === "camera") {
         const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
@@ -5727,7 +6107,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           seed: generated.seed,
           error: ""
         });
+        markOutputTargetSaved(outputTarget, [generated], "image");
         loadOutputHistory();
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "output") {
+        const saved = await runOutputNodeSave(currentNode, incoming, requestContext);
+        const resultItems = saved.url ? [saved] : [];
+        updateNode(currentNode.id, {
+          status: "complete",
+          error: "",
+          resultUrl: saved.url || "",
+          resultType: saved.type || "",
+          resultItems,
+          selectedResultIndex: 0,
+          lastSavedAt: new Date().toISOString(),
+          lastSavedFileName: saved.fileName || fileNameFromLocalUrl(saved.url || "") || "",
+          lastSavedPath: saved.filePath || ""
+        });
         return { status: "complete" };
       }
 
@@ -5746,6 +6144,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: processed.text,
           lastRunModel: processed.model
         });
+        if (outputTarget) {
+          const saved = await saveTextToOutputTarget(outputTarget, currentNode, processed.text, requestContext);
+          if (saved) markOutputTargetSaved(outputTarget, [saved], "text");
+        }
         return { status: "complete" };
       }
 
@@ -5903,6 +6305,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(autoAspectResults),
           error: batchRunError("image", autoAspectTargets.length, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, autoAspectResults, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -5953,6 +6356,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", shots.length, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, successes, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -5977,6 +6381,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             resultType: "image",
             error: ""
           });
+          markOutputTargetSaved(outputTarget, generatedItems, "image");
           loadOutputHistory();
           return { status: "complete" };
         }
@@ -6011,6 +6416,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: utilityResultType,
           error: batchRunError(utilityResultType, batchCount, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, successes, utilityResultType);
         if (wanWarpSourceSegments.length) {
           syncWanSegmentPreviewVideos(wanWarpSourceSegments, successes);
         }
@@ -6038,6 +6444,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: editResultType,
           error: ""
         });
+        markOutputTargetSaved(outputTarget, generatedItems, editResultType);
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6083,6 +6490,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: resultTextFromItems(successes),
           error: batchRunError("image", batchCount, successes, failures)
         });
+        markOutputTargetSaved(outputTarget, successes, "image");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6106,6 +6514,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultType: "model3d",
           error: ""
         });
+        markOutputTargetSaved(outputTarget, [generated], "model3d");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -6145,12 +6554,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         resultText: "",
         error: batchRunError("video", batchCount, successes, failures)
       });
+      markOutputTargetSaved(outputTarget, successes, "video");
       loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
       showComfyWanDialogForError(error, currentNode);
       const message = error?.message || String(error || "Node failed.");
       updateNode(currentNode.id, { status: "error", error: message, ...(error?.nodePatch || {}) });
+      markOutputTargetFailed(outputTarget || (error?.outputTargetNodeId ? { node: { id: error.outputTargetNodeId } } : null), message);
       return { status: "error", error: error instanceof Error ? error : new Error(message) };
     }
   }
@@ -6221,7 +6632,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runSelectedNodes() {
     const selectedIds = new Set(selectedNodeIds);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
-    const runnable = nodesRef.current.filter((node) => selectedIds.has(node.id) && isRunnableNode(node) && node.data.status !== "running");
+    const runnable = nodesRef.current.filter((node) => {
+      if (!selectedIds.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
+      if (node.type !== "output") return true;
+      return !(currentIncomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedIds.has(source.id) && isRunnableNode(source));
+    });
     const playablePreviewNodes = nodesRef.current.filter((node) => selectedIds.has(node.id) && previewVideoSourceForNode(node, currentIncomingByNode));
     const previewPlayback = playablePreviewNodes.length ? playSelectedPreviewVideos(playablePreviewNodes.map((node) => node.id)) : null;
 
@@ -6262,18 +6677,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  const renderedEdges = edges.map((edge) => ({
-    edge,
-    from: getPortPoint(edge.from.nodeId, edge.from.port),
-    to: getPortPoint(edge.to.nodeId, edge.to.port)
-  }));
-  const draftConnection = draftEdge
-    ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y } }
-    : null;
-  const marqueePoints = dragState?.type === "marquee" ? [dragState.start, dragState.current] : [];
-  const wireLayerBounds = edgeLayerBounds(
-    [...renderedEdges, ...(draftConnection ? [draftConnection] : [])],
-    marqueePoints
+  const renderedEdges = React.useMemo(
+    () =>
+      edges.map((edge) => ({
+        edge,
+        from: getPortPoint(edge.from.nodeId, edge.from.port),
+        to: getPortPoint(edge.to.nodeId, edge.to.port)
+      })),
+    [edges, nodeMap, overviewRendering, portPositions]
+  );
+  const draftConnection = React.useMemo(
+    () => (draftEdge ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y }, color: draftEdge.color } : null),
+    [draftEdge]
+  );
+  const marqueePoints = React.useMemo(
+    () => (dragState?.type === "marquee" ? [dragState.start, dragState.current] : []),
+    [dragState]
+  );
+  const marqueeLayerBounds = React.useMemo(
+    () => edgeLayerBounds([], marqueePoints),
+    [marqueePoints]
   );
 
   return (
@@ -6416,6 +6839,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        <EdgeCanvas
+          ref={edgeCanvasRef}
+          edges={renderedEdges}
+          draftConnection={draftConnection}
+          viewportRef={viewportRef}
+          canvasSize={canvasSize}
+          selectedEdgeId={selectedEdgeId}
+          activeEdgeIds={activeEdgeIds}
+          inactiveEdgeIds={inactiveEdgeIds}
+        />
         <div className="node-scene node-group-scene">
           {groups.map((group) => (
             <GroupBackdrop
@@ -6429,42 +6862,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ))}
         </div>
 
-        <div className="node-scene node-edge-scene">
+        {dragState?.type === "marquee" && (
+        <div className="node-scene node-marquee-scene">
           <svg
-            className="edge-layer"
+            className="selection-layer"
             style={{
-              left: wireLayerBounds.left,
-              top: wireLayerBounds.top,
-              width: wireLayerBounds.width,
-              height: wireLayerBounds.height
+              left: marqueeLayerBounds.left,
+              top: marqueeLayerBounds.top,
+              width: marqueeLayerBounds.width,
+              height: marqueeLayerBounds.height
             }}
-            viewBox={wireLayerBounds.viewBox}
+            viewBox={marqueeLayerBounds.viewBox}
             preserveAspectRatio="none"
           >
-            <g>
-            {renderedEdges.map(({ edge, from, to }) => {
-              return (
-                <EdgePath
-                  key={edge.id}
-                  edgeId={edge.id}
-                  from={from}
-                  to={to}
-                  color={edge.color}
-                  selected={selectedEdgeId === edge.id}
-                  active={activeEdgeIds.has(edge.id)}
-                  inactive={inactiveEdgeIds.has(edge.id)}
-                  onSelect={selectEdge}
-                />
-              );
-            })}
-          {draftConnection && <EdgePath from={draftConnection.from} to={draftConnection.to} color={draftEdge.color} draft />}
-          {dragState?.type === "marquee" && <SelectionMarquee start={dragState.start} current={dragState.current} />}
-            </g>
+            <SelectionMarquee start={dragState.start} current={dragState.current} />
           </svg>
         </div>
+        )}
         <div className="node-scene node-node-scene">
 
-          {nodes.map((node) => (
+          {renderedNodes.map((node) => (
             <NodeCardBoundary key={node.id} node={node} onRemove={removeNode}>
               <NodeCard
                 node={node}
@@ -6513,6 +6930,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onPreviewLayoutExport={exportPreviewLayoutBoard}
                 onOpenComposer={setComposerEditorNodeId}
                 onFrameItCapture={captureFrameItFrame}
+                onFrameItGenerate={generateFrameItMedia}
                 onCanvasPanStart={beginCanvasPan}
                 running={node.data?.status === "running"}
                 transferCompiling={compilingTransferNodeId === node.id}
@@ -6799,7 +7217,16 @@ function NodeColorPicker({ color, onChange }) {
 }
 
 function isCanvasSurface(target, canvas) {
-  return target === canvas || target.classList?.contains("node-scene") || target.classList?.contains("edge-layer") || target.classList?.contains("node-group-backdrop") || target.classList?.contains("frame-it-canvas");
+  return (
+    target === canvas ||
+    target.classList?.contains("node-scene") ||
+    target.classList?.contains("edge-layer") ||
+    target.classList?.contains("edge-canvas-layer") ||
+    target.classList?.contains("selection-layer") ||
+    target.classList?.contains("node-marquee-scene") ||
+    target.classList?.contains("node-group-backdrop") ||
+    target.classList?.contains("frame-it-canvas")
+  );
 }
 
 function textareaCanConsumeWheel(textarea, deltaY) {
@@ -6947,6 +7374,7 @@ function NodeCard({
   onPreviewLayoutExport,
   onOpenComposer,
   onFrameItCapture,
+  onFrameItGenerate,
   onCanvasPanStart,
   running,
   transferCompiling,
@@ -7124,24 +7552,29 @@ function NodeCard({
   const customNodeWidth = normalizedNodeWidth(nodeData.nodeWidth, node.type);
   const customNodeHeight = normalizedNodeHeight(nodeData.nodeHeight);
   const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
+  const customNodeWidthClass = Boolean(customNodeWidth);
+  const customNodeHeightClass = Boolean(customNodeHeight);
 
   const customTextareaSize = Boolean(nodeData.textareaResizeMode);
+  const cardClassName = `node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
+  const cardStyle = {
+    transform: `translate(${node.x}px, ${node.y}px)`,
+    width: customNodeWidth ? `${customNodeWidth}px` : undefined,
+    height: customNodeHeight ? `${customNodeHeight}px` : undefined,
+    "--preview-scale": nodeData.previewScale || 1,
+    "--node-color": nodeColor || "transparent",
+    "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
+    "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
+    "--frame-it-scale": frameItScalable ? nodeData.frameItScale || 1 : 1,
+    "--reference-tag-color": tagHighlight?.color || "#4d8dff",
+    "--node-default-width": `${estimatedNodeWidth(node.type)}px`,
+  };
+
   return (
     <article
       ref={cardRef}
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`}
-      style={{
-        transform: `translate(${node.x}px, ${node.y}px)`,
-        width: customNodeWidth ? `${customNodeWidth}px` : undefined,
-        height: customNodeHeight ? `${customNodeHeight}px` : undefined,
-        "--preview-scale": nodeData.previewScale || 1,
-        "--node-color": nodeColor || "transparent",
-        "--mood-board-scale": moodBoardScalable ? nodeData.moodBoardScale || 1 : 1,
-        "--storyboard-scale": storyboardScalable ? nodeData.storyboardScale || 1 : 1,
-        "--frame-it-scale": frameItScalable ? nodeData.frameItScale || 1 : 1,
-        "--reference-tag-color": tagHighlight?.color || "#4d8dff",
-        "--node-default-width": `${estimatedNodeWidth(node.type)}px`,
-      }}
+      className={cardClassName}
+      style={cardStyle}
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}
       onBlurCapture={handleBlurCapture}
@@ -7265,6 +7698,7 @@ function NodeCard({
         onPreviewLayoutExport={onPreviewLayoutExport}
         onOpenComposer={onOpenComposer}
         onFrameItCapture={onFrameItCapture}
+        onFrameItGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
@@ -9285,6 +9719,139 @@ function formatComposerControlValue(value, precision) {
   return Number(value).toFixed(Math.max(0, precision));
 }
 
+function OutputNodeBody({
+  node,
+  config,
+  incoming,
+  onUpdate,
+  onRun,
+  running,
+  onConnectStart,
+  onDisconnectInput,
+  connectedPortKeys
+}) {
+  const sourcePort = config.input.find((port) => port.id === "sourceIn");
+  const sourceSummary = outputSourceSummary(incoming.sourceIn);
+  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn);
+  const [filenamePreview, setFilenamePreview] = React.useState({ status: "idle", fileName: "", filePath: "", error: "" });
+
+  React.useEffect(() => {
+    const outputPath = String(node.data.outputPath || "").trim();
+    if (!outputPath) {
+      setFilenamePreview({ status: "idle", fileName: "", filePath: "", error: "" });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const body = {
+      outputTargetPath: outputPath,
+      outputTargetFileName: String(node.data.outputFileName || "$node_$date_$time").trim() || "$node_$date_$time",
+      outputTargetNodeId: node.id,
+      outputTargetNodeTitle: node.data.title || "Output",
+      outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
+      sourceFileName: sourceInfo.sourceFileName || "",
+      mediaType: sourceInfo.mediaType || ""
+    };
+
+    setFilenamePreview((current) => ({ ...current, status: current.fileName ? "ready" : "loading", error: "" }));
+    const timer = window.setTimeout(async () => {
+      try {
+        const { response, data } = await nodeApi.previewOutput(body);
+        if (cancelled) return;
+        if (!response.ok) {
+          setFilenamePreview({ status: "error", fileName: "", filePath: "", error: data.error || "Could not resolve filename." });
+          return;
+        }
+        const preview = data.preview || {};
+        setFilenamePreview({
+          status: "ready",
+          fileName: preview.fileName || "",
+          filePath: preview.filePath || "",
+          error: ""
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setFilenamePreview({ status: "error", fileName: "", filePath: "", error: error?.message || "Could not resolve filename." });
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    node.data.outputPath,
+    node.data.outputFileName,
+    node.data.title,
+    node.id,
+    sourceInfo.mediaType,
+    sourceInfo.sourceFileName,
+    sourceInfo.sourceTitle
+  ]);
+
+  async function pickOutputFolder() {
+    const folderSelection = await systemApi.selectFolder({
+      title: "Choose Output folder",
+      defaultPath: node.data.outputPath || ""
+    });
+    if (!folderSelection.response.ok) return;
+    if (folderSelection.data?.path) onUpdate(node.id, { outputPath: folderSelection.data.path });
+  }
+
+  const savedAt = node.data.lastSavedAt ? new Date(node.data.lastSavedAt) : null;
+  const savedTime = savedAt && Number.isFinite(savedAt.getTime()) ? savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const resolvedFilename = filenamePreview.fileName || node.data.lastSavedFileName || "";
+  const statusText =
+    node.data.error ||
+    filenamePreview.error ||
+    (running && resolvedFilename ? `Saving as ${resolvedFilename}` : "") ||
+    (resolvedFilename ? `Filename: ${resolvedFilename}` : "") ||
+    (node.data.lastSavedFileName ? `Saved ${node.data.lastSavedFileName}${savedTime ? ` at ${savedTime}` : ""}` : "") ||
+    (filenamePreview.status === "loading" ? "Resolving filename..." : "Set a path to preview the filename.");
+  const statusTitle = filenamePreview.filePath || node.data.lastSavedPath || "";
+
+  return (
+    <div className="node-body output-node-body">
+      <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button type="button" className={incoming.sourceIn?.length ? "connected-field" : ""}>{sourceSummary}</button>
+      </NodeRow>
+      <NodeRow label="Path">
+        <div className="output-path-control">
+          <input
+            value={node.data.outputPath || ""}
+            placeholder="C:\\Exports\\$date"
+            onChange={(event) => onUpdate(node.id, { outputPath: event.target.value })}
+          />
+          <button type="button" onClick={pickOutputFolder} title="Choose folder" aria-label="Choose output folder">
+            <FolderOpen size={15} />
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Filename">
+        <input
+          className="connected-field"
+          value={node.data.outputFileName || ""}
+          placeholder="$node_$date_$time"
+          onChange={(event) => onUpdate(node.id, { outputFileName: event.target.value })}
+        />
+      </NodeRow>
+      <div className="output-token-strip" aria-label="Output filename tokens">
+        <code>$node</code>
+        <code>$date</code>
+        <code>$time</code>
+        <code>$index</code>
+        <code>$output_node</code>
+      </div>
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
+        {running ? "Saving..." : "Run Output"}
+      </button>
+      <small className={`output-save-status ${node.data.error || filenamePreview.status === "error" ? "error" : ""}`} title={statusTitle}>
+        {statusText}
+      </small>
+    </div>
+  );
+}
+
 function NodeBody({
   node,
   onUpdate,
@@ -9327,6 +9894,7 @@ function NodeBody({
   onPreviewLayoutExport,
   onOpenComposer,
   onFrameItCapture,
+  onFrameItGenerate,
   onCanvasPanStart,
   incomingByNode,
   transferCompiling,
@@ -9443,6 +10011,22 @@ function NodeBody({
     );
   }
 
+  if (node.type === "output") {
+    return (
+      <OutputNodeBody
+        node={node}
+        config={config}
+        incoming={incoming}
+        onUpdate={onUpdate}
+        onRun={onRun}
+        running={running}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
+    );
+  }
+
   if (node.type === "frameIt") {
     return (
       <FrameItNodeBody
@@ -9454,12 +10038,15 @@ function NodeBody({
         }}
         onUpdate={onUpdate}
         onCapture={onFrameItCapture}
+        onGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
         onUndoSnapshot={onUndoSnapshot}
         onResizeStart={onPreviewResizeStart}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
+        imageModelOptions={imageModelOptions}
+        videoModelOptions={videoModelOptions}
       />
     );
   }
@@ -9653,6 +10240,18 @@ function NodeBody({
                     placeholder="Personal reference notes"
                     onChange={(event) => onUpdate(node.id, { characterReferenceNotes: event.target.value })}
                   />
+                </label>
+                <label className="character-section character-model-field">
+                  <span className="character-section-label">Sheet Model</span>
+                  <select
+                    value={normalizeCharacterSheetModel(node.data.characterSheetModel)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
+                  >
+                    {characterSheetModelOptions.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="character-section character-option-row">
                   <input
@@ -10545,29 +11144,52 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const customPaletteSelected = selectedPreset === "Custom Palette";
+    const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
+    const customPaletteSelected = selectedGrade === "Custom";
     const paletteColors = normalizedCustomPaletteColors(node.data);
     const styleSelected = styleOutputEnabled(node.data);
+    const customGradeAnalysis = customPaletteSelected && paletteColors.length
+      ? analyzeColorLookPalette(paletteColors.map((color) => color.hex))
+      : null;
 
     async function handlePaletteImageUpload(files) {
       const file = firstAcceptedFile(files, "image");
       if (!file) return;
+      await handlePaletteImageSource({
+        sourceName: file.name,
+        extract: () => extractCustomPaletteFromFile(file)
+      });
+    }
+
+    async function handlePaletteOutputImport(item) {
+      const asset = assetFromOutputItem(item);
+      if (!asset || asset.mediaType !== "image" || !asset.localUrl) {
+        onUpdate(node.id, { customPaletteError: "Drop an image output to extract a grade." });
+        return;
+      }
+      await handlePaletteImageSource({
+        sourceName: asset.fileName || item.label || "NewtNode image",
+        extract: () => extractCustomPaletteFromUrl(asset.localUrl)
+      });
+    }
+
+    async function handlePaletteImageSource({ sourceName, extract }) {
       onUndoSnapshot?.();
       onUpdate(node.id, {
         customPaletteStatus: "extracting",
         customPaletteError: "",
-        customPaletteSourceName: file.name,
+        customPaletteSourceName: sourceName,
         customPalettePreviewUrl: "",
         customPaletteColors: [],
         customPaletteRgbText: ""
       });
       try {
-        const extracted = await extractCustomPaletteFromFile(file);
+        const extracted = await extract();
         const firstExtractedColor = extracted.colors?.[0]?.hex;
         onUpdate(node.id, {
           customPaletteStatus: "",
           customPaletteError: "",
-          customPaletteSourceName: file.name,
+          customPaletteSourceName: sourceName,
           customPalettePreviewUrl: extracted.previewUrl,
           customPaletteColors: extracted.colors,
           customPaletteRgbText: "",
@@ -10583,6 +11205,11 @@ function NodeBody({
 
     function handlePaletteDrop(event) {
       allowFileDrop(event);
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer) || currentDraggedOutputItem();
+      if (outputItem?.type === "image") {
+        handlePaletteOutputImport(outputItem);
+        return;
+      }
       handlePaletteImageUpload(event.dataTransfer.files);
     }
 
@@ -10687,19 +11314,28 @@ function NodeBody({
           <OutputPortRow
             node={node}
             port={outputPort}
-            label={selectedPreset}
+            label={styleGradeLabel(node.data)}
             onConnectStart={onConnectStart}
             onDisconnectInput={onDisconnectInput}
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">{customPaletteSelected ? "Add palette colors to enable output" : "Choose style to enable output"}</div>
+          <div className="style-output-placeholder">{customPaletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, customPaletteError: "" })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
             {stylePresetNames.map((presetName) => (
+              <option key={presetName}>{presetName}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="style-preset-row">
+          <span>Grade</span>
+          <select value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
+            {gradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
@@ -10782,6 +11418,23 @@ function NodeBody({
                   ))}
                 </div>
               </>
+            )}
+            {customGradeAnalysis && (
+              <div className="custom-grade-analysis">
+                <div className="custom-grade-summary">
+                  <span>{customGradeAnalysis.temperature}</span>
+                  <span>{customGradeAnalysis.contrast} contrast</span>
+                  <span>{customGradeAnalysis.saturation}</span>
+                </div>
+                <div className="custom-grade-hex-list" aria-label="Optimized grade HEX values">
+                  {customGradeAnalysis.colors.map((color) => (
+                    <span key={color.hex} title={`${color.hex} RGB(${color.r}, ${color.g}, ${color.b})`}>
+                      <i style={{ "--swatch-color": color.hex }} />
+                      <code>{color.hex}</code>
+                    </span>
+                  ))}
+                </div>
+              </div>
             )}
             {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
             {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
@@ -10986,8 +11639,8 @@ function NodeBody({
         {activePreviewTab === "preview" ? (
           <>
             <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
-              {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-              {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+              {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
@@ -11017,8 +11670,8 @@ function NodeBody({
                       title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
                       aria-label={`Select preview ${index + 1}`}
                     >
-                      {item.type === "image" && <img {...fullResolutionImageProps(item)} src={previewImageUrl(item)} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                      {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+                      {item.type === "video" && <video src={displayMediaUrl(item.url)} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
                           <Box size={18} />
@@ -11066,7 +11719,7 @@ function NodeBody({
                     >
                       <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
-                      }} {...fullResolutionImageProps(item)} src={previewImageUrl(item)} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
                       <figcaption>{index + 1}</figcaption>
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
@@ -15087,6 +15740,11 @@ function getNodeConfig(type) {
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
       output: []
     },
+    output: {
+      icon: Save,
+      input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
+      output: []
+    },
     autoAspect: {
       icon: Maximize2,
       input: [{ id: "imageIn", label: "Image", color: portColors.image }],
@@ -15210,6 +15868,21 @@ function createDefaultNodeData(type, label, count) {
   }
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0, previewTab: "preview", previewLayoutItems: [] };
+  if (type === "output") {
+    return {
+      title,
+      outputPath: "",
+      outputFileName: "$node_$date_$time",
+      resultUrl: "",
+      resultItems: [],
+      selectedResultIndex: 0,
+      resultType: "",
+      lastSavedAt: "",
+      lastSavedFileName: "",
+      lastSavedPath: "",
+      error: ""
+    };
+  }
   if (type === "autoAspect") {
     return {
       title,
@@ -15304,6 +15977,23 @@ function createDefaultNodeData(type, label, count) {
       frameItUseLimits: true,
       frameItSavedPoses: [],
       frameItSelectedPoseId: defaultFrameItPoseId,
+      frameItViewMode: "shot",
+      frameItShotPreset: "medium",
+      frameItShowShotLabel: false,
+      frameItCreateMode: "image",
+      frameItImageModel: imageModelNames.openAiImage2,
+      frameItVideoModel: videoModelNames.seedance,
+      frameItPrompt: "",
+      frameItSubjectPrompt: "",
+      frameItEnvironmentPrompt: "",
+      frameItStylePrompt: "",
+      frameItCharacterSheet: true,
+      frameItEnvironmentSheet: true,
+      frameItCameraMotion: "Static",
+      frameItDuration: "5 seconds",
+      frameItImageResolution: "2K",
+      frameItVideoResolution: "720p",
+      frameItGeneratedItems: [],
       frameItScale: 1
     };
   }
@@ -15318,6 +16008,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
+      characterSheetModel: imageModelNames.openAiImage2,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
@@ -15567,6 +16258,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       stylePreset: "None",
+      gradePreset: "None",
       customPaletteRgbText: "",
       customPalettePicker: "#ddc631",
       customPaletteColors: [],
@@ -16955,6 +17647,7 @@ function portKindFromColor(color) {
 function portKindForNodePort(node, portId, role) {
   if (!node || !portId) return "";
   if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
+  if (role === "input" && node.type === "output" && portId === "sourceIn") return "output";
   if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
   if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
@@ -16968,6 +17661,7 @@ function portKindForNodePort(node, portId, role) {
 function acceptedInputPortKinds(node, portId) {
   const inputKind = portKindForNodePort(node, portId, "input");
   if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  if (inputKind === "output") return ["image", "video", "audio", "model3d", "transfer", "character", "prompt", "director"];
   return inputKind ? [inputKind] : [];
 }
 
@@ -16982,6 +17676,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
   if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Film Director, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -16998,7 +17693,8 @@ function humanPortKindLabel(kind) {
     video: "Video",
     audio: "Audio",
     model3d: "3D",
-    preview: "Preview"
+    preview: "Preview",
+    output: "Output"
   }[kind] || "matching";
 }
 
@@ -17221,6 +17917,7 @@ function nodeResultMediaType(node) {
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "edit") return editOutputType(node);
+  if (node.type === "output") return node.data?.resultType || "";
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
   if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
@@ -17766,6 +18463,41 @@ function connectedOutputUrl(source, edge) {
   return connectedOutputItem(source, edge)?.url || "";
 }
 
+function outputSourceSummary(items = []) {
+  const connection = items.at(-1);
+  if (!connection?.source) return "Connect output";
+  const outputItem = connectedOutputItem(connection.source, connection.edge);
+  if (outputItem?.label) return outputItem.label;
+  if (outputItem?.url) return fileNameFromLocalUrl(outputItem.url) || sourceLabel(connection.source);
+  const text = rawConnectedTextForSource(connection.source);
+  if (text) return sourceLabel(connection.source);
+  return sourceLabel(connection.source) || "Connected";
+}
+
+function outputPreviewSourceInfo(items = []) {
+  const connection = items.at(-1);
+  const source = connection?.source;
+  if (!source) return { sourceTitle: "", sourceFileName: "", mediaType: "" };
+  const outputItem = connectedOutputItem(source, connection.edge);
+  const isTextSource = ["plainText", "text", "skillDirector"].includes(source.type);
+  const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
+  const outputFileName = outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || "");
+  const sourceTitle = sourceLabel(source) || source.data?.title || nodeTypeLabel(source.type) || "source";
+  return {
+    sourceTitle,
+    sourceFileName: outputFileName || `${safeStillFrameName(sourceTitle)}${outputPreviewDefaultExtension(mediaType)}`,
+    mediaType
+  };
+}
+
+function outputPreviewDefaultExtension(mediaType) {
+  if (mediaType === "video") return ".mp4";
+  if (mediaType === "audio") return ".mp3";
+  if (mediaType === "model3d") return ".glb";
+  if (mediaType === "text" || mediaType === "prompt" || mediaType === "director") return ".txt";
+  return ".png";
+}
+
 function connectedAssetUrls(items = []) {
   return items.map(({ source, edge }) => connectedOutputUrl(source, edge)).filter(Boolean);
 }
@@ -18221,6 +18953,9 @@ async function runCameraQwenEdit({ node, incoming, projectId, projectName, workf
     url: data.image.localUrl,
     type: "image",
     label: "Camera image",
+    fileName: data.image.fileName || "",
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     prompt: data.prompt || "",
     seed: data.seed,
     cost: data.cost
@@ -18297,6 +19032,9 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     url: image.localUrl,
     type: "image",
     label: image.label || `${data.modelName || "Image"} ${index + 1}`,
+    fileName: image.fileName || "",
+    filePath: image.filePath || "",
+    mimeType: image.mimeType || "",
     text: data.text || "",
     seed: data.seed,
     cost: data.cost,
@@ -18336,6 +19074,9 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, imageInputItem = nu
     url: data.image.localUrl,
     type: "image",
     label: data.image.label || "Color ID to Matte",
+    fileName: data.image.fileName || "",
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
     imageEditRole: "mask",
     imageEditInstruction: colorIdToMatteImageEditPrompt,
     sourceImageUrl: sourceRgbImageUrl,
@@ -18510,7 +19251,8 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     referenceVideoUrls: referenceVideoItems.map((item) => item.url),
     referenceVideoLabels: referenceVideoItems.map((item) => item.label),
     referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode)
+    filmDirector: directorPackageForVideo(directorSource, incomingByNode),
+    outputTargetIndex: String((Number(index) || 0) + 1)
   }));
   if (!response.ok) {
     throw new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`);
@@ -18657,7 +19399,8 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
       wanBlendFrameIndices: node.data.videoStitchWanBlendFrameIndices || "",
       wanWarpSegments
     },
-    voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames)
+    voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames),
+    outputTargetIndex: String((Number(index) || 0) + 1)
   }), "Utility video");
   if (!response.ok) {
     const error = new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);
@@ -18716,6 +19459,9 @@ async function runEditNodeGeneration({ node, incoming, projectId, projectName, w
     url: media.localUrl,
     type: sourceType,
     label: media.label || data.modelName || effect.label,
+    fileName: media.fileName || "",
+    filePath: media.filePath || "",
+    mimeType: media.mimeType || "",
     text: data.text || "",
     cost: data.cost || null
   };
@@ -19614,7 +20360,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
     const selectedPreset = source.data.stylePreset || "None";
     return [
       stylePresetPrompts[selectedPreset] || "",
-      selectedPreset === "Custom Palette" ? customPalettePromptPiece(source.data) : ""
+      gradePromptPiece(source.data)
     ].filter(Boolean);
   }
 
@@ -19637,7 +20383,11 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
 async function extractCustomPaletteFromFile(file) {
   const dataUrl = await fileToDataUrl(file);
-  const image = await loadCanvasImage(dataUrl);
+  return extractCustomPaletteFromUrl(dataUrl);
+}
+
+async function extractCustomPaletteFromUrl(url) {
+  const image = await loadCanvasImage(url);
   const colors = extractDominantPaletteColors(image, 10);
   if (!colors.length) throw new Error("No usable colors found in that image.");
   return {
@@ -19768,17 +20518,33 @@ function uniqueCustomPaletteColors(colors = []) {
     });
 }
 
-function customPalettePromptPiece(data = {}) {
+function customGradePromptPiece(data = {}) {
   const colors = normalizedCustomPaletteColors(data);
   if (!colors.length) return "";
-  return `Utilize the hues and values: ${colors.map((color) => `${color.hex} RGB(${color.r}, ${color.g}, ${color.b}), hue ${color.hue} degrees, value ${color.value}%`).join("; ")}.`;
+  return buildColorGradePrompt({ palette: colors.map((color) => color.hex) });
+}
+
+function gradePromptPiece(data = {}) {
+  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
+  if (selectedGrade === "Custom") return customGradePromptPiece(data);
+  return gradePresetPrompts[selectedGrade] || "";
 }
 
 function styleOutputEnabled(data = {}) {
   const selectedPreset = data.stylePreset || "None";
-  if (selectedPreset === "None") return false;
-  if (selectedPreset === "Custom Palette") return Boolean(customPalettePromptPiece(data));
-  return true;
+  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
+  const hasStyle = selectedPreset !== "None";
+  const hasGrade = selectedGrade === "Custom" ? Boolean(customGradePromptPiece(data)) : selectedGrade !== "None";
+  return hasStyle || hasGrade;
+}
+
+function styleGradeLabel(data = {}) {
+  const style = data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
+  const grade = normalizeGradePresetName(data.gradePreset || "None");
+  const gradeLabel = grade === "Custom"
+    ? (customGradePromptPiece(data) ? "Custom Grade" : "")
+    : grade !== "None" ? grade : "";
+  return [style, gradeLabel].filter(Boolean).join(" + ") || "Style";
 }
 
 function customPaletteColorFromHex(value) {
@@ -20058,10 +20824,10 @@ function sourceLabel(source) {
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "Style Reference";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
-  if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
+  if (source.type === "style") return styleGradeLabel(source.data);
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
   if (source.type === "edit" && source.data.resultUrl) return editOutputType(source) === "video" ? "Edit video" : "Edit image";
-  if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
+  if (source.data.resultUrl) return fileNameFromLocalUrl(source.data.resultUrl);
   if (source.data.fileName) return source.data.fileName;
   return source.data.title || source.type;
 }
@@ -20220,6 +20986,7 @@ function formatSkillDirectorShotListForClient(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
+    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -20352,6 +21119,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "output") {
+    return {
+      ...nextNode,
+      data: normalizeOutputData(data)
+    };
+  }
+
   if (nextNode.type === "storyboard") {
     return {
       ...nextNode,
@@ -20448,6 +21222,7 @@ function normalizeCurrentNode(node) {
       characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
+      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       characterSheetVariants,
       characterBatchProgress: null,
       characterTab: data.characterTab === "sheet" && data.resultUrl ? "sheet" : "build"
@@ -20476,6 +21251,24 @@ function normalizeStoryboardFrameCountValue(value) {
   const parsed = Number.parseInt(normalized, 10);
   if (!Number.isFinite(parsed)) return storyboardAutoFrameCount;
   return String(Math.min(storyboardMaxFrameCount, Math.max(1, parsed)));
+}
+
+function normalizeOutputData(data = {}) {
+  return {
+    ...createDefaultNodeData("output", data.title || "Output", 1),
+    ...data,
+    title: data.title || "Output",
+    outputPath: String(data.outputPath || data.path || "").trim(),
+    outputFileName: String(data.outputFileName || data.fileNameTemplate || "$node_$date_$time").trim() || "$node_$date_$time",
+    resultUrl: String(data.resultUrl || "").trim(),
+    resultItems: Array.isArray(data.resultItems) ? data.resultItems : [],
+    selectedResultIndex: Math.max(0, Number(data.selectedResultIndex) || 0),
+    resultType: String(data.resultType || "").trim(),
+    lastSavedAt: String(data.lastSavedAt || "").trim(),
+    lastSavedFileName: String(data.lastSavedFileName || "").trim(),
+    lastSavedPath: String(data.lastSavedPath || "").trim(),
+    error: String(data.error || "").trim()
+  };
 }
 
 function storyboardFrameCountNumber(value, fallback = storyboardDefaultFrameCount) {
@@ -21494,11 +22287,13 @@ function normalizeCoverageData(data = {}) {
 function normalizeStyleData(data = {}) {
   const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
   const customPaletteColors = normalizedCustomPaletteColors(data);
+  const legacyCustomPalette = data.stylePreset === "Custom Palette";
   return {
     ...defaultData,
     ...data,
     title: data.title || "Style",
-    stylePreset: normalizeStylePresetName(data.stylePreset || "None"),
+    stylePreset: normalizeStylePresetName(legacyCustomPalette ? "None" : data.stylePreset || "None"),
+    gradePreset: normalizeGradePresetName(data.gradePreset || (legacyCustomPalette ? "Custom" : "None")),
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
     customPaletteColors,

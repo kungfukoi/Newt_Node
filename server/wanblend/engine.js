@@ -520,11 +520,11 @@ function normalizeChoice(value, choices, fallback) {
 
 function isNewtLocalAssetUrl(value) {
   const raw = String(value || "").trim();
-  if (/^\/(?:uploads|outputs|workflow-assets)\//.test(raw)) return true;
+  if (/^\/(?:uploads|outputs|external-outputs|workflow-assets)\//.test(raw)) return true;
 
   try {
     const parsed = new URL(raw, "http://localhost");
-    return /^\/(?:uploads|outputs|workflow-assets)\//.test(decodeURIComponent(parsed.pathname || ""));
+    return /^\/(?:uploads|outputs|external-outputs|workflow-assets)\//.test(decodeURIComponent(parsed.pathname || ""));
   } catch {
     return false;
   }

@@ -54,6 +54,41 @@ test("Coverage participates in batch graph runs as an image-stage node", () => {
   assert.equal(runStageLabel(node.type), "coverage");
 });
 
+test("Output nodes run after model nodes in dependency runs", () => {
+  const node = { id: "output", type: "output", data: {} };
+  assert.equal(isRunnableNode(node), true);
+  assert.equal(nodeRunPriority(node), 5);
+  assert.equal(runStageLabel(node.type), "output");
+});
+
+test("video generation requests carry Output node target fields", () => {
+  const request = buildVideoGenerationRequest({
+    node: {
+      id: "video",
+      data: {
+        title: "Video Model",
+        model: "Seedance 2.0"
+      }
+    },
+    prompt: "Save this render",
+    workflowContext: {
+      outputTargetPath: "C:\\renders\\$date",
+      outputTargetFileName: "$node_name_$index",
+      outputTargetNodeId: "output-1",
+      outputTargetNodeTitle: "Output",
+      outputTargetSourceNodeId: "video",
+      outputTargetSourceNodeTitle: "Video Model"
+    },
+    outputTargetIndex: "2"
+  });
+
+  assert.equal(request.outputTargetPath, "C:\\renders\\$date");
+  assert.equal(request.outputTargetFileName, "$node_name_$index");
+  assert.equal(request.outputTargetNodeId, "output-1");
+  assert.equal(request.outputTargetSourceNodeTitle, "Video Model");
+  assert.equal(request.outputTargetIndex, "2");
+});
+
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [
     { id: "video", type: "videoModel", data: {} },

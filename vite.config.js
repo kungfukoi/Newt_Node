@@ -28,6 +28,7 @@ export default defineConfig({
       "/api": apiTarget,
       "/uploads": apiTarget,
       "/outputs": apiTarget,
+      "/external-outputs": apiTarget,
       "/workflow-assets": apiTarget
     }
   },
@@ -38,6 +39,7 @@ export default defineConfig({
       "/api": apiTarget,
       "/uploads": apiTarget,
       "/outputs": apiTarget,
+      "/external-outputs": apiTarget,
       "/workflow-assets": apiTarget
     }
   }

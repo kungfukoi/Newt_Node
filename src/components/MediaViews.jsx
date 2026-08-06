@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
-import { capitalizeMediaType, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
+import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
@@ -68,7 +68,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
         }}
         title="Drag image into another node or double-click to edit"
       >
-        <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt={node.data.fileName || "Uploaded image"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+        <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={displayMediaUrl(previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl))} alt={node.data.fileName || "Uploaded image"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       </div>
     );
   }
@@ -83,7 +83,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
         onDragEnd={endPreviewDrag}
         title="Scrub video with left-drag. Ctrl-drag to use this video in another node."
       >
-        <video src={node.data.resultUrl} controls muted loop playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />
+        <video src={displayMediaUrl(node.data.resultUrl)} controls muted loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />
       </div>
     );
   }
@@ -91,7 +91,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   return (
     <div className="media-preview audio" draggable onDragStart={startPreviewDrag} onDragEnd={endPreviewDrag} title="Drag audio into another node">
       <FileAudio size={28} />
-      <audio src={node.data.resultUrl} controls />
+      <audio src={displayMediaUrl(node.data.resultUrl)} controls />
     </div>
   );
 }
@@ -154,7 +154,7 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
 
 const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onDragEnd, onPreviewOpen }) {
   const thumbRef = React.useRef(null);
-  const mediaSrc = useLazyRailMediaSrc(thumbRef, item.type === "image" ? previewImageUrl(item) : item.thumbnailUrl || item.url);
+  const mediaSrc = useLazyRailMediaSrc(thumbRef, displayMediaUrl(item.type === "image" ? previewImageUrl(item) : item.thumbnailUrl || item.url));
   const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
 
   return (
@@ -168,7 +168,7 @@ const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDrag
       title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
     >
       {item.type === "image" && mediaSrc && <img {...fullResolutionImageProps(item)} src={mediaSrc} alt={item.label || item.fileName || "Generated output"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-      {item.type === "video" && mediaSrc && <video src={mediaSrc} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+      {item.type === "video" && mediaSrc && <video src={mediaSrc} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
       {(item.type === "model3d" || item.type === "audio" || !mediaSrc) && (
         <div className="project-output-placeholder">
           <KindIcon size={22} />
@@ -1666,7 +1666,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
         <div className="output-lightbox-stage" ref={lightboxStageRef}>
           {displayItem.type === "image" && (
             <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""} ${paintMode ? "painting" : ""}`} ref={imageEditorRef} style={imageEditorStyle}>
-              <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : curvesMode && curvePreviewUrl ? curvePreviewUrl : displayItem.url} alt={label} onLoad={handleLightboxImageLoad} onError={useNewtNodeImageFallback} />
+              <img src={displayMediaUrl(toneMode && tonePreviewUrl ? tonePreviewUrl : curvesMode && curvePreviewUrl ? curvePreviewUrl : displayItem.url)} alt={label} onLoad={handleLightboxImageLoad} onError={useNewtNodeImageFallback} />
               {textMode && normalizedTextOverlay(textOverlay).text.trim() && (
                 <div
                   className="output-text-overlay"
@@ -1725,12 +1725,12 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
               )}
             </div>
           )}
-          {displayItem.type === "video" && <video src={displayItem.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
+          {displayItem.type === "video" && <video src={displayMediaUrl(displayItem.url)} controls loop playsInline onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
           {displayItem.type === "model3d" && <Model3DViewer url={displayItem.url} assets={displayItem.assets} label={label} />}
           {displayItem.type === "audio" && (
             <div className="output-lightbox-audio">
               <FileAudio size={34} />
-              <audio src={displayItem.url} controls />
+              <audio src={displayMediaUrl(displayItem.url)} controls />
             </div>
           )}
           {editError && <small className="output-lightbox-error">{editError}</small>}
@@ -1805,11 +1805,11 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
             {activeItem.type === "image" && (
               <StableResultImage
                 item={activeItem}
-                src={previewImageUrl(activeItem)}
+                src={displayMediaUrl(previewImageUrl(activeItem))}
                 alt={activeItem.label || `Generated image ${activeIndex + 1}`}
               />
             )}
-            {activeItem.type === "video" && <video src={activeItem.url} controls loop playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+            {activeItem.type === "video" && <video src={displayMediaUrl(activeItem.url)} controls loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} assets={activeItem.assets} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
             {activeItem.type === "wanSegment" && (
               <div className="wansegment-result">
@@ -1896,6 +1896,12 @@ export function useNewtNodeVideoFallback(event) {
   video.poster = "/newtnode-logo.png";
   video.removeAttribute("src");
   video.load();
+}
+
+export function useNewtNodeVideoReady(event) {
+  const video = event.currentTarget;
+  video.classList.remove("newtnode-logo-fallback", "newtnode-video-fallback");
+  if (video.poster.endsWith("/newtnode-logo.png")) video.removeAttribute("poster");
 }
 
 export function Model3DViewer({ url, label, assets }) {

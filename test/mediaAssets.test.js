@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   fullResolutionContextPreparedAttribute,
+  displayMediaUrl,
   fullResolutionImageProps,
   fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
@@ -34,6 +35,34 @@ test("drag payloads always prefer a full-resolution asset", () => {
 
   assert.equal(item.url, "/outputs/Test/image.png");
   assert.equal(item.thumbnailUrl, "/outputs/Test/thumbnails/image-preview.jpg");
+});
+
+test("external Output node saves are treated as local draggable media", () => {
+  const externalUrl = "/external-outputs/QzpcUmVuZGVyc1xPdXRwdXQgQ29weV8wMi5tcDQ/Output%20Copy_02.mp4";
+
+  assert.equal(isLocalDraggableMediaUrl(externalUrl), true);
+  assert.equal(fullResolutionOutputItem({ type: "video", url: externalUrl })?.url, externalUrl);
+});
+
+test("external Output node media display bypasses the Vite frontend server", () => {
+  const previousWindow = globalThis.window;
+  const externalUrl = "/external-outputs/QzpcUmVuZGVyc1xPdXRwdXQgQ29weV8wMi5tcDQ/Output%20Copy_02.mp4";
+  globalThis.window = {
+    location: {
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: "5176"
+    }
+  };
+
+  try {
+    assert.equal(
+      displayMediaUrl(externalUrl),
+      `http://127.0.0.1:3336${externalUrl}`
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
 });
 
 test("thumbnail-only drag payloads are rejected", () => {
