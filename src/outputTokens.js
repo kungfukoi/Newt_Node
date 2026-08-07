@@ -1,5 +1,11 @@
 export const outputTokenOptions = Object.freeze(["$node", "$date", "$index", "$time"]);
 
+export function outputSourceNodeTitle(source, fallback = "source") {
+  const title = String(source?.data?.title || "").trim();
+  if (title) return title;
+  return String(fallback || source?.type || "source").trim() || "source";
+}
+
 export function insertOutputToken(value, token, selectionStart, selectionEnd = selectionStart) {
   const text = String(value || "");
   const cleanToken = outputTokenOptions.includes(token) ? token : "";

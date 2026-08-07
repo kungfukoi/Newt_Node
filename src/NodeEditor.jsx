@@ -308,7 +308,8 @@ import {
   videoModelSupportsFilmDirector
 } from "./nodeRunners/videoModels.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
-import { insertOutputToken, outputTokenOptions } from "./outputTokens.js";
+import { isOutputSinkConnection, outputAcceptedSourceKinds } from "./outputConnections.js";
+import { insertOutputToken, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
@@ -5231,6 +5232,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (isOutputSinkConnection(target.type, "sourceIn", outputKind)) {
+      return ["sourceIn"];
+    }
     const inputs = {
       prompt: {
         imageModel: ["promptIn"],
@@ -5339,6 +5343,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (isOutputSinkConnection(target.type, to.port, portKindForNodePort(source, from.port, "output"))) return "";
 
     if (source.type === "storyboard") {
       if (!storyboardOutputItem(source, { from })?.url) return from.port === storyboardBoardOutputPortId ? "Lock this Storyboard board before connecting it" : "Generate this Storyboard frame before connecting it";
@@ -5966,7 +5971,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       outputTargetNodeId: outputNode.id,
       outputTargetNodeTitle: outputNode.data?.title || "Output",
       outputTargetSourceNodeId: sourceNode?.id || "",
-      outputTargetSourceNodeTitle: sourceNode?.data?.title || nodeTypeLabel(sourceNode?.type) || "output",
+      outputTargetSourceNodeTitle: outputSourceNodeTitle(sourceNode, nodeTypeLabel(sourceNode?.type) || "output"),
       outputTargetIndex: outputIndex ? String(outputIndex) : ""
     };
   }
@@ -16160,7 +16165,7 @@ function createDefaultNodeData(type, label, count) {
       utilityMode: "video",
       model: videoModelNames.wanFunControl,
       utilityImageModel: utilityImageModelNames.dwpose,
-      utilityVideoModel: utilityVideoModelNames.wan22VaceDepth,
+      utilityVideoModel: utilityVideoModelNames.extractFrame,
       stillFrameTime: 0,
       ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
@@ -17770,7 +17775,7 @@ function portKindForNodePort(node, portId, role) {
 function acceptedInputPortKinds(node, portId) {
   const inputKind = portKindForNodePort(node, portId, "input");
   if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
-  if (inputKind === "output") return ["image", "video", "audio", "model3d", "transfer", "character", "prompt", "director"];
+  if (inputKind === "output") return outputAcceptedSourceKinds;
   return inputKind ? [inputKind] : [];
 }
 
@@ -18575,12 +18580,10 @@ function connectedOutputUrl(source, edge) {
 function outputSourceSummary(items = []) {
   const connection = items.at(-1);
   if (!connection?.source) return "Connect output";
-  const outputItem = connectedOutputItem(connection.source, connection.edge);
-  if (outputItem?.label) return outputItem.label;
-  if (outputItem?.url) return fileNameFromLocalUrl(outputItem.url) || sourceLabel(connection.source);
-  const text = rawConnectedTextForSource(connection.source);
-  if (text) return sourceLabel(connection.source);
-  return sourceLabel(connection.source) || "Connected";
+  return outputSourceNodeTitle(
+    connection.source,
+    sourceLabel(connection.source) || nodeTypeLabel(connection.source.type) || "Connected"
+  );
 }
 
 function outputPreviewSourceInfo(items = []) {
@@ -18591,7 +18594,7 @@ function outputPreviewSourceInfo(items = []) {
   const isTextSource = ["plainText", "text", "skillDirector"].includes(source.type);
   const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
   const outputFileName = outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || "");
-  const sourceTitle = sourceLabel(source) || source.data?.title || nodeTypeLabel(source.type) || "source";
+  const sourceTitle = outputSourceNodeTitle(source, sourceLabel(source) || nodeTypeLabel(source.type) || "source");
   return {
     sourceTitle,
     sourceFileName: outputFileName || `${safeStillFrameName(sourceTitle)}${outputPreviewDefaultExtension(mediaType)}`,
