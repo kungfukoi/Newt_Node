@@ -66,6 +66,35 @@ export async function relocatedWorkflowPackageAssetFilePath(packagePath, relativ
   return ranked[0].filePath;
 }
 
+export function workflowPackageAssetCandidatesForExternalFilePath(filePath, packagePath) {
+  const sourceSegments = originalPathSegments(filePath);
+  const packageSegments = originalPathSegments(packagePath);
+  const fileName = sourceSegments.at(-1);
+  if (!sourceSegments.length || !fileName) return [];
+
+  const candidates = [];
+  const packageName = packageSegments.at(-1)?.toLowerCase();
+  if (packageName) {
+    for (let index = sourceSegments.length - 2; index >= 0; index -= 1) {
+      if (sourceSegments[index].toLowerCase() !== packageName) continue;
+      addCandidate(candidates, sourceSegments.slice(index + 1));
+      break;
+    }
+  }
+
+  const assetGroups = new Set(["inputs", "outputs", "dependencies", "thumbnails"]);
+  for (let index = sourceSegments.length - 2; index >= 0; index -= 1) {
+    if (!assetGroups.has(sourceSegments[index].toLowerCase())) continue;
+    addCandidate(candidates, sourceSegments.slice(index));
+    break;
+  }
+
+  ["outputs", "dependencies", "thumbnails", "inputs"].forEach((group) => {
+    addCandidate(candidates, [group, fileName]);
+  });
+  return candidates;
+}
+
 function workflowPackageRoot(workflow) {
   return String(workflow?.packagePath || workflow?.package?.rootPath || "").trim();
 }
@@ -165,6 +194,22 @@ function pathSegments(value) {
     .split(/[\\/]+/)
     .map((segment) => segment.toLowerCase())
     .filter(Boolean);
+}
+
+function originalPathSegments(value) {
+  return String(value || "")
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function addCandidate(candidates, segments) {
+  const candidate = safePackageRelativePath(segments.join(path.sep));
+  if (!candidate) return;
+  const key = process.platform === "win32" ? candidate.toLowerCase() : candidate;
+  if (!candidates.some((value) => (process.platform === "win32" ? value.toLowerCase() : value) === key)) {
+    candidates.push(candidate);
+  }
 }
 
 function endsWithSegments(value, suffix) {

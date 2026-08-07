@@ -46,6 +46,7 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
 import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
@@ -514,7 +515,9 @@ app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
   try {
-    const filePath = externalOutputFilePathFromPublicPath(req.path);
+    const requestedPath = externalOutputFilePathFromPublicPath(req.path);
+    const filePath = existsSync(requestedPath) ? requestedPath : await relocatedExternalOutputFilePath(req.path);
+    if (!filePath) return res.status(404).send("Output file not found.");
     res.sendFile(filePath, (error) => {
       if (error && !res.headersSent) res.status(error.statusCode || 404).send("Output file not found.");
     });
@@ -9077,13 +9080,23 @@ function workflowPackageAssetReferenceForOpenedPath(value, workflowId, packagePa
     return value;
   }
 
-  const candidatePaths = workflowPackageAssetCandidatesForLocalPath(publicPath);
+  const candidatePaths = workflowPackageAssetCandidatesForLocalPath(publicPath, packagePath);
   const matchingPath = candidatePaths.find((relativePath) => existsSync(path.join(packagePath, relativePath)));
   return matchingPath ? workflowPackagePublicPath(workflowId, matchingPath) : value;
 }
 
-function workflowPackageAssetCandidatesForLocalPath(publicPath) {
+function workflowPackageAssetCandidatesForLocalPath(publicPath, packagePath = "") {
   const decodedPath = decodeURIComponent(String(publicPath || ""));
+  if (decodedPath.startsWith(`${externalOutputsPrefix}/`)) {
+    try {
+      return workflowPackageAssetCandidatesForExternalFilePath(
+        externalOutputFilePathFromPublicPath(decodedPath),
+        packagePath
+      );
+    } catch {
+      return [];
+    }
+  }
   const isUpload = decodedPath.startsWith("/uploads/");
   const prefix = isUpload ? "/uploads/" : "/outputs/";
   if (!decodedPath.startsWith(prefix)) return [];
@@ -9103,6 +9116,26 @@ function workflowPackageAssetCandidatesForLocalPath(publicPath) {
       path.join(workflowPackageThumbnailDirName, fileName)
     ])
   ];
+}
+
+async function relocatedExternalOutputFilePath(publicPath) {
+  let originalPath = "";
+  try {
+    originalPath = externalOutputFilePathFromPublicPath(publicPath);
+  } catch {
+    return "";
+  }
+
+  const workflows = await readRegisteredWorkflowPackages();
+  for (const workflow of workflows) {
+    const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+    const candidates = workflowPackageAssetCandidatesForExternalFilePath(originalPath, packagePath);
+    for (const relativePath of candidates) {
+      const exactPath = await exactWorkflowPackageAssetFilePath(packagePath, relativePath);
+      if (exactPath) return exactPath;
+    }
+  }
+  return "";
 }
 
 function tryLocalPublicPath(value) {

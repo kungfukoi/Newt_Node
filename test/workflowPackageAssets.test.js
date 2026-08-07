@@ -7,6 +7,7 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "../server/workflowPackageAssets.js";
 
@@ -44,6 +45,25 @@ test("workflow package lookup refuses ambiguous filename matches and traversal",
   assert.equal(await exactWorkflowPackageAssetFilePath(packagePath, "../frame.png"), "");
 });
 
+test("external output paths rebase to a moved workflow package", () => {
+  const candidates = workflowPackageAssetCandidatesForExternalFilePath(
+    "C:\\Users\\someone\\OneDrive\\Projects\\DXC_video_v03\\outputs\\TrainShot\\Xbridge_16.png",
+    "C:\\Users\\current\\OneDrive\\Projects\\DXC_video_v03"
+  );
+
+  assert.deepEqual(pathSegments(candidates[0]), ["outputs", "TrainShot", "Xbridge_16.png"]);
+  assert.ok(candidates.some((candidate) => pathSegments(candidate).join("/") === "outputs/Xbridge_16.png"));
+});
+
+test("external output rebasing recognizes Windows paths in macOS packages", () => {
+  const candidates = workflowPackageAssetCandidatesForExternalFilePath(
+    "C:\\Users\\someone\\Projects\\ShowPackage\\outputs\\Seq01\\frame.png",
+    "/Users/current/Projects/ShowPackage"
+  );
+
+  assert.deepEqual(pathSegments(candidates[0]), ["outputs", "Seq01", "frame.png"]);
+});
+
 test("workflow package candidates include duplicate ids and stale ids referenced by a graph", () => {
   const workflows = [
     { id: "shared-id", packagePath: "C:/packages/one", graph: {} },
@@ -78,3 +98,6 @@ test("Save As assigns a fresh workflow identity for a cloned package", () => {
   assert.deepEqual(cloned, { id: "clone-id", existingWorkflow: null, isPackageClone: true });
   assert.deepEqual(ordinarySave, { id: "original-id", existingWorkflow, isPackageClone: false });
 });
+function pathSegments(value) {
+  return String(value || "").split(/[\\/]+/).filter(Boolean);
+}
