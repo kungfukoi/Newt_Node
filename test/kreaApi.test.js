@@ -29,6 +29,7 @@ test("current shared NewtNode models resolve to Krea endpoints", () => {
   ].forEach((name) => assert.equal(supportsKreaModel("image", name), true, name));
 
   assert.equal(kreaEndpointForModel("video", "Seedance 2.0"), "/generate/video/bytedance/seedance-2");
+  assert.equal(kreaEndpointForModel("video", "Seedance 2.5"), "/generate/video/bytedance/seedance-2-5");
   assert.equal(kreaEndpointForModel("video", "Kling O3 Pro"), "/generate/video/kling/kling-3.0");
   assert.equal(kreaEndpointForModel("video", "Gemini Omni Flash"), "/generate/video/google/gemini-omni-flash");
   assert.equal(kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro"), "/generate/3d/tencent/hunyuan3d-3.1-pro");

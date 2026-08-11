@@ -7,6 +7,7 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  uniqueWorkflowPackageAssetFilePath,
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "../server/workflowPackageAssets.js";
@@ -43,6 +44,24 @@ test("workflow package lookup refuses ambiguous filename matches and traversal",
 
   assert.equal(await relocatedWorkflowPackageAssetFilePath(packagePath, "outputs/frame.png"), "");
   assert.equal(await exactWorkflowPackageAssetFilePath(packagePath, "../frame.png"), "");
+});
+
+test("workflow package lookup recovers a uniquely matching asset from a stale workflow id", async (context) => {
+  const rootPath = await mkdtemp(path.join(tmpdir(), "newtnode-package-assets-"));
+  context.after(() => rm(rootPath, { recursive: true, force: true }));
+
+  const firstPackage = path.join(rootPath, "first");
+  const secondPackage = path.join(rootPath, "second");
+  const sourcePath = path.join(firstPackage, "outputs", "depth-video.mp4");
+  await mkdir(path.dirname(sourcePath), { recursive: true });
+  await mkdir(path.join(secondPackage, "outputs"), { recursive: true });
+  await writeFile(sourcePath, "video");
+
+  const workflows = [{ packagePath: firstPackage }, { packagePath: secondPackage }];
+  assert.equal(await uniqueWorkflowPackageAssetFilePath(workflows, "outputs/depth-video.mp4"), sourcePath);
+
+  await writeFile(path.join(secondPackage, "outputs", "depth-video.mp4"), "duplicate");
+  assert.equal(await uniqueWorkflowPackageAssetFilePath(workflows, "outputs/depth-video.mp4"), "");
 });
 
 test("external output paths rebase to a moved workflow package", () => {

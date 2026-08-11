@@ -10,6 +10,7 @@ import {
   fullResolutionImageUrl,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
+  nextFullResolutionImageFallback,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
   restoreFullResolutionImagePreview
@@ -168,4 +169,29 @@ test("native image context menus temporarily expose the full-resolution source",
   );
   assert.equal(attributes.has(fullResolutionContextPreparedAttribute), false);
   assert.equal(attributes.has(fullResolutionPreviewSourceAttribute), false);
+});
+
+test("broken preview thumbnails retry the full-resolution image before using the logo", () => {
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "/workflow-assets/project-1/thumbnails/image-preview.jpg",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    "/workflow-assets/project-1/outputs/image.png"
+  );
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "http://127.0.0.1:5176/workflow-assets/project-1/outputs/image.png",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    ""
+  );
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "/workflow-assets/project-1/thumbnails/image-preview.jpg",
+      "/workflow-assets/project-1/outputs/image.png",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    ""
+  );
 });

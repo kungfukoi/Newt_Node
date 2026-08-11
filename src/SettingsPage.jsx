@@ -370,7 +370,7 @@ export default function SettingsPage() {
         >
           <div className="settings-provider-routing">
             <label className="settings-field">
-              <span>Seedance 2.0</span>
+              <span>Seedance 2.0 / 2.5</span>
               <select
                 value={modelProviderPreferences.seedance}
                 onChange={(event) => setModelProviderPreferences((current) => ({ ...current, seedance: event.target.value }))}

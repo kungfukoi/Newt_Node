@@ -278,6 +278,7 @@ export function useWorkflowPersistence({
       setSaveStatus(options.saveAsPackage ? "Saving workflow package..." : "Saving...");
       const project = await workflowApi.save({
         id: options.saveAsPackage || shouldCreateNewProject ? null : projectId,
+        sourceWorkflowId: options.saveAsPackage ? projectId : "",
         name: cleanProjectName,
         packageParentPath: options.packageParentPath || "",
         packagePath: options.packageParentPath ? "" : options.packagePath || projectPackagePath || "",

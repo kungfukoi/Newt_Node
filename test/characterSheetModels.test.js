@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   characterSheetGenerationSettings,
   characterSheetModelOptions,
+  mergeGeneratedCharacterSheetVariants,
   normalizeCharacterSheetModel
 } from "../src/characterSheetModels.js";
 import { imageModelNames } from "../src/modelOptions.js";
@@ -30,4 +31,15 @@ test("character sheets use Seedream's supported 2K output", () => {
     model: imageModelNames.seedream5Pro,
     resolution: "2K"
   });
+});
+
+test("partial Character regeneration replaces successes and preserves prior failed wardrobe sheets", () => {
+  const previousA = { wardrobeId: "wardrobe-a", generated: { url: "/outputs/a-old.png" } };
+  const previousB = { wardrobeId: "wardrobe-b", generated: { url: "/outputs/b-old.png" } };
+  const regeneratedA = { wardrobeId: "wardrobe-a", generated: { url: "/outputs/a-new.png" } };
+
+  assert.deepEqual(
+    mergeGeneratedCharacterSheetVariants([previousA, previousB], [regeneratedA], ["wardrobe-a", "wardrobe-b"]),
+    [regeneratedA, previousB]
+  );
 });

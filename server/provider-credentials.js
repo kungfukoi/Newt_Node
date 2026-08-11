@@ -64,7 +64,10 @@ export function mergeProviderCredentialsWithEnv({
     const key = activeKey || disabledKey;
     if (!key) continue;
 
-    let credential = mergedCredentials[provider].find((item) => item.key === key);
+    const selectedCredential = mergedCredentials[provider].find((item) => item.id === mergedActiveCredentialIds[provider]);
+    let credential = selectedCredential?.key === key
+      ? selectedCredential
+      : mergedCredentials[provider].find((item) => item.key === key);
     if (!credential) {
       const usedIds = new Set(mergedCredentials[provider].map((item) => item.id));
       credential = {

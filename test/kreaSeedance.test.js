@@ -25,6 +25,7 @@ test("Seedance honors the explicit Settings provider without silently falling ba
 test("Krea Seedance endpoints reflect speed", () => {
   assert.equal(kreaSeedanceEndpoint("standard"), "/generate/video/bytedance/seedance-2");
   assert.equal(kreaSeedanceEndpoint("fast"), "/generate/video/bytedance/seedance-2-fast");
+  assert.equal(kreaSeedanceEndpoint("standard", "Seedance 2.5"), "/generate/video/bytedance/seedance-2-5");
 });
 
 test("Krea Seedance pricing uses resolution and video-reference tier", () => {
@@ -35,6 +36,19 @@ test("Krea Seedance pricing uses resolution and video-reference tier", () => {
   });
   assert.equal(cost.unitRateUsd, 0.1911);
   assert.equal(cost.amountUsd, 2.8665);
+});
+
+test("Krea Seedance 2.5 pricing follows the published resolution and video-reference rates", () => {
+  const cost = estimateKreaSeedanceCost({
+    modelName: "Seedance 2.5",
+    durationSeconds: 20,
+    resolution: "720p",
+    hasVideoReference: true
+  });
+  assert.equal(cost.unitRateUsd, 0.1452);
+  assert.equal(cost.amountUsd, 2.904);
+  assert.equal(cost.durationSeconds, 20);
+  assert.equal(cost.pricingSource, "krea-openapi-2026-08-08");
 });
 
 test("Krea result URLs normalize supported response shapes", () => {

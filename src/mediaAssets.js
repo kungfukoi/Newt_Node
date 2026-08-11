@@ -2,6 +2,7 @@ export const outputDragMime = "application/x-newtnode-output";
 export const outputDragEndEvent = "newtnode-output-drag-end";
 export const fullResolutionContextPreparedAttribute = "data-full-resolution-context-prepared";
 export const fullResolutionPreviewSourceAttribute = "data-full-resolution-preview-source";
+export const fullResolutionFallbackAttemptAttribute = "data-full-resolution-fallback-attempt";
 const outputDragWindowKey = "__newtNodeDraggedOutputItem";
 const externalOutputsPrefix = "/external-outputs/";
 const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
@@ -125,6 +126,29 @@ export function fullResolutionImageProps(itemOrUrl, fileName = "") {
         || "image"
     ).trim()
   };
+}
+
+export function nextFullResolutionImageFallback(currentUrl, fullResolutionUrl, attemptedUrl = "") {
+  const current = comparableMediaUrl(currentUrl);
+  const fullResolution = comparableMediaUrl(fullResolutionUrl);
+  const attempted = comparableMediaUrl(attemptedUrl);
+  if (!fullResolution || current === fullResolution || attempted === fullResolution) return "";
+  return String(fullResolutionUrl || "").trim();
+}
+
+function comparableMediaUrl(value) {
+  const source = String(value || "").trim();
+  if (!source) return "";
+
+  try {
+    const parsed = new URL(source, "http://newtnode.local");
+    if (parsed.origin === "http://newtnode.local" || ["127.0.0.1", "localhost", "0.0.0.0"].includes(parsed.hostname)) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.href;
+  } catch {
+    return source;
+  }
 }
 
 export function prepareFullResolutionImageForNativeSave(image) {

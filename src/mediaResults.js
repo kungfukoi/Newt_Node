@@ -19,6 +19,17 @@ export function appendResultItems(previousItems = [], newItems = [], type) {
   }));
 }
 
+export function replacementResultItems(asset = {}, type = asset.mediaType) {
+  if (!asset.localUrl) return [];
+  return [{
+    url: asset.localUrl,
+    type,
+    label: asset.fileName || mediaResultLabel(type),
+    fileName: asset.fileName || "",
+    mimeType: asset.mimeType || ""
+  }];
+}
+
 export function mediaResultLabel(type) {
   if (type === "image") return "Image";
   if (type === "video") return "Video";

@@ -49,6 +49,9 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions,
   seedream5ResolutionOptions,
   normalizeModelPreferences,
   videoModelNames,
@@ -57,6 +60,7 @@ import {
   wan27ReferenceResolutionOptions
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
+import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
 import "./styles.css";
@@ -1065,6 +1069,16 @@ function formatKrea2Creativity(value) {
 }
 
 function videoSettingsForModel(model) {
+  if (isSeedance25Model(model)) {
+    return {
+      durations: seedance25DurationOptions.map(durationLabelToValue),
+      durationValues: seedance25DurationOptions.map(durationLabelToValue),
+      defaultDuration: "auto",
+      resolutions: seedance25ResolutionOptions,
+      aspectRatios: seedance25AspectRatioOptions
+    };
+  }
+
   if (isGeminiOmniModel(model)) {
     return {
       durations: geminiOmniDurationOptions.map(durationLabelToValue),
@@ -1140,6 +1154,7 @@ function isWan27VideoModel(model) {
 }
 
 function durationLabelToValue(value) {
+  if (String(value || "").trim().toLowerCase() === "auto") return "auto";
   return String(value || "").match(/\d+/)?.[0] || "5";
 }
 

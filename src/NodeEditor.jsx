@@ -55,6 +55,7 @@ import {
   OutputPreviewLightbox,
   ProjectOutputDrawer,
   ResultPane,
+  retryNewtNodeImageFallback,
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback,
   useNewtNodeVideoReady
@@ -135,7 +136,7 @@ import {
   previewImageUrl,
   setOutputItemDragData
 } from "./mediaAssets.js";
-import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
+import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
 import { findNodeReferenceMentions } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
@@ -144,7 +145,7 @@ import {
   characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
-import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
+import { characterSheetModelOptions, mergeGeneratedCharacterSheetVariants, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -201,6 +202,9 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions,
   seedream5ResolutionOptions,
   shotPresetNames,
   shotPresetPrompts,
@@ -242,6 +246,7 @@ import {
   wanVaceTransparencyOptions
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
+import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
 import {
@@ -1475,6 +1480,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [active, nodes, groups]);
 
   React.useEffect(() => {
+    if (!active) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      canvasRef.current
+        ?.querySelectorAll("img.newtnode-logo-fallback[data-full-resolution-url]")
+        .forEach((image) => retryNewtNodeImageFallback(image));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, projectId, workflowFilePath, nodes.length]);
+
+  React.useEffect(() => {
     if (!active || metadataLoadedRef.current) return;
     metadataLoadedRef.current = true;
     loadProjects();
@@ -2470,12 +2485,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
+      const resultItems = replacementResultItems(asset, asset.mediaType);
       updateNode(node.id, {
         fileName: asset.fileName,
         storedFileName: asset.storedFileName,
         mimeType: asset.mimeType,
         mediaType: asset.mediaType,
         resultUrl: asset.localUrl,
+        resultItems,
+        selectedResultIndex: 0,
+        resultType: asset.mediaType,
         status: "ready",
         error: ""
       });
@@ -3105,6 +3124,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
     const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
+    const existingVariants = normalizeCharacterSheetVariants(node.data);
     let completedVariantCount = 0;
 
     if (useCustomSheet) {
@@ -3218,14 +3238,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           }
         })
       );
-      const variants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
+      const generatedVariants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
       const failures = results.filter((result) => result.status === "rejected");
-      if (!variants.length) {
+      if (!generatedVariants.length) {
         throw failures[0]?.reason || new Error("Character sheet generation failed.");
       }
+      const variants = mergeGeneratedCharacterSheetVariants(
+        existingVariants,
+        generatedVariants,
+        wardrobeOptions.map((wardrobe) => characterWardrobeVariantId(wardrobe))
+      );
       const selectedVariant = variants.find((variant) => variant.wardrobeId === desiredWardrobeId) || variants[0];
       const variantNotice = failures.length
-        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be generated.`
+        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be regenerated; previous sheets were kept where available.`
         : "";
       pushUndoSnapshot();
       updateNode(node.id, {
@@ -3245,6 +3270,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
     } catch (error) {
       updateNode(node.id, {
+        ...(existingVariants.length ? { characterTab: "sheet" } : {}),
         status: "error",
         characterBatchProgress: null,
         error: error.message
@@ -3258,14 +3284,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       activated: false,
       locked: false,
       characterTab: "build",
-      resultUrl: "",
-      resultItems: [],
-      fileName: "",
-      compiledWardrobeUrl: "",
-      compiledTraitPrompt: "",
-      compiledVoicePrompt: "",
-      characterSheetVariants: [],
-      characterSheetPreviewKind: "image",
       characterBatchProgress: null,
       characterVariantNotice: "",
       status: "ready",
@@ -14049,6 +14067,7 @@ function NodeBody({
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isGeminiOmni = isGeminiOmniModel(node.data.model);
   const isSam3Video = isSam3VideoModel(node.data.model);
+  const isSeedance25 = isSeedance25Model(node.data.model);
   const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
   const wan27Resolution = normalizedWan27ReferenceResolution(node.data.resolution);
   const wan27AspectRatio = normalizedWan27ReferenceAspectRatio(node.data.aspectRatio);
@@ -14428,25 +14447,30 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Duration">
               <select value={node.data.duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {seedanceVideoDurationOptions.map((option) => (
-                  <option key={option}>{option}</option>
+                {(isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
+                  <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {seedanceVideoResolutionOptions.map((option) => (
+                {(isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
               <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {seedanceVideoAspectRatioOptions.map((option) => (
-                  <option key={option}>{option}</option>
+                {(isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
+                  <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
             </NodeRow>
+            {isSeedance25 && (
+              <NodeRow label="Seed">
+                <input inputMode="numeric" value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value.replace(/[^\d]/g, "") })} placeholder="Random" />
+              </NodeRow>
+            )}
             <NodeRow label="Generate Audio">
               <button className={`node-toggle ${node.data.generateAudio ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}>
                 <span />
@@ -15326,7 +15350,7 @@ function ConnectedImageInputButton({ items = [], fallback = "Add image" }) {
 
   return (
     <button className="connected-field wanwarp-frame-thumb-button has-thumb" title={imageItem.label || "Connected image"}>
-      <img src={imageItem.url} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+      <img {...fullResolutionImageProps(imageItem)} src={imageItem.url} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       {items.length > 1 && <span>{items.length}</span>}
     </button>
   );
@@ -15453,7 +15477,7 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
                 role="listitem"
                 title={`${ordinalLabel(index + 1)} keyframe: ${item.label}`}
               >
-                <img src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <img {...fullResolutionImageProps(item)} src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 <span>{ordinalLabel(index + 1)}</span>
               </div>
             ))}
@@ -16614,7 +16638,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Film Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
@@ -16660,6 +16684,18 @@ function videoModelSelectionPatch(data = {}, model) {
       negativePrompt: data.negativePrompt || "",
       multiShots: Boolean(data.multiShots),
       enableSafetyChecker: data.enableSafetyChecker !== false,
+      seed: data.seed || ""
+    };
+  }
+
+  if (isSeedance25Model(model)) {
+    const preserveSeedance25 = isSeedance25Model(data.model);
+    return {
+      model,
+      duration: preserveSeedance25 && seedance25DurationOptions.includes(data.duration) ? data.duration : "auto",
+      resolution: preserveSeedance25 && seedance25ResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
+      aspectRatio: preserveSeedance25 && seedance25AspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "auto",
+      generateAudio: data.generateAudio !== false,
       seed: data.seed || ""
     };
   }
