@@ -133,7 +133,8 @@ import {
   outputDragMime,
   outputItemFromDataTransfer,
   previewImageUrl,
-  setOutputItemDragData
+  setOutputItemDragData,
+  supportedFilesFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import { findNodeReferenceMentions } from "./nodeReferences.js";
@@ -2111,9 +2112,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
-  function handleCanvasDrop(event) {
-    const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-    const files = event.dataTransfer?.files;
+  async function handleCanvasDrop(event) {
+    const dataTransfer = event.dataTransfer;
+    const outputItem = outputItemFromDataTransfer(dataTransfer);
+    const files = dataTransfer?.files;
     const storyboardFrameDropTarget = event.target.closest?.("[data-storyboard-node-id][data-storyboard-frame-id]");
     if (storyboardFrameDropTarget) {
       const storyboardNode = nodesRef.current.find((node) => node.id === storyboardFrameDropTarget.dataset.storyboardNodeId);
@@ -2126,7 +2128,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
     }
-    if (!outputItem && !hasSupportedDroppedFile(files)) return;
+    if (!outputItem && !hasSupportedDroppedFile(dataTransfer?.items || files)) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -2135,7 +2137,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       createMediaNodeFromOutputItem(outputItem, position);
       return;
     }
-    createMediaNodesFromFiles(files, position);
+    const droppedFiles = await supportedFilesFromDataTransfer(dataTransfer);
+    createMediaNodesFromFiles(droppedFiles, position);
   }
 
   function removeNode(nodeId) {
@@ -5248,6 +5251,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         storyboard: ["directorIn"]
       },
       image: {
+        output: ["sourceIn"],
         preview: ["sourceIn"],
         autoAspect: ["imageIn"],
         edit: ["imageIn"],
@@ -5263,6 +5267,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         skillDirector: ["imageIn", "locationIn"]
       },
       video: {
+        output: ["sourceIn"],
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
         edit: ["videoIn"],
@@ -5471,6 +5476,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (source.type === "utility") {
       if (utilityOutputType(source, from.port) === "video") {
+        if (target.type === "output" && to.port === "sourceIn") return "";
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
@@ -5479,6 +5485,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return "Utility video output connects to video inputs";
       }
 
+      if (target.type === "output" && to.port === "sourceIn") return "";
       if (target.type === "preview" && to.port === "sourceIn") return "";
       if (target.type === "storyboard" && ["sceneReferenceIn", "propsIn"].includes(to.port)) return "";
       if (target.type === "autoAspect" && to.port === "imageIn") return "";
@@ -6050,7 +6057,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       sourceText: text,
       sourceFileName: `${safeStillFrameName(sourceNode?.data?.title || sourceNode?.type || "output")}.txt`,
       mediaType: "text",
-      ...workflowContextPayload(requestContext),
+      ...workflowContextPayload({
+        ...requestContext,
+        ...(outputTarget.context || {})
+      }),
       nodeId: outputTarget.node.id,
       nodeTitle: outputTarget.node.data?.title || "Output"
     }, "Output text save");
@@ -6162,13 +6172,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "text") {
+        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, nodesRef.current);
+        const resolvedText = resolveNodeReferencesInText(currentNode.data.text, nodeReferenceContext, currentNode.id);
         const processed = await runTextNodeProcessing({
           node: currentNode,
           incoming,
           workflowContext: requestContext,
           sourceLabel,
           promptPiecesForSource,
-          nodeReferences: textModelNodeReferenceInputs(currentNode, incoming, nodesRef.current)
+          text: resolvedText,
+          nodeReferences
         });
         updateNode(currentNode.id, {
           status: "complete",
@@ -20203,7 +20216,7 @@ function previewMediaType(source, edge) {
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
-  if (/\.(mp4|mov|webm)$/i.test(source.data.resultUrl || "")) return "video";
+  if (/\.(mp4|mov|qt|webm)$/i.test(source.data.resultUrl || "")) return "video";
   return "image";
 }
 

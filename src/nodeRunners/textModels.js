@@ -7,10 +7,11 @@ export async function runTextNodeProcessing({
   workflowContext,
   sourceLabel,
   promptPiecesForSource,
+  text,
   nodeReferences = {}
 }) {
   const { response, data } = await nodeApi.processText({
-    text: node.data.text,
+    text: text ?? node.data.text,
     textInputs: [
       ...normalizedReferenceInputs(nodeReferences.textInputs),
       ...connectedTextInputItems(incoming.textIn, sourceLabel),

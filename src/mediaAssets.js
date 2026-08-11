@@ -7,6 +7,9 @@ const externalOutputsPrefix = "/external-outputs/";
 const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
 
 const outputMediaTypes = new Set(["image", "video", "audio", "model3d", "text"]);
+const imageFileExtensionPattern = /\.(png|jpe?g|webp|gif)$/i;
+const videoFileExtensionPattern = /\.(mp4|mov|qt|webm)$/i;
+const audioFileExtensionPattern = /\.(mp3|wav|m4a|aac|ogg)$/i;
 
 export function isLocalOutputUrl(value) {
   if (typeof value !== "string") return false;
@@ -32,7 +35,7 @@ export function isLocalDraggableMediaUrl(value) {
 export function outputMediaTypeForUrl(url, fallbackType) {
   const extension = fileNameFromLocalUrl(url).toLowerCase();
   if (/\.(glb|gltf)$/.test(extension)) return "model3d";
-  if (/\.(mp4|mov|webm)$/.test(extension)) return "video";
+  if (/\.(mp4|mov|qt|webm)$/.test(extension)) return "video";
   if (/\.(mp3|wav|m4a|aac|ogg)$/.test(extension)) return "audio";
   if (/\.(txt|md|markdown|json|csv|tsv|xml|yaml|yml)$/.test(extension)) return "text";
   if (/\.(png|jpe?g|webp|gif)$/.test(extension)) return "image";
@@ -90,6 +93,9 @@ export function displayMediaUrl(itemOrUrl) {
       || ""
   ).trim();
   if (!sourceUrl || /^(?:blob:|data:|https?:)/i.test(sourceUrl)) return sourceUrl;
+  if (shouldUseLocalVideoPreview(sourceUrl)) {
+    return `/api/video-preview?url=${encodeURIComponent(sourceUrl)}`;
+  }
   if (!sourceUrl.startsWith(externalOutputsPrefix)) return sourceUrl;
   if (typeof window === "undefined" || !window.location) return sourceUrl;
 
@@ -98,6 +104,11 @@ export function displayMediaUrl(itemOrUrl) {
   if (!localApiPort || window.location.port === localApiPort) return sourceUrl;
 
   return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${sourceUrl}`;
+}
+
+function shouldUseLocalVideoPreview(value) {
+  const cleanPath = String(value || "").split("?")[0].split("#")[0];
+  return /\.(mov|qt)$/i.test(cleanPath) && isLocalDraggableMediaUrl(cleanPath);
 }
 
 export function fullResolutionImageProps(itemOrUrl, fileName = "") {
@@ -313,7 +324,7 @@ export function mimeForOutputItem(item) {
   if (lower.endsWith(".webp")) return "image/webp";
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".mp4")) return "video/mp4";
-  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".mov") || lower.endsWith(".qt")) return "video/quicktime";
   if (lower.endsWith(".webm")) return "video/webm";
   if (lower.endsWith(".glb")) return "model/gltf-binary";
   if (lower.endsWith(".gltf")) return "model/gltf+json";
@@ -346,9 +357,9 @@ export function capitalizeMediaType(type) {
 }
 
 export function mediaAccept(type) {
-  if (type === "image") return "image/png,image/jpeg,image/webp";
-  if (type === "video") return "video/mp4,video/quicktime,video/webm";
-  return "audio/mpeg,audio/wav,audio/mp4";
+  if (type === "image") return "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.gif";
+  if (type === "video") return "video/mp4,video/quicktime,video/webm,.mp4,.mov,.qt,.webm";
+  return "audio/mpeg,audio/wav,audio/mp4,.mp3,.wav,.m4a,.aac,.ogg";
 }
 
 export function allowFileDrop(event) {
@@ -358,17 +369,75 @@ export function allowFileDrop(event) {
 
 export function firstAcceptedFile(fileList, type) {
   const files = Array.from(fileList || []);
-  if (type === "image") return files.find((file) => file.type.startsWith("image/"));
-  if (type === "video") return files.find((file) => file.type.startsWith("video/"));
-  if (type === "audio") return files.find((file) => file.type.startsWith("audio/"));
+  if (type === "image") return files.find((file) => nodeTypeForDroppedFile(file) === "image");
+  if (type === "video") return files.find((file) => nodeTypeForDroppedFile(file) === "video");
+  if (type === "audio") return files.find((file) => nodeTypeForDroppedFile(file) === "audio");
   if (type === "model3d") return files.find(isModel3DFile);
   return files[0];
+}
+
+export async function supportedFilesFromDataTransfer(dataTransfer, maxFiles = 32) {
+  const items = Array.from(dataTransfer?.items || []);
+  if (items.length) {
+    const files = [];
+    for (const item of items) {
+      if (files.length >= maxFiles) break;
+      await collectDataTransferItemFiles(item, files, maxFiles);
+    }
+    if (files.length) return files.filter((file) => nodeTypeForDroppedFile(file)).slice(0, maxFiles);
+  }
+
+  return Array.from(dataTransfer?.files || [])
+    .filter((file) => nodeTypeForDroppedFile(file))
+    .slice(0, maxFiles);
+}
+
+async function collectDataTransferItemFiles(item, files, maxFiles) {
+  if (!item || (item.kind && item.kind !== "file") || files.length >= maxFiles) return;
+  const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+  if (entry) {
+    await collectDroppedEntryFiles(entry, files, maxFiles);
+    return;
+  }
+
+  const file = typeof item.getAsFile === "function" ? item.getAsFile() : null;
+  if (nodeTypeForDroppedFile(file)) files.push(file);
+}
+
+async function collectDroppedEntryFiles(entry, files, maxFiles) {
+  if (!entry || files.length >= maxFiles) return;
+
+  if (entry.isFile) {
+    const file = await new Promise((resolve) => entry.file(resolve, () => resolve(null)));
+    if (nodeTypeForDroppedFile(file)) files.push(file);
+    return;
+  }
+
+  if (!entry.isDirectory || typeof entry.createReader !== "function") return;
+  const reader = entry.createReader();
+  let entries = await readDirectoryEntries(reader);
+  while (entries.length && files.length < maxFiles) {
+    for (const child of entries) {
+      if (files.length >= maxFiles) break;
+      await collectDroppedEntryFiles(child, files, maxFiles);
+    }
+    entries = await readDirectoryEntries(reader);
+  }
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve) => reader.readEntries(resolve, () => resolve([])));
 }
 
 export function hasSupportedDroppedFile(value) {
   return Array.from(value || []).some((item) => {
     if (item.kind && item.kind !== "file") return false;
-    if (item.kind === "file") return true;
+    if (item.kind === "file") {
+      const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+      if (entry?.isDirectory) return true;
+      const file = typeof item.getAsFile === "function" ? item.getAsFile() : null;
+      return Boolean(nodeTypeForDroppedFile(file) || nodeTypeForDroppedFile({ type: item.type || "", name: file?.name || "" }));
+    }
     if (item.getAsFile) return Boolean(nodeTypeForDroppedFile(item.getAsFile()) || nodeTypeForDroppedFile({ type: item.type || "", name: "" }));
     return Boolean(nodeTypeForDroppedFile(item));
   });
@@ -377,9 +446,13 @@ export function hasSupportedDroppedFile(value) {
 export function nodeTypeForDroppedFile(file) {
   if (!file) return "";
   const mimeType = String(file.type || "").toLowerCase();
+  const name = String(file.name || "").toLowerCase();
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";
   if (mimeType.startsWith("audio/")) return "audio";
+  if (imageFileExtensionPattern.test(name)) return "image";
+  if (videoFileExtensionPattern.test(name)) return "video";
+  if (audioFileExtensionPattern.test(name)) return "audio";
   if (isModel3DFile(file)) return "model3d";
   if (isTextFile(file)) return "plainText";
   return "";

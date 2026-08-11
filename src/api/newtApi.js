@@ -1,6 +1,6 @@
 import { apiErrorMessage } from "../apiErrors.js";
 
-const localApiPort = import.meta.env.VITE_API_PORT || "3336";
+const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {

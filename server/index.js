@@ -184,6 +184,7 @@ let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
 const runtimeThumbnailJobs = new Map();
+const runtimeVideoPreviewJobs = new Map();
 let registeredWorkflowPackageCache = null;
 let registeredWorkflowPackageLoadPromise = null;
 let registeredWorkflowPackageCacheGeneration = 0;
@@ -533,6 +534,16 @@ app.get("/api/media-thumbnail", runtimeThumbnailRequestLimiter, async (req, res)
     res.redirect(302, thumbnailUrl);
   } catch (error) {
     sendApiError(res, error, "Could not create image preview.");
+  }
+});
+app.get("/api/video-preview", runtimeThumbnailRequestLimiter, async (req, res) => {
+  try {
+    const sourceUrl = String(req.query.url || "").trim();
+    const previewUrl = await ensureRuntimeVideoPreview(sourceUrl);
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(302, previewUrl);
+  } catch (error) {
+    sendApiError(res, error, "Could not create video preview.");
   }
 });
 app.use("/api", async (_req, _res, next) => {
@@ -12373,6 +12384,65 @@ async function ensureRuntimeImageThumbnail(value) {
 
   runtimeThumbnailJobs.set(targetFilePath, thumbnailJob);
   return thumbnailJob;
+}
+
+async function ensureRuntimeVideoPreview(value) {
+  const publicPath = localPublicPathFromUrl(value);
+  const cleanPath = publicPath.split("?")[0].split("#")[0];
+  if (/\/(?:thumbnails)\//i.test(cleanPath) || /-preview(?:-\d+)?\.mp4$/i.test(cleanPath)) {
+    return cleanPath;
+  }
+  if (!/\.(?:mp4|mov|qt|webm)$/i.test(cleanPath)) {
+    throw httpError(400, "Only local video assets can be previewed.");
+  }
+  if (!/\.(?:mov|qt)$/i.test(cleanPath)) {
+    return cleanPath;
+  }
+
+  const source = await resolveLocalAssetPath(cleanPath);
+  const sourceStats = await stat(source.filePath);
+  const cacheKey = createHash("sha256")
+    .update(`${cleanPath}:${sourceStats.size}:${sourceStats.mtimeMs}`)
+    .digest("hex")
+    .slice(0, 24);
+  const targetFileName = `${cacheKey}-preview.mp4`;
+  const targetFilePath = path.join(runtimeThumbnailsDir, targetFileName);
+  const targetPublicPath = `/outputs/thumbnails/runtime/${targetFileName}`;
+
+  if (existsSync(targetFilePath)) return targetPublicPath;
+  if (runtimeVideoPreviewJobs.has(targetFilePath)) return runtimeVideoPreviewJobs.get(targetFilePath);
+
+  const previewJob = (async () => {
+    const temporaryPath = `${targetFilePath}.${randomUUID()}.tmp.mp4`;
+    try {
+      await runFfmpeg([
+        "-y",
+        "-i", source.filePath,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-movflags", "+faststart",
+        "-map_metadata", "-1",
+        temporaryPath
+      ], "Runtime video preview", 600000);
+      await rename(temporaryPath, targetFilePath);
+      return targetPublicPath;
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+  })().finally(() => {
+    runtimeVideoPreviewJobs.delete(targetFilePath);
+  });
+
+  runtimeVideoPreviewJobs.set(targetFilePath, previewJob);
+  return previewJob;
 }
 
 async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
