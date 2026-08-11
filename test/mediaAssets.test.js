@@ -66,6 +66,36 @@ test("external Output node media display bypasses the Vite frontend server", () 
   }
 });
 
+test("workflow package media display bypasses the Vite frontend server", () => {
+  const previousWindow = globalThis.window;
+  const workflowAssetUrl = "/workflow-assets/project-1/outputs/frame.png";
+  const thumbnailUrl = `/api/media-thumbnail?url=${encodeURIComponent(workflowAssetUrl)}`;
+  globalThis.window = {
+    location: {
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: "5176"
+    }
+  };
+
+  try {
+    assert.equal(
+      displayMediaUrl(workflowAssetUrl),
+      `http://127.0.0.1:3336${workflowAssetUrl}`
+    );
+    assert.equal(
+      displayMediaUrl(thumbnailUrl),
+      `http://127.0.0.1:3336${thumbnailUrl}`
+    );
+    assert.equal(
+      displayMediaUrl(`http://127.0.0.1:5176${workflowAssetUrl}`),
+      `http://127.0.0.1:3336${workflowAssetUrl}`
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
 test("thumbnail-only drag payloads are rejected", () => {
   assert.equal(fullResolutionOutputItem({
     type: "image",

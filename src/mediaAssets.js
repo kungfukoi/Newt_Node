@@ -8,6 +8,7 @@ const externalOutputsPrefix = "/external-outputs/";
 const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
 
 const outputMediaTypes = new Set(["image", "video", "audio", "model3d", "text"]);
+const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
 
 export function isLocalOutputUrl(value) {
   if (typeof value !== "string") return false;
@@ -90,15 +91,42 @@ export function displayMediaUrl(itemOrUrl) {
       || itemOrUrl
       || ""
   ).trim();
-  if (!sourceUrl || /^(?:blob:|data:|https?:)/i.test(sourceUrl)) return sourceUrl;
-  if (!sourceUrl.startsWith(externalOutputsPrefix)) return sourceUrl;
+  if (!sourceUrl || /^(?:blob:|data:)/i.test(sourceUrl)) return sourceUrl;
+
+  const localPath = localApiServedMediaPath(sourceUrl);
+  if (!localPath) return sourceUrl;
   if (typeof window === "undefined" || !window.location) return sourceUrl;
 
-  const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
   if (!localHosts.has(window.location.hostname)) return sourceUrl;
-  if (!localApiPort || window.location.port === localApiPort) return sourceUrl;
+  const absoluteLocalUrl = /^https?:\/\//i.test(sourceUrl);
+  if (!localApiPort || (window.location.port === localApiPort && !absoluteLocalUrl)) return sourceUrl;
 
-  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${sourceUrl}`;
+  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${localPath}`;
+}
+
+function localApiServedMediaPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (isApiServedMediaPath(raw)) return raw;
+
+  try {
+    const parsed = new URL(raw, "http://newtnode.local");
+    if (!localHosts.has(parsed.hostname)) return "";
+    const pathWithQuery = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    return isApiServedMediaPath(pathWithQuery) ? pathWithQuery : "";
+  } catch {
+    return "";
+  }
+}
+
+function isApiServedMediaPath(value) {
+  const clean = String(value || "").split("?")[0].split("#")[0];
+  return clean === "/api/media-thumbnail"
+    || clean === "/api/video-preview"
+    || clean.startsWith("/uploads/")
+    || clean.startsWith("/outputs/")
+    || clean.startsWith(externalOutputsPrefix)
+    || /^\/workflow-assets\/[^/]+\//.test(clean);
 }
 
 export function fullResolutionImageProps(itemOrUrl, fileName = "") {

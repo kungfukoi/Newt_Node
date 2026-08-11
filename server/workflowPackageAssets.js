@@ -75,6 +75,29 @@ export async function uniqueWorkflowPackageAssetFilePath(workflows = [], relativ
   return relocatedMatches.length === 1 ? relocatedMatches[0] : "";
 }
 
+export async function uniqueFileByNameUnderRoots(roots = [], fileName = "", depth = 6) {
+  const expectedName = String(fileName || "").trim();
+  if (!expectedName) return "";
+
+  const rootPaths = uniqueSearchRoots(roots);
+  const matches = [];
+  const seenMatches = new Set();
+  for (const rootPath of rootPaths) {
+    const rootMatches = [];
+    await collectNamedFiles(rootPath, expectedName, rootPath, depth, rootMatches);
+    for (const filePath of rootMatches) {
+      const resolvedPath = path.resolve(filePath);
+      const key = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+      if (seenMatches.has(key)) continue;
+      seenMatches.add(key);
+      matches.push(resolvedPath);
+      if (matches.length > 1) return "";
+    }
+  }
+
+  return matches.length === 1 ? matches[0] : "";
+}
+
 function uniqueWorkflowPackageRoots(workflows) {
   const roots = [];
   const seenPaths = new Set();
@@ -88,6 +111,20 @@ function uniqueWorkflowPackageRoots(workflows) {
     roots.push(resolvedPath);
   }
   return roots;
+}
+
+function uniqueSearchRoots(roots = []) {
+  const normalized = [];
+  const seenPaths = new Set();
+  for (const root of roots) {
+    const rootPath = normalizedPackageRoot(root);
+    if (!rootPath) continue;
+    const key = process.platform === "win32" ? rootPath.toLowerCase() : rootPath;
+    if (seenPaths.has(key)) continue;
+    seenPaths.add(key);
+    normalized.push(rootPath);
+  }
+  return normalized;
 }
 
 async function uniqueAssetMatches(packagePaths, relativePath, resolver) {

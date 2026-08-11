@@ -11,7 +11,7 @@ import { File } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
@@ -46,6 +46,7 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  uniqueFileByNameUnderRoots,
   uniqueWorkflowPackageAssetFilePath,
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
@@ -195,6 +196,7 @@ let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
 const runtimeThumbnailJobs = new Map();
+const relocatedExternalOutputCache = new Map();
 let registeredWorkflowPackageCache = null;
 let registeredWorkflowPackageLoadPromise = null;
 let registeredWorkflowPackageCacheGeneration = 0;
@@ -9218,16 +9220,91 @@ async function relocatedExternalOutputFilePath(publicPath) {
     return "";
   }
 
+  const cacheKey = process.platform === "win32" ? path.resolve(originalPath).toLowerCase() : path.resolve(originalPath);
+  const cachedPath = relocatedExternalOutputCache.get(cacheKey);
+  if (cachedPath && existsSync(cachedPath)) return cachedPath;
+  relocatedExternalOutputCache.delete(cacheKey);
+
+  const userRebasedPath = currentUserExternalOutputPath(originalPath);
+  if (userRebasedPath && existsSync(userRebasedPath)) {
+    relocatedExternalOutputCache.set(cacheKey, userRebasedPath);
+    return userRebasedPath;
+  }
+
   const workflows = await readRegisteredWorkflowPackages();
   for (const workflow of workflows) {
     const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
     const candidates = workflowPackageAssetCandidatesForExternalFilePath(originalPath, packagePath);
     for (const relativePath of candidates) {
       const exactPath = await exactWorkflowPackageAssetFilePath(packagePath, relativePath);
-      if (exactPath) return exactPath;
+      if (exactPath) {
+        relocatedExternalOutputCache.set(cacheKey, exactPath);
+        return exactPath;
+      }
     }
   }
+
+  const fileName = path.basename(originalPath);
+  const nearbyMatch = await uniqueFileByNameUnderRoots(externalOutputSearchRoots(originalPath, workflows), fileName, 8);
+  if (nearbyMatch) {
+    relocatedExternalOutputCache.set(cacheKey, nearbyMatch);
+    return nearbyMatch;
+  }
+
   return "";
+}
+
+function currentUserExternalOutputPath(originalPath) {
+  const homePath = path.resolve(homedir());
+  if (!homePath || process.platform !== "win32") return "";
+  const match = String(originalPath || "").match(/^([A-Za-z]:\\Users\\)[^\\]+\\(.+)$/i);
+  if (!match) return "";
+  const nextPath = path.resolve(homePath, match[2]);
+  return nextPath !== path.resolve(originalPath) ? nextPath : "";
+}
+
+function externalOutputSearchRoots(originalPath, workflows = []) {
+  const roots = [];
+  const addRoot = (value) => {
+    const rootPath = String(value || "").trim();
+    if (!rootPath) return;
+    const parsed = path.parse(rootPath);
+    const resolvedPath = path.resolve(rootPath);
+    if (resolvedPath === parsed.root) return;
+    if (!existsSync(resolvedPath)) return;
+    try {
+      if (!statSync(resolvedPath).isDirectory()) return;
+    } catch {
+      return;
+    }
+    const key = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+    if (!roots.some((root) => (process.platform === "win32" ? root.toLowerCase() : root) === key)) {
+      roots.push(resolvedPath);
+    }
+  };
+
+  addExternalOutputPathParents(originalPath, addRoot);
+  const rebasedPath = currentUserExternalOutputPath(originalPath);
+  if (rebasedPath) addExternalOutputPathParents(rebasedPath, addRoot);
+
+  for (const workflow of workflows) {
+    const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+    if (!packagePath) continue;
+    addRoot(packagePath);
+    addRoot(path.dirname(packagePath));
+  }
+
+  return roots.slice(0, 24);
+}
+
+function addExternalOutputPathParents(filePath, addRoot) {
+  let current = path.dirname(String(filePath || ""));
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    addRoot(current);
+    const next = path.dirname(current);
+    if (!next || next === current) break;
+    current = next;
+  }
 }
 
 function tryLocalPublicPath(value) {

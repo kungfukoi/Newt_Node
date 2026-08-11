@@ -20,7 +20,7 @@ import {
 import { generationApi, historyApi, settingsApi } from "./api/newtApi.js";
 import { installClientDiagnostics, reportClientDiagnostic } from "./clientDiagnostics.js";
 import { FullResolutionImageContextMenu } from "./components/FullResolutionImageContextMenu.jsx";
-import { fullResolutionImageProps, previewImageUrl } from "./mediaAssets.js";
+import { displayMediaUrl, fullResolutionImageProps, previewImageUrl } from "./mediaAssets.js";
 import {
   batchOptions,
   defaultModelPreferences,
@@ -636,7 +636,7 @@ function App() {
                 <div className="result-stack">
                   {imageResult.map((item, index) => (
                     <div className="image-stage" key={item.image?.localUrl || index}>
-                      <img {...fullResolutionImageProps(item.image)} src={previewImageUrl(item.image)} alt={`Generated image ${index + 1}`} loading="lazy" decoding="async" />
+                      <img {...fullResolutionImageProps(item.image)} src={displayMediaUrl(previewImageUrl(item.image))} alt={`Generated image ${index + 1}`} loading="lazy" decoding="async" />
                       <div className="video-meta">
                         <span>{imageResult.length > 1 ? `Image ${index + 1}` : imageModel}</span>
                         <span>{formatCost(item.cost)}</span>
@@ -778,7 +778,7 @@ function App() {
                 <div className="result-stack">
                   {result.map((item, index) => (
                     <div className="video-stage" key={item.video?.localUrl || index}>
-                      <video controls src={item.video.localUrl} />
+                      <video controls src={displayMediaUrl(item.video.localUrl)} />
                       <div className="video-meta">
                         <span>{result.length > 1 ? `Video ${index + 1}` : item.modelName || item.mode || videoModel}</span>
                         {supportsVideoSeed && <span>{item.seed ? `Seed ${item.seed}` : "Seed auto"}</span>}
@@ -1018,9 +1018,9 @@ function Gallery({ history, onRemove }) {
               <Trash2 size={15} />
             </button>
             {item.mediaType === "image" ? (
-              <img {...fullResolutionImageProps(item.localImage)} src={item.localThumbnail || item.localImage} alt={item.prompt || "Generated image"} loading="lazy" decoding="async" />
+              <img {...fullResolutionImageProps(item.localImage)} src={displayMediaUrl(item.localThumbnail || item.localImage)} alt={item.prompt || "Generated image"} loading="lazy" decoding="async" />
             ) : (
-              <video controls playsInline preload="metadata" src={item.localVideo} />
+              <video controls playsInline preload="metadata" src={displayMediaUrl(item.localVideo)} />
             )}
             <div>
               <p>{item.prompt}</p>

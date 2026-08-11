@@ -7,6 +7,7 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  uniqueFileByNameUnderRoots,
   uniqueWorkflowPackageAssetFilePath,
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
@@ -62,6 +63,23 @@ test("workflow package lookup recovers a uniquely matching asset from a stale wo
 
   await writeFile(path.join(secondPackage, "outputs", "depth-video.mp4"), "duplicate");
   assert.equal(await uniqueWorkflowPackageAssetFilePath(workflows, "outputs/depth-video.mp4"), "");
+});
+
+test("external output relocation finds one matching file near project roots", async (context) => {
+  const rootPath = await mkdtemp(path.join(tmpdir(), "newtnode-external-output-"));
+  context.after(() => rm(rootPath, { recursive: true, force: true }));
+
+  const matchPath = path.join(rootPath, "Spot1_Clips", "4K_Renders", "4k_Xbridge_02.mp4");
+  await mkdir(path.dirname(matchPath), { recursive: true });
+  await writeFile(matchPath, "video");
+
+  assert.equal(await uniqueFileByNameUnderRoots([rootPath], "4k_Xbridge_02.mp4", 5), matchPath);
+
+  const duplicatePath = path.join(rootPath, "DXC_video_v03", "outputs", "4k_Xbridge_02.mp4");
+  await mkdir(path.dirname(duplicatePath), { recursive: true });
+  await writeFile(duplicatePath, "duplicate");
+
+  assert.equal(await uniqueFileByNameUnderRoots([rootPath], "4k_Xbridge_02.mp4", 5), "");
 });
 
 test("external output paths rebase to a moved workflow package", () => {

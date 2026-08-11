@@ -1884,7 +1884,13 @@ function StableResultImage({ item, src, alt }) {
 
 export function useNewtNodeImageFallback(event) {
   const image = event.currentTarget;
-  if (image.src.endsWith("/newtnode-logo.png")) return;
+  if (image.src.endsWith("/newtnode-logo.png")) {
+    const retryUrl = displayMediaUrl(image.getAttribute("data-full-resolution-url") || "");
+    if (!retryUrl) return;
+    image.classList.remove("newtnode-logo-fallback");
+    image.src = retryUrl;
+    return;
+  }
   const fullResolutionUrl = displayMediaUrl(image.getAttribute("data-full-resolution-url") || "");
   const fallbackUrl = nextFullResolutionImageFallback(
     image.getAttribute("src") || image.currentSrc || image.src,

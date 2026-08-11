@@ -1481,12 +1481,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   React.useEffect(() => {
     if (!active) return undefined;
-    const frame = window.requestAnimationFrame(() => {
+    const retryFallbacks = () => {
       canvasRef.current
         ?.querySelectorAll("img.newtnode-logo-fallback[data-full-resolution-url]")
         .forEach((image) => retryNewtNodeImageFallback(image));
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    const frame = window.requestAnimationFrame(retryFallbacks);
+    const timers = [250, 1000, 2500].map((delay) => window.setTimeout(retryFallbacks, delay));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [active, projectId, workflowFilePath, nodes.length]);
 
   React.useEffect(() => {
@@ -7802,7 +7807,7 @@ function CharacterVoicePlayer({ voice }) {
     <div className="character-voice-player">
       <audio
         ref={audioRef}
-        src={voice.localUrl}
+        src={displayMediaUrl(voice.localUrl)}
         muted={muted}
         preload="metadata"
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
@@ -7839,12 +7844,13 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
   }
 
   if (!sourceUrl) return null;
+  const displaySourceUrl = displayMediaUrl(sourceUrl);
 
   if (sourceType === "video") {
     return (
       <video
         className="edit-source-dimension-probe"
-        src={sourceUrl}
+        src={displaySourceUrl}
         muted
         playsInline
         preload="metadata"
@@ -7859,7 +7865,7 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
   return (
     <img
       className="edit-source-dimension-probe"
-      src={sourceUrl}
+      src={displaySourceUrl}
       alt=""
       draggable={false}
       onLoad={(event) => reportDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
@@ -7870,6 +7876,7 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
 function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
   const trackRef = React.useRef(null);
   const dragRef = React.useRef(null);
+  const displaySourceUrl = displayMediaUrl(sourceUrl);
   const safeDuration = Math.max(0.001, finiteNumber(duration, 0));
   const minGap = Math.min(0.033, Math.max(0.001, safeDuration / 1000));
   const safeStart = clamp(finiteNumber(start, 0), 0, Math.max(0, safeDuration - minGap));
@@ -7936,7 +7943,7 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
         onPointerUp={endHandleDrag}
         onPointerCancel={endHandleDrag}
       >
-        {sourceUrl ? <video src={sourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
+        {sourceUrl ? <video src={displaySourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
         <div className="edit-trim-shade left" style={{ width: `${startPercent}%` }} />
         <div className="edit-trim-shade right" style={{ left: `${endPercent}%` }} />
         <div className="edit-trim-selection" style={{ left: `${startPercent}%`, width: `${selectionWidth}%` }} />
@@ -8159,6 +8166,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   const isBrush = effect.id === "brushInpaint";
   const showGeneratedPreview = ["tone", "curves"].includes(effect.id);
   const displayUrl = previewUrl || sourceUrl;
+  const mediaDisplayUrl = displayMediaUrl(displayUrl);
 
   React.useEffect(() => {
     setPaintHasMask(Boolean(settings.maskDataUrl));
@@ -8607,7 +8615,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
         ref={imageEditorRef}
         style={{ aspectRatio: imageAspect || 16 / 9 }}
       >
-        <img src={displayUrl} alt={`${effect.label} preview`} draggable={false} onLoad={handlePreviewImageLoad} onError={useNewtNodeImageFallback} />
+        <img src={mediaDisplayUrl} alt={`${effect.label} preview`} draggable={false} onLoad={handlePreviewImageLoad} onError={useNewtNodeImageFallback} />
         {isText && textOverlay.text.trim() && (
           <div
             className="edit-image-text-overlay"
@@ -8870,7 +8878,7 @@ function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, on
             ref={editorRef}
             style={editorSize ? { width: `${editorSize.width}px`, height: `${editorSize.height}px` } : { aspectRatio: imageAspect || 16 / 9 }}
           >
-            <img ref={imageRef} src={sourceUrl} alt="Brush inpaint source" draggable={false} onLoad={handleImageLoad} onError={useNewtNodeImageFallback} />
+            <img ref={imageRef} src={displayMediaUrl(sourceUrl)} alt="Brush inpaint source" draggable={false} onLoad={handleImageLoad} onError={useNewtNodeImageFallback} />
             <canvas
               ref={canvasRef}
               className="edit-brush-dialog-paint-mask"
@@ -8992,6 +9000,7 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
   const videoRef = React.useRef(null);
   const [duration, setDuration] = React.useState(0);
   const [loadState, setLoadState] = React.useState(videoUrl ? "loading" : "idle");
+  const displayVideoUrl = displayMediaUrl(videoUrl);
   const numericValue = Math.max(0, Number(value) || 0);
   const usableDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const sliderMax = usableDuration ? Math.max(0.01, usableDuration) : Math.max(1, numericValue);
@@ -9053,7 +9062,7 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
       <div className="still-frame-video-shell">
         <video
           ref={videoRef}
-          src={videoUrl}
+          src={displayVideoUrl}
           muted
           playsInline
           preload="metadata"
@@ -10305,7 +10314,7 @@ function NodeBody({
                 <span className="character-section-label">Portrait Reference</span>
                 <label className={`character-main-preview ${portrait ? "has-image" : ""}`} title={portrait ? "Replace portrait image" : "Upload portrait image"}>
                   {portrait?.localUrl ? (
-                    <img {...fullResolutionImageProps(portrait)} src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                    <img {...fullResolutionImageProps(portrait)} src={displayMediaUrl(previewImageUrl(portrait))} alt="Character portrait" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                   ) : (
                     <UserRound size={28} />
                   )}
@@ -10354,7 +10363,7 @@ function NodeBody({
                           onClick={() => selectWardrobe(wardrobe)}
                           title={locked && hasSheet ? `Use ${wardrobe.fileName || "this wardrobe"} character sheet` : locked ? "No generated sheet for this wardrobe" : wardrobe.fileName}
                         >
-                          <img {...fullResolutionImageProps(wardrobe)} src={previewImageUrl(wardrobe)} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                          <img {...fullResolutionImageProps(wardrobe)} src={displayMediaUrl(previewImageUrl(wardrobe))} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                           <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterWardrobeRemove(node.id, wardrobe.id); }}>
                             <X size={10} />
                           </span>
@@ -10444,7 +10453,7 @@ function NodeBody({
                     </div>
                     <label className="character-custom-sheet-upload" title={customSheet?.localUrl ? "Replace custom character sheet" : "Upload custom character sheet"}>
                       {customSheet?.localUrl ? (
-                        <img {...fullResolutionImageProps(customSheet)} src={previewImageUrl(customSheet)} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                        <img {...fullResolutionImageProps(customSheet)} src={displayMediaUrl(previewImageUrl(customSheet))} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                       ) : (
                         <>
                           <ImagePlus size={20} />
@@ -10590,7 +10599,7 @@ function NodeBody({
                 }}
                 title="Drag the full-resolution character sheet into another node or double-click to preview"
               >
-                <img {...fullResolutionImageProps(characterSheetPreviewItem)} src={previewImageUrl(characterSheetPreviewItem)} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <img {...fullResolutionImageProps(characterSheetPreviewItem)} src={displayMediaUrl(previewImageUrl(characterSheetPreviewItem))} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
               </div>
             ) : (
               <div className="character-sheet-empty">
@@ -10952,7 +10961,7 @@ function NodeBody({
                   storyboardCharacters.length ? storyboardCharacters.map((character) => (
                     <div className={`storyboard-character-card ${character.sheetUrl ? "ready" : ""} ${character.status === "error" ? "error" : ""}`} key={character.id}>
                       <div className="storyboard-character-thumb">
-                        {character.portrait?.localUrl ? <img {...fullResolutionImageProps(character.portrait)} src={previewImageUrl(character.portrait)} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} /> : <UserRound size={20} />}
+                        {character.portrait?.localUrl ? <img {...fullResolutionImageProps(character.portrait)} src={displayMediaUrl(previewImageUrl(character.portrait))} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} /> : <UserRound size={20} />}
                       </div>
                       <div className="storyboard-character-name-row">
                         <input value={character.name || ""} placeholder="Name becomes @Name" disabled={storyboardLocked} onChange={(event) => onStoryboardCharacterUpdate?.(node.id, character.id, { name: event.target.value, error: "", status: character.status === "error" ? "ready" : character.status })} />
@@ -11477,7 +11486,7 @@ function NodeBody({
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
               <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
-                  <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={previewImageUrl(node.data.customPalettePreviewUrl)} alt="Extracted custom palette" loading="lazy" decoding="async" />
+                  <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={displayMediaUrl(previewImageUrl(node.data.customPalettePreviewUrl))} alt="Extracted custom palette" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 ) : (
                   <span className="custom-palette-empty">
                     <FileImage size={18} />
@@ -15350,7 +15359,7 @@ function ConnectedImageInputButton({ items = [], fallback = "Add image" }) {
 
   return (
     <button className="connected-field wanwarp-frame-thumb-button has-thumb" title={imageItem.label || "Connected image"}>
-      <img {...fullResolutionImageProps(imageItem)} src={imageItem.url} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+      <img {...fullResolutionImageProps(imageItem)} src={displayMediaUrl(previewImageUrl(imageItem))} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       {items.length > 1 && <span>{items.length}</span>}
     </button>
   );
@@ -15477,7 +15486,7 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
                 role="listitem"
                 title={`${ordinalLabel(index + 1)} keyframe: ${item.label}`}
               >
-                <img {...fullResolutionImageProps(item)} src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 <span>{ordinalLabel(index + 1)}</span>
               </div>
             ))}
@@ -15595,6 +15604,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
   const largeVideoRef = React.useRef(null);
   const [duration, setDuration] = React.useState(0);
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  const displayVideoUrl = displayMediaUrl(videoUrl);
   const selectedTime = Math.max(0, finiteNumber(node.data.extractFrameTime, 0));
   const selectedFormat = node.data.extractFrameFormat === "jpeg" ? "jpeg" : "png";
   const sliderMax = duration ? extractFrameMaxTime(duration) : Math.max(1, selectedTime);
@@ -15692,7 +15702,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
         >
           {videoUrl ? (
             <>
-              <video ref={videoRef} src={videoUrl} muted preload="metadata" playsInline onLoadedMetadata={handleLoadedMetadata} />
+              <video ref={videoRef} src={displayVideoUrl} muted preload="metadata" playsInline onLoadedMetadata={handleLoadedMetadata} />
               <button type="button" className="extract-frame-expand-button" onClick={handlePreviewOpen} title="Open large frame picker" aria-label="Open large frame picker">
                 <Maximize2 size={14} />
               </button>
@@ -15729,7 +15739,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
             <div className="extract-frame-modal-video">
               <video
                 ref={largeVideoRef}
-                src={videoUrl}
+                src={displayVideoUrl}
                 controls
                 muted
                 preload="metadata"
@@ -21801,11 +21811,11 @@ function cacheBustedAssetUrl(url, version = 0) {
 }
 
 function storyboardFrameImageSrc(frame = {}) {
-  return previewImageUrl(cacheBustedAssetUrl(frame.thumbnailUrl || frame.resultUrl, frame.resultVersion));
+  return displayMediaUrl(previewImageUrl(cacheBustedAssetUrl(frame.thumbnailUrl || frame.resultUrl, frame.resultVersion)));
 }
 
 function storyboardFrameFallbackSrc(frame = {}) {
-  return cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion);
+  return displayMediaUrl(cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion));
 }
 
 function storyboardFrameCountForNode(node, incoming = null) {
