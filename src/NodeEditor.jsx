@@ -137,7 +137,7 @@ import {
   setOutputItemDragData
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
-import { findNodeReferenceMentions } from "./nodeReferences.js";
+import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
   characterVideoCustomSheetWardrobePrompt,
@@ -1136,6 +1136,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const nodesRef = React.useRef(savedDraft.nodes);
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
+  const groupsRef = React.useRef(savedDraft.groups);
   const connectedPortKeysRef = React.useRef(emptyPortSet);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
@@ -1193,7 +1194,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
-  const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
+  const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode, groups), [nodes, incomingByNode, groups]);
   const selectedRunnableNodes = React.useMemo(
     () => nodes.filter((node) => {
       if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
@@ -1334,6 +1335,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useLayoutEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  React.useLayoutEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   React.useLayoutEffect(() => {
     if (!active) return undefined;
@@ -2343,8 +2348,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
+      const sourceBeforeUpdate = current.find((node) => node.id === nodeId);
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
-      const nextNodes = current.map((node) =>
+      let nextNodes = current.map((node) =>
         node.id === nodeId
           ? (() => {
               const data = {
@@ -2364,6 +2370,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             })()
           : node
       );
+      if (
+        sourceBeforeUpdate &&
+        Object.prototype.hasOwnProperty.call(patch, "title") &&
+        String(sourceBeforeUpdate.data?.title || "").trim() !== String(patch.title || "").trim()
+      ) {
+        nextNodes = updateBoundNodeReferenceLabels(nextNodes, sourceBeforeUpdate, patch.title, groupsRef.current);
+      }
       let updatedNodes = nextNodes;
       if (shouldUpdateConnectedPreviews) {
         try {
@@ -6091,7 +6104,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
-    const currentNode =
+    let currentNode =
       storedNode
         ? {
             ...storedNode,
@@ -6104,9 +6117,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!isRunnableNode(currentNode)) return { status: "skipped" };
     if (currentNode.data.status === "running") return { status: "skipped" };
 
+    const nodeReferenceBindings = updatedNodeReferenceBindings(currentNode, nodesRef.current, groupsRef.current);
+    if (!nodeReferenceBindingsEqual(nodeReferenceBindings, currentNode.data?.nodeReferenceBindings)) {
+      currentNode = {
+        ...currentNode,
+        data: { ...currentNode.data, nodeReferenceBindings }
+      };
+      updateNode(currentNode.id, { nodeReferenceBindings });
+    }
+
+    const referenceNodes = nodesRef.current.map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    const nodeReferenceContext = { nodes: nodesRef.current };
+    const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
       currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model)
@@ -6191,7 +6214,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           workflowContext: requestContext,
           sourceLabel,
           promptPiecesForSource,
-          nodeReferences: textModelNodeReferenceInputs(currentNode, incoming, nodesRef.current)
+          nodeReferences: textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current)
         });
         updateNode(currentNode.id, {
           status: "complete",
@@ -6507,7 +6530,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
-        const imageIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
+        const imageIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, referenceNodes, currentNode, groupsRef.current);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, imageIncoming);
         const imagePromptItems = connectedImagePromptItems(
@@ -6574,7 +6597,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      const promptReferencedVideoIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
+      const promptReferencedVideoIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, referenceNodes, currentNode, groupsRef.current);
       const supportsVideoCharacters = videoModelSupportsCharacterInput(currentNode.data.model);
       const compatibleVideoIncoming = supportsVideoCharacters
         ? promptReferencedVideoIncoming
@@ -18105,7 +18128,7 @@ function buildConnectedPortKeys(edges) {
   return keys;
 }
 
-function buildReferenceTagHighlights(nodes, incomingByNode) {
+function buildReferenceTagHighlights(nodes, incomingByNode, groups = []) {
   const highlights = new Map();
 
   nodes.forEach((node) => {
@@ -18122,7 +18145,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
           ...normalizedStoryboardFrames(node.data.storyboardFrames).map((frame) => frame.prompt || "")
         ].join("\n")
       : connectedText(incoming.promptIn) || node.data.prompt || "";
-    const nodeReferenceMatches = textNodePrompt ? nodeReferenceMentionsForText(textNodePrompt, nodes, node.id) : [];
+    const nodeReferenceMatches = textNodePrompt ? nodeReferenceMentionsForText(textNodePrompt, nodes, node, groups) : [];
     const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isImageModelUnsupportedInput(node, "characterIn")
       ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
       : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
@@ -18216,14 +18239,13 @@ function resolveNodeReferencesInText(text, referenceContext = null, ownerNodeId 
   const value = String(text || "");
   const nodes = referenceContext?.nodes || [];
   if (!value || !nodes.length) return value;
-  const referenceInputs = nodeReferenceInputsForText(value, nodes, ownerNodeId);
+  const referenceInputs = nodeReferenceInputsForText(value, nodes, ownerNodeId, referenceContext?.groups || []);
   const context = nodeReferenceContextText(referenceInputs);
   return context ? `${value}\n\n${context}` : value;
 }
 
-function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "") {
-  const currentNodeId = typeof ownerNodeOrId === "string" ? ownerNodeOrId : ownerNodeOrId?.id || "";
-  const mentions = nodeReferenceMentionsForText(text, nodes, currentNodeId);
+function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "", groups = []) {
+  const mentions = nodeReferenceMentionsForText(text, nodes, ownerNodeOrId, groups);
   const uniqueMentions = new Map();
   mentions.forEach((mention) => {
     if (!uniqueMentions.has(mention.nodeId)) uniqueMentions.set(mention.nodeId, mention);
@@ -18245,11 +18267,11 @@ function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "") {
   return { textInputs, imageInputs, videoInputs, mentions: [...uniqueMentions.values()] };
 }
 
-function textModelNodeReferenceInputs(node, incoming = {}, nodes = []) {
+function textModelNodeReferenceInputs(node, incoming = {}, nodes = [], groups = []) {
   const merged = emptyNodeReferenceInputs();
-  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node));
+  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node, groups));
   (incoming.textIn || []).forEach(({ source }) => {
-    mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source.id));
+    mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source, groups));
   });
   return merged;
 }
@@ -18281,16 +18303,104 @@ function appendUniqueReferenceItems(targetItems, sourceItems = [], key) {
   });
 }
 
-function nodeReferenceMentionsForText(text, nodes = [], currentNodeId = "") {
+function nodeReferenceMentionsForText(text, nodes = [], currentNodeOrId = "", groups = []) {
+  const currentNode = typeof currentNodeOrId === "string"
+    ? nodes.find((node) => node.id === currentNodeOrId)
+    : currentNodeOrId;
+  const currentNodeId = currentNode?.id || (typeof currentNodeOrId === "string" ? currentNodeOrId : "");
   return findNodeReferenceMentions(text, nodes, {
     currentNodeId,
-    labelForNode: nodeReferenceLabel
+    labelForNode: nodeReferenceLabel,
+    bindings: currentNode?.data?.nodeReferenceBindings || {},
+    rankForNode: (candidate) => nodeReferenceRankForOwner(candidate, currentNode, groups)
   }).map((mention, index) => ({
     ...mention,
     tag: mention.name,
     color: nodeReferenceColor(mention.node, index),
     type: "node-reference"
   }));
+}
+
+function nodeReferenceRankForOwner(candidate, owner, groups = []) {
+  if (!candidate || !owner) return 0;
+  const sameGroup = groups.some((group) => {
+    const nodeIds = group?.nodeIds || [];
+    return nodeIds.includes(owner.id) && nodeIds.includes(candidate.id);
+  });
+  const ownerX = Number(owner.x) || 0;
+  const ownerY = Number(owner.y) || 0;
+  const candidateX = Number(candidate.x) || 0;
+  const candidateY = Number(candidate.y) || 0;
+  const distance = Math.hypot(candidateX - ownerX, candidateY - ownerY);
+  return (sameGroup ? 1_000_000_000 : 0) - Math.min(distance, 10_000_000);
+}
+
+function updatedNodeReferenceBindings(owner, nodes = [], groups = []) {
+  if (!owner?.id) return {};
+  const existingBindings = owner.data?.nodeReferenceBindings || {};
+  const nextBindings = {};
+  nodeReferenceTextValues(owner.data).forEach((text) => {
+    findNodeReferenceMentions(text, nodes, {
+      currentNodeId: owner.id,
+      labelForNode: nodeReferenceLabel,
+      bindings: existingBindings,
+      rankForNode: (candidate) => nodeReferenceRankForOwner(candidate, owner, groups)
+    }).forEach((mention) => {
+      const key = nodeReferenceBindingKey(mention.mention);
+      if (key) nextBindings[key] = mention.nodeId;
+    });
+  });
+  return nextBindings;
+}
+
+function nodeReferenceTextValues(value, values = [], key = "") {
+  if (key === "nodeReferenceBindings") return values;
+  if (typeof value === "string") {
+    if (value.includes("@")) values.push(value);
+    return values;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => nodeReferenceTextValues(item, values));
+    return values;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([entryKey, item]) => nodeReferenceTextValues(item, values, entryKey));
+  }
+  return values;
+}
+
+function nodeReferenceBindingsEqual(first = {}, second = {}) {
+  const firstEntries = Object.entries(first || {}).sort(([left], [right]) => left.localeCompare(right));
+  const secondEntries = Object.entries(second || {}).sort(([left], [right]) => left.localeCompare(right));
+  return firstEntries.length === secondEntries.length && firstEntries.every(([key, value], index) => (
+    secondEntries[index]?.[0] === key && secondEntries[index]?.[1] === value
+  ));
+}
+
+function updateBoundNodeReferenceLabels(nodes, sourceBeforeUpdate, nextTitle, groups = []) {
+  const nextLabel = String(nextTitle || "").trim();
+  if (!sourceBeforeUpdate?.id || !nextLabel) return nodes;
+  const resolutionNodes = nodes.map((node) => node.id === sourceBeforeUpdate.id ? sourceBeforeUpdate : node);
+
+  return nodes.map((owner) => {
+    if (owner.id === sourceBeforeUpdate.id) return owner;
+    const ownerForResolution = resolutionNodes.find((node) => node.id === owner.id) || owner;
+    const bindings = updatedNodeReferenceBindings(ownerForResolution, resolutionNodes, groups);
+    const boundAliases = Object.entries(bindings)
+      .filter(([, nodeId]) => nodeId === sourceBeforeUpdate.id)
+      .map(([alias]) => alias);
+    if (!boundAliases.length) return owner;
+
+    const data = renameBoundNodeReferenceTokenInData(
+      { ...owner.data, nodeReferenceBindings: bindings },
+      sourceBeforeUpdate.id,
+      nextLabel
+    );
+    return {
+      ...owner,
+      data
+    };
+  });
 }
 
 function nodeReferenceLabel(node) {
@@ -18550,8 +18660,8 @@ function nodeReferenceContextText(referenceInputs = {}) {
   return lines.length ? `Node reference context:\n${lines.join("\n\n")}` : "";
 }
 
-function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes = [], targetNode = null) {
-  const mentions = nodeReferenceMentionsForText(prompt, nodes, targetNode?.id || "");
+function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes = [], targetNode = null, groups = []) {
+  const mentions = nodeReferenceMentionsForText(prompt, nodes, targetNode, groups);
   if (!mentions.length) return incoming;
 
   const nextIncoming = { ...incoming };

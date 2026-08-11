@@ -97,14 +97,25 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
   const edges = graph.edges || [];
   const groups = graph.groups || [];
 
-  const remappedNodes = nodes.map((node, index) => {
-    const nextId = createNodeId(node.type, `import-${stamp}-${index}`);
-    idMap.set(node.id, nextId);
+  nodes.forEach((node, index) => {
+    idMap.set(node.id, createNodeId(node.type, `import-${stamp}-${index}`));
+  });
+  const remappedNodes = nodes.map((node) => {
+    const nextId = idMap.get(node.id);
+    const clonedNode = cloneNode(node);
+    const bindings = clonedNode.data?.nodeReferenceBindings || {};
+    const remappedBindings = Object.fromEntries(
+      Object.entries(bindings).map(([name, nodeId]) => [name, idMap.get(nodeId) || nodeId])
+    );
     return {
-      ...cloneNode(node),
+      ...clonedNode,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
-      y: Math.round(node.y + safeOffset.y)
+      y: Math.round(node.y + safeOffset.y),
+      data: {
+        ...clonedNode.data,
+        ...(Object.keys(remappedBindings).length ? { nodeReferenceBindings: remappedBindings } : {})
+      }
     };
   });
 
