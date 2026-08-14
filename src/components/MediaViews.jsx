@@ -48,7 +48,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
     const itemIndex = Math.max(0, normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image").findIndex((item) => item.url === node.data.resultUrl));
     return (
       <div
-        className="media-preview"
+        className="media-preview aspect-safe-media-frame"
         draggable
         onPointerDown={(event) => event.stopPropagation()}
         onDragStart={startPreviewDrag}
@@ -76,7 +76,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   if (node.type === "video") {
     return (
       <div
-        className="media-preview"
+        className="media-preview aspect-safe-media-frame"
         draggable
         onPointerDown={stopPreviewPointer}
         onDragStart={startVideoPreviewDrag}
@@ -1781,7 +1781,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   }
 
   return (
-    <div className={`result-pane ${items.length ? "has-result" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
+    <div className={`result-pane ${items.length ? "has-result aspect-safe-media-frame" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
       {activeItem && (
         <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
           <div
