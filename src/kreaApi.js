@@ -11,6 +11,7 @@ export const kreaEndpoints = Object.freeze({
   }),
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
+    "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
     "Kling O3 Pro": "/generate/video/kling/kling-3.0",
     "Kling O3 4K": "/generate/video/kling/kling-3.0",
     "Gemini Omni Flash": "/generate/video/google/gemini-omni-flash"

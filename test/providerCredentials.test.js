@@ -113,6 +113,22 @@ test("an .env key reuses and activates its existing saved profile", () => {
   assert.equal(recovered.activeCredentialIds.google, "current");
 });
 
+test("an explicitly selected duplicate profile remains active after .env reload", () => {
+  const recovered = mergeProviderCredentialsWithEnv({
+    credentials: {
+      openAi: [
+        { id: "versus", label: "Versus key", key: "shared-openai" },
+        { id: "personal", label: "Personal", key: "shared-openai" }
+      ]
+    },
+    activeCredentialIds: { openAi: "personal" },
+    env: { OPENAI_API_KEY: "shared-openai" }
+  });
+
+  assert.equal(recovered.activeCredentialIds.openAi, "personal");
+  assert.equal(activeProviderCredentials(recovered.credentials, recovered.activeCredentialIds).openAi.label, "Personal");
+});
+
 test("a commented .env key remains saved but disabled", () => {
   const recovered = mergeProviderCredentialsWithEnv({
     credentials: {},

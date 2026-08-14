@@ -21,7 +21,10 @@ This branch is the current development line for the next mainline merge. Treat t
 - The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.
 - The File menu owns New, Save, Save As, Open, and Import. New starts a blank workflow through the same unsaved-change guard as Open and Import.
 - Text Model defaults to the Fal OpenRouter route with Gemini Flash model ids unless environment variables override them.
-- Utility model coverage includes Luma Photon/Ray2, Depth Anything Video, Fal Wan LoRA/VACE models, and local ComfyUI WanBlend/WanSegment/WanWarp workflows.
+- Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2`, `REVE 2.1`, and `Krea 2 Large`. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `Wan 2.7 Reference-to-Video`, `Happy Horse`, and `Creatify Aurora`; callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
+- Utility coverage includes local media transforms, pose/depth/matte tools, hosted Wan/VACE and upscaling models, and local ComfyUI WanBlend/WanSegment/WanWarp workflows. SAM 3 options remain hidden while `sam3SegmentationModelsEnabled` is false.
+- Stable node ids are the canonical graph identity. Visible titles and `@tokens` may change, but saved edges, reference bindings, Output routing, and dependency scheduling must continue to resolve by id.
+- An attached Output node redirects generated files to its configured target without replacing the source node's playable result URLs or breaking Preview nodes after save/reopen.
 - Workflow saves should stay fast: the client upserts the returned project summary, and the server rebuilds workflow indexes after the save response rather than blocking the write path.
 - When this branch is merged or released, app version displays should derive from package metadata and be updated with the release bump, not hard-coded in UI copy.
 
@@ -51,8 +54,11 @@ Use this quick pass before implementing a feature, and again before committing i
 | Run scheduling and result state | `src/nodeRunner.js`, `src/nodeRunners/*` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong in `nodeRunner.js`. Node-specific API runners and reusable request/result builders belong in focused files under `src/nodeRunners/`. |
 | Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
 | Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
+| Output routing and tokens | `src/outputConnections.js`, `src/outputTokens.js`, `server/outputTargets.js` | Keep accepted source kinds and browser token insertion focused in `src`; keep path expansion, unique-file reservation, and external-output URL encoding server-side. |
+| Cross-workflow clipboard | `src/workflowClipboard.js`, `src/workflowState.js`, `src/nodeGeometry.js` | Serialize selected graph fragments, remap copied ids and bindings, and place pasted selections through these helpers. |
+| Node identity and `@` references | `src/nodeReferences.js`, `src/workflowState.js`, `src/NodeEditor.jsx` | Treat node ids as canonical identity. Keep reusable mention parsing, binding, and visible-token rename helpers in `nodeReferences.js`; remap ids and bindings in `workflowState.js`; let `NodeEditor.jsx` coordinate bindings with live node/group state. |
 | Model, utility, and edit options | `src/modelOptions.js`, `src/editEffects.js` | Model names, preset names/prompts, aspect ratios, duration/resolution lists, utility descriptions, model-control option lists, and Edit node effect definitions live here. Keep labels stable because saved workflows and UI normalization rely on them. |
-| Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
+| Canvas chrome | `src/components/CanvasChrome.jsx` | Canvas edge drawing/hit testing, selection marquee/action bar, and workflow prompt live here. Keep hot drawing/UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
 | Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
@@ -134,15 +140,58 @@ Use these internal media type names consistently in node config, result items, p
 
 If a new media type is added, update this table, `portColors`, preview logic, stats media mix, connection compatibility, and result rendering together.
 
+## Current Node Catalog
+
+`src/nodeRegistry.js` is the canonical catalog and order. Keep this list aligned when a node type is added, removed, renamed, or reordered.
+
+| Internal type | UI label | Primary role |
+| --- | --- | --- |
+| `plainText` | Text | Lightweight prompt text |
+| `text` | Text Model | AI-assisted text processing |
+| `image` | Image | Uploaded or connected image media |
+| `video` | Video | Uploaded or connected video media |
+| `preview` | Preview | Multi-result image, video, and 3D inspection |
+| `output` | Output | Explicit filesystem save target |
+| `autoAspect` | Auto Aspect | Image aspect preparation |
+| `skillDirector` | Film Director | Scene package and shot-list direction |
+| `storyboard` | Storyboard | Planned and generated shot frames |
+| `coverage` | Coverage | Coverage-image generation |
+| `character` | Character | Locked character identity, wardrobe, and voice |
+| `camera` | Camera | Camera instruction |
+| `composer` | Composer | Spatial image-guide composition |
+| `frameIt` | Frame It | Camera and figure composition |
+| `style` | Style | Style instruction |
+| `transfer` | Mood Board | Locked visual-transfer collage |
+| `utility` | Utility | Local, hosted, and Comfy-backed image/video tools |
+| `edit` | Edit | Local ffmpeg image/video editing |
+| `audio` | Audio | Uploaded or connected audio media |
+| `model3d` | 3D | Multi-view GLB generation |
+| `imageModel` | Image Model | Remote image generation |
+| `videoModel` | Video Model | Remote video generation |
+
 ## Text Node Roles
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
 - `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. The default text and vision-text route is Gemini Flash-class through Fal/OpenRouter route constants in `server/index.js`, with explicit environment overrides for model changes.
-- Text and Text Model prompts may mention nodes by name with `@Node Name`. Mentions match exact node titles, including spaces, and compact aliases such as `@NodeName` or `@Node-Name`. Text Model sends referenced text, image, and video nodes as structured model context; Image and Video Model prompts that consume referenced Text output also receive referenced media nodes as prompt-side references when compatible.
+- Text and Text Model prompts may mention nodes by name with `@Node Name`. An unbound mention initially matches the visible node title, including spaces, or a compact alias such as `@NodeName` or `@Node-Name`; after that match, the referencing node stores the selected source node id in `data.nodeReferenceBindings`. Text Model sends referenced text, image, and video nodes as structured model context; Image and Video Model prompts that consume referenced Text output also receive referenced media nodes as prompt-side references when compatible.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
 - The default text-processing provider is Fal via `TEXT_LLM_PROVIDER=fal`. The current default model ids are `google/gemini-2.5-flash` for `FAL_TEXT_MODEL`, `FAL_VISION_TEXT_MODEL`, `FAL_VISION_TEXT_FALLBACK_MODEL`, and `FAL_VIDEO_TEXT_MODEL`.
 - Fal text processing uses `openrouter/router` and should pass the app's text-processing instructions as `system_prompt`. Image and video helper descriptions use the matching OpenRouter vision/video routes before the final text prompt is assembled.
 - OpenAI text processing remains an explicit provider override through `TEXT_LLM_PROVIDER=openai` and `OPENAI_TEXT_MODEL`; do not silently switch providers in UI code.
+
+## Node Identity And Reference Standards
+
+- Every node has a stable, opaque `id`. That id is the canonical identity for edges, `@` references, groups, previews, output routing, dependency scheduling, and saved workflow relationships.
+- A node title is a user-facing label only. Never use the title as the durable key for a connection, reference, result owner, or persisted relationship.
+- Graph edges store `from.nodeId` and `to.nodeId`. Renaming either endpoint must not recreate, detach, or reinterpret the edge.
+- `@token` text stays readable while its saved binding points to a node id. Store bindings on the referencing node as `data.nodeReferenceBindings`, keyed by the normalized visible token without `@`, for example `{ "depth": "utility-1786..." }`.
+- Renaming a referenced node updates bound visible tokens throughout node data and moves the binding to the new normalized token, while preserving the bound node id. Renaming `depth` to `dogpile` therefore changes `@depth` to `@dogpile` without changing what the reference means.
+- If a user manually replaces an old token with the renamed node's current token, resolve that token against the current title and persist the same source id under the new token.
+- Existing workflows without `nodeReferenceBindings` migrate lazily when references are used. When duplicate titles exist, prefer a matching node in the referencing node's group, then the nearest matching node; persist the selected id immediately so later runs do not depend on node-array order or position.
+- Saved bindings take priority over title matching. A bound token must continue resolving after the source node is renamed, even before the visible token update is saved.
+- Copy and Import create fresh ids for copied nodes. Remap `nodeReferenceBindings` whenever the referenced node is included in the copied graph, just as edges and group membership are remapped. A binding whose source is not included may fall back to normal title resolution in the destination workflow; it must never silently bind to an unrelated stale id.
+- Keep reusable parsing, binding-key normalization, duplicate ranking, and visible-token replacement in `src/nodeReferences.js`. Keep graph id and binding remapping in `src/workflowState.js`.
+- `$node` in an Output node may render the connected source's current title into a path or filename, but the Output connection itself remains identified by edge/node ids.
 
 ## Node Definition Checklist
 
@@ -152,6 +201,7 @@ Every new node type should touch the same core surfaces unless there is a clear 
 - Add `getNodeConfig(type)` with all input and output ports.
 - Add defaults in `createDefaultNodeData`.
 - Add normalization in `normalizeCurrentNode` so saved workflows remain stable.
+- Preserve the node's existing `id` during every data, title, result, and layout update. Only explicit copy/import operations should assign a new node id, and they must remap all internal edges, group membership, and node-reference bindings together.
 - Add connection rules in `getConnectionError`.
 - Add auto-connect behavior in `preferredAutoInputPorts` and `autoConnectionOutputKind`.
 - Add edge migration/color handling in `normalizeEdgeForCurrentGraph` when needed.
@@ -181,6 +231,26 @@ Nodes should feel like they belong to the same editor.
 - Use icon buttons for small actions such as download, step, delete, and navigation.
 - Pasting copied nodes on the canvas anchors the copied selection's top-left at the current mouse position. Multi-node pastes must preserve the copied nodes' relative spacing and internal edges.
 
+## Node Resizing Standards
+
+Every catalog node uses the shared bottom-right resize handle. Resizing changes the node shell and its interior layout together; it must never create a large empty shell around a fixed-size body.
+
+- Persist shell dimensions as `data.nodeWidth` and `data.nodeHeight`. Normalize them through `normalizedNodeWidth` and `normalizedNodeHeight` in `src/nodeGeometry.js`; do not introduce node-local width/height fields for the outer card.
+- The current width range is the node type's estimated/default width through `2400px`. The current height range is `180px` through `3000px`. If a node needs a larger minimum width, add it to `estimatedNodeWidth`; if graph bounds or paste/culling behavior needs a better default height, add it to `estimatedNodeHeight`.
+- Current minimum/default widths are `980px` for Frame It, `920px` for Storyboard, `760px` for Film Director and Character, `390px` for Auto Aspect and Coverage, `370px` for Image Model, Video Model, Utility, Edit, and 3D, `360px` for Camera and Style, `335px` for Mood Board and Preview, and `310px` for the remaining node types.
+- A custom-size card is a column flex container. Its title and compact controls remain `flex: 0 0 auto`; the node body and primary workspace use `flex: 1 1 auto` with `min-width: 0` and `min-height: 0` so descendants can actually shrink and grow.
+- Do not leave fixed heights, fixed margins, or `justify-content: space-between` behavior that turns added height into dead space. Put overflow on the controls or list that needs it, not on the entire media-first body unless the whole body is intentionally a form.
+- Image, Video, generation-result, Preview, Storyboard, Character, Composer, Frame It, and Mood Board nodes are media-first when enlarged. Their preview, board, collage, or viewport must consume the largest useful share of remaining space; upload controls, tabs, ports, run buttons, status text, and settings headers stay content-sized.
+- Media inside a resized region uses the full available width and height with `object-fit: contain` unless the node's explicit editing behavior requires cropping. Never stretch media or replace its native aspect ratio with a viewport-relative font/width trick.
+- Fixed-aspect workspaces such as Composer and Frame It should use a size container and fit the largest complete aspect-ratio surface within both available dimensions. They must respond to height-only and width-only changes without overflow or clipping.
+- Storyboard grids and Character layouts may reflow, but generated frames, the selected sheet, and essential controls must remain reachable. Enlarging these nodes should increase useful media area before it increases gaps.
+- Textareas may retain their specialized resize state, but a shell resize clears stale inline textarea dimensions and lets the node layout own the available space. Typed controls must keep local draft updates responsive and should not force a whole-graph commit on every keystroke.
+- Resizing is a graph edit: push one undo snapshot at resize start, update dimensions during the gesture, preserve the final dimensions in workflow saves, and include them in graph bounds, culling, paste placement, and selection calculations.
+- A node-specific legacy preview-scale handle may coexist only when it scales a distinct artifact rather than the outer shell. It must not fight the shared `nodeWidth`/`nodeHeight` layout or create nested resize behavior users cannot predict.
+- `ResizeObserver` must remeasure node cards and ports while dimensions change. Connector lines must stay attached throughout the drag and settle on the final endpoints without requiring a click, collapse toggle, pan, or zoom to refresh.
+
+When adding or changing a resizable node, verify its minimum size, width-only growth, height-only growth, diagonal growth, shrink-back behavior, saved/reopened dimensions, controls at both extremes, media aspect ratio, scroll reachability, and every connected port before considering the layout complete.
+
 ## Port And Connection Standards
 
 - Ports should be typed by media and colored from `portColors`.
@@ -191,6 +261,13 @@ Nodes should feel like they belong to the same editor.
 - Collapsed input stacks should show colored dots without extra labels.
 - Expanded settings should expose named inputs in rows.
 - Connector lines inherit the source output color.
+- Connector endpoints and all connection lookups use node ids and port ids. Titles are never connection keys.
+- The edge drawing canvas is a separate rendering surface, but it must use the exact live canvas viewport transform and scene-space port coordinates used by the node layer. Pan and zoom should redraw through the same transient viewport value; never let an independently cached transform drift from the cards.
+- Measure visible ports from their DOM centers. Observe the canvas, node cards, and ports for resize and subtree changes, and batch endpoint refreshes through `requestAnimationFrame` so expanding Settings or resizing a node updates lines promptly without measurement churn.
+- If a connected port is briefly absent because its section collapsed, a node was culled, or React is replacing that row, retain its last valid measured endpoint instead of dropping the wire. Use an estimated node-boundary endpoint only when no valid measurement exists, then replace it after the real port renders.
+- Collapsing an input section changes only presentation. It must not remove the edge, invalidate its saved port id, or make its connector disappear; expanding it must remeasure the real endpoint immediately.
+- The large-canvas optimization may cull nodes outside a generously buffered viewport, but visible nodes keep their complete node UI at every zoom level. Do not replace visible nodes with incomplete overview placeholders. Connected edges remain drawable using measured or estimated endpoints even when one endpoint is outside the rendered set.
+- Keep normal connectors visually lightweight and scale their scene-to-screen points from the current viewport. Selection, draft, active, and inactive styles may differ, but hit testing should remain generous without increasing the visible line weight.
 - Incompatible connections should fail with a plain, helpful message.
 - Auto-created nodes from a dragged connector should link only when compatible.
 - Backward compatibility matters: if a port is renamed, migrate previous edge shapes in `normalizeEdgeForCurrentGraph`.
@@ -203,18 +280,35 @@ Nodes should feel like they belong to the same editor.
 - Video result panes and video media previews should preserve browser scrub controls. Dragging a video result into another node uses Ctrl+drag so normal left-drag remains available for scrubbing.
 - Preview nodes should preserve existing preview history and update to the latest connected generation result.
 - Preview nodes should support stepping through multiple connected or generated results.
+- Preview's primary image view uses the full-resolution source, not a proxy thumbnail. Thumbnails are display-only for compact grids and rails; drag, edit, export, download, native Save Image, and downstream connections must resolve to the original media URL.
 - Generated outputs should have a node-level download affordance when possible.
 - 3D outputs should be displayed with the shared lazy Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
 - Result item normalization and append behavior belongs in `src/mediaResults.js` and `src/nodeRunner.js`; do not duplicate result merging logic inside individual node branches.
 - The project output rail should show recent local outputs from the current graph and matching history only. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
 - Project output rail data belongs in `src/projectOutputs.js`; shared preview/result UI belongs in `src/components/MediaViews.jsx`.
+- Route API-served local media through `displayMediaUrl`. During split-port development, `/uploads`, `/outputs`, `/external-outputs`, `/workflow-assets`, `/api/media-thumbnail`, and `/api/video-preview` must resolve through the backend origin instead of accidentally requesting them from Vite.
+- When a thumbnail fails, retry its known full-resolution source before showing the NewtNode logo. The logo is a missing/unresolved-media fallback, never a replacement for an existing local file.
+- A model or Utility run redirected by an Output node must still write the real saved public URL into the source node's `resultItems`/`resultUrl`. Connected Preview nodes must receive those same playable items; do not substitute the Output node title, a filename-only string, or the logo.
 - Fetch output history lazily when the output rail first opens. Manual refresh and generation completion may still refresh it immediately.
 - Output rail thumbnails should keep layout stable and lazy-load image/video media as they near the visible rail; the full-size lightbox owns eager preview loading after double-click.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
 - Dragging from the output rail onto the canvas should create a matching media node in place. Dragging external files onto the canvas should import supported media into the current workflow package/app storage and create matching Image, Video, Audio, 3D, or Text nodes; text files store file contents in the Text node.
+- Video uploads and canvas drops accept MP4, MOV/QuickTime, and WebM. Preserve the original managed asset and MIME type; browser playback still depends on the codec inside the container, so an unsupported codec should produce a useful preview/run error instead of reclassifying the file as non-video.
 - Double-clicking an output rail thumbnail should open a lightweight full-size preview modal instead of expanding the rail. The modal must fit the complete image or video in its native aspect ratio rather than cropping it.
 - The output rail should expose an open-folder action for the current project's output folder through the local API.
+
+## Output Node Standard
+
+- Output uses internal type `output`, has one generic `sourceIn` sink, and accepts prompt, image, camera, style, transfer, character, director, video, audio, and 3D output kinds. The connection is an edge keyed by source and Output node ids; source titles are filename metadata only.
+- Connecting Output to a runnable source makes it that source's save target. A separate overwrite toggle is not needed. Running Output directly copies the selected existing source result; running the source routes each newly generated result to the same target.
+- The configured Path and Filename both expand tokens server-side. The visible insertion strip exposes `$node`, `$date`, `$index`, and `$time`. The server also preserves legacy/explicit aliases `$node_name`, `$source_node_name`, `$workflow_name`, `$output_node`, and `$output_node_name` for saved workflows and request compatibility.
+- `$node`, `$node_name`, and `$source_node_name` resolve to the connected input node's current title. `$output_node` and `$output_node_name` resolve to the Output node title. `$date` uses local `YYYY-MM-DD`; `$time` uses local `HH-MM-SS`; `$index` is a zero-padded, incrementing available-file index.
+- Tokens work in both Path and Filename. Sanitize token values and final basenames for the host filesystem, create missing directories recursively, preserve or infer the media extension, and never silently overwrite an existing file. Without `$index`, reserve a unique `-2`, `-3`, and so on suffix when needed.
+- The status line previews the fully resolved filename before a run and reports the actual saved filename afterward. Filename preview must not create or reserve the target file.
+- Absolute external targets are exposed to the browser as `/external-outputs/<encoded-absolute-path>/<encoded-filename>`. Persist the public URL in results; keep `externalPath` as backend/history metadata and never use a raw absolute path or browser object URL as an HTML media source.
+- On reopen, every existing external Output result should resolve from its saved URL. If the original user root changed, the server may rebase the path or recover one unique nearby filename match; ambiguous or missing files should fail clearly and may then show the logo fallback.
+- Redirecting storage must not sever provenance. The source node remains the result owner, Stats/history retain the generating node/model/provider, and Preview/downstream nodes continue to consume the source result normally.
 
 ## Run And Dependency Standards
 
@@ -225,6 +319,7 @@ Nodes should feel like they belong to the same editor.
 - 3D nodes should run after their image dependencies are available.
 - Video-producing nodes run after prompt, image, 3D, or utility dependencies they consume.
 - Edit nodes run after their source image or video dependencies and use the same dependency stage as Utility and Video Model work.
+- Output runs after its connected source when invoked independently. When a selected runnable source already routes through that Output node, do not schedule a second redundant Output copy for the same selection.
 - Independent nodes of the same stage may run concurrently.
 - Nodes should set `status`, `error`, `resultUrl`, `resultItems`, `selectedResultIndex`, and `resultType` consistently.
 - Batch failures should report partial success without discarding successful outputs.
@@ -281,13 +376,27 @@ Settings is a local runtime control surface, not an account system.
 - Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
 - If the Settings branch tile or health payload shows the app version, derive it from package metadata so release bumps update the display automatically.
 
+## Image And Video Model Standards
+
+- Callable model labels, shared option lists, and workspace filtering live in `src/modelOptions.js`. Keep labels stable for saved workflows; add migrations when a provider rename must change one.
+- Model-specific normalization and request builders belong in focused modules such as `src/geminiOmni.js`, `src/seedance25.js`, and `src/nodeRunners/*`. The generic Video Model UI should select capabilities and gather connected inputs, not duplicate provider schemas.
+- Video Model inputs are role-specific. `startFrameIn`, `endFrameIn`, `referenceImageIn`, `referenceVideoIn`, `referenceAudioIn`, Character, Storyboard, Film Director, and prompt inputs must remain distinct through collection, upload, provider request construction, and history metadata.
+- Gemini Omni Flash supports text-to-video, start-frame/image-to-video, image references, and reference-video editing. It is fixed to `720p`, currently supports `16:9` and `9:16`, and uses the Google/Fal route selected by the Veo/Google Video runtime preference. Reference-video edits prefer direct Google when an active Google key is available.
+- A Gemini Omni reference video is an edit source, not a weak style hint. Prepare it as provider-compatible 720p H.264 when needed, send the actual uploaded video bytes/URI or provider URL, select the video-edit endpoint/task, and add a concise preserve-everything-else instruction unless the user already supplied one. Provider rejection must say the video was received and rejected rather than claiming the input was missing.
+- Gemini Omni start frame and reference images must be sent as media parts or provider image fields, not merely described in prompt text. Normalize direct-Google text to the provider's accepted byte range before request encoding so punctuation cannot trigger ByteString conversion failures.
+- Seedance 2.0 and Seedance 2.5 are separate model contracts. Seedance 2.5 supports `auto` or 4-30 seconds, `720p`/`480p`, and auto plus the ratios declared in `src/seedance25.js`; do not reuse the broader Seedance 2.0 duration/resolution options.
+- Seedance 2.5 reference limits are 30 images, 10 videos, 10 audio files, 50 references total, 30 seconds of reference video, and 30 seconds of reference audio. Validate these before provider submission and record the actual route and reference counts in history.
+- Provider selection is authoritative. If the selected route lacks a key, capability, or valid response, report that provider's error; do not silently change service to make the run succeed.
+
 ## Hosted Utility Model Standards
 
 Hosted utility models should follow the same request, result, history, and stats contracts as other generation nodes.
 
 - Keep hosted utility labels and option lists in `src/modelOptions.js`; saved workflows rely on stable labels.
-- Luma image generation is represented by `Luma Dream Machine` image model behavior through Fal Luma Photon. Luma video generation uses Luma Ray2 through Fal and should keep duration, resolution, and aspect-ratio normalization aligned between `src/modelOptions.js`, `src/NodeEditor.jsx`, `server/index.js`, and `StatsDashboard.jsx`.
-- Luma pricing belongs in server pricing constants and `/api/stats`; support endpoint and pricing overrides with environment variables.
+- Current Utility Image catalog labels are `Color ID to Matte`, `Image to Color ID`, `Grab Still Frame`, `DWPose`, `Depth Anything`, `Topaz Image Upscale`, `Patina`, `BiRefNet Image`, and gated `SAM 3 Image`.
+- Current Utility Video catalog labels are `Extract Frame`, `Color ID to Matte`, `Composite Video`, `DWPose Video`, `Depth Anything Video`, `WanBlend`, `WanWarp`, `WanSegment`, `Wan VACE Mask-to-Video`, `Wan VACE 14B Inpainting`, the Wan 2.2 A14B LoRA and VACE variants, gated `SAM 3 Video`, `VOID Video Inpainting`, `BiRefNet Video`, `RIFE Video`, `Bytedance Video Upscaler`, and `Topaz Video Upscale`.
+- Only options returned by the enabled Utility preference filters are callable. Hidden legacy handlers may remain for saved-workflow compatibility, but retired labels such as Luma Photon/Ray2 and Wan 2.1 LoRA must not be reintroduced to the current dropdown accidentally.
+- SAM 3 image/video segmentation remains feature-gated by `sam3SegmentationModelsEnabled`; keep both options hidden together until the integration is deliberately re-enabled and reverified.
 - Depth Anything Video is a Utility Video model. It requires a connected source video, supports model, colormap, resolution, max-frame, output-FPS, and side-by-side controls, and returns a normal video result item.
 - Depth Anything image and video preprocessors are paid Fal utilities. Estimate cost from the available image/video duration data; mark the cost unpriced when duration is unavailable instead of inventing a fake amount.
 - Topaz Image Upscale and Topaz Video Upscale are paid Fal Utility models. Keep their image/video option lists separate because the Fal schemas differ, and estimate cost from output megapixels for image or output-resolution tier, duration, FPS, and Gaia 2 multiplier for video when that metadata is available.
@@ -433,8 +542,9 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - New, Open, and Import must use the unsaved-change guard before discarding or changing the current graph. New resets project id, package path, file path, local file handle state, groups, selections, and viewport, then marks the blank workflow clean.
 - When a workflow replacement would discard unsaved graph or project-name changes, prompt with Save, Don't Save, and Cancel. Save writes never-saved workflows to the local app saved-workflows folder.
 - Ctrl+S and Cmd+S save the current workflow. If it has never been saved, use the default local saved-workflows registry rather than requiring Save As.
-- The Recent workflows dropdown behaves as a Recent Files list backed by the local server registry, not as a live scan of every JSON file on disk. The trash action removes the workflow from the dropdown only; it must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
+- The Recent workflows dropdown behaves as a Recent Files list backed by the local server registry, not as a live scan of every JSON file on disk. The trash action removes the workflow from the dropdown immediately without a confirmation dialog; it must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
 - New/Save/Open/Import orchestration belongs in `src/useWorkflowPersistence.js`; workflow document construction and display paths belong in `src/workflowFiles.js`; graph fingerprints, cloning, deduping, import remapping, and stale runtime cleanup belong in `src/workflowState.js`.
+- Persist `data.nodeReferenceBindings` with node data. Loading or normalizing a node must preserve valid unknown binding fields; copying/importing a graph must remap binding values for every copied source node id.
 - After a successful save, update the Recent workflows list by upserting the returned workflow summary instead of immediately reloading every project. Keep the summary shape compatible with `readSavedWorkflowSummaryFiles`.
 - Server saves should migrate legacy projects when needed, read summary files for collision/existing checks, write the workflow/package, return the registered workflow promptly, and schedule the workflow-index rebuild in the background.
 - Background workflow-index rebuilds should log success or failure but must not make an already-successful save look failed to the user.
@@ -448,6 +558,16 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, unpackaged helper dependencies under `/outputs/<workflow-name>/dependencies/`, and registry copies of saved workflows under `/saved_workflows`.
 - Treat `/saved_workflows/inputs`, `/saved_workflows/outputs`, and `/saved_workflows/dependencies` as local app storage for copied/generated assets. Keep those media files ignored by git; only `.gitkeep` placeholders should be tracked.
 - Treat `server/data/*.json`, including `recent-workflows.json` and index files, as local runtime state. These files should be ignored by git and never used as source fixtures.
+
+## Clipboard And Import Standards
+
+- Copy serializes every selected node, edges whose two endpoints are selected, and selected group metadata into the versioned `newtnode.workflow.nodes` payload owned by `src/workflowClipboard.js`.
+- Write the payload to in-memory state, browser local storage, and the system text clipboard when available. This allows paste into another open workflow or another NewtNode tab while preserving a fallback when browser clipboard permission is unavailable.
+- Ignore ordinary text and unmarked JSON during graph paste. Clipboard parsing must be defensive and must not turn malformed external text into nodes.
+- Paste creates fresh node, edge, and group ids, remaps edge endpoints and group membership, and remaps `data.nodeReferenceBindings` for referenced nodes included in the copied selection. Never retain source-workflow ids in the pasted graph.
+- Preserve relative node spacing and internal connections. Anchor the copied selection's top-left at the current canvas pointer; use the legacy fixed offset only when no pointer position is available.
+- Cross-workflow paste copies graph data, not hidden machine state. Managed local media URLs may remain valid on the same installation, but browser object URLs, running flags, and stale runtime-only fields must not become durable dependencies.
+- Import follows the same id and binding-remap rules as paste, then deduplicates and places the imported graph in a clear canvas region. Open replaces the graph and therefore preserves valid saved ids instead of remapping them.
 
 ## Workflow Package Standards
 
@@ -478,7 +598,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Opening a packaged workflow must register its package path with the local server before packaged assets are expected to preview or run.
 - Save As must assign a new workflow ID so the new package has an independent `/workflow-assets/<workflow-id>/...` namespace. Legacy copied packages that share an ID must remain addressable by searching every registered package root for that ID.
 - Packaged asset resolution must search every registered package root for a workflow ID and may recover a uniquely matched file that was reorganized into a nested subfolder inside that package. Cache and coalesce registry reads so a canvas full of previews does not reload every workflow package per image; invalidate that cache when a registry workflow is written. Ambiguous or genuinely missing files must fail with an actionable missing-file message rather than being reported as an unregistered package.
-- Importing a workflow must remap node, edge, and group IDs and place the imported graph in a clear canvas area rather than directly on top of the current graph.
+- Importing a workflow must remap node, edge, and group IDs plus internal `nodeReferenceBindings`, and place the imported graph in a clear canvas area rather than directly on top of the current graph.
 - Do not use browser-only object URLs or absolute machine-local paths as saved graph dependencies.
 
 ## Film Director And Storyboard Standards
@@ -520,7 +640,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - The Settings page shows local key status for Fal, Google, Krea, and OpenAI without revealing stored secret values by default. Every saved credential has its own validation badge, and the active provider metric turns green only after a no-generation provider request verifies that selected credential; provider outages and timeouts remain unverified rather than being reported as invalid.
 - Credential activation uses mutually exclusive radio controls, including a `None` option, rather than independent toggles. Saving model preferences, provider routing, and ComfyUI root configuration must preserve unchanged credential profiles.
 - Every Settings content panel must have an arrow-button header and independent collapsed state. Keep API Credentials and Model Providers open initially for first-glance clarity; secondary panels may start collapsed.
-- Model Providers must show the explicit Seedance Fal/Krea route plus the Google/Fal routes for Google video/Veo and Nano Banana Pro image generation. The selected option remains authoritative until the user changes it.
+- Model Providers must show the explicit Seedance 2.0 / 2.5 Fal/Krea route plus the Google/Fal routes for Google video/Veo and Nano Banana Pro image generation. The selected option remains authoritative until the user changes it.
 - Local ComfyUI configuration and preflight status remain available alongside the remote-provider controls.
 - The Branch metric shows the current branch state and the loaded package version from `package.json`.
 - Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.
@@ -546,6 +666,9 @@ Portable packages are the default Save As shape for workflows that need to move 
 - For 3D scenes, use Three.js and verify nonblank rendering.
 - Use stable dimensions for boards, previews, result panes, and tool rows so hover or dynamic content does not shift layout.
 - Scrollable tool panels should consume available space before introducing nested scrollbars. When a control list must scroll, make the scrollbar discoverable and verify the first and last controls are reachable.
+- Draftable text inputs and textareas update their DOM/local draft immediately and commit graph state on the shared debounce or blur boundary. Do not make each keystroke rebuild the full node graph, port map, and edge layer.
+- Pan and wheel zoom use the live viewport ref and `requestAnimationFrame` drawing during the gesture, then commit React viewport state after the transient interaction. A delayed state commit must never snap the viewport back to an older value.
+- Large canvases may cull offscreen node DOM with a scene-space buffer once they cross the shared node-count threshold. Keep selected and running nodes mounted, use normalized saved dimensions for culling bounds, and preserve full visible-node detail instead of inventing a second simplified node renderer.
 
 ## Edit Node Standard
 
@@ -601,7 +724,12 @@ Before committing node or UI changes:
 - When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5176/ http://localhost:3336/api/health`.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.
-- Check collapsed and expanded node states.
+- Verify node identity behavior: bind an `@token`, rename its source node, confirm the visible token updates while the saved node id remains unchanged, and confirm the next run uses the same source output. Include a duplicate-title case and a copy/import remap case when reference behavior changes.
+- Check collapsed and expanded node states. Confirm every connected line stays visible and reanchors without an extra interaction when a connected section collapses or expands.
+- For resize changes, test width-only, height-only, diagonal, minimum, maximum, saved/reopened, and shrink-back behavior. Confirm the primary media/workspace expands first, controls remain reachable, aspect ratios remain correct, and lines track every port during the drag.
+- For large-canvas changes, test above and below the culling and overview thresholds at near and far zoom. Visible nodes must retain complete content, offscreen connections must remain drawable, and pan/zoom must not snap back.
+- For clipboard/import changes, paste a multi-node selection with an internal edge, group, and bound `@token` into another open workflow and confirm all ids are fresh and correctly remapped.
+- For Output changes, test tokens in both Path and Filename, collision handling with and without `$index`, direct Output copy, source-run redirection, Preview propagation, save/reopen, and a genuinely missing external file.
 - Check Preview behavior for every output media type touched.
 - Check Stats after a recorded run or with representative history.
 - Restart `npm run dev` when route changes are not visible in the running backend.

@@ -13,7 +13,15 @@ export function estimatedNodeWidth(type) {
   return 310;
 }
 
-export function normalizedNodeWidth(value, type, maximum = 2400) {
+export function maximumResizableNodeWidth(type) {
+  return type === "preview" ? 12000 : 2400;
+}
+
+export function maximumResizableNodeHeight(type) {
+  return type === "preview" ? 12000 : 3000;
+}
+
+export function normalizedNodeWidth(value, type, maximum = maximumResizableNodeWidth(type)) {
   const width = Number(value);
   if (!Number.isFinite(width)) return null;
   const minimum = estimatedNodeWidth(type);
@@ -27,6 +35,16 @@ export function normalizedNodeHeight(value, minimum = 180, maximum = 3000) {
   return Math.round(clamp(height, safeMinimum, Math.max(safeMinimum, Number(maximum) || 3000)));
 }
 
+export function minimumResizableNodeHeight(type) {
+  if (type === "frameIt") return 520;
+  if (type === "storyboard" || type === "character") return 420;
+  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d") return 320;
+  if (type === "preview" || type === "transfer" || type === "composer") return 280;
+  if (type === "autoAspect" || type === "coverage" || type === "camera" || type === "style") return 260;
+  if (type === "image" || type === "video") return 250;
+  return 180;
+}
+
 export function estimatedNodeHeight(type) {
   if (type === "frameIt") return 700;
   if (type === "character") return 520;
@@ -38,10 +56,13 @@ export function estimatedNodeHeight(type) {
   if (type === "style") return 520;
   return 270;
 }
-
 export function estimatedNodeRect(node, padding = 0) {
   const width = normalizedNodeWidth(node?.data?.nodeWidth, node?.type) || estimatedNodeWidth(node?.type);
-  const height = normalizedNodeHeight(node?.data?.nodeHeight) || estimatedNodeHeight(node?.type);
+  const height = normalizedNodeHeight(
+    node?.data?.nodeHeight,
+    minimumResizableNodeHeight(node?.type),
+    maximumResizableNodeHeight(node?.type)
+  ) || estimatedNodeHeight(node?.type);
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,

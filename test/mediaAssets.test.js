@@ -10,6 +10,7 @@ import {
   fullResolutionImageUrl,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
+  nextFullResolutionImageFallback,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
   restoreFullResolutionImagePreview
@@ -59,6 +60,36 @@ test("external Output node media display bypasses the Vite frontend server", () 
     assert.equal(
       displayMediaUrl(externalUrl),
       `http://127.0.0.1:3336${externalUrl}`
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("workflow package media display bypasses the Vite frontend server", () => {
+  const previousWindow = globalThis.window;
+  const workflowAssetUrl = "/workflow-assets/project-1/outputs/frame.png";
+  const thumbnailUrl = `/api/media-thumbnail?url=${encodeURIComponent(workflowAssetUrl)}`;
+  globalThis.window = {
+    location: {
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: "5176"
+    }
+  };
+
+  try {
+    assert.equal(
+      displayMediaUrl(workflowAssetUrl),
+      `http://127.0.0.1:3336${workflowAssetUrl}`
+    );
+    assert.equal(
+      displayMediaUrl(thumbnailUrl),
+      `http://127.0.0.1:3336${thumbnailUrl}`
+    );
+    assert.equal(
+      displayMediaUrl(`http://127.0.0.1:5176${workflowAssetUrl}`),
+      `http://127.0.0.1:3336${workflowAssetUrl}`
     );
   } finally {
     globalThis.window = previousWindow;
@@ -168,4 +199,29 @@ test("native image context menus temporarily expose the full-resolution source",
   );
   assert.equal(attributes.has(fullResolutionContextPreparedAttribute), false);
   assert.equal(attributes.has(fullResolutionPreviewSourceAttribute), false);
+});
+
+test("broken preview thumbnails retry the full-resolution image before using the logo", () => {
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "/workflow-assets/project-1/thumbnails/image-preview.jpg",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    "/workflow-assets/project-1/outputs/image.png"
+  );
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "http://127.0.0.1:5176/workflow-assets/project-1/outputs/image.png",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    ""
+  );
+  assert.equal(
+    nextFullResolutionImageFallback(
+      "/workflow-assets/project-1/thumbnails/image-preview.jpg",
+      "/workflow-assets/project-1/outputs/image.png",
+      "/workflow-assets/project-1/outputs/image.png"
+    ),
+    ""
+  );
 });

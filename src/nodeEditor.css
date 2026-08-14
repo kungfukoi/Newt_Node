@@ -3681,6 +3681,54 @@
   width: 100%;
 }
 
+.aspect-safe-media-frame {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.aspect-safe-media-frame img,
+.aspect-safe-media-frame video {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important;
+  object-position: center;
+  background: #000;
+}
+
+.node-card.custom-node-height .aspect-safe-media-frame img,
+.node-card.custom-node-height .aspect-safe-media-frame video {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important;
+}
+
+.node-card.custom-node-height > .model-node-body > .result-pane.has-result,
+.node-card.custom-node-height > .media-node-body > .media-preview:not(.empty):not(.audio),
+.node-card.custom-node-height > .preview-node-body > .preview-stage.has-preview {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.node-card.custom-node-height .result-carousel,
+.node-card.custom-node-height .result-item {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+}
 .media-preview {
   display: grid;
   overflow: hidden;
@@ -6080,7 +6128,8 @@ video.newtnode-video-fallback {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #000;
 }
 
 .character-main-preview:hover {
@@ -7016,7 +7065,8 @@ video.newtnode-video-fallback {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #000;
 }
 
 .preview-thumb-model {
@@ -7121,7 +7171,7 @@ video.newtnode-video-fallback {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.035);
+  background: #000;
   cursor: grab;
 }
 
@@ -7141,7 +7191,7 @@ video.newtnode-video-fallback {
 }
 
 .preview-layout-item.has-dimensions img {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .preview-layout-item figcaption {

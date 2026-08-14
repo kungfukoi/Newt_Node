@@ -55,6 +55,7 @@ import {
   OutputPreviewLightbox,
   ProjectOutputDrawer,
   ResultPane,
+  retryNewtNodeImageFallback,
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback,
   useNewtNodeVideoReady
@@ -136,8 +137,8 @@ import {
   setOutputItemDragData,
   supportedFilesFromDataTransfer
 } from "./mediaAssets.js";
-import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
-import { findNodeReferenceMentions } from "./nodeReferences.js";
+import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
+import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
   characterVideoCustomSheetWardrobePrompt,
@@ -145,7 +146,7 @@ import {
   characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
-import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
+import { characterSheetModelOptions, mergeGeneratedCharacterSheetVariants, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -202,6 +203,9 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions,
   seedream5ResolutionOptions,
   shotPresetNames,
   shotPresetPrompts,
@@ -243,6 +247,7 @@ import {
   wanVaceTransparencyOptions
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
+import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
 import {
@@ -259,6 +264,8 @@ import {
   estimatedNodeHeight,
   estimatedNodeRect,
   estimatedNodeWidth,
+  maximumResizableNodeHeight,
+  minimumResizableNodeHeight,
   normalizedNodeHeight,
   normalizedNodeWidth,
   graphBoundsForNodes,
@@ -1132,6 +1139,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const nodesRef = React.useRef(savedDraft.nodes);
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
+  const groupsRef = React.useRef(savedDraft.groups);
   const connectedPortKeysRef = React.useRef(emptyPortSet);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
@@ -1165,6 +1173,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   const nodeMap = React.useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
+  const promptResolvedIncomingByNode = React.useMemo(
+    () => buildPromptResolvedIncomingByNode(nodes, incomingByNode, groups),
+    [nodes, incomingByNode, groups]
+  );
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
   const enabledImageModels = React.useMemo(
@@ -1189,7 +1201,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
-  const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
+  const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, promptResolvedIncomingByNode, groups), [nodes, promptResolvedIncomingByNode, groups]);
   const selectedRunnableNodes = React.useMemo(
     () => nodes.filter((node) => {
       if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
@@ -1330,6 +1342,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useLayoutEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  React.useLayoutEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   React.useLayoutEffect(() => {
     if (!active) return undefined;
@@ -1474,6 +1490,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!active) return;
     syncGroupMembership();
   }, [active, nodes, groups]);
+
+  React.useEffect(() => {
+    if (!active) return undefined;
+    const retryFallbacks = () => {
+      canvasRef.current
+        ?.querySelectorAll("img.newtnode-logo-fallback[data-full-resolution-url]")
+        .forEach((image) => retryNewtNodeImageFallback(image));
+    };
+    const frame = window.requestAnimationFrame(retryFallbacks);
+    const timers = [250, 1000, 2500].map((delay) => window.setTimeout(retryFallbacks, delay));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [active, projectId, workflowFilePath, nodes.length]);
 
   React.useEffect(() => {
     if (!active || metadataLoadedRef.current) return;
@@ -2326,8 +2357,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
+      const sourceBeforeUpdate = current.find((node) => node.id === nodeId);
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
-      const nextNodes = current.map((node) =>
+      let nextNodes = current.map((node) =>
         node.id === nodeId
           ? (() => {
               const data = {
@@ -2347,6 +2379,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             })()
           : node
       );
+      if (
+        sourceBeforeUpdate &&
+        Object.prototype.hasOwnProperty.call(patch, "title") &&
+        String(sourceBeforeUpdate.data?.title || "").trim() !== String(patch.title || "").trim()
+      ) {
+        nextNodes = updateBoundNodeReferenceLabels(nextNodes, sourceBeforeUpdate, patch.title, groupsRef.current);
+      }
       let updatedNodes = nextNodes;
       if (shouldUpdateConnectedPreviews) {
         try {
@@ -2473,12 +2512,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
+      const resultItems = replacementResultItems(asset, asset.mediaType);
       updateNode(node.id, {
         fileName: asset.fileName,
         storedFileName: asset.storedFileName,
         mimeType: asset.mimeType,
         mediaType: asset.mediaType,
         resultUrl: asset.localUrl,
+        resultItems,
+        selectedResultIndex: 0,
+        resultType: asset.mediaType,
         status: "ready",
         error: ""
       });
@@ -3108,6 +3151,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
     const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
+    const existingVariants = normalizeCharacterSheetVariants(node.data);
     let completedVariantCount = 0;
 
     if (useCustomSheet) {
@@ -3221,14 +3265,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           }
         })
       );
-      const variants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
+      const generatedVariants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
       const failures = results.filter((result) => result.status === "rejected");
-      if (!variants.length) {
+      if (!generatedVariants.length) {
         throw failures[0]?.reason || new Error("Character sheet generation failed.");
       }
+      const variants = mergeGeneratedCharacterSheetVariants(
+        existingVariants,
+        generatedVariants,
+        wardrobeOptions.map((wardrobe) => characterWardrobeVariantId(wardrobe))
+      );
       const selectedVariant = variants.find((variant) => variant.wardrobeId === desiredWardrobeId) || variants[0];
       const variantNotice = failures.length
-        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be generated.`
+        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be regenerated; previous sheets were kept where available.`
         : "";
       pushUndoSnapshot();
       updateNode(node.id, {
@@ -3248,6 +3297,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
     } catch (error) {
       updateNode(node.id, {
+        ...(existingVariants.length ? { characterTab: "sheet" } : {}),
         status: "error",
         characterBatchProgress: null,
         error: error.message
@@ -3261,14 +3311,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       activated: false,
       locked: false,
       characterTab: "build",
-      resultUrl: "",
-      resultItems: [],
-      fileName: "",
-      compiledWardrobeUrl: "",
-      compiledTraitPrompt: "",
-      compiledVoicePrompt: "",
-      characterSheetVariants: [],
-      characterSheetPreviewKind: "image",
       characterBatchProgress: null,
       characterVariantNotice: "",
       status: "ready",
@@ -3358,6 +3400,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function startPreviewResize(event, node, scaleKey = "previewScale") {
+    if (scaleKey === "previewScale") {
+      startNodeResize(event, node);
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     pushUndoSnapshot();
@@ -4523,7 +4569,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       normalizedNodeWidth(node.data?.nodeWidth, node.type) ||
       Math.round(Number.parseFloat(computedStyle?.width || "") || estimatedNodeWidth(node.type));
     const startHeight =
-      normalizedNodeHeight(node.data?.nodeHeight) ||
+      normalizedNodeHeight(node.data?.nodeHeight, minimumResizableNodeHeight(node.type), maximumResizableNodeHeight(node.type)) ||
       Math.round(Number.parseFloat(computedStyle?.height || "") || estimatedNodeHeight(node.type));
     const startTextareaWidth = textarea
       ? Number.parseFloat(textareaStyle?.width || "") || textarea.clientWidth
@@ -4710,7 +4756,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         dragState.startWidth + appliedDeltaX,
         dragState.nodeType
       );
-      const nextHeight = normalizedNodeHeight(dragState.startHeight + appliedDeltaY);
+      const nextHeight = normalizedNodeHeight(
+        dragState.startHeight + appliedDeltaY,
+        minimumResizableNodeHeight(dragState.nodeType),
+        maximumResizableNodeHeight(dragState.nodeType)
+      );
       setNodes((current) =>
         current.map((node) =>
           node.id === dragState.nodeId
@@ -6078,7 +6128,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function runNode(node) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
-    const currentNode =
+    let currentNode =
       storedNode
         ? {
             ...storedNode,
@@ -6091,9 +6141,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!isRunnableNode(currentNode)) return { status: "skipped" };
     if (currentNode.data.status === "running") return { status: "skipped" };
 
+    const nodeReferenceBindings = updatedNodeReferenceBindings(currentNode, nodesRef.current, groupsRef.current);
+    if (!nodeReferenceBindingsEqual(nodeReferenceBindings, currentNode.data?.nodeReferenceBindings)) {
+      currentNode = {
+        ...currentNode,
+        data: { ...currentNode.data, nodeReferenceBindings }
+      };
+      updateNode(currentNode.id, { nodeReferenceBindings });
+    }
+
+    const referenceNodes = nodesRef.current.map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    const nodeReferenceContext = { nodes: nodesRef.current };
+    const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
       currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model)
@@ -6172,7 +6232,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "text") {
-        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, nodesRef.current);
+        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current);
         const resolvedText = resolveNodeReferencesInText(currentNode.data.text, nodeReferenceContext, currentNode.id);
         const processed = await runTextNodeProcessing({
           node: currentNode,
@@ -6497,7 +6557,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
-        const imageIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
+        const imageIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, imageIncoming);
         const imagePromptItems = connectedImagePromptItems(
@@ -6564,7 +6624,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      const promptReferencedVideoIncoming = mergePromptNodeReferencesIntoIncoming(incoming, basePrompt, nodesRef.current, currentNode);
+      const promptReferencedVideoIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current);
       const supportsVideoCharacters = videoModelSupportsCharacterInput(currentNode.data.model);
       const compatibleVideoIncoming = supportsVideoCharacters
         ? promptReferencedVideoIncoming
@@ -6939,8 +6999,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onConnectStart={startConnection}
                 onDisconnectInput={disconnectInputPort}
                 connectedPortKeys={connectedPortKeys}
-                incoming={incomingByNode[node.id] || {}}
-                incomingByNode={incomingByNode}
+                incoming={promptResolvedIncomingByNode[node.id] || {}}
+                incomingByNode={promptResolvedIncomingByNode}
                 onRun={runNode}
                 onCreateBrushMask={createEditBrushMaskOutput}
                 onUpload={uploadMediaAsset}
@@ -7597,7 +7657,11 @@ function NodeCard({
   const storyboardScalable = node.type === "storyboard";
   const frameItScalable = node.type === "frameIt";
   const customNodeWidth = normalizedNodeWidth(nodeData.nodeWidth, node.type);
-  const customNodeHeight = normalizedNodeHeight(nodeData.nodeHeight);
+  const customNodeHeight = normalizedNodeHeight(
+    nodeData.nodeHeight,
+    minimumResizableNodeHeight(node.type),
+    maximumResizableNodeHeight(node.type)
+  );
   const customNodeSize = Boolean(customNodeWidth || customNodeHeight);
   const customNodeWidthClass = Boolean(customNodeWidth);
   const customNodeHeightClass = Boolean(customNodeHeight);
@@ -7797,7 +7861,7 @@ function CharacterVoicePlayer({ voice }) {
     <div className="character-voice-player">
       <audio
         ref={audioRef}
-        src={voice.localUrl}
+        src={displayMediaUrl(voice.localUrl)}
         muted={muted}
         preload="metadata"
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
@@ -7834,12 +7898,13 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
   }
 
   if (!sourceUrl) return null;
+  const displaySourceUrl = displayMediaUrl(sourceUrl);
 
   if (sourceType === "video") {
     return (
       <video
         className="edit-source-dimension-probe"
-        src={sourceUrl}
+        src={displaySourceUrl}
         muted
         playsInline
         preload="metadata"
@@ -7854,7 +7919,7 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
   return (
     <img
       className="edit-source-dimension-probe"
-      src={sourceUrl}
+      src={displaySourceUrl}
       alt=""
       draggable={false}
       onLoad={(event) => reportDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
@@ -7865,6 +7930,7 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
 function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
   const trackRef = React.useRef(null);
   const dragRef = React.useRef(null);
+  const displaySourceUrl = displayMediaUrl(sourceUrl);
   const safeDuration = Math.max(0.001, finiteNumber(duration, 0));
   const minGap = Math.min(0.033, Math.max(0.001, safeDuration / 1000));
   const safeStart = clamp(finiteNumber(start, 0), 0, Math.max(0, safeDuration - minGap));
@@ -7931,7 +7997,7 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
         onPointerUp={endHandleDrag}
         onPointerCancel={endHandleDrag}
       >
-        {sourceUrl ? <video src={sourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
+        {sourceUrl ? <video src={displaySourceUrl} muted playsInline preload="metadata" draggable={false} /> : <div className="edit-trim-empty-strip" />}
         <div className="edit-trim-shade left" style={{ width: `${startPercent}%` }} />
         <div className="edit-trim-shade right" style={{ left: `${endPercent}%` }} />
         <div className="edit-trim-selection" style={{ left: `${startPercent}%`, width: `${selectionWidth}%` }} />
@@ -8154,6 +8220,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   const isBrush = effect.id === "brushInpaint";
   const showGeneratedPreview = ["tone", "curves"].includes(effect.id);
   const displayUrl = previewUrl || sourceUrl;
+  const mediaDisplayUrl = displayMediaUrl(displayUrl);
 
   React.useEffect(() => {
     setPaintHasMask(Boolean(settings.maskDataUrl));
@@ -8602,7 +8669,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
         ref={imageEditorRef}
         style={{ aspectRatio: imageAspect || 16 / 9 }}
       >
-        <img src={displayUrl} alt={`${effect.label} preview`} draggable={false} onLoad={handlePreviewImageLoad} onError={useNewtNodeImageFallback} />
+        <img src={mediaDisplayUrl} alt={`${effect.label} preview`} draggable={false} onLoad={handlePreviewImageLoad} onError={useNewtNodeImageFallback} />
         {isText && textOverlay.text.trim() && (
           <div
             className="edit-image-text-overlay"
@@ -8865,7 +8932,7 @@ function EditBrushInpaintDialog({ sourceUrl, settings = {}, onSettingsChange, on
             ref={editorRef}
             style={editorSize ? { width: `${editorSize.width}px`, height: `${editorSize.height}px` } : { aspectRatio: imageAspect || 16 / 9 }}
           >
-            <img ref={imageRef} src={sourceUrl} alt="Brush inpaint source" draggable={false} onLoad={handleImageLoad} onError={useNewtNodeImageFallback} />
+            <img ref={imageRef} src={displayMediaUrl(sourceUrl)} alt="Brush inpaint source" draggable={false} onLoad={handleImageLoad} onError={useNewtNodeImageFallback} />
             <canvas
               ref={canvasRef}
               className="edit-brush-dialog-paint-mask"
@@ -8987,6 +9054,7 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
   const videoRef = React.useRef(null);
   const [duration, setDuration] = React.useState(0);
   const [loadState, setLoadState] = React.useState(videoUrl ? "loading" : "idle");
+  const displayVideoUrl = displayMediaUrl(videoUrl);
   const numericValue = Math.max(0, Number(value) || 0);
   const usableDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const sliderMax = usableDuration ? Math.max(0.01, usableDuration) : Math.max(1, numericValue);
@@ -9048,7 +9116,7 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
       <div className="still-frame-video-shell">
         <video
           ref={videoRef}
-          src={videoUrl}
+          src={displayVideoUrl}
           muted
           playsInline
           preload="metadata"
@@ -10300,7 +10368,7 @@ function NodeBody({
                 <span className="character-section-label">Portrait Reference</span>
                 <label className={`character-main-preview ${portrait ? "has-image" : ""}`} title={portrait ? "Replace portrait image" : "Upload portrait image"}>
                   {portrait?.localUrl ? (
-                    <img {...fullResolutionImageProps(portrait)} src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                    <img {...fullResolutionImageProps(portrait)} src={displayMediaUrl(previewImageUrl(portrait))} alt="Character portrait" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                   ) : (
                     <UserRound size={28} />
                   )}
@@ -10349,7 +10417,7 @@ function NodeBody({
                           onClick={() => selectWardrobe(wardrobe)}
                           title={locked && hasSheet ? `Use ${wardrobe.fileName || "this wardrobe"} character sheet` : locked ? "No generated sheet for this wardrobe" : wardrobe.fileName}
                         >
-                          <img {...fullResolutionImageProps(wardrobe)} src={previewImageUrl(wardrobe)} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                          <img {...fullResolutionImageProps(wardrobe)} src={displayMediaUrl(previewImageUrl(wardrobe))} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                           <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterWardrobeRemove(node.id, wardrobe.id); }}>
                             <X size={10} />
                           </span>
@@ -10439,7 +10507,7 @@ function NodeBody({
                     </div>
                     <label className="character-custom-sheet-upload" title={customSheet?.localUrl ? "Replace custom character sheet" : "Upload custom character sheet"}>
                       {customSheet?.localUrl ? (
-                        <img {...fullResolutionImageProps(customSheet)} src={previewImageUrl(customSheet)} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                        <img {...fullResolutionImageProps(customSheet)} src={displayMediaUrl(previewImageUrl(customSheet))} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                       ) : (
                         <>
                           <ImagePlus size={20} />
@@ -10585,7 +10653,7 @@ function NodeBody({
                 }}
                 title="Drag the full-resolution character sheet into another node or double-click to preview"
               >
-                <img {...fullResolutionImageProps(characterSheetPreviewItem)} src={previewImageUrl(characterSheetPreviewItem)} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <img {...fullResolutionImageProps(characterSheetPreviewItem)} src={displayMediaUrl(previewImageUrl(characterSheetPreviewItem))} alt={`${node.data.characterName || "Character"} sheet`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
               </div>
             ) : (
               <div className="character-sheet-empty">
@@ -10947,7 +11015,7 @@ function NodeBody({
                   storyboardCharacters.length ? storyboardCharacters.map((character) => (
                     <div className={`storyboard-character-card ${character.sheetUrl ? "ready" : ""} ${character.status === "error" ? "error" : ""}`} key={character.id}>
                       <div className="storyboard-character-thumb">
-                        {character.portrait?.localUrl ? <img {...fullResolutionImageProps(character.portrait)} src={previewImageUrl(character.portrait)} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} /> : <UserRound size={20} />}
+                        {character.portrait?.localUrl ? <img {...fullResolutionImageProps(character.portrait)} src={displayMediaUrl(previewImageUrl(character.portrait))} alt={character.name || "Storyboard character"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} /> : <UserRound size={20} />}
                       </div>
                       <div className="storyboard-character-name-row">
                         <input value={character.name || ""} placeholder="Name becomes @Name" disabled={storyboardLocked} onChange={(event) => onStoryboardCharacterUpdate?.(node.id, character.id, { name: event.target.value, error: "", status: character.status === "error" ? "ready" : character.status })} />
@@ -11472,7 +11540,7 @@ function NodeBody({
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
               <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
-                  <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={previewImageUrl(node.data.customPalettePreviewUrl)} alt="Extracted custom palette" loading="lazy" decoding="async" />
+                  <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={displayMediaUrl(previewImageUrl(node.data.customPalettePreviewUrl))} alt="Extracted custom palette" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 ) : (
                   <span className="custom-palette-empty">
                     <FileImage size={18} />
@@ -11764,7 +11832,7 @@ function NodeBody({
 
         {activePreviewTab === "preview" ? (
           <>
-            <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+            <div className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
               {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
               {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
@@ -13859,7 +13927,7 @@ function NodeBody({
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const characterTagMatches = isSam3Image || isImageModelUnsupportedInput(node, "characterIn") ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
+    const referenceTagMatches = isSam3Image ? [] : imageModelReferenceTagMatches(promptValue, node, incoming, incomingByNode);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
@@ -13926,14 +13994,14 @@ function NodeBody({
               className={promptConnected ? "connected-field" : ""}
               value={promptValue}
               readOnly={promptConnected}
-              tagMatches={characterTagMatches}
+              tagMatches={referenceTagMatches}
               onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
             />
           </NodeRow>
-          {characterTagMatches.length > 0 && (
+          {referenceTagMatches.length > 0 && (
             <div className="reference-tag-chips">
-              {characterTagMatches.map((match) => (
-                <span key={match.nodeId} className="reference-tag-chip" style={{ "--tag-color": match.color }}>
+              {referenceTagMatches.map((match) => (
+                <span key={`${match.nodeId}:${match.tag}`} className="reference-tag-chip" style={{ "--tag-color": match.color }}>
                   @{match.tag}
                 </span>
               ))}
@@ -14062,6 +14130,7 @@ function NodeBody({
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isGeminiOmni = isGeminiOmniModel(node.data.model);
   const isSam3Video = isSam3VideoModel(node.data.model);
+  const isSeedance25 = isSeedance25Model(node.data.model);
   const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
   const wan27Resolution = normalizedWan27ReferenceResolution(node.data.resolution);
   const wan27AspectRatio = normalizedWan27ReferenceAspectRatio(node.data.aspectRatio);
@@ -14441,25 +14510,30 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Duration">
               <select value={node.data.duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {seedanceVideoDurationOptions.map((option) => (
-                  <option key={option}>{option}</option>
+                {(isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
+                  <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {seedanceVideoResolutionOptions.map((option) => (
+                {(isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
               <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {seedanceVideoAspectRatioOptions.map((option) => (
-                  <option key={option}>{option}</option>
+                {(isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
+                  <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
             </NodeRow>
+            {isSeedance25 && (
+              <NodeRow label="Seed">
+                <input inputMode="numeric" value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value.replace(/[^\d]/g, "") })} placeholder="Random" />
+              </NodeRow>
+            )}
             <NodeRow label="Generate Audio">
               <button className={`node-toggle ${node.data.generateAudio ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}>
                 <span />
@@ -15339,7 +15413,7 @@ function ConnectedImageInputButton({ items = [], fallback = "Add image" }) {
 
   return (
     <button className="connected-field wanwarp-frame-thumb-button has-thumb" title={imageItem.label || "Connected image"}>
-      <img src={imageItem.url} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+      <img {...fullResolutionImageProps(imageItem)} src={displayMediaUrl(previewImageUrl(imageItem))} alt={imageItem.label || "Connected image"} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       {items.length > 1 && <span>{items.length}</span>}
     </button>
   );
@@ -15466,7 +15540,7 @@ function TransitionBuilderControls({ incoming, promptPort, promptValue, promptCo
                 role="listitem"
                 title={`${ordinalLabel(index + 1)} keyframe: ${item.label}`}
               >
-                <img src={item.url} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={`${ordinalLabel(index + 1)} keyframe`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 <span>{ordinalLabel(index + 1)}</span>
               </div>
             ))}
@@ -15584,6 +15658,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
   const largeVideoRef = React.useRef(null);
   const [duration, setDuration] = React.useState(0);
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  const displayVideoUrl = displayMediaUrl(videoUrl);
   const selectedTime = Math.max(0, finiteNumber(node.data.extractFrameTime, 0));
   const selectedFormat = node.data.extractFrameFormat === "jpeg" ? "jpeg" : "png";
   const sliderMax = duration ? extractFrameMaxTime(duration) : Math.max(1, selectedTime);
@@ -15681,7 +15756,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
         >
           {videoUrl ? (
             <>
-              <video ref={videoRef} src={videoUrl} muted preload="metadata" playsInline onLoadedMetadata={handleLoadedMetadata} />
+              <video ref={videoRef} src={displayVideoUrl} muted preload="metadata" playsInline onLoadedMetadata={handleLoadedMetadata} />
               <button type="button" className="extract-frame-expand-button" onClick={handlePreviewOpen} title="Open large frame picker" aria-label="Open large frame picker">
                 <Maximize2 size={14} />
               </button>
@@ -15718,7 +15793,7 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
             <div className="extract-frame-modal-video">
               <video
                 ref={largeVideoRef}
-                src={videoUrl}
+                src={displayVideoUrl}
                 controls
                 muted
                 preload="metadata"
@@ -16627,7 +16702,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Film Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
@@ -16673,6 +16748,18 @@ function videoModelSelectionPatch(data = {}, model) {
       negativePrompt: data.negativePrompt || "",
       multiShots: Boolean(data.multiShots),
       enableSafetyChecker: data.enableSafetyChecker !== false,
+      seed: data.seed || ""
+    };
+  }
+
+  if (isSeedance25Model(model)) {
+    const preserveSeedance25 = isSeedance25Model(data.model);
+    return {
+      model,
+      duration: preserveSeedance25 && seedance25DurationOptions.includes(data.duration) ? data.duration : "auto",
+      resolution: preserveSeedance25 && seedance25ResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
+      aspectRatio: preserveSeedance25 && seedance25AspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "auto",
+      generateAudio: data.generateAudio !== false,
       seed: data.seed || ""
     };
   }
@@ -18063,6 +18150,15 @@ function buildIncomingByNode(nodes, edges) {
   }, {});
 }
 
+function buildPromptResolvedIncomingByNode(nodes = [], incomingByNode = {}, groups = []) {
+  const resolved = { ...incomingByNode };
+  nodes.forEach((node) => {
+    if (node.type !== "imageModel" && node.type !== "videoModel") return;
+    resolved[node.id] = promptReferenceIncomingForNode(incomingByNode[node.id] || {}, node, nodes, groups);
+  });
+  return resolved;
+}
+
 function buildConnectedPortKeys(edges) {
   const keys = new Set();
   edges.forEach((edge) => {
@@ -18072,7 +18168,7 @@ function buildConnectedPortKeys(edges) {
   return keys;
 }
 
-function buildReferenceTagHighlights(nodes, incomingByNode) {
+function buildReferenceTagHighlights(nodes, incomingByNode, groups = []) {
   const highlights = new Map();
 
   nodes.forEach((node) => {
@@ -18089,9 +18185,9 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
           ...normalizedStoryboardFrames(node.data.storyboardFrames).map((frame) => frame.prompt || "")
         ].join("\n")
       : connectedText(incoming.promptIn) || node.data.prompt || "";
-    const nodeReferenceMatches = textNodePrompt ? nodeReferenceMentionsForText(textNodePrompt, nodes, node.id) : [];
-    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isImageModelUnsupportedInput(node, "characterIn")
-      ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
+    const nodeReferenceMatches = textNodePrompt ? nodeReferenceMentionsForText(textNodePrompt, nodes, node, groups) : [];
+    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model)
+      ? imageModelReferenceTagMatches(prompt, node, incoming, incomingByNode)
       : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
         ? videoModelReferenceTagMatches(prompt, incoming)
         : node.type === "storyboard"
@@ -18183,14 +18279,13 @@ function resolveNodeReferencesInText(text, referenceContext = null, ownerNodeId 
   const value = String(text || "");
   const nodes = referenceContext?.nodes || [];
   if (!value || !nodes.length) return value;
-  const referenceInputs = nodeReferenceInputsForText(value, nodes, ownerNodeId);
+  const referenceInputs = nodeReferenceInputsForText(value, nodes, ownerNodeId, referenceContext?.groups || []);
   const context = nodeReferenceContextText(referenceInputs);
   return context ? `${value}\n\n${context}` : value;
 }
 
-function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "") {
-  const currentNodeId = typeof ownerNodeOrId === "string" ? ownerNodeOrId : ownerNodeOrId?.id || "";
-  const mentions = nodeReferenceMentionsForText(text, nodes, currentNodeId);
+function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "", groups = []) {
+  const mentions = nodeReferenceMentionsForText(text, nodes, ownerNodeOrId, groups);
   const uniqueMentions = new Map();
   mentions.forEach((mention) => {
     if (!uniqueMentions.has(mention.nodeId)) uniqueMentions.set(mention.nodeId, mention);
@@ -18212,11 +18307,11 @@ function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "") {
   return { textInputs, imageInputs, videoInputs, mentions: [...uniqueMentions.values()] };
 }
 
-function textModelNodeReferenceInputs(node, incoming = {}, nodes = []) {
+function textModelNodeReferenceInputs(node, incoming = {}, nodes = [], groups = []) {
   const merged = emptyNodeReferenceInputs();
-  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node));
+  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node, groups));
   (incoming.textIn || []).forEach(({ source }) => {
-    mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source.id));
+    mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source, groups));
   });
   return merged;
 }
@@ -18248,16 +18343,104 @@ function appendUniqueReferenceItems(targetItems, sourceItems = [], key) {
   });
 }
 
-function nodeReferenceMentionsForText(text, nodes = [], currentNodeId = "") {
+function nodeReferenceMentionsForText(text, nodes = [], currentNodeOrId = "", groups = []) {
+  const currentNode = typeof currentNodeOrId === "string"
+    ? nodes.find((node) => node.id === currentNodeOrId)
+    : currentNodeOrId;
+  const currentNodeId = currentNode?.id || (typeof currentNodeOrId === "string" ? currentNodeOrId : "");
   return findNodeReferenceMentions(text, nodes, {
     currentNodeId,
-    labelForNode: nodeReferenceLabel
+    labelForNode: nodeReferenceLabel,
+    bindings: currentNode?.data?.nodeReferenceBindings || {},
+    rankForNode: (candidate) => nodeReferenceRankForOwner(candidate, currentNode, groups)
   }).map((mention, index) => ({
     ...mention,
     tag: mention.name,
     color: nodeReferenceColor(mention.node, index),
     type: "node-reference"
   }));
+}
+
+function nodeReferenceRankForOwner(candidate, owner, groups = []) {
+  if (!candidate || !owner) return 0;
+  const sameGroup = groups.some((group) => {
+    const nodeIds = group?.nodeIds || [];
+    return nodeIds.includes(owner.id) && nodeIds.includes(candidate.id);
+  });
+  const ownerX = Number(owner.x) || 0;
+  const ownerY = Number(owner.y) || 0;
+  const candidateX = Number(candidate.x) || 0;
+  const candidateY = Number(candidate.y) || 0;
+  const distance = Math.hypot(candidateX - ownerX, candidateY - ownerY);
+  return (sameGroup ? 1_000_000_000 : 0) - Math.min(distance, 10_000_000);
+}
+
+function updatedNodeReferenceBindings(owner, nodes = [], groups = []) {
+  if (!owner?.id) return {};
+  const existingBindings = owner.data?.nodeReferenceBindings || {};
+  const nextBindings = {};
+  nodeReferenceTextValues(owner.data).forEach((text) => {
+    findNodeReferenceMentions(text, nodes, {
+      currentNodeId: owner.id,
+      labelForNode: nodeReferenceLabel,
+      bindings: existingBindings,
+      rankForNode: (candidate) => nodeReferenceRankForOwner(candidate, owner, groups)
+    }).forEach((mention) => {
+      const key = nodeReferenceBindingKey(mention.mention);
+      if (key) nextBindings[key] = mention.nodeId;
+    });
+  });
+  return nextBindings;
+}
+
+function nodeReferenceTextValues(value, values = [], key = "") {
+  if (key === "nodeReferenceBindings") return values;
+  if (typeof value === "string") {
+    if (value.includes("@")) values.push(value);
+    return values;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => nodeReferenceTextValues(item, values));
+    return values;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([entryKey, item]) => nodeReferenceTextValues(item, values, entryKey));
+  }
+  return values;
+}
+
+function nodeReferenceBindingsEqual(first = {}, second = {}) {
+  const firstEntries = Object.entries(first || {}).sort(([left], [right]) => left.localeCompare(right));
+  const secondEntries = Object.entries(second || {}).sort(([left], [right]) => left.localeCompare(right));
+  return firstEntries.length === secondEntries.length && firstEntries.every(([key, value], index) => (
+    secondEntries[index]?.[0] === key && secondEntries[index]?.[1] === value
+  ));
+}
+
+function updateBoundNodeReferenceLabels(nodes, sourceBeforeUpdate, nextTitle, groups = []) {
+  const nextLabel = String(nextTitle || "").trim();
+  if (!sourceBeforeUpdate?.id || !nextLabel) return nodes;
+  const resolutionNodes = nodes.map((node) => node.id === sourceBeforeUpdate.id ? sourceBeforeUpdate : node);
+
+  return nodes.map((owner) => {
+    if (owner.id === sourceBeforeUpdate.id) return owner;
+    const ownerForResolution = resolutionNodes.find((node) => node.id === owner.id) || owner;
+    const bindings = updatedNodeReferenceBindings(ownerForResolution, resolutionNodes, groups);
+    const boundAliases = Object.entries(bindings)
+      .filter(([, nodeId]) => nodeId === sourceBeforeUpdate.id)
+      .map(([alias]) => alias);
+    if (!boundAliases.length) return owner;
+
+    const data = renameBoundNodeReferenceTokenInData(
+      { ...owner.data, nodeReferenceBindings: bindings },
+      sourceBeforeUpdate.id,
+      nextLabel
+    );
+    return {
+      ...owner,
+      data
+    };
+  });
 }
 
 function nodeReferenceLabel(node) {
@@ -18517,8 +18700,46 @@ function nodeReferenceContextText(referenceInputs = {}) {
   return lines.length ? `Node reference context:\n${lines.join("\n\n")}` : "";
 }
 
-function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes = [], targetNode = null) {
-  const mentions = nodeReferenceMentionsForText(prompt, nodes, targetNode?.id || "");
+function promptReferenceIncomingForNode(incoming = {}, targetNode = null, nodes = [], groups = []) {
+  const promptConnections = incoming.promptIn || [];
+  let resolved = promptConnections.length
+    ? promptConnections.reduce((current, { source }) => (
+        mergePromptNodeReferencesIntoIncoming(
+          current,
+          rawConnectedTextForSource(source),
+          nodes,
+          targetNode,
+          groups,
+          source
+        )
+      ), incoming)
+    : mergePromptNodeReferencesIntoIncoming(
+        incoming,
+        targetNode?.data?.prompt || "",
+        nodes,
+        targetNode,
+        groups,
+        targetNode
+      );
+
+  if (targetNode?.type === "videoModel") {
+    resolved = (incoming.directorIn || []).reduce((current, { source }) => (
+      mergePromptNodeReferencesIntoIncoming(
+        current,
+        rawConnectedTextForSource(source),
+        nodes,
+        targetNode,
+        groups,
+        source
+      )
+    ), resolved);
+  }
+
+  return resolved;
+}
+
+function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes = [], targetNode = null, groups = [], ownerNode = targetNode) {
+  const mentions = nodeReferenceMentionsForText(prompt, nodes, ownerNode, groups);
   if (!mentions.length) return incoming;
 
   const nextIncoming = { ...incoming };
@@ -18530,7 +18751,9 @@ function mergePromptNodeReferencesIntoIncoming(incoming = {}, prompt = "", nodes
     const edge = nodeReferenceSyntheticEdge(source);
     const targetPort = nodeReferenceTargetPortForPromptReference(targetNode, source, edge);
     if (!targetPort) return;
-    nextIncoming[targetPort] = [...(nextIncoming[targetPort] || []), { source, edge }];
+    const currentItems = nextIncoming[targetPort] || [];
+    if (currentItems.some((item) => item.source?.id === source.id)) return;
+    nextIncoming[targetPort] = [...currentItems, { source, edge }];
   });
   return nextIncoming;
 }
@@ -18911,6 +19134,45 @@ function videoModelReferenceTagMatches(prompt, incoming = {}) {
   return [...imageCandidates, ...videoCandidates, ...characterCandidates].filter((match) => promptHasTag(text, match.tag));
 }
 
+function imageModelReferenceTagMatches(prompt, node, incoming = {}, incomingByNode = null) {
+  const text = String(prompt || "");
+  const candidateGroups = [
+    incoming.imagePromptIn || [],
+    !isImageModelUnsupportedInput(node, "cameraIn") ? incoming.cameraIn || [] : [],
+    !isImageModelUnsupportedInput(node, "styleIn") ? incoming.styleIn || [] : [],
+    !isImageModelUnsupportedInput(node, "transferIn") ? incoming.transferIn || [] : []
+  ];
+  const candidates = new Map();
+
+  candidateGroups.flat().forEach(({ source, edge }) => {
+    if (!isActiveImageModelTagSource(source, edge)) return;
+    const tag = cleanPromptTag(source.data?.title || sourceLabel(source));
+    if (!tag) return;
+    candidates.set(`${source.id}:${tag}`.toLowerCase(), {
+      nodeId: source.id,
+      tag,
+      color: nodeReferenceColor(source, candidates.size),
+      type: "node-reference"
+    });
+  });
+
+  if (!isImageModelUnsupportedInput(node, "characterIn")) {
+    imageModelCharacterTagMatches(text, incoming.characterIn, incomingByNode).forEach((match) => {
+      candidates.set(`${match.nodeId}:${match.tag}`.toLowerCase(), match);
+    });
+  }
+
+  return [...candidates.values()].filter((match) => promptHasTag(text, match.tag));
+}
+
+function isActiveImageModelTagSource(source, edge) {
+  if (!source) return false;
+  if (source.type === "camera") return hasCameraPreset(source);
+  if (source.type === "style") return styleOutputEnabled(source.data);
+  if (source.type === "transfer") return Boolean(source.data?.locked && source.data?.activated && source.data?.resultUrl);
+  if (source.type === "composer") return isActiveComposerSource(source);
+  return Boolean(connectedOutputItem(source, edge)?.url);
+}
 function imageModelCharacterTagMatches(prompt, items = [], incomingByNode = null) {
   const text = String(prompt || "");
   return activeConnectedCharacterSources(items, incomingByNode)
@@ -21778,11 +22040,11 @@ function cacheBustedAssetUrl(url, version = 0) {
 }
 
 function storyboardFrameImageSrc(frame = {}) {
-  return previewImageUrl(cacheBustedAssetUrl(frame.thumbnailUrl || frame.resultUrl, frame.resultVersion));
+  return displayMediaUrl(previewImageUrl(cacheBustedAssetUrl(frame.thumbnailUrl || frame.resultUrl, frame.resultVersion)));
 }
 
 function storyboardFrameFallbackSrc(frame = {}) {
-  return cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion);
+  return displayMediaUrl(cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion));
 }
 
 function storyboardFrameCountForNode(node, incoming = null) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
-import { allowFileDrop, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import {
   addFilmDirectorScene,
@@ -926,7 +926,7 @@ export function ComposerNodeBody({ node, imageOutputPort, composerInputPorts, on
       <div className="composer-preview-slot">
         <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
           {node.data.resultUrl ? (
-            <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt="Composer frame" />
+            <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={displayMediaUrl(previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl))} alt="Composer frame" />
           ) : (
             <>
               <Box size={28} />

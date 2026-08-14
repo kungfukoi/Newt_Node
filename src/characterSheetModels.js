@@ -19,3 +19,11 @@ export function characterSheetGenerationSettings(value) {
     ...(model === imageModelNames.openAiImage2 ? { quality: openAiImage2Quality } : {})
   };
 }
+
+export function mergeGeneratedCharacterSheetVariants(existingVariants = [], generatedVariants = [], wardrobeIds = []) {
+  const existingByWardrobe = new Map(existingVariants.filter((variant) => variant?.wardrobeId).map((variant) => [variant.wardrobeId, variant]));
+  const generatedByWardrobe = new Map(generatedVariants.filter((variant) => variant?.wardrobeId).map((variant) => [variant.wardrobeId, variant]));
+  return [...new Set(wardrobeIds)]
+    .map((wardrobeId) => generatedByWardrobe.get(wardrobeId) || existingByWardrobe.get(wardrobeId))
+    .filter(Boolean);
+}

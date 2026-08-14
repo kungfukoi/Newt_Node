@@ -11,7 +11,7 @@ import { File } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
@@ -46,6 +46,8 @@ import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
   relocatedWorkflowPackageAssetFilePath,
+  uniqueFileByNameUnderRoots,
+  uniqueWorkflowPackageAssetFilePath,
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
@@ -119,6 +121,16 @@ import {
 } from "../src/kreaSeedance.js";
 import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
 import {
+  isSeedance25Model,
+  normalizeSeedance25AspectRatio,
+  normalizeSeedance25Duration,
+  normalizeSeedance25Resolution,
+  seedance25Endpoint,
+  seedance25EndpointRoot,
+  seedance25ModelName,
+  seedance25ReferenceLimits
+} from "../src/seedance25.js";
+import {
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
@@ -185,6 +197,7 @@ let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
 const runtimeThumbnailJobs = new Map();
 const runtimeVideoPreviewJobs = new Map();
+const relocatedExternalOutputCache = new Map();
 let registeredWorkflowPackageCache = null;
 let registeredWorkflowPackageLoadPromise = null;
 let registeredWorkflowPackageCacheGeneration = 0;
@@ -230,6 +243,7 @@ const updatePreservedDirectories = [
 ];
 const updatePreservedFiles = [".env"];
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
+const seedance25CostPerThousandTokens = Number(process.env.SEEDANCE_25_COST_PER_1000_TOKENS || 0.0214);
 const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
 const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_PER_SECOND || 0.28);
@@ -281,6 +295,7 @@ const imageModelOptions = [
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
+  seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
@@ -290,6 +305,7 @@ const videoModelNames = {
 };
 const videoModelOptions = [
   videoModelNames.seedance,
+  videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
@@ -2340,10 +2356,11 @@ app.post("/api/saved-workflows", async (req, res) => {
       const workflows = await readSavedWorkflowSummaryFiles();
       const now = new Date().toISOString();
       const requestedId = String(req.body.id || randomUUID()).trim();
+      const sourceWorkflowId = String(req.body.sourceWorkflowId || requestedId).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
       const identity = workflowSaveIdentity({
         requestedId,
-        existingWorkflow: workflows.find((item) => item.id === requestedId),
+        existingWorkflow: workflows.find((item) => item.id === sourceWorkflowId),
         packageParentPath: req.body.packageParentPath,
         createId: randomUUID
       });
@@ -2367,7 +2384,9 @@ app.post("/api/saved-workflows", async (req, res) => {
         }
       };
 
-      const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
+      const savedWorkflow = packagePath
+        ? await writeWorkflowPackage(workflow, packagePath, { detachMissingAssets: identity.isPackageClone })
+        : workflow;
       const registeredWorkflow = await writeWorkflowFile(savedWorkflow);
       res.json(registeredWorkflow);
       scheduleWorkflowIndexRebuild();
@@ -5274,6 +5293,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     }
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
+    const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
       if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY && !process.env.KREA_API_KEY) {
@@ -5287,7 +5307,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     }
 
     if (
-      selectedVideoModel.provider !== "fal-seedance" &&
+      !["fal-seedance", "fal-seedance-25"].includes(selectedVideoModel.provider) &&
       !process.env.FAL_KEY &&
       !(process.env.KREA_API_KEY && supportsKreaModel("video", selectedVideoModel.displayName))
     ) {
@@ -5358,10 +5378,15 @@ app.post("/api/node/generate-video", async (req, res) => {
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
     const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
     const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+    const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
+    if (seedance25 && rawReferenceImageUrls.filter(isLocalAssetUrl).length > seedance25ReferenceLimits.images) {
+      return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.images} image references.` });
+    }
     const mergedReferenceImages = mergeSeedanceDirectorReferences({
-      directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
+      directUrls: rawReferenceImageUrls,
       directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
-      directorReferences
+      directorReferences,
+      limit: seedance25 ? seedance25ReferenceLimits.images : undefined
     });
     const referenceImages = mergedReferenceImages.urls
       .map((url, index) => ({ url, label: mergedReferenceImages.labels[index] }))
@@ -5376,11 +5401,29 @@ app.post("/api/node/generate-video", async (req, res) => {
     const referenceVideoUrls = referenceVideos.map(({ url }) => url);
     const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : [];
+    if (seedance25) {
+      const referenceCount = referenceImageUrls.length + referenceVideoUrls.length + referenceAudioUrls.length;
+      if (referenceImageUrls.length > seedance25ReferenceLimits.images) {
+        return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.images} image references.` });
+      }
+      if (referenceVideoUrls.length > seedance25ReferenceLimits.videos) {
+        return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.videos} video references.` });
+      }
+      if (referenceAudioUrls.length > seedance25ReferenceLimits.audios) {
+        return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.audios} audio references.` });
+      }
+      if (referenceCount > seedance25ReferenceLimits.total) {
+        return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.total} total references.` });
+      }
+    }
     const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
-    const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
-    const duration = normalizeDuration(req.body.duration);
-    const aspectRatio = normalizeAspectRatio(req.body.aspectRatio);
-    const generateAudio = Boolean(req.body.generateAudio);
+    const resolution = seedance25
+      ? normalizeSeedance25Resolution(req.body.resolution)
+      : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
+    const duration = seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
+    const aspectRatio = seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
+    const generateAudio = req.body.generateAudio !== false;
+    const requestedSeed = optionalInteger(req.body.seed);
     const runtimeProvider = resolveSeedanceRuntimeProvider({
       preferredProvider: runtimeModelProviderPreferences.seedance,
       falKey: process.env.FAL_KEY,
@@ -5390,7 +5433,6 @@ app.post("/api/node/generate-video", async (req, res) => {
       const providerLabel = runtimeModelProviderPreferences.seedance === "krea" ? "Krea" : "Fal";
       return res.status(400).json({ error: `Seedance is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
     }
-
     let routeKind = "text-to-video";
     if (startFrameUrl) {
       routeKind = "image-to-video";
@@ -5403,17 +5445,31 @@ app.post("/api/node/generate-video", async (req, res) => {
         ? rewriteReferenceMentions(prompt, {
             imageNames: referenceImageNames,
             videoNames: referenceVideoNames
-          })
+          }, { bracketSyntax: seedance25 && runtimeProvider === "fal" })
         : prompt;
     if (runtimeProvider === "krea") {
       submittedPrompt = compactKreaSeedancePrompt(submittedPrompt);
     }
+    const referenceVideoDurationSeconds = seedance25 && routeKind === "reference-to-video"
+      ? await sumLocalMediaDurations(referenceVideoUrls)
+      : 0;
+    const referenceAudioDurationSeconds = seedance25 && routeKind === "reference-to-video"
+      ? await sumLocalMediaDurations(referenceAudioUrls)
+      : 0;
+    if (referenceVideoDurationSeconds > seedance25ReferenceLimits.videoSeconds) {
+      return res.status(400).json({ error: `Seedance 2.5 reference videos can be up to ${seedance25ReferenceLimits.videoSeconds} seconds total.` });
+    }
+    if (referenceAudioDurationSeconds > seedance25ReferenceLimits.audioSeconds) {
+      return res.status(400).json({ error: `Seedance 2.5 reference audio can be up to ${seedance25ReferenceLimits.audioSeconds} seconds total.` });
+    }
     let endpoint;
     let requestId;
-    let resultSeed = null;
+    let resultSeed = requestedSeed ?? null;
     let remoteVideo;
     let cost;
     let providerName;
+    let runtimeAspectRatio = aspectRatio;
+    let runtimeDurationSeconds = durationToSeconds(duration);
 
     if (runtimeProvider === "fal") {
       const input = {
@@ -5423,6 +5479,7 @@ app.post("/api/node/generate-video", async (req, res) => {
         aspect_ratio: aspectRatio,
         generate_audio: generateAudio
       };
+      if (Number.isInteger(requestedSeed)) input.seed = requestedSeed;
 
       if (routeKind === "image-to-video") {
         input.image_url = await uploadLocalOutputToFal(startFrameUrl);
@@ -5432,29 +5489,36 @@ app.post("/api/node/generate-video", async (req, res) => {
       if (routeKind === "reference-to-video") {
         if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
         if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
+        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, seedance25 ? seedance25ReferenceLimits.audios : 3).map(uploadLocalOutputToFal));
       }
 
-      endpoint = `bytedance/seedance-2.0/${routeKind}`;
+      endpoint = seedance25 ? seedance25Endpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
       const result = await subscribeFal(endpoint, { input, logs: true });
       requestId = result.requestId;
-      resultSeed = result?.data?.seed ?? null;
+      resultSeed = result?.data?.seed ?? requestedSeed ?? null;
       remoteVideo = result?.data?.video;
       providerName = "fal.ai";
-      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind });
+      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, modelName: selectedVideoModel.displayName, inputVideoDurationSeconds: referenceVideoDurationSeconds });
 
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
       }
     } else {
-      endpoint = kreaSeedanceEndpoint();
+      endpoint = kreaSeedanceEndpoint(undefined, selectedVideoModel.displayName);
+      const kreaAspectRatio = await resolveKreaSeedanceAspectRatio({
+        value: aspectRatio,
+        imageUrls: [startFrameUrl, ...referenceImageUrls]
+      });
+      runtimeAspectRatio = kreaAspectRatio;
+      runtimeDurationSeconds = seedance25 && duration === "auto" ? 5 : durationToSeconds(duration);
       const input = {
         prompt: submittedPrompt,
         resolution,
-        duration: durationToSeconds(duration),
-        aspect_ratio: aspectRatio,
+        duration: runtimeDurationSeconds,
+        aspect_ratio: kreaAspectRatio,
         generate_audio: generateAudio
       };
+      if (Number.isInteger(requestedSeed)) input.seed = requestedSeed;
 
       if (routeKind === "image-to-video") {
         input.start_image = await uploadKreaReferenceImage(startFrameUrl);
@@ -5462,9 +5526,12 @@ app.post("/api/node/generate-video", async (req, res) => {
       }
 
       if (routeKind === "reference-to-video") {
-        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, 9).map(uploadKreaReferenceImage));
-        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, 3).map(uploadLocalOutputToKrea));
-        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToKrea));
+        const imageLimit = seedance25 ? seedance25ReferenceLimits.images : 9;
+        const videoLimit = seedance25 ? seedance25ReferenceLimits.videos : 3;
+        const audioLimit = seedance25 ? seedance25ReferenceLimits.audios : 3;
+        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, imageLimit).map(uploadKreaReferenceImage));
+        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, videoLimit).map(uploadLocalOutputToKrea));
+        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, audioLimit).map(uploadLocalOutputToKrea));
       }
 
       const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
@@ -5472,21 +5539,46 @@ app.post("/api/node/generate-video", async (req, res) => {
       remoteVideo = kreaResult.remoteVideo;
       providerName = "Krea";
       cost = estimateKreaSeedanceCost({
-        durationSeconds: durationToSeconds(duration),
+        modelName: selectedVideoModel.displayName,
+        durationSeconds: runtimeDurationSeconds,
         resolution,
         hasVideoReference: referenceVideoUrls.length > 0
       });
-      cost.aspectRatio = aspectRatio;
+      cost.aspectRatio = kreaAspectRatio;
       cost.routeKind = routeKind;
     }
 
     const output = await downloadVideo(req, remoteVideo.url, routeKind, { stripAudio: !generateAudio });
+    if (seedance25) {
+      remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+      if (runtimeProvider === "fal") {
+        cost = estimateSeedanceCost({
+          duration,
+          durationSeconds: remoteVideo.duration,
+          inputVideoDurationSeconds: referenceVideoDurationSeconds,
+          resolution,
+          aspectRatio: runtimeAspectRatio,
+          endpoint,
+          routeKind,
+          modelName: selectedVideoModel.displayName
+        });
+      } else {
+        cost = estimateKreaSeedanceCost({
+          modelName: selectedVideoModel.displayName,
+          durationSeconds: positiveNumber(remoteVideo.duration) || runtimeDurationSeconds,
+          resolution,
+          hasVideoReference: referenceVideoUrls.length > 0
+        });
+        cost.aspectRatio = runtimeAspectRatio;
+        cost.routeKind = routeKind;
+      }
+    }
     await appendHistory({
       id: requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: providerName,
-      modelName: "Seedance 2.0",
+      modelName: selectedVideoModel.displayName,
       endpoint,
       mode: routeKindLabel(routeKind),
       prompt,
@@ -5520,7 +5612,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       seed: resultSeed,
       endpoint,
       provider: providerName,
-      modelName: "Seedance 2.0",
+      modelName: selectedVideoModel.displayName,
       submittedPrompt,
       cost,
       video: {
@@ -8575,9 +8667,9 @@ function normalizeReferenceNames(names, count, fallbackPrefix = "Image") {
   });
 }
 
-function rewriteReferenceMentions(prompt, referenceNames) {
+function rewriteReferenceMentions(prompt, referenceNames, { bracketSyntax = false } = {}) {
   if (Array.isArray(referenceNames)) {
-    return rewriteReferenceMentions(prompt, { imageNames: referenceNames });
+    return rewriteReferenceMentions(prompt, { imageNames: referenceNames }, { bracketSyntax });
   }
 
   const mentionMap = new Map();
@@ -8585,10 +8677,10 @@ function rewriteReferenceMentions(prompt, referenceNames) {
   const videoNames = referenceNames?.videoNames || [];
 
   imageNames.forEach((name, index) => {
-    mentionMap.set(name.toLowerCase(), `@Image${index + 1}`);
+    mentionMap.set(name.toLowerCase(), bracketSyntax ? `[Image${index + 1}]` : `@Image${index + 1}`);
   });
   videoNames.forEach((name, index) => {
-    mentionMap.set(name.toLowerCase(), `@Video${index + 1}`);
+    mentionMap.set(name.toLowerCase(), bracketSyntax ? `[Video${index + 1}]` : `@Video${index + 1}`);
   });
 
   return prompt.replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
@@ -8939,10 +9031,10 @@ function normalizeWorkflowPackageRegistration(value) {
   };
 }
 
-async function writeWorkflowPackage(workflow, packagePath) {
+async function writeWorkflowPackage(workflow, packagePath, options = {}) {
   await ensureWorkflowPackageDirs(packagePath);
   const workflowFileName = workflowFileNameForName(workflow.name || "workflow");
-  const assets = await copyWorkflowAssetsToPackage(workflow.graph, workflow.id, packagePath);
+  const assets = await copyWorkflowAssetsToPackage(workflow.graph, workflow.id, packagePath, options);
   const graph = rewriteWorkflowAssetUrls(workflow.graph, assets.urlMap);
   const updatedAt = new Date().toISOString();
   const packagedWorkflow = {
@@ -8984,7 +9076,7 @@ function legacyWorkflowPackageManifestPath(packagePath) {
   return path.join(packagePath, workflowPackageManifestFileName);
 }
 
-async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
+async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath, options = {}) {
   const urls = collectWorkflowAssetUrls(graph);
   const urlMap = new Map();
   const manifest = [];
@@ -9022,9 +9114,11 @@ async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
         fileName: targetName
       });
     } catch (error) {
+      if (options.detachMissingAssets) urlMap.set(publicPath, "");
       manifest.push({
         source: publicPath,
         missing: true,
+        detached: Boolean(options.detachMissingAssets),
         error: error.message || "Asset could not be copied."
       });
     }
@@ -9137,16 +9231,91 @@ async function relocatedExternalOutputFilePath(publicPath) {
     return "";
   }
 
+  const cacheKey = process.platform === "win32" ? path.resolve(originalPath).toLowerCase() : path.resolve(originalPath);
+  const cachedPath = relocatedExternalOutputCache.get(cacheKey);
+  if (cachedPath && existsSync(cachedPath)) return cachedPath;
+  relocatedExternalOutputCache.delete(cacheKey);
+
+  const userRebasedPath = currentUserExternalOutputPath(originalPath);
+  if (userRebasedPath && existsSync(userRebasedPath)) {
+    relocatedExternalOutputCache.set(cacheKey, userRebasedPath);
+    return userRebasedPath;
+  }
+
   const workflows = await readRegisteredWorkflowPackages();
   for (const workflow of workflows) {
     const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
     const candidates = workflowPackageAssetCandidatesForExternalFilePath(originalPath, packagePath);
     for (const relativePath of candidates) {
       const exactPath = await exactWorkflowPackageAssetFilePath(packagePath, relativePath);
-      if (exactPath) return exactPath;
+      if (exactPath) {
+        relocatedExternalOutputCache.set(cacheKey, exactPath);
+        return exactPath;
+      }
     }
   }
+
+  const fileName = path.basename(originalPath);
+  const nearbyMatch = await uniqueFileByNameUnderRoots(externalOutputSearchRoots(originalPath, workflows), fileName, 8);
+  if (nearbyMatch) {
+    relocatedExternalOutputCache.set(cacheKey, nearbyMatch);
+    return nearbyMatch;
+  }
+
   return "";
+}
+
+function currentUserExternalOutputPath(originalPath) {
+  const homePath = path.resolve(homedir());
+  if (!homePath || process.platform !== "win32") return "";
+  const match = String(originalPath || "").match(/^([A-Za-z]:\\Users\\)[^\\]+\\(.+)$/i);
+  if (!match) return "";
+  const nextPath = path.resolve(homePath, match[2]);
+  return nextPath !== path.resolve(originalPath) ? nextPath : "";
+}
+
+function externalOutputSearchRoots(originalPath, workflows = []) {
+  const roots = [];
+  const addRoot = (value) => {
+    const rootPath = String(value || "").trim();
+    if (!rootPath) return;
+    const parsed = path.parse(rootPath);
+    const resolvedPath = path.resolve(rootPath);
+    if (resolvedPath === parsed.root) return;
+    if (!existsSync(resolvedPath)) return;
+    try {
+      if (!statSync(resolvedPath).isDirectory()) return;
+    } catch {
+      return;
+    }
+    const key = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+    if (!roots.some((root) => (process.platform === "win32" ? root.toLowerCase() : root) === key)) {
+      roots.push(resolvedPath);
+    }
+  };
+
+  addExternalOutputPathParents(originalPath, addRoot);
+  const rebasedPath = currentUserExternalOutputPath(originalPath);
+  if (rebasedPath) addExternalOutputPathParents(rebasedPath, addRoot);
+
+  for (const workflow of workflows) {
+    const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+    if (!packagePath) continue;
+    addRoot(packagePath);
+    addRoot(path.dirname(packagePath));
+  }
+
+  return roots.slice(0, 24);
+}
+
+function addExternalOutputPathParents(filePath, addRoot) {
+  let current = path.dirname(String(filePath || ""));
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    addRoot(current);
+    const next = path.dirname(current);
+    if (!next || next === current) break;
+    current = next;
+  }
 }
 
 function tryLocalPublicPath(value) {
@@ -13174,14 +13343,32 @@ const seedanceResolutionDimensions = {
   }
 };
 
-function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind }) {
-  const seconds = durationToSeconds(duration);
-  const unitRateUsd = resolution === "4k"
-    ? seedance4KCostPerThousandTokens
-    : seedanceStandardCostPerThousandTokens;
+function estimateSeedanceCost({
+  duration,
+  durationSeconds,
+  inputVideoDurationSeconds = 0,
+  resolution,
+  aspectRatio,
+  endpoint,
+  routeKind,
+  modelName = "Seedance 2.0"
+}) {
+  const seedance25 = isSeedance25Model(modelName) || String(endpoint || "").includes("seedance-2.5");
+  const outputSeconds = positiveNumber(durationSeconds) || (seedance25 && duration === "auto" ? 30 : durationToSeconds(duration));
+  const inputSeconds = seedance25 && routeKind === "reference-to-video"
+    ? positiveNumber(inputVideoDurationSeconds) || 0
+    : 0;
+  const hasVideoReference = inputSeconds > 0;
+  const unitRateUsd = seedance25
+    ? seedance25CostPerThousandTokens
+    : resolution === "4k"
+      ? seedance4KCostPerThousandTokens
+      : seedanceStandardCostPerThousandTokens;
   const dimensions = seedanceBillingDimensions(resolution, aspectRatio);
-  const billableUnits = (dimensions.width * dimensions.height * seconds * seedanceBillingFps) / 1024 / 1000;
-  const amountUsd = roundCurrency(billableUnits * unitRateUsd);
+  const billableSeconds = outputSeconds + inputSeconds;
+  const billableUnits = (dimensions.width * dimensions.height * billableSeconds * seedanceBillingFps) / 1024 / 1000;
+  const videoReferenceMultiplier = seedance25 && hasVideoReference ? 0.6 : 1;
+  const amountUsd = roundCurrency(billableUnits * unitRateUsd * videoReferenceMultiplier);
 
   return {
     amountUsd,
@@ -13194,10 +13381,14 @@ function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, rou
     aspectRatio,
     billingWidth: dimensions.width,
     billingHeight: dimensions.height,
-    durationSeconds: seconds,
+    durationSeconds: outputSeconds,
+    inputVideoDurationSeconds: roundUsageUnits(inputSeconds),
     billingFps: seedanceBillingFps,
-    pricingBasis: "Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens",
-    pricingSource: "fal-model-page-2026-07-10",
+    videoReferenceMultiplier,
+    pricingBasis: seedance25
+      ? `Seedance 2.5 fal.ai token estimate: width * height * (${hasVideoReference ? "input + output" : "output"}) seconds * 24 / 1024, billed per 1K tokens${hasVideoReference ? " at the 0.6 video-reference multiplier" : ""}`
+      : "Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens",
+    pricingSource: seedance25 ? "fal-model-page-2026-08-08" : "fal-model-page-2026-07-10",
     routeKind
   };
 }
@@ -13839,6 +14030,19 @@ function normalizeWan27ReferenceAspectRatio(value) {
 function positiveNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+async function sumLocalMediaDurations(urls = []) {
+  const durations = await Promise.all(urls.map(async (url) => {
+    try {
+      const source = await resolveLocalAssetPath(url);
+      const metadata = await probeVideoFile(source.filePath);
+      return positiveNumber(metadata.duration) || 0;
+    } catch {
+      return 0;
+    }
+  }));
+  return durations.reduce((total, duration) => total + duration, 0);
 }
 
 function frameRateFromRatio(value) {
@@ -15655,6 +15859,15 @@ function resolveVideoModel(model) {
     };
   }
 
+  if (isSeedance25Model(model)) {
+    return {
+      provider: "fal-seedance-25",
+      displayName: seedance25ModelName,
+      id: `${seedance25EndpointRoot}/`,
+      speed: "seedance-2.5"
+    };
+  }
+
   return {
     provider: "fal-seedance",
     displayName: "Seedance 2.0",
@@ -15704,6 +15917,22 @@ async function firstImageDimensions(imagePromptUrls = []) {
   }
 
   return null;
+}
+
+async function resolveKreaSeedanceAspectRatio({ value, imageUrls = [] }) {
+  if (String(value || "").toLowerCase() !== "auto") return value;
+
+  const dimensions = await firstImageDimensions(imageUrls.filter(Boolean));
+  if (!dimensions) return "16:9";
+
+  return closestAspectRatio(dimensions.width / Math.max(1, dimensions.height), [
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ]);
 }
 
 function imageDimensionsFromBuffer(buffer, mimeType = "") {
@@ -18071,10 +18300,9 @@ function localPublicPathFromUrl(value) {
 
 async function resolveLocalAssetPath(publicPath) {
   if (String(publicPath || "").startsWith(`${externalOutputsPrefix}/`)) {
-    const filePath = externalOutputFilePathFromPublicPath(publicPath);
-    if (!existsSync(filePath)) {
-      throw httpError(400, `The referenced external output is no longer available: ${path.basename(filePath)}.`);
-    }
+    const requestedPath = externalOutputFilePathFromPublicPath(publicPath);
+    const filePath = existsSync(requestedPath) ? requestedPath : await relocatedExternalOutputFilePath(publicPath);
+    if (!filePath) throw httpError(400, `The referenced external output is no longer available: ${path.basename(requestedPath)}.`);
     return {
       fileName: path.basename(filePath),
       filePath
@@ -18087,7 +18315,8 @@ async function resolveLocalAssetPath(publicPath) {
     const relativePath = safeRelativeAssetPath(decodeURIComponent(packageMatch[2] || ""));
     if (!relativePath) throw new Error("Workflow package asset is not registered.");
 
-    const workflows = await findRegisteredWorkflowPackages(workflowId);
+    const registeredWorkflows = await readRegisteredWorkflowPackages();
+    const workflows = registeredWorkflowPackageCandidates(registeredWorkflows, workflowId);
     for (const workflow of workflows) {
       const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
       const exactFilePath = await exactWorkflowPackageAssetFilePath(packagePath, relativePath);
@@ -18118,9 +18347,18 @@ async function resolveLocalAssetPath(publicPath) {
       };
     }
 
+    const fallbackPath = await uniqueWorkflowPackageAssetFilePath(registeredWorkflows, relativePath);
+    if (fallbackPath) {
+      return {
+        fileName: path.basename(fallbackPath),
+        filePath: fallbackPath
+      };
+    }
+
     if (!workflows.length) {
       throw new Error("Workflow package is not registered. Reopen the workflow package, then try again.");
     }
+
     throw new Error(`Workflow package asset could not be found: ${path.basename(relativePath)}. Restore the file inside the package or reconnect the source asset.`);
   }
 

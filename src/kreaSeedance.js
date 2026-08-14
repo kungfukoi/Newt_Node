@@ -2,6 +2,7 @@ import {
   extractKreaJobResultUrl,
   kreaApiBaseUrl
 } from "./kreaApi.js";
+import { isSeedance25Model } from "./seedance25.js";
 
 export { extractKreaJobResultUrl, kreaApiBaseUrl };
 export const kreaSeedancePromptBudget = 4000;
@@ -33,7 +34,8 @@ export function resolveSeedanceRuntimeProvider({ preferredProvider, falKey, krea
   return "";
 }
 
-export function kreaSeedanceEndpoint(speed) {
+export function kreaSeedanceEndpoint(speed, modelName = "Seedance 2.0") {
+  if (isSeedance25Model(modelName)) return "/generate/video/bytedance/seedance-2-5";
   return speed === "fast"
     ? "/generate/video/bytedance/seedance-2-fast"
     : "/generate/video/bytedance/seedance-2";
@@ -136,7 +138,26 @@ function clipUtf8End(value, maxBytes) {
   return text.slice(-low);
 }
 
-export function estimateKreaSeedanceCost({ speed, durationSeconds, resolution, hasVideoReference }) {
+export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, durationSeconds, resolution, hasVideoReference }) {
+  if (isSeedance25Model(modelName)) {
+    const seconds = Math.max(4, Math.min(30, Number(durationSeconds) || 5));
+    const normalizedResolution = resolution === "480p" ? "480p" : "720p";
+    const rate = normalizedResolution === "480p"
+      ? hasVideoReference ? 0.0645 : 0.1078
+      : hasVideoReference ? 0.1452 : 0.2427;
+    return {
+      amountUsd: roundCurrency(seconds * rate),
+      currency: "USD",
+      unitRateUsd: rate,
+      units: seconds,
+      unit: "second",
+      mediaType: "video",
+      resolution: normalizedResolution,
+      durationSeconds: seconds,
+      pricingBasis: `Krea Seedance 2.5 per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
+      pricingSource: "krea-openapi-2026-08-08"
+    };
+  }
   const tier = speed === "fast" ? "fast" : "standard";
   const fallbackResolution = "720p";
   const normalizedResolution = kreaSeedanceRates[tier][resolution] ? resolution : fallbackResolution;

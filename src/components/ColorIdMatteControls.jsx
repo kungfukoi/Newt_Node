@@ -2,6 +2,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { loadCanvasImage } from "../canvasMedia.js";
+import { displayMediaUrl } from "../mediaAssets.js";
 import {
   averageColorFromImageData,
   colorIdMatteBlur,
@@ -31,20 +32,21 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
   const sampleRadius = colorIdMatteSampleRadius(node.data.colorIdMatteSampleRadius);
   const invert = Boolean(node.data.colorIdMatteInvert);
   const selectedHex = selectedColor ? rgbToHex(selectedColor) : "None";
+  const displayImageUrl = displayMediaUrl(imageUrl);
 
   React.useEffect(() => {
     let cancelled = false;
 
     async function drawPicker() {
       const canvas = canvasRef.current;
-      if (!canvas || !imageUrl) {
+      if (!canvas || !displayImageUrl) {
         sourceImageDataRef.current = null;
         matteImageDataRef.current = null;
         return;
       }
 
       try {
-        const image = await loadCanvasImage(imageUrl);
+        const image = await loadCanvasImage(displayImageUrl);
         if (cancelled) return;
 
         const sourceImageData = drawColorIdMattePickerCanvas(canvas, image);
@@ -79,7 +81,7 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerOpen, pickerView]);
+  }, [displayImageUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerOpen, pickerView]);
 
   function pickColor(event, canvas = canvasRef.current) {
     const imageData = sourceImageDataRef.current;
@@ -203,11 +205,12 @@ export function ColorIdMatteVideoPicker({
   const outputFormat = normalizeChoice(node.data.colorIdMatteOutputFormat, outputOptions.map(([value]) => value), "mp4");
   const selectedHex = selectedColor ? rgbToHex(selectedColor) : "None";
   const sliderMax = duration ? Math.max(0, duration - 0.01) : Math.max(1, currentTime);
+  const displayVideoUrl = displayMediaUrl(videoUrl);
 
   const drawVideoFrame = React.useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!canvas || !videoUrl || !video?.videoWidth || !video?.videoHeight) {
+    if (!canvas || !displayVideoUrl || !video?.videoWidth || !video?.videoHeight) {
       sourceImageDataRef.current = null;
       return;
     }
@@ -231,7 +234,7 @@ export function ColorIdMatteVideoPicker({
       sourceImageDataRef.current = null;
       setPickerStatus(error.message || "Could not read video frame.");
     }
-  }, [videoUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerView]);
+  }, [displayVideoUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerView]);
 
   React.useEffect(() => {
     setDuration(0);
@@ -341,7 +344,7 @@ export function ColorIdMatteVideoPicker({
       {videoUrl && (
         <video
           ref={videoRef}
-          src={videoUrl}
+          src={displayVideoUrl}
           preload="metadata"
           muted
           playsInline

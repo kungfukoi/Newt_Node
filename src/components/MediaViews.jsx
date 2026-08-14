@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
-import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
+import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
@@ -48,7 +48,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
     const itemIndex = Math.max(0, normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image").findIndex((item) => item.url === node.data.resultUrl));
     return (
       <div
-        className="media-preview"
+        className="media-preview aspect-safe-media-frame"
         draggable
         onPointerDown={(event) => event.stopPropagation()}
         onDragStart={startPreviewDrag}
@@ -76,7 +76,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   if (node.type === "video") {
     return (
       <div
-        className="media-preview"
+        className="media-preview aspect-safe-media-frame"
         draggable
         onPointerDown={stopPreviewPointer}
         onDragStart={startVideoPreviewDrag}
@@ -1781,7 +1781,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   }
 
   return (
-    <div className={`result-pane ${items.length ? "has-result" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
+    <div className={`result-pane ${items.length ? "has-result aspect-safe-media-frame" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
       {activeItem && (
         <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
           <div
@@ -1884,9 +1884,44 @@ function StableResultImage({ item, src, alt }) {
 
 export function useNewtNodeImageFallback(event) {
   const image = event.currentTarget;
-  if (image.src.endsWith("/newtnode-logo.png")) return;
+  if (image.src.endsWith("/newtnode-logo.png")) {
+    const retryUrl = displayMediaUrl(image.getAttribute("data-full-resolution-url") || "");
+    if (!retryUrl) return;
+    image.classList.remove("newtnode-logo-fallback");
+    image.src = retryUrl;
+    return;
+  }
+  const fullResolutionUrl = displayMediaUrl(image.getAttribute("data-full-resolution-url") || "");
+  const fallbackUrl = nextFullResolutionImageFallback(
+    image.getAttribute("src") || image.currentSrc || image.src,
+    fullResolutionUrl,
+    image.getAttribute(fullResolutionFallbackAttemptAttribute) || ""
+  );
+  if (fallbackUrl) {
+    image.setAttribute(fullResolutionFallbackAttemptAttribute, fallbackUrl);
+    image.classList.remove("newtnode-logo-fallback");
+    image.addEventListener("load", clearNewtNodeImageFallback, { once: true });
+    image.src = fallbackUrl;
+    return;
+  }
   image.classList.add("newtnode-logo-fallback");
   image.src = "/newtnode-logo.png";
+}
+
+function clearNewtNodeImageFallback(event) {
+  const image = event.currentTarget;
+  image.classList.remove("newtnode-logo-fallback");
+  image.removeAttribute(fullResolutionFallbackAttemptAttribute);
+}
+
+export function retryNewtNodeImageFallback(image) {
+  const fullResolutionUrl = displayMediaUrl(image?.getAttribute?.("data-full-resolution-url") || "");
+  if (!image || !fullResolutionUrl) return false;
+  image.removeAttribute(fullResolutionFallbackAttemptAttribute);
+  image.classList.remove("newtnode-logo-fallback");
+  image.addEventListener("load", clearNewtNodeImageFallback, { once: true });
+  image.src = fullResolutionUrl;
+  return true;
 }
 
 export function useNewtNodeVideoFallback(event) {

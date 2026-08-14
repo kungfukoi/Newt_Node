@@ -23,7 +23,7 @@ test("remapImportedGraph remaps node, edge, and group ids with an offset", () =>
   const graph = {
     nodes: [
       { id: "a", type: "image", x: 10, y: 20, data: { title: "A" } },
-      { id: "b", type: "video", x: 30, y: 40, data: { title: "B" } }
+      { id: "b", type: "video", x: 30, y: 40, data: { title: "B", nodeReferenceBindings: { a: "a" } } }
     ],
     edges: [{ id: "edge-1", from: { nodeId: "a", port: "imageOut" }, to: { nodeId: "b", port: "videoIn" }, color: "#fff" }],
     groups: [{ id: "group-1", x: 0, y: 0, width: 100, height: 100, nodeIds: ["a", "b"] }]
@@ -36,6 +36,7 @@ test("remapImportedGraph remaps node, edge, and group ids with an offset", () =>
   assert.equal(remapped.nodes[1].y, 240);
   assert.equal(remapped.edges[0].from.nodeId, remapped.nodes[0].id);
   assert.equal(remapped.edges[0].to.nodeId, remapped.nodes[1].id);
+  assert.equal(remapped.nodes[1].data.nodeReferenceBindings.a, remapped.nodes[0].id);
   assert.deepEqual(remapped.groups[0].nodeIds, remapped.nodes.map((node) => node.id));
 });
 

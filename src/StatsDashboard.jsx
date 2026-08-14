@@ -761,6 +761,12 @@ const seedanceResolutionDimensions = {
 };
 
 function estimateSeedanceStatsCost(item, settings, pricing) {
+  const modelKey = [item.modelName, item.endpoint].filter(Boolean).join(" ").toLowerCase();
+  if (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5")) {
+    const storedCost = numericCostAmount(item.cost);
+    if (storedCost !== null) return storedCost;
+    if (String(item.provider || "").toLowerCase().includes("krea")) return null;
+  }
   const seedancePricing = pricing.seedance || defaultPricing.seedance;
   const isFast = settings.speed === "fast" || String(item.endpoint || "").includes("/fast/");
   const fallbackTokenRate =
@@ -951,6 +957,7 @@ function inferModelName(item, mediaType) {
   if (mediaType === "image") return "Nano Banana Pro";
   if (mediaType === "text") return item.settings?.model || "Text processing";
   if (mediaType === "model3d") return "Hunyuan 3D 3.1 Pro";
+  if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
   return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";
 }
 

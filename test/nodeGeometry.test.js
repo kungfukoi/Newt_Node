@@ -7,6 +7,8 @@ import {
   edgePathData,
   estimatedNodeRect,
   estimatedNodeWidth,
+  maximumResizableNodeHeight,
+  minimumResizableNodeHeight,
   normalizedNodeWidth,
   normalizedNodeHeight,
   graphBoundsForNodes,
@@ -31,10 +33,13 @@ test("custom node sizes are clamped and included in estimated bounds", () => {
   assert.equal(normalizedNodeWidth(120, "text"), estimatedNodeWidth("text"));
   assert.equal(normalizedNodeWidth(500, "storyboard"), 920);
   assert.equal(normalizedNodeWidth(5000, "text"), 2400);
+  assert.equal(normalizedNodeWidth(5000, "preview"), 5000);
+  assert.equal(normalizedNodeWidth(20000, "preview"), 12000);
   assert.equal(normalizedNodeWidth("not-a-width", "text"), null);
   assert.equal(normalizedNodeHeight(640), 640);
   assert.equal(normalizedNodeHeight(80), 180);
   assert.equal(normalizedNodeHeight(5000), 3000);
+  assert.equal(normalizedNodeHeight(8000, minimumResizableNodeHeight("preview"), maximumResizableNodeHeight("preview")), 8000);
   assert.equal(normalizedNodeHeight("not-a-height"), null);
   assert.deepEqual(
     estimatedNodeRect({
@@ -47,6 +52,13 @@ test("custom node sizes are clamped and included in estimated bounds", () => {
   );
 });
 
+test("media-bearing nodes keep enough height for an uncropped preview", () => {
+  assert.equal(minimumResizableNodeHeight("imageModel"), 320);
+  assert.equal(minimumResizableNodeHeight("preview"), 280);
+  assert.equal(minimumResizableNodeHeight("image"), 250);
+  assert.equal(minimumResizableNodeHeight("text"), 180);
+  assert.equal(normalizedNodeHeight(120, minimumResizableNodeHeight("imageModel")), 320);
+});
 test("rectsOverlap detects separated and overlapping rectangles", () => {
   assert.equal(rectsOverlap({ left: 0, top: 0, right: 10, bottom: 10 }, { left: 9, top: 9, right: 20, bottom: 20 }), true);
   assert.equal(rectsOverlap({ left: 0, top: 0, right: 10, bottom: 10 }, { left: 10, top: 10, right: 20, bottom: 20 }), false);

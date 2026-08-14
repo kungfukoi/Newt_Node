@@ -1,4 +1,16 @@
+import {
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ModelName,
+  seedance25ResolutionOptions
+} from "./seedance25.js";
+
 export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
+export {
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions
+};
 
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
@@ -138,6 +150,7 @@ export const qwenCameraDefaults = {
 
 export const videoModelNames = {
   seedance: "Seedance 2.0",
+  seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
@@ -149,6 +162,7 @@ export const videoModelNames = {
 };
 export const videoModelOptions = [
   videoModelNames.seedance,
+  videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,

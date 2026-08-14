@@ -2,6 +2,7 @@ export const outputDragMime = "application/x-newtnode-output";
 export const outputDragEndEvent = "newtnode-output-drag-end";
 export const fullResolutionContextPreparedAttribute = "data-full-resolution-context-prepared";
 export const fullResolutionPreviewSourceAttribute = "data-full-resolution-preview-source";
+export const fullResolutionFallbackAttemptAttribute = "data-full-resolution-fallback-attempt";
 const outputDragWindowKey = "__newtNodeDraggedOutputItem";
 const externalOutputsPrefix = "/external-outputs/";
 const localApiPort = String(import.meta.env?.VITE_API_PORT || "3336");
@@ -10,6 +11,7 @@ const outputMediaTypes = new Set(["image", "video", "audio", "model3d", "text"])
 const imageFileExtensionPattern = /\.(png|jpe?g|webp|gif)$/i;
 const videoFileExtensionPattern = /\.(mp4|mov|qt|webm)$/i;
 const audioFileExtensionPattern = /\.(mp3|wav|m4a|aac|ogg)$/i;
+const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
 
 export function isLocalOutputUrl(value) {
   if (typeof value !== "string") return false;
@@ -92,18 +94,45 @@ export function displayMediaUrl(itemOrUrl) {
       || itemOrUrl
       || ""
   ).trim();
-  if (!sourceUrl || /^(?:blob:|data:|https?:)/i.test(sourceUrl)) return sourceUrl;
-  if (shouldUseLocalVideoPreview(sourceUrl)) {
-    return `/api/video-preview?url=${encodeURIComponent(sourceUrl)}`;
-  }
-  if (!sourceUrl.startsWith(externalOutputsPrefix)) return sourceUrl;
+  if (!sourceUrl || /^(?:blob:|data:)/i.test(sourceUrl)) return sourceUrl;
+
+  const displayUrl = shouldUseLocalVideoPreview(sourceUrl)
+    ? `/api/video-preview?url=${encodeURIComponent(sourceUrl)}`
+    : sourceUrl;
+  const localPath = localApiServedMediaPath(displayUrl);
+  if (!localPath) return displayUrl;
   if (typeof window === "undefined" || !window.location) return sourceUrl;
 
-  const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
   if (!localHosts.has(window.location.hostname)) return sourceUrl;
-  if (!localApiPort || window.location.port === localApiPort) return sourceUrl;
+  const absoluteLocalUrl = /^https?:\/\//i.test(displayUrl);
+  if (!localApiPort || (window.location.port === localApiPort && !absoluteLocalUrl)) return displayUrl;
 
-  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${sourceUrl}`;
+  return `${window.location.protocol}//${window.location.hostname}:${localApiPort}${localPath}`;
+}
+
+function localApiServedMediaPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (isApiServedMediaPath(raw)) return raw;
+
+  try {
+    const parsed = new URL(raw, "http://newtnode.local");
+    if (!localHosts.has(parsed.hostname)) return "";
+    const pathWithQuery = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    return isApiServedMediaPath(pathWithQuery) ? pathWithQuery : "";
+  } catch {
+    return "";
+  }
+}
+
+function isApiServedMediaPath(value) {
+  const clean = String(value || "").split("?")[0].split("#")[0];
+  return clean === "/api/media-thumbnail"
+    || clean === "/api/video-preview"
+    || clean.startsWith("/uploads/")
+    || clean.startsWith("/outputs/")
+    || clean.startsWith(externalOutputsPrefix)
+    || /^\/workflow-assets\/[^/]+\//.test(clean);
 }
 
 function shouldUseLocalVideoPreview(value) {
@@ -136,6 +165,29 @@ export function fullResolutionImageProps(itemOrUrl, fileName = "") {
         || "image"
     ).trim()
   };
+}
+
+export function nextFullResolutionImageFallback(currentUrl, fullResolutionUrl, attemptedUrl = "") {
+  const current = comparableMediaUrl(currentUrl);
+  const fullResolution = comparableMediaUrl(fullResolutionUrl);
+  const attempted = comparableMediaUrl(attemptedUrl);
+  if (!fullResolution || current === fullResolution || attempted === fullResolution) return "";
+  return String(fullResolutionUrl || "").trim();
+}
+
+function comparableMediaUrl(value) {
+  const source = String(value || "").trim();
+  if (!source) return "";
+
+  try {
+    const parsed = new URL(source, "http://newtnode.local");
+    if (parsed.origin === "http://newtnode.local" || ["127.0.0.1", "localhost", "0.0.0.0"].includes(parsed.hostname)) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.href;
+  } catch {
+    return source;
+  }
 }
 
 export function prepareFullResolutionImageForNativeSave(image) {
