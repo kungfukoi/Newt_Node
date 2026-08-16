@@ -51,6 +51,7 @@ import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
+import { GenerationProgress } from "./components/GenerationProgress.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import {
   Model3DViewer,
@@ -65,6 +66,8 @@ import {
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
+import { createGenerationGroupId } from "./generationProgress.js";
+import { runTrackedGeneration } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
 import {
@@ -315,7 +318,7 @@ import {
   normalizeVideoGenerationResult,
   videoModelSupportsFilmDirector
 } from "./nodeRunners/videoModels.js";
-import { buildProjectOutputItems } from "./projectOutputs.js";
+import { adjacentProjectOutputImage, buildProjectOutputItems } from "./projectOutputs.js";
 import { isOutputSinkConnection, outputAcceptedSourceKinds } from "./outputConnections.js";
 import { insertOutputToken, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
@@ -1173,6 +1176,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [outputHistory, setOutputHistory] = React.useState([]);
   const [defaultProjectOutputPath, setDefaultProjectOutputPath] = React.useState("");
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
+  const [previewLightboxSource, setPreviewLightboxSource] = React.useState("");
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const selectedEdgeIdRef = React.useRef(null);
@@ -1317,6 +1321,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
     [nodes, outputHistory, projectId, projectName]
   );
+  const openPreviewLightbox = React.useCallback((item) => {
+    setPreviewLightboxSource("");
+    setPreviewLightboxItem(item);
+  }, []);
+  const openProjectOutputPreview = React.useCallback((item) => {
+    setPreviewLightboxSource("projectOutputs");
+    setPreviewLightboxItem(item);
+  }, []);
+  const closePreviewLightbox = React.useCallback(() => {
+    setPreviewLightboxItem(null);
+    setPreviewLightboxSource("");
+  }, []);
+  const navigateProjectOutputPreview = React.useCallback((direction) => {
+    setPreviewLightboxItem((current) => adjacentProjectOutputImage(projectOutputs, current, direction) || current);
+  }, [projectOutputs]);
 
   React.useLayoutEffect(() => {
     nodesRef.current = nodes;
@@ -6294,6 +6313,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
+    const generationGroupId = ["text", "imageModel", "videoModel"].includes(currentNode.type)
+      ? createGenerationGroupId(currentNode.type)
+      : "";
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
@@ -6360,7 +6382,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           sourceLabel,
           promptPiecesForSource,
           text: resolvedText,
-          nodeReferences
+          nodeReferences,
+          generationGroupId
         });
         updateNode(currentNode.id, {
           status: "complete",
@@ -6697,7 +6720,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             aspectRatio,
             imagePromptItems,
             workflowContext: requestContext,
-            index
+            index,
+            generationGroupId,
+            batchTotal: batchCount
           }),
           imageRunStaggerMs
         );
@@ -6761,7 +6786,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           incoming: videoIncoming,
           incomingByNode: currentIncomingByNode,
           workflowContext: requestContext,
-          index
+          index,
+          generationGroupId,
+          batchTotal: batchCount
         })
       );
       const settled = await Promise.allSettled(runs);
@@ -6947,7 +6974,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onStoryboardCharacterRemove={removeStoryboardCharacter}
         onUndoSnapshot={pushUndoSnapshot}
         onPreviewResizeStart={startPreviewResize}
-        onPreviewOpen={setPreviewLightboxItem}
+        onPreviewOpen={openPreviewLightbox}
         onPreviewLayoutExport={exportPreviewLayoutBoard}
         onOpenComposer={setComposerEditorNodeId}
         onFrameItCapture={captureFrameItFrame}
@@ -7001,9 +7028,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {previewLightboxItem && (
         <OutputPreviewLightbox
           item={previewLightboxItem}
+          navigationKey={previewLightboxSource === "projectOutputs" ? previewLightboxItem.id || previewLightboxItem.url : ""}
+          onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : undefined}
           onApplyImageEdit={applyPreviewLayoutImageEdit}
           onRestoreImageEdit={restorePreviewLayoutImageEdit}
-          onClose={() => setPreviewLightboxItem(null)}
+          onClose={closePreviewLightbox}
         />
       )}
       {toolbarCollapsed && (
@@ -7234,7 +7263,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onStoryboardCharacterRemove={removeStoryboardCharacter}
                 onUndoSnapshot={pushUndoSnapshot}
                 onPreviewResizeStart={startPreviewResize}
-                onPreviewOpen={setPreviewLightboxItem}
+                onPreviewOpen={openPreviewLightbox}
                 onPreviewLayoutExport={exportPreviewLayoutBoard}
                 onOpenComposer={setComposerEditorNodeId}
                 onFrameItCapture={captureFrameItFrame}
@@ -7295,7 +7324,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onClose={() => setOutputsCollapsed(true)}
           onOpenFolder={openProjectOutputFolder}
           onRefresh={loadOutputHistory}
-          onPreviewOpen={setPreviewLightboxItem}
+          onPreviewOpen={openProjectOutputPreview}
           openFolderBusy={openingOutputFolder}
           outputDragMime={outputDragMime}
         />
@@ -14194,6 +14223,7 @@ function NodeBody({
             ))}
           </div>
         )}
+        <GenerationProgress nodeId={node.id} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
           {running ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...` : "Run Image"}
         </button>
@@ -14391,6 +14421,7 @@ function NodeBody({
         error={node.data.error}
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
       />
+      <GenerationProgress nodeId={node.id} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...` : "Run Video"}
       </button>
@@ -19823,7 +19854,7 @@ function connected3DViewUrls(incoming = {}) {
   );
 }
 
-async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index }) {
+async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
   const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
   const characterReferences = connectedCharacterReferences(characterConnections);
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
@@ -19833,23 +19864,34 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
   ]);
   const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
-  const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
-    node,
-    prompt,
-    workflowContext,
-    projectId,
-    projectName,
-    startFrameUrls: connectedAssetUrls(incoming.startFrameIn),
-    endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
-    referenceImageUrls: referenceImageItems.map((item) => item.url),
-    referenceImageLabels: referenceImageItems.map((item) => item.label),
-    characterReferenceUrls: characterReferences.map((item) => item.url),
-    characterReferenceLabels: characterReferences.map((item) => item.label),
-    referenceVideoUrls: referenceVideoItems.map((item) => item.url),
-    referenceVideoLabels: referenceVideoItems.map((item) => item.label),
-    referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode),
-    outputTargetIndex: String((Number(index) || 0) + 1)
+  const { response, data } = await runTrackedGeneration({
+    nodeId: node.id,
+    nodeTitle: node.data.title,
+    kind: "video",
+    label: node.data.model || "Video generation",
+    groupId: generationGroupId,
+    batchIndex: index + 1,
+    batchTotal
+  }, (progress) => nodeApi.generateVideo({
+    ...buildVideoGenerationRequest({
+      node,
+      prompt,
+      workflowContext,
+      projectId,
+      projectName,
+      startFrameUrls: connectedAssetUrls(incoming.startFrameIn),
+      endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
+      referenceImageUrls: referenceImageItems.map((item) => item.url),
+      referenceImageLabels: referenceImageItems.map((item) => item.label),
+      characterReferenceUrls: characterReferences.map((item) => item.url),
+      characterReferenceLabels: characterReferences.map((item) => item.label),
+      referenceVideoUrls: referenceVideoItems.map((item) => item.url),
+      referenceVideoLabels: referenceVideoItems.map((item) => item.label),
+      referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
+      filmDirector: directorPackageForVideo(directorSource, incomingByNode),
+      outputTargetIndex: String((Number(index) || 0) + 1)
+    }),
+    ...progress
   }));
   if (!response.ok) {
     throw new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`);

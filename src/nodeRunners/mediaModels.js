@@ -1,9 +1,18 @@
 import { nodeApi } from "../api/newtApi.js";
 import { characterSheetGenerationSettings } from "../characterSheetModels.js";
 import { workflowContextPayload } from "../workflowContext.js";
+import { runTrackedGeneration } from "../generationProgressStore.js";
 
-export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index }) {
-  const { response, data } = await nodeApi.generateImage({
+export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index, generationGroupId, batchTotal = 1 }) {
+  const { response, data } = await runTrackedGeneration({
+    nodeId: node.id,
+    nodeTitle: node.data.title,
+    kind: "image",
+    label: node.data.model || "Image generation",
+    groupId: generationGroupId,
+    batchIndex: index + 1,
+    batchTotal
+  }, (progress) => nodeApi.generateImage({
     prompt,
     model: node.data.model,
     aspectRatio: aspectRatio || node.data.aspectRatio,
@@ -17,8 +26,9 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     ...workflowContextPayload(workflowContext),
     outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
-    nodeTitle: node.data.title
-  });
+    nodeTitle: node.data.title,
+    ...progress
+  }));
   if (!response.ok) {
     throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
   }

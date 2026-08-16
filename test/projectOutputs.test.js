@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildProjectOutputItems } from "../src/projectOutputs.js";
+import { adjacentProjectOutputImage, buildProjectOutputItems } from "../src/projectOutputs.js";
+
+test("project output image navigation skips other media and wraps", () => {
+  const items = [
+    { id: "image-1", type: "image", url: "/outputs/one.png" },
+    { id: "video-1", type: "video", url: "/outputs/movie.mp4" },
+    { id: "image-2", type: "image", url: "/outputs/two.png" }
+  ];
+
+  assert.equal(adjacentProjectOutputImage(items, items[0], 1)?.id, "image-2");
+  assert.equal(adjacentProjectOutputImage(items, items[2], 1)?.id, "image-1");
+  assert.equal(adjacentProjectOutputImage(items, items[0], -1)?.id, "image-2");
+  assert.equal(adjacentProjectOutputImage(items, items[1], 1), null);
+});
 
 test("buildProjectOutputItems includes Transition Builder history influence outputs", () => {
   const refinedUrl = "/workflow-assets/project/outputs/transition-mask-influenced-morph.mp4";

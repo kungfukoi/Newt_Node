@@ -6,6 +6,10 @@
 }
 
 .newt-react-flow .react-flow__viewport {
+  will-change: auto;
+}
+
+.node-canvas.is-navigating:not(.is-distant-zoom) .newt-react-flow .react-flow__viewport {
   will-change: transform;
 }
 
@@ -87,6 +91,15 @@
   stroke-width: 4px;
   opacity: 0.96;
   filter: drop-shadow(0 0 4px rgba(244, 240, 232, 0.5));
+}
+
+.node-canvas.is-distant-zoom .newt-react-flow .node-card,
+.node-canvas.is-distant-zoom .newt-flow-group-layer .node-group-backdrop {
+  box-shadow: none;
+}
+
+.node-canvas.is-distant-zoom .newt-flow-edge.selected .newt-flow-edge-visible {
+  filter: none;
 }
 
 .newt-flow-edge.inactive .newt-flow-edge-visible {

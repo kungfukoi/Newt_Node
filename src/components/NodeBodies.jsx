@@ -12,6 +12,7 @@ import {
   switchFilmDirectorScene
 } from "../filmDirectorScenes.js";
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
+import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
@@ -78,6 +79,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
           </label>
         )}
       </div>
+      <GenerationProgress nodeId={node.id} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
         {running ? "Running..." : "Run Text Model"}
       </button>

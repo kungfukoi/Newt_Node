@@ -1,5 +1,6 @@
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
+import { runTrackedGeneration } from "../generationProgressStore.js";
 
 export async function runTextNodeProcessing({
   node,
@@ -8,9 +9,18 @@ export async function runTextNodeProcessing({
   sourceLabel,
   promptPiecesForSource,
   text,
-  nodeReferences = {}
+  nodeReferences = {},
+  generationGroupId = ""
 }) {
-  const { response, data } = await nodeApi.processText({
+  const { response, data } = await runTrackedGeneration({
+    nodeId: node.id,
+    nodeTitle: node.data.title,
+    kind: "text",
+    label: "Text Model",
+    groupId: generationGroupId,
+    batchIndex: 1,
+    batchTotal: 1
+  }, (progress) => nodeApi.processText({
     text: text ?? node.data.text,
     textInputs: [
       ...normalizedReferenceInputs(nodeReferences.textInputs),
@@ -27,8 +37,9 @@ export async function runTextNodeProcessing({
     ],
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
-    nodeTitle: node.data.title
-  });
+    nodeTitle: node.data.title,
+    ...progress
+  }));
   if (!response.ok) throw new Error(data.error || "Text processing failed.");
 
   return {

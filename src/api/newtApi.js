@@ -169,6 +169,12 @@ export const statsApi = {
   }
 };
 
+export const generationProgressApi = {
+  list() {
+    return getJson("/api/generation-progress", "Could not load generation progress.");
+  }
+};
+
 export const generationApi = {
   generateVideo(form) {
     return postForm("/api/generate", form, "Generation failed.");

@@ -421,7 +421,7 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onRestoreImageEdit }) {
+export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit }) {
   const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
@@ -685,6 +685,21 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
         return;
       }
       if (
+        (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+        !commandKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        displayItem.type === "image" &&
+        typeof onNavigate === "function" &&
+        !previewEditorKeyTargetIsTyping(event.target)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        onNavigate(event.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
+      if (
         event.key === "Enter" &&
         !commandKey &&
         !event.altKey &&
@@ -710,7 +725,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode]);
+  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode]);
 
   React.useEffect(() => {
     setCropMode(false);
@@ -738,7 +753,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     committedRedoStackRef.current = [];
     toneSliderSnapshotRef.current = null;
     textChangeSnapshotRef.current = null;
-  }, [item?.editContext?.nodeId, item?.editContext?.itemId]);
+  }, [item?.editContext?.nodeId, item?.editContext?.itemId, navigationKey]);
 
   React.useEffect(() => {
     if (!curvesMode || displayItem.type !== "image" || !displayItem.url) {

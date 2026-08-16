@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  flowOnlyRenderVisibleElements,
   flowOverviewEnabled,
   flowRenderMode,
   shouldUseFlowOverview
@@ -8,6 +9,7 @@ import {
 
 test("semantic proxy rendering is disabled at every workflow size and zoom", () => {
   assert.equal(flowOverviewEnabled, false);
+  assert.equal(flowOnlyRenderVisibleElements, false);
   assert.equal(flowRenderMode(271, 0.28, "compact"), "detail");
   assert.equal(flowRenderMode(271, 0.05, "map"), "detail");
   assert.equal(flowRenderMode(1000, 0.001, "map"), "detail");

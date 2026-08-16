@@ -1732,7 +1732,7 @@
   overflow: hidden;
 }
 
-.node-card.custom-node-height > :is(.model-node-body, .media-node-body, .composer-node-body, .preview-node-body, .storyboard-node-body, .character-node-body, .frame-it-node-body) > :is(.port-row, .node-row, .run-node-button, .media-upload-card, .composer-input-list, .preview-tabs, .preview-frame-nav, .preview-result-browser, .storyboard-topbar, .character-topbar, .frame-it-view-tabs, small) {
+.node-card.custom-node-height > :is(.model-node-body, .media-node-body, .composer-node-body, .preview-node-body, .storyboard-node-body, .character-node-body, .frame-it-node-body) > :is(.port-row, .node-row, .run-node-button, .generation-progress, .media-upload-card, .composer-input-list, .preview-tabs, .preview-frame-nav, .preview-result-browser, .storyboard-topbar, .character-topbar, .frame-it-view-tabs, small) {
   flex: 0 0 auto;
 }
 
@@ -8584,6 +8584,64 @@ video.newtnode-video-fallback {
 .run-node-button.running:disabled {
   cursor: wait;
 }
+
+.generation-progress {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  margin: -2px 0 10px;
+  color: rgba(244, 240, 232, 0.72);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
+  letter-spacing: 0;
+}
+
+.generation-progress-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.generation-progress-labels span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-progress-track {
+  position: relative;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.generation-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #ddc631;
+  transition: width 180ms ease;
+}
+
+.generation-progress.indeterminate .generation-progress-fill {
+  width: 8%;
+}
+
+.generation-progress.completed .generation-progress-fill {
+  background: #35d07f;
+}
+
+.generation-progress.failed .generation-progress-fill {
+  width: 100%;
+  background: #e95d55;
+  animation: none;
+}
+
 
 .node-row {
   display: grid;

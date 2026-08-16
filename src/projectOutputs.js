@@ -57,6 +57,19 @@ export function buildProjectOutputItems({
     .slice(0, maxItems);
 }
 
+export function adjacentProjectOutputImage(items = [], currentItem = null, direction = 1) {
+  const images = items.filter((item) => item?.type === "image" && item.url);
+  if (images.length < 2 || currentItem?.type !== "image") return null;
+
+  const currentIndex = images.findIndex((item) => (
+    (currentItem.id && item.id === currentItem.id) || item.url === currentItem.url
+  ));
+  if (currentIndex < 0) return null;
+
+  const step = Number(direction) < 0 ? -1 : 1;
+  return images[(currentIndex + step + images.length) % images.length];
+}
+
 function addProjectOutput(outputMap, item) {
   if (!item?.url || !isLocalOutputUrl(item.url)) return;
   if (outputMap.has(item.url)) {

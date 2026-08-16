@@ -4,6 +4,7 @@ export const flowMapExitZoomThreshold = 0.08;
 export const flowDetailEnterZoomThreshold = 0.18;
 export const flowDetailExitZoomThreshold = 0.15;
 export const flowOverviewEnabled = false;
+export const flowOnlyRenderVisibleElements = false;
 
 export function flowRenderMode(nodeCount, zoom, previousMode = "detail") {
   if (!flowOverviewEnabled) return "detail";

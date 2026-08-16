@@ -22,6 +22,12 @@ import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import {
+  generationProgressMiddleware,
+  listGenerationProgress,
+  providerProgressPercent,
+  updateCurrentGenerationProgress
+} from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import {
   activeProviderCredentials,
@@ -570,6 +576,11 @@ app.use("/api", async (_req, _res, next) => {
     next(error);
   }
 });
+app.use("/api/node", generationProgressMiddleware);
+app.get("/api/generation-progress", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ entries: listGenerationProgress(), serverTime: new Date().toISOString() });
+});
 registerCoreRoutes(app, {
   safeRelativeAssetPath,
   resolveLocalAssetPath,
@@ -648,6 +659,7 @@ function buildHealthPayload() {
       skillDirector: true,
       storyboardQc: true,
       mediaThumbnail: true,
+      generationProgress: true,
       settings: true
     },
     ffmpeg: {
@@ -2776,6 +2788,7 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
 
 app.post("/api/node/process-text", async (req, res) => {
   try {
+    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Processing text" });
     const text = String(req.body.text || "").trim();
     const textInputs = normalizedTextInputs(req.body.textInputs);
     const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
@@ -2971,6 +2984,7 @@ async function handleTransferCollageUpload(req, res) {
 
 app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
+    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing image generation" });
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -5287,6 +5301,7 @@ async function runTransitionBuilderUtilityVideo(req, res, { startFrameUrls, endF
 
 app.post("/api/node/generate-video", async (req, res) => {
   try {
+    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing video generation" });
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -10446,6 +10461,7 @@ async function uploadToFal(file) {
 }
 
 async function downloadVideo(req, url, kind, { stripAudio = false } = {}) {
+  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated video" });
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
@@ -12445,6 +12461,7 @@ function enrichVideoMetadata(video, metadata = {}) {
 }
 
 async function downloadImage(req, url, kind, mimeTypeHint = "") {
+  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated image" });
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated image: ${response.status} ${response.statusText}`);
@@ -12997,6 +13014,12 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
       logs: options.logs ?? true,
       onEnqueue: (nextRequestId) => {
         requestId = nextRequestId || requestId;
+        updateCurrentGenerationProgress({
+          status: "queued",
+          phase: "queued",
+          requestId,
+          message: "Queued with Fal"
+        });
         writeFalDebugLog({
           event: "enqueued",
           endpoint,
@@ -13010,6 +13033,19 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
         const status = update?.status || "UNKNOWN";
         const queuePosition = update?.queue_position ?? update?.position ?? null;
         const positionKey = queuePosition === null || queuePosition === undefined ? "" : String(queuePosition);
+        const queued = status === "IN_QUEUE" || status === "QUEUED";
+        const providerPercent = providerProgressPercent(update);
+        updateCurrentGenerationProgress({
+          status: queued ? "queued" : "running",
+          phase: queued ? "queued" : "generating",
+          ...(providerPercent === null ? {} : { percent: generationStagePercent(providerPercent) }),
+          requestId,
+          queuePosition,
+          providerStatus: status,
+          message: queued
+            ? (queuePosition === null || queuePosition === undefined ? "Queued with Fal" : `Fal queue position ${queuePosition}`)
+            : "Generating with Fal"
+        });
 
         if (status !== lastStatus || positionKey !== lastQueuePosition) {
           lastStatus = status;
@@ -13046,6 +13082,14 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
 
         originalOnQueueUpdate?.(update);
       }
+    });
+    updateCurrentGenerationProgress({
+      status: "running",
+      phase: "finalizing",
+      requestId: result?.requestId || requestId,
+      providerStatus: "COMPLETED",
+      percent: 98,
+      message: "Fal generation complete"
     });
 
     writeFalDebugLog({
@@ -18144,6 +18188,14 @@ async function runKreaGeneration({ endpoint, input, label = "generation" }) {
     throw httpError(502, "Krea accepted the request but returned no job ID.", { body: submittedJob });
   }
 
+  updateCurrentGenerationProgress({
+    status: "queued",
+    phase: "queued",
+    requestId: jobId,
+    providerStatus: submittedJob?.status || "queued",
+    message: "Queued with Krea"
+  });
+
   return {
     requestId: jobId,
     job: await waitForKreaJob(jobId, label)
@@ -18162,13 +18214,37 @@ async function waitForKreaJob(jobId, label = "generation") {
       throw httpError(response.status, kreaErrorMessage(job, `Krea could not read the ${label} job status.`), { body: job });
     }
 
-    if (job?.status === "completed") return job;
+    if (job?.status === "completed") {
+      updateCurrentGenerationProgress({
+        status: "running",
+        phase: "finalizing",
+        requestId: jobId,
+        providerStatus: job.status,
+        percent: 98,
+        message: "Krea generation complete"
+      });
+      return job;
+    }
     if (job?.status === "failed" || job?.status === "cancelled") {
       throw httpError(502, kreaErrorMessage(job, `Krea ${label} job ${job.status}.`), { body: job });
     }
+    const queued = job?.status === "queued" || job?.status === "pending";
+    const providerPercent = providerProgressPercent(job);
+    updateCurrentGenerationProgress({
+      status: queued ? "queued" : "running",
+      phase: queued ? "queued" : "generating",
+      ...(providerPercent === null ? {} : { percent: generationStagePercent(providerPercent) }),
+      requestId: jobId,
+      providerStatus: job?.status || "processing",
+      message: queued ? "Queued with Krea" : "Generating with Krea"
+    });
   }
 
   throw httpError(504, `Krea ${label} generation timed out after 20 minutes.`);
+}
+
+function generationStagePercent(providerPercent) {
+  return Math.min(92, 10 + (Math.max(0, Math.min(100, Number(providerPercent) || 0)) * 0.82));
 }
 
 function kreaAuthorizationHeaders() {

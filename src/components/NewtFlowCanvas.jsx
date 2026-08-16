@@ -21,7 +21,11 @@ import {
   normalizedNodeHeight,
   normalizedNodeWidth
 } from "../nodeGeometry.js";
-import { flowOverviewEnabled, flowRenderMode } from "../flowOverview.js";
+import {
+  flowOnlyRenderVisibleElements,
+  flowOverviewEnabled,
+  flowRenderMode
+} from "../flowOverview.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 
@@ -342,6 +346,7 @@ function NewtFlowCanvasInner({
         defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.scale }}
         minZoom={0.05}
         maxZoom={2.5}
+        onlyRenderVisibleElements={flowOnlyRenderVisibleElements}
         nodesConnectable
         nodesDraggable
         noDragClassName="nodrag"
