@@ -1232,6 +1232,10 @@
   cursor: grab;
 }
 
+.node-canvas.is-distant-zoom {
+  background-image: none;
+}
+
 .node-canvas:active {
   cursor: grabbing;
 }

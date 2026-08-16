@@ -90,7 +90,7 @@ The `dev` branch uses React Flow as the node canvas runtime while Newt continues
 
 - React Flow owns node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths.
 - Node positions stay local during a drag and commit to Newt's persisted graph once when the gesture ends, avoiding full graph rebuilds for every pointer event.
-- Large workflows use semantic zoom with hysteresis: full detail above `0.30`, a compact canvas between `0.12` and `0.30`, and a map canvas at `0.12` and below. Exit thresholds at `0.24` and `0.16` prevent mode flapping near the boundaries.
+- Semantic compact and map proxy modes are disabled. React Flow keeps the complete node UI mounted at every zoom level; below `0.15`, the sub-pixel dot grid and mouse-wheel transform easing are disabled to prevent distant-view raster artifacts. With proxies off, navigation also skips warm-node hydration bookkeeping so mounted node bodies remain stable.
 - Compact and map views draw the complete workflow in one high-DPI Canvas 2D layer. Every node, group, and connection remains visible without creating hundreds of React node bodies.
 - Overview labels and edge widths use screen-space values. Hover or selection shows the full node title, and double-click focuses a node at working zoom.
 - Selection has one owner per render mode: React Flow handles partial-overlap marquee and modifier-click selection in detail mode; the overview canvas handles additive marquee and modifier-click toggling in compact and map modes. Do not run the legacy NodeEditor marquee alongside either renderer.

@@ -21,7 +21,7 @@ import {
   normalizedNodeHeight,
   normalizedNodeWidth
 } from "../nodeGeometry.js";
-import { flowRenderMode } from "../flowOverview.js";
+import { flowOverviewEnabled, flowRenderMode } from "../flowOverview.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 
@@ -121,7 +121,7 @@ function NewtFlowCanvasInner({
   }
 
   function syncWarmNodeIds(nextViewport, { force = false } = {}) {
-    if (renderModeRef.current !== "detail") return;
+    if (!flowOverviewEnabled || renderModeRef.current !== "detail") return;
     const now = performance.now();
     if (!force && now - lastWarmSyncRef.current < 100) return;
     lastWarmSyncRef.current = now;
@@ -155,7 +155,7 @@ function NewtFlowCanvasInner({
   }, [graphNodes, renderMode, selectedNodeIds]);
 
   React.useEffect(() => {
-    if (!selectedNodeIds?.length || renderModeRef.current !== "detail") return;
+    if (!flowOverviewEnabled || !selectedNodeIds?.length || renderModeRef.current !== "detail") return;
     const nextWarm = new Set(warmNodeIdsRef.current);
     let changed = false;
     selectedNodeIds.forEach((id) => {
@@ -176,7 +176,7 @@ function NewtFlowCanvasInner({
       const normalized = normalizeViewport(nextViewport);
       if (navigationActiveRef.current) {
         navigationActiveRef.current = false;
-        setNavigationActive(false);
+        if (flowOverviewEnabled) setNavigationActive(false);
       }
       liveViewportRef.current = normalized;
       syncRenderMode(normalized.zoom);
@@ -189,7 +189,7 @@ function NewtFlowCanvasInner({
       const normalized = normalizeViewport(nextViewport);
       if (!navigationActiveRef.current) {
         navigationActiveRef.current = true;
-        setNavigationActive(true);
+        if (flowOverviewEnabled) setNavigationActive(true);
       }
       liveViewportRef.current = normalized;
       syncRenderMode(normalized.zoom);
@@ -498,7 +498,7 @@ function mergeFlowNodes(current, desired, dragging) {
 const NewtFlowNode = React.memo(function NewtFlowNode({ id, data, selected }) {
   const { navigationActive, renderMode, renderNodeRef, warmNodeIds } = React.useContext(NewtFlowRenderContext);
   const updateNodeInternals = useUpdateNodeInternals();
-  const shouldRenderFull = renderMode === "detail" && warmNodeIds.has(id);
+  const shouldRenderFull = !flowOverviewEnabled || (renderMode === "detail" && warmNodeIds.has(id));
   const [hydrated, setHydrated] = React.useState(() => shouldRenderFull && !navigationActive);
 
   React.useEffect(() => {
@@ -507,10 +507,10 @@ const NewtFlowNode = React.memo(function NewtFlowNode({ id, data, selected }) {
   }, [navigationActive, shouldRenderFull]);
 
   React.useLayoutEffect(() => {
-    if (shouldRenderFull && hydrated) updateNodeInternals(id);
+    if (shouldRenderFull && (hydrated || !flowOverviewEnabled)) updateNodeInternals(id);
   }, [data.node.data, hydrated, id, shouldRenderFull, updateNodeInternals]);
 
-  const showPlaceholder = !shouldRenderFull || !hydrated;
+  const showPlaceholder = flowOverviewEnabled && (!shouldRenderFull || !hydrated);
 
   return (
     <NewtFlowPortProvider>

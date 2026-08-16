@@ -1008,6 +1008,8 @@ const wheelLineDeltaScale = 40;
 const trackpadZoomDeltaThreshold = 8;
 const trackpadZoomSensitivity = 0.006;
 const mouseWheelZoomSensitivity = 0.00135;
+const mouseWheelZoomTransitionMs = 110;
+const distantZoomVisualThreshold = 0.15;
 const wheelZoomDeltaClamp = 240;
 const nodeDraftCommitDelayMs = 300;
 const largeCanvasNodeCountThreshold = 80;
@@ -1132,6 +1134,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const portPositionFrameRef = React.useRef(null);
   const viewportRenderFrameRef = React.useRef(null);
   const viewportCommitTimerRef = React.useRef(null);
+  const mouseWheelZoomTimerRef = React.useRef(null);
   const clipboardRef = React.useRef(null);
   const lastPointerClientRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
@@ -1465,6 +1468,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       window.clearTimeout(viewportCommitTimerRef.current);
       viewportCommitTimerRef.current = null;
     }
+    if (mouseWheelZoomTimerRef.current) {
+      window.clearTimeout(mouseWheelZoomTimerRef.current);
+      mouseWheelZoomTimerRef.current = null;
+    }
+    canvasRef.current?.classList.remove("is-mouse-wheel-zooming");
   }, []);
 
   React.useLayoutEffect(() => {
@@ -1743,6 +1751,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       canvas.style.setProperty("--grid-size", `${gridSize}px`);
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
+      canvas.classList.toggle("is-distant-zoom", nextViewport.scale < distantZoomVisualThreshold);
     }
     if (transient) flowCanvasRef.current?.setTransientViewport?.(nextViewport);
     else flowCanvasRef.current?.setViewport?.(nextViewport, { duration: 0 });
@@ -1796,6 +1805,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       canvas.style.setProperty("--grid-size", `${gridSize}px`);
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
+      canvas.classList.toggle("is-distant-zoom", nextViewport.scale < distantZoomVisualThreshold);
     }
     if (zoomReadoutRef.current) zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
   }
@@ -4992,6 +5002,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return Math.exp(-clamp(wheelDelta, -wheelZoomDeltaClamp, wheelZoomDeltaClamp) * sensitivity);
   }
 
+  function beginMouseWheelZoomTransition() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.classList.add("is-mouse-wheel-zooming");
+    if (mouseWheelZoomTimerRef.current) window.clearTimeout(mouseWheelZoomTimerRef.current);
+    mouseWheelZoomTimerRef.current = window.setTimeout(() => {
+      mouseWheelZoomTimerRef.current = null;
+      canvas.classList.remove("is-mouse-wheel-zooming");
+    }, mouseWheelZoomTransitionMs + 40);
+  }
+
   function handleCanvasWheel(event) {
     const storyboardScroller = event.target.closest(".storyboard-scroll-surface");
     if (storyboardScroller && shouldPrioritizeSelectedTextareaWheel(event)) {
@@ -5082,6 +5103,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.ctrlKey || event.metaKey || event.altKey) {
       const wheelDelta = normalizedWheelZoomDelta(event);
       if (wheelDelta) {
+        if (!isLikelyTrackpadZoom(event, wheelDelta)) beginMouseWheelZoomTransition();
         zoomViewportAtPoint(pointer, zoomFactorForWheelDelta(event, wheelDelta));
       }
       return;
@@ -7078,7 +7100,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       <div
         ref={canvasRef}
-        className="node-canvas"
+        className={`node-canvas${viewportRef.current.scale < distantZoomVisualThreshold ? " is-distant-zoom" : ""}`}
         style={{
           "--viewport-transform": `translate3d(${viewportRef.current.x}px, ${viewportRef.current.y}px, 0) scale(${viewportRef.current.scale})`,
           "--grid-size": `${28 * viewportRef.current.scale}px`,
