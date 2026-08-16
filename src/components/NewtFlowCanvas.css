@@ -9,6 +9,15 @@
   will-change: transform;
 }
 
+.newt-react-flow .react-flow__edges,
+.newt-react-flow .react-flow__connectionline {
+  z-index: 0 !important;
+}
+
+.newt-react-flow .react-flow__nodes {
+  z-index: 2;
+}
+
 .node-canvas.is-mouse-wheel-zooming:not(.is-distant-zoom) .newt-react-flow .react-flow__viewport {
   transition: transform 110ms cubic-bezier(0.2, 0.7, 0.25, 1);
 }

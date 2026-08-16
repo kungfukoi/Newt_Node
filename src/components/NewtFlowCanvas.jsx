@@ -95,6 +95,7 @@ function NewtFlowCanvasInner({
       return {
         id: node.id,
         type: "newt",
+        dragHandle: ".node-title",
         position: { x: Number(node.x) || 0, y: Number(node.y) || 0 },
         initialWidth: width,
         initialHeight: height,
@@ -232,7 +233,7 @@ function NewtFlowCanvasInner({
         active: activeEdgeIds?.has?.(edge.id),
         inactive: inactiveEdgeIds?.has?.(edge.id)
       },
-      zIndex: selectedEdgeId === edge.id ? 12 : 4
+      zIndex: selectedEdgeId === edge.id ? 1 : 0
     })),
     [activeEdgeIds, graphEdges, inactiveEdgeIds, selectedEdgeId]
   );
@@ -343,6 +344,7 @@ function NewtFlowCanvasInner({
         maxZoom={2.5}
         nodesConnectable
         nodesDraggable
+        noDragClassName="nodrag"
         elementsSelectable
         selectNodesOnDrag={false}
         selectionKeyCode="Shift"
@@ -469,6 +471,7 @@ function mergeFlowNodes(current, desired, dragging) {
     const zIndex = selected ? 20 : 2;
     if (
       previous.type === node.type &&
+      previous.dragHandle === node.dragHandle &&
       previous.position.x === position.x &&
       previous.position.y === position.y &&
       previous.zIndex === zIndex &&
