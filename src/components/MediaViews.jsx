@@ -1,9 +1,21 @@
 import React from "react";
-import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
+const projectOutputDrawerDefaultWidth = 116;
+const projectOutputDrawerMinWidth = 116;
+const projectOutputDrawerMaxWidth = 560;
+const projectOutputDrawerWidthStorageKey = "newtnode.project-output-drawer-width";
+
+function clampedProjectOutputDrawerWidth(width, workspace) {
+  const workspaceWidth = workspace?.getBoundingClientRect?.().width || window.innerWidth || projectOutputDrawerMaxWidth;
+  const toolbarAllowance = workspace?.classList?.contains("toolbar-collapsed") ? 0 : 196;
+  const availableWidth = workspaceWidth - toolbarAllowance - 336;
+  const responsiveMaximum = Math.max(projectOutputDrawerMinWidth, Math.min(projectOutputDrawerMaxWidth, availableWidth));
+  return Math.round(Math.min(responsiveMaximum, Math.max(projectOutputDrawerMinWidth, Number(width) || projectOutputDrawerDefaultWidth)));
+}
 
 export function MediaPreview({ node, onPreviewOpen }) {
   if (!node.data.resultUrl) {
@@ -112,12 +124,131 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
   openFolderBusy = false,
   outputDragMime = defaultOutputDragMime
 }) {
+  const drawerRef = React.useRef(null);
+  const resizeDragRef = React.useRef(null);
+  const resizeFrameRef = React.useRef(null);
+  const [drawerWidth, setDrawerWidth] = React.useState(projectOutputDrawerDefaultWidth);
+
+  const applyDrawerWidth = React.useCallback((width, persist = false) => {
+    const workspace = drawerRef.current?.closest(".node-workspace");
+    if (!workspace) return projectOutputDrawerDefaultWidth;
+    const nextWidth = clampedProjectOutputDrawerWidth(width, workspace);
+    workspace.style.setProperty("--project-output-drawer-width", `${nextWidth}px`);
+    if (persist) {
+      try {
+        window.localStorage.setItem(projectOutputDrawerWidthStorageKey, String(nextWidth));
+      } catch {
+        // The rail remains resizable when browser storage is unavailable.
+      }
+    }
+    return nextWidth;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    let storedWidth = projectOutputDrawerDefaultWidth;
+    try {
+      storedWidth = Number(window.localStorage.getItem(projectOutputDrawerWidthStorageKey)) || storedWidth;
+    } catch {
+      // Use the default width when browser storage is unavailable.
+    }
+    setDrawerWidth(applyDrawerWidth(storedWidth));
+  }, [applyDrawerWidth]);
+
+  React.useEffect(() => () => {
+    if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
+    resizeDragRef.current?.workspace?.classList.remove("output-drawer-resizing");
+  }, []);
+
+  function scheduleDrawerWidth(width) {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    drag.pendingWidth = clampedProjectOutputDrawerWidth(width, drag.workspace);
+    if (resizeFrameRef.current) return;
+    resizeFrameRef.current = window.requestAnimationFrame(() => {
+      resizeFrameRef.current = null;
+      const activeDrag = resizeDragRef.current;
+      if (activeDrag) applyDrawerWidth(activeDrag.pendingWidth);
+    });
+  }
+
+  function startDrawerResize(event) {
+    if (event.button !== 0) return;
+    const workspace = drawerRef.current?.closest(".node-workspace");
+    if (!workspace) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startWidth = drawerRef.current.getBoundingClientRect().width;
+    resizeDragRef.current = {
+      pointerId: event.pointerId,
+      handle: event.currentTarget,
+      workspace,
+      startX: event.clientX,
+      startWidth,
+      pendingWidth: startWidth
+    };
+    workspace.classList.add("output-drawer-resizing");
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveDrawerResize(event) {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    scheduleDrawerWidth(drag.startWidth + drag.startX - event.clientX);
+  }
+
+  function finishDrawerResize(event) {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (resizeFrameRef.current) {
+      window.cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = null;
+    }
+    const nextWidth = applyDrawerWidth(drag.pendingWidth, true);
+    resizeDragRef.current = null;
+    drag.workspace.classList.remove("output-drawer-resizing");
+    setDrawerWidth(nextWidth);
+    if (drag.handle.hasPointerCapture?.(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+  }
+
+  function resizeDrawerWithKeyboard(event) {
+    let nextWidth = drawerWidth;
+    if (event.key === "ArrowLeft") nextWidth += 24;
+    else if (event.key === "ArrowRight") nextWidth -= 24;
+    else if (event.key === "Home") nextWidth = projectOutputDrawerDefaultWidth;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDrawerWidth(applyDrawerWidth(nextWidth, true));
+  }
+
   const startDrag = React.useCallback((event, item) => {
     setOutputItemDragData(event.dataTransfer, item, outputDragMime);
   }, [outputDragMime]);
 
   return (
-    <aside className="project-output-drawer">
+    <aside ref={drawerRef} className="project-output-drawer">
+      <div
+        className="output-drawer-resize-handle"
+        role="separator"
+        aria-label="Resize project output previews"
+        aria-orientation="vertical"
+        aria-valuemin={projectOutputDrawerMinWidth}
+        aria-valuemax={projectOutputDrawerMaxWidth}
+        aria-valuenow={drawerWidth}
+        tabIndex={0}
+        title="Drag left to enlarge project output previews"
+        onPointerDown={startDrawerResize}
+        onPointerMove={moveDrawerResize}
+        onPointerUp={finishDrawerResize}
+        onPointerCancel={finishDrawerResize}
+        onLostPointerCapture={finishDrawerResize}
+        onKeyDown={resizeDrawerWithKeyboard}
+      >
+        <GripVertical size={12} aria-hidden="true" />
+      </div>
       <div className="output-drawer-header">
         <div className="output-drawer-actions">
           <button onClick={onOpenFolder} disabled={!onOpenFolder || openFolderBusy} title="Open output folder" aria-label="Open output folder">

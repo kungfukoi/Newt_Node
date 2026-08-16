@@ -13,11 +13,11 @@
 }
 
 .node-workspace.outputs-open {
-  grid-template-columns: 180px minmax(0, 1fr) 116px;
+  grid-template-columns: 180px minmax(0, 1fr) var(--project-output-drawer-width, 116px);
 }
 
 .node-workspace.toolbar-collapsed.outputs-open {
-  grid-template-columns: minmax(0, 1fr) 116px;
+  grid-template-columns: minmax(0, 1fr) var(--project-output-drawer-width, 116px);
 }
 
 .node-toolbar {
@@ -269,6 +269,7 @@
 }
 
 .project-output-drawer {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
@@ -277,6 +278,41 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   background: rgba(18, 18, 18, 0.82);
+}
+
+.output-drawer-resize-handle {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 4;
+  display: grid;
+  width: 14px;
+  height: 58px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+  color: rgba(244, 240, 232, 0.48);
+  background: rgba(8, 8, 8, 0.9);
+  cursor: col-resize;
+  touch-action: none;
+  transform: translateY(-50%);
+}
+
+.output-drawer-resize-handle:hover,
+.output-drawer-resize-handle:focus-visible,
+.node-workspace.output-drawer-resizing .output-drawer-resize-handle {
+  border-color: rgba(221, 198, 49, 0.58);
+  color: #ddc631;
+  background: rgba(34, 32, 18, 0.96);
+  outline: 0;
+}
+
+.node-workspace.output-drawer-resizing,
+.node-workspace.output-drawer-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .output-drawer-header {
@@ -313,8 +349,9 @@
 }
 
 .project-output-list {
-  display: grid;
-  align-content: start;
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
@@ -326,7 +363,11 @@
   position: relative;
   display: grid;
   width: 100%;
-  min-height: 54px;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  flex: 0 0 auto;
+  align-self: start;
   padding: 0;
   place-items: center;
   overflow: hidden;
@@ -351,7 +392,10 @@
   display: block;
   width: 100%;
   height: auto;
+  max-width: 100%;
+  aspect-ratio: auto;
   object-fit: contain;
+  object-position: center;
   background: #050505;
 }
 
@@ -9685,6 +9729,10 @@ video.newtnode-video-fallback {
 
   .project-output-drawer {
     max-height: 220px;
+  }
+
+  .output-drawer-resize-handle {
+    display: none;
   }
 
   .composer-modal {
