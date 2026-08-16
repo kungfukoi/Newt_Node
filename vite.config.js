@@ -13,7 +13,11 @@ export default defineConfig({
         manualChunks(id) {
           const moduleId = id.replace(/\\/g, "/");
           if (!moduleId.includes("/node_modules/")) return undefined;
-          if (moduleId.includes("/react/") || moduleId.includes("/react-dom/")) return "vendor-react";
+          if (
+            moduleId.includes("/node_modules/react/") ||
+            moduleId.includes("/node_modules/react-dom/") ||
+            moduleId.includes("/node_modules/scheduler/")
+          ) return "vendor-react";
           if (moduleId.includes("/three/")) return "vendor-three";
           if (moduleId.includes("/lucide-react/") || moduleId.includes("/lucide-static/")) return "vendor-icons";
           return "vendor";

@@ -1,0 +1,126 @@
+.newt-react-flow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+}
+
+.newt-react-flow .react-flow__viewport {
+  will-change: transform;
+}
+
+.newt-react-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.newt-react-flow .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.newt-react-flow .react-flow__node-newt {
+  width: auto;
+  cursor: default;
+}
+
+.newt-react-flow .node-card.flow-managed {
+  position: relative;
+  inset: auto;
+  transform: none;
+}
+
+.newt-react-flow .node-title {
+  cursor: grab;
+}
+
+.newt-react-flow .react-flow__node.dragging .node-title {
+  cursor: grabbing;
+}
+
+.newt-react-flow .inline-port.react-flow__handle {
+  position: relative;
+  inset: auto !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  min-width: 18px;
+  min-height: 18px;
+  transform: none !important;
+}
+
+.newt-flow-edge-visible,
+.newt-flow-connection-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.newt-flow-edge-visible {
+  stroke-width: 2px;
+  opacity: 0.62;
+  transition: opacity 120ms ease, stroke-width 120ms ease, filter 120ms ease;
+}
+
+.newt-flow-edge-hitbox {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18px;
+  pointer-events: stroke;
+  vector-effect: non-scaling-stroke;
+}
+
+.newt-flow-edge.selected .newt-flow-edge-visible {
+  stroke-width: 4px;
+  opacity: 0.96;
+  filter: drop-shadow(0 0 4px rgba(244, 240, 232, 0.5));
+}
+
+.newt-flow-edge.inactive .newt-flow-edge-visible {
+  opacity: 0.3;
+}
+
+.newt-flow-edge.active .newt-flow-edge-visible {
+  stroke-dasharray: 8 12;
+  opacity: 0.9;
+  animation: newt-flow-edge-processing 0.7s linear infinite;
+}
+
+.newt-flow-connection-line {
+  stroke: #ddc631;
+  stroke-width: 2.5px;
+  stroke-dasharray: 6 8;
+  animation: newt-flow-edge-processing 0.7s linear infinite;
+}
+
+.newt-flow-group-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.newt-flow-group-layer .node-group-backdrop {
+  pointer-events: auto;
+}
+
+.newt-react-flow .react-flow__selection,
+.newt-react-flow .react-flow__nodesselection-rect {
+  border: 1px solid rgba(221, 198, 49, 0.78);
+  background: rgba(221, 198, 49, 0.08);
+}
+
+@keyframes newt-flow-edge-processing {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .newt-flow-edge.active .newt-flow-edge-visible,
+  .newt-flow-connection-line {
+    animation: none;
+  }
+}

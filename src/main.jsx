@@ -95,8 +95,11 @@ class WorkspaceErrorBoundary extends React.Component {
   }
 
   retry = () => {
+    if (this.props.onRetry) {
+      this.props.onRetry();
+      return;
+    }
     this.setState({ error: null });
-    this.props.onRetry?.();
   };
 
   render() {
@@ -106,7 +109,7 @@ class WorkspaceErrorBoundary extends React.Component {
           <span className="status-icon"><X size={18} /></span>
           <span>{this.props.label || "Workspace"} failed to load.</span>
           <small>{this.state.error?.message || "Unknown error"}</small>
-          <button type="button" onClick={this.retry}>Retry</button>
+          <button type="button" onClick={this.retry}>{this.props.retryLabel || "Retry"}</button>
         </div>
       );
     }
@@ -172,7 +175,6 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = React.useState("image");
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
-  const [nodeWorkspaceRetryKey, setNodeWorkspaceRetryKey] = React.useState(0);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
   const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
   const enabledVideoWorkspaceOptions = React.useMemo(() => enabledVideoModelOptions(modelPreferences, { workspaceOnly: true }), [modelPreferences]);
@@ -804,8 +806,12 @@ function App() {
 
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
-          <WorkspaceErrorBoundary label="Nodes" resetKey={nodeWorkspaceRetryKey} onRetry={() => setNodeWorkspaceRetryKey((value) => value + 1)}>
-            <React.Suspense key={nodeWorkspaceRetryKey} fallback={<WorkspaceFallback label="Loading nodes" />}>
+          <WorkspaceErrorBoundary
+            label="Nodes"
+            retryLabel="Reload"
+            onRetry={() => window.location.reload()}
+          >
+            <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
               <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} />
             </React.Suspense>
           </WorkspaceErrorBoundary>

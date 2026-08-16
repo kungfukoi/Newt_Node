@@ -83,3 +83,24 @@ Current totals:
 - Keep heavy node controls behind `React.lazy` when they are not common to normal canvas startup.
 - Use focused components for new heavy UI surfaces so future lazy boundaries are easy to place.
 - Treat bundle-size changes as a signal to inspect loading behavior, not as the only performance measure.
+
+## React Flow Canvas Baseline
+
+The `dev` branch uses React Flow as the node canvas runtime while Newt continues to render the existing node bodies and owns graph execution, persistence, uploads, previews, and model behavior.
+
+- React Flow owns node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths.
+- Node positions stay local during a drag and commit to Newt's persisted graph once when the gesture ends, avoiding full graph rebuilds for every pointer event.
+- Large workflows use semantic zoom with hysteresis: full detail above `0.30`, a compact canvas between `0.12` and `0.30`, and a map canvas at `0.12` and below. Exit thresholds at `0.24` and `0.16` prevent mode flapping near the boundaries.
+- Compact and map views draw the complete workflow in one high-DPI Canvas 2D layer. Every node, group, and connection remains visible without creating hundreds of React node bodies.
+- Overview labels and edge widths use screen-space values. Hover or selection shows the full node title, and double-click focuses a node at working zoom.
+- Selection has one owner per render mode: React Flow handles partial-overlap marquee and modifier-click selection in detail mode; the overview canvas handles additive marquee and modifier-click toggling in compact and map modes. Do not run the legacy NodeEditor marquee alongside either renderer.
+- Detail view keeps lightweight React Flow geometry shells mounted instead of repeatedly destroying and recreating offscreen nodes while panning.
+- Full node bodies hydrate inside a viewport buffer. Recently visited bodies stay warm for a bounded period, avoiding reload pauses when the user pans back while limiting media and editor cost.
+- Saved or estimated node dimensions and connected-port bounds seed React Flow before the first full render, so connection geometry is stable before node controls hydrate.
+- Port positions come from React Flow handles; the former canvas-wide DOM port sweep and independent edge transform are bypassed.
+- Nodes that first enter view during an active pan or zoom use a lightweight geometry placeholder and hydrate their complete Newt UI when the gesture ends. Nodes already visible remain mounted throughout the gesture.
+- Transient pan and zoom updates the React Flow transform and the overview canvas directly; graph state commits after the gesture instead of on every pointer event.
+- Edge strokes use `vector-effect: non-scaling-stroke` so visual weight stays stable through zoom. Processing edges retain Newt's animated dash cue.
+- Newt's existing mouse-wheel increment, trackpad pinch, zoom controls, context menus, grouping, node resize, and node-specific UI remain the source of behavior.
+
+Validate this path with a production build, the complete Node test suite, and a browser interaction pass that drags a node, pans and zooms through both semantic thresholds, verifies all distant nodes redraw immediately, confirms an attached edge at each step, and confirms visible edge width remains constant.

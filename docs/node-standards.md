@@ -262,12 +262,13 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Expanded settings should expose named inputs in rows.
 - Connector lines inherit the source output color.
 - Connector endpoints and all connection lookups use node ids and port ids. Titles are never connection keys.
-- The edge drawing canvas is a separate rendering surface, but it must use the exact live canvas viewport transform and scene-space port coordinates used by the node layer. Pan and zoom should redraw through the same transient viewport value; never let an independently cached transform drift from the cards.
-- Measure visible ports from their DOM centers. Observe the canvas, node cards, and ports for resize and subtree changes, and batch endpoint refreshes through `requestAnimationFrame` so expanding Settings or resizing a node updates lines promptly without measurement churn.
-- If a connected port is briefly absent because its section collapsed, a node was culled, or React is replacing that row, retain its last valid measured endpoint instead of dropping the wire. Use an estimated node-boundary endpoint only when no valid measurement exists, then replace it after the real port renders.
+- React Flow owns the live viewport, node transforms, handle geometry, selection, and edge paths. Do not add an independently transformed wire layer or a second viewport cache.
+- Ports render as React Flow handles while preserving Newt's node ids, port ids, media colors, connection rules, and click-to-disconnect behavior. Dynamic port changes must call React Flow's node-internals update path.
+- If a connected control section is collapsed, keep its handle mounted or provide a stable equivalent handle position. Presentation changes must never remove the saved edge or make a valid connection appear detached.
 - Collapsing an input section changes only presentation. It must not remove the edge, invalidate its saved port id, or make its connector disappear; expanding it must remeasure the real endpoint immediately.
-- The large-canvas optimization may cull nodes outside a generously buffered viewport, but visible nodes keep their complete node UI at every zoom level. Do not replace visible nodes with incomplete overview placeholders. Connected edges remain drawable using measured or estimated endpoints even when one endpoint is outside the rendered set.
-- Keep normal connectors visually lightweight and scale their scene-to-screen points from the current viewport. Selection, draft, active, and inactive styles may differ, but hit testing should remain generous without increasing the visible line weight.
+- Seed initial node dimensions and connected handle bounds from persisted or estimated graph geometry. Virtualization must not require every heavy node body to mount once before offscreen culling begins.
+- Large canvases use semantic zoom. Compact and map views draw the complete graph in one Canvas 2D layer; detail view keeps lightweight React Flow geometry stable and hydrates full node bodies inside a buffered warm region. Never remount heavy node bodies merely to keep distant edges visible.
+- Keep normal connectors visually lightweight and use `vector-effect: non-scaling-stroke` so zoom does not make wires look fat or thin. Selection, draft, active, and inactive styles may differ, active processing retains its animated dash, and hit testing remains generous without increasing visible line weight.
 - Incompatible connections should fail with a plain, helpful message.
 - Auto-created nodes from a dragged connector should link only when compatible.
 - Backward compatibility matters: if a port is renamed, migrate previous edge shapes in `normalizeEdgeForCurrentGraph`.
@@ -667,8 +668,8 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Use stable dimensions for boards, previews, result panes, and tool rows so hover or dynamic content does not shift layout.
 - Scrollable tool panels should consume available space before introducing nested scrollbars. When a control list must scroll, make the scrollbar discoverable and verify the first and last controls are reachable.
 - Draftable text inputs and textareas update their DOM/local draft immediately and commit graph state on the shared debounce or blur boundary. Do not make each keystroke rebuild the full node graph, port map, and edge layer.
-- Pan and wheel zoom use the live viewport ref and `requestAnimationFrame` drawing during the gesture, then commit React viewport state after the transient interaction. A delayed state commit must never snap the viewport back to an older value.
-- Large canvases may cull offscreen node DOM with a scene-space buffer once they cross the shared node-count threshold. Keep selected and running nodes mounted, use normalized saved dimensions for culling bounds, and preserve full visible-node detail instead of inventing a second simplified node renderer.
+- Pan and wheel zoom use the live viewport ref and React Flow's imperative viewport API during the gesture, then commit Newt's persisted viewport state after the transient interaction. A delayed state commit must never snap the viewport back to an older value.
+- Let React Flow virtualize offscreen node DOM. Keep node data and graph execution independent from whether a card is mounted. At working zoom, steady-state visible nodes preserve their complete UI and a node first entering view during active navigation may defer its heavy body until the gesture ends. At overview zoom, all visible nodes may use lightweight shells until the user zooms back into the working range.
 
 ## Edit Node Standard
 
@@ -727,7 +728,7 @@ Before committing node or UI changes:
 - Verify node identity behavior: bind an `@token`, rename its source node, confirm the visible token updates while the saved node id remains unchanged, and confirm the next run uses the same source output. Include a duplicate-title case and a copy/import remap case when reference behavior changes.
 - Check collapsed and expanded node states. Confirm every connected line stays visible and reanchors without an extra interaction when a connected section collapses or expands.
 - For resize changes, test width-only, height-only, diagonal, minimum, maximum, saved/reopened, and shrink-back behavior. Confirm the primary media/workspace expands first, controls remain reachable, aspect ratios remain correct, and lines track every port during the drag.
-- For large-canvas changes, test above and below the culling and overview thresholds at near and far zoom. Visible nodes must retain complete content, offscreen connections must remain drawable, and pan/zoom must not snap back.
+- For large-canvas changes, test above and below the `0.12/0.16` map and `0.24/0.30` detail hysteresis thresholds. At distant zoom every node and edge must redraw immediately; at working zoom buffered full nodes must stay warm when panning away and back; pan/zoom must not snap back.
 - For clipboard/import changes, paste a multi-node selection with an internal edge, group, and bound `@token` into another open workflow and confirm all ids are fresh and correctly remapped.
 - For Output changes, test tokens in both Path and Filename, collision handling with and without `$index`, direct Output copy, source-run redirection, Preview propagation, save/reopen, and a genuinely missing external file.
 - Check Preview behavior for every output media type touched.

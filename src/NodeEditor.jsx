@@ -1,4 +1,5 @@
 import React from "react";
+import "@xyflow/react/dist/style.css";
 import {
   Aperture,
   Box,
@@ -47,9 +48,10 @@ import {
 import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { apiErrorMessage } from "./apiErrors.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
-import { EdgeCanvas, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
+import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
+import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import {
   Model3DViewer,
   OutputPreviewLightbox,
@@ -271,11 +273,9 @@ import {
   graphBoundsForNodes,
   groupToRect,
   mergeMeasuredPortPositions,
-  normalizeRect,
   pastedNodePositions,
   pointInRect,
   positiveModulo,
-  rectsIntersect,
   rectsOverlap
 } from "./nodeGeometry.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
@@ -1118,6 +1118,11 @@ function shouldUseOverviewRendering(nodes, viewport) {
 export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
+  const flowCanvasRef = React.useRef(null);
+  const flowConnectionRef = React.useRef(null);
+  const flowDragStartRef = React.useRef(null);
+  const flowNodeRenderRef = React.useRef(null);
+  const flowGroupRenderRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -1215,33 +1220,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, selectedNodeSet, incomingByNode]
   );
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
-  const largeCanvasMode = nodes.length >= largeCanvasNodeCountThreshold;
-  const overviewRendering = shouldUseOverviewRendering(nodes, viewport);
-  const visibleSceneRect = React.useMemo(
-    () => (largeCanvasMode ? expandedViewportSceneRect(viewport, canvasSize) : null),
-    [canvasSize, largeCanvasMode, viewport]
-  );
-  const renderedNodeIds = React.useMemo(() => {
-    if (!largeCanvasMode || !visibleSceneRect) return null;
-    const forcedNodeIds = new Set(selectedNodeIds);
-    if (draftEdge?.from?.nodeId) forcedNodeIds.add(draftEdge.from.nodeId);
-
-    return new Set(
-      nodes
-        .filter(
-          (node) =>
-            forcedNodeIds.has(node.id) ||
-            node.data?.status === "running" ||
-            rectsIntersect(estimatedNodeRect(node), visibleSceneRect)
-        )
-        .map((node) => node.id)
-    );
-  }, [draftEdge?.from?.nodeId, largeCanvasMode, nodes, selectedNodeIds, visibleSceneRect]);
-  const renderedNodes = React.useMemo(
-    () => (renderedNodeIds ? nodes.filter((node) => renderedNodeIds.has(node.id)) : nodes),
-    [nodes, renderedNodeIds]
-  );
-  const renderedNodeKey = React.useMemo(() => renderedNodes.map((node) => node.id).join("|"), [renderedNodes]);
+  const overviewRendering = false;
+  const renderedNodes = nodes;
+  const renderedNodeKey = "";
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
     projects,
@@ -1442,7 +1423,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [active, nodes, selectedNodeIds]);
 
   React.useLayoutEffect(() => {
-    if (!active || typeof ResizeObserver === "undefined") return undefined;
+    if (!active || typeof ResizeObserver === "undefined" || flowCanvasRef.current) return undefined;
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
@@ -1753,7 +1734,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  function applyViewportToCanvas(nextViewport) {
+  function applyViewportToCanvas(nextViewport, { transient = false } = {}) {
     const canvas = canvasRef.current;
     if (canvas) {
       const gridSize = 28 * nextViewport.scale;
@@ -1763,7 +1744,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
       canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
     }
-    edgeCanvasRef.current?.draw?.(nextViewport);
+    if (transient) flowCanvasRef.current?.setTransientViewport?.(nextViewport);
+    else flowCanvasRef.current?.setViewport?.(nextViewport, { duration: 0 });
     if (zoomReadoutRef.current) {
       zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
     }
@@ -1775,7 +1757,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!viewportRenderFrameRef.current) {
       viewportRenderFrameRef.current = window.requestAnimationFrame(() => {
         viewportRenderFrameRef.current = null;
-        applyViewportToCanvas(viewportRef.current);
+        applyViewportToCanvas(viewportRef.current, { transient: true });
       });
     }
 
@@ -1806,7 +1788,76 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setViewport((current) => (sameViewport(current, nextViewport) ? current : nextViewport));
   }
 
+  function handleFlowViewportChange(nextViewport) {
+    viewportRef.current = nextViewport;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const gridSize = 28 * nextViewport.scale;
+      canvas.style.setProperty("--grid-size", `${gridSize}px`);
+      canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
+      canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
+    }
+    if (zoomReadoutRef.current) zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
+  }
+
+  function handleFlowViewportCommit(nextViewport) {
+    handleFlowViewportChange(nextViewport);
+    setViewport((current) => (sameViewport(current, nextViewport) ? current : nextViewport));
+  }
+
+  const handleFlowSelectionChange = React.useCallback(({ nodeIds, edgeId }) => {
+    setSelectedNodeIds((current) => {
+      if (current.length === nodeIds.length) {
+        const currentSet = new Set(current);
+        if (nodeIds.every((nodeId) => currentSet.has(nodeId))) return current;
+      }
+      return nodeIds;
+    });
+    if (selectedEdgeIdRef.current !== edgeId) {
+      selectedEdgeIdRef.current = edgeId;
+      setSelectedEdgeId(edgeId);
+    }
+    if (nodeIds.length || edgeId) setContextMenu(null);
+  }, []);
+
+  function startFlowNodeDrag(_event, nodeId) {
+    const selectedIds = selectedNodeSet.has(nodeId) ? selectedNodeIds : [nodeId];
+    if (!selectedNodeSet.has(nodeId)) setSelectedNodeIds(selectedIds);
+    setSelectedEdgeId(null);
+    pushUndoSnapshot();
+    flowDragStartRef.current = {
+      anchorId: nodeId,
+      nodes: new Map(nodesRef.current.filter((node) => selectedIds.includes(node.id)).map((node) => [node.id, { x: node.x, y: node.y }])),
+      groups: getSelectedGroupsForNodeIds(selectedIds).map((group) => ({ id: group.id, x: group.x, y: group.y }))
+    };
+  }
+
+  function commitFlowNodePositions(movedNodes) {
+    const movedById = new Map(movedNodes.map((node) => [node.id, node]));
+    if (movedById.size) {
+      setNodes((current) => current.map((node) => {
+        const moved = movedById.get(node.id);
+        return moved ? { ...node, x: moved.x, y: moved.y } : node;
+      }));
+    }
+    const dragStart = flowDragStartRef.current;
+    const anchorStart = dragStart?.nodes?.get(dragStart.anchorId);
+    const anchorEnd = movedById.get(dragStart?.anchorId);
+    if (anchorStart && anchorEnd && dragStart.groups?.length) {
+      const deltaX = anchorEnd.x - anchorStart.x;
+      const deltaY = anchorEnd.y - anchorStart.y;
+      const groupStarts = new Map(dragStart.groups.map((group) => [group.id, group]));
+      setGroups((current) => current.map((group) => {
+        const start = groupStarts.get(group.id);
+        return start ? { ...group, x: start.x + deltaX, y: start.y + deltaY } : group;
+      }));
+    }
+    flowDragStartRef.current = null;
+    schedulePortPositionRefresh();
+  }
+
   function updatePortPositions() {
+    if (flowCanvasRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -4785,15 +4836,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    if (dragState?.type === "marquee") {
-      const rect = normalizeRect(dragState.start, pointer);
-      const selected = nodes
-        .filter((node) => rectsIntersect(rect, getNodeBounds(node.id)))
-        .map((node) => node.id);
-      setDragState((current) => (current?.type === "marquee" ? { ...current, current: pointer } : current));
-      setSelectedNodeIds([...new Set([...dragState.baseSelection, ...selected])]);
-    }
-
     if (dragState?.type === "nodeScaleResize") {
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
@@ -4843,17 +4885,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     setSelectedEdgeId(null);
-    const pointer = screenToScene(event.clientX, event.clientY);
 
-    if (event.shiftKey) {
-      event.preventDefault();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      setDragState({
-        type: "marquee",
-        start: pointer,
-        current: pointer,
-        baseSelection: selectedNodeIds
-      });
+    if (event.shiftKey && event.target.classList?.contains("react-flow__pane")) {
+      // React Flow owns detail-mode marquee selection. Let its pane handler finish the gesture.
       return;
     }
 
@@ -4865,7 +4899,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    canvasRef.current?.setPointerCapture?.(event.pointerId);
+    const captureTarget = event.target.closest?.(".flow-overview-canvas") || canvasRef.current;
+    captureTarget?.setPointerCapture?.(event.pointerId);
     setDragState({
       type: "pan",
       startClient: {
@@ -5189,11 +5224,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function finishConnection(event) {
-    if (dragState?.type === "marquee") {
-      stopNodeDrag();
-      return;
-    }
-
     if (!draftEdge) {
       stopNodeDrag();
       return;
@@ -5272,6 +5302,73 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function canCreateEdge(from, to) {
     return !getConnectionError(from, to);
+  }
+
+  function connectFlowPorts(from, to, color) {
+    if (!from?.nodeId || !from?.port || !to?.nodeId || !to?.port || from.nodeId === to.nodeId) return false;
+    const connectionError = getConnectionError(from, to, nodesRef.current);
+    if (connectionError) {
+      setSaveStatus(connectionError);
+      return false;
+    }
+
+    pushUndoSnapshot();
+    const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
+    const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
+    const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+    setEdges((current) => {
+      const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
+      const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
+      const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+      const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
+      const nextEdges = current.filter((edge) => {
+        if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+        if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+        if (replacesSingleCoverageInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+        if (replacesSingleStoryboardSceneInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+        return !(edge.from.nodeId === from.nodeId && edge.from.port === from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
+      });
+      return [...nextEdges, { id: `edge-${Date.now()}`, from, to, color }];
+    });
+    if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
+    if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
+    setSaveStatus("Connected nodes");
+    return true;
+  }
+
+  function handleFlowConnectStart(event, params) {
+    if (params?.handleType !== "source") return;
+    const handle = event.target?.closest?.("[data-port-role='output']");
+    flowConnectionRef.current = {
+      from: { nodeId: params.nodeId, port: params.handleId },
+      color: handle ? window.getComputedStyle(handle).getPropertyValue("--port-color").trim() : "#ddc631"
+    };
+    setSelectedEdgeId(null);
+  }
+
+  function handleFlowConnect(connection) {
+    const pending = flowConnectionRef.current;
+    flowConnectionRef.current = null;
+    connectFlowPorts(
+      { nodeId: connection.source, port: connection.sourceHandle },
+      { nodeId: connection.target, port: connection.targetHandle },
+      pending?.color || "#ddc631"
+    );
+  }
+
+  function handleFlowConnectEnd(event, connectionState) {
+    const pending = flowConnectionRef.current;
+    flowConnectionRef.current = null;
+    if (!pending || connectionState?.isValid || connectionState?.toHandle) return;
+    const point = "changedTouches" in event && event.changedTouches?.length ? event.changedTouches[0] : event;
+    openNodeContextMenuAtPoint(point.clientX, point.clientY, pending);
+  }
+
+  function isValidFlowConnection(connection) {
+    return canCreateEdge(
+      { nodeId: connection.source, port: connection.sourceHandle },
+      { nodeId: connection.target, port: connection.targetHandle }
+    );
   }
 
   function compatibleInputPortForNewNode(from, targetNode, graphNodes) {
@@ -6782,26 +6879,78 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  const renderedEdges = React.useMemo(
-    () =>
-      edges.map((edge) => ({
-        edge,
-        from: getPortPoint(edge.from.nodeId, edge.from.port),
-        to: getPortPoint(edge.to.nodeId, edge.to.port)
-      })),
-    [edges, nodeMap, overviewRendering, portPositions]
+  flowNodeRenderRef.current = (node, selected) => (
+    <NodeCardBoundary node={node} onRemove={removeNode}>
+      <NodeCard
+        node={node}
+        defaultOutputPath={defaultProjectOutputPath}
+        onDragStart={startNodeDrag}
+        onNodeResizeStart={startNodeResize}
+        onRemove={removeNode}
+        onUpdate={updateNode}
+        onDraftPatchChange={updateNodeDraftPatch}
+        onConnectStart={startConnection}
+        onDisconnectInput={disconnectInputPort}
+        connectedPortKeys={connectedPortKeys}
+        incoming={promptResolvedIncomingByNode[node.id] || {}}
+        incomingByNode={promptResolvedIncomingByNode}
+        onRun={runNode}
+        onCreateBrushMask={createEditBrushMaskOutput}
+        onUpload={uploadMediaAsset}
+        onOutputImport={importOutputAssetToMediaNode}
+        onTransferImagesUpload={uploadTransferImages}
+        onTransferOutputImport={importOutputAssetToTransferNode}
+        onTransferImageRemove={removeTransferImage}
+        onTransferActivate={activateTransferNode}
+        onTransferUnlock={unlockTransferNode}
+        onCharacterPortraitUpload={uploadCharacterPortrait}
+        onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
+        onCharacterSheetReplace={uploadCharacterSheetReplacement}
+        onCharacterWardrobesUpload={uploadCharacterWardrobes}
+        onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
+        onCharacterVoicesUpload={uploadCharacterVoices}
+        onCharacterWardrobeRemove={removeCharacterWardrobe}
+        onCharacterVoiceRemove={removeCharacterVoice}
+        onCharacterActivate={activateCharacterNode}
+        onCharacterUnlock={unlockCharacterNode}
+        onStoryboardPlan={planStoryboardNode}
+        onStoryboardGenerateAll={generateStoryboardNode}
+        onStoryboardGenerateFrame={generateStoryboardFrame}
+        onStoryboardExport={exportStoryboardBoard}
+        onStoryboardLock={lockStoryboardBoard}
+        onStoryboardFrameImport={importImageToStoryboardFrame}
+        onStoryboardCharacterUpload={uploadStoryboardCharacter}
+        onStoryboardCharacterImport={importStoryboardCharacter}
+        onStoryboardCharacterUpdate={updateStoryboardCharacter}
+        onStoryboardCharacterRemove={removeStoryboardCharacter}
+        onUndoSnapshot={pushUndoSnapshot}
+        onPreviewResizeStart={startPreviewResize}
+        onPreviewOpen={setPreviewLightboxItem}
+        onPreviewLayoutExport={exportPreviewLayoutBoard}
+        onOpenComposer={setComposerEditorNodeId}
+        onFrameItCapture={captureFrameItFrame}
+        onFrameItGenerate={generateFrameItMedia}
+        onCanvasPanStart={beginCanvasPan}
+        running={node.data?.status === "running"}
+        transferCompiling={compilingTransferNodeId === node.id}
+        selected={selected}
+        tagHighlight={referenceTagHighlights.get(node.id)}
+        imageModelOptions={enabledImageModels}
+        videoModelOptions={enabledVideoModels}
+        utilityImageModelOptions={enabledUtilityImageModels}
+        utilityVideoModelOptions={enabledUtilityVideoModels}
+        flowManaged
+      />
+    </NodeCardBoundary>
   );
-  const draftConnection = React.useMemo(
-    () => (draftEdge ? { from: draftEdge.start, to: { x: draftEdge.x, y: draftEdge.y }, color: draftEdge.color } : null),
-    [draftEdge]
-  );
-  const marqueePoints = React.useMemo(
-    () => (dragState?.type === "marquee" ? [dragState.start, dragState.current] : []),
-    [dragState]
-  );
-  const marqueeLayerBounds = React.useMemo(
-    () => edgeLayerBounds([], marqueePoints),
-    [marqueePoints]
+  flowGroupRenderRef.current = (group) => (
+    <GroupBackdrop
+      group={group}
+      onDragStart={startGroupDrag}
+      onResizeStart={startGroupResize}
+      onUpdate={updateGroup}
+      onRemove={removeGroup}
+    />
   );
 
   return (
@@ -6944,6 +7093,37 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        <NewtFlowCanvas
+          ref={flowCanvasRef}
+          graphNodes={nodes}
+          graphEdges={edges}
+          groups={groups}
+          viewport={viewport}
+          selectedNodeIds={selectedNodeIds}
+          selectedEdgeId={selectedEdgeId}
+          activeEdgeIds={activeEdgeIds}
+          inactiveEdgeIds={inactiveEdgeIds}
+          renderNodeRef={flowNodeRenderRef}
+          renderGroupRef={flowGroupRenderRef}
+          onNodeDragStart={startFlowNodeDrag}
+          onNodePositionsCommit={commitFlowNodePositions}
+          onSelectionChange={handleFlowSelectionChange}
+          onViewportChange={handleFlowViewportChange}
+          onViewportCommit={handleFlowViewportCommit}
+          onConnect={handleFlowConnect}
+          isValidConnection={isValidFlowConnection}
+          onConnectStart={handleFlowConnectStart}
+          onConnectEnd={handleFlowConnectEnd}
+          onPaneContextMenu={openCanvasContextMenu}
+          onPaneClick={() => {
+            setContextMenu(null);
+            setSelectedNodeIds([]);
+            setSelectedEdgeId(null);
+          }}
+          onDragOver={handleCanvasDragOver}
+          onDrop={handleCanvasDrop}
+        />
+        {false && (<>
         <EdgeCanvas
           ref={edgeCanvasRef}
           edges={renderedEdges}
@@ -7050,6 +7230,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             </NodeCardBoundary>
           ))}
         </div>
+        </>)}
         {selectionBounds && (
           <SelectionActionBar
             bounds={selectionBounds}
@@ -7325,6 +7506,8 @@ function NodeColorPicker({ color, onChange }) {
 function isCanvasSurface(target, canvas) {
   return (
     target === canvas ||
+    target.classList?.contains("flow-overview-canvas") ||
+    target.classList?.contains("react-flow__pane") ||
     target.classList?.contains("node-scene") ||
     target.classList?.contains("edge-layer") ||
     target.classList?.contains("edge-canvas-layer") ||
@@ -7490,7 +7673,8 @@ function NodeCard({
   imageModelOptions,
   videoModelOptions,
   utilityImageModelOptions,
-  utilityVideoModelOptions
+  utilityVideoModelOptions,
+  flowManaged = false
 }) {
   const config = getNodeConfig(node.type);
   const rawNodeData = node.data || {};
@@ -7667,9 +7851,9 @@ function NodeCard({
   const customNodeHeightClass = Boolean(customNodeHeight);
 
   const customTextareaSize = Boolean(nodeData.textareaResizeMode);
-  const cardClassName = `node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
+  const cardClassName = `node-card ${flowManaged ? "flow-managed" : ""} ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
   const cardStyle = {
-    transform: `translate(${node.x}px, ${node.y}px)`,
+    transform: flowManaged ? undefined : `translate(${node.x}px, ${node.y}px)`,
     width: customNodeWidth ? `${customNodeWidth}px` : undefined,
     height: customNodeHeight ? `${customNodeHeight}px` : undefined,
     "--preview-scale": nodeData.previewScale || 1,
@@ -7689,7 +7873,11 @@ function NodeCard({
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}
       onBlurCapture={handleBlurCapture}
-      onPointerDown={(event) => onDragStart(event, renderedNode)}
+      onPointerDown={flowManaged
+        ? (event) => {
+            if (!event.target.closest?.(".node-title")) event.stopPropagation();
+          }
+        : (event) => onDragStart(event, renderedNode)}
     >
       <div className="node-title">
         <span className="node-title-label">
