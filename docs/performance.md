@@ -40,67 +40,67 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for `v3.0.0-beta.0` on `main` after adding Edit node live previews, using `npm.cmd run build` and `npm.cmd run bundle:report`.
+Measured for `v3.0.0-beta.0` on `dev` after the React Flow canvas migration and generation-progress work, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-08-16.
 
 | Area | Current behavior |
 | --- | --- |
-| Initial shell | `src/main.jsx`, core React, shared vendor, icons, and global CSS are referenced by `dist/index.html`. |
-| Node editor | `src/NodeEditor.jsx` is loaded through `React.lazy` after the user enters the node workspace. |
+| Initial shell | `src/main.jsx`, core React, icons, and global CSS are referenced by `dist/index.html`. |
+| Node editor | `src/NodeEditor.jsx`, React Flow, node bodies, runners, and editor CSS load through the lazy node-editor boundary after the user enters Nodes. |
 | Stats dashboard | `src/StatsDashboard.jsx` is loaded through `React.lazy`. |
 | Settings page | `src/SettingsPage.jsx` is loaded through `React.lazy`. |
-| Edit node controls | Edit effect UI and live preview state are part of the lazy node editor chunk; local effect definitions live in `src/editEffects.js` and do not add to the initial shell. |
-| Color ID to Matte controls | `src/components/ColorIdMatteControls.jsx` is loaded only when the relevant utility controls render. |
-| 3D result viewer | `src/components/Model3DViewer.jsx` is loaded only when a 3D preview/result renders. |
+| Edit node controls | Edit effect UI and live preview state are part of the lazy node editor chunk; effect definitions live in `src/editEffects.js`. |
+| Generation progress | Progress aggregation, polling, and node UI are part of the lazy node editor path; the initial shell does not load them. |
+| Color ID to Matte controls | `src/components/ColorIdMatteControls.jsx` loads only when the relevant Utility controls render. |
+| 3D result viewer | `src/components/Model3DViewer.jsx` loads only when a 3D preview/result renders. |
 | Three.js runtime | `vendor-three` is generated as an async chunk from `src/threeRuntime.js`; it is not referenced by `dist/index.html`. |
 
 Recent production build summary:
 
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
-| `index.html` | document | 0.73 kB | 0.37 kB |
-| `assets/index-*.js` | entry script | 38.81 kB | 13.28 kB |
-| `assets/index-*.css` | entry style | 18.54 kB | 4.34 kB |
-| `assets/vendor-*.js` | modulepreload | 3.53 kB | 1.54 kB |
-| `assets/vendor-react-*.js` | modulepreload | 184.32 kB | 57.63 kB |
-| `assets/vendor-icons-*.js` | modulepreload | 14.08 kB | 4.74 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 387.24 kB | 104.75 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 84.84 kB | 14.94 kB |
-| `assets/Model3DViewer-*.js` | lazy 3D viewer chunk | 3.53 kB | 1.64 kB |
-| `assets/ColorIdMatteControls-*.js` | lazy utility chunk | 12.92 kB | 3.27 kB |
-| `assets/SettingsPage-*.js` | lazy settings chunk | 9.08 kB | 2.89 kB |
-| `assets/StatsDashboard-*.js` | lazy stats chunk | 19.65 kB | 6.64 kB |
-| `assets/vendor-three-*.js` | lazy Three.js runtime | 761.25 kB | 198.57 kB |
+| `index.html` | document | 0.66 kB | 0.36 kB |
+| `assets/index-*.js` | entry script | 66.13 kB | 22.29 kB |
+| `assets/index-*.css` | entry style | 25.80 kB | 5.42 kB |
+| `assets/vendor-icons-*.js` | modulepreload | 19.03 kB | 6.24 kB |
+| `assets/vendor-react-*.js` | modulepreload | 188.00 kB | 58.94 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 821.51 kB | 224.12 kB |
+| `assets/NodeEditor-*.css` | lazy editor style | 149.75 kB | 25.16 kB |
+| `assets/vendor-*.js` | lazy shared/editor vendor | 175.46 kB | 57.52 kB |
+| `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
+| `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 12.98 kB | 3.31 kB |
+| `assets/SettingsPage-*.js` | lazy Settings page | 19.60 kB | 6.03 kB |
+| `assets/StatsDashboard-*.js` | lazy Stats page | 23.21 kB | 7.45 kB |
+| `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |
 
 Current totals:
 
-- Initial shell: 260.00 kB, 81.90 kB gzip.
-- Lazy/generated: 1278.51 kB, 332.70 kB gzip.
-- All assets: 1538.51 kB, 414.60 kB gzip.
+- Initial shell: 299.62 kB, 93.24 kB gzip.
+- Lazy/generated: 2020.23 kB, 536.10 kB gzip.
+- All assets: 2319.85 kB, 629.34 kB gzip.
+
+Vite currently reports the expected large-chunk warning for the node editor and Three.js runtime. Treat the editor chunk as the next code-splitting target; do not move node-editor dependencies into the initial shell to hide the warning.
 
 ## Guardrails
 
-- Do not statically import `three`, GLTF loaders, or viewer-only Three UI into `src/main.jsx` or common preview modules.
-- Keep heavy node controls behind `React.lazy` when they are not common to normal canvas startup.
-- Use focused components for new heavy UI surfaces so future lazy boundaries are easy to place.
-- Treat bundle-size changes as a signal to inspect loading behavior, not as the only performance measure.
+- Do not statically import `three`, GLTF loaders, React Flow, or node-editor-only UI into `src/main.jsx`.
+- Keep Settings, Stats, 3D rendering, and specialist controls behind their current lazy boundaries.
+- Use focused components for new heavy UI surfaces so future lazy boundaries remain practical.
+- Treat bundle size, interaction latency, media decode cost, and graph stability as separate measurements. A smaller bundle does not excuse dropped nodes or broken edges.
+- Refresh this baseline from `bundle:report`; do not hand-copy Vite's decimal-kB values because the report uses binary kB consistently.
 
 ## React Flow Canvas Baseline
 
-The `dev` branch uses React Flow as the node canvas runtime while Newt continues to render the existing node bodies and owns graph execution, persistence, uploads, previews, and model behavior.
+The `dev` branch uses React Flow for node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths. Newt continues to own graph execution, persistence, uploads, previews, model behavior, grouping, and workflow state.
 
-- React Flow owns node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths.
-- Node positions stay local during a drag and commit to Newt's persisted graph once when the gesture ends, avoiding full graph rebuilds for every pointer event.
-- Semantic compact and map proxy modes are disabled. React Flow keeps the complete node UI mounted at every zoom level; below `0.15`, the sub-pixel dot grid and mouse-wheel transform easing are disabled to prevent distant-view raster artifacts. With proxies off, navigation also skips warm-node hydration bookkeeping so mounted node bodies remain stable.
-- Compact and map views draw the complete workflow in one high-DPI Canvas 2D layer. Every node, group, and connection remains visible without creating hundreds of React node bodies.
-- Overview labels and edge widths use screen-space values. Hover or selection shows the full node title, and double-click focuses a node at working zoom.
-- Selection has one owner per render mode: React Flow handles partial-overlap marquee and modifier-click selection in detail mode; the overview canvas handles additive marquee and modifier-click toggling in compact and map modes. Do not run the legacy NodeEditor marquee alongside either renderer.
-- Detail view keeps lightweight React Flow geometry shells mounted instead of repeatedly destroying and recreating offscreen nodes while panning.
-- Full node bodies hydrate inside a viewport buffer. Recently visited bodies stay warm for a bounded period, avoiding reload pauses when the user pans back while limiting media and editor cost.
-- Saved or estimated node dimensions and connected-port bounds seed React Flow before the first full render, so connection geometry is stable before node controls hydrate.
-- Port positions come from React Flow handles; the former canvas-wide DOM port sweep and independent edge transform are bypassed.
-- Nodes that first enter view during an active pan or zoom use a lightweight geometry placeholder and hydrate their complete Newt UI when the gesture ends. Nodes already visible remain mounted throughout the gesture.
-- Transient pan and zoom updates the React Flow transform and the overview canvas directly; graph state commits after the gesture instead of on every pointer event.
-- Edge strokes use `vector-effect: non-scaling-stroke` so visual weight stays stable through zoom. Processing edges retain Newt's animated dash cue.
-- Newt's existing mouse-wheel increment, trackpad pinch, zoom controls, context menus, grouping, node resize, and node-specific UI remain the source of behavior.
+- `flowOverviewEnabled` is `false` and `flowOnlyRenderVisibleElements` is `false`. Proxy, compact, map, warm-hydration, and offscreen-culling paths are inactive.
+- The canvas stays in full-detail mode from the 5% minimum zoom through the 250% maximum. Every node and edge remains mounted while panning and zooming.
+- Node positions stay local during a drag and commit to Newt's persisted graph when the gesture ends, avoiding a full graph rebuild for every pointer event.
+- Pan and wheel zoom update the live viewport imperatively during the gesture, then commit the final viewport. Delayed state must never snap the canvas back to an older transform.
+- React Flow owns partial-overlap marquee selection and modifier-click multi-selection. Text fields and interactive controls use the no-drag boundary so selecting text does not move a node.
+- Saved or estimated node dimensions and connected-handle bounds seed React Flow before measurement. Dynamic port or size changes must call the node-internals update path so edges stay attached.
+- Edge strokes use screen-stable non-scaling rendering and sit behind node cards. Processing edges retain Newt's animated dash cue.
+- The low-zoom canvas must not introduce raster proxy layers, grayscale bars, or remount flicker. Full node content may become visually tiny, but it remains the same node UI and graph structure.
+- Mouse-wheel zoom keeps Newt's configured increment and smooth transient transform behavior. Trackpad pinch remains native and must not be converted to wheel-step zoom.
+- Media regions keep `object-fit: contain`; resizing a node may add unused space but must never crop or cover the source image/video.
 
-Validate this path with a production build, the complete Node test suite, and a browser interaction pass that drags a node, pans and zooms through both semantic thresholds, verifies all distant nodes redraw immediately, confirms an attached edge at each step, and confirms visible edge width remains constant.
+Validate canvas changes with a production build, the complete Node test suite, and a browser interaction pass on a production-scale workflow. Test 5%, 8%, 30%, and 100% zoom; pan repeatedly across distant regions; verify all nodes remain present, edges stay behind and attached, line weight remains stable, selection and text editing work, media stays uncropped, and the viewport never snaps back.

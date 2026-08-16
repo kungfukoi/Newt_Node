@@ -1,7 +1,9 @@
 # Latent Wan Transition Handoff
 
+Status: archived research note. It records the 2026-06-04 design exploration and is not the current implementation guide. Current WanSegment/WanWarp behavior lives in `docs/node-standards.md`, `server/wanwarp/`, and the `dev` branch.
+
 Date: 2026-06-04
-Branch: `wan22-animdiff-transition-dev`
+Historical branch: `wan22-animdiff-transition-dev`
 
 ## Goal
 
@@ -215,20 +217,19 @@ The workflow is promising if:
 - Should LoRA application target high-noise, low-noise, or both transformer stages?
 - Is the motion LoRA compatible with the chosen Wan implementation outside Fal?
 
-## Resume Checklist
+## Current Implementation Reference
 
-On another machine:
+Do not resume development by switching to the historical branch. Start from the current development line and review the production integration first:
 
 ```powershell
-cd C:\dev\newt_node
-git fetch --all --prune
-git switch wan22-animdiff-transition-dev
-git pull --ff-only
-npm test
-npm run build
+cd C:\dev\Newt_Node
+git switch dev
+git pull --ff-only origin dev
+npm.cmd test
+npm.cmd run build
 ```
 
-Then read this file and continue with the first experiment that has not been completed.
+Then read `docs/node-standards.md`, `docs/comfyWan-requirements.yaml`, and the current `server/wanwarp/` implementation. Use this document only when the original latent-blending research context is useful.
 
 ## Notes From Current Branch
 

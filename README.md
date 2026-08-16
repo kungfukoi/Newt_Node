@@ -19,6 +19,7 @@ Current release: `v3.0.0-beta.0`
 - Edit local image and video outputs with ffmpeg-backed Transform, Time, Color, Blur, and Effects controls.
 - Use the Composer node to block camera, pose, image planes, props, maquettes, and guide frames before generation.
 - Keep multiple node results, preview them in-node, send them to Preview nodes, or browse recent project outputs in the right rail.
+- Track active model runs with per-node progress for queueing, generation, download, finalization, batches, and elapsed time.
 - Drag outputs or external files onto the canvas to create matching Image, Video, Audio, 3D, or Text nodes.
 - Save portable workflow packages with their inputs, outputs, and helper dependencies.
 - Track model usage and estimated spend through the local stats view.
@@ -27,15 +28,17 @@ Current release: `v3.0.0-beta.0`
 
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
+- **React Flow canvas**: Stable node identities, handles, selection, resizing, and non-scaling connection lines remain responsive across large graphs. Full node interfaces stay available at every zoom level; proxy/map modes are currently disabled.
 - **Provider routing**: Store multiple named Fal, Google, Krea, and OpenAI credentials, select one active key per service, and explicitly route Seedance, Google video/Veo, and Nano Banana Pro image generation to their supported provider.
 - **Film Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
 - **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
-- **Current image models**: Work with GPT Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, REVE 2.1, Krea 2 Large, and Z-Image from the same reference-aware image workflow.
+- **Current image models**: Work with OpenAI Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, REVE 2.1, Krea 2 Large, and Z-Image from the same reference-aware image workflow.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
-- **Edit node**: Local ffmpeg edits support live frame previews while controls change, plus scale, pixel crop with aspect lock, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, negative, and edge-detect effects.
-- **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph.
+- **Edit node**: Image and Video modes expose only compatible local ffmpeg-backed tools. Controls include source-sized scale, interactive crop, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, Invert, edge detect, text overlay, and brush inpaint with mask output. Local preview frames update while controls change.
+- **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph. After opening a rail image, use Left/Right Arrow to step through the other images.
 - **Video handling**: Video thumbnails and result panes keep native scrub controls; use Ctrl-drag when dragging video results into another node.
+- **Generation progress**: Model nodes show real provider progress when available and a clearly marked estimate otherwise, including batch completion, queue position, elapsed time, and terminal success/failure states.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Settings**: Local API keys, provider routing, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page.
@@ -123,4 +126,4 @@ Reference images can be renamed in the thumbnail strip. Use those handles in you
 
 ## Development Standards
 
-Before adding a new feature, read `docs/node-standards.md`. It is the shared checklist for node behavior, UI conventions, workflow packages, asset storage, backend routes, stats, and verification.
+Start with `docs/README.md` for the documentation map. Before adding a new feature, read `docs/node-standards.md`; it is the shared checklist for node behavior, UI conventions, workflow packages, asset storage, backend routes, stats, and verification.

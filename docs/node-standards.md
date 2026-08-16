@@ -19,6 +19,8 @@ Before starting any new feature, read this document first. If the feature change
 This branch is the current development line for the next mainline merge. Treat these as durable surfaces, even if the branch name or release version changes during promotion:
 
 - The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.
+- React Flow is the active canvas runtime. Proxy, compact, and map render modes are currently disabled; complete node bodies and all edges remain mounted from the minimum 5% zoom through working zoom.
+- Image, video, and text model runs expose per-node generation progress with queue, generation, download, finalization, batch, elapsed-time, and terminal states.
 - The File menu owns New, Save, Save As, Open, and Import. New starts a blank workflow through the same unsaved-change guard as Open and Import.
 - Text Model defaults to the Fal OpenRouter route with Gemini Flash model ids unless environment variables override them.
 - Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2`, `REVE 2.1`, and `Krea 2 Large`. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `Wan 2.7 Reference-to-Video`, `Happy Horse`, and `Creatify Aurora`; callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
@@ -52,19 +54,21 @@ Use this quick pass before implementing a feature, and again before committing i
 | Node registry | `src/nodeRegistry.js`, `src/NodeEditor.jsx` icon map | Add catalog definitions in `nodeRegistry.js`; add only the display icon mapping in `NodeEditor.jsx`. |
 | Node config/defaults/normalization | `src/NodeEditor.jsx` | `getNodeConfig`, `createDefaultNodeData`, and `normalizeCurrentNode` still live here. Keep backward-compatible migrations close to these functions until they are deliberately extracted. |
 | Run scheduling and result state | `src/nodeRunner.js`, `src/nodeRunners/*` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong in `nodeRunner.js`. Node-specific API runners and reusable request/result builders belong in focused files under `src/nodeRunners/`. |
+| Generation progress | `src/generationProgress.js`, `src/generationProgressStore.js`, `src/components/GenerationProgress.jsx`, `server/generation-progress.js` | Build run metadata and aggregate batches in the client helpers, poll through the shared store, render the accessible node progress bar in the component, and keep request-scoped provider state in the server module. |
 | Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
 | Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
 | Output routing and tokens | `src/outputConnections.js`, `src/outputTokens.js`, `server/outputTargets.js` | Keep accepted source kinds and browser token insertion focused in `src`; keep path expansion, unique-file reservation, and external-output URL encoding server-side. |
 | Cross-workflow clipboard | `src/workflowClipboard.js`, `src/workflowState.js`, `src/nodeGeometry.js` | Serialize selected graph fragments, remap copied ids and bindings, and place pasted selections through these helpers. |
 | Node identity and `@` references | `src/nodeReferences.js`, `src/workflowState.js`, `src/NodeEditor.jsx` | Treat node ids as canonical identity. Keep reusable mention parsing, binding, and visible-token rename helpers in `nodeReferences.js`; remap ids and bindings in `workflowState.js`; let `NodeEditor.jsx` coordinate bindings with live node/group state. |
 | Model, utility, and edit options | `src/modelOptions.js`, `src/editEffects.js` | Model names, preset names/prompts, aspect ratios, duration/resolution lists, utility descriptions, model-control option lists, and Edit node effect definitions live here. Keep labels stable because saved workflows and UI normalization rely on them. |
-| Canvas chrome | `src/components/CanvasChrome.jsx` | Canvas edge drawing/hit testing, selection marquee/action bar, and workflow prompt live here. Keep hot drawing/UI chrome out of `NodeEditor.jsx`. |
+| React Flow canvas | `src/components/NewtFlowCanvas.jsx`, `src/components/NewtFlowContext.jsx`, `src/flowOverview.js` | React Flow owns viewport transforms, node movement, selection, handles, and edges. `flowOverview.js` owns the disabled overview-mode feature flags and any future thresholds; do not duplicate them in render components. |
+| Canvas chrome | `src/components/CanvasChrome.jsx` | Shared canvas overlays, selection actions, and workflow prompt UI live here. Keep hot drawing and UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
 | Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
 | Settings page | `src/SettingsPage.jsx`, `server/index.js` settings routes | Runtime API key entry, repository update, restart, branch status, loaded app version, and enabled-model preferences live here. Keep settings data local and avoid exposing secret values in logs, history, or docs. |
-| Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
+| Project output rail data | `src/projectOutputs.js` | Build, filter, and navigate project output rail items here; keep filesystem/history filtering and adjacent-image selection out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
 | Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
 | Color ID to Matte UI/helpers | `src/components/ColorIdMatteControls.jsx`, `src/colorIdMatte.js` | Picker UI state lives in the component file; color normalization, matte preview rendering, sample radius/tolerance bounds, and matte run item normalization live in the helper file. |
@@ -267,7 +271,7 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - If a connected control section is collapsed, keep its handle mounted or provide a stable equivalent handle position. Presentation changes must never remove the saved edge or make a valid connection appear detached.
 - Collapsing an input section changes only presentation. It must not remove the edge, invalidate its saved port id, or make its connector disappear; expanding it must remeasure the real endpoint immediately.
 - Seed initial node dimensions and connected handle bounds from persisted or estimated graph geometry. Virtualization must not require every heavy node body to mount once before offscreen culling begins.
-- Large canvases use semantic zoom. Compact and map views draw the complete graph in one Canvas 2D layer; detail view keeps lightweight React Flow geometry stable and hydrates full node bodies inside a buffered warm region. Never remount heavy node bodies merely to keep distant edges visible.
+- Proxy, compact, and map modes are disabled while `flowOverviewEnabled` is `false`. Keep all React Flow nodes and edges mounted and keep `onlyRenderVisibleElements` disabled so distant graph structure does not disappear or respawn while panning. Any future virtualization or semantic mode must be opt-in, tested on production-scale workflows, and documented here before it becomes active.
 - Keep normal connectors visually lightweight and use `vector-effect: non-scaling-stroke` so zoom does not make wires look fat or thin. Selection, draft, active, and inactive styles may differ, active processing retains its animated dash, and hit testing remains generous without increasing visible line weight.
 - Incompatible connections should fail with a plain, helpful message.
 - Auto-created nodes from a dragged connector should link only when compatible.
@@ -292,7 +296,7 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - When a thumbnail fails, retry its known full-resolution source before showing the NewtNode logo. The logo is a missing/unresolved-media fallback, never a replacement for an existing local file.
 - A model or Utility run redirected by an Output node must still write the real saved public URL into the source node's `resultItems`/`resultUrl`. Connected Preview nodes must receive those same playable items; do not substitute the Output node title, a filename-only string, or the logo.
 - Fetch output history lazily when the output rail first opens. Manual refresh and generation completion may still refresh it immediately.
-- Output rail thumbnails should keep layout stable and lazy-load image/video media as they near the visible rail; the full-size lightbox owns eager preview loading after double-click.
+- Output rail thumbnails should keep layout stable and lazy-load image/video media as they near the visible rail; the full-size lightbox owns eager preview loading after double-click. When a lightbox was opened from the output rail, unmodified Left/Right Arrow keys step through image items only, skip other media types, and wrap at the ends. Do not capture those keys while a text or form control is being edited.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
 - Dragging from the output rail onto the canvas should create a matching media node in place. Dragging external files onto the canvas should import supported media into the current workflow package/app storage and create matching Image, Video, Audio, 3D, or Text nodes; text files store file contents in the Text node.
 - Video uploads and canvas drops accept MP4, MOV/QuickTime, and WebM. Preserve the original managed asset and MIME type; browser playback still depends on the codec inside the container, so an unsupported codec should produce a useful preview/run error instead of reclassifying the file as non-video.
@@ -324,6 +328,16 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Independent nodes of the same stage may run concurrently.
 - Nodes should set `status`, `error`, `resultUrl`, `resultItems`, `selectedResultIndex`, and `resultType` consistently.
 - Batch failures should report partial success without discarding successful outputs.
+
+## Generation Progress Standard
+
+- Model generation requests carry `generationRunId`, `generationGroupId`, node identity, generation kind/label, and one-based batch index/total metadata. Keep this metadata additive so provider request schemas remain unchanged.
+- `generationProgressMiddleware` owns requests under `/api/node`; `GET /api/generation-progress` returns current entries for client polling. Do not expose API credentials, prompts, or provider payloads through progress responses.
+- Supported phases are `queued`, `generating`, `downloading`, `finalizing`, `complete`, and `failed`. The UI must show a real filling track, a phase label, elapsed time, batch completion, queue position when available, and a terminal result.
+- Prefer provider-reported percent or step/frame logs. When a provider supplies no usable percent, show a clearly labeled estimate derived from phase and elapsed time; never present an estimate as provider-reported truth.
+- Batch progress aggregates all runs in a generation group. Preserve completed batch items when another item fails, and retain the terminal bar long enough for the user to read it.
+- The progress component is node-scoped and accessible: expose `role=progressbar`, value bounds, a numeric value when determinate, and useful text when indeterminate.
+- Progress polling must stop when there are no active runs and must not trigger full graph updates on each poll. Keep subscription and aggregation logic outside `NodeEditor.jsx`.
 
 ## Composer Node Standard
 
@@ -631,7 +645,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Fal is the default provider route for remote models that do not expose an explicit provider choice.
 - Fal, Google, Krea, and OpenAI each support multiple named credentials in Settings. One credential or `None` is active per provider; selecting a different credential must not delete the others.
 - Models available from more than one service must expose a separate provider-routing preference. Seedance has an explicit Fal/Krea choice; Google video/Veo and Nano Banana Pro image generation have explicit Google/Fal choices. A run must not silently switch away from the selected provider when that provider lacks an active key or returns an error. Provider choice, endpoint, and provider-specific cost must be recorded in history.
-- GPT Image 2 uses the selected OpenAI key and preserves its quality-specific generation/edit pricing metadata.
+- OpenAI Image 2 uses the selected OpenAI key and preserves its quality-specific generation/edit pricing metadata.
 - Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
 - Nano Banana Pro must follow the explicit Image Generation provider preference: direct Google for Google or the configured Fal Nano Banana Pro endpoint for Fal.
 - Provider failures such as high demand, quota exhaustion, overload, and 5xx/429 responses should display the selected provider's diagnostic on the node. The user may switch the relevant Model Providers setting before retrying; the runtime must not silently fall back.
@@ -669,7 +683,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Scrollable tool panels should consume available space before introducing nested scrollbars. When a control list must scroll, make the scrollbar discoverable and verify the first and last controls are reachable.
 - Draftable text inputs and textareas update their DOM/local draft immediately and commit graph state on the shared debounce or blur boundary. Do not make each keystroke rebuild the full node graph, port map, and edge layer.
 - Pan and wheel zoom use the live viewport ref and React Flow's imperative viewport API during the gesture, then commit Newt's persisted viewport state after the transient interaction. A delayed state commit must never snap the viewport back to an older value.
-- Let React Flow virtualize offscreen node DOM. Keep node data and graph execution independent from whether a card is mounted. At working zoom, steady-state visible nodes preserve their complete UI and a node first entering view during active navigation may defer its heavy body until the gesture ends. At overview zoom, all visible nodes may use lightweight shells until the user zooms back into the working range.
+- Keep React Flow's offscreen culling disabled in the current full-detail mode. Every node retains its complete UI during pan and zoom, including at the 5% minimum zoom; graph execution remains independent from visibility. Reintroducing lightweight shells or overview proxies requires a deliberate feature change and production-scale interaction testing.
 
 ## Edit Node Standard
 
@@ -679,7 +693,7 @@ The Edit node establishes the standard for local ffmpeg-backed media editing nod
 - Internal type: `edit`.
 - Catalog placement: under Utility and above Audio.
 - Output port: `editOut`, colored as image or video based on the selected source type.
-- Inputs: `imageIn` for image effects and `videoIn` for video effects. Switching source type or effect group should remove stale incompatible Edit edges.
+- Inputs: `imageIn` for image effects and `videoIn` for video effects. Image and Video source tabs filter the effect list to compatible definitions. Switching source type or effect group should remove stale incompatible Edit edges.
 - Visible effect groups are `Transform`, `Time`, `Color`, `Blur`, and `Effects`. Backend support for older hidden cleanup effects may remain for saved-workflow compatibility, but hidden groups should not appear as tabs.
 - Effect definitions, labels, controls, defaults, and definitions live in `src/editEffects.js`. Backend ffmpeg filter mapping lives near `/api/node/edit-media` handling.
 - Edit node operations are local ffmpeg edits. They should not call a paid provider.
@@ -688,7 +702,9 @@ The Edit node establishes the standard for local ffmpeg-backed media editing nod
 - Video output formats are MP4, WebM, and ProRes MOV. Image edits output PNG.
 - The Settings drawer should show a live ffmpeg-backed preview frame for the selected effect and source. Preview requests should debounce control changes, ignore stale responses, and return temporary inline PNG data instead of writing output/history entries.
 - Video previews use a frame-time slider. Time-only effects should still preview a representative frame: Trim previews within the selected start/end range, Reverse maps the selected preview time from the end of the source, and FPS previews the source frame because it does not visibly change a single frame.
-- Transform `Crop Center` uses pixel `Width` and `Height`, seeded from the connected source dimensions when known. It uses sliders plus number inputs and an aspect-lock toggle; do not reintroduce percentage crop controls for this effect.
+- Image `Crop` uses an interactive crop box and never crops the source merely because the node shell was resized. Normal dragging is freeform; Ctrl-drag preserves the current crop proportions.
+- `Scale` seeds pixel Width and Height from the connected source dimensions. Sliders and direct number inputs stay synchronized; the aspect-lock toggle keeps dimensions proportional when enabled.
+- Use the visible label `Invert` for the legacy internal effect id `negate`. Do not expose the hidden Cleanup group or retired one-click Flip Horizontal, Flip Vertical, Rotate 90, or Crop Center entries.
 - Time `Trim` uses start/end seconds tied to a compact clip timeline. Dragging the head or tail updates the fields, and typing in the fields updates the handles. The default end time should seed from the connected clip duration when metadata is available.
 - Brush Inpaint exposes `Create mask` in the compact and enlarged brush controls. It saves the current painted region as a black-background, white-region PNG result without calling the inpaint provider, and the Edit mask output port emits the newest mask result.
 - Edit outputs should append to `resultItems`, preserve previous results, support download, and connect anywhere a normal image or video output can connect.
@@ -728,10 +744,11 @@ Before committing node or UI changes:
 - Verify node identity behavior: bind an `@token`, rename its source node, confirm the visible token updates while the saved node id remains unchanged, and confirm the next run uses the same source output. Include a duplicate-title case and a copy/import remap case when reference behavior changes.
 - Check collapsed and expanded node states. Confirm every connected line stays visible and reanchors without an extra interaction when a connected section collapses or expands.
 - For resize changes, test width-only, height-only, diagonal, minimum, maximum, saved/reopened, and shrink-back behavior. Confirm the primary media/workspace expands first, controls remain reachable, aspect ratios remain correct, and lines track every port during the drag.
-- For large-canvas changes, test above and below the `0.12/0.16` map and `0.24/0.30` detail hysteresis thresholds. At distant zoom every node and edge must redraw immediately; at working zoom buffered full nodes must stay warm when panning away and back; pan/zoom must not snap back.
+- For large-canvas changes, test at 5%, 8%, 30%, and 100% zoom with a production-scale graph. Every node and edge must remain present, node bodies must not flicker or turn into proxies, edge weight must remain screen-stable, selection must stay correct, and pan/zoom must not snap back.
 - For clipboard/import changes, paste a multi-node selection with an internal edge, group, and bound `@token` into another open workflow and confirm all ids are fresh and correctly remapped.
 - For Output changes, test tokens in both Path and Filename, collision handling with and without `$index`, direct Output copy, source-run redirection, Preview propagation, save/reopen, and a genuinely missing external file.
-- Check Preview behavior for every output media type touched.
+- Check Preview behavior for every output media type touched. For right-rail image changes, open an image and verify Left/Right navigation skips non-images, wraps, and leaves typing controls alone.
+- For generation-progress changes, verify provider percent, estimated percent, queue position, batch aggregation, terminal success/failure, polling shutdown, and progressbar accessibility.
 - Check Stats after a recorded run or with representative history.
 - Restart `npm run dev` when route changes are not visible in the running backend.
 

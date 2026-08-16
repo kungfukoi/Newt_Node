@@ -1,5 +1,7 @@
 # Blog Draft: Image-First NewtNode Post
 
+Status: copy and screenshot draft, refreshed 2026-08-16. This is not an engineering source of truth; use `README.md` and `docs/node-standards.md` for current product behavior.
+
 Suggested title:
 
 Vibe Coding NewtNode: Replacing Krea and Flora With My Own Creative Node System
@@ -43,11 +45,11 @@ The strongest version of this post should feel like a guided studio tour:
 
 5. Utility video workflow
    Open a workflow such as `Zootopia.json` or a saved utility test.
-   Capture Video input into Utility nodes such as SAM, VOID, BiRefNet, RIFE, or upscaling.
+   Capture Video input into Utility nodes such as DWPose Video, Depth Anything Video, VOID, BiRefNet, RIFE, or upscaling.
    Caption: Utility nodes make cleanup, matting, interpolation, upscaling, and extraction part of the same graph.
 
 6. Edit node workflow
-   Capture a Video or Image node connected into an Edit node, with the live preview, Trim timeline, or Crop Center pixel controls visible.
+   Capture a Video or Image node connected into an Edit node, with the live preview, Trim timeline, interactive Crop box, or source-sized Scale controls visible.
    Caption: The Edit node keeps live-previewed ffmpeg transforms, trims, color passes, blur, and effects inside the same creative graph.
 
 7. Preview node gallery
@@ -151,13 +153,13 @@ That visual continuity is one of the reasons I keep reaching for NewtNode first.
 
 ## The Edit Node
 
-The newest piece of that continuity is the **Edit** node.
+One important piece of that continuity is the **Edit** node.
 
-Instead of round-tripping out to another tool for basic media work, I can keep local ffmpeg edits in the graph. Scale, crop, rotate, flip, trim, frame-rate changes, color adjustment, blur, sharpen, vignette, noise, negative, and edge-detect passes can all sit between generation steps.
+Instead of round-tripping out to another tool for basic media work, I can keep local ffmpeg edits in the graph. Scale, crop, rotate, flip, trim, frame-rate changes, color adjustment, blur, sharpen, vignette, noise, Invert, and edge-detect passes can all sit between generation steps.
 
-[IMAGE 08: Edit node with live preview, Trim timeline, or Crop Center controls]
+[IMAGE 08: Edit node with live preview, Trim timeline, interactive Crop, or Scale controls]
 
-The interaction matters here. Crop Center works in pixels, starts from the source dimensions, and has sliders plus an aspect-lock toggle. Trim has a small clip timeline, so the start and end fields can be dragged visually instead of guessed numerically. As controls change, the node renders a quick local preview frame so I can see the effect before committing to a full output.
+The interaction matters here. Image Crop uses a draggable crop box, with Ctrl-drag preserving its proportions. Scale starts from the source pixel dimensions and can lock width and height together. Trim has a small clip timeline, so the start and end fields can be dragged visually instead of guessed numerically. As controls change, the node renders a quick local preview frame so I can see the effect before committing to a full output.
 
 The result is still a normal NewtNode image or video output. It can go into Preview, another Edit node, a Utility node, an Image Model, a Video Model, or a 3D node if the media type fits.
 
