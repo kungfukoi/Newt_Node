@@ -1,7 +1,7 @@
 .newt-react-flow {
-  --newt-flow-edge-width: 3px;
-  --newt-flow-edge-selected-width: 5px;
-  --newt-flow-connection-width: 3.5px;
+  --newt-flow-edge-width: 6px;
+  --newt-flow-edge-selected-width: 10px;
+  --newt-flow-connection-width: 7px;
   position: absolute;
   inset: 0;
   z-index: 1;
