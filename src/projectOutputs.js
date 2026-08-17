@@ -1,7 +1,7 @@
 import { capitalizeMediaType, fileNameFromLocalUrl, isLocalOutputUrl, mimeForOutputItem, outputMediaTypeForUrl } from "./mediaAssets.js";
 import { normalizedResultItems } from "./mediaResults.js";
 
-const defaultMaxProjectOutputItems = 25;
+const defaultMaxProjectOutputItems = 500;
 
 export function buildProjectOutputItems({
   nodes = [],

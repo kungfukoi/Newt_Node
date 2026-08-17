@@ -1,4 +1,7 @@
 .newt-react-flow {
+  --newt-flow-edge-width: 3px;
+  --newt-flow-edge-selected-width: 5px;
+  --newt-flow-connection-width: 3.5px;
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -74,7 +77,7 @@
 }
 
 .newt-flow-edge-visible {
-  stroke-width: 2px;
+  stroke-width: var(--newt-flow-edge-width);
   opacity: 0.62;
   transition: opacity 120ms ease, stroke-width 120ms ease, filter 120ms ease;
 }
@@ -88,7 +91,7 @@
 }
 
 .newt-flow-edge.selected .newt-flow-edge-visible {
-  stroke-width: 4px;
+  stroke-width: var(--newt-flow-edge-selected-width);
   opacity: 0.96;
   filter: drop-shadow(0 0 4px rgba(244, 240, 232, 0.5));
 }
@@ -114,7 +117,7 @@
 
 .newt-flow-connection-line {
   stroke: #ddc631;
-  stroke-width: 2.5px;
+  stroke-width: var(--newt-flow-connection-width);
   stroke-dasharray: 6 8;
   animation: newt-flow-edge-processing 0.7s linear infinite;
 }

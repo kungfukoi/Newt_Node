@@ -206,6 +206,7 @@ export const utilityImageModelNames = {
 export const utilityImageModelOptions = [
   utilityImageModelNames.colorIdMatte,
   utilityImageModelNames.imageToId,
+  utilityImageModelNames.qwenCameraEdit,
   utilityImageModelNames.stillFrame,
   utilityImageModelNames.dwpose,
   utilityImageModelNames.depthAnything,

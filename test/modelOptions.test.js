@@ -15,6 +15,11 @@ test("Topaz upscalers are exposed in both Utility model tabs", () => {
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazUpscaler));
 });
 
+test("Qwen Camera Edit is exposed in Utility image models", () => {
+  assert.equal(utilityImageModelNames.qwenCameraEdit, "Qwen Camera Edit");
+  assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.qwenCameraEdit));
+});
+
 test("DWPose Video is exposed in Utility video models", () => {
   assert.equal(utilityVideoModelNames.dwposeVideo, "DWPose Video");
   assert.ok(

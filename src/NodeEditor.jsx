@@ -326,6 +326,7 @@ import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
+import { createWorkflowSessionId } from "./workflowSession.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import {
   createWorkflowClipboardPayload,
@@ -1163,7 +1164,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [canvasSize, setCanvasSize] = React.useState(defaultCanvasSize);
   const [selectedNodeIds, setSelectedNodeIds] = React.useState([]);
   const [projectName, setProjectName] = React.useState(savedDraft.projectName);
-  const [projectId, setProjectId] = React.useState(savedDraft.projectId);
+  const [projectId, setProjectId] = React.useState(() => savedDraft.projectId || createWorkflowSessionId());
   const [savedProjectName, setSavedProjectName] = React.useState(savedDraft.savedProjectName);
   const [projectPackagePath, setProjectPackagePath] = React.useState(savedDraft.projectPackagePath);
   const [workflowFilePath, setWorkflowFilePath] = React.useState(savedDraft.workflowFilePath);

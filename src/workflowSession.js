@@ -1,5 +1,10 @@
 import { workflowDisplayPath, workflowFileNameForProject } from "./workflowFiles.js";
 
+export function createWorkflowSessionId() {
+  const randomId = globalThis.crypto?.randomUUID?.() || Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+  return "workflow-" + randomId;
+}
+
 export function selectedWorkflowProjectName(projects = [], projectId = "") {
   return projects.find((project) => project.id === projectId)?.name;
 }

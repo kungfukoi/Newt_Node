@@ -8,7 +8,7 @@ import {
   writeWorkflowFileHandle
 } from "./workflowFiles.js";
 import { lastPackageParentPath, rememberOpenedWorkflowPath, rememberPackageParentPath, workflowPickerDefaultPath } from "./workflowPreferences.js";
-import { appendWorkflowRequestContextToForm, currentWorkflowDisplayPath, selectedWorkflowProjectName, workflowRequestContextForState } from "./workflowSession.js";
+import { appendWorkflowRequestContextToForm, createWorkflowSessionId, currentWorkflowDisplayPath, selectedWorkflowProjectName, workflowRequestContextForState } from "./workflowSession.js";
 import { createNodeId, remapImportedGraph, workflowStateFingerprint } from "./workflowState.js";
 
 export function useWorkflowPersistence({
@@ -409,7 +409,7 @@ export function useWorkflowPersistence({
       const graph = normalizeEditorGraph(newProjectNodes, newProjectEdges, newProjectGroups);
       localWorkflowHandleRef.current = null;
       setLocalWorkflowFileName("");
-      setProjectId(null);
+      setProjectId(createWorkflowSessionId());
       setProjectName("Untitled node project");
       setSavedProjectName(null);
       setProjectPackagePath("");
@@ -446,7 +446,7 @@ export function useWorkflowPersistence({
     const displayPath = workflowDisplayPath(project);
     localWorkflowHandleRef.current = null;
     setLocalWorkflowFileName("");
-    setProjectId(project.id || null);
+    setProjectId(project.id || createWorkflowSessionId());
     setProjectName(nextProjectName);
     setSavedProjectName(project.name || null);
     setProjectPackagePath(nextPackagePath);
@@ -476,7 +476,7 @@ export function useWorkflowPersistence({
     const nextViewport = { x: 0, y: 0, scale: 1 };
     localWorkflowHandleRef.current = null;
     setLocalWorkflowFileName("");
-    setProjectId(null);
+    setProjectId(createWorkflowSessionId());
     setProjectName(nextProjectName);
     setSavedProjectName(null);
     setProjectPackagePath("");
@@ -701,7 +701,7 @@ export function useWorkflowPersistence({
       const nextProjects = await workflowApi.remove(project.registryFileName || project.fileName || project.id);
       setProjects(nextProjects);
       if (projectId === project.id) {
-        setProjectId(null);
+        setProjectId(createWorkflowSessionId());
         setProjectName("Untitled node project");
         setSavedProjectName(null);
         setProjectPackagePath("");

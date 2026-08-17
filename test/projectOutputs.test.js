@@ -151,3 +151,70 @@ test("history outputs use the matching thumbnail without replacing the full asse
   assert.equal(items[0].url, "/outputs/project/history.png");
   assert.equal(items[0].thumbnailUrl, "/outputs/project/history-preview.jpg");
 });
+
+test("project output rail keeps the complete retained history for the active project", () => {
+  const history = Array.from({ length: 183 }, (_, index) => ({
+    id: `history-${index}`,
+    createdAt: new Date(Date.UTC(2026, 7, 16, 12, 0, index)).toISOString(),
+    mediaType: "image",
+    project: { id: "project-1", name: "Project" },
+    localImage: `/outputs/project/generation-${index}.png`
+  }));
+
+  const items = buildProjectOutputItems({
+    nodes: [],
+    history,
+    projectId: "project-1",
+    projectName: "Project",
+    getNodeResultMediaType: () => ""
+  });
+
+  assert.equal(items.length, 183);
+  assert.equal(items[0].url, "/outputs/project/generation-182.png");
+  assert.equal(items.at(-1).url, "/outputs/project/generation-0.png");
+});
+
+test("unsaved workflow sessions retain their own generation history", () => {
+  const items = buildProjectOutputItems({
+    nodes: [{
+      id: "image-model-1",
+      type: "imageModel",
+      data: {
+        title: "Image Model",
+        resultUrl: "/outputs/project/generation-2.png",
+        resultItems: [{ url: "/outputs/project/generation-2.png", type: "image" }]
+      }
+    }],
+    history: [
+      {
+        id: "history-2",
+        createdAt: "2026-08-16T12:02:00.000Z",
+        mediaType: "image",
+        project: { id: "workflow-session-a", name: "Untitled node project" },
+        localImage: "/outputs/project/generation-2.png"
+      },
+      {
+        id: "history-1",
+        createdAt: "2026-08-16T12:01:00.000Z",
+        mediaType: "image",
+        project: { id: "workflow-session-a", name: "Untitled node project" },
+        localImage: "/outputs/project/generation-1.png"
+      },
+      {
+        id: "other-workflow",
+        createdAt: "2026-08-16T12:03:00.000Z",
+        mediaType: "image",
+        project: { id: "workflow-session-b", name: "Untitled node project" },
+        localImage: "/outputs/other/generation.png"
+      }
+    ],
+    projectId: "workflow-session-a",
+    projectName: "Untitled node project",
+    getNodeResultMediaType: () => "image"
+  });
+
+  assert.deepEqual(items.map((item) => item.url), [
+    "/outputs/project/generation-2.png",
+    "/outputs/project/generation-1.png"
+  ]);
+});

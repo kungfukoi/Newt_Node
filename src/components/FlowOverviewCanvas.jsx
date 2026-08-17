@@ -280,7 +280,7 @@ function drawEdges(context, edges, nodes, viewport, activeEdgeIds, inactiveEdgeI
     context.bezierCurveTo(sourceX + curve, sourceY, targetX - curve, targetY, targetX, targetY);
     context.strokeStyle = edge.color || "#6285cf";
     context.globalAlpha = selected || active ? 0.95 : inactive ? 0.18 : 0.42;
-    context.lineWidth = selected || active ? 2 : 1;
+    context.lineWidth = selected || active ? 3 : 1.5;
     if (active) {
       context.setLineDash([8, 6]);
       context.lineDashOffset = -((time || 0) / 45) % 14;
