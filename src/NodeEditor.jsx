@@ -13138,7 +13138,7 @@ function NodeBody({
     const qwenZoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     const utilityOutputPort = {
       ...config.output[0],
-      label: utilityOutputMediaType === "video" ? "Video output" : "Image output",
+      label: isSam3Image ? "Mask output" : utilityOutputMediaType === "video" ? "Video output" : "Image output",
       color: utilityOutputMediaType === "video" ? portColors.video : portColors.image
     };
     const controlVideoOutputPort = config.output.find((port) => port.id === "controlVideoOut");
@@ -18022,7 +18022,9 @@ function outputPortDefinitionsForNode(node) {
         port.id === "utilityOut"
           ? {
               ...port,
-              label: utilityOutputType(node, port.id) === "video" ? "Video output" : "Image output",
+              label: isUtilitySam3ImageModel(node.data?.utilityImageModel)
+                ? "Mask output"
+                : utilityOutputType(node, port.id) === "video" ? "Video output" : "Image output",
               color: utilityOutputType(node, port.id) === "video" ? portColors.video : portColors.image
             }
           : port

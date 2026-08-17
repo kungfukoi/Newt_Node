@@ -473,7 +473,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",
   [utilityImageModelNames.topazUpscaler]: "Upscales and enhances a connected image with Topaz image enhancement models.",
   [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
-  [utilityImageModelNames.sam3Image]: "Segments prompted objects in an image and returns the masked result.",
+  [utilityImageModelNames.sam3Image]: "Segments prompted objects and returns black and white masks, with a masked preview for inspection.",
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
   [utilityVideoModelNames.wanFunControl]: "Legacy Wan Fun Control alias. New runs route to Wan 2.2 VACE Fun A14B Depth.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",

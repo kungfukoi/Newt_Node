@@ -29,6 +29,7 @@ import {
   updateCurrentGenerationProgress
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
+import { sam3ImageOutputs } from "./sam3Outputs.js";
 import {
   activeProviderCredentials,
   legacyProviderCredentialStore,
@@ -4103,24 +4104,42 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
   };
 
   const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
+  const { masks: remoteMasks, preview: remotePreview } = sam3ImageOutputs(result?.data);
 
-  if (!remoteImage?.url && Array.isArray(result?.data?.masks) && !result.data.masks.length) {
+  if (!remoteMasks.length) {
     return res.status(422).json({
       error: "SAM 3 Image did not find a matching segment. Try naming a visible object in the image, like helmet, face, person, or robot.",
       raw: result?.data
     });
   }
 
-  if (!remoteImage?.url) {
-    return res.status(502).json({ error: "Fal returned no segmentation image URL.", raw: result?.data });
+  const downloadedMasks = [];
+  for (const [index, remoteMask] of remoteMasks.entries()) {
+    downloadedMasks.push({
+      remoteImage: remoteMask,
+      output: await downloadImage(
+        req,
+        remoteMask.url,
+        `sam-3-image-mask-${index + 1}`,
+        remoteMask.content_type || remoteMask.mimeType
+      )
+    });
   }
-
-  const output = await downloadImage(req, remoteImage.url, "sam-3-image-segmentation", remoteImage.content_type || remoteImage.mimeType);
-  const returnedMaskCount = Array.isArray(result?.data?.masks) ? result.data.masks.length : 0;
-  const maskCount = returnedMaskCount || 1;
+  const downloadedPreview = remotePreview
+    ? {
+        remoteImage: remotePreview,
+        output: await downloadImage(
+          req,
+          remotePreview.url,
+          "sam-3-image-preview",
+          remotePreview.content_type || remotePreview.mimeType
+        )
+      }
+    : null;
+  const maskCount = downloadedMasks.length;
   const text = `Segmented ${maskCount} ${maskCount === 1 ? "mask" : "masks"}.`;
   const cost = estimateSam3ImageCost({ endpoint });
+  const primaryMask = downloadedMasks[0];
 
   await appendHistory({
     id: result.requestId || randomUUID(),
@@ -4145,16 +4164,38 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
       maskCount
     },
     cost,
-    remoteImage,
-    remoteMasks: result?.data?.masks || [],
+    remoteImage: primaryMask.remoteImage,
+    remoteMasks,
+    remotePreview,
     metadata: result?.data?.metadata || [],
     scores: result?.data?.scores || [],
     boxes: result?.data?.boxes || [],
-    localImage: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes,
+    localImage: primaryMask.output.publicPath,
+    localMasks: downloadedMasks.map(({ output }) => output.publicPath),
+    localPreview: downloadedPreview?.output.publicPath || "",
+    outputFileName: primaryMask.output.fileName,
+    outputBytes: primaryMask.output.bytes,
     text
   });
+
+  const images = downloadedMasks.map(({ remoteImage, output }, index) => ({
+    ...remoteImage,
+    label: maskCount === 1 ? "Black and white mask" : `Black and white mask ${index + 1}`,
+    localUrl: output.publicPath,
+    fileName: output.fileName,
+    mimeType: output.mimeType,
+    isMask: true
+  }));
+  if (downloadedPreview) {
+    images.push({
+      ...downloadedPreview.remoteImage,
+      label: "Masked preview",
+      localUrl: downloadedPreview.output.publicPath,
+      fileName: downloadedPreview.output.fileName,
+      mimeType: downloadedPreview.output.mimeType,
+      isMask: false
+    });
+  }
 
   return res.json({
     requestId: result.requestId,
@@ -4162,16 +4203,10 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
     modelName: "SAM 3 Image",
     text,
     cost,
-    image: {
-      ...remoteImage,
-      label: "SAM 3 Image",
-      localUrl: output.publicPath,
-      fileName: output.fileName,
-      mimeType: output.mimeType
-    }
+    image: images[0],
+    images
   });
 }
-
 app.post("/api/node/utility-image", async (req, res) => {
   try {
     const selectedModel = resolveUtilityImageModel(req.body.model);
