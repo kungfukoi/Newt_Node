@@ -1,10 +1,17 @@
 import path from "node:path";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import {
+  copyFileWithRetry,
+  readFileWithRetry,
+  renameFileWithRetry,
+  statFileWithRetry,
+  writeFileWithRetry
+} from "./file-write.js";
 
 export async function readJsonFile(filePath, fallback) {
   try {
-    return JSON.parse(await readFile(filePath, "utf8"));
+    return JSON.parse(await readFileWithRetry(filePath, "utf8"));
   } catch {
     return fallback;
   }
@@ -17,13 +24,13 @@ export async function writeJsonAtomic(filePath, value) {
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
 
   try {
-    await writeFile(tempPath, json);
+    await writeFileWithRetry(tempPath, json);
     try {
-      await rename(tempPath, filePath);
+      await renameFileWithRetry(tempPath, filePath, { attempts: 3, initialDelayMs: 50, maximumDelayMs: 100 });
     } catch (error) {
       if (!["EPERM", "EACCES", "EEXIST"].includes(error?.code)) throw error;
-      await rm(filePath, { force: true }).catch(() => {});
-      await rename(tempPath, filePath);
+      await copyFileWithRetry(tempPath, filePath);
+      await rm(tempPath, { force: true }).catch(() => {});
     }
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => {});
@@ -33,7 +40,7 @@ export async function writeJsonAtomic(filePath, value) {
 
 export async function fileMetadata(filePath) {
   try {
-    const metadata = await stat(filePath);
+    const metadata = await statFileWithRetry(filePath);
     return {
       exists: true,
       size: metadata.size,

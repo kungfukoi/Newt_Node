@@ -21,6 +21,10 @@ $env:VITE_CLIENT_PORT = "$clientPort"
 $appUrl = "http://127.0.0.1:$clientPort/"
 $apiHealthUrl = "http://127.0.0.1:$apiPort/api/health"
 
+Write-Host "Checking NewtNode dependencies..."
+& node (Join-Path $root "scripts\ensureDependencies.mjs")
+if ($LASTEXITCODE -ne 0) { throw "NewtNode dependency installation failed." }
+
 $distIndex = Join-Path $root "dist\index.html"
 $sourcePaths = @(
   (Join-Path $root "src"),

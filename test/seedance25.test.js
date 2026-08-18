@@ -29,9 +29,17 @@ test("Seedance 2.5 controls match the published Fal schema", () => {
   assert.equal(seedance25DurationOptions[0], "auto");
   assert.equal(seedance25DurationOptions[1], "4 seconds");
   assert.equal(seedance25DurationOptions.at(-1), "30 seconds");
-  assert.deepEqual(seedance25ResolutionOptions, ["720p", "480p"]);
+  assert.deepEqual(seedance25ResolutionOptions, ["1080p", "720p", "480p"]);
   assert.deepEqual(seedance25AspectRatioOptions, ["auto", "21:9", "16:9 (Landscape)", "4:3", "1:1", "3:4", "9:16 (Portrait)"]);
-  assert.deepEqual(seedance25ReferenceLimits, { images: 30, videos: 10, audios: 10, total: 50, videoSeconds: 30, audioSeconds: 30 });
+  assert.deepEqual(seedance25ReferenceLimits, {
+    images: 30,
+    videos: 10,
+    audios: 10,
+    total: 50,
+    minimumMediaSeconds: 1.8,
+    videoSeconds: 30.2,
+    audioSeconds: 30.2
+  });
 });
 
 test("Seedance 2.5 normalizes API values without inheriting 2.0 limits", () => {
@@ -41,8 +49,10 @@ test("Seedance 2.5 normalizes API values without inheriting 2.0 limits", () => {
   assert.equal(normalizeSeedance25Duration("30 seconds"), "30");
   assert.equal(normalizeSeedance25Duration("31 seconds"), "auto");
   assert.equal(normalizeSeedance25Resolution("4k"), "720p");
+  assert.equal(normalizeSeedance25Resolution("1080p"), "1080p");
   assert.equal(normalizeSeedance25AspectRatio("16:9 (Landscape)"), "16:9");
   assert.equal(normalizeSeedance25AspectRatio("Auto"), "auto");
+  assert.equal(normalizeSeedance25AspectRatio("16:9 (Landscape)", "image-to-video"), "auto");
 });
 
 test("Seedance 2.5 route IDs use the official Fal endpoint family", () => {

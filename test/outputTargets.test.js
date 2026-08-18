@@ -36,7 +36,7 @@ test("Output filename tokens use the input node name, date, and timestamp", asyn
 
     assert.equal(target.fileName, "Video Model_2026-08-05_14-03-09.mp4");
     assert.equal(path.basename(path.dirname(target.filePath)), "2026-08-05");
-    await stat(target.filePath);
+    await assert.rejects(stat(target.filePath), { code: "ENOENT" });
   });
 });
 
@@ -130,7 +130,7 @@ test("Output saves without $index still avoid overwriting existing files", async
     );
 
     assert.equal(target.fileName, "Video Model-2.mp4");
-    await stat(target.filePath);
+    await assert.rejects(stat(target.filePath), { code: "ENOENT" });
   });
 });
 

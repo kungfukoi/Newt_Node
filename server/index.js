@@ -41,6 +41,12 @@ import {
   providerEnvironmentKey
 } from "./provider-credentials.js";
 import { validateProviderKey } from "./provider-key-validation.js";
+import {
+  copyFileWithRetry,
+  readFileWithRetry,
+  statFileWithRetry,
+  writeFileWithRetry
+} from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
@@ -251,6 +257,7 @@ const updatePreservedDirectories = [
 const updatePreservedFiles = [".env"];
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
 const seedance25CostPerThousandTokens = Number(process.env.SEEDANCE_25_COST_PER_1000_TOKENS || 0.0214);
+const seedance25HighResolutionCostPerThousandTokens = Number(process.env.SEEDANCE_25_1080P_COST_PER_1000_TOKENS || 0.0234);
 const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
 const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_PER_SECOND || 0.28);
@@ -2586,10 +2593,10 @@ app.post("/api/node/save-output", async (req, res) => {
 
     if (sourcePath) {
       if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
-        await copyFile(sourcePath, target.filePath);
+        await copyFileWithRetry(sourcePath, target.filePath);
       }
     } else {
-      await writeFile(target.filePath, sourceText, "utf8");
+      await writeFileWithRetry(target.filePath, sourceText, "utf8");
     }
 
     const outputStats = await stat(target.filePath);
@@ -2635,7 +2642,7 @@ app.post("/api/node/composer-frame", async (req, res) => {
     }
 
     const output = await createManagedAssetTarget(req, captureSlug, ".png", workflowPackageOutputDirName);
-    await writeFile(output.filePath, bytes);
+    await writeFileWithRetry(output.filePath, bytes);
     const localUrl = output.publicPath;
     const title = String(req.body.nodeTitle || captureLabel).trim() || captureLabel;
     const cost = {
@@ -3492,7 +3499,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     const extension = extensionForMime(mimeType);
     const output = await createManagedAssetTarget(req, "nano-banana-pro", extension, workflowPackageOutputDirName);
     const imageBytes = Buffer.from(inlineData.data, "base64");
-    await writeFile(output.filePath, imageBytes);
+    await writeFileWithRetry(output.filePath, imageBytes);
     const thumbnail = await createImagePreview(req, output, "nano-banana-pro");
 
     const cost = estimateImageCost({ resolution: req.body.resolution, provider: "Google", endpoint: model });
@@ -5471,7 +5478,6 @@ app.post("/api/node/generate-video", async (req, res) => {
       ? normalizeSeedance25Resolution(req.body.resolution)
       : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
     const duration = seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
-    const aspectRatio = seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = req.body.generateAudio !== false;
     const requestedSeed = optionalInteger(req.body.seed);
     const runtimeProvider = resolveSeedanceRuntimeProvider({
@@ -5489,6 +5495,22 @@ app.post("/api/node/generate-video", async (req, res) => {
     } else if (referenceImageUrls.length || referenceVideoUrls.length || referenceAudioUrls.length) {
       routeKind = "reference-to-video";
     }
+    const aspectRatio = seedance25 && runtimeProvider === "fal"
+      ? normalizeSeedance25AspectRatio(req.body.aspectRatio, routeKind)
+      : seedance25
+        ? normalizeSeedance25AspectRatio(req.body.aspectRatio)
+        : normalizeAspectRatio(req.body.aspectRatio);
+
+    if (
+      seedance25 &&
+      runtimeProvider === "fal" &&
+      routeKind === "reference-to-video" &&
+      referenceAudioUrls.length &&
+      !referenceImageUrls.length &&
+      !referenceVideoUrls.length
+    ) {
+      return res.status(400).json({ error: "Seedance 2.5 reference audio requires at least one reference image or video." });
+    }
 
     let submittedPrompt =
       routeKind === "reference-to-video"
@@ -5500,12 +5522,20 @@ app.post("/api/node/generate-video", async (req, res) => {
     if (runtimeProvider === "krea") {
       submittedPrompt = compactKreaSeedancePrompt(submittedPrompt);
     }
-    const referenceVideoDurationSeconds = seedance25 && routeKind === "reference-to-video"
-      ? await sumLocalMediaDurations(referenceVideoUrls)
-      : 0;
-    const referenceAudioDurationSeconds = seedance25 && routeKind === "reference-to-video"
-      ? await sumLocalMediaDurations(referenceAudioUrls)
-      : 0;
+    const referenceVideoDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
+      ? await localVideoDurations(referenceVideoUrls)
+      : [];
+    const referenceAudioDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
+      ? await localVideoDurations(referenceAudioUrls)
+      : [];
+    const referenceVideoDurationSeconds = referenceVideoDurations.reduce((total, seconds) => total + seconds, 0);
+    const referenceAudioDurationSeconds = referenceAudioDurations.reduce((total, seconds) => total + seconds, 0);
+    if (referenceVideoDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
+      return res.status(400).json({ error: `Seedance 2.5 reference videos must be at least ${seedance25ReferenceLimits.minimumMediaSeconds} seconds long.` });
+    }
+    if (referenceAudioDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
+      return res.status(400).json({ error: `Seedance 2.5 reference audio must be at least ${seedance25ReferenceLimits.minimumMediaSeconds} seconds long.` });
+    }
     if (referenceVideoDurationSeconds > seedance25ReferenceLimits.videoSeconds) {
       return res.status(400).json({ error: `Seedance 2.5 reference videos can be up to ${seedance25ReferenceLimits.videoSeconds} seconds total.` });
     }
@@ -5869,7 +5899,7 @@ async function generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRat
   const bytes = videoPart.data
     ? Buffer.from(videoPart.data, "base64")
     : await downloadGoogleGeminiOmniFile(videoPart.uri);
-  await writeFile(target.filePath, bytes);
+  await writeFileWithRetry(target.filePath, bytes);
 
   return {
     requestId: data.id || randomUUID(),
@@ -9462,7 +9492,7 @@ async function readWorkflowFromFilePath(filePath) {
     throw new Error("Workflow file is not accessible.");
   }
 
-  const workflow = JSON.parse(await readFile(workflowFilePath, "utf8"));
+  const workflow = JSON.parse(await readFileWithRetry(workflowFilePath, "utf8"));
   if (!workflow?.graph || !Array.isArray(workflow.graph.nodes) || !Array.isArray(workflow.graph.edges)) {
     throw new Error("That JSON file is not a NewtNode workflow.");
   }
@@ -9567,7 +9597,7 @@ async function workflowFileNameFromPackageManifest(packagePath) {
 
   for (const manifestPath of manifestPaths) {
     try {
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const manifest = JSON.parse(await readFileWithRetry(manifestPath, "utf8"));
       const workflowFileName = safeWorkflowFileName(manifest.workflowFileName);
       if (workflowFileName && existsSync(path.join(packagePath, workflowFileName))) return workflowFileName;
     } catch {
@@ -9586,7 +9616,7 @@ async function findWorkflowJsonFileName(packagePath) {
 
   for (const fileName of jsonFiles) {
     try {
-      const workflow = JSON.parse(await readFile(path.join(packagePath, fileName), "utf8"));
+      const workflow = JSON.parse(await readFileWithRetry(path.join(packagePath, fileName), "utf8"));
       if (workflow?.graph && Array.isArray(workflow.graph.nodes) && Array.isArray(workflow.graph.edges)) {
         return fileName;
       }
@@ -9767,7 +9797,6 @@ exit 2
 }
 
 async function selectWorkflowFileWithWindowsDialog({ title, defaultPath }) {
-  const selectedPath = normalizeWorkflowPackagePath(defaultPath);
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -9776,26 +9805,22 @@ $dialog.Title = ${powershellStringLiteral(title)}
 $dialog.Filter = 'NewtNode workflow JSON (*.json)|*.json|JSON files (*.json)|*.json|All files (*.*)|*.*'
 $dialog.CheckFileExists = $true
 $dialog.Multiselect = $false
-$selectedPath = ${powershellStringLiteral(selectedPath)}
-
-if ($selectedPath) {
-  if (Test-Path -LiteralPath $selectedPath -PathType Leaf) {
-    $dialog.InitialDirectory = [System.IO.Path]::GetDirectoryName($selectedPath)
-    $dialog.FileName = [System.IO.Path]::GetFileName($selectedPath)
-  } elseif (Test-Path -LiteralPath $selectedPath -PathType Container) {
-    $dialog.InitialDirectory = $selectedPath
-  }
-}
+$dialog.RestoreDirectory = $true
+$dialog.DereferenceLinks = $true
 
 ${windowsDialogOwnerScript()}
 try {
   $result = $dialog.ShowDialog($owner)
+  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    $selectedFileName = $dialog.FileName
+  }
 } finally {
-  $owner.Dispose()
+  if ($null -ne $owner) { $owner.Dispose() }
+  if ($null -ne $dialog) { $dialog.Dispose() }
 }
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-  Write-Output $dialog.FileName
+  Write-Output $selectedFileName
   exit 0
 }
 exit 2
@@ -9814,13 +9839,15 @@ $dialog.Title = ${powershellStringLiteral(title)}
 $dialog.Filter = 'LoRA weights (*.safetensors;*.pt;*.ckpt;*.bin)|*.safetensors;*.pt;*.ckpt;*.bin|SafeTensors (*.safetensors)|*.safetensors|All files (*.*)|*.*'
 $dialog.CheckFileExists = $true
 $dialog.Multiselect = $false
+$dialog.RestoreDirectory = $true
+$dialog.DereferenceLinks = $true
 $selectedPath = ${powershellStringLiteral(selectedPath)}
 
 if ($selectedPath) {
-  if (Test-Path -LiteralPath $selectedPath -PathType Leaf) {
+  if ([System.IO.Path]::HasExtension($selectedPath)) {
     $dialog.InitialDirectory = [System.IO.Path]::GetDirectoryName($selectedPath)
     $dialog.FileName = [System.IO.Path]::GetFileName($selectedPath)
-  } elseif (Test-Path -LiteralPath $selectedPath -PathType Container) {
+  } else {
     $dialog.InitialDirectory = $selectedPath
   }
 }
@@ -9828,12 +9855,16 @@ if ($selectedPath) {
 ${windowsDialogOwnerScript()}
 try {
   $result = $dialog.ShowDialog($owner)
+  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    $selectedFileName = $dialog.FileName
+  }
 } finally {
-  $owner.Dispose()
+  if ($null -ne $owner) { $owner.Dispose() }
+  if ($null -ne $dialog) { $dialog.Dispose() }
 }
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-  Write-Output $dialog.FileName
+  Write-Output $selectedFileName
   exit 0
 }
 exit 2
@@ -10505,7 +10536,7 @@ async function downloadVideo(req, url, kind, { stripAudio = false } = {}) {
   const extension = path.extname(new URL(url).pathname) || ".mp4";
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(output.filePath, bytes);
+  await writeFileWithRetry(output.filePath, bytes);
   const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
 
   return {
@@ -12505,17 +12536,16 @@ async function downloadImage(req, url, kind, mimeTypeHint = "") {
   const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
   const extension = imageExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
-  if (!response.body) throw new Error("Generated image download returned no data.");
-
+  const bytes = Buffer.from(await response.arrayBuffer());
   try {
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(output.filePath));
+    await writeFileWithRetry(output.filePath, bytes);
   } catch (error) {
     await rm(output.filePath, { force: true }).catch(() => {});
     throw error;
   }
 
-  const outputStats = await stat(output.filePath);
-  const dimensions = imageDimensionsFromBuffer(await readFile(output.filePath), mimeType);
+  const outputStats = await statFileWithRetry(output.filePath);
+  const dimensions = imageDimensionsFromBuffer(await readFileWithRetry(output.filePath), mimeType);
   const thumbnail = await createImagePreview(req, output, kind);
 
   return {
@@ -12676,7 +12706,7 @@ async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
   const extension = modelExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(output.filePath, bytes);
+  await writeFileWithRetry(output.filePath, bytes);
 
   return {
     fileName: output.fileName,
@@ -12738,7 +12768,7 @@ async function downloadModelAssetFile(req, url, kind, mimeTypeHint = "") {
   const extension = modelAssetExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(output.filePath, bytes);
+  await writeFileWithRetry(output.filePath, bytes);
 
   return {
     fileName: output.fileName,
@@ -12757,7 +12787,7 @@ async function downloadTextAssetFile(req, url, kind, extension = ".txt", transfo
   const mimeType = normalizeMimeType(response.headers.get("content-type") || "text/plain", "text/plain");
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const text = transform(await response.text());
-  await writeFile(output.filePath, text, "utf8");
+  await writeFileWithRetry(output.filePath, text, "utf8");
 
   return {
     fileName: output.fileName,
@@ -13439,7 +13469,7 @@ function estimateSeedanceCost({
     : 0;
   const hasVideoReference = inputSeconds > 0;
   const unitRateUsd = seedance25
-    ? seedance25CostPerThousandTokens
+    ? resolution === "1080p" ? seedance25HighResolutionCostPerThousandTokens : seedance25CostPerThousandTokens
     : resolution === "4k"
       ? seedance4KCostPerThousandTokens
       : seedanceStandardCostPerThousandTokens;
@@ -13467,7 +13497,7 @@ function estimateSeedanceCost({
     pricingBasis: seedance25
       ? `Seedance 2.5 fal.ai token estimate: width * height * (${hasVideoReference ? "input + output" : "output"}) seconds * 24 / 1024, billed per 1K tokens${hasVideoReference ? " at the 0.6 video-reference multiplier" : ""}`
       : "Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens",
-    pricingSource: seedance25 ? "fal-model-page-2026-08-08" : "fal-model-page-2026-07-10",
+    pricingSource: seedance25 ? "fal-model-page-2026-08-18" : "fal-model-page-2026-07-10",
     routeKind
   };
 }
@@ -14109,19 +14139,6 @@ function normalizeWan27ReferenceAspectRatio(value) {
 function positiveNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
-}
-
-async function sumLocalMediaDurations(urls = []) {
-  const durations = await Promise.all(urls.map(async (url) => {
-    try {
-      const source = await resolveLocalAssetPath(url);
-      const metadata = await probeVideoFile(source.filePath);
-      return positiveNumber(metadata.duration) || 0;
-    } catch {
-      return 0;
-    }
-  }));
-  return durations.reduce((total, duration) => total + duration, 0);
 }
 
 function frameRateFromRatio(value) {

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "deps:ensure": "node scripts/ensureDependencies.mjs",
     "dev": "concurrently -k \"npm:server\" \"npm:client\"",
     "client": "vite",
     "server": "node --watch server/index.js",

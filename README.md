@@ -48,9 +48,12 @@ Current release: `v3.0.0-beta.0`
 
 - Node.js 20 or newer is recommended.
 - npm.
+- Application packages, including the `@xyflow/react` canvas runtime, are declared in `package.json` and pinned by `package-lock.json`.
 - At least one supported provider API key for remote generation.
 - Fal is required for Fal-hosted models and utilities.
 - Google, Krea, and OpenAI keys are optional and can be enabled independently.
+
+The Windows and macOS launchers check these npm dependencies before startup and automatically install anything missing or changed after a pull. See [NewtNode Dependencies](docs/dependencies.md) for the maintained runtime list and bootstrap behavior.
 
 ## Setup
 

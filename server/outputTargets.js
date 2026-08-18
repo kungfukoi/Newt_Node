@@ -1,8 +1,10 @@
 import path from "node:path";
-import { mkdir, open as openFile, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 export const defaultExternalOutputsPrefix = "/external-outputs";
+const reservedOutputFilePaths = new Map();
+const outputReservationLifetimeMs = 5 * 60 * 1000;
 
 export async function createOutputTargetAsset(body = {}, kind = "output", extension = "", preferredBaseNameOrOptions = "", maybeOptions = {}) {
   return resolveOutputTargetAsset(body, kind, extension, preferredBaseNameOrOptions, maybeOptions, true);
@@ -214,8 +216,24 @@ async function resolveOutputFileCandidate(filePath, reserveFile = true) {
 
 async function reserveOutputFile(filePath) {
   await mkdir(path.dirname(filePath), { recursive: true });
-  const handle = await openFile(filePath, "wx");
-  await handle.close();
+  const reservationKey = path.resolve(filePath).toLowerCase();
+  const reservationExpiresAt = reservedOutputFilePaths.get(reservationKey) || 0;
+  if (reservationExpiresAt > Date.now()) {
+    const error = new Error("Output file already exists.");
+    error.code = "EEXIST";
+    throw error;
+  }
+
+  try {
+    await stat(filePath);
+    const error = new Error("Output file already exists.");
+    error.code = "EEXIST";
+    throw error;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  reservedOutputFilePaths.set(reservationKey, Date.now() + outputReservationLifetimeMs);
 }
 
 function outputHttpError(status, message) {

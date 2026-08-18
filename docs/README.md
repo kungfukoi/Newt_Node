@@ -10,6 +10,7 @@ This directory separates current product standards from operational manifests, d
 
 ## Operational
 
+- `dependencies.md`: NewtNode npm/runtime requirements and automatic launcher installation behavior.
 - `comfyWan-requirements.yaml`: machine-readable ComfyUI custom-node and model requirements for WanBlend/WanWarp.
 
 ## Drafts And Historical Notes

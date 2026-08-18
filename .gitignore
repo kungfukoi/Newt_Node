@@ -19,6 +19,7 @@ server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log
 server/data/*.log.*
+server/data/npm-cache/
 server/restart-marker.js
 public/models/poses/.*.tmp
 .vs_ai_logs/

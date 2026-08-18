@@ -17,6 +17,9 @@ export PORT="$API_PORT"
 export VITE_API_PORT="$API_PORT"
 export VITE_CLIENT_PORT="$CLIENT_PORT"
 
+echo "Checking NewtNode dependencies..."
+node "$ROOT_DIR/scripts/ensureDependencies.mjs"
+
 BUILD_REQUIRED=0
 if [ ! -f "$ROOT_DIR/dist/index.html" ]; then
   BUILD_REQUIRED=1
