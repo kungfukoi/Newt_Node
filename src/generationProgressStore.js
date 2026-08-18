@@ -4,7 +4,8 @@ import {
   generationProgressTerminalDisplayMs,
   generationRequestMetadata,
   isTerminalProgressStatus,
-  progressEntryFromRequestMetadata
+  progressEntryFromRequestMetadata,
+  shouldDiscardProgressEntryMissingFromServer
 } from "./generationProgress.js";
 
 const entriesByRunId = new Map();
@@ -69,8 +70,8 @@ async function refreshGenerationProgress() {
   try {
     const data = await generationProgressApi.list();
     const entries = Array.isArray(data?.entries) ? data.entries : [];
-    entries.forEach(upsertProgressEntry);
-    hasActive = entries.some((entry) => !isTerminalProgressStatus(entry.status));
+    reconcileProgressEntries(entries);
+    hasActive = [...entriesByRunId.values()].some((entry) => !isTerminalProgressStatus(entry.status));
     refreshSubscribedSnapshots();
   } catch {
     hasActive = [...entriesByRunId.values()].some((entry) => !isTerminalProgressStatus(entry.status));
@@ -78,6 +79,23 @@ async function refreshGenerationProgress() {
     pollInFlight = false;
     scheduleProgressPoll(hasActive ? 650 : 2500);
   }
+}
+
+function reconcileProgressEntries(serverEntries) {
+  const serverRunIds = new Set();
+  serverEntries.forEach((entry) => {
+    if (!entry?.runId || !entry?.nodeId) return;
+    serverRunIds.add(entry.runId);
+    upsertProgressEntry(entry);
+  });
+
+  const affectedNodeIds = new Set();
+  for (const [runId, entry] of entriesByRunId) {
+    if (serverRunIds.has(runId) || !shouldDiscardProgressEntryMissingFromServer(entry)) continue;
+    entriesByRunId.delete(runId);
+    affectedNodeIds.add(entry.nodeId);
+  }
+  affectedNodeIds.forEach(refreshNodeSnapshot);
 }
 
 function scheduleProgressPoll(delay) {

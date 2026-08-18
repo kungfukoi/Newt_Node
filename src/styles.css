@@ -80,11 +80,27 @@ button {
 }
 
 .nodes-tab-keepalive {
-  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  min-height: 100vh;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-200vw);
+  contain: layout paint style;
 }
 
 .nodes-tab-keepalive.active {
-  display: block;
+  position: static;
+  width: auto;
+  min-height: 0;
+  overflow: visible;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  contain: none;
 }
 
 .topbar {

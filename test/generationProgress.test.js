@@ -4,7 +4,8 @@ import {
   aggregateGenerationProgressEntries,
   generationEntryProgress,
   generationRequestMetadata,
-  progressEntryFromRequestMetadata
+  progressEntryFromRequestMetadata,
+  shouldDiscardProgressEntryMissingFromServer
 } from "../src/generationProgress.js";
 
 test("generation request metadata keeps one group across a model batch", () => {
@@ -142,4 +143,41 @@ test("provider percentages remain exact instead of estimated", () => {
 
   assert.equal(progress.percent, 61);
   assert.equal(progress.estimated, false);
+});
+
+test("fresh local progress survives briefly while its request registers with the server", () => {
+  const entry = {
+    runId: "fresh-run",
+    nodeId: "video-fresh",
+    status: "queued",
+    startedAt: "2026-08-18T12:00:00.000Z"
+  };
+
+  assert.equal(
+    shouldDiscardProgressEntryMissingFromServer(entry, Date.parse("2026-08-18T12:00:09.999Z")),
+    false
+  );
+});
+
+test("active progress missing from the server is discarded after registration grace", () => {
+  const entry = {
+    runId: "stale-run",
+    nodeId: "video-stale",
+    status: "running",
+    startedAt: "2026-08-18T12:00:00.000Z"
+  };
+
+  assert.equal(
+    shouldDiscardProgressEntryMissingFromServer(entry, Date.parse("2026-08-18T12:00:10.000Z")),
+    true
+  );
+});
+
+test("terminal local progress can be discarded when the server no longer retains it", () => {
+  assert.equal(shouldDiscardProgressEntryMissingFromServer({
+    runId: "complete-run",
+    nodeId: "image-complete",
+    status: "completed",
+    startedAt: "2026-08-18T12:00:00.000Z"
+  }), true);
 });

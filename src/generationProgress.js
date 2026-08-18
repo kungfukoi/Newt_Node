@@ -1,4 +1,5 @@
 export const generationProgressTerminalDisplayMs = 5000;
+export const generationProgressServerRegistrationGraceMs = 10000;
 
 export function createGenerationGroupId(prefix = "generation") {
   const randomPart = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -177,6 +178,14 @@ export function formatGenerationElapsed(milliseconds) {
 
 export function isTerminalProgressStatus(status) {
   return status === "completed" || status === "failed";
+}
+
+export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {
+  if (!entry?.runId || !entry?.nodeId) return true;
+  if (isTerminalProgressStatus(entry.status)) return true;
+  const startedAt = Date.parse(entry.startedAt || entry.updatedAt || "");
+  if (!Number.isFinite(startedAt)) return true;
+  return now - startedAt >= generationProgressServerRegistrationGraceMs;
 }
 
 function progressPhase(active, failed, groupIncomplete) {
