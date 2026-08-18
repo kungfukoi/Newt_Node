@@ -114,7 +114,9 @@ export function loadCanvasImage(src) {
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("Could not load one of the mood board images."));
-    image.src = src;
+    const source = String(src || "").trim();
+    if (/^https?:\/\//i.test(source)) image.crossOrigin = "anonymous";
+    image.src = source;
   });
 }
 

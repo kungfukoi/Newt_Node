@@ -7,7 +7,6 @@ import {
   averageColorFromImageData,
   colorIdMatteBlur,
   colorIdMatteExpand,
-  colorIdMatteImageData,
   colorIdMatteSampleRadius,
   colorIdMatteTolerance,
   drawColorIdMattePickerCanvas,
@@ -23,7 +22,7 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
   const canvasRef = React.useRef(null);
   const largeCanvasRef = React.useRef(null);
   const sourceImageDataRef = React.useRef(null);
-  const matteImageDataRef = React.useRef(null);
+  const [sourceRevision, setSourceRevision] = React.useState(0);
   const [pickerStatus, setPickerStatus] = React.useState("");
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickerView, setPickerView] = React.useState("rgb");
@@ -37,11 +36,11 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
   React.useEffect(() => {
     let cancelled = false;
 
-    async function drawPicker() {
+    async function loadPickerSource() {
       const canvas = canvasRef.current;
       if (!canvas || !displayImageUrl) {
         sourceImageDataRef.current = null;
-        matteImageDataRef.current = null;
+        setSourceRevision((value) => value + 1);
         return;
       }
 
@@ -49,40 +48,48 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
         const image = await loadCanvasImage(displayImageUrl);
         if (cancelled) return;
 
-        const sourceImageData = drawColorIdMattePickerCanvas(canvas, image);
-        const width = sourceImageData.width;
-        const height = sourceImageData.height;
-        sourceImageDataRef.current = sourceImageData;
-        const matteImageData = selectedColor ? colorIdMatteImageData(sourceImageData, selectedColor, tolerance, invert).imageData : null;
-        matteImageDataRef.current = matteImageData;
-        const context = canvas.getContext("2d", { willReadFrequently: true });
-        renderColorIdMattePickerPreview(context, sourceImageData, selectedColor, tolerance, invert, "overlay");
-
-        const largeCanvas = largeCanvasRef.current;
-        if (largeCanvas) {
-          largeCanvas.width = width;
-          largeCanvas.height = height;
-          const largeContext = largeCanvas.getContext("2d", { willReadFrequently: true });
-          if (pickerView === "matte" && matteImageData) {
-            largeContext.putImageData(matteImageData, 0, 0);
-          } else {
-            renderColorIdMattePickerPreview(largeContext, sourceImageData, selectedColor, tolerance, invert, "rgb");
-          }
-        }
+        sourceImageDataRef.current = drawColorIdMattePickerCanvas(canvas, image);
         setPickerStatus("");
+        setSourceRevision((value) => value + 1);
       } catch (error) {
         sourceImageDataRef.current = null;
-        matteImageDataRef.current = null;
         setPickerStatus(error.message || "Could not load image.");
+        setSourceRevision((value) => value + 1);
       }
     }
 
-    drawPicker();
+    loadPickerSource();
     return () => {
       cancelled = true;
     };
-  }, [displayImageUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerOpen, pickerView]);
+  }, [displayImageUrl]);
 
+  React.useLayoutEffect(() => {
+    const sourceImageData = sourceImageDataRef.current;
+    const canvas = canvasRef.current;
+    if (sourceImageData && canvas) {
+      canvas.width = sourceImageData.width;
+      canvas.height = sourceImageData.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      renderColorIdMattePickerPreview(context, sourceImageData, selectedColor, tolerance, invert, "overlay");
+    }
+
+    const largeCanvas = largeCanvasRef.current;
+    if (!pickerOpen || !sourceImageData || !largeCanvas) return;
+    largeCanvas.width = sourceImageData.width;
+    largeCanvas.height = sourceImageData.height;
+    const largeContext = largeCanvas.getContext("2d", { willReadFrequently: true });
+    renderColorIdMattePickerPreview(largeContext, sourceImageData, selectedColor, tolerance, invert, pickerView);
+  }, [sourceRevision, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerOpen, pickerView]);
+
+  React.useEffect(() => {
+    if (!pickerOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pickerOpen]);
   function pickColor(event, canvas = canvasRef.current) {
     const imageData = sourceImageDataRef.current;
     if (!canvas || !imageData) return;
@@ -139,7 +146,7 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
         <ColorIdMatteModalPortal>
-          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID to Matte picker" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="color-id-picker-modal nodrag nopan nowheel" role="dialog" aria-modal="true" aria-label="Color ID to Matte picker" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
             <div className="color-id-picker-modal-panel">
               <div className="color-id-picker-modal-header">
                 <div className="color-id-selected">
@@ -344,6 +351,7 @@ export function ColorIdMatteVideoPicker({
       {videoUrl && (
         <video
           ref={videoRef}
+          crossOrigin="anonymous"
           src={displayVideoUrl}
           preload="metadata"
           muted
@@ -460,7 +468,7 @@ export function ColorIdMatteVideoPicker({
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
         <ColorIdMatteModalPortal>
-          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="color-id-picker-modal nodrag nopan nowheel" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
             <div className="color-id-picker-modal-panel">
               <div className="color-id-picker-modal-header">
                 <div className="color-id-selected">
