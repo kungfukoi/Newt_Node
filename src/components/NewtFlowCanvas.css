@@ -46,13 +46,10 @@
   position: relative;
   inset: auto;
   transform: none;
-}
-
-.newt-react-flow .node-title {
   cursor: grab;
 }
 
-.newt-react-flow .react-flow__node.dragging .node-title {
+.newt-react-flow .react-flow__node.dragging .node-card.flow-managed {
   cursor: grabbing;
 }
 

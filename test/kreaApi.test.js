@@ -8,6 +8,7 @@ import {
   extractKreaJobResultUrls,
   kreaEndpointForModel,
   normalizeKreaImageResolution,
+  normalizeKreaUploadedAssetUrl,
   resolveFalKreaProvider,
   supportsKreaModel
 } from "../src/kreaApi.js";
@@ -92,6 +93,16 @@ test("Krea job URL extraction accepts string, object, and typed model results", 
     }),
     "https://example.com/model.glb"
   );
+});
+
+test("Krea uploads use the direct asset URL instead of its image proxy", () => {
+  const source = "https://app-uploads.krea.ai/workspace/reference.png";
+  const proxy = `https://www.krea.ai/api/img?f=jpeg&i=${encodeURIComponent(source)}`;
+
+  assert.equal(normalizeKreaUploadedAssetUrl(proxy), source);
+  assert.equal(normalizeKreaUploadedAssetUrl(source), source);
+  const externalProxy = `https://www.krea.ai/api/img?i=${encodeURIComponent("https://example.com/reference.png")}`;
+  assert.equal(normalizeKreaUploadedAssetUrl(externalProxy), externalProxy);
 });
 
 test("Krea Kling cost uses mode and audio-specific published rates", () => {

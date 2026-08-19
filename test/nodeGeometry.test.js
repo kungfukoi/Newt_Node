@@ -11,6 +11,7 @@ import {
   minimumResizableNodeHeight,
   normalizedNodeWidth,
   normalizedNodeHeight,
+  pairedTextareaResizeHeights,
   graphBoundsForNodes,
   mergeMeasuredPortPositions,
   pastedNodePositions,
@@ -58,6 +59,13 @@ test("media-bearing nodes keep enough height for an uncropped preview", () => {
   assert.equal(minimumResizableNodeHeight("image"), 250);
   assert.equal(minimumResizableNodeHeight("text"), 180);
   assert.equal(normalizedNodeHeight(120, minimumResizableNodeHeight("imageModel")), 320);
+});
+
+test("paired Text Model textarea resizing transfers height without changing the total", () => {
+  assert.deepEqual(pairedTextareaResizeHeights(240, 240, -80), { primary: 160, paired: 320 });
+  assert.deepEqual(pairedTextareaResizeHeights(240, 240, 120), { primary: 360, paired: 120 });
+  assert.deepEqual(pairedTextareaResizeHeights(240, 240, -1000), { primary: 40, paired: 440 });
+  assert.deepEqual(pairedTextareaResizeHeights(240, 240, 1000), { primary: 440, paired: 40 });
 });
 test("rectsOverlap detects separated and overlapping rectangles", () => {
   assert.equal(rectsOverlap({ left: 0, top: 0, right: 10, bottom: 10 }, { left: 9, top: 9, right: 20, bottom: 20 }), true);

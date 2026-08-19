@@ -273,6 +273,7 @@ import {
   minimumResizableNodeHeight,
   normalizedNodeHeight,
   normalizedNodeWidth,
+  pairedTextareaResizeHeights,
   graphBoundsForNodes,
   groupToRect,
   mergeMeasuredPortPositions,
@@ -4645,7 +4646,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const textareaKey = textarea && textareaIndex >= 0
       ? nodeTextareaStorageKey(textarea, textareaIndex)
       : "";
+    const pairedTextarea = node.type === "text" && textareas.length === 2 && textareaIndex >= 0
+      ? textareas[textareaIndex === 0 ? 1 : 0]
+      : null;
+    const pairedTextareaIndex = pairedTextarea ? textareas.indexOf(pairedTextarea) : -1;
+    const pairedTextareaKey = pairedTextarea && pairedTextareaIndex >= 0
+      ? nodeTextareaStorageKey(pairedTextarea, pairedTextareaIndex)
+      : "";
     const textareaStyle = textarea ? window.getComputedStyle(textarea) : null;
+    const pairedTextareaStyle = pairedTextarea ? window.getComputedStyle(pairedTextarea) : null;
     const startWidth =
       normalizedNodeWidth(node.data?.nodeWidth, node.type) ||
       Math.round(Number.parseFloat(computedStyle?.width || "") || estimatedNodeWidth(node.type));
@@ -4657,6 +4666,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       : 0;
     const startTextareaHeight = textarea
       ? Number.parseFloat(textareaStyle?.height || "") || textarea.clientHeight
+      : 0;
+    const startPairedTextareaHeight = pairedTextarea
+      ? Number.parseFloat(pairedTextareaStyle?.height || "") || pairedTextarea.clientHeight
       : 0;
     if (!textarea) {
       card?.querySelectorAll("textarea").forEach((field) => {
@@ -4689,11 +4701,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       nodeType: node.type,
       resizeSource: textarea ? "textarea" : "node",
       textareaKey,
+      pairedTextareaKey,
       startPointer: pointer,
       startWidth,
       startHeight,
       startTextareaWidth,
-      startTextareaHeight
+      startTextareaHeight,
+      startPairedTextareaHeight
     });
   }
 
@@ -4821,16 +4835,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
       const resizingTextarea = dragState.resizeSource === "textarea" && dragState.textareaKey;
+      const resizingTextareaPair = resizingTextarea && dragState.pairedTextareaKey;
       const nextTextareaWidth = resizingTextarea
         ? Math.round(clamp(dragState.startTextareaWidth + deltaX, 120, 2400))
         : null;
-      const nextTextareaHeight = resizingTextarea
-        ? Math.round(clamp(dragState.startTextareaHeight + deltaY, 40, 1400))
+      const pairedTextareaHeights = resizingTextareaPair
+        ? pairedTextareaResizeHeights(dragState.startTextareaHeight, dragState.startPairedTextareaHeight, deltaY)
         : null;
+      const nextTextareaHeight = pairedTextareaHeights
+        ? pairedTextareaHeights.primary
+        : resizingTextarea
+          ? Math.round(clamp(dragState.startTextareaHeight + deltaY, 40, 1400))
+          : null;
+      const nextPairedTextareaHeight = pairedTextareaHeights?.paired ?? null;
       const appliedDeltaX = resizingTextarea
         ? nextTextareaWidth - dragState.startTextareaWidth
         : deltaX;
-      const appliedDeltaY = resizingTextarea
+      const appliedDeltaY = resizingTextareaPair
+        ? 0
+        : resizingTextarea
         ? nextTextareaHeight - dragState.startTextareaHeight
         : deltaY;
       const nextWidth = normalizedNodeWidth(
@@ -4855,7 +4878,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                   data.textareaResizeMode = true;
                   data.textareaHeights = {
                     ...normalizedTextareaHeights(node.data?.textareaHeights),
-                    [dragState.textareaKey]: nextTextareaHeight
+                    [dragState.textareaKey]: nextTextareaHeight,
+                    ...(resizingTextareaPair ? { [dragState.pairedTextareaKey]: nextPairedTextareaHeight } : {})
                   };
                 }
                 return { ...node, data };
@@ -7668,6 +7692,53 @@ function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
   return changed ? nextNodes : nodes;
 }
 
+const flowNodeNoDragSelector = [
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "summary",
+  "label",
+  "a[href]",
+  "video",
+  "audio",
+  "canvas",
+  "[contenteditable='true']",
+  "[draggable='true']",
+  "[role='button']",
+  "[role='tab']",
+  "[role='tablist']",
+  "[role='slider']",
+  "[role='checkbox']",
+  "[role='radio']",
+  "[role='switch']",
+  "[role='menuitem']",
+  "[role='dialog']",
+  "[role='toolbar']",
+  "[data-node-drag-block]",
+  ".inline-port",
+  ".react-flow__resize-control",
+  ".media-preview",
+  ".preview-stage",
+  ".result-carousel",
+  ".composer-node-preview",
+  ".camera-viewport-shell",
+  ".model-3d-viewer",
+  ".edit-trim-timeline",
+  ".edit-image-tool-surface",
+  ".edit-brush-dialog",
+  ".edit-live-preview",
+  ".color-id-picker"
+].join(",");
+
+function markFlowNodeNoDragElements(root) {
+  if (!root || typeof root.matches !== "function") return;
+  const matches = root.matches(flowNodeNoDragSelector) ? [root] : [];
+  root.querySelectorAll?.(flowNodeNoDragSelector).forEach((element) => matches.push(element));
+  matches.forEach((element) => element.classList.add("nodrag"));
+}
+
 function NodeCard({
   node,
   defaultOutputPath,
@@ -7749,6 +7820,19 @@ function NodeCard({
   const [infoOpen, setInfoOpen] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState(rawNodeData.title || "");
   const cardRef = React.useRef(null);
+
+  React.useLayoutEffect(() => {
+    if (!flowManaged || !cardRef.current) return undefined;
+    const card = cardRef.current;
+    markFlowNodeNoDragElements(card);
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => {
+        record.addedNodes.forEach(markFlowNodeNoDragElements);
+      });
+    });
+    observer.observe(card, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [flowManaged]);
 
   React.useEffect(() => {
     if (!editingTitle) {
@@ -7925,11 +8009,7 @@ function NodeCard({
       data-node-card-id={node.id}
       onPointerDownCapture={beginTextareaResize}
       onBlurCapture={handleBlurCapture}
-      onPointerDown={flowManaged
-        ? (event) => {
-            if (!event.target.closest?.(".node-title")) event.stopPropagation();
-          }
-        : (event) => onDragStart(event, renderedNode)}
+      onPointerDown={flowManaged ? undefined : (event) => onDragStart(event, renderedNode)}
     >
       <div className="node-title">
         <span className="node-title-label">
@@ -8167,11 +8247,68 @@ function EditSourceDimensionProbe({ sourceUrl, sourceType, onDimensions }) {
   );
 }
 
+function EditTrimFrame({ sourceUrl, time, label, duration, frameStep }) {
+  const videoRef = React.useRef(null);
+  const [loadState, setLoadState] = React.useState(sourceUrl ? "loading" : "idle");
+  const displaySourceUrl = displayMediaUrl(sourceUrl);
+  const safeDuration = Math.max(0, finiteNumber(duration, 0));
+  const targetTime = label === "Out"
+    ? clamp(finiteNumber(time, 0) - frameStep, 0, Math.max(0, safeDuration - frameStep))
+    : clamp(finiteNumber(time, 0), 0, Math.max(0, safeDuration - frameStep));
+
+  React.useEffect(() => {
+    setLoadState(sourceUrl ? "loading" : "idle");
+  }, [sourceUrl]);
+
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!sourceUrl || !video || video.readyState < 1) return;
+    video.pause();
+    if (Math.abs(video.currentTime - targetTime) > 0.004) video.currentTime = targetTime;
+  }, [sourceUrl, targetTime]);
+
+  function seekToTarget(event) {
+    const video = event.currentTarget;
+    setLoadState("ready");
+    video.pause();
+    if (Math.abs(video.currentTime - targetTime) > 0.004) video.currentTime = targetTime;
+  }
+
+  return (
+    <div className="edit-trim-frame">
+      <div className="edit-trim-frame-media">
+        {sourceUrl ? (
+          <video
+            ref={videoRef}
+            src={displaySourceUrl}
+            muted
+            playsInline
+            preload="metadata"
+            draggable={false}
+            onLoadedMetadata={seekToTarget}
+            onLoadedData={() => setLoadState("ready")}
+            onSeeked={() => setLoadState("ready")}
+            onError={() => setLoadState("error")}
+          />
+        ) : null}
+        {loadState !== "ready" && (
+          <span>{loadState === "error" ? "Preview unavailable" : sourceUrl ? "Loading frame..." : "Connect video"}</span>
+        )}
+      </div>
+      <div className="edit-trim-frame-label">
+        <strong>{label}</strong>
+        <span>{formatPreciseTimelineTime(time)}</span>
+      </div>
+    </div>
+  );
+}
+
 function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
   const trackRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const displaySourceUrl = displayMediaUrl(sourceUrl);
   const safeDuration = Math.max(0.001, finiteNumber(duration, 0));
+  const frameStep = Math.min(1 / 30, safeDuration);
   const minGap = Math.min(0.033, Math.max(0.001, safeDuration / 1000));
   const safeStart = clamp(finiteNumber(start, 0), 0, Math.max(0, safeDuration - minGap));
   const safeEnd = clamp(finiteNumber(end, safeDuration), safeStart + minGap, safeDuration);
@@ -8227,8 +8364,25 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
     startHandleDrag(event, handle);
   }
 
+  function nudgeHandle(event, handle) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    const delta = direction * frameStep * (event.shiftKey ? 10 : 1);
+    if (handle === "start") {
+      onChange?.({ start: clamp(safeStart + delta, 0, safeEnd - minGap), end: safeEnd }, "start");
+      return;
+    }
+    onChange?.({ start: safeStart, end: clamp(safeEnd + delta, safeStart + minGap, safeDuration) }, "end");
+  }
+
   return (
     <div className="edit-trim-timeline" onPointerDown={(event) => event.stopPropagation()}>
+      <div className="edit-trim-frame-grid">
+        <EditTrimFrame sourceUrl={sourceUrl} time={safeStart} label="In" duration={safeDuration} frameStep={frameStep} />
+        <EditTrimFrame sourceUrl={sourceUrl} time={safeEnd} label="Out" duration={safeDuration} frameStep={frameStep} />
+      </div>
       <div
         ref={trackRef}
         className="edit-trim-track"
@@ -8249,8 +8403,9 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
           onPointerMove={moveHandleDrag}
           onPointerUp={endHandleDrag}
           onPointerCancel={endHandleDrag}
+          onKeyDown={(event) => nudgeHandle(event, "start")}
           aria-label="Trim start"
-          title="Drag trim start"
+          title="Drag trim start; arrow keys nudge one frame"
         />
         <button
           type="button"
@@ -8260,13 +8415,15 @@ function EditTrimTimeline({ sourceUrl, duration, start, end, onChange }) {
           onPointerMove={moveHandleDrag}
           onPointerUp={endHandleDrag}
           onPointerCancel={endHandleDrag}
+          onKeyDown={(event) => nudgeHandle(event, "end")}
           aria-label="Trim end"
-          title="Drag trim end"
+          title="Drag trim end; arrow keys nudge one frame"
         />
       </div>
       <div className="edit-trim-time-readout">
-        <span>{formatTimelineTime(safeStart)}</span>
-        <span>{formatTimelineTime(safeEnd)}</span>
+        <span>{formatPreciseTimelineTime(safeStart)}</span>
+        <strong>Duration {formatPreciseTimelineTime(safeEnd - safeStart)}</strong>
+        <span>{formatPreciseTimelineTime(safeEnd)}</span>
       </div>
     </div>
   );
@@ -12984,7 +13141,7 @@ function NodeBody({
               onSettingsChange={updateEditSettingsPatch}
               onCreateMask={(maskDataUrl) => onCreateBrushMask?.(node, maskDataUrl)}
             />
-          ) : (
+          ) : effect.id !== "trim" ? (
             <EditLivePreview
               sourceUrl={sourceUrl}
               sourceType={sourceType}
@@ -12992,7 +13149,7 @@ function NodeBody({
               effect={effect}
               settings={settings}
             />
-          )}
+          ) : null}
           {!isLocalImageEffect && effect.id === "scale" ? (
             renderEditScaleControls()
           ) : !isLocalImageEffect && effect.id === "crop" ? (
@@ -19828,6 +19985,14 @@ function formatTimelineTime(seconds) {
   const wholeSeconds = Math.floor(value % 60);
   const tenths = Math.floor((value % 1) * 10);
   return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${tenths}`;
+}
+
+function formatPreciseTimelineTime(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(value / 60);
+  const wholeSeconds = Math.floor(value % 60);
+  const hundredths = Math.floor(((value % 1) * 100) + 0.0001);
+  return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${hundredths.toString().padStart(2, "0")}`;
 }
 
 function normalizedWan27ReferenceDurationLabel(value) {

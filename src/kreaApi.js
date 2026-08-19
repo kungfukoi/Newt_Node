@@ -45,6 +45,26 @@ export function supportsKreaModel(kind, modelName) {
   return Boolean(kreaEndpointForModel(kind, modelName));
 }
 
+export function normalizeKreaUploadedAssetUrl(value) {
+  const original = String(value || "").trim();
+  if (!original) return "";
+
+  try {
+    const proxyUrl = new URL(original);
+    const isKreaImageProxy = proxyUrl.hostname === "krea.ai" || proxyUrl.hostname === "www.krea.ai";
+    if (!isKreaImageProxy || proxyUrl.pathname !== "/api/img") return original;
+
+    const source = new URL(proxyUrl.searchParams.get("i") || "");
+    if (source.protocol === "https:" && source.hostname === "app-uploads.krea.ai") {
+      return source.toString();
+    }
+  } catch {
+    return original;
+  }
+
+  return original;
+}
+
 export function buildKreaImageInput({
   modelName,
   prompt,

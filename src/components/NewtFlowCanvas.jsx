@@ -99,7 +99,6 @@ function NewtFlowCanvasInner({
       return {
         id: node.id,
         type: "newt",
-        dragHandle: ".node-title",
         position: { x: Number(node.x) || 0, y: Number(node.y) || 0 },
         initialWidth: width,
         initialHeight: height,

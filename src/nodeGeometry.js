@@ -35,6 +35,21 @@ export function normalizedNodeHeight(value, minimum = 180, maximum = 3000) {
   return Math.round(clamp(height, safeMinimum, Math.max(safeMinimum, Number(maximum) || 3000)));
 }
 
+export function pairedTextareaResizeHeights(primaryHeight, pairedHeight, delta, minimum = 40, maximum = 1400) {
+  const safeMinimum = Math.max(1, Number(minimum) || 40);
+  const safeMaximum = Math.max(safeMinimum, Number(maximum) || 1400);
+  const primary = clamp(Number(primaryHeight) || safeMinimum, safeMinimum, safeMaximum);
+  const paired = clamp(Number(pairedHeight) || safeMinimum, safeMinimum, safeMaximum);
+  const total = primary + paired;
+  const lowerBound = Math.max(safeMinimum, total - safeMaximum);
+  const upperBound = Math.min(safeMaximum, total - safeMinimum);
+  const nextPrimary = Math.round(clamp(primary + (Number(delta) || 0), lowerBound, upperBound));
+  return {
+    primary: nextPrimary,
+    paired: Math.round(total - nextPrimary)
+  };
+}
+
 export function minimumResizableNodeHeight(type) {
   if (type === "frameIt") return 520;
   if (type === "storyboard" || type === "character") return 420;

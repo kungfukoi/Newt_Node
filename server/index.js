@@ -151,6 +151,7 @@ import {
   kreaApiBaseUrl,
   kreaEndpointForModel,
   normalizeKreaImageResolution,
+  normalizeKreaUploadedAssetUrl,
   resolveFalKreaProvider,
   supportsKreaModel
 } from "../src/kreaApi.js";
@@ -18198,7 +18199,7 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
     throw httpError(502, "Krea uploaded the reference but returned no asset URL.", { body: data });
   }
 
-  return data.image_url;
+  return normalizeKreaUploadedAssetUrl(data.image_url);
 }
 
 async function runKreaSeedanceGeneration({ endpoint, input }) {
