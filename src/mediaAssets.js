@@ -429,19 +429,31 @@ export function firstAcceptedFile(fileList, type) {
 }
 
 export async function supportedFilesFromDataTransfer(dataTransfer, maxFiles = 32) {
+  const directFiles = Array.from(dataTransfer?.files || [])
+    .filter((file) => nodeTypeForDroppedFile(file));
   const items = Array.from(dataTransfer?.items || []);
+  const itemFiles = [];
   if (items.length) {
-    const files = [];
     for (const item of items) {
-      if (files.length >= maxFiles) break;
-      await collectDataTransferItemFiles(item, files, maxFiles);
+      if (itemFiles.length >= maxFiles) break;
+      await collectDataTransferItemFiles(item, itemFiles, maxFiles);
     }
-    if (files.length) return files.filter((file) => nodeTypeForDroppedFile(file)).slice(0, maxFiles);
   }
 
-  return Array.from(dataTransfer?.files || [])
-    .filter((file) => nodeTypeForDroppedFile(file))
-    .slice(0, maxFiles);
+  const merged = directFiles.slice(0, maxFiles);
+  const signatures = new Set(merged.map(droppedFileSignature));
+  for (const file of itemFiles) {
+    if (merged.length >= maxFiles) break;
+    const signature = droppedFileSignature(file);
+    if (signatures.has(signature)) continue;
+    signatures.add(signature);
+    merged.push(file);
+  }
+  return merged;
+}
+
+function droppedFileSignature(file) {
+  return [file?.name || "", file?.size || 0, file?.lastModified || 0, file?.type || ""].join(":");
 }
 
 async function collectDataTransferItemFiles(item, files, maxFiles) {

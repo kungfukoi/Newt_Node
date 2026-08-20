@@ -26,6 +26,7 @@ import {
   flowOverviewEnabled,
   flowRenderMode
 } from "../flowOverview.js";
+import { buildNodeConnectionKeys } from "../flowNodeConnections.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 
@@ -87,6 +88,10 @@ function NewtFlowCanvasInner({
     () => buildBootstrapPorts(graphNodes, graphEdges),
     [graphEdges, graphNodes]
   );
+  const connectionKeysByNode = React.useMemo(
+    () => buildNodeConnectionKeys(graphNodes, graphEdges),
+    [graphEdges, graphNodes]
+  );
   const desiredNodes = React.useMemo(
     () => graphNodes.map((node) => {
       const width = normalizedNodeWidth(node.data?.nodeWidth, node.type) || estimatedNodeWidth(node.type);
@@ -103,12 +108,17 @@ function NewtFlowCanvasInner({
         initialWidth: width,
         initialHeight: height,
         handles,
-        data: { node, bootstrapHandles: handles, bootstrapSize: { width, height } },
+        data: {
+          node,
+          connectionKey: connectionKeysByNode.get(node.id) || "",
+          bootstrapHandles: handles,
+          bootstrapSize: { width, height }
+        },
         selected: selectedSet.has(node.id),
         zIndex: selectedSet.has(node.id) ? 20 : 2
       };
     }),
-    [bootstrapPortsByNode, graphNodes, selectedSet]
+    [bootstrapPortsByNode, connectionKeysByNode, graphNodes, selectedSet]
   );
   const [flowNodes, setFlowNodes] = React.useState(desiredNodes);
 
@@ -470,7 +480,10 @@ function mergeFlowNodes(current, desired, dragging) {
     }
     const keepLocalPosition = dragging && previous.selected;
     const position = keepLocalPosition ? previous.position : node.position;
-    const data = previous.data?.node === node.data.node ? previous.data : node.data;
+    const data = previous.data?.node === node.data.node
+      && previous.data?.connectionKey === node.data.connectionKey
+      ? previous.data
+      : node.data;
     const selected = node.selected;
     const zIndex = selected ? 20 : 2;
     if (
@@ -515,7 +528,7 @@ const NewtFlowNode = React.memo(function NewtFlowNode({ id, data, selected }) {
 
   React.useLayoutEffect(() => {
     if (shouldRenderFull && (hydrated || !flowOverviewEnabled)) updateNodeInternals(id);
-  }, [data.node.data, hydrated, id, shouldRenderFull, updateNodeInternals]);
+  }, [data.connectionKey, data.node.data, hydrated, id, shouldRenderFull, updateNodeInternals]);
 
   const showPlaceholder = flowOverviewEnabled && (!shouldRenderFull || !hydrated);
 

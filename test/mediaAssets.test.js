@@ -13,8 +13,21 @@ import {
   nextFullResolutionImageFallback,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
-  restoreFullResolutionImagePreview
+  restoreFullResolutionImagePreview,
+  supportedFilesFromDataTransfer
 } from "../src/mediaAssets.js";
+
+test("multi-file drops preserve the complete browser file list", async () => {
+  const first = { name: "first.png", type: "image/png", size: 100, lastModified: 1 };
+  const second = { name: "second.mp4", type: "video/mp4", size: 200, lastModified: 2 };
+  const itemCopyOfFirst = { ...first };
+  const files = await supportedFilesFromDataTransfer({
+    files: [first, second],
+    items: [{ kind: "file", getAsFile: () => itemCopyOfFirst }]
+  });
+
+  assert.deepEqual(files, [first, second]);
+});
 
 test("thumbnail assets are display-only and cannot become draggable working media", () => {
   const localThumbnail = "/outputs/Test/thumbnails/image-preview.jpg";

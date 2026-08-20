@@ -280,6 +280,7 @@ import {
 import {
   clamp,
   clampContextMenuPosition,
+  droppedNodePositions,
   edgeLayerBounds,
   estimatedNodeHeight,
   estimatedNodeRect,
@@ -2149,16 +2150,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     nodeCatalog.forEach((item) => {
       typeCounts.set(item.type, nodesRef.current.filter((node) => node.type === item.type).length);
     });
+    const fallbackPosition = defaultNodePosition(nodesRef.current.length + 1);
+    const droppedPositions = droppedNodePositions(
+      files.map(({ type }) => type),
+      position || fallbackPosition
+    );
 
     const droppedNodes = files.map(({ file, type }, index) => {
       const nextCount = (typeCounts.get(type) || 0) + 1;
       typeCounts.set(type, nextCount);
       const spec = nodeCatalog.find((item) => item.type === type);
       const nodeId = createNodeId(type, `drop-${stamp}-${index}`);
-      const nodePosition = {
-        x: Math.round((position?.x ?? defaultNodePosition(nextCount).x) + index * 38),
-        y: Math.round((position?.y ?? defaultNodePosition(nextCount).y) + index * 38)
-      };
+      const nodePosition = droppedPositions[index] || defaultNodePosition(nextCount);
       const defaultData = createDefaultNodeData(type, spec?.label || "Node", nextCount);
       return {
         id: nodeId,

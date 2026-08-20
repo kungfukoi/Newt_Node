@@ -119,6 +119,23 @@ export function pastedNodePositions(nodes = [], anchor = null, fallbackOffset = 
   return positions.map((position) => ({ x: position.x + offset, y: position.y + offset }));
 }
 
+export function droppedNodePositions(types = [], anchor = null, options = {}) {
+  if (!types.length) return [];
+
+  const gap = Math.max(0, Number(options.gap) || 48);
+  const maximumColumns = Math.max(1, Number(options.maximumColumns) || 4);
+  const columns = Math.min(maximumColumns, Math.ceil(Math.sqrt(types.length)));
+  const cellWidth = Math.max(...types.map((type) => estimatedNodeWidth(type))) + gap;
+  const cellHeight = Math.max(...types.map((type) => estimatedNodeHeight(type))) + gap;
+  const originX = finiteCoordinate(anchor?.x);
+  const originY = finiteCoordinate(anchor?.y);
+
+  return types.map((_type, index) => ({
+    x: Math.round(originX + (index % columns) * cellWidth),
+    y: Math.round(originY + Math.floor(index / columns) * cellHeight)
+  }));
+}
+
 function finiteCoordinate(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;

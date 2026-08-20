@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clamp,
   clampContextMenuPosition,
+  droppedNodePositions,
   edgeLayerBounds,
   edgePathData,
   estimatedNodeRect,
@@ -91,6 +92,18 @@ test("pasted nodes anchor at the cursor while preserving relative spacing", () =
 
 test("pasted nodes retain the legacy offset when no canvas cursor is available", () => {
   assert.deepEqual(pastedNodePositions([{ x: 100, y: 80 }]), [{ x: 142, y: 122 }]);
+});
+
+test("multi-file drops place nodes in a non-overlapping grid", () => {
+  assert.deepEqual(
+    droppedNodePositions(["image", "video", "image", "video"], { x: 100, y: 200 }),
+    [
+      { x: 100, y: 200 },
+      { x: 458, y: 200 },
+      { x: 100, y: 518 },
+      { x: 458, y: 518 }
+    ]
+  );
 });
 
 test("edge geometry creates a padded SVG viewport around paths", () => {
