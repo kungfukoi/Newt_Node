@@ -1,11 +1,12 @@
 import { workflowContextPayload } from "../workflowContext.js";
 import { isGeminiOmniModel } from "../geminiOmni.js";
+import { isMinimaxH3Model } from "../minimaxH3.js";
 
 export function videoModelSupportsFilmDirector(model) {
   const normalized = String(model || "").toLowerCase();
   const isSeedance = normalized.includes("seedance");
   const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
-  return isSeedance || isKlingO3 || isGeminiOmniModel(model);
+  return isSeedance || isKlingO3 || isGeminiOmniModel(model) || isMinimaxH3Model(model);
 }
 
 export function composeVideoPrompt({ directorPrompt, connectedPrompt, fallbackPrompt } = {}) {
@@ -35,6 +36,7 @@ export function buildVideoGenerationRequest({
   referenceVideoUrls = [],
   referenceVideoLabels = [],
   referenceAudioUrls = [],
+  referenceAudioLabels = [],
   filmDirector = null,
   outputTargetIndex = ""
 }) {
@@ -58,7 +60,11 @@ export function buildVideoGenerationRequest({
     referenceVideoUrls,
     referenceVideoLabels,
     referenceAudioUrls,
+    referenceAudioLabels,
     filmDirector: videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null,
+    minimaxH3: {
+      enablePromptExpansion: node.data.minimaxH3EnablePromptExpansion !== false
+    },
     wan27Reference: {
       negativePrompt: node.data.negativePrompt || "",
       multiShots: Boolean(node.data.multiShots)

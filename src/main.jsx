@@ -60,6 +60,12 @@ import {
   wan27ReferenceResolutionOptions
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
+import {
+  isMinimaxH3Model,
+  minimaxH3DurationOptions,
+  minimaxH3ResolutionOptions,
+  minimaxH3TextAspectRatioOptions
+} from "./minimaxH3.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -214,7 +220,7 @@ function App() {
   const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
   const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel) || isGeminiOmniModel(videoModel);
   const supportsVideoEndFrame = !isGeminiOmniModel(videoModel);
-  const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel);
+  const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel) || isMinimaxH3Model(videoModel);
 
   React.useEffect(() => {
     if (!modelPreferencesLoaded) return;
@@ -1075,6 +1081,16 @@ function formatKrea2Creativity(value) {
 }
 
 function videoSettingsForModel(model) {
+  if (isMinimaxH3Model(model)) {
+    return {
+      durations: minimaxH3DurationOptions.map(durationLabelToValue),
+      durationValues: minimaxH3DurationOptions.map(durationLabelToValue),
+      defaultDuration: "5",
+      resolutions: minimaxH3ResolutionOptions,
+      aspectRatios: minimaxH3TextAspectRatioOptions
+    };
+  }
+
   if (isSeedance25Model(model)) {
     return {
       durations: seedance25DurationOptions.map(durationLabelToValue),

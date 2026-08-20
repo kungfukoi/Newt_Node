@@ -15,6 +15,7 @@ import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.
 import { reve21CostPerImage } from "./reve21.js";
 import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
 import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
+import { estimateMinimaxH3Cost, minimaxH3CostPerSecond, minimaxH3ReferenceLimits } from "./minimaxH3.js";
 
 const defaultPricing = {
   seedance: {
@@ -23,6 +24,14 @@ const defaultPricing = {
     standardCostPerThousandTokens: 0.014,
     fastCostPerThousandTokens: 0.0112,
     billingFps: 24
+  },
+  minimaxH3: {
+    costPerSecond480P: minimaxH3CostPerSecond["480P"],
+    costPerSecond768P: minimaxH3CostPerSecond["768P"],
+    costPerSecond2K: minimaxH3CostPerSecond["2K"],
+    costPerSecond4K: minimaxH3CostPerSecond["4K"],
+    freeReferenceImages: minimaxH3ReferenceLimits.freeImages,
+    additionalReferenceImageCost: minimaxH3ReferenceLimits.additionalImageCost
   },
   geminiOmni: {
     googleCostPerSecond: 0.1,
@@ -633,6 +642,10 @@ function estimateItemCost(item, mediaType, pricing) {
     return null;
   }
 
+  if (modelKey.includes("minimax h3") || modelKey.includes("minimax/h3")) {
+    return estimateMinimaxH3StatsCost(item, settings, pricing);
+  }
+
   if (modelKey.includes("seedance") || modelKey.includes("bytedance/seedance")) {
     return estimateSeedanceStatsCost(item, settings, pricing);
   }
@@ -917,6 +930,23 @@ function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {
   return duration * baseRate * fpsMultiplier * tierMultiplier;
 }
 
+function estimateMinimaxH3StatsCost(item, settings, pricing) {
+  const modelPricing = pricing.minimaxH3 || defaultPricing.minimaxH3;
+  return estimateMinimaxH3Cost({
+    duration: settings.duration || item.cost?.durationSeconds || item.cost?.units,
+    resolution: settings.resolution || item.cost?.resolution,
+    referenceImageCount: settings.referenceImageCount || item.cost?.referenceImageCount,
+    rates: {
+      "480P": modelPricing.costPerSecond480P,
+      "768P": modelPricing.costPerSecond768P,
+      "2K": modelPricing.costPerSecond2K,
+      "4K": modelPricing.costPerSecond4K
+    },
+    freeReferenceImages: modelPricing.freeReferenceImages,
+    additionalReferenceImageCost: modelPricing.additionalReferenceImageCost
+  }).amountUsd;
+}
+
 function estimateFluxVideoUpscaleStatsCost(item, settings, pricing) {
   const utilityPricing = pricing.utility?.fluxVideoUpscale || defaultPricing.utility.fluxVideoUpscale;
   const cost = estimateFluxVideoUpscaleCost({
@@ -1019,6 +1049,7 @@ function inferModelName(item, mediaType) {
   if (mediaType === "image") return "Nano Banana Pro";
   if (mediaType === "text") return item.settings?.model || "Text processing";
   if (mediaType === "model3d") return "Hunyuan 3D 3.1 Pro";
+  if (String(item.endpoint || "").includes("minimax/h3")) return "MiniMax H3";
   if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
   return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";
 }

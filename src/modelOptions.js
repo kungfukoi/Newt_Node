@@ -9,6 +9,7 @@ import {
   fluxVideoUpscaleCreativityOptions,
   fluxVideoUpscaleSafetyToleranceOptions
 } from "./fluxVideoUpscale.js";
+import { minimaxH3ModelName } from "./minimaxH3.js";
 
 export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
 export {
@@ -156,6 +157,7 @@ export const qwenCameraDefaults = {
 export const videoModelNames = {
   seedance: "Seedance 2.0",
   seedance25: seedance25ModelName,
+  minimaxH3: minimaxH3ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
@@ -168,6 +170,7 @@ export const videoModelNames = {
 export const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedance25,
+  videoModelNames.minimaxH3,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,

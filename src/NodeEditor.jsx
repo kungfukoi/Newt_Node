@@ -255,6 +255,18 @@ import {
   wanVaceTransparencyOptions
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
+import {
+  isMinimaxH3Model,
+  minimaxH3DurationOptions,
+  minimaxH3ReferenceAspectRatioOptions,
+  minimaxH3ReferenceLimits,
+  minimaxH3ResolutionOptions,
+  minimaxH3Route,
+  minimaxH3TextAspectRatioOptions,
+  normalizeMinimaxH3AspectRatio,
+  normalizeMinimaxH3DurationLabel,
+  normalizeMinimaxH3Resolution
+} from "./minimaxH3.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -14569,6 +14581,7 @@ function NodeBody({
   const isKlingO3Pro = isKlingO3ProModel(node.data.model);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isGeminiOmni = isGeminiOmniModel(node.data.model);
+  const isMinimaxH3 = isMinimaxH3Model(node.data.model);
   const isSam3Video = isSam3VideoModel(node.data.model);
   const isSeedance25 = isSeedance25Model(node.data.model);
   const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
@@ -14586,6 +14599,21 @@ function NodeBody({
   const displayIncoming = supportsDirectorInput
     ? expandVideoDirectorPackageIncoming(incoming, incomingByNode, { includeCharacters: supportsCharacterInput })
     : incoming;
+  const minimaxH3ImageCount = uniqueAssetItems([
+    ...connectedAssetItems(displayIncoming.referenceImageIn),
+    ...connectedCharacterReferences(displayIncoming.characterIn).map((item) => ({ ...item, type: "image" }))
+  ]).length;
+  const minimaxH3VideoCount = displayIncoming.referenceVideoIn?.length || 0;
+  const minimaxH3AudioCount = displayIncoming.referenceAudioIn?.length || 0;
+  const activeMinimaxH3Route = minimaxH3Route({
+    hasStartFrame: Boolean(incoming.startFrameIn?.length),
+    referenceImageCount: minimaxH3ImageCount,
+    referenceVideoCount: minimaxH3VideoCount,
+    referenceAudioCount: minimaxH3AudioCount
+  });
+  const minimaxH3AspectRatioOptions = activeMinimaxH3Route === "reference-to-video"
+    ? minimaxH3ReferenceAspectRatioOptions
+    : minimaxH3TextAspectRatioOptions;
   const directorPromptValue = supportsDirectorInput ? connectedDirectorPackageText(incoming.directorIn) : "";
   const promptValue = [directorPromptValue, resolvedPromptText(incoming.promptIn) || node.data.prompt].filter(Boolean).join("\n\n");
   const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
@@ -14600,8 +14628,10 @@ function NodeBody({
       ? [promptPort, activeDirectorPort, referenceImagePort, referenceVideoPort, characterPort]
     : isAurora
       ? [promptPort, activeDirectorPort, referenceImagePort, referenceAudioPort]
-      : isHappyHorse
+    : isHappyHorse
         ? [promptPort, activeDirectorPort, referenceImagePort, characterPort]
+    : isMinimaxH3
+      ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort]
     : isKlingO3
       ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, characterPort]
     : isGeminiOmni
@@ -14839,6 +14869,59 @@ function NodeBody({
               </button>
             </NodeRow>
           </>
+        ) : isMinimaxH3 ? (
+          <>
+            <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="End Frame" inputPort={settingsOpen ? endFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="Reference Images" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{`Add Images ( ${minimaxH3ImageCount}/${minimaxH3ReferenceLimits.images} )`}</button>
+            </NodeRow>
+            <NodeRow label="Reference Videos" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={displayIncoming.referenceVideoIn?.length ? "connected-field" : ""}>{`Add Videos ( ${minimaxH3VideoCount}/${minimaxH3ReferenceLimits.videos} )`}</button>
+            </NodeRow>
+            <NodeRow label="Reference Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={displayIncoming.referenceAudioIn?.length ? "connected-field" : ""}>{`Add Audio ( ${minimaxH3AudioCount}/${minimaxH3ReferenceLimits.audios} )`}</button>
+            </NodeRow>
+            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={displayIncoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.characterIn, "Optional character")}</button>
+            </NodeRow>
+            <NodeRow label="Duration">
+              <select value={normalizeMinimaxH3DurationLabel(node.data.duration)} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
+                {minimaxH3DurationOptions.map((option) => <option key={option}>{option}</option>)}
+              </select>
+            </NodeRow>
+            <NodeRow label="Resolution">
+              <select value={normalizeMinimaxH3Resolution(node.data.resolution)} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {minimaxH3ResolutionOptions.map((option) => <option key={option}>{option}</option>)}
+              </select>
+            </NodeRow>
+            <NodeRow label="Aspect Ratio">
+              {activeMinimaxH3Route === "image-to-video" ? (
+                <select value="adaptive" disabled><option value="adaptive">Source image</option></select>
+              ) : (
+                <select value={normalizeMinimaxH3AspectRatio(node.data.aspectRatio, activeMinimaxH3Route)} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                  {minimaxH3AspectRatioOptions.map((option) => <option key={option} value={option}>{option === "adaptive" ? "Adaptive" : option}</option>)}
+                </select>
+              )}
+            </NodeRow>
+            <NodeRow label="Seed">
+              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+            </NodeRow>
+            <NodeRow label="Prompt Expansion">
+              <button className={`node-toggle ${node.data.minimaxH3EnablePromptExpansion !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { minimaxH3EnablePromptExpansion: node.data.minimaxH3EnablePromptExpansion === false })}>
+                <span />
+              </button>
+            </NodeRow>
+            <NodeRow label="Safety Check">
+              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
+                <span />
+              </button>
+            </NodeRow>
+          </>
         ) : isGeminiOmni ? (
           <>
             <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -14986,6 +15069,7 @@ function NodeBody({
       {isAurora && <small className="upload-status model-status-note">lipsync model</small>}
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
+      {isMinimaxH3 && <small className="upload-status model-status-note">{activeMinimaxH3Route.replaceAll("-", " ")} · native audio</small>}
       {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings Â· preview</small>}
       {isKlingO3 && <small className="upload-status model-status-note">Film Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
@@ -17147,7 +17231,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Film Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
@@ -17161,6 +17245,19 @@ function videoModelUnsupportedCharacterMessage(model) {
 }
 
 function videoModelSelectionPatch(data = {}, model) {
+  if (isMinimaxH3Model(model)) {
+    const preserveMinimaxH3 = isMinimaxH3Model(data.model);
+    return {
+      model,
+      duration: preserveMinimaxH3 ? normalizeMinimaxH3DurationLabel(data.duration) : "5 seconds",
+      resolution: preserveMinimaxH3 ? normalizeMinimaxH3Resolution(data.resolution) : "2K",
+      aspectRatio: preserveMinimaxH3 ? normalizeMinimaxH3AspectRatio(data.aspectRatio, "reference-to-video") : "adaptive",
+      seed: data.seed || "",
+      minimaxH3EnablePromptExpansion: data.minimaxH3EnablePromptExpansion !== false,
+      enableSafetyChecker: data.enableSafetyChecker !== false
+    };
+  }
+
   if (isGeminiOmniModel(model)) {
     return {
       model,
@@ -20101,6 +20198,14 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
   const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
+  const referenceAudioItems = uniqueAssetItems([
+    ...connectedAssetItems(incoming.referenceAudioIn),
+    ...characterVoices.map((url, voiceIndex) => ({
+      url,
+      label: characterReferences[voiceIndex]?.label || `Character audio ${voiceIndex + 1}`,
+      type: "audio"
+    }))
+  ]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const { response, data } = await runTrackedGeneration({
     nodeId: node.id,
@@ -20125,7 +20230,8 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
       characterReferenceLabels: characterReferences.map((item) => item.label),
       referenceVideoUrls: referenceVideoItems.map((item) => item.url),
       referenceVideoLabels: referenceVideoItems.map((item) => item.label),
-      referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
+      referenceAudioUrls: referenceAudioItems.map((item) => item.url),
+      referenceAudioLabels: referenceAudioItems.map((item) => item.label),
       filmDirector: directorPackageForVideo(directorSource, incomingByNode),
       outputTargetIndex: String((Number(index) || 0) + 1)
     }),
