@@ -11,13 +11,13 @@ function ensureOk(response, data, fallbackMessage) {
   return data;
 }
 
-export async function fetchJsonApi(path, options = {}, label = "Request") {
+export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true } = {}) {
   const requestUrl = localApiFetchUrl(path);
   let response;
   try {
     response = await fetch(requestUrl, options);
   } catch (error) {
-    if (requestUrl !== path) {
+    if (requestUrl !== path && retryLocalApi) {
       try {
         response = await fetch(path, options);
       } catch {
@@ -34,7 +34,7 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
       data: await readJsonResponse(response, label)
     };
   } catch (error) {
-    if (!error.htmlApiResponse || !canRetryLocalApi(path) || requestUrl !== path) throw error;
+    if (!retryLocalApi || !error.htmlApiResponse || !canRetryLocalApi(path) || requestUrl !== path) throw error;
 
     try {
       const healthResponse = await fetch(`${localApiBaseUrl}/api/health`);
@@ -287,19 +287,19 @@ export const nodeApi = {
 
 export const systemApi = {
   selectFolder(body) {
-    return fetchJsonApi("/api/system/select-folder", jsonBody(body), "Folder picker");
+    return systemDialogRequest("/api/system/select-folder", body, "Folder picker");
   },
 
   selectLoraFile(body) {
-    return fetchJsonApi("/api/system/select-lora-file", jsonBody(body), "LoRA file picker");
+    return systemDialogRequest("/api/system/select-lora-file", body, "LoRA file picker");
   },
 
   selectSavePath(body) {
-    return fetchJsonApi("/api/system/select-save-path", jsonBody(body), "Save picker");
+    return systemDialogRequest("/api/system/select-save-path", body, "Save picker");
   },
 
   openWorkflowFile(body, label = "Open workflow") {
-    return fetchJsonApi("/api/system/open-workflow-file", jsonBody(body), label);
+    return systemDialogRequest("/api/system/open-workflow-file", body, label);
   },
 
   saveWorkflowFile(body, label = "Save workflow") {
@@ -322,6 +322,43 @@ export const systemApi = {
     return fetchJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
   }
 };
+
+async function systemDialogRequest(path, body, label) {
+  await exitFullscreenForSystemDialog();
+  await ensureSystemDialogServer(path, label);
+  return fetchJsonApi(path, jsonBody(body), label, { retryLocalApi: false });
+}
+
+async function ensureSystemDialogServer(path, label) {
+  if (!canRetryLocalApi(path)) return;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetch(`${localApiBaseUrl}/api/health`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch {
+    throw new Error(`${label} could not open because the local app server is offline. Restart NewtNode and try again.`);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function exitFullscreenForSystemDialog() {
+  if (typeof document === "undefined") return;
+
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen();
+      return;
+    }
+    if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  } catch {
+    // The picker can still open if the browser declines the fullscreen exit.
+  }
+}
 
 export const settingsApi = {
   load() {

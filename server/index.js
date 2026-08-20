@@ -427,6 +427,7 @@ const dwposeCostPerComputeSecond = 0.0006;
 const patinaBaseCost = 0.01;
 const patinaMapCostPerMegapixel = 0.01;
 const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_IMAGE_TIMEOUT_MS) || 180000);
+const mediaPersistenceConcurrency = clampInteger(process.env.NEWTNODE_MEDIA_PERSISTENCE_CONCURRENCY, 1, 6, 2);
 const klingReferenceMaximumBytes = 9.5 * 1024 * 1024;
 const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENERATION_CONCURRENCY, 1, 6, 3);
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
@@ -542,6 +543,7 @@ const composerPoseFieldKeys = [
 const app = express();
 const imageGenerationRequestLimiter = createRequestConcurrencyLimiter(imageGenerationConcurrency);
 const runtimeThumbnailRequestLimiter = createRequestConcurrencyLimiter(2);
+const queueMediaPersistence = createAsyncWorkLimiter(mediaPersistenceConcurrency);
 
 await Promise.all([
   mkdir(uploadsDir, { recursive: true }),
@@ -738,6 +740,7 @@ function buildHealthPayload() {
     falVisionTextModel,
     falVideoTextModel,
     imageGenerationConcurrency,
+    mediaPersistenceConcurrency,
     outputDirectory: outputsDir
   };
 }
@@ -771,6 +774,31 @@ function createRequestConcurrencyLimiter(maxConcurrent = 3) {
     queue.push({ res, next });
     drain();
   };
+}
+
+function createAsyncWorkLimiter(maxConcurrent = 2) {
+  const limit = Math.max(1, Number(maxConcurrent) || 1);
+  const queue = [];
+  let active = 0;
+
+  function drain() {
+    while (active < limit && queue.length) {
+      const job = queue.shift();
+      active += 1;
+      Promise.resolve()
+        .then(job.task)
+        .then(job.resolve, job.reject)
+        .finally(() => {
+          active = Math.max(0, active - 1);
+          queueMicrotask(drain);
+        });
+    }
+  }
+
+  return (task) => new Promise((resolve, reject) => {
+    queue.push({ task, resolve, reject });
+    drain();
+  });
 }
 
 function queueClientDiagnostic(value = {}) {
@@ -2645,21 +2673,26 @@ app.post("/api/node/save-output", async (req, res) => {
       return res.status(400).json({ error: "Connect a source with output before saving." });
     }
 
-    const target = await createManagedAssetTarget(req, sourceFileName || sourceTitle, extension || ".bin", workflowPackageOutputDirName);
-    if (!target.outputTarget) {
+    const savedOutput = await queueMediaPersistence(async () => {
+      const target = await createManagedAssetTarget(req, sourceFileName || sourceTitle, extension || ".bin", workflowPackageOutputDirName);
+      if (!target.outputTarget) return null;
+
+      if (sourcePath) {
+        if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
+          await copyFileWithRetry(sourcePath, target.filePath);
+        }
+      } else {
+        await writeFileWithRetry(target.filePath, sourceText, "utf8");
+      }
+
+      const outputStats = await stat(target.filePath);
+      const thumbnail = mediaType === "image" ? await createImagePreview(req, target, "output") : null;
+      return { target, outputStats, thumbnail };
+    });
+    if (!savedOutput) {
       return res.status(400).json({ error: "Set an Output path before saving." });
     }
-
-    if (sourcePath) {
-      if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
-        await copyFileWithRetry(sourcePath, target.filePath);
-      }
-    } else {
-      await writeFileWithRetry(target.filePath, sourceText, "utf8");
-    }
-
-    const outputStats = await stat(target.filePath);
-    const thumbnail = mediaType === "image" ? await createImagePreview(req, target, "output") : null;
+    const { target, outputStats, thumbnail } = savedOutput;
     res.json({
       output: {
         localUrl: target.publicPath,
@@ -10365,15 +10398,28 @@ function powershellStringLiteral(value) {
 function windowsDialogOwnerScript() {
   return `
 Add-Type -AssemblyName System.Drawing
+Add-Type -Namespace NewtNode -Name NativeWindow -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+'@
 $owner = New-Object System.Windows.Forms.Form
-$owner.Text = 'NewtNode'
-$owner.StartPosition = 'CenterScreen'
+$owner.Text = 'NewtNode File Dialog'
+$owner.StartPosition = 'Manual'
 $owner.TopMost = $true
-$owner.ShowInTaskbar = $false
+$owner.ShowInTaskbar = $true
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $owner.Size = New-Object System.Drawing.Size(1, 1)
 $owner.Opacity = 0.01
+$screen = [System.Windows.Forms.Screen]::FromPoint([System.Windows.Forms.Cursor]::Position)
+$owner.Location = New-Object System.Drawing.Point(
+  ($screen.WorkingArea.Left + [Math]::Floor($screen.WorkingArea.Width / 2)),
+  ($screen.WorkingArea.Top + [Math]::Floor($screen.WorkingArea.Height / 2))
+)
 $owner.Show()
+$owner.BringToFront()
 $owner.Activate()
+[NewtNode.NativeWindow]::SetForegroundWindow($owner.Handle) | Out-Null
+[System.Windows.Forms.Application]::DoEvents()
 `;
 }
 
@@ -10985,26 +11031,29 @@ async function uploadToFal(file) {
 }
 
 async function downloadVideo(req, url, kind, { stripAudio = false, extension: requestedExtension = "" } = {}) {
-  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated video" });
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
-  }
+  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 93, message: "Queued generated video for local save" });
+  return queueMediaPersistence(async () => {
+    updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated video" });
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
+    }
 
-  const extension = requestedExtension || path.extname(new URL(url).pathname) || ".mp4";
-  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFileWithRetry(output.filePath, bytes);
-  const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
+    const extension = requestedExtension || path.extname(new URL(url).pathname) || ".mp4";
+    const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFileWithRetry(output.filePath, bytes);
+    const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
 
-  return {
-    fileName: output.fileName,
-    publicPath: output.publicPath,
-    filePath: output.filePath,
-    externalPath: output.externalPath || "",
-    outputTarget: Boolean(output.outputTarget),
-    bytes: outputBytes
-  };
+    return {
+      fileName: output.fileName,
+      publicPath: output.publicPath,
+      filePath: output.filePath,
+      externalPath: output.externalPath || "",
+      outputTarget: Boolean(output.outputTarget),
+      bytes: outputBytes
+    };
+  });
 }
 
 async function removeVideoAudioTrack(filePath) {
@@ -12985,40 +13034,43 @@ function enrichVideoMetadata(video, metadata = {}) {
 }
 
 async function downloadImage(req, url, kind, mimeTypeHint = "") {
-  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated image" });
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Could not download generated image: ${response.status} ${response.statusText}`);
-  }
+  updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 93, message: "Queued generated image for local save" });
+  return queueMediaPersistence(async () => {
+    updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated image" });
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Could not download generated image: ${response.status} ${response.statusText}`);
+    }
 
-  const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
-  const extension = imageExtensionForUrl(url, mimeType);
-  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  try {
-    await writeFileWithRetry(output.filePath, bytes);
-  } catch (error) {
-    await rm(output.filePath, { force: true }).catch(() => {});
-    throw error;
-  }
+    const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
+    const extension = imageExtensionForUrl(url, mimeType);
+    const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    try {
+      await writeFileWithRetry(output.filePath, bytes);
+    } catch (error) {
+      await rm(output.filePath, { force: true }).catch(() => {});
+      throw error;
+    }
 
-  const outputStats = await statFileWithRetry(output.filePath);
-  const dimensions = imageDimensionsFromBuffer(await readFileWithRetry(output.filePath), mimeType);
-  const thumbnail = await createImagePreview(req, output, kind);
+    const outputStats = await statFileWithRetry(output.filePath);
+    const dimensions = imageDimensionsFromBuffer(await readFileWithRetry(output.filePath), mimeType);
+    const thumbnail = await createImagePreview(req, output, kind);
 
-  return {
-    fileName: output.fileName,
-    publicPath: output.publicPath,
-    filePath: output.filePath,
-    externalPath: output.externalPath || "",
-    outputTarget: Boolean(output.outputTarget),
-    bytes: outputStats.size,
-    mimeType,
-    thumbnailPublicPath: thumbnail?.publicPath || "",
-    thumbnailFileName: thumbnail?.fileName || "",
-    width: dimensions?.width || null,
-    height: dimensions?.height || null
-  };
+    return {
+      fileName: output.fileName,
+      publicPath: output.publicPath,
+      filePath: output.filePath,
+      externalPath: output.externalPath || "",
+      outputTarget: Boolean(output.outputTarget),
+      bytes: outputStats.size,
+      mimeType,
+      thumbnailPublicPath: thumbnail?.publicPath || "",
+      thumbnailFileName: thumbnail?.fileName || "",
+      width: dimensions?.width || null,
+      height: dimensions?.height || null
+    };
+  });
 }
 
 async function createImagePreview(requestLike, source, kind = "image") {
