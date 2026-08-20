@@ -150,6 +150,16 @@ import {
   topazSdrToHdrMaximumDurationSeconds
 } from "../src/topazSdrToHdr.js";
 import {
+  estimateFluxVideoUpscaleCost,
+  fluxVideoUpscaleCostPerSecond,
+  fluxVideoUpscaleEndpoint,
+  fluxVideoUpscaleMaximumBytes,
+  fluxVideoUpscaleMaximumDurationSeconds,
+  normalizeFluxVideoUpscaleCreativity,
+  normalizeFluxVideoUpscaleFactor,
+  normalizeFluxVideoUpscaleSafetyTolerance
+} from "../src/fluxVideoUpscale.js";
+import {
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
@@ -2299,6 +2309,17 @@ app.get("/api/stats", async (_req, res) => {
           costPerSecond4K: bytedanceUpscalerCostPerSecond["4k"],
           proMultiplier: 10,
           fps60Multiplier: 2,
+          currency: "USD"
+        },
+        fluxVideoUpscale: {
+          preciseCostPerSecond1080p: fluxVideoUpscaleCostPerSecond.precise["1080p"],
+          preciseCostPerSecond2K: fluxVideoUpscaleCostPerSecond.precise["2k"],
+          preciseCostPerSecond4K: fluxVideoUpscaleCostPerSecond.precise["4k"],
+          creativeCostPerSecond1080p: fluxVideoUpscaleCostPerSecond.creative["1080p"],
+          creativeCostPerSecond2K: fluxVideoUpscaleCostPerSecond.creative["2k"],
+          creativeCostPerSecond4K: fluxVideoUpscaleCostPerSecond.creative["4k"],
+          maximumDurationSeconds: fluxVideoUpscaleMaximumDurationSeconds,
+          maximumBytes: fluxVideoUpscaleMaximumBytes,
           currency: "USD"
         },
         topazUpscaler: {
@@ -5031,6 +5052,14 @@ app.post("/api/node/utility-video", async (req, res) => {
 
     if (selectedVideoModel.provider === "fal-bytedance-video-upscaler") {
       return runBytedanceVideoUpscaler(req, res, {
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-flux-video-upscale") {
+      return runFluxVideoUpscale(req, res, {
+        prompt,
         referenceVideoUrls,
         selectedVideoModel
       });
@@ -8322,6 +8351,147 @@ async function runBytedanceVideoUpscaler(req, res, { referenceVideoUrls, selecte
     requestId: result.requestId,
     endpoint,
     modelName: selectedVideoModel.displayName,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function prepareFluxVideoUpscaleSource(req, videoUrl) {
+  const source = await resolveLocalAssetPath(videoUrl);
+  const sourceMetadata = await probeVideoFile(source.filePath);
+  if (sourceMetadata.duration > fluxVideoUpscaleMaximumDurationSeconds) {
+    throw httpError(400, "Flux Video Upscale accepts videos up to 20 seconds long.");
+  }
+
+  let uploadPublicPath = videoUrl;
+  let uploadFilePath = source.filePath;
+  if (path.extname(source.fileName || source.filePath).toLowerCase() !== ".mp4") {
+    const sourceBaseName = path.basename(source.fileName || "source-video", path.extname(source.fileName || ""));
+    const target = await createManagedAssetTarget(
+      req,
+      "flux-video-upscale-source",
+      ".mp4",
+      workflowPackageDependencyDirName,
+      { fileNameBase: `${sourceBaseName}-flux-upscale-source` }
+    );
+    await runFfmpeg([
+      "-y",
+      "-i", source.filePath,
+      "-map", "0:v:0",
+      "-map", "0:a?",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "18",
+      "-pix_fmt", "yuv420p",
+      "-tag:v", "avc1",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-movflags", "+faststart",
+      target.filePath
+    ], "Flux Video Upscale source prep", 600000);
+    uploadPublicPath = target.publicPath;
+    uploadFilePath = target.filePath;
+  }
+
+  const uploadStats = await stat(uploadFilePath);
+  if (uploadStats.size > fluxVideoUpscaleMaximumBytes) {
+    throw httpError(400, "Flux Video Upscale accepts MP4 files up to 50 MB. Trim or compress the source video and try again.");
+  }
+
+  return {
+    sourceMetadata,
+    uploadPublicPath,
+    uploadBytes: uploadStats.size
+  };
+}
+
+async function runFluxVideoUpscale(req, res, { prompt, referenceVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: "Flux Video Upscale requires a connected video." });
+  }
+
+  const prepared = await prepareFluxVideoUpscaleSource(req, videoUrl);
+  const options = req.body.fluxVideoUpscale || {};
+  const upscaleFactor = normalizeFluxVideoUpscaleFactor(options.upscaleFactor);
+  const creativity = normalizeFluxVideoUpscaleCreativity(options.creativity);
+  const safetyTolerance = normalizeFluxVideoUpscaleSafetyTolerance(options.safetyTolerance);
+  const endpoint = selectedVideoModel.id;
+  const input = {
+    video_url: await uploadLocalOutputToFal(prepared.uploadPublicPath),
+    upscale_factor: upscaleFactor,
+    creativity,
+    safety_tolerance: safetyTolerance
+  };
+  if (prompt) input.prompt = prompt;
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Flux upscaled video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, "flux-video-upscale", { extension: ".mp4" });
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateFluxVideoUpscaleCost({
+    endpoint,
+    durationSeconds: outputVideo.duration || prepared.sourceMetadata.duration,
+    sourceWidth: prepared.sourceMetadata.width,
+    sourceHeight: prepared.sourceMetadata.height,
+    outputWidth: outputVideo.width,
+    outputHeight: outputVideo.height,
+    upscaleFactor,
+    creativity
+  });
+  const modeLabel = creativity === 0 ? "precise" : "creative";
+  const text = `Flux Video Upscale, ${upscaleFactor}x ${modeLabel} mode.`;
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Flux video upscale",
+    prompt: prompt || text,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: selectedVideoModel.displayName,
+      upscaleFactor,
+      creativity,
+      mode: modeLabel,
+      creativePrompt: prompt || "",
+      safetyTolerance,
+      sourceWidth: prepared.sourceMetadata.width || null,
+      sourceHeight: prepared.sourceMetadata.height || null,
+      outputWidth: outputVideo.width || cost.outputWidth,
+      outputHeight: outputVideo.height || cost.outputHeight,
+      billingResolutionTier: cost.billingResolutionTier,
+      durationSeconds: cost.durationSeconds,
+      sourceBytes: prepared.uploadBytes,
+      sourceVideoCount: 1
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    text,
     cost,
     video: {
       ...outputVideo,
@@ -15844,6 +16014,15 @@ function resolveUtilityVideoModel(model) {
       provider: "fal-bytedance-video-upscaler",
       displayName: "Bytedance Video Upscaler",
       id: "fal-ai/bytedance-upscaler/upscale/video",
+      requiresPrompt: false
+    };
+  }
+
+  if (normalized.includes("flux") && normalized.includes("video") && normalized.includes("upscal")) {
+    return {
+      provider: "fal-flux-video-upscale",
+      displayName: "Flux Video Upscale",
+      id: fluxVideoUpscaleEndpoint,
       requiresPrompt: false
     };
   }

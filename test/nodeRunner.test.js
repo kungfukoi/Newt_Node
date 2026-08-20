@@ -599,6 +599,33 @@ test("buildUtilityVideoRequest preserves Topaz SDR to HDR output format", () => 
   assert.deepEqual(request.topazSdrToHdr, { outputFormat: "prores" });
 });
 
+test("buildUtilityVideoRequest preserves Flux Video Upscale controls", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-flux-video-upscale",
+      data: {
+        title: "Flux Video Upscale",
+        fluxVideoUpscaleFactor: "2.5",
+        fluxVideoUpscaleCreativity: 0,
+        fluxVideoUpscaleSafetyTolerance: 3
+      }
+    },
+    prompt: "Preserve the interface typography",
+    model: "Flux Video Upscale",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceVideoUrls: ["/outputs/source.mp4"]
+  });
+
+  assert.equal(request.prompt, "Preserve the interface typography");
+  assert.deepEqual(request.fluxVideoUpscale, {
+    upscaleFactor: "2.5",
+    creativity: 0,
+    safetyTolerance: 3
+  });
+});
+
 test("buildUtilityVideoRequest preserves DWPose Video draw mode", () => {
   const request = buildUtilityVideoRequest({
     node: {

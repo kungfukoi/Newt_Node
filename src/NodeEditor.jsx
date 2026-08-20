@@ -176,6 +176,8 @@ import {
   enabledVideoModelOptions,
   firstEnabledImageModel,
   firstEnabledVideoModel,
+  fluxVideoUpscaleCreativityOptions,
+  fluxVideoUpscaleSafetyToleranceOptions,
   happyHorseDurationOptions,
   imageBatchOptions,
   imageModelNames,
@@ -13286,6 +13288,7 @@ function NodeBody({
     const isWan22VaceControlVideo = isUtilityWan22VaceControlModel(utilityVideoModel);
     const isWanVaceVideo = isWanVaceMaskToVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo;
     const isBytedanceUpscaler = isUtilityBytedanceUpscalerModel(utilityVideoModel);
+    const isFluxVideoUpscaler = isUtilityFluxVideoUpscalerModel(utilityVideoModel);
     const isTopazSdrToHdr = isUtilityTopazSdrToHdrModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
@@ -13393,6 +13396,8 @@ function NodeBody({
                             ? "Run Wan VACE"
                           : isBytedanceUpscaler
                             ? "Run Bytedance Upscale"
+                          : isFluxVideoUpscaler
+                            ? "Run Flux Upscale"
                             : isTopazSdrToHdr
                               ? "Run Topaz HDR"
                             : isTopazUpscaler
@@ -13740,6 +13745,29 @@ function NodeBody({
                     <button className={`node-toggle ${node.data.depthAnythingVideoSideBySide ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { depthAnythingVideoSideBySide: !node.data.depthAnythingVideoSideBySide })}>
                       <span />
                     </button>
+                  </NodeRow>
+                </>
+              ) : isFluxVideoUpscaler ? (
+                <>
+                  <NodeRow label="Upscale">
+                    <input type="number" min="1.5" max="3" step="0.1" value={node.data.fluxVideoUpscaleFactor ?? 2} onChange={(event) => onUpdate(node.id, { fluxVideoUpscaleFactor: event.target.value })} />
+                  </NodeRow>
+                  <NodeRow label="Mode">
+                    <select value={String(node.data.fluxVideoUpscaleCreativity ?? 1)} onChange={(event) => onUpdate(node.id, { fluxVideoUpscaleCreativity: Number(event.target.value) })}>
+                      {fluxVideoUpscaleCreativityOptions.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </NodeRow>
+                  <NodeRow label="Creative Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                    <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} placeholder="Optional creative detail guidance" />
+                  </NodeRow>
+                  <NodeRow label="Safety">
+                    <select value={String(node.data.fluxVideoUpscaleSafetyTolerance ?? 2)} onChange={(event) => onUpdate(node.id, { fluxVideoUpscaleSafetyTolerance: Number(event.target.value) })}>
+                      {fluxVideoUpscaleSafetyToleranceOptions.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                      ))}
+                    </select>
                   </NodeRow>
                 </>
               ) : isBytedanceUpscaler ? (
@@ -16837,8 +16865,11 @@ function createDefaultNodeData(type, label, count) {
       bytedanceUpscalerPreset: "general",
       bytedanceUpscalerTier: "standard",
       bytedanceUpscalerFidelity: "high",
-      topazSdrToHdrOutputFormat: "mp4",
       bytedanceUpscalerScaleRatio: "",
+      fluxVideoUpscaleFactor: 2,
+      fluxVideoUpscaleCreativity: 1,
+      fluxVideoUpscaleSafetyTolerance: 2,
+      topazSdrToHdrOutputFormat: "mp4",
       topazUpscalerModel: "Proteus",
       topazUpscalerFactor: 2,
       topazUpscalerTargetFps: "source",
@@ -17469,13 +17500,18 @@ function isUtilityTopazUpscalerModel(model) {
   return normalized.includes("topaz") && normalized.includes("upscal");
 }
 
+function isUtilityFluxVideoUpscalerModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("flux") && normalized.includes("video") && normalized.includes("upscal");
+}
+
 function isUtilityTopazSdrToHdrModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"));
 }
 
 function isUtilityVideoUpscalerModel(model) {
-  return isUtilityBytedanceUpscalerModel(model) || isUtilityTopazUpscalerModel(model) || isUtilityTopazSdrToHdrModel(model);
+  return isUtilityBytedanceUpscalerModel(model) || isUtilityFluxVideoUpscalerModel(model) || isUtilityTopazUpscalerModel(model) || isUtilityTopazSdrToHdrModel(model);
 }
 
 function isUtilityVoidVideoModel(model) {
@@ -17716,6 +17752,16 @@ function utilityVideoModelSelectionPatch(model) {
     };
   }
 
+  if (isUtilityFluxVideoUpscalerModel(model)) {
+    return {
+      ...patch,
+      prompt: "",
+      fluxVideoUpscaleFactor: 2,
+      fluxVideoUpscaleCreativity: 1,
+      fluxVideoUpscaleSafetyTolerance: 2
+    };
+  }
+
   return patch;
 }
 
@@ -17741,6 +17787,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityWan22VaceControlModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn"];
   if (isUtilityWanVaceMaskToVideoModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
   if (isUtilityWanVaceInpaintingModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
+  if (isUtilityFluxVideoUpscalerModel(videoModel)) return ["promptIn", "referenceVideoIn"];
   if (isUtilityVideoUpscalerModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityVoidVideoModel(videoModel)) return ["promptIn", "referenceVideoIn", "maskVideoIn"];
   return isUtilitySam3VideoModel(videoModel) ? ["promptIn", "referenceVideoIn"] : ["promptIn", "referenceImageIn", "referenceVideoIn"];
@@ -17787,11 +17834,12 @@ function normalizedUtilityVideoModelName(model) {
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (isUtilityDwposeVideoModel(normalized)) return utilityVideoModelNames.dwposeVideo;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
-  if (normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"))) return utilityVideoModelNames.topazSdrToHdr;
   if (isUtilityDepthAnythingVideoModel(normalized)) return utilityVideoModelNames.depthAnythingVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
   if (isUtilityExtractFrameVideoModel(normalized)) return utilityVideoModelNames.extractFrame;
   if (normalized.includes("bytedance") && normalized.includes("upscal")) return utilityVideoModelNames.bytedanceUpscaler;
+  if (normalized.includes("flux") && normalized.includes("video") && normalized.includes("upscal")) return utilityVideoModelNames.fluxVideoUpscale;
+  if (normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"))) return utilityVideoModelNames.topazSdrToHdr;
   if (normalized.includes("topaz")) return utilityVideoModelNames.topazUpscaler;
   if (normalized.includes("wan") && normalized.includes("mask")) return utilityVideoModelNames.wanVaceMaskToVideo;
   if (normalized.includes("wan") && normalized.includes("inpaint")) return utilityVideoModelNames.wanVaceInpainting;
@@ -23399,11 +23447,14 @@ function normalizeUtilityData(data = {}) {
     topazImageUpscalerEnhancementStrength: normalizeChoice(data.topazImageUpscalerEnhancementStrength, topazImageUpscalerEnhancementStrengthOptions, "auto"),
     bytedanceUpscalerTargetResolution: data.bytedanceUpscalerTargetResolution || "1080p",
     bytedanceUpscalerTargetFps: data.bytedanceUpscalerTargetFps || "30fps",
-    topazSdrToHdrOutputFormat: normalizeChoice(data.topazSdrToHdrOutputFormat, topazSdrToHdrOutputFormatOptions, "mp4"),
     bytedanceUpscalerPreset: data.bytedanceUpscalerPreset || "general",
     bytedanceUpscalerTier: data.bytedanceUpscalerTier || "standard",
     bytedanceUpscalerFidelity: data.bytedanceUpscalerFidelity || "high",
     bytedanceUpscalerScaleRatio: data.bytedanceUpscalerScaleRatio || "",
+    fluxVideoUpscaleFactor: clampedNumber(data.fluxVideoUpscaleFactor, 1.5, 3, 2),
+    fluxVideoUpscaleCreativity: Number(data.fluxVideoUpscaleCreativity) === 0 ? 0 : 1,
+    fluxVideoUpscaleSafetyTolerance: Math.round(clampedNumber(data.fluxVideoUpscaleSafetyTolerance, 0, 4, 2)),
+    topazSdrToHdrOutputFormat: normalizeChoice(data.topazSdrToHdrOutputFormat, topazSdrToHdrOutputFormatOptions, "mp4"),
     topazUpscalerModel: data.topazUpscalerModel || "Proteus",
     topazUpscalerFactor: data.topazUpscalerFactor || 2,
     topazUpscalerTargetFps: data.topazUpscalerTargetFps || "source",

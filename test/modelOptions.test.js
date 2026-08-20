@@ -17,6 +17,11 @@ test("Topaz utilities are exposed in their Utility model tabs", () => {
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazSdrToHdr));
 });
 
+test("Flux Video Upscale is exposed in Utility video models", () => {
+  assert.equal(utilityVideoModelNames.fluxVideoUpscale, "Flux Video Upscale");
+  assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.fluxVideoUpscale));
+});
+
 test("Qwen Camera Edit is exposed in Utility image models", () => {
   assert.equal(utilityImageModelNames.qwenCameraEdit, "Qwen Camera Edit");
   assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.qwenCameraEdit));

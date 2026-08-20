@@ -359,6 +359,11 @@ export function buildUtilityVideoRequest({
       fidelity: node.data.bytedanceUpscalerFidelity || "high",
       scaleRatio: node.data.bytedanceUpscalerScaleRatio || ""
     },
+    fluxVideoUpscale: {
+      upscaleFactor: node.data.fluxVideoUpscaleFactor ?? 2,
+      creativity: Number(node.data.fluxVideoUpscaleCreativity) === 0 ? 0 : 1,
+      safetyTolerance: node.data.fluxVideoUpscaleSafetyTolerance ?? 2
+    },
     topazVideoUpscaler: {
       model: node.data.topazUpscalerModel || "Proteus",
       upscaleFactor: node.data.topazUpscalerFactor || 2,

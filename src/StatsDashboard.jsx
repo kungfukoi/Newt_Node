@@ -13,6 +13,7 @@ import { statsApi } from "./api/newtApi.js";
 import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
 import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { reve21CostPerImage } from "./reve21.js";
+import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
 import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
 
 const defaultPricing = {
@@ -120,6 +121,14 @@ const defaultPricing = {
       costPerSecond4K: 0.0288,
       proMultiplier: 10,
       fps60Multiplier: 2
+    },
+    fluxVideoUpscale: {
+      preciseCostPerSecond1080p: 0.14,
+      preciseCostPerSecond2K: 0.25,
+      preciseCostPerSecond4K: 0.55,
+      creativeCostPerSecond1080p: 0.2,
+      creativeCostPerSecond2K: 0.35,
+      creativeCostPerSecond4K: 0.79
     },
     topazUpscaler: {
       costPerSecondUpTo720p: 0.01,
@@ -661,6 +670,10 @@ function estimateItemCost(item, mediaType, pricing) {
     return estimateBytedanceUpscalerStatsCost(item, settings, pricing);
   }
 
+  if (modelKey.includes("flux") && modelKey.includes("video") && modelKey.includes("upscal")) {
+    return estimateFluxVideoUpscaleStatsCost(item, settings, pricing);
+  }
+
   if (modelKey.includes("topaz") && (modelKey.includes("hdr") || modelKey.includes("sdr-to-hdr"))) {
     return estimateTopazSdrToHdrStatsCost(item, settings, pricing);
   }
@@ -902,6 +915,32 @@ function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {
   const fpsMultiplier = String(settings.targetFps || item.cost?.targetFps || "30fps") === "60fps" ? utilityPricing.fps60Multiplier : 1;
   const tierMultiplier = String(settings.enhancementTier || item.cost?.enhancementTier || "standard") === "pro" ? utilityPricing.proMultiplier : 1;
   return duration * baseRate * fpsMultiplier * tierMultiplier;
+}
+
+function estimateFluxVideoUpscaleStatsCost(item, settings, pricing) {
+  const utilityPricing = pricing.utility?.fluxVideoUpscale || defaultPricing.utility.fluxVideoUpscale;
+  const cost = estimateFluxVideoUpscaleCost({
+    durationSeconds: item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units,
+    sourceWidth: settings.sourceWidth || item.cost?.sourceWidth,
+    sourceHeight: settings.sourceHeight || item.cost?.sourceHeight,
+    outputWidth: item.remoteVideo?.width || settings.outputWidth || item.cost?.outputWidth,
+    outputHeight: item.remoteVideo?.height || settings.outputHeight || item.cost?.outputHeight,
+    upscaleFactor: settings.upscaleFactor || item.cost?.upscaleFactor,
+    creativity: settings.creativity ?? item.cost?.creativity,
+    rates: {
+      precise: {
+        "1080p": utilityPricing.preciseCostPerSecond1080p,
+        "2k": utilityPricing.preciseCostPerSecond2K,
+        "4k": utilityPricing.preciseCostPerSecond4K
+      },
+      creative: {
+        "1080p": utilityPricing.creativeCostPerSecond1080p,
+        "2k": utilityPricing.creativeCostPerSecond2K,
+        "4k": utilityPricing.creativeCostPerSecond4K
+      }
+    }
+  });
+  return cost.amountUsd;
 }
 
 function estimateTopazUpscalerStatsCost(item, settings, pricing) {
