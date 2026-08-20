@@ -144,6 +144,12 @@ import {
   seedance25ReferenceLimits
 } from "../src/seedance25.js";
 import {
+  estimateTopazSdrToHdrCost,
+  normalizeTopazSdrToHdrOutputFormat,
+  topazSdrToHdrEndpoint,
+  topazSdrToHdrMaximumDurationSeconds
+} from "../src/topazSdrToHdr.js";
+import {
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
@@ -2301,6 +2307,12 @@ app.get("/api/stats", async (_req, res) => {
           costPerSecondAbove1080p: topazUpscalerCostPerSecond["above-1080p"],
           fps60Multiplier: 2,
           gaia2Multiplier: 0.5,
+          currency: "USD"
+        },
+        topazSdrToHdr: {
+          costPerSecondUpTo1080p: 0.24,
+          costPerSecond4K: 0.51,
+          maximumDurationSeconds: topazSdrToHdrMaximumDurationSeconds,
           currency: "USD"
         },
         topazImageUpscaler: {
@@ -5026,6 +5038,13 @@ app.post("/api/node/utility-video", async (req, res) => {
 
     if (selectedVideoModel.provider === "fal-topaz-video-upscaler") {
       return runTopazVideoUpscaler(req, res, {
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-topaz-sdr-to-hdr") {
+      return runTopazSdrToHdr(req, res, {
         referenceVideoUrls,
         selectedVideoModel
       });
@@ -8464,6 +8483,86 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
   });
 }
 
+async function runTopazSdrToHdr(req, res, { referenceVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: "Topaz SDR to HDR requires a connected video." });
+  }
+
+  const source = await resolveLocalAssetPath(videoUrl);
+  const sourceMetadata = await probeVideoFile(source.filePath);
+  if (sourceMetadata.duration > topazSdrToHdrMaximumDurationSeconds) {
+    return res.status(400).json({ error: "Topaz SDR to HDR accepts videos up to 5 minutes long." });
+  }
+
+  const endpoint = selectedVideoModel.id;
+  const outputFormat = normalizeTopazSdrToHdrOutputFormat(req.body.topazSdrToHdr?.outputFormat);
+  const input = {
+    video_url: await uploadLocalOutputToFal(videoUrl),
+    output_format: outputFormat
+  };
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Topaz HDR video URL.", raw: result?.data });
+  }
+
+  const extension = outputFormat === "prores" ? ".mov" : ".mp4";
+  const output = await downloadVideo(req, remoteVideo.url, "topaz-sdr-to-hdr", { extension });
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const width = outputVideo.width || sourceMetadata.width;
+  const height = outputVideo.height || sourceMetadata.height;
+  const durationSeconds = outputVideo.duration || sourceMetadata.duration;
+  const cost = estimateTopazSdrToHdrCost({ endpoint, durationSeconds, width, height });
+  const text = `Topaz SDR to HDR, ${outputFormat === "prores" ? "ProRes 422 HQ" : "MP4 H265 HDR10"}.`;
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Topaz SDR to HDR",
+    prompt: text,
+    submittedPrompt: "",
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: selectedVideoModel.displayName,
+      outputFormat,
+      codec: outputFormat === "prores" ? "ProRes 422 HQ 10-bit" : "H265 HDR10 10-bit",
+      billingResolutionTier: cost.billingResolutionTier,
+      sourceWidth: sourceMetadata.width || null,
+      sourceHeight: sourceMetadata.height || null,
+      sourceFps: sourceMetadata.fps || null,
+      durationSeconds: cost.durationSeconds,
+      sourceVideoCount: 1
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    text,
+    cost,
+    video: {
+      ...outputVideo,
+      label: selectedVideoModel.displayName,
+      localUrl: output.publicPath,
+      fileName: output.fileName,
+      mimeType: outputFormat === "prores" ? "video/quicktime" : "video/mp4"
+    }
+  });
+}
+
 app.post(
   "/api/generate",
   upload.fields([
@@ -10527,14 +10626,14 @@ async function uploadToFal(file) {
   return fal.storage.upload(falFile);
 }
 
-async function downloadVideo(req, url, kind, { stripAudio = false } = {}) {
+async function downloadVideo(req, url, kind, { stripAudio = false, extension: requestedExtension = "" } = {}) {
   updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated video" });
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
   }
 
-  const extension = path.extname(new URL(url).pathname) || ".mp4";
+  const extension = requestedExtension || path.extname(new URL(url).pathname) || ".mp4";
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFileWithRetry(output.filePath, bytes);
@@ -15749,7 +15848,16 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
-  if (normalized.includes("topaz") || (normalized.includes("video") && normalized.includes("upscale"))) {
+  if (normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"))) {
+    return {
+      provider: "fal-topaz-sdr-to-hdr",
+      displayName: "Topaz SDR to HDR",
+      id: topazSdrToHdrEndpoint,
+      requiresPrompt: false
+    };
+  }
+
+  if ((normalized.includes("topaz") && normalized.includes("upscal")) || (normalized.includes("video") && normalized.includes("upscale"))) {
     return {
       provider: "fal-topaz-video-upscaler",
       displayName: "Topaz Video Upscale",

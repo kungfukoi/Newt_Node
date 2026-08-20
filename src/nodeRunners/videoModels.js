@@ -371,6 +371,9 @@ export function buildUtilityVideoRequest({
       grain: node.data.topazUpscalerGrain ?? "",
       recoverDetail: node.data.topazUpscalerRecoverDetail ?? ""
     },
+    topazSdrToHdr: {
+      outputFormat: node.data.topazSdrToHdrOutputFormat || "mp4"
+    },
     birefnet: {
       model: node.data.birefnetModel || "General Use (Light)",
       operatingResolution: node.data.birefnetOperatingResolution || "1024x1024",

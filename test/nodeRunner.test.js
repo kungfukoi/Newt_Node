@@ -579,6 +579,26 @@ test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
   assert.equal(request.depthAnythingVideo.sideBySide, true);
 });
 
+test("buildUtilityVideoRequest preserves Topaz SDR to HDR output format", () => {
+  const request = buildUtilityVideoRequest({
+    node: {
+      id: "utility-topaz-hdr",
+      data: {
+        title: "Topaz SDR to HDR",
+        topazSdrToHdrOutputFormat: "prores"
+      }
+    },
+    prompt: "",
+    model: "Topaz SDR to HDR",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceVideoUrls: ["/outputs/source.mp4"]
+  });
+
+  assert.deepEqual(request.topazSdrToHdr, { outputFormat: "prores" });
+});
+
 test("buildUtilityVideoRequest preserves DWPose Video draw mode", () => {
   const request = buildUtilityVideoRequest({
     node: {

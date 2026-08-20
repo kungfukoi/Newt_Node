@@ -8,11 +8,13 @@ import {
   utilityVideoModelOptions
 } from "../src/modelOptions.js";
 
-test("Topaz upscalers are exposed in both Utility model tabs", () => {
+test("Topaz utilities are exposed in their Utility model tabs", () => {
   assert.equal(utilityImageModelNames.topazUpscaler, "Topaz Image Upscale");
   assert.equal(utilityVideoModelNames.topazUpscaler, "Topaz Video Upscale");
+  assert.equal(utilityVideoModelNames.topazSdrToHdr, "Topaz SDR to HDR");
   assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.topazUpscaler));
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazUpscaler));
+  assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazSdrToHdr));
 });
 
 test("Qwen Camera Edit is exposed in Utility image models", () => {

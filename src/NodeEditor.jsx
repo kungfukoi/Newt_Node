@@ -224,6 +224,7 @@ import {
   topazUpscalerBillingTierOptions,
   topazUpscalerFpsOptions,
   topazUpscalerModelOptions,
+  topazSdrToHdrOutputFormatOptions,
   typePresetNames,
   typePresetPrompts,
   utilityImageModelNames,
@@ -13285,6 +13286,7 @@ function NodeBody({
     const isWan22VaceControlVideo = isUtilityWan22VaceControlModel(utilityVideoModel);
     const isWanVaceVideo = isWanVaceMaskToVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo;
     const isBytedanceUpscaler = isUtilityBytedanceUpscalerModel(utilityVideoModel);
+    const isTopazSdrToHdr = isUtilityTopazSdrToHdrModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
@@ -13391,6 +13393,8 @@ function NodeBody({
                             ? "Run Wan VACE"
                           : isBytedanceUpscaler
                             ? "Run Bytedance Upscale"
+                            : isTopazSdrToHdr
+                              ? "Run Topaz HDR"
                             : isTopazUpscaler
                               ? "Run Topaz Upscale"
                               : "Run Utility Video"
@@ -13783,6 +13787,16 @@ function NodeBody({
                     <input type="number" min="1.1" max="10" step="0.1" value={node.data.bytedanceUpscalerScaleRatio || ""} onChange={(event) => onUpdate(node.id, { bytedanceUpscalerScaleRatio: event.target.value })} placeholder="Auto" />
                   </NodeRow>
                 </>
+              ) : isTopazSdrToHdr ? (
+                <NodeRow label="Output Format">
+                  <select value={node.data.topazSdrToHdrOutputFormat || "mp4"} onChange={(event) => onUpdate(node.id, { topazSdrToHdrOutputFormat: event.target.value })}>
+                    {topazSdrToHdrOutputFormatOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option === "prores" ? "ProRes 422 HQ (.mov)" : "MP4 HDR10 (.mp4)"}
+                      </option>
+                    ))}
+                  </select>
+                </NodeRow>
               ) : isTopazUpscaler ? (
                 <>
                   <NodeRow label="Topaz Model">
@@ -16823,6 +16837,7 @@ function createDefaultNodeData(type, label, count) {
       bytedanceUpscalerPreset: "general",
       bytedanceUpscalerTier: "standard",
       bytedanceUpscalerFidelity: "high",
+      topazSdrToHdrOutputFormat: "mp4",
       bytedanceUpscalerScaleRatio: "",
       topazUpscalerModel: "Proteus",
       topazUpscalerFactor: 2,
@@ -17450,11 +17465,17 @@ function isUtilityBytedanceUpscalerModel(model) {
 }
 
 function isUtilityTopazUpscalerModel(model) {
-  return String(model || "").toLowerCase().includes("topaz");
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("topaz") && normalized.includes("upscal");
+}
+
+function isUtilityTopazSdrToHdrModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"));
 }
 
 function isUtilityVideoUpscalerModel(model) {
-  return isUtilityBytedanceUpscalerModel(model) || isUtilityTopazUpscalerModel(model);
+  return isUtilityBytedanceUpscalerModel(model) || isUtilityTopazUpscalerModel(model) || isUtilityTopazSdrToHdrModel(model);
 }
 
 function isUtilityVoidVideoModel(model) {
@@ -17766,6 +17787,7 @@ function normalizedUtilityVideoModelName(model) {
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (isUtilityDwposeVideoModel(normalized)) return utilityVideoModelNames.dwposeVideo;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
+  if (normalized.includes("topaz") && (normalized.includes("hdr") || normalized.includes("sdr"))) return utilityVideoModelNames.topazSdrToHdr;
   if (isUtilityDepthAnythingVideoModel(normalized)) return utilityVideoModelNames.depthAnythingVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
   if (isUtilityExtractFrameVideoModel(normalized)) return utilityVideoModelNames.extractFrame;
@@ -23377,6 +23399,7 @@ function normalizeUtilityData(data = {}) {
     topazImageUpscalerEnhancementStrength: normalizeChoice(data.topazImageUpscalerEnhancementStrength, topazImageUpscalerEnhancementStrengthOptions, "auto"),
     bytedanceUpscalerTargetResolution: data.bytedanceUpscalerTargetResolution || "1080p",
     bytedanceUpscalerTargetFps: data.bytedanceUpscalerTargetFps || "30fps",
+    topazSdrToHdrOutputFormat: normalizeChoice(data.topazSdrToHdrOutputFormat, topazSdrToHdrOutputFormatOptions, "mp4"),
     bytedanceUpscalerPreset: data.bytedanceUpscalerPreset || "general",
     bytedanceUpscalerTier: data.bytedanceUpscalerTier || "standard",
     bytedanceUpscalerFidelity: data.bytedanceUpscalerFidelity || "high",

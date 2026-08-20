@@ -4,6 +4,7 @@ import {
   seedance25ModelName,
   seedance25ResolutionOptions
 } from "./seedance25.js";
+import { topazSdrToHdrOutputFormatOptions } from "./topazSdrToHdr.js";
 
 export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
 export {
@@ -301,6 +302,7 @@ export const utilityVideoModelNames = {
   birefnetVideo: "BiRefNet Video",
   rifeVideo: "RIFE Video",
   bytedanceUpscaler: "Bytedance Video Upscaler",
+  topazSdrToHdr: "Topaz SDR to HDR",
   topazUpscaler: "Topaz Video Upscale"
 };
 export const utilityVideoModelOptions = [
@@ -324,6 +326,7 @@ export const utilityVideoModelOptions = [
   utilityVideoModelNames.birefnetVideo,
   utilityVideoModelNames.rifeVideo,
   utilityVideoModelNames.bytedanceUpscaler,
+  utilityVideoModelNames.topazSdrToHdr,
   utilityVideoModelNames.topazUpscaler
 ];
 
@@ -428,6 +431,7 @@ export const topazUpscalerBillingTierOptions = [
   ["720p-1080p", "720p to 1080p"],
   ["above-1080p", "Above 1080p"]
 ];
+export { topazSdrToHdrOutputFormatOptions };
 export const colorIdMatteVideoOutputOptions = [
   ["mp4", "MP4 mask"],
   ["webm", "WebM mask"],
@@ -496,6 +500,7 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.birefnetVideo]: "Removes a video background with BiRefNet and can optionally return the mask video.",
   [utilityVideoModelNames.rifeVideo]: "Interpolates in-between frames with RIFE optical-flow style motion estimation to smooth low-FPS video.",
   [utilityVideoModelNames.bytedanceUpscaler]: "Upscales video with Bytedance's Fal upscaler using resolution, FPS, preset, tier, and fidelity controls.",
+  [utilityVideoModelNames.topazSdrToHdr]: "Converts SDR video to 10-bit HDR with Topaz Hyperion 2.5 while preserving source resolution and frame rate.",
   [utilityVideoModelNames.topazUpscaler]: "Upscales and enhances video with Topaz Video AI models, with optional interpolation and billing-tier tracking."
 };
 

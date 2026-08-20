@@ -13,6 +13,7 @@ import { statsApi } from "./api/newtApi.js";
 import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
 import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { reve21CostPerImage } from "./reve21.js";
+import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
 
 const defaultPricing = {
   seedance: {
@@ -126,6 +127,10 @@ const defaultPricing = {
       costPerSecondAbove1080p: 0.08,
       fps60Multiplier: 2,
       gaia2Multiplier: 0.5
+    },
+    topazSdrToHdr: {
+      costPerSecondUpTo1080p: 0.24,
+      costPerSecond4K: 0.51
     },
     topazImageUpscaler: {
       costUpTo24MP: 0.08,
@@ -656,6 +661,10 @@ function estimateItemCost(item, mediaType, pricing) {
     return estimateBytedanceUpscalerStatsCost(item, settings, pricing);
   }
 
+  if (modelKey.includes("topaz") && (modelKey.includes("hdr") || modelKey.includes("sdr-to-hdr"))) {
+    return estimateTopazSdrToHdrStatsCost(item, settings, pricing);
+  }
+
   if (modelKey.includes("topaz")) {
     return estimateTopazUpscalerStatsCost(item, settings, pricing);
   }
@@ -909,6 +918,20 @@ function estimateTopazUpscalerStatsCost(item, settings, pricing) {
   const fpsMultiplier = Number(settings.targetFps || item.cost?.targetFps || 0) >= 60 ? utilityPricing.fps60Multiplier : 1;
   const modelMultiplier = String(settings.model || item.cost?.model || "").toLowerCase() === "gaia 2" ? utilityPricing.gaia2Multiplier : 1;
   return duration * baseRate * fpsMultiplier * modelMultiplier;
+}
+
+function estimateTopazSdrToHdrStatsCost(item, settings, pricing) {
+  const utilityPricing = pricing.utility?.topazSdrToHdr || defaultPricing.utility.topazSdrToHdr;
+  const cost = estimateTopazSdrToHdrCost({
+    durationSeconds: item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units,
+    width: item.remoteVideo?.width || settings.sourceWidth || item.cost?.sourceWidth,
+    height: item.remoteVideo?.height || settings.sourceHeight || item.cost?.sourceHeight,
+    rates: {
+      "up-to-1080p": utilityPricing.costPerSecondUpTo1080p,
+      "4k": utilityPricing.costPerSecond4K
+    }
+  });
+  return cost.amountUsd;
 }
 
 function estimateTopazImageUpscalerStatsCost(item, _settings, pricing) {
