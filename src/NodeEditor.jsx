@@ -46,7 +46,12 @@ import {
   X
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { AssemblyNodeBody } from "./components/AssemblyNodeBody.jsx";
+import { assemblyRenderPayload, createAssemblyState, normalizeAssemblyState } from "./assembly/assemblyState.js";
+import { selectAssemblyPreviewSource } from "./assembly/assemblyPreview.js";
+import { subscribeAssemblyLiveFrame } from "./assembly/assemblyLiveFrameBus.js";
 import { apiErrorMessage } from "./apiErrors.js";
+import { normalizeOutputExportFormat, outputExportFormatOptions } from "./outputExport.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -298,7 +303,7 @@ import {
   positiveModulo,
   rectsOverlap
 } from "./nodeGeometry.js";
-import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
+import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -442,6 +447,7 @@ const nodeIcons = {
   transfer: Compass,
   utility: Wrench,
   edit: SlidersHorizontal,
+  assembly: Clapperboard,
   audio: FileAudio,
   model3d: Box,
   autoAspect: Maximize2,
@@ -577,6 +583,13 @@ const nodeHelpContent = {
     lines: [
       "Contains helper tools for media cleanup, extraction, masks, and other workflow tasks.",
       "Connect supported media, choose the tool, then run or export the result."
+    ]
+  },
+  assembly: {
+    title: "Timeline",
+    lines: [
+      "Arrange connected video, audio, and still sources on a multi-track timeline.",
+      "Scrubbing emits the owned playhead frame to every connected Preview; Render Timeline creates the final video."
     ]
   },
   model3d: {
@@ -2441,10 +2454,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function captureTextareaLayoutsForSave(currentNodes = nodesRef.current) {
     const nodesWithDrafts = mergeNodeDraftPatches(currentNodes);
     const preparedNodes = mergeTextareaLayoutsFromCanvas(nodesWithDrafts, canvasRef.current);
-    if (preparedNodes === currentNodes) return currentNodes;
-    nodesRef.current = preparedNodes;
-    setNodes(preparedNodes);
-    return preparedNodes;
+    if (preparedNodes !== currentNodes) {
+      nodesRef.current = preparedNodes;
+      setNodes(preparedNodes);
+    }
+    return preparedNodes.map((node) => cloneNode(node));
   }
 
   function updateNode(nodeId, patch) {
@@ -2459,6 +2473,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setNodes((current) => {
       const sourceBeforeUpdate = current.find((node) => node.id === nodeId);
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
+      const shouldUpdateAssemblyPreviews = Object.prototype.hasOwnProperty.call(patch, "assemblyFrameUrl") && Boolean(patch.assemblyFrameUrl);
       let nextNodes = current.map((node) =>
         node.id === nodeId
           ? (() => {
@@ -2487,9 +2502,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         nextNodes = updateBoundNodeReferenceLabels(nextNodes, sourceBeforeUpdate, patch.title, groupsRef.current);
       }
       let updatedNodes = nextNodes;
-      if (shouldUpdateConnectedPreviews) {
+      if (shouldUpdateConnectedPreviews || shouldUpdateAssemblyPreviews) {
         try {
-          updatedNodes = syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current);
+          updatedNodes = syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current, shouldUpdateAssemblyPreviews ? "frameOut" : "");
         } catch (error) {
           console.warn("Could not sync connected preview nodes after result update:", error);
         }
@@ -2633,9 +2648,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
-  function syncConnectedPreviewNodes(nextNodes, sourceNodeId, currentEdges) {
-    const hasPreviewConnection = currentEdges.some((edge) => edge.from.nodeId === sourceNodeId && edge.to.port === "sourceIn");
-    if (!hasPreviewConnection) return nextNodes;
+  function syncConnectedPreviewNodes(nextNodes, sourceNodeId, currentEdges, preferredSourcePort = "") {
+    const previewConnections = currentEdges.filter((edge) =>
+      edge.from.nodeId === sourceNodeId &&
+      edge.to.port === "sourceIn" &&
+      (!preferredSourcePort || edge.from.port === preferredSourcePort)
+    );
+    if (!previewConnections.length) return nextNodes;
+    if (preferredSourcePort) {
+      const expectedSourceId = `${sourceNodeId}:${preferredSourcePort}`;
+      const previewsAlreadyBound = previewConnections.every((edge) =>
+        nextNodes.find((node) => node.id === edge.to.nodeId)?.data?.previewSourceId === expectedSourceId
+      );
+      if (previewsAlreadyBound) return nextNodes;
+    }
 
     const incomingByPreview = buildIncomingByNode(nextNodes, currentEdges);
     return nextNodes.map((node) => {
@@ -2644,11 +2670,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (!incomingSources.some(({ edge }) => edge.from.nodeId === sourceNodeId)) return node;
 
       const previewSources = connectedPreviewSources(incomingSources);
-      const sourceGroup = previewSources.find((source) => source.sourceNodeId === sourceNodeId);
+      const sourceGroup = preferredSourcePort
+        ? selectAssemblyPreviewSource(previewSources, sourceNodeId, preferredSourcePort)
+        : previewSources.find((source) => source.sourceNodeId === sourceNodeId);
       if (!sourceGroup) return node;
       const selectedItemIndex = sourceGroup.items.findIndex((item) => item.sourceSelectedResult);
       const previewItemIndex = selectedItemIndex >= 0 ? selectedItemIndex : Math.max(0, sourceGroup.items.length - 1);
 
+      if (node.data?.previewSourceId === sourceGroup.id && node.data?.previewItemIndex === previewItemIndex) return node;
       return {
         ...node,
         data: {
@@ -5486,6 +5515,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         preview: ["sourceIn"],
         autoAspect: ["imageIn"],
         edit: ["imageIn"],
+        assembly: ["imageIn"],
         coverage: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
@@ -5502,11 +5532,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
         edit: ["videoIn"],
+        assembly: ["videoIn"],
         utility: ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"],
         text: ["videoIn"]
       },
       audio: {
-        videoModel: ["referenceAudioIn"]
+        videoModel: ["referenceAudioIn"],
+        assembly: ["audioIn"]
       },
       camera: {
         imageModel: ["cameraIn"]
@@ -5551,6 +5583,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "frameIt") return "image";
     if (source.type === "utility") return utilityOutputType(source, from.port);
     if (source.type === "edit") return from.port === "editMaskOut" ? "image" : editOutputType(source);
+    if (source.type === "assembly") return from.port === "frameOut" ? "image" : "video";
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
@@ -5580,6 +5613,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
     if (isOutputSinkConnection(target.type, to.port, portKindForNodePort(source, from.port, "output"))) return "";
+    if (target.type === "assembly") return "";
 
     if (source.type === "storyboard") {
       if (!storyboardOutputItem(source, { from })?.url) return from.port === storyboardBoardOutputPortId ? "Lock this Storyboard board before connecting it" : "Generate this Storyboard frame before connecting it";
@@ -5886,7 +5920,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
+      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "assembly", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
       return "Preview accepts image, video, and 3D sources";
     }
 
@@ -6259,12 +6293,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const outputItem = connectedOutputItem(sourceNode, connection.edge);
     const sourceText = outputItem?.url ? "" : rawConnectedTextForSource(sourceNode);
     if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
+    const sourceMediaType = outputItem?.type || (sourceText ? "text" : "");
+    const outputFormat = outputExportFormatForNode(outputNode.data, sourceMediaType);
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode);
     const { response, data } = await nodeApi.saveOutput({
       sourceUrl: outputItem?.url || "",
       sourceText,
       sourceFileName: outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || ""),
-      mediaType: outputItem?.type || (sourceText ? "text" : ""),
+      mediaType: sourceMediaType,
+      outputFormat,
       ...workflowContextPayload({ ...requestContext, ...outputContext }),
       nodeId: outputNode.id,
       nodeTitle: outputNode.data.title || "Output"
@@ -6305,6 +6342,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       filePath: output.filePath || "",
       mimeType: output.mimeType || "text/plain"
     };
+  }
+
+  async function probeAssemblyMedia(node, media) {
+    const { response, data } = await nodeApi.assemblyProbe({
+      ...workflowRequestContext(),
+      nodeId: node.id,
+      nodeTitle: node.data?.title || "Timeline",
+      media
+    });
+    if (!response.ok) throw new Error(data.error || "Timeline could not read this media source.");
+    return data.media || null;
   }
 
   async function runNode(node) {
@@ -6364,6 +6412,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
     const previousEditResults = existingResultItemsForNode(currentNode, currentNode.type === "edit" ? editOutputType(currentNode) : "video");
+    const previousAssemblyResults = existingResultItemsForNode(currentNode, "video");
     let outputTarget = null;
     let requestContext = workflowRequestContext();
     const hasBasePrompt = Boolean(String(basePrompt || "").trim());
@@ -6412,6 +6461,38 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           lastSavedFileName: saved.fileName || fileNameFromLocalUrl(saved.url || "") || "",
           lastSavedPath: saved.filePath || ""
         });
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "assembly") {
+        const { response, data } = await nodeApi.assemblyRender({
+          ...requestContext,
+          nodeId: currentNode.id,
+          nodeTitle: currentNode.data?.title || "Timeline",
+          assembly: assemblyRenderPayload(currentNode.data.assembly)
+        });
+        if (!response.ok) throw new Error(data.error || "Timeline render failed.");
+        const generated = {
+          url: data.video?.localUrl || "",
+          type: "video",
+          label: data.video?.label || "Timeline render",
+          fileName: data.video?.fileName || "",
+          mimeType: data.video?.mimeType || "video/mp4",
+          metadata: data.video?.metadata || {},
+          text: data.text || "Timeline render"
+        };
+        if (!generated.url) throw new Error("Timeline render returned no video.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousAssemblyResults, [generated], "video");
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: generated.url,
+          resultItems,
+          selectedResultIndex: firstNewIndex,
+          resultType: "video",
+          error: ""
+        });
+        markOutputTargetSaved(outputTarget, [generated], "video");
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -7022,6 +7103,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onOpenComposer={setComposerEditorNodeId}
         onFrameItCapture={captureFrameItFrame}
         onFrameItGenerate={generateFrameItMedia}
+        onAssemblyProbe={probeAssemblyMedia}
         onCanvasPanStart={beginCanvasPan}
         running={node.data?.status === "running"}
         transferCompiling={compilingTransferNodeId === node.id}
@@ -7806,6 +7888,7 @@ function NodeCard({
   onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
+  onAssemblyProbe,
   onCanvasPanStart,
   running,
   transferCompiling,
@@ -8149,6 +8232,7 @@ function NodeCard({
         onOpenComposer={onOpenComposer}
         onFrameItCapture={onFrameItCapture}
         onFrameItGenerate={onFrameItGenerate}
+        onAssemblyProbe={onAssemblyProbe}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
@@ -10265,6 +10349,9 @@ function OutputNodeBody({
   const sourcePort = config.input.find((port) => port.id === "sourceIn");
   const sourceSummary = outputSourceSummary(incoming.sourceIn);
   const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn);
+  const formatOptions = outputExportFormatOptions(sourceInfo.mediaType);
+  const outputFormat = outputExportFormatForNode(node.data, sourceInfo.mediaType);
+  const outputFormatDataKey = sourceInfo.mediaType === "video" ? "outputVideoFormat" : "outputImageFormat";
   const [filenamePreview, setFilenamePreview] = React.useState({ status: "idle", fileName: "", filePath: "", error: "" });
   const pathInputRef = React.useRef(null);
   const filenameInputRef = React.useRef(null);
@@ -10297,7 +10384,8 @@ function OutputNodeBody({
       outputTargetNodeTitle: node.data.title || "Output",
       outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
       sourceFileName: sourceInfo.sourceFileName || "",
-      mediaType: sourceInfo.mediaType || ""
+      mediaType: sourceInfo.mediaType || "",
+      outputFormat
     };
 
     setFilenamePreview((current) => ({ ...current, status: current.fileName ? "ready" : "loading", error: "" }));
@@ -10331,6 +10419,7 @@ function OutputNodeBody({
     node.data.outputFileName,
     node.data.title,
     node.id,
+    outputFormat,
     sourceInfo.mediaType,
     sourceInfo.sourceFileName,
     sourceInfo.sourceTitle
@@ -10397,6 +10486,16 @@ function OutputNodeBody({
       <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
         <button type="button" className={incoming.sourceIn?.length ? "connected-field" : ""}>{sourceSummary}</button>
       </NodeRow>
+      {formatOptions.length > 0 && (
+        <NodeRow label="Format">
+          <select
+            value={outputFormat}
+            onChange={(event) => onUpdate(node.id, { [outputFormatDataKey]: event.target.value, error: "" })}
+          >
+            {formatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </NodeRow>
+      )}
       <NodeRow label="Path">
         <div className="output-path-control">
           <input
@@ -10503,6 +10602,7 @@ function NodeBody({
   onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
+  onAssemblyProbe,
   onCanvasPanStart,
   incomingByNode,
   transferCompiling,
@@ -10593,6 +10693,24 @@ function NodeBody({
         onUpload={onUpload}
         onOutputImport={onOutputImport}
         onPreviewOpen={onPreviewOpen}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
+    );
+  }
+
+  if (node.type === "assembly") {
+    return (
+      <AssemblyNodeBody
+        node={node}
+        inputItems={assemblyConnectedMediaInputs(incoming)}
+        inputPorts={config.input}
+        outputPorts={config.output}
+        onUpdate={onUpdate}
+        onRun={onRun}
+        onProbeMedia={onAssemblyProbe}
+        running={running}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
@@ -12071,10 +12189,12 @@ function NodeBody({
       const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
       const item = previewItems[nextIndex];
       if (!item?.url) return;
-      onUpdate(previewSource.sourceNodeId, {
-        selectedResultIndex: item.sourceResultIndex ?? nextIndex,
-        resultUrl: item.url
-      });
+      onUpdate(previewSource.sourceNodeId, previewSource.sourcePort === "frameOut"
+        ? { assemblyFrameUrl: item.url }
+        : {
+            selectedResultIndex: item.sourceResultIndex ?? nextIndex,
+            resultUrl: item.url
+          });
       onUpdate(node.id, {
         previewSourceId: previewSource.id,
         previewItemIndex: nextIndex
@@ -12248,11 +12368,16 @@ function NodeBody({
         {activePreviewTab === "preview" ? (
           <>
             <div className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
-              {previewItem?.type === "image" && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+              {previewItem?.type === "image" && (previewItem.live
+                ? <TimelineLivePreviewImage item={previewItem} sourceLabel={previewSource.label} />
+                : <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />)}
               {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
+            {previewItem?.live && (
+              <TimelinePreviewPlaybackRate sourceNodeId={previewItem.sourceNodeId} frameTime={previewItem.frameTime} targetFrameRate={previewItem.targetFrameRate} />
+            )}
             {previewItems.length > 1 && (
               <div className="preview-frame-nav" onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" onClick={(event) => selectPreviewItem(previewIndex - 1, event)} title="Previous preview" aria-label="Previous preview">
@@ -16454,6 +16579,18 @@ function getNodeConfig(type) {
       ],
       output: [{ id: "editOut", label: "Output", color: portColors.video }]
     },
+    assembly: {
+      icon: Clapperboard,
+      input: [
+        { id: "videoIn", label: "Video", color: portColors.video },
+        { id: "imageIn", label: "Still", color: portColors.image },
+        { id: "audioIn", label: "Audio", color: portColors.audio }
+      ],
+      output: [
+        { id: "frameOut", label: "Live Preview", color: portColors.image },
+        { id: "videoOut", label: "Render", color: portColors.video }
+      ]
+    },
     video: {
       icon: Video,
       input: [],
@@ -16596,6 +16733,22 @@ function createDefaultNodeData(type, label, count) {
     };
   }
   if (type === "image" || type === "video" || type === "audio") return { title };
+  if (type === "assembly") {
+    return {
+      title,
+      nodeWidth: 1080,
+      nodeHeight: 520,
+      assembly: createAssemblyState(),
+      assemblyFrameUrl: "",
+      assemblyFrameTime: 0,
+      resultUrl: "",
+      resultItems: [],
+      resultType: "video",
+      selectedResultIndex: 0,
+      status: "ready",
+      error: ""
+    };
+  }
   if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0, previewTab: "preview", previewLayoutItems: [] };
   if (type === "output") {
     return {
@@ -16603,6 +16756,8 @@ function createDefaultNodeData(type, label, count) {
       outputPath: "",
       outputPathMode: "project-default",
       outputFileName: "$node_$date_$time",
+      outputImageFormat: "png",
+      outputVideoFormat: "mp4",
       resultUrl: "",
       resultItems: [],
       selectedResultIndex: 0,
@@ -18703,6 +18858,7 @@ function nodeResultMediaType(node) {
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "edit") return editOutputType(node);
   if (node.type === "output") return node.data?.resultType || "";
+  if (node.type === "assembly") return node.data?.resultUrl ? "video" : node.data?.assemblyFrameUrl ? "image" : "";
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
   if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
@@ -19253,6 +19409,7 @@ function nodeReferenceOutputPort(node) {
   if (node.type === "composer") return "imageOut";
   if (node.type === "model3d") return "modelOut";
   if (node.type === "edit") return "editOut";
+  if (node.type === "assembly") return node.data?.resultUrl ? "videoOut" : "frameOut";
   if (node.type === "utility") return utilityOutputType(node) === "video" ? "generatedVideoOut" : "utilityOut";
   return outputPortDefinitionsForNode(node)[0]?.id || "";
 }
@@ -19393,6 +19550,12 @@ function outputSourceSummary(items = []) {
   );
 }
 
+function outputExportFormatForNode(data = {}, mediaType = "") {
+  if (mediaType === "image") return normalizeOutputExportFormat("image", data.outputImageFormat);
+  if (mediaType === "video") return normalizeOutputExportFormat("video", data.outputVideoFormat);
+  return "";
+}
+
 function outputPreviewSourceInfo(items = []) {
   const connection = items.at(-1);
   const source = connection?.source;
@@ -19500,6 +19663,35 @@ function transitionKeyframeInputKey(item, index = 0) {
   return [item?.source?.id || "source", item?.edge?.from?.port || "out", index].join(":");
 }
 
+function assemblyConnectedMediaInputs(incoming = {}) {
+  const ports = [
+    ["videoIn", "video"],
+    ["imageIn", "image"],
+    ["audioIn", "audio"]
+  ];
+  return ports.flatMap(([targetPort, fallbackType]) => (incoming[targetPort] || []).map(({ source, edge }, index) => {
+    const item = connectedOutputItem(source, edge);
+    const url = item?.url || connectedOutputUrl(source, edge);
+    if (!url) return null;
+    return {
+      id: edge?.id || `${source.id}:${edge?.from?.port || index}`,
+      sourceNodeId: source.id,
+      sourcePort: edge?.from?.port || "",
+      sourcePortTarget: targetPort,
+      url,
+      type: item?.type || fallbackType,
+      label: item?.label || sourceLabel(source),
+      fileName: item?.fileName || fileNameFromLocalUrl(url),
+      mimeType: item?.mimeType || mimeForOutputItem({ url, type: fallbackType }),
+      duration: Number(item?.metadata?.duration || item?.duration || 0),
+      width: Number(item?.metadata?.width || item?.width || 0),
+      height: Number(item?.metadata?.height || item?.height || 0),
+      fps: Number(item?.metadata?.fps || item?.fps || 0),
+      hasAudio: Boolean(item?.metadata?.hasAudio || fallbackType === "audio")
+    };
+  }).filter(Boolean));
+}
+
 function connectedAssetItems(items = []) {
   return items
     .map(({ source, edge }) => {
@@ -19564,6 +19756,21 @@ function segmentVideoResultsByRole(items = []) {
 }
 
 function sourceResultItemsForPort(source, portId = "", type = "") {
+  if (source?.type === "assembly") {
+    if (portId === "frameOut") {
+      return source.data?.assemblyFrameUrl ? [{
+        url: source.data.assemblyFrameUrl,
+        type: "image",
+        label: `${source.data?.title || "Timeline"} frame`,
+        fileName: "timeline-frame.jpg",
+        mimeType: "image/jpeg",
+        live: true,
+        frameTime: Math.max(0, Number(source.data?.assemblyFrameTime) || 0),
+        targetFrameRate: Math.max(1, Number(source.data?.assembly?.frameRate) || 24)
+      }] : [];
+    }
+    return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "video").filter((item) => item.type === "video");
+  }
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     const item = transitionBuilderResultItemForPort(source, portId);
     return item?.url ? [item] : [];
@@ -19578,6 +19785,7 @@ function sourceResultItemsForPort(source, portId = "", type = "") {
 }
 
 function sourceResultUrlForPort(source, portId = "") {
+  if (source?.type === "assembly") return portId === "frameOut" ? source.data?.assemblyFrameUrl || "" : source.data?.resultUrl || "";
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     const item = transitionBuilderResultItemForPort(source, portId);
     if (item?.url) return item.url;
@@ -19591,6 +19799,7 @@ function sourceResultUrlForPort(source, portId = "") {
 }
 
 function sourceResultLabelForPort(source, portId = "") {
+  if (source?.type === "assembly") return portId === "frameOut" ? "Timeline frame" : "Timeline render";
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     return transitionBuilderResultItemForPort(source, portId)?.label || "";
   }
@@ -20595,6 +20804,9 @@ function connectedPreviewSources(items = []) {
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
   if (!source) return [];
+  if (source.type === "assembly") {
+    return sourceResultItemsForPort(source, edge?.from?.port, sourceType);
+  }
   if (source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     return sourceResultItemsForPort(source, edge?.from?.port, sourceType);
   }
@@ -21035,6 +21247,68 @@ function previewCropRectToPixels(rect, imageWidth, imageHeight) {
   };
 }
 
+function useTimelineLiveFrame(sourceNodeId, fallbackFrame) {
+  const [frame, setFrame] = React.useState(fallbackFrame);
+  React.useEffect(() => {
+    setFrame(fallbackFrame);
+    return subscribeAssemblyLiveFrame(sourceNodeId, setFrame);
+  }, [sourceNodeId]);
+  return frame;
+}
+
+function TimelineLivePreviewImage({ item, sourceLabel }) {
+  const frame = useTimelineLiveFrame(item.sourceNodeId, {
+    url: item.url,
+    frameTime: item.frameTime,
+    targetFrameRate: item.targetFrameRate
+  });
+  return <img src={displayMediaUrl(frame?.url || item.url)} alt={item.label || sourceLabel} draggable={false} loading="eager" decoding="async" onError={useNewtNodeImageFallback} />;
+}
+
+function TimelinePreviewPlaybackRate({ sourceNodeId, frameTime = 0, targetFrameRate = 24 }) {
+  const liveFrame = useTimelineLiveFrame(sourceNodeId, { frameTime, targetFrameRate });
+  const deliveredFrameTime = Math.max(0, Number(liveFrame?.frameTime) || 0);
+  const samplesRef = React.useRef([]);
+  const pauseTimerRef = React.useRef(null);
+  const lastDisplayUpdateRef = React.useRef(0);
+  const playbackActiveRef = React.useRef(false);
+  const [playback, setPlayback] = React.useState({ active: false, fps: 0 });
+  const targetFps = Math.max(1, Number(liveFrame?.targetFrameRate || targetFrameRate) || 24);
+
+  React.useEffect(() => {
+    const now = globalThis.performance?.now?.() || Date.now();
+    samplesRef.current = [...samplesRef.current, now].filter((sample) => now - sample <= 1000);
+    const samples = samplesRef.current;
+    const measuredFps = samples.length > 1
+      ? ((samples.length - 1) * 1000) / Math.max(1, samples.at(-1) - samples[0])
+      : 0;
+    if (measuredFps && (now - lastDisplayUpdateRef.current >= 200 || !playbackActiveRef.current)) {
+      lastDisplayUpdateRef.current = now;
+      playbackActiveRef.current = true;
+      setPlayback({ active: true, fps: measuredFps });
+    }
+    if (pauseTimerRef.current) window.clearTimeout(pauseTimerRef.current);
+    pauseTimerRef.current = window.setTimeout(() => {
+      samplesRef.current = [];
+      playbackActiveRef.current = false;
+      setPlayback((current) => ({ ...current, active: false }));
+    }, Math.max(180, (1000 / targetFps) * 4));
+    return () => {
+      if (pauseTimerRef.current) window.clearTimeout(pauseTimerRef.current);
+    };
+  }, [deliveredFrameTime, targetFps]);
+
+  const measuredLabel = playback.active && playback.fps ? `${playback.fps.toFixed(1)} fps` : "Paused";
+  return (
+    <div className={`preview-live-playback-rate ${playback.active ? "active" : ""}`} aria-label={`Live preview ${measuredLabel}; timeline ${targetFps} frames per second`}>
+      <i aria-hidden="true" />
+      <strong>{measuredLabel}</strong>
+      <span>Live preview</span>
+      <small>{targetFps} fps timeline</small>
+    </div>
+  );
+}
+
 function previewVideoSourceForNode(node, incomingByNode) {
   if (node?.type !== "preview") return null;
   const previewSources = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
@@ -21070,6 +21344,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 
 function previewMediaType(source, edge) {
   if (!source) return "";
+  if (source.type === "assembly") return edge?.from?.port === "frameOut" ? "image" : "video";
   if (source.type === "storyboard" && storyboardOutputItem(source, edge)) return "image";
   if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
@@ -22015,6 +22290,21 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "assembly") {
+    return {
+      ...nextNode,
+      data: {
+        ...createDefaultNodeData("assembly", timelineNodeTitle(data.title), 1),
+        ...data,
+        title: timelineNodeTitle(data.title),
+        assembly: normalizeAssemblyState(data.assembly),
+        assemblyFrameUrl: String(data.assemblyFrameUrl || ""),
+        assemblyFrameTime: Math.max(0, Number(data.assemblyFrameTime) || 0),
+        resultType: "video"
+      }
+    };
+  }
+
   if (nextNode.type === "text") {
     return {
       ...nextNode,
@@ -22246,6 +22536,8 @@ function normalizeOutputData(data = {}) {
     title: data.title || "Output",
     outputPath: String(data.outputPath || data.path || "").trim(),
     outputFileName: String(data.outputFileName || data.fileNameTemplate || "$node_$date_$time").trim() || "$node_$date_$time",
+    outputImageFormat: normalizeOutputExportFormat("image", data.outputImageFormat),
+    outputVideoFormat: normalizeOutputExportFormat("video", data.outputVideoFormat),
     resultUrl: String(data.resultUrl || "").trim(),
     resultItems: Array.isArray(data.resultItems) ? data.resultItems : [],
     selectedResultIndex: Math.max(0, Number(data.selectedResultIndex) || 0),

@@ -17,6 +17,7 @@ export const nodeTypeDefinitions = [
   { type: "transfer", label: "Mood Board" },
   { type: "utility", label: "Utility" },
   { type: "edit", label: "Edit" },
+  { type: "assembly", label: "Timeline" },
   { type: "audio", label: "Audio" },
   { type: "model3d", label: "3D" },
   { type: "imageModel", label: "Image Model" },
@@ -31,6 +32,14 @@ export function nodeTypeDefinition(type) {
 
 export function nodeTypeLabel(type, fallback = "Node") {
   return nodeTypeDefinition(type)?.label || fallback;
+}
+
+export function timelineNodeTitle(value = "") {
+  const title = String(value || "");
+  const normalized = title.trim();
+  if (!normalized) return "Timeline";
+  if (/^Assembly(?:\s+\d+)?$/.test(normalized)) return normalized.replace(/^Assembly/, "Timeline");
+  return title;
 }
 
 export function nodeTypeForOutputItem(item) {

@@ -154,6 +154,24 @@ test("Output filename preview resolves tokens without creating the target file",
   });
 });
 
+test("selected Output format overrides an extension typed in the filename field", async () => {
+  await withTempOutputDir(async (directory) => {
+    const target = await previewOutputTargetAsset(
+      {
+        outputTargetPath: directory,
+        outputTargetFileName: "$node.png",
+        outputTargetSourceNodeTitle: "Timeline"
+      },
+      "video",
+      ".mov",
+      "",
+      { rootDir: directory, forceExtension: true }
+    );
+
+    assert.equal(target.fileName, "Timeline.mov");
+  });
+});
+
 test("external output public paths round-trip filenames with spaces", async () => {
   await withTempOutputDir(async (directory) => {
     const filePath = path.join(directory, "Output Copy_02.mp4");

@@ -33,7 +33,9 @@ export function MediaPreview({ node, onPreviewOpen }) {
     type: node.type,
     label: node.data.fileName || capitalizeMediaType(node.type),
     fileName: node.data.fileName || "",
-    mimeType: node.data.mimeType || ""
+    mimeType: node.data.mimeType || "",
+    sourceNodeId: node.id,
+    sourcePort: `${node.type}Out`
   };
   function startPreviewDrag(event) {
     setOutputItemDragData(event.dataTransfer, dragItem, defaultOutputDragMime);
@@ -50,6 +52,16 @@ export function MediaPreview({ node, onPreviewOpen }) {
     }
 
     startPreviewDrag(event);
+  }
+
+  function startVideoHandleDrag(event) {
+    event.stopPropagation();
+    startPreviewDrag(event);
+  }
+
+  function endVideoHandleDrag(event) {
+    event.stopPropagation();
+    endPreviewDrag(event);
   }
 
   function stopPreviewPointer(event) {
@@ -93,9 +105,21 @@ export function MediaPreview({ node, onPreviewOpen }) {
         onPointerDown={stopPreviewPointer}
         onDragStart={startVideoPreviewDrag}
         onDragEnd={endPreviewDrag}
-        title="Scrub video with left-drag. Ctrl-drag to use this video in another node."
+        title="Scrub with left-drag. Ctrl-drag the video or use the grip to create another node or add it to Timeline."
       >
         <video src={displayMediaUrl(node.data.resultUrl)} controls muted loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />
+        <button
+          type="button"
+          className="video-output-drag-handle"
+          draggable
+          title="Drag video to the canvas or Timeline media bin"
+          aria-label="Drag video output"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDragStart={startVideoHandleDrag}
+          onDragEnd={endVideoHandleDrag}
+        >
+          <GripVertical size={14} />
+        </button>
       </div>
     );
   }
@@ -1909,11 +1933,12 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
     link.click();
   }
 
-  function startResultDrag(event) {
-    if (!canDragActiveItem || !activeItem?.url || (activeItem.type === "video" && !event.ctrlKey)) {
+  function startResultDrag(event, forceVideoDrag = false) {
+    if (!canDragActiveItem || !activeItem?.url || (activeItem.type === "video" && !event.ctrlKey && !forceVideoDrag)) {
       event.preventDefault();
       return;
     }
+    if (forceVideoDrag) event.stopPropagation();
 
     const dragItem = {
       id: activeItem.id || `${activeItem.type || type}:${activeItem.url}`,
@@ -1956,6 +1981,23 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
               />
             )}
             {activeItem.type === "video" && <video src={displayMediaUrl(activeItem.url)} controls loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+            {activeItem.type === "video" && (
+              <button
+                type="button"
+                className="video-output-drag-handle"
+                draggable
+                title="Drag video to the canvas or Timeline media bin"
+                aria-label="Drag video output"
+                onPointerDown={(event) => event.stopPropagation()}
+                onDragStart={(event) => startResultDrag(event, true)}
+                onDragEnd={(event) => {
+                  event.stopPropagation();
+                  finishOutputItemDragData(activeItem, event);
+                }}
+              >
+                <GripVertical size={14} />
+              </button>
+            )}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} assets={activeItem.assets} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
             {activeItem.type === "wanSegment" && (
               <div className="wansegment-result">

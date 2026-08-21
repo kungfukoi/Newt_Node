@@ -55,6 +55,8 @@ import {
   externalOutputFilePathFromPublicPath,
   previewOutputTargetAsset
 } from "./outputTargets.js";
+import { buildOutputExportFfmpegArgs, outputExportRequiresConversion } from "./output-export.js";
+import { normalizeOutputExportFormat, outputExportExtension, outputExportMimeType } from "../src/outputExport.js";
 import {
   exactWorkflowPackageAssetFilePath,
   registeredWorkflowPackageCandidates,
@@ -65,6 +67,7 @@ import {
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
 import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -2619,13 +2622,16 @@ app.post("/api/node/preview-output", async (req, res) => {
 
     const sourceFileName = String(req.body.sourceFileName || "").trim();
     const mediaType = String(req.body.mediaType || "").trim();
-    const extension = path.extname(sourceFileName) || outputPreviewExtensionForMediaType(mediaType);
+    const requestedFormat = String(req.body.outputFormat || "").trim();
+    const outputFormat = requestedFormat ? normalizeOutputExportFormat(mediaType, requestedFormat) : "";
+    const sourceExtension = path.extname(sourceFileName) || outputPreviewExtensionForMediaType(mediaType);
+    const extension = outputFormat ? outputExportExtension(mediaType, outputFormat, sourceExtension) : sourceExtension;
     const target = await previewOutputTargetAsset(
       req.body,
       sourceFileName || mediaType || "output",
       extension,
       "",
-      { rootDir, outputPrefix: externalOutputsPrefix }
+      { rootDir, outputPrefix: externalOutputsPrefix, forceExtension: Boolean(outputFormat) }
     );
     if (!target) return res.status(400).json({ error: "Set an Output path to preview the filename." });
 
@@ -2673,13 +2679,34 @@ app.post("/api/node/save-output", async (req, res) => {
       return res.status(400).json({ error: "Connect a source with output before saving." });
     }
 
+    const requestedFormat = String(req.body.outputFormat || "").trim();
+    const outputFormat = requestedFormat ? normalizeOutputExportFormat(mediaType, requestedFormat) : "";
+    if (outputFormat) {
+      extension = outputExportExtension(mediaType, outputFormat, extension || ".bin");
+      mimeType = outputExportMimeType(mediaType, outputFormat, mimeType || mimeForExtension(extension.toLowerCase()));
+    }
+
     const savedOutput = await queueMediaPersistence(async () => {
-      const target = await createManagedAssetTarget(req, sourceFileName || sourceTitle, extension || ".bin", workflowPackageOutputDirName);
+      const target = await createManagedAssetTarget(
+        req,
+        sourceFileName || sourceTitle,
+        extension || ".bin",
+        workflowPackageOutputDirName,
+        { forceExtension: Boolean(outputFormat) }
+      );
       if (!target.outputTarget) return null;
 
       if (sourcePath) {
-        if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
-          await copyFileWithRetry(sourcePath, target.filePath);
+        try {
+          if (outputFormat && outputExportRequiresConversion(sourcePath, mediaType, outputFormat)) {
+            const args = buildOutputExportFfmpegArgs({ sourcePath, targetPath: target.filePath, mediaType, format: outputFormat });
+            await runFfmpeg(args, `Output ${outputFormat} export`, mediaType === "video" ? 1800000 : 120000);
+          } else if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
+            await copyFileWithRetry(sourcePath, target.filePath);
+          }
+        } catch (error) {
+          await rm(target.filePath, { force: true }).catch(() => {});
+          throw error;
         }
       } else {
         await writeFileWithRetry(target.filePath, sourceText, "utf8");
@@ -2701,7 +2728,8 @@ app.post("/api/node/save-output", async (req, res) => {
         mimeType,
         mediaType,
         bytes: outputStats.size,
-        thumbnailUrl: thumbnail?.publicPath || ""
+        thumbnailUrl: thumbnail?.publicPath || "",
+        outputFormat
       }
     });
   } catch (error) {
@@ -5173,6 +5201,25 @@ app.post("/api/node/edit-preview", async (req, res) => {
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Edit preview failed.");
+  }
+});
+
+app.post("/api/node/assembly-probe", async (req, res) => {
+  try {
+    const media = await createAssemblyMediaProbe(req);
+    return res.json({ endpoint: "local/assembly-probe", media });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Timeline could not read this media source.");
+  }
+});
+
+app.post("/api/node/assembly-render", async (req, res) => {
+  try {
+    return await createAssemblyRenderResult(req, res);
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Timeline render failed.");
   }
 });
 
@@ -9446,7 +9493,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const inputExtension = extension || path.extname(String(kind || ""));
   const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
   const outputTarget = assetGroup === workflowPackageOutputDirName
-    ? await createOutputTargetAsset(body, kind, inputExtension, preferredBaseName, { rootDir, outputPrefix: externalOutputsPrefix })
+    ? await createOutputTargetAsset(body, kind, inputExtension, preferredBaseName, { rootDir, outputPrefix: externalOutputsPrefix, forceExtension: Boolean(options.forceExtension) })
     : null;
   if (outputTarget) return outputTarget;
 
@@ -11750,6 +11797,153 @@ async function createVideoStitchResult({ body, videoUrls = [] }) {
     };
   } catch (error) {
     if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function createAssemblyMediaProbe(req) {
+  const requested = req.body?.media && typeof req.body.media === "object" ? req.body.media : {};
+  const url = firstLocalOutput(requested.url);
+  if (!url) {
+    const error = new Error("Timeline media must be a local NewtNode asset.");
+    error.status = 400;
+    throw error;
+  }
+  const source = await resolveLocalAssetPathFromUrl(url);
+  const type = ["image", "video", "audio"].includes(requested.type) ? requested.type : "video";
+  const metadata = type === "image"
+    ? await probeLocalImageFile(source.filePath, source.fileName)
+    : await probeAssemblyMediaFile(source.filePath);
+  let waveformUrl = "";
+  if (metadata.hasAudio || type === "audio") {
+    const waveform = await createManagedAssetTarget(req, "timeline-waveform", ".png", workflowPackageThumbnailDirName);
+    try {
+      await runFfmpeg([
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-i", source.filePath,
+        "-filter_complex", "[0:a:0]aformat=channel_layouts=mono,showwavespic=s=1600x96:colors=0xddc631:draw=full[wave]",
+        "-map", "[wave]",
+        "-frames:v", "1",
+        waveform.filePath
+      ], "Timeline waveform", 120000);
+      waveformUrl = waveform.publicPath;
+    } catch {
+      await rm(waveform.filePath, { force: true }).catch(() => {});
+    }
+  }
+  return {
+    id: String(requested.id || ""),
+    duration: positiveNumber(metadata.duration) || (type === "image" ? 5 : 1),
+    width: positiveNumber(metadata.width) || 0,
+    height: positiveNumber(metadata.height) || 0,
+    fps: positiveNumber(metadata.fps) || 0,
+    hasAudio: Boolean(metadata.hasAudio || type === "audio"),
+    waveformUrl
+  };
+}
+
+async function probeAssemblyMediaFile(filePath) {
+  const { stdout } = await execFile(
+    ffprobeBinaryPath,
+    [
+      "-v", "error",
+      "-show_entries", "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,duration:format=duration",
+      "-of", "json",
+      filePath
+    ],
+    { windowsHide: true, timeout: 15000 }
+  );
+  const data = JSON.parse(stdout || "{}");
+  const streams = Array.isArray(data.streams) ? data.streams : [];
+  const video = streams.find((stream) => stream.codec_type === "video") || {};
+  const audio = streams.find((stream) => stream.codec_type === "audio") || {};
+  return {
+    width: positiveNumber(video.width),
+    height: positiveNumber(video.height),
+    duration: positiveNumber(video.duration) || positiveNumber(audio.duration) || positiveNumber(data.format?.duration),
+    fps: frameRateFromRatio(video.avg_frame_rate || video.r_frame_rate),
+    hasAudio: Boolean(audio.codec_type)
+  };
+}
+
+async function createAssemblyRenderResult(req, res) {
+  const assembly = req.body?.assembly && typeof req.body.assembly === "object" ? req.body.assembly : null;
+  if (!assembly) return res.status(400).json({ error: "Timeline render needs timeline data." });
+  const requestedMedia = Array.isArray(assembly.media) ? assembly.media : [];
+  if (!requestedMedia.length) return res.status(400).json({ error: "Timeline has no media to render." });
+
+  const resolvedMedia = [];
+  for (const media of requestedMedia) {
+    const url = firstLocalOutput(media.url);
+    if (!url) continue;
+    const source = await resolveLocalAssetPathFromUrl(url);
+    const metadata = media.type === "image"
+      ? await probeLocalImageFile(source.filePath, source.fileName)
+      : await probeAssemblyMediaFile(source.filePath);
+    resolvedMedia.push({
+      id: String(media.id || ""),
+      filePath: source.filePath,
+      fileName: source.fileName,
+      hasAudio: Boolean(metadata.hasAudio || media.type === "audio"),
+      ...metadata
+    });
+  }
+
+  const plan = createAssemblyRenderPlan(assembly, resolvedMedia);
+  if (!plan.inputs.length) return res.status(400).json({ error: "Timeline has no accessible local media clips." });
+  const output = await createManagedAssetTarget(req, "timeline-render", ".mp4", workflowPackageOutputDirName);
+  try {
+    const args = buildAssemblyFfmpegArgs(plan, output.filePath);
+    await runFfmpeg(args, "Timeline render", 1800000);
+    const outputStats = await stat(output.filePath);
+    const metadata = await probeAssemblyMediaFile(output.filePath);
+    const summary = assemblyRenderSummary(plan);
+    const text = "Timeline render: " + summary.visualClipCount + " visual and " + summary.audioClipCount + " audio clip" + (summary.audioClipCount === 1 ? "" : "s") + ".";
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 1,
+      unit: "local render",
+      mediaType: "video",
+      pricingBasis: "Local FFmpeg timeline render",
+      pricingSource: "local-ffmpeg"
+    };
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "video",
+      provider: "local",
+      modelName: "Timeline",
+      endpoint: "local/timeline-render",
+      mode: "FFmpeg multi-track timeline",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: { ...summary, ffmpeg: path.basename(ffmpegBinaryPath) },
+      cost,
+      localVideo: output.publicPath,
+      outputFileName: output.fileName,
+      outputBytes: outputStats.size,
+      text
+    });
+    return res.json({
+      endpoint: "local/timeline-render",
+      modelName: "Timeline",
+      text,
+      cost,
+      video: {
+        label: "Timeline render",
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: "video/mp4",
+        bytes: outputStats.size,
+        metadata
+      }
+    });
+  } catch (error) {
+    await rm(output.filePath, { force: true }).catch(() => {});
     throw error;
   }
 }

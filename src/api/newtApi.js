@@ -282,6 +282,14 @@ export const nodeApi = {
 
   editPreview(body, label = "Edit preview") {
     return fetchJsonApi("/api/node/edit-preview", jsonBody(body), label);
+  },
+
+  assemblyProbe(body, label = "Timeline media probe") {
+    return fetchJsonApi("/api/node/assembly-probe", jsonBody(body), label);
+  },
+
+  assemblyRender(body, label = "Timeline render") {
+    return fetchJsonApi("/api/node/assembly-render", jsonBody(body), label);
   }
 };
 

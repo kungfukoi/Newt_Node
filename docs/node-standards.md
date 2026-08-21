@@ -168,6 +168,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 | `transfer` | Mood Board | Locked visual-transfer collage |
 | `utility` | Utility | Local, hosted, and Comfy-backed image/video tools |
 | `edit` | Edit | Local ffmpeg image/video editing |
+| `assembly` | Timeline | Multi-track nonlinear video and audio editing timeline |
 | `audio` | Audio | Uploaded or connected audio media |
 | `model3d` | 3D | Multi-view GLB generation |
 | `imageModel` | Image Model | Remote image generation |
@@ -241,7 +242,7 @@ Every catalog node uses the shared bottom-right resize handle. Resizing changes 
 
 - Persist shell dimensions as `data.nodeWidth` and `data.nodeHeight`. Normalize them through `normalizedNodeWidth` and `normalizedNodeHeight` in `src/nodeGeometry.js`; do not introduce node-local width/height fields for the outer card.
 - The current width range is the node type's estimated/default width through `2400px`. The current height range is `180px` through `3000px`. If a node needs a larger minimum width, add it to `estimatedNodeWidth`; if graph bounds or paste/culling behavior needs a better default height, add it to `estimatedNodeHeight`.
-- Current minimum/default widths are `980px` for Frame It, `920px` for Storyboard, `760px` for Film Director and Character, `390px` for Auto Aspect and Coverage, `370px` for Image Model, Video Model, Utility, Edit, and 3D, `360px` for Camera and Style, `335px` for Mood Board and Preview, and `310px` for the remaining node types.
+- Current minimum/default widths are `1080px` for Timeline, `980px` for Frame It, `920px` for Storyboard, `760px` for Film Director and Character, `390px` for Auto Aspect and Coverage, `370px` for Image Model, Video Model, Utility, Edit, and 3D, `360px` for Camera and Style, `335px` for Mood Board and Preview, and `310px` for the remaining node types.
 - A custom-size card is a column flex container. Its title and compact controls remain `flex: 0 0 auto`; the node body and primary workspace use `flex: 1 1 auto` with `min-width: 0` and `min-height: 0` so descendants can actually shrink and grow.
 - Do not leave fixed heights, fixed margins, or `justify-content: space-between` behavior that turns added height into dead space. Put overflow on the controls or list that needs it, not on the entire media-first body unless the whole body is intentionally a form.
 - Image, Video, generation-result, Preview, Storyboard, Character, Composer, Frame It, and Mood Board nodes are media-first when enlarged. Their preview, board, collage, or viewport must consume the largest useful share of remaining space; upload controls, tabs, ports, run buttons, status text, and settings headers stay content-sized.
@@ -695,6 +696,27 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Draftable text inputs and textareas update their DOM/local draft immediately and commit graph state on the shared debounce or blur boundary. Do not make each keystroke rebuild the full node graph, port map, and edge layer.
 - Pan and wheel zoom use the live viewport ref and React Flow's imperative viewport API during the gesture, then commit Newt's persisted viewport state after the transient interaction. A delayed state commit must never snap the viewport back to an older value.
 - Keep React Flow's offscreen culling disabled in the current full-detail mode. Every node retains its complete UI during pan and zoom, including at the 5% minimum zoom; graph execution remains independent from visibility. Reintroducing lightweight shells or overview proxies requires a deliberate feature change and production-scale interaction testing.
+
+## Timeline Node Standard
+
+The Timeline node is Newt Node's basic nonlinear editor and stays modular across timeline state, playback, rendering, media management, and UI.
+
+- UI label and internal type: `Timeline` / `assembly` (legacy-compatible internal type).
+- Catalog placement: after Edit and before Audio.
+- Default shell: horizontal `1080px` by `520px`, with a resizable timeline workspace.
+- Inputs: multi-connect `videoIn`, `imageIn`, and `audioIn` ports. Each connected source is imported once into the media bin and remains identified by source node id and output port. When that same source port generates a new URL, update the existing bin media object in place and preserve its media id so every timeline clip using it follows the new result. Importing or refreshing media must not recreate timeline clips.
+- Media bin: a fixed one-column rail occupies the left side of the node. It accepts connected sources and direct drops from Newt media-output drag payloads. Connected media is live-linked by source node and output port; direct drops are URL-based snapshots and do not follow later generations unless that source is also connected. Every asset preserves its visible aspect ratio, video and still assets show thumbnails, audio uses its waveform when available, and double-click opens an aspect-safe enlarged viewer.
+- Bin assets are reusable source objects. Each drag to a compatible timeline track creates a fresh independent clip at the drop time, so one connection can supply any number of timeline instances. A connected source refresh preserves those clip edits and media references while replacing the source URL used by all instances.
+- Outputs: `frameOut` emits the Timeline-owned playhead frame as an image; `videoOut` emits the most recent FFmpeg render.
+- Preview nodes remain ordinary viewers. Timeline owns playback and publishes throttled playhead-frame updates through existing graph result propagation; do not add timeline state or transport ownership to Preview. Loop In/Out is a persistent Timeline transport mode: it is disabled without a valid two-marker range, starts at In whenever playback begins outside the range, and wraps from Out back to In without pausing.
+- Timeline timeline focus owns clip-editing shortcuts. Ctrl/Cmd+C copies the selected clip instance with its trim and slip state, Ctrl/Cmd+V pastes a fresh instance at the playhead, and Delete/Backspace removes the selected clip. Handled clip shortcuts must stop propagation so canvas-level copy, paste, undo, and node deletion do not run from the same keypress; ordinary text fields retain native editing behavior.
+- Persist only normalized serializable timeline state. DOM media elements, decoder state, request state, and undo/redo stacks remain runtime-only.
+- Editing operations are immutable state transitions. Current operations include split, trim, ripple delete/trim, slip, pointer-locked clip sliding with magnetic edge snapping and deliberate compatible-track switching, track add, visibility/mute/lock, zoom, scrub, persistent In/Out range markers set with I and O, marker jumps with { and }, bounded In/Out loop playback, and undo/redo.
+- Visual tracks composite top-down with contain/letterbox behavior. Audio tracks and enabled embedded video audio mix at their timeline offsets.
+- Media probing and waveform generation use local ffprobe/FFmpeg routes. Final rendering uses the local FFmpeg runtime and writes a managed workflow-package MP4.
+- Timeline duration for display may include empty working space, but renders stop at actual content end.
+- New track kinds such as subtitles or AI annotations should extend the track schema and renderer adapters without changing the master clock or Preview contract.
+- The design is adapted from OpenReel Video's MIT-licensed clock/history/module patterns; provenance is recorded in `THIRD_PARTY_NOTICES.md`. Do not vendor the complete OpenReel app into Newt Node.
 
 ## Edit Node Standard
 

@@ -1,6 +1,7 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 
 export function estimatedNodeWidth(type) {
+  if (type === "assembly") return 1080;
   if (type === "frameIt") return 980;
   if (type === "storyboard") return 920;
   if (type === "autoAspect") return 390;
@@ -51,6 +52,7 @@ export function pairedTextareaResizeHeights(primaryHeight, pairedHeight, delta, 
 }
 
 export function minimumResizableNodeHeight(type) {
+  if (type === "assembly") return 420;
   if (type === "frameIt") return 520;
   if (type === "storyboard" || type === "character") return 420;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "edit" || type === "model3d") return 320;
@@ -61,6 +63,7 @@ export function minimumResizableNodeHeight(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "assembly") return 520;
   if (type === "frameIt") return 700;
   if (type === "character") return 520;
   if (type === "composer") return 410;

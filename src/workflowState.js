@@ -20,9 +20,12 @@ export function workflowStateFingerprint(state = {}) {
 }
 
 export function cloneNode(node) {
+  const data = node?.type === "assembly"
+    ? { ...(node?.data || {}), assemblyFrameUrl: "", assemblyFrameTime: 0 }
+    : node?.data || {};
   return {
     ...node,
-    data: JSON.parse(JSON.stringify(node?.data || {}))
+    data: JSON.parse(JSON.stringify(data))
   };
 }
 

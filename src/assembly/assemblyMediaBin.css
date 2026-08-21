@@ -1,0 +1,456 @@
+.node-card.node-type-assembly {
+  min-width: 900px;
+  min-height: 480px;
+}
+
+.assembly-node-body {
+  grid-template-columns: minmax(154px, 190px) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(230px, 1fr) auto;
+}
+
+.assembly-port-strip {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 28px;
+  justify-content: flex-end;
+}
+
+.assembly-node-drag-surface {
+  cursor: grab;
+  user-select: none;
+}
+
+.assembly-node-drag-surface:active {
+  cursor: grabbing;
+}
+
+.assembly-toolbar {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.assembly-toolbar > .assembly-tool-group {
+  display: flex;
+  flex: 1 1 160px;
+  min-width: 150px;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 10px;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.assembly-toolbar .assembly-transport {
+  margin-left: 0;
+}
+
+.assembly-marker-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.assembly-marker-jump {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.assembly-timeline-scroll {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.assembly-playhead {
+  width: 11px;
+  margin-left: -5px;
+  pointer-events: auto;
+  background: transparent;
+  box-shadow: none;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.assembly-playhead::before {
+  left: 1px;
+}
+
+.assembly-playhead > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: #f2d820;
+  box-shadow: 0 0 0 1px rgba(242, 216, 32, 0.2);
+}
+
+.assembly-playhead:hover > i {
+  width: 2px;
+}
+
+.assembly-marked-range {
+  position: absolute;
+  z-index: 2;
+  top: 28px;
+  bottom: 0;
+  pointer-events: none;
+  border-right: 1px solid rgba(255, 155, 84, 0.45);
+  border-left: 1px solid rgba(83, 213, 154, 0.45);
+  background: rgba(83, 213, 154, 0.08);
+}
+
+.assembly-range-marker {
+  position: absolute;
+  z-index: 9;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: var(--assembly-marker-color);
+}
+
+.assembly-range-marker.in {
+  --assembly-marker-color: #53d59a;
+}
+
+.assembly-range-marker.out {
+  --assembly-marker-color: #ff9b54;
+}
+
+.assembly-range-marker > span {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  display: grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  color: #111;
+  background: var(--assembly-marker-color);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.assembly-range-marker.out > span {
+  left: -15px;
+}
+
+.assembly-footer {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+.assembly-media-bin {
+  display: grid;
+  grid-column: 1;
+  grid-row: 1 / 5;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #363636;
+  background: #121212;
+}
+
+.assembly-media-bin.is-output-drop-target {
+  border-color: #e8d229;
+  box-shadow: inset 0 0 0 2px rgba(232, 210, 41, 0.32);
+}
+
+.assembly-media-bin.is-output-drop-target .assembly-media-bin-list {
+  background: rgba(232, 210, 41, 0.06);
+}
+
+.assembly-media-bin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 9px;
+  border-bottom: 1px solid #303030;
+  background: #1b1b1b;
+}
+
+.assembly-media-bin-header strong {
+  color: #e4e4e4;
+  font-size: 11px;
+}
+
+.assembly-media-bin-header span {
+  min-width: 20px;
+  color: #b6a329;
+  font-size: 10px;
+  text-align: right;
+}
+
+.assembly-media-bin-inputs {
+  padding: 7px;
+  border-bottom: 1px solid #303030;
+  background: #171717;
+}
+
+.assembly-media-bin-inputs .assembly-input-ports {
+  display: grid;
+  gap: 5px;
+}
+
+.assembly-media-bin-inputs .node-row {
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 5px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.assembly-media-bin-inputs .node-row > button {
+  min-height: 26px;
+  padding: 0 5px;
+  font-size: 9px;
+}
+
+.assembly-media-bin-inputs .inline-port {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  border-width: 2px;
+}
+
+.assembly-media-bin-list {
+  display: flex;
+  min-height: 0;
+  padding: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 7px;
+  scrollbar-color: #5e5e5e #171717;
+}
+
+.assembly-media-bin-item {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #363636;
+  border-radius: 4px;
+  outline: none;
+  color: #d8d8d8;
+  background: #1a1a1a;
+  cursor: grab;
+  user-select: none;
+}
+
+.assembly-media-bin-item:hover,
+.assembly-media-bin-item:focus-visible {
+  border-color: #d9c42d;
+}
+
+.assembly-media-bin-item:active {
+  cursor: grabbing;
+}
+
+.assembly-media-bin-thumb {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  place-items: center;
+  overflow: hidden;
+  background: #050505;
+}
+
+.assembly-media-bin-thumb img,
+.assembly-media-bin-thumb video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #050505;
+  pointer-events: none;
+}
+
+.assembly-media-bin-thumb.audio {
+  color: #d5bd2a;
+}
+
+.assembly-media-bin-thumb.audio > img {
+  padding: 8px 4px;
+  object-fit: contain;
+}
+
+.assembly-media-type {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  color: #efefef;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.assembly-media-bin-caption {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 6px 7px 7px;
+}
+
+.assembly-media-bin-caption strong,
+.assembly-media-bin-caption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assembly-media-bin-caption strong {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.assembly-media-bin-caption small {
+  color: #8f8f8f;
+  font-size: 9px;
+}
+
+.assembly-media-bin-empty {
+  display: grid;
+  min-height: 94px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  color: #666;
+  font-size: 10px;
+}
+
+.assembly-media-viewer-backdrop {
+  position: fixed;
+  z-index: 10020;
+  inset: 0;
+  display: grid;
+  padding: 28px;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.86);
+}
+
+.assembly-media-viewer {
+  display: grid;
+  width: min(1100px, calc(100vw - 56px));
+  height: min(780px, calc(100vh - 56px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  color: #e4e4e4;
+  background: #111;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.assembly-media-viewer > header,
+.assembly-media-viewer > footer {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #1c1c1c;
+}
+
+.assembly-media-viewer > header {
+  justify-content: space-between;
+  border-bottom: 1px solid #343434;
+}
+
+.assembly-media-viewer > header strong,
+.assembly-media-viewer > footer span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assembly-media-viewer > header button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  color: #d5d5d5;
+  background: #272727;
+}
+
+.assembly-media-viewer > footer {
+  justify-content: space-between;
+  border-top: 1px solid #343434;
+  color: #8f8f8f;
+  font-size: 10px;
+}
+
+.assembly-media-viewer-stage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.assembly-media-viewer-stage > img,
+.assembly-media-viewer-stage > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.assembly-media-viewer-audio {
+  display: grid;
+  width: min(760px, calc(100% - 40px));
+  gap: 22px;
+  place-items: center;
+  color: #d8c22f;
+}
+
+.assembly-media-viewer-audio img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.assembly-media-viewer-audio audio {
+  width: 100%;
+}
+
+.assembly-clip {
+  touch-action: none;
+}
+
+.assembly-clip.dragging {
+  z-index: 6;
+  border-color: #f2dc28;
+  cursor: grabbing;
+  box-shadow: 0 0 0 1px #f2dc28, 0 7px 18px rgba(0, 0, 0, 0.48);
+}
+
+.assembly-track-lane.is-drop-target {
+  background-color: rgba(232, 210, 41, 0.055);
+  box-shadow: inset 0 0 0 2px rgba(232, 210, 41, 0.9);
+}
+
+@media (max-width: 960px) {
+  .node-card.node-type-assembly {
+    min-width: 760px;
+  }
+
+  .assembly-node-body {
+    grid-template-columns: 142px minmax(0, 1fr);
+  }
+}

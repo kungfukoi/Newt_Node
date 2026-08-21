@@ -24,6 +24,7 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
   if (!rawDirectory) return null;
 
   const now = options.now || new Date();
+  const forceExtension = Boolean(options.forceExtension);
   const extensionWithDot = normalizedOutputExtension(extension || path.extname(String(kind || "")) || ".bin");
   const fileNameTemplate = String(body.outputTargetFileName || body.outputFileName || "").trim() || "$node_$date_$time";
   const hasIndexToken = outputTemplateHasIndexToken(rawDirectory) || outputTemplateHasIndexToken(fileNameTemplate);
@@ -37,13 +38,14 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
       rootDir,
       outputPrefix,
       now,
+      forceExtension,
       reserveFile
     });
   }
 
   const tokenContext = outputTokenContext(body, now, 1);
   const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
-  const fileName = outputTargetFileName(fileNameTemplate, extensionWithDot, tokenContext);
+  const fileName = outputTargetFileName(fileNameTemplate, extensionWithDot, tokenContext, forceExtension);
   if (reserveFile) await mkdir(directory, { recursive: true });
   const finalFileName = await reserveUniqueOutputTargetFileName(directory, fileName, { reserveFile });
   return outputTargetAssetFromPath(path.join(directory, finalFileName), outputPrefix);
@@ -67,11 +69,11 @@ export function externalOutputFilePathFromPublicPath(publicPath, outputPrefix = 
   return filePath;
 }
 
-async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate, extension, rootDir, outputPrefix, now, reserveFile }) {
+async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate, extension, rootDir, outputPrefix, now, forceExtension, reserveFile }) {
   for (let outputIndex = 1; outputIndex < 10000; outputIndex += 1) {
     const tokenContext = outputTokenContext(body, now, outputIndex);
     const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
-    const fileName = outputTargetFileName(fileNameTemplate, extension, tokenContext);
+    const fileName = outputTargetFileName(fileNameTemplate, extension, tokenContext, forceExtension);
     const filePath = path.join(directory, fileName);
     try {
       await resolveOutputFileCandidate(filePath, reserveFile);
@@ -85,7 +87,7 @@ async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate
   const tokenContext = outputTokenContext(body, now, 1);
   const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
   if (reserveFile) await mkdir(directory, { recursive: true });
-  const fallbackName = outputTargetFileName(`${fileNameTemplate}-${randomUUID().slice(0, 8)}`, extension, tokenContext);
+  const fallbackName = outputTargetFileName(`${fileNameTemplate}-${randomUUID().slice(0, 8)}`, extension, tokenContext, forceExtension);
   const filePath = path.join(directory, fallbackName);
   await resolveOutputFileCandidate(filePath, reserveFile);
   return outputTargetAssetFromPath(filePath, outputPrefix);
@@ -154,7 +156,7 @@ function resolveOutputDirectory(value, rootDir) {
   return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(rootDir, expanded);
 }
 
-function outputTargetFileName(template, extension, tokenContext = {}) {
+function outputTargetFileName(template, extension, tokenContext = {}, forceExtension = false) {
   const expanded = expandOutputTokens(template || "$node_$date_$time", tokenContext);
   const cleanBaseName = path.basename(expanded).replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_").replace(/[. ]+$/g, "").trim() || "output";
   const parsed = path.parse(cleanBaseName);
@@ -163,7 +165,7 @@ function outputTargetFileName(template, extension, tokenContext = {}) {
     .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_")
     .replace(/[. ]+$/g, "")
     .slice(0, 160) || "output";
-  return `${safeBase}${explicitExtension || extension}`;
+  return `${safeBase}${forceExtension ? extension : explicitExtension || extension}`;
 }
 
 function normalizedOutputExtension(extension) {

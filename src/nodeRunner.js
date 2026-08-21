@@ -61,7 +61,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
-  return ["text", "skillDirector", "imageModel", "videoModel", "utility", "edit", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
+  return ["text", "skillDirector", "imageModel", "videoModel", "utility", "edit", "assembly", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
 }
 
 export function buildSelectedRunnableDependencies(nodes, edges) {
@@ -86,6 +86,7 @@ export function nodeRunPriority(node) {
   if (node?.type === "model3d") return 3;
   if (node?.type === "utility") return 4;
   if (node?.type === "edit") return 4;
+  if (node?.type === "assembly") return 4;
   if (node?.type === "videoModel") return 4;
   if (node?.type === "output") return 5;
   return 3;
@@ -101,6 +102,7 @@ export function runStageLabel(type) {
   if (type === "model3d") return "3D";
   if (type === "utility") return "utility";
   if (type === "edit") return "edit";
+  if (type === "assembly") return "assembly";
   if (type === "videoModel") return "video";
   if (type === "output") return "output";
   return "selected";
