@@ -184,12 +184,12 @@ export function AssemblyNodeBody({
   React.useEffect(() => {
     const clock = new AssemblyPlaybackClock({
       duration,
-      onTime: (time) => {
+      onTime: (time, playbackState) => {
         const current = timelineRef.current;
         const next = setAssemblyPlayhead(current, time);
         timelineRef.current = next;
         setTimeline(next);
-        syncMediaElements(next, time, true);
+        syncMediaElements(next, time, playbackState === "playing");
         renderCompositionFrame(next, time);
       },
       onState: (state) => {
@@ -221,7 +221,7 @@ export function AssemblyNodeBody({
   }, [timeline.inPoint, timeline.outPoint, timeline.loopInOut]);
 
   React.useEffect(() => {
-    syncMediaElements(timeline, timeline.playhead, playing);
+    syncMediaElements(timeline, timeline.playhead, playingRef.current);
     renderCompositionFrame(timeline, timeline.playhead, true);
   }, [timeline.media.length, timeline.tracks.length]);
 
@@ -244,7 +244,7 @@ export function AssemblyNodeBody({
     timelineRef.current = normalized;
     setTimeline(normalized);
     persistTimeline(normalized);
-    syncMediaElements(normalized, normalized.playhead, playing);
+    syncMediaElements(normalized, normalized.playhead, playingRef.current);
     renderCompositionFrame(normalized, normalized.playhead, true);
   }
 
@@ -269,14 +269,14 @@ export function AssemblyNodeBody({
     const next = setAssemblyPlayhead(timelineRef.current, nextTime);
     timelineRef.current = next;
     setTimeline(next);
-    syncMediaElements(next, nextTime, playing);
+    syncMediaElements(next, nextTime, playingRef.current);
     renderCompositionFrame(next, nextTime, true);
     if (persist) persistTimeline(next);
   }
 
   function togglePlayback() {
     rootRef.current?.focus({ preventScroll: true });
-    if (playing) clockRef.current?.pause();
+    if (playingRef.current) clockRef.current?.pause();
     else {
       syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
       clockRef.current?.play();

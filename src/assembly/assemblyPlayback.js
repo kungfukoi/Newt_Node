@@ -45,20 +45,22 @@ export class AssemblyPlaybackClock {
       this.startedAt = this.now();
       this.startedFrom = this.currentTime;
     }
-    this.onTime(this.currentTime);
+    this.onTime(this.currentTime, this.state);
     return this.currentTime;
   }
 
   play() {
     if (this.state === "playing") return;
+    let timeChanged = false;
     if (this.hasLoopRange() && (this.currentTime < this.loopStart || this.currentTime >= this.loopEnd)) {
       this.currentTime = this.loopStart;
-      this.onTime(this.currentTime);
+      timeChanged = true;
     } else if (this.duration > 0 && this.currentTime >= this.duration) {
       this.currentTime = 0;
-      this.onTime(this.currentTime);
+      timeChanged = true;
     }
     this.state = "playing";
+    if (timeChanged) this.onTime(this.currentTime, this.state);
     this.startedAt = this.now();
     this.startedFrom = this.currentTime;
     this.onState(this.state);
@@ -102,18 +104,18 @@ export class AssemblyPlaybackClock {
         : this.loopStart + ((this.currentTime - this.loopStart) % span);
       this.startedAt = timestamp;
       this.startedFrom = this.currentTime;
-      this.onTime(this.currentTime);
+      this.onTime(this.currentTime, this.state);
       return;
     }
     if (this.duration > 0 && this.currentTime >= this.duration) {
       this.currentTime = this.duration;
-      this.onTime(this.currentTime);
+      this.onTime(this.currentTime, this.state);
       this.state = "paused";
       this.stopFrame();
       this.onState(this.state);
       return;
     }
-    this.onTime(this.currentTime);
+    this.onTime(this.currentTime, this.state);
   }
 
   stopFrame() {
