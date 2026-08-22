@@ -25,6 +25,7 @@ import { displayMediaUrl } from "../mediaAssets.js";
 import {
   addAssemblyTrack,
   assemblyActiveClips,
+  assemblyClipPlaybackRate,
   assemblyClipSourceTime,
   assemblyDuration,
   assemblyFrameDuration,
@@ -37,6 +38,7 @@ import {
   normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
+  retimeAssemblyClip,
   setAssemblyInPoint,
   setAssemblyLoopInOut,
   setAssemblyOutPoint,
@@ -47,15 +49,17 @@ import {
   splitAssemblyClip,
   syncAssemblyInputs,
   trimAssemblyClip,
+  updateAssemblyClip,
   updateAssemblyMedia,
   updateAssemblyTrack
 } from "../assembly/assemblyState.js";
 import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
 import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
 import { assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
+import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
 import { AssemblyMediaBin, assemblyMediaDragType } from "./AssemblyMediaBin.jsx";
 import "../assembly/assembly.css";
 import "../assembly/assemblyMediaBin.css";
@@ -101,6 +105,8 @@ export function AssemblyNodeBody({
   const clipDragCleanupRef = React.useRef(null);
   const previewFailureRef = React.useRef("");
   const videoFrameCancelRef = React.useRef(new Map());
+  const timelineScrubbingRef = React.useRef(false);
+  const scrubPreviewPendingRef = React.useRef(false);
 
   const duration = assemblyDuration(timeline);
   const pixelsPerSecond = timeline.zoom;
@@ -311,7 +317,9 @@ export function AssemblyNodeBody({
       const { item, audible } = active;
       if ("muted" in element) element.muted = !audible;
       const sourceTime = assemblyClipSourceTime(item, time);
-      const seekTarget = assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, shouldPlay);
+      const canPlayForward = shouldPlay && !item.reverse;
+      if ("playbackRate" in element) element.playbackRate = assemblyClipPlaybackRate(item);
+      const seekTarget = assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, canPlayForward);
       if (seekTarget !== null) {
         try {
           element.currentTime = seekTarget;
@@ -319,11 +327,11 @@ export function AssemblyNodeBody({
           // The media element may still be loading metadata.
         }
       }
-      if (shouldPlay && element.paused) {
+      if (canPlayForward && element.paused) {
         const playback = element.play?.();
         playback?.catch?.(() => {});
       }
-      if (!shouldPlay && !element.paused) element.pause?.();
+      if (!canPlayForward && !element.paused) element.pause?.();
     });
   }
 
@@ -345,11 +353,14 @@ export function AssemblyNodeBody({
       const sourceTime = assemblyClipSourceTime(item, time);
       return {
         element,
-        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate, playingRef.current)
+        clip: item,
+        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate, playingRef.current && !item.reverse)
       };
     });
-    const renderableLayers = assemblyRenderablePreviewLayers(drawableLayers);
-    if (layers.length && !renderableLayers.length) return;
+    const scrubPreview = timelineScrubbingRef.current || scrubPreviewPendingRef.current;
+    const renderableLayers = scrubPreview ? assemblyScrubPreviewLayers(drawableLayers) : assemblyRenderablePreviewLayers(drawableLayers);
+    if (scrubPreview && !layers.length && !timelineScrubbingRef.current) scrubPreviewPendingRef.current = false;
+    if (layers.length && !renderableLayers.length && !scrubPreview) return;
 
     const aspect = state.outputWidth / state.outputHeight;
     canvas.width = 640;
@@ -357,8 +368,8 @@ export function AssemblyNodeBody({
     context.fillStyle = "#000";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    renderableLayers.forEach(({ element, width, height }) => {
-      drawContained(context, element, canvas.width, canvas.height, width, height);
+    renderableLayers.forEach(({ element, clip, width, height }) => {
+      drawAssemblyLayer(context, element, clip, canvas.width, canvas.height, width, height, state.outputWidth, state.outputHeight);
     });
 
     const now = globalThis.performance?.now?.() || Date.now();
@@ -374,6 +385,7 @@ export function AssemblyNodeBody({
         targetFrameRate: state.frameRate,
         emittedAt: now
       });
+      if (scrubPreview && !timelineScrubbingRef.current && renderableLayers.at(-1)?.ready) scrubPreviewPendingRef.current = false;
       const shouldCheckpointGraph = !node.data.assemblyFrameUrl || now - lastGraphPreviewCheckpointRef.current >= graphPreviewCheckpointIntervalMs;
       if (shouldCheckpointGraph) {
         lastGraphPreviewCheckpointRef.current = now;
@@ -418,6 +430,8 @@ export function AssemblyNodeBody({
     if (!ruler) return;
     event.preventDefault();
     event.stopPropagation();
+    timelineScrubbingRef.current = true;
+    scrubPreviewPendingRef.current = true;
     const captureTarget = event.currentTarget;
     const pointerId = event.pointerId;
     const pointerTime = (pointerEvent) => assemblyTimeAtClientX(ruler, pointerEvent.clientX, pixelsPerSecond);
@@ -432,6 +446,8 @@ export function AssemblyNodeBody({
       } catch {
         // Pointer capture may already have ended outside the timeline.
       }
+      timelineScrubbingRef.current = false;
+      renderCompositionFrame(timelineRef.current, timelineRef.current.playhead, true);
     };
     const finish = (pointerEvent) => {
       update(pointerEvent);
@@ -606,6 +622,38 @@ export function AssemblyNodeBody({
     return true;
   }
 
+  function previewSelectedClip(patch) {
+    const clipId = timelineRef.current.selectedClipId;
+    if (!clipId) return;
+    const next = updateAssemblyClip(timelineRef.current, clipId, patch);
+    timelineRef.current = next;
+    setTimeline(next);
+    syncMediaElements(next, next.playhead, playingRef.current);
+    renderCompositionFrame(next, next.playhead, true);
+  }
+
+  function updateSelectedClip(patch) {
+    const clipId = timelineRef.current.selectedClipId;
+    if (!clipId) return;
+    commitTimeline(updateAssemblyClip(timelineRef.current, clipId, patch));
+  }
+
+  function previewRetimeSelectedClip(speed) {
+    const clipId = timelineRef.current.selectedClipId;
+    if (!clipId) return;
+    const next = retimeAssemblyClip(timelineRef.current, clipId, speed, timelineRef.current.ripple);
+    timelineRef.current = next;
+    setTimeline(next);
+    syncMediaElements(next, next.playhead, playingRef.current);
+    renderCompositionFrame(next, next.playhead, true);
+  }
+
+  function retimeSelectedClip(speed) {
+    const clipId = timelineRef.current.selectedClipId;
+    if (!clipId) return;
+    commitTimeline(retimeAssemblyClip(timelineRef.current, clipId, speed, timelineRef.current.ripple));
+  }
+
   function handleKeyDown(event) {
     if (event.target.closest("input, textarea, select")) return;
     const modifier = event.ctrlKey || event.metaKey;
@@ -713,6 +761,18 @@ export function AssemblyNodeBody({
         )}
       />
 
+      <AssemblyDetailsPanel
+        selection={selected}
+        media={selectedMedia}
+        frameRate={timeline.frameRate}
+        outputWidth={timeline.outputWidth}
+        outputHeight={timeline.outputHeight}
+        onPreviewUpdate={previewSelectedClip}
+        onUpdate={updateSelectedClip}
+        onPreviewRetime={previewRetimeSelectedClip}
+        onRetime={retimeSelectedClip}
+      />
+
       <div className="assembly-toolbar nodrag" onPointerDown={(event) => event.stopPropagation()}>
         <div className="assembly-tool-group" role="toolbar" aria-label="Timeline edit tools">
           <IconButton active={timeline.tool === "select"} title="Select and move clips" onClick={() => selectTool("select")}><MousePointer2 size={14} /></IconButton>
@@ -814,7 +874,7 @@ export function AssemblyNodeBody({
                     >
                       <button type="button" className="assembly-trim-handle left" aria-label="Trim clip start" onPointerDown={(event) => beginTrim(event, clip.id, "left")} />
                       <span>{media.label}</span>
-                      <small>{formatClipDuration(clip.duration)}</small>
+                      <small>{formatClipDuration(clip.duration)}{clip.speed !== 100 ? ` | ${clip.speed}%` : ""}{clip.reverse ? " | R" : ""}</small>
                       <button type="button" className="assembly-trim-handle right" aria-label="Trim clip end" onPointerDown={(event) => beginTrim(event, clip.id, "right")} />
                     </div>
                   );
@@ -898,11 +958,15 @@ function IconButton({ active = false, disabled = false, title, onClick, children
   return <button type="button" className={`assembly-icon-button ${active ? "active" : ""}`} disabled={disabled} title={title} aria-label={title} onClick={onClick}>{children}</button>;
 }
 
-function drawContained(context, element, frameWidth, frameHeight, mediaWidth, mediaHeight) {
-  const scale = Math.min(frameWidth / mediaWidth, frameHeight / mediaHeight);
-  const width = mediaWidth * scale;
-  const height = mediaHeight * scale;
-  context.drawImage(element, (frameWidth - width) / 2, (frameHeight - height) / 2, width, height);
+function drawAssemblyLayer(context, element, clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth, outputHeight) {
+  const geometry = assemblyPreviewLayerGeometry(clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth, outputHeight);
+  context.save();
+  context.globalAlpha = geometry.opacity;
+  context.translate(geometry.centerX, geometry.centerY);
+  context.rotate(geometry.rotation);
+  context.scale(geometry.flipX, geometry.flipY);
+  context.drawImage(element, -geometry.width / 2, -geometry.height / 2, geometry.width, geometry.height);
+  context.restore();
 }
 
 function findClip(state, clipId) {

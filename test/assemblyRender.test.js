@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "../server/assembly-render.js";
-import { createAssemblyState, insertAssemblyMediaClip, syncAssemblyInputs, updateAssemblyMedia } from "../src/assembly/assemblyState.js";
+import { createAssemblyState, insertAssemblyMediaClip, retimeAssemblyClip, syncAssemblyInputs, updateAssemblyClip, updateAssemblyMedia } from "../src/assembly/assemblyState.js";
 
 test("timeline render plan keeps multiple visual and audio tracks", () => {
   let state = syncAssemblyInputs(createAssemblyState(), [
@@ -15,6 +15,18 @@ test("timeline render plan keeps multiple visual and audio tracks", () => {
   state = insertAssemblyMediaClip(state, "video", videoTracks[0].id, 0);
   state = insertAssemblyMediaClip(state, "still", videoTracks[1].id, 0);
   state = insertAssemblyMediaClip(state, "audio", audioTrack.id, 0);
+  const videoClip = state.tracks.flatMap((track) => track.clips).find((clip) => clip.mediaId === "video");
+  state = updateAssemblyClip(state, videoClip.id, {
+    translateX: 120,
+    translateY: -45,
+    scale: 125,
+    opacity: 45,
+    rotation: 15,
+    flipHorizontal: true,
+    flipVertical: true,
+    reverse: true
+  });
+  state = retimeAssemblyClip(state, videoClip.id, 200, false);
   const resolved = [
     { id: "video", filePath: "C:/media/v.mp4", hasAudio: true },
     { id: "audio", filePath: "C:/media/a.wav", hasAudio: true },
@@ -28,5 +40,13 @@ test("timeline render plan keeps multiple visual and audio tracks", () => {
   const filter = args[args.indexOf("-filter_complex") + 1];
   assert.match(filter, /overlay=/);
   assert.match(filter, /amix=inputs=2/);
+  assert.match(filter, /reverse/);
+  assert.match(filter, /areverse/);
+  assert.match(filter, /atempo=2/);
+  assert.match(filter, /hflip/);
+  assert.match(filter, /vflip/);
+  assert.match(filter, /colorchannelmixer=aa=0\.45/);
+  assert.match(filter, /rotate=/);
+  assert.match(filter, /overlay=x=\(W-w\)\/2\+120:y=\(H-h\)\/2-45/);
   assert.equal(args.at(-1), "C:/out/render.mp4");
 });

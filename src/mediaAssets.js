@@ -220,7 +220,8 @@ export function hasOutputItemDragData(dataTransfer) {
     || types.includes("text/uri-list")
     || types.includes("text/plain")
     || types.includes("DownloadURL")
-    || types.includes("text/html");
+    || types.includes("text/html")
+    || Boolean(currentDraggedOutputItem());
 }
 
 export function outputItemFromDataTransfer(dataTransfer) {

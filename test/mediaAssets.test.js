@@ -3,19 +3,52 @@ import test from "node:test";
 
 import {
   fullResolutionContextPreparedAttribute,
+  clearOutputItemDragData,
   displayMediaUrl,
   fullResolutionImageProps,
   fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
   fullResolutionImageUrl,
+  hasOutputItemDragData,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
   nextFullResolutionImageFallback,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
   restoreFullResolutionImagePreview,
+  setOutputItemDragData,
   supportedFilesFromDataTransfer
 } from "../src/mediaAssets.js";
+
+test("active Newt Node output drags remain droppable when the browser hides custom MIME types", () => {
+  const previousWindow = globalThis.window;
+  const values = new Map();
+  const dataTransfer = {
+    types: [],
+    effectAllowed: "none",
+    setData(type, value) {
+      values.set(type, value);
+    }
+  };
+  const item = {
+    id: "video-node-1:/outputs/shot.mp4",
+    url: "/outputs/shot.mp4",
+    type: "video",
+    sourceNodeId: "video-node-1",
+    sourcePort: "videoOut"
+  };
+  globalThis.window = {};
+
+  try {
+    setOutputItemDragData(dataTransfer, item);
+    assert.equal(hasOutputItemDragData(dataTransfer), true);
+    assert.equal(JSON.parse(values.get("application/x-newtnode-output")).sourceNodeId, "video-node-1");
+    clearOutputItemDragData(item);
+    assert.equal(hasOutputItemDragData(dataTransfer), false);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
 
 test("multi-file drops preserve the complete browser file list", async () => {
   const first = { name: "first.png", type: "image/png", size: 100, lastModified: 1 };

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   addAssemblyTrack,
   assemblyActiveClips,
+  assemblyClipSourceTime,
   assemblyDuration,
   createAssemblyClipClipboard,
   createAssemblyHistory,
@@ -12,11 +13,13 @@ import {
   normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
+  retimeAssemblyClip,
   slipAssemblyClip,
   snapAssemblyClipMoveStart,
   splitAssemblyClip,
   syncAssemblyInputs,
   trimAssemblyClip,
+  updateAssemblyClip,
   updateAssemblyMedia,
   updateAssemblyTrack
 } from "../src/assembly/assemblyState.js";
@@ -92,6 +95,78 @@ test("Timeline clip clipboard preserves edits and pastes a fresh clip at the pla
   assert.equal(duplicate.duration, 5);
   assert.equal(duplicate.sourceIn, 2);
   assert.equal(duplicate.sourceDuration, 8);
+});
+
+test("Timeline clip inspector edits remain non-destructive and survive copy/paste", () => {
+  let state = stateWithVideo();
+  const clip = state.tracks.flatMap((track) => track.clips)[0];
+  state = updateAssemblyClip(state, clip.id, {
+    translateX: 120,
+    translateY: -45,
+    scale: 135,
+    opacity: 55,
+    rotation: 18,
+    flipHorizontal: true,
+    flipVertical: true,
+    reverse: true
+  });
+  state = retimeAssemblyClip(state, clip.id, 200, false);
+  const edited = state.tracks.flatMap((track) => track.clips)[0];
+
+  assert.equal(edited.duration, 4);
+  assert.equal(edited.speed, 200);
+  assert.equal(edited.translateX, 120);
+  assert.equal(edited.translateY, -45);
+  assert.equal(edited.scale, 135);
+  assert.equal(edited.opacity, 55);
+  assert.equal(edited.rotation, 18);
+  assert.equal(edited.flipHorizontal, true);
+  assert.equal(edited.flipVertical, true);
+  assert.equal(edited.reverse, true);
+  assert.equal(assemblyClipSourceTime(edited, edited.start), 8);
+  assert.equal(assemblyClipSourceTime(edited, edited.start + 2), 4);
+
+  const pasted = pasteAssemblyClip(state, createAssemblyClipClipboard(state, edited.id), 10);
+  const duplicate = pasted.tracks.flatMap((track) => track.clips).find((item) => item.id === pasted.selectedClipId);
+  assert.equal(duplicate.speed, 200);
+  assert.equal(duplicate.duration, 4);
+  assert.equal(duplicate.translateX, 120);
+  assert.equal(duplicate.opacity, 55);
+  assert.equal(duplicate.flipHorizontal, true);
+  assert.equal(duplicate.reverse, true);
+});
+
+test("Timeline speed changes preserve the selected source range", () => {
+  let state = stateWithVideo();
+  const clip = state.tracks.flatMap((track) => track.clips)[0];
+  state = trimAssemblyClip(state, clip.id, "right", 6, false);
+  const faster = retimeAssemblyClip(state, clip.id, 150, false);
+  const edited = faster.tracks.flatMap((track) => track.clips)[0];
+
+  assert.equal(edited.speed, 150);
+  assert.equal(edited.duration, 4);
+  assert.equal(assemblyClipSourceTime(edited, edited.start + edited.duration), 6);
+});
+
+test("Timeline reverse clips split and trim against the correct source edges", () => {
+  let state = stateWithVideo();
+  const clip = state.tracks.flatMap((track) => track.clips)[0];
+  state = updateAssemblyClip(state, clip.id, { reverse: true });
+  state = retimeAssemblyClip(state, clip.id, 200, false);
+
+  const split = splitAssemblyClip(state, clip.id, 1);
+  const pieces = split.tracks.flatMap((track) => track.clips).sort((a, b) => a.start - b.start);
+  assert.equal(pieces[0].sourceIn, 6);
+  assert.equal(pieces[0].duration, 1);
+  assert.equal(pieces[1].sourceIn, 0);
+  assert.equal(pieces[1].duration, 3);
+  assert.equal(assemblyClipSourceTime(pieces[0], pieces[0].start), 8);
+  assert.equal(assemblyClipSourceTime(pieces[1], pieces[1].start), 6);
+
+  const trimmed = trimAssemblyClip(state, clip.id, "right", 2, false).tracks.flatMap((track) => track.clips)[0];
+  assert.equal(trimmed.sourceIn, 4);
+  assert.equal(trimmed.duration, 2);
+  assert.equal(assemblyClipSourceTime(trimmed, trimmed.start), 8);
 });
 
 test("Timeline clip paste falls back from a locked source track", () => {

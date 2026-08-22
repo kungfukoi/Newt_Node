@@ -1,0 +1,160 @@
+.assembly-inspector {
+  display: grid;
+  grid-column: 3;
+  grid-row: 1 / 5;
+  grid-template-rows: 33px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #363636;
+  background: #111;
+}
+
+.assembly-inspector > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border-bottom: 1px solid #303030;
+  color: #dedede;
+  background: #1b1b1b;
+  font-size: 11px;
+}
+
+.assembly-inspector-scroll {
+  display: flex;
+  min-height: 0;
+  padding: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 7px;
+  scrollbar-color: #5e5e5e #171717;
+}
+
+.assembly-inspector-tile {
+  display: grid;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #191919;
+}
+
+.assembly-inspector-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assembly-inspector-title > strong {
+  overflow: hidden;
+  color: #e5e5e5;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assembly-inspector-title > span {
+  color: #cfbb2d;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.assembly-inspector-title > button {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #aaa;
+  background: #252525;
+}
+
+.assembly-inspector-tile dl {
+  display: grid;
+  margin: 0;
+  gap: 5px;
+}
+
+.assembly-inspector-tile dl > div {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 6px;
+  font-size: 9px;
+}
+
+.assembly-inspector-tile dt { color: #777; }
+.assembly-inspector-tile dd { margin: 0; overflow-wrap: anywhere; color: #c8c8c8; }
+
+.assembly-inspector-control {
+  display: grid;
+  gap: 4px;
+  color: #999;
+  font-size: 9px;
+}
+
+.assembly-inspector-control > div {
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) 58px 22px;
+  align-items: center;
+  gap: 5px;
+}
+
+.assembly-inspector-control.number-only > div { grid-template-columns: minmax(0, 1fr) 22px; }
+.assembly-inspector-control input[type="range"] { width: 100%; min-width: 0; accent-color: #e8d229; }
+.assembly-inspector-control input[type="number"] { width: 100%; min-width: 0; height: 25px; padding: 0 5px; box-sizing: border-box; }
+.assembly-inspector-control small { color: #6f6f6f; font-size: 8px; }
+
+.assembly-inspector-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.assembly-inspector-actions button {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid #3b3b3b;
+  border-radius: 3px;
+  color: #aaa;
+  background: #252525;
+  font-size: 9px;
+}
+
+.assembly-inspector-actions button.active {
+  border-color: #e8d229;
+  color: #161616;
+  background: #e8d229;
+}
+
+.assembly-inspector-toggle {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #aaa;
+  font-size: 9px;
+}
+
+.assembly-inspector-toggle input { accent-color: #e8d229; }
+.assembly-inspector-tile > small { color: #777; font-size: 8px; line-height: 1.35; }
+
+.assembly-inspector-empty {
+  display: grid;
+  min-height: 130px;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  color: #666;
+  font-size: 10px;
+}

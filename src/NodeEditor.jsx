@@ -14778,6 +14778,8 @@ function NodeBody({
         status={node.data.status}
         error={node.data.error}
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        sourceNodeId={node.id}
+        sourcePort={outputPort.id}
       />
       <GenerationProgress nodeId={node.id} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>

@@ -87,19 +87,20 @@ export function nextAssemblyPreviewEmission(previousScheduledAt, now, frameRate 
 }
 
 export function assemblyPreviewElementState(media, element, sourceTime = 0, frameRate = 24, playing = false) {
-  if (!media || !element) return { ready: false, width: 0, height: 0 };
+  if (!media || !element) return { ready: false, decoded: false, width: 0, height: 0 };
 
   if (media.type === "image") {
     const width = Number(element.naturalWidth) || 0;
     const height = Number(element.naturalHeight) || 0;
     return {
       ready: Boolean(element.complete && width && height),
+      decoded: Boolean(element.complete && width && height),
       width,
       height
     };
   }
 
-  if (media.type !== "video") return { ready: false, width: 0, height: 0 };
+  if (media.type !== "video") return { ready: false, decoded: false, width: 0, height: 0 };
   const width = Number(element.videoWidth) || Number(media.width) || 0;
   const height = Number(element.videoHeight) || Number(media.height) || 0;
   const currentTime = Number(element.currentTime);
@@ -108,6 +109,7 @@ export function assemblyPreviewElementState(media, element, sourceTime = 0, fram
   const atRequestedFrame = Number.isFinite(currentTime) && Math.abs(currentTime - expectedTime) <= tolerance;
   return {
     ready: Boolean(element.readyState >= 2 && width && height && atRequestedFrame),
+    decoded: Boolean(element.readyState >= 2 && width && height),
     width,
     height
   };
@@ -120,4 +122,25 @@ export function assemblyRenderablePreviewLayers(layers = []) {
     Number(layer.width) > 0 &&
     Number(layer.height) > 0
   ));
+}
+
+export function assemblyScrubPreviewLayers(layers = []) {
+  const topLayer = layers.at(-1);
+  if (!topLayer?.decoded || !topLayer.element || Number(topLayer.width) <= 0 || Number(topLayer.height) <= 0) return [];
+  return [topLayer];
+}
+
+export function assemblyPreviewLayerGeometry(clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth = frameWidth, outputHeight = frameHeight) {
+  const containScale = Math.min(frameWidth / mediaWidth, frameHeight / mediaHeight);
+  const clipScale = Math.max(0.01, Number(clip?.scale || 100) / 100);
+  return {
+    width: mediaWidth * containScale * clipScale,
+    height: mediaHeight * containScale * clipScale,
+    centerX: frameWidth / 2 + (Number(clip?.translateX) || 0) * frameWidth / Math.max(1, outputWidth),
+    centerY: frameHeight / 2 + (Number(clip?.translateY) || 0) * frameHeight / Math.max(1, outputHeight),
+    rotation: (Number(clip?.rotation) || 0) * Math.PI / 180,
+    opacity: Math.min(1, Math.max(0, Number(clip?.opacity ?? 100) / 100)),
+    flipX: clip?.flipHorizontal ? -1 : 1,
+    flipY: clip?.flipVertical ? -1 : 1
+  };
 }

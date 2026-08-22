@@ -1,10 +1,10 @@
 .node-card.node-type-assembly {
-  min-width: 900px;
+  min-width: 1120px;
   min-height: 480px;
 }
 
 .assembly-node-body {
-  grid-template-columns: minmax(154px, 190px) minmax(0, 1fr);
+  grid-template-columns: minmax(154px, 190px) minmax(460px, 1fr) minmax(210px, 240px);
   grid-template-rows: auto auto minmax(230px, 1fr) auto;
 }
 
@@ -447,10 +447,10 @@
 
 @media (max-width: 960px) {
   .node-card.node-type-assembly {
-    min-width: 760px;
+    min-width: 980px;
   }
 
   .assembly-node-body {
-    grid-template-columns: 142px minmax(0, 1fr);
+    grid-template-columns: 142px minmax(420px, 1fr) 210px;
   }
 }

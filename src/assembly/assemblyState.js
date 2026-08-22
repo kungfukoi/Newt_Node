@@ -182,7 +182,16 @@ export function createAssemblyClipClipboard(state, clipId = state?.selectedClipI
       mediaId: found.clip.mediaId,
       duration: found.clip.duration,
       sourceIn: found.clip.sourceIn,
-      sourceDuration: found.clip.sourceDuration
+      sourceDuration: found.clip.sourceDuration,
+      translateX: found.clip.translateX,
+      translateY: found.clip.translateY,
+      scale: found.clip.scale,
+      opacity: found.clip.opacity,
+      rotation: found.clip.rotation,
+      flipHorizontal: found.clip.flipHorizontal,
+      flipVertical: found.clip.flipVertical,
+      speed: found.clip.speed,
+      reverse: found.clip.reverse
     }
   };
 }
@@ -280,6 +289,32 @@ export function updateAssemblyTrack(state, trackId, patch = {}) {
   return next;
 }
 
+export function updateAssemblyClip(state, clipId, patch = {}) {
+  const next = cloneAssemblyState(normalizeAssemblyState(state));
+  const found = findAssemblyClip(next, clipId);
+  if (!found || found.track.locked) return next;
+  const updated = normalizeAssemblyClip({ ...found.clip, ...patch, id: found.clip.id, mediaId: found.clip.mediaId });
+  const index = found.track.clips.findIndex((clip) => clip.id === clipId);
+  found.track.clips[index] = updated;
+  return next;
+}
+
+export function retimeAssemblyClip(state, clipId, speed, ripple = state?.ripple) {
+  const next = cloneAssemblyState(normalizeAssemblyState(state));
+  const found = findAssemblyClip(next, clipId);
+  if (!found || found.track.locked || found.media.type === "image") return next;
+  const originalDuration = found.clip.duration;
+  const sourceSpan = assemblyClipSourceSpan(found.clip);
+  const nextSpeed = clampNumber(speed, 1, 1000, found.clip.speed);
+  const frame = assemblyFrameDuration(next);
+  const requestedDuration = sourceSpan / (nextSpeed / 100);
+  const nextDuration = Math.max(frame, Math.round(requestedDuration / frame) * frame);
+  found.clip.speed = nextSpeed;
+  found.clip.duration = nextDuration;
+  if (ripple) shiftFollowingClips(found.track, found.clip.start + originalDuration, nextDuration - originalDuration, clipId);
+  return next;
+}
+
 export function moveAssemblyClip(state, clipId, targetTrackId, start) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const source = findAssemblyClip(next, clipId);
@@ -321,13 +356,18 @@ export function splitAssemblyClip(state, clipId, time = state?.playhead || 0) {
   const splitTime = snapAssemblyTime(next, time);
   const localTime = splitTime - found.clip.start;
   if (localTime <= minimumClipDuration || localTime >= found.clip.duration - minimumClipDuration) return next;
-  const first = normalizeAssemblyClip({ ...found.clip, duration: localTime });
+  const sourceDelta = localTime * assemblyClipPlaybackRate(found.clip);
+  const first = normalizeAssemblyClip({
+    ...found.clip,
+    duration: localTime,
+    sourceIn: found.clip.reverse ? found.clip.sourceIn + assemblyClipSourceSpan(found.clip) - sourceDelta : found.clip.sourceIn
+  });
   const second = normalizeAssemblyClip({
     ...found.clip,
     id: createAssemblyId("clip"),
     start: splitTime,
     duration: found.clip.duration - localTime,
-    sourceIn: found.clip.sourceIn + localTime
+    sourceIn: found.clip.reverse ? found.clip.sourceIn : found.clip.sourceIn + sourceDelta
   });
   const index = found.track.clips.findIndex((clip) => clip.id === clipId);
   found.track.clips.splice(index, 1, first, second);
@@ -341,21 +381,32 @@ export function trimAssemblyClip(state, clipId, edge, time, ripple = state?.ripp
   if (!found || found.track.locked) return next;
   const original = { ...found.clip };
   const frame = assemblyFrameDuration(next);
-  const sourceLimit = Math.max(original.duration, original.sourceDuration || original.duration);
+  const playbackRate = assemblyClipPlaybackRate(original);
+  const sourceLimit = Math.max(frame * playbackRate, original.sourceDuration || original.duration * playbackRate);
 
   if (edge === "left") {
     const maximumStart = original.start + original.duration - frame;
     const nextStart = clampNumber(snapAssemblyTime(next, time), 0, maximumStart, original.start);
     const delta = nextStart - original.start;
-    const nextSourceIn = clampNumber(original.sourceIn + delta, 0, sourceLimit - frame, original.sourceIn);
-    const appliedDelta = nextSourceIn - original.sourceIn;
-    found.clip.start = original.start + appliedDelta;
-    found.clip.sourceIn = nextSourceIn;
-    found.clip.duration = original.duration - appliedDelta;
+    if (original.reverse) {
+      const maximumExtension = Math.max(0, (sourceLimit - (original.sourceIn + assemblyClipSourceSpan(original))) / playbackRate);
+      const appliedDelta = clampNumber(delta, -maximumExtension, original.duration - frame, 0);
+      found.clip.start = original.start + appliedDelta;
+      found.clip.duration = original.duration - appliedDelta;
+    } else {
+      const nextSourceIn = clampNumber(original.sourceIn + delta * playbackRate, 0, sourceLimit - frame * playbackRate, original.sourceIn);
+      const appliedDelta = (nextSourceIn - original.sourceIn) / playbackRate;
+      found.clip.start = original.start + appliedDelta;
+      found.clip.sourceIn = nextSourceIn;
+      found.clip.duration = original.duration - appliedDelta;
+    }
   } else {
     const requestedDuration = snapAssemblyTime(next, time) - original.start;
-    const maximumDuration = Math.max(frame, sourceLimit - original.sourceIn);
+    const maximumDuration = original.reverse
+      ? Math.max(frame, original.duration + original.sourceIn / playbackRate)
+      : Math.max(frame, (sourceLimit - original.sourceIn) / playbackRate);
     const nextDuration = clampNumber(requestedDuration, frame, maximumDuration, original.duration);
+    if (original.reverse) found.clip.sourceIn = Math.max(0, original.sourceIn + (original.duration - nextDuration) * playbackRate);
     found.clip.duration = nextDuration;
     if (ripple) shiftFollowingClips(found.track, original.start + original.duration, nextDuration - original.duration, clipId);
   }
@@ -366,7 +417,7 @@ export function slipAssemblyClip(state, clipId, delta) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked || found.media.type === "image") return next;
-  const maximum = Math.max(0, found.clip.sourceDuration - found.clip.duration);
+  const maximum = Math.max(0, found.clip.sourceDuration - assemblyClipSourceSpan(found.clip));
   found.clip.sourceIn = clampNumber(found.clip.sourceIn + Number(delta || 0), 0, maximum, found.clip.sourceIn);
   return next;
 }
@@ -490,7 +541,17 @@ export function assemblyRenderPayload(state) {
 }
 
 export function assemblyClipSourceTime(clip, timelineTime) {
-  return Math.max(0, Number(clip?.sourceIn || 0) + Math.max(0, Number(timelineTime || 0) - Number(clip?.start || 0)));
+  const localTime = Math.max(0, Number(timelineTime || 0) - Number(clip?.start || 0));
+  const sourceOffset = localTime * assemblyClipPlaybackRate(clip);
+  return Math.max(0, Number(clip?.sourceIn || 0) + (clip?.reverse ? assemblyClipSourceSpan(clip) - sourceOffset : sourceOffset));
+}
+
+export function assemblyClipPlaybackRate(clip) {
+  return clampNumber(clip?.speed, 1, 1000, 100) / 100;
+}
+
+export function assemblyClipSourceSpan(clip) {
+  return Math.max(minimumClipDuration, Number(clip?.duration || 0) * assemblyClipPlaybackRate(clip));
 }
 
 function normalizeAssemblyTrack(value = {}) {
@@ -542,7 +603,16 @@ function normalizeAssemblyClip(value = {}) {
     start: Math.max(0, finiteNumber(value.start)),
     duration,
     sourceIn: Math.max(0, finiteNumber(value.sourceIn)),
-    sourceDuration: Math.max(duration, finiteNumber(value.sourceDuration, duration))
+    sourceDuration: Math.max(minimumClipDuration, finiteNumber(value.sourceDuration, duration)),
+    translateX: clampNumber(value.translateX, -100000, 100000, 0),
+    translateY: clampNumber(value.translateY, -100000, 100000, 0),
+    scale: clampNumber(value.scale, 1, 1000, 100),
+    opacity: clampNumber(value.opacity, 0, 100, 100),
+    rotation: clampNumber(value.rotation, -3600, 3600, 0),
+    flipHorizontal: Boolean(value.flipHorizontal),
+    flipVertical: Boolean(value.flipVertical),
+    speed: clampNumber(value.speed, 1, 1000, 100),
+    reverse: Boolean(value.reverse)
   };
 }
 

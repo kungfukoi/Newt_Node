@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, assemblyRenderablePreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
 
 test("Timeline live preview waits for an image to decode", () => {
   const loading = assemblyPreviewElementState({ type: "image" }, { complete: false, naturalWidth: 1920, naturalHeight: 1080 });
   const ready = assemblyPreviewElementState({ type: "image" }, { complete: true, naturalWidth: 1920, naturalHeight: 1080 });
   assert.equal(loading.ready, false);
-  assert.deepEqual(ready, { ready: true, width: 1920, height: 1080 });
+  assert.deepEqual(ready, { ready: true, decoded: true, width: 1920, height: 1080 });
 });
 
 test("Timeline metadata preload requests a decoded first frame", () => {
@@ -88,6 +88,14 @@ test("Timeline live preview withholds a visual frame until one layer is drawable
   ]), []);
 });
 
+test("Timeline scrubbing never exposes a lower layer while the top clip seeks", () => {
+  const lower = { element: { id: "lower" }, ready: true, decoded: true, width: 1920, height: 1080 };
+  const top = { element: { id: "top" }, ready: false, decoded: true, width: 1920, height: 1080 };
+
+  assert.deepEqual(assemblyScrubPreviewLayers([lower, top]), [top]);
+  assert.deepEqual(assemblyScrubPreviewLayers([lower, { ...top, decoded: false }]), []);
+});
+
 test("Timeline selected clip readout formats resolution and frame rate", () => {
   assert.equal(
     assemblyMediaTechnicalReadout({ type: "video", width: 864, height: 496, fps: 23.976 }),
@@ -97,6 +105,27 @@ test("Timeline selected clip readout formats resolution and frame rate", () => {
     assemblyMediaTechnicalReadout({ type: "image", width: 2048, height: 2048 }),
     "Resolution 2048 x 2048 | Still image"
   );
+});
+
+test("Timeline live preview maps clip motion into output-space geometry", () => {
+  const geometry = assemblyPreviewLayerGeometry({
+    translateX: 192,
+    translateY: -108,
+    scale: 150,
+    rotation: 90,
+    opacity: 40,
+    flipHorizontal: true,
+    flipVertical: false
+  }, 640, 360, 1920, 1080, 1920, 1080);
+
+  assert.equal(geometry.width, 960);
+  assert.equal(geometry.height, 540);
+  assert.equal(geometry.centerX, 384);
+  assert.equal(geometry.centerY, 144);
+  assert.equal(geometry.rotation, Math.PI / 2);
+  assert.equal(geometry.opacity, 0.4);
+  assert.equal(geometry.flipX, -1);
+  assert.equal(geometry.flipY, 1);
 });
 
 test("Timeline live-preview scheduler sustains a 24 fps cadence on a 60 Hz display", () => {
