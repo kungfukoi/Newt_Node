@@ -112,3 +112,12 @@ export function assemblyPreviewElementState(media, element, sourceTime = 0, fram
     height
   };
 }
+
+export function assemblyRenderablePreviewLayers(layers = []) {
+  return layers.filter((layer) => (
+    layer?.ready &&
+    layer.element &&
+    Number(layer.width) > 0 &&
+    Number(layer.height) > 0
+  ));
+}

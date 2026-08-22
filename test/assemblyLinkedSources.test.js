@@ -67,5 +67,3 @@ test("connecting an already dropped asset adopts it without breaking timeline cl
   assert.equal(regenerated.media[0].url, "/outputs/generation-v2.mp4");
   assert.equal(regenerated.tracks.find((track) => track.id === videoTrack.id).clips[0].mediaId, mediaId);
 });
-
-\n

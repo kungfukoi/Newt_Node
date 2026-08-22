@@ -9,6 +9,7 @@ import {
   createAssemblyState,
   insertAssemblyMediaClip,
   moveAssemblyClip,
+  normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
   slipAssemblyClip,
@@ -175,6 +176,23 @@ test("history provides stable undo and redo snapshots", () => {
   assert.equal(history.current().tracks.length, 5);
   assert.equal(history.undo().tracks.length, 4);
   assert.equal(history.redo().tracks.length, 5);
+});
+
+test("video tracks always remain above audio tracks", () => {
+  const normalized = normalizeAssemblyState({
+    tracks: [
+      { id: "a1", type: "audio", name: "A1" },
+      { id: "v1", type: "video", name: "V1" },
+      { id: "a2", type: "audio", name: "A2" },
+      { id: "v2", type: "video", name: "V2" }
+    ],
+    media: []
+  });
+  assert.deepEqual(normalized.tracks.map((track) => track.id), ["v1", "v2", "a1", "a2"]);
+
+  const withVideo = addAssemblyTrack(normalized, "video");
+  assert.deepEqual(withVideo.tracks.map((track) => track.type), ["video", "video", "video", "audio", "audio"]);
+  assert.equal(withVideo.tracks[2].name, "V3");
 });
 
 test("active clips resolve visual layers at the owned playhead", () => {

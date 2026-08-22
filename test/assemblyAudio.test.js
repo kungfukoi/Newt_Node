@@ -20,5 +20,3 @@ test("realtime audio selection follows video-track mute independently from visib
   assert.equal(assemblyActiveClips(state, 1, "visual").length, 0);
   assert.equal(assemblyActiveClips(state, 1, "audio").length, 1);
 });
-
-\n

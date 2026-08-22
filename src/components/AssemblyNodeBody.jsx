@@ -52,7 +52,7 @@ import {
 } from "../assembly/assemblyState.js";
 import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
 import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
 import { assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
@@ -348,7 +348,8 @@ export function AssemblyNodeBody({
         ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate, playingRef.current)
       };
     });
-    if (drawableLayers.some((layer) => !layer.ready)) return;
+    const renderableLayers = assemblyRenderablePreviewLayers(drawableLayers);
+    if (layers.length && !renderableLayers.length) return;
 
     const aspect = state.outputWidth / state.outputHeight;
     canvas.width = 640;
@@ -356,7 +357,7 @@ export function AssemblyNodeBody({
     context.fillStyle = "#000";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    drawableLayers.forEach(({ element, width, height }) => {
+    renderableLayers.forEach(({ element, width, height }) => {
       drawContained(context, element, canvas.width, canvas.height, width, height);
     });
 

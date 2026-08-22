@@ -35,7 +35,8 @@ export function normalizeAssemblyState(value = {}) {
   const source = value && typeof value === "object" ? value : {};
   const tracks = uniqueById((Array.isArray(source.tracks) ? source.tracks : []).map(normalizeAssemblyTrack));
   const media = uniqueById((Array.isArray(source.media) ? source.media : []).map(normalizeAssemblyMedia));
-  const normalizedTracks = tracks.length ? tracks : createAssemblyState().tracks;
+  const normalizedTracks = [...(tracks.length ? tracks : createAssemblyState().tracks)]
+    .sort((first, second) => assemblyTrackSortRank(first.type) - assemblyTrackSortRank(second.type));
   const trackIds = new Set(normalizedTracks.map((track) => track.id));
   const mediaIds = new Set(media.map((item) => item.id));
   const inPoint = normalizeAssemblyMarker(source.inPoint);
@@ -261,7 +262,10 @@ export function updateAssemblyMedia(state, mediaId, patch = {}) {
 export function addAssemblyTrack(state, type) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const count = next.tracks.filter((track) => track.type === type).length + 1;
-  next.tracks.push(createAssemblyTrack(type, count));
+  const track = createAssemblyTrack(type, count);
+  const insertionIndex = next.tracks.findIndex((item) => assemblyTrackSortRank(item.type) > assemblyTrackSortRank(track.type));
+  if (insertionIndex < 0) next.tracks.push(track);
+  else next.tracks.splice(insertionIndex, 0, track);
   return next;
 }
 
@@ -500,6 +504,12 @@ function normalizeAssemblyTrack(value = {}) {
     locked: Boolean(value.locked),
     clips: uniqueById((Array.isArray(value.clips) ? value.clips : []).map(normalizeAssemblyClip))
   };
+}
+
+function assemblyTrackSortRank(type) {
+  if (type === "video") return 0;
+  if (type === "audio") return 2;
+  return 1;
 }
 
 function normalizeAssemblyMedia(value = {}) {
