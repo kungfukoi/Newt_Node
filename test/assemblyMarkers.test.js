@@ -23,8 +23,20 @@ test("crossing a Timeline marker clears the stale opposite boundary", () => {
   assert.equal(state.outPoint, null);
 
   state = setAssemblyOutPoint(state, 5);
-  assert.equal(state.inPoint, null);
+  assert.equal(state.inPoint, 0);
   assert.equal(state.outPoint, 5);
+});
+
+test("setting only a Timeline Out marker creates an In marker at frame 1", () => {
+  const state = setAssemblyOutPoint(createAssemblyState({ playhead: 5 }));
+  assert.equal(state.inPoint, 0);
+  assert.equal(state.outPoint, 5);
+});
+
+test("saved Out-only ranges recover their In marker at frame 1", () => {
+  const state = createAssemblyState({ inPoint: null, outPoint: 8 });
+  assert.equal(state.inPoint, 0);
+  assert.equal(state.outPoint, 8);
 });
 
 test("Timeline marker working space stays visible and can be cleared", () => {

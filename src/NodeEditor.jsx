@@ -2595,7 +2595,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     form.append("asset", file);
 
     try {
-      const { response, data } = await nodeApi.uploadAsset(form);
+      const { response, data } = nodeTypeForDroppedFile(file) === "video"
+        ? await nodeApi.uploadVideoAsset(form)
+        : await nodeApi.uploadAsset(form);
       if (!response.ok) throw new Error(data.error || "Upload failed.");
       const asset = data.asset || {};
 
@@ -3452,7 +3454,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     appendWorkflowContextToForm(form);
     form.append("nodeType", nodeType);
     form.append("asset", file);
-    const { response, data } = await nodeApi.uploadAsset(form);
+    const { response, data } = nodeTypeForDroppedFile(file) === "video"
+      ? await nodeApi.uploadVideoAsset(form)
+      : await nodeApi.uploadAsset(form);
     if (!response.ok) throw new Error(data.error || "Upload failed.");
     return {
       fileName: data.asset.fileName,

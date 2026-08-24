@@ -1,3 +1,5 @@
+import { minimumAssemblyZoom, normalizeAssemblyZoom } from "./assemblyZoom.js";
+
 const assemblySchemaVersion = 1;
 const defaultStillDuration = 5;
 const defaultFrameRate = 24;
@@ -39,16 +41,16 @@ export function normalizeAssemblyState(value = {}) {
     .sort((first, second) => assemblyTrackSortRank(first.type) - assemblyTrackSortRank(second.type));
   const trackIds = new Set(normalizedTracks.map((track) => track.id));
   const mediaIds = new Set(media.map((item) => item.id));
-  const inPoint = normalizeAssemblyMarker(source.inPoint);
-  const requestedOutPoint = normalizeAssemblyMarker(source.outPoint);
-  const outPoint = inPoint !== null && requestedOutPoint !== null && requestedOutPoint < inPoint ? null : requestedOutPoint;
+  const requestedInPoint = normalizeAssemblyMarker(source.inPoint);
+  const outPoint = normalizeAssemblyMarker(source.outPoint);
+  const inPoint = outPoint !== null && (requestedInPoint === null || requestedInPoint > outPoint) ? 0 : requestedInPoint;
 
   return {
     version: assemblySchemaVersion,
     frameRate: clampNumber(source.frameRate, 1, 120, defaultFrameRate),
     outputWidth: evenDimension(source.outputWidth, 1920),
     outputHeight: evenDimension(source.outputHeight, 1080),
-    zoom: clampNumber(source.zoom, 24, 360, 72),
+    zoom: normalizeAssemblyZoom(source.zoom),
     ripple: Boolean(source.ripple),
     tool: ["select", "blade", "slip"].includes(source.tool) ? source.tool : "select",
     playhead: Math.max(0, finiteNumber(source.playhead)),
@@ -333,7 +335,7 @@ export function snapAssemblyClipMoveStart(state, clipId, targetTrackId, start, p
   const requestedStart = snapAssemblyTime(current, start);
   if (!source || !target || target.locked || !assemblyTrackAcceptsMedia(target, source.media)) return requestedStart;
 
-  const threshold = Math.max(assemblyFrameDuration(current), Math.abs(Number(thresholdPixels) || 0) / Math.max(1, Number(pixelsPerSecond) || 1));
+  const threshold = Math.max(assemblyFrameDuration(current), Math.abs(Number(thresholdPixels) || 0) / Math.max(minimumAssemblyZoom, Number(pixelsPerSecond) || minimumAssemblyZoom));
   const edges = [0, ...target.clips
     .filter((clip) => clip.id !== clipId)
     .flatMap((clip) => [clip.start, clip.start + clip.duration])];
@@ -451,8 +453,8 @@ export function setAssemblyInPoint(state, time = state?.playhead || 0) {
 export function setAssemblyOutPoint(state, time = state?.playhead || 0) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   next.outPoint = snapAssemblyTime(next, time);
-  if (next.inPoint !== null && next.inPoint > next.outPoint) {
-    next.inPoint = null;
+  if (next.inPoint === null || next.inPoint > next.outPoint) {
+    next.inPoint = 0;
     next.loopInOut = false;
   }
   return next;

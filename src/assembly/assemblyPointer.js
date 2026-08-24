@@ -1,3 +1,5 @@
+import { minimumAssemblyZoom } from "./assemblyZoom.js";
+
 export function assemblyLocalX(element, clientX) {
   const rect = element?.getBoundingClientRect?.();
   if (!rect) return 0;
@@ -10,6 +12,6 @@ export function assemblyLocalX(element, clientX) {
 }
 
 export function assemblyTimeAtClientX(element, clientX, pixelsPerSecond) {
-  const scale = Math.max(1, Number(pixelsPerSecond) || 1);
+  const scale = Math.max(minimumAssemblyZoom, Number(pixelsPerSecond) || minimumAssemblyZoom);
   return Math.max(0, assemblyLocalX(element, clientX) / scale);
 }

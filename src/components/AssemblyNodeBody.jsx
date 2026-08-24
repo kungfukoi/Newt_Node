@@ -9,6 +9,7 @@ import {
   FlagOff,
   Lock,
   MousePointer2,
+  Minus,
   Pause,
   Play,
   Plus,
@@ -58,6 +59,7 @@ import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/as
 import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
 import { assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
+import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
 import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
 import { AssemblyMediaBin, assemblyMediaDragType } from "./AssemblyMediaBin.jsx";
@@ -111,6 +113,7 @@ export function AssemblyNodeBody({
   const duration = assemblyDuration(timeline);
   const pixelsPerSecond = timeline.zoom;
   const timelineWidth = Math.max(760, duration * pixelsPerSecond + 80);
+  const timelineGridWidth = Math.max(8, assemblyRulerSpacing(duration, pixelsPerSecond, timeline.frameRate).minorStep * pixelsPerSecond);
   const selected = findSelectedClip(timeline);
   const selectedMedia = selected ? timeline.media.find((item) => item.id === selected.clip.mediaId) : null;
   const mediaProbeKey = timeline.media.map((media) => `${media.id}:${media.url}`).join("|");
@@ -601,6 +604,33 @@ export function AssemblyNodeBody({
     replaceTimeline(next, true);
   }
 
+  function zoomTimeline(direction) {
+    const current = timelineRef.current;
+    const nextZoom = stepAssemblyZoom(current.zoom, direction);
+    if (nextZoom === current.zoom) return;
+
+    const scroll = scrollRef.current;
+    let anchorTime = current.playhead;
+    let anchorViewportX = timelineGutterWidth;
+    if (scroll) {
+      const playheadX = timelineGutterWidth + current.playhead * current.zoom;
+      const viewportLeft = scroll.scrollLeft;
+      const viewportRight = viewportLeft + scroll.clientWidth;
+      const anchorX = playheadX >= viewportLeft && playheadX <= viewportRight
+        ? playheadX
+        : viewportLeft + scroll.clientWidth / 2;
+      anchorTime = Math.max(0, (anchorX - timelineGutterWidth) / current.zoom);
+      anchorViewportX = anchorX - viewportLeft;
+    }
+
+    replaceTimeline(setAssemblyView(current, { zoom: nextZoom }), true);
+    if (scroll) {
+      window.requestAnimationFrame(() => {
+        scroll.scrollLeft = Math.max(0, timelineGutterWidth + anchorTime * nextZoom - anchorViewportX);
+      });
+    }
+  }
+
   function jumpToMarker(time) {
     if (time === null || time === undefined) return;
     rootRef.current?.focus({ preventScroll: true });
@@ -802,10 +832,11 @@ export function AssemblyNodeBody({
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
         </div>
-        <label className="assembly-zoom-control">
-          <span>Zoom</span>
-          <input type="range" min="24" max="360" step="4" value={timeline.zoom} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { zoom: Number(event.target.value) }), true)} />
-        </label>
+        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
+          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
+          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
+          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
+        </div>
         <div className="assembly-track-actions">
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "video"))}><Plus size={13} /> Video</button>
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "audio"))}><Plus size={13} /> Audio</button>
@@ -817,7 +848,7 @@ export function AssemblyNodeBody({
           <div className="assembly-ruler-row">
             <div className="assembly-ruler-gutter">Tracks</div>
             <div ref={rulerRef} className="assembly-ruler" style={{ width: timelineWidth }} onPointerDown={beginRulerScrub}>
-              {rulerTicks(duration, pixelsPerSecond).map((tick) => (
+              {rulerTicks(duration, pixelsPerSecond, timeline.frameRate).map((tick) => (
                 <span key={tick.time} className={tick.major ? "major" : ""} style={{ left: tick.time * pixelsPerSecond }}>
                   {tick.major ? <i>{formatRulerTime(tick.time)}</i> : null}
                 </span>
@@ -845,7 +876,7 @@ export function AssemblyNodeBody({
               <div
                 className={`assembly-track-lane ${dragTargetTrackId === track.id ? "is-drop-target" : ""}`}
                 data-track-id={track.id}
-                style={{ width: timelineWidth, "--assembly-second-width": `${pixelsPerSecond}px` }}
+                style={{ width: timelineWidth, "--assembly-second-width": `${timelineGridWidth}px` }}
                 onDragOver={(event) => {
                   if (!Array.from(event.dataTransfer.types || []).includes(assemblyMediaDragType())) return;
                   event.preventDefault();
@@ -928,7 +959,7 @@ export function AssemblyNodeBody({
         <label><span>H</span><input type="number" min="16" step="2" value={timeline.outputHeight} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputHeight: Number(event.target.value) }), true)} /></label>
         <label><span>FPS</span><input type="number" min="1" max="120" value={timeline.frameRate} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { frameRate: Number(event.target.value) }), true)} /></label>
         <button type="button" className="run-node-button assembly-render-button" disabled={running || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
-          {running ? "Rendering..." : "Render Timeline"}
+          {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}
         </button>
       </div>
 
@@ -982,9 +1013,8 @@ function findSelectedClip(state) {
   return state.selectedClipId ? findClip(state, state.selectedClipId) : null;
 }
 
-function rulerTicks(duration, pixelsPerSecond) {
-  const majorStep = pixelsPerSecond < 40 ? 10 : pixelsPerSecond < 90 ? 5 : pixelsPerSecond < 180 ? 2 : 1;
-  const minorStep = majorStep / 5;
+function rulerTicks(duration, pixelsPerSecond, frameRate) {
+  const { majorStep, minorStep } = assemblyRulerSpacing(duration, pixelsPerSecond, frameRate);
   const count = Math.ceil(duration / minorStep);
   return Array.from({ length: count + 1 }, (_, index) => {
     const time = index * minorStep;
@@ -993,8 +1023,13 @@ function rulerTicks(duration, pixelsPerSecond) {
 }
 
 function formatRulerTime(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.floor(seconds % 60);
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 1) return `${value.toFixed(2)}s`;
+  const totalSeconds = Math.floor(value);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainder = totalSeconds % 60;
+  if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
   return minutes ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
 }
 

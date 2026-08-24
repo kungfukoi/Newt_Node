@@ -3,6 +3,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import { isLocalVideoUpload, localVideoUploadLimits, standardUploadLimits } from "./upload-config.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -570,11 +571,15 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({
+const upload = multer({ storage, limits: standardUploadLimits });
+const localVideoUpload = multer({
   storage,
-  limits: {
-    fileSize: 200 * 1024 * 1024,
-    files: 11
+  limits: localVideoUploadLimits,
+  fileFilter: (_req, file, callback) => {
+    if (isLocalVideoUpload(file)) return callback(null, true);
+    const error = new Error("Only MP4, MOV, QT, and WebM files can use the local video import route.");
+    error.status = 415;
+    return callback(error);
   }
 });
 
@@ -2587,7 +2592,7 @@ app.delete("/api/history/:id", async (req, res) => {
   res.json(nextHistory);
 });
 
-app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
+async function handleNodeAssetUpload(req, res) {
   if (!req.file) {
     return res.status(400).json({ error: "No asset uploaded." });
   }
@@ -2612,7 +2617,10 @@ app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
     console.error(error);
     res.status(500).json({ error: error.message || "Upload failed." });
   }
-});
+}
+
+app.post("/api/node/upload-asset", upload.single("asset"), handleNodeAssetUpload);
+app.post("/api/node/upload-video-asset", localVideoUpload.single("asset"), handleNodeAssetUpload);
 
 app.post("/api/node/preview-output", async (req, res) => {
   try {

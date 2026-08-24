@@ -6,9 +6,15 @@ export function createAssemblyRenderPlan(assembly, resolvedMedia = []) {
   const inputs = [];
   const visualClips = [];
   const audioClips = [];
+  const contentDuration = assemblyContentDuration(timeline);
+  const usesRange = timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint;
+  const rangeStart = usesRange ? timeline.inPoint : 0;
+  const rangeEnd = usesRange ? timeline.outPoint : contentDuration;
 
   timeline.tracks.forEach((track, trackIndex) => {
-    track.clips.forEach((clip) => {
+    track.clips.forEach((sourceClip) => {
+      const clip = assemblyClipForRenderRange(sourceClip, rangeStart, rangeEnd);
+      if (!clip) return;
       const media = timeline.media.find((item) => item.id === clip.mediaId);
       const resolved = resolvedById.get(clip.mediaId);
       if (!media || !resolved?.filePath) return;
@@ -27,11 +33,38 @@ export function createAssemblyRenderPlan(assembly, resolvedMedia = []) {
     frameRate: timeline.frameRate,
     width: timeline.outputWidth,
     height: timeline.outputHeight,
-    duration: assemblyContentDuration(timeline),
+    duration: Math.max(1 / timeline.frameRate, rangeEnd - rangeStart),
+    rangeStart,
+    rangeEnd,
+    usesRange,
     inputs,
     visualClips: visualClips.sort((first, second) => second.trackIndex - first.trackIndex || first.clip.start - second.clip.start),
     audioClips,
     timeline
+  };
+}
+
+function assemblyClipForRenderRange(clip, rangeStart, rangeEnd) {
+  const clipStart = Math.max(0, Number(clip?.start) || 0);
+  const clipDuration = Math.max(0, Number(clip?.duration) || 0);
+  const overlapStart = Math.max(clipStart, rangeStart);
+  const overlapEnd = Math.min(clipStart + clipDuration, rangeEnd);
+  if (overlapEnd <= overlapStart) return null;
+
+  const playbackRate = assemblyClipPlaybackRate(clip);
+  const headTrim = (overlapStart - clipStart) * playbackRate;
+  const duration = overlapEnd - overlapStart;
+  const sourceSpan = duration * playbackRate;
+  const originalSourceIn = Math.max(0, Number(clip.sourceIn) || 0);
+  const sourceIn = clip.reverse
+    ? originalSourceIn + Math.max(0, assemblyClipSourceSpan(clip) - headTrim - sourceSpan)
+    : originalSourceIn + headTrim;
+
+  return {
+    ...clip,
+    start: overlapStart - rangeStart,
+    duration,
+    sourceIn
   };
 }
 

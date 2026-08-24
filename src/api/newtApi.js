@@ -200,6 +200,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/upload-asset", { method: "POST", body: form }, label);
   },
 
+  uploadVideoAsset(form, label = "Video import") {
+    return fetchJsonApi("/api/node/upload-video-asset", { method: "POST", body: form }, label);
+  },
+
   uploadTransferCollage(form, label = "Mood Board compile") {
     return fetchJsonApi("/api/node/upload-transfer-collage", { method: "POST", body: form }, label);
   },

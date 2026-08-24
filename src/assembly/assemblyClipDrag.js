@@ -1,3 +1,5 @@
+import { minimumAssemblyZoom } from "./assemblyZoom.js";
+
 export function startAssemblyClipDrag({
   event,
   clip,
@@ -20,7 +22,7 @@ export function startAssemblyClipDrag({
 
   event.preventDefault();
   event.stopPropagation();
-  const pps = Math.max(1, Number(pixelsPerSecond) || 1);
+  const pps = Math.max(minimumAssemblyZoom, Number(pixelsPerSecond) || minimumAssemblyZoom);
   const originRect = originLane.getBoundingClientRect();
   const grabOffsetSeconds = (event.clientX - originRect.left) / pps - clip.start;
   const originPointerY = event.clientY;
