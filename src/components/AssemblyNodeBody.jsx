@@ -359,6 +359,7 @@ export function AssemblyNodeBody({
     });
     const scrubPreview = timelineScrubbingRef.current || scrubPreviewPendingRef.current;
     const renderableLayers = scrubPreview ? assemblyScrubPreviewLayers(drawableLayers) : assemblyRenderablePreviewLayers(drawableLayers);
+    if (renderableLayers === null) return;
     if (scrubPreview && !layers.length && !timelineScrubbingRef.current) scrubPreviewPendingRef.current = false;
     if (layers.length && !renderableLayers.length && !scrubPreview) return;
 

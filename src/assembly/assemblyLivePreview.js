@@ -126,7 +126,9 @@ export function assemblyRenderablePreviewLayers(layers = []) {
 
 export function assemblyScrubPreviewLayers(layers = []) {
   const topLayer = layers.at(-1);
-  if (!topLayer?.decoded || !topLayer.element || Number(topLayer.width) <= 0 || Number(topLayer.height) <= 0) return [];
+  if (!topLayer) return [];
+  // A null result keeps the last published frame visible until the requested frame is ready.
+  if (!topLayer.ready || !topLayer.element || Number(topLayer.width) <= 0 || Number(topLayer.height) <= 0) return null;
   return [topLayer];
 }
 

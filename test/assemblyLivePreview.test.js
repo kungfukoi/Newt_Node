@@ -88,12 +88,15 @@ test("Timeline live preview withholds a visual frame until one layer is drawable
   ]), []);
 });
 
-test("Timeline scrubbing never exposes a lower layer while the top clip seeks", () => {
+test("Timeline scrubbing holds its last frame until the requested top frame is ready", () => {
   const lower = { element: { id: "lower" }, ready: true, decoded: true, width: 1920, height: 1080 };
-  const top = { element: { id: "top" }, ready: false, decoded: true, width: 1920, height: 1080 };
+  const seekingTop = { element: { id: "top" }, ready: false, decoded: true, width: 1920, height: 1080 };
+  const readyTop = { ...seekingTop, ready: true };
 
-  assert.deepEqual(assemblyScrubPreviewLayers([lower, top]), [top]);
-  assert.deepEqual(assemblyScrubPreviewLayers([lower, { ...top, decoded: false }]), []);
+  assert.equal(assemblyScrubPreviewLayers([lower, seekingTop]), null);
+  assert.deepEqual(assemblyScrubPreviewLayers([lower, readyTop]), [readyTop]);
+  assert.equal(assemblyScrubPreviewLayers([lower, { ...seekingTop, decoded: false }]), null);
+  assert.deepEqual(assemblyScrubPreviewLayers([]), []);
 });
 
 test("Timeline selected clip readout formats resolution and frame rate", () => {
