@@ -91,18 +91,12 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
 }
 
 export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
-  const historyRef = useRef(null);
   const draft = String(node.data.agentDraft || "");
+  const response = String(node.data.resultText || "");
   const messages = normalizeTextAgentMessages(node.data.agentMessages);
   const inputPorts = ["textIn", "imageIn", "videoIn", "styleIn"]
     .map((id) => config.input.find((port) => port.id === id))
     .filter(Boolean);
-
-  useEffect(() => {
-    const history = historyRef.current;
-    if (!history) return;
-    history.scrollTop = history.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.text, running]);
 
   const sendMessage = () => {
     if (running || !draft.trim()) return;
@@ -127,7 +121,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
       </div>
       <div className="text-agent-shell">
         <div className="text-agent-toolbar">
-          <span>Conversation</span>
+          <span>Response</span>
           <button
             type="button"
             className="icon-button text-agent-clear"
@@ -139,21 +133,15 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
             <Trash2 size={14} aria-hidden="true" />
           </button>
         </div>
-        <div ref={historyRef} className="text-agent-history" aria-live="polite">
-          {!messages.length && !running && <div className="text-agent-empty">Responses will appear here</div>}
-          {messages.map((message) => (
-            <div key={message.id} className={`text-agent-message ${message.role}`}>
-              <span>{message.role === "assistant" ? "Agent" : "You"}</span>
-              <p>{message.text}</p>
-            </div>
-          ))}
-          {running && (
-            <div className="text-agent-message assistant pending">
-              <span>Agent</span>
-              <p>Thinking...</p>
-            </div>
-          )}
-        </div>
+        <textarea
+          className="text-agent-response"
+          aria-label="Text Agent response"
+          aria-live="polite"
+          aria-busy={running}
+          readOnly
+          value={response}
+          placeholder={running ? "Thinking..." : "Responses will appear here"}
+        />
         <div className="text-agent-composer">
           <textarea
             aria-label="Message Text Agent"
