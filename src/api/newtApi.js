@@ -11,13 +11,19 @@ function ensureOk(response, data, fallbackMessage) {
   return data;
 }
 
-export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true } = {}) {
-  const requestUrl = localApiFetchUrl(path);
+export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false } = {}) {
+  const requestUrl = preferClientProxy ? path : localApiFetchUrl(path);
   let response;
   try {
     response = await fetch(requestUrl, options);
   } catch (error) {
-    if (requestUrl !== path && retryLocalApi) {
+    if (retryLocalApi && requestUrl === path && canRetryLocalApi(path)) {
+      try {
+        response = await fetch(`${localApiBaseUrl}${path}`, options);
+      } catch {
+        throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
+      }
+    } else if (requestUrl !== path && retryLocalApi) {
       try {
         response = await fetch(path, options);
       } catch {
@@ -316,7 +322,7 @@ export const systemApi = {
   },
 
   saveWorkflowFile(body, label = "Save workflow") {
-    return fetchJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
+    return controlJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
   },
 
   comfyWanStatus({ workflow = "", rootPath = "" } = {}) {
@@ -328,18 +334,30 @@ export const systemApi = {
   },
 
   openProjectOutputFolder(body, label = "Open output folder") {
-    return fetchJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
+    return controlJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
   },
 
   projectOutputPath(body) {
-    return fetchJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
+    return controlJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
   }
 };
 
 async function systemDialogRequest(path, body, label) {
   await exitFullscreenForSystemDialog();
   await ensureSystemDialogServer(path, label);
-  return fetchJsonApi(path, jsonBody(body), label, { retryLocalApi: false });
+  return controlJsonApi(path, jsonBody(body), label);
+}
+
+function controlJsonApi(path, options, label) {
+  // Generations keep long-lived requests open against the API origin. Sending
+  // desktop controls through the client proxy gives them an independent
+  // browser connection pool while reaching the same local Express server.
+  return fetchJsonApi(path, options, label, { preferClientProxy: true });
+}
+
+async function controlRequestData(path, options, fallbackMessage) {
+  const { response, data } = await controlJsonApi(path, options, fallbackMessage);
+  return ensureOk(response, data, fallbackMessage);
 }
 
 async function ensureSystemDialogServer(path, label) {
@@ -348,7 +366,7 @@ async function ensureSystemDialogServer(path, label) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 3000);
   try {
-    const response = await fetch(`${localApiBaseUrl}/api/health`, { signal: controller.signal });
+    const response = await fetch("/api/health", { signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch {
     throw new Error(`${label} could not open because the local app server is offline. Restart NewtNode and try again.`);
@@ -411,27 +429,31 @@ export const composerApi = {
 
 export const workflowApi = {
   listSummary() {
-    return getJson("/api/saved-workflows?summary=1", "Could not load saved workflows.");
+    return controlRequestData("/api/saved-workflows?summary=1", { method: "GET" }, "Could not load saved workflows.");
   },
 
   open(fileName) {
-    return getJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not load workflow.");
+    return controlRequestData(`/api/saved-workflows/${encodeURIComponent(fileName)}`, { method: "GET" }, "Could not load workflow.");
   },
 
   save(workflow) {
-    return postJson("/api/saved-workflows", workflow, "Could not save workflow.");
+    return controlRequestData("/api/saved-workflows", jsonBody(workflow), "Could not save workflow.");
   },
 
   autosave(body) {
-    return postJson("/api/saved-workflows/autosave", body, "Could not autosave workflow.");
+    return controlRequestData("/api/saved-workflows/autosave", jsonBody(body), "Could not autosave workflow.");
   },
 
   registerPackage(workflow) {
-    return postJson("/api/saved-workflows/register-package", workflow, "Could not register workflow package.");
+    return controlRequestData("/api/saved-workflows/register-package", jsonBody(workflow), "Could not register workflow package.");
   },
 
   remove(fileName) {
-    return deleteJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not remove workflow from the dropdown.");
+    return controlRequestData(
+      `/api/saved-workflows/${encodeURIComponent(fileName)}`,
+      { method: "DELETE" },
+      "Could not remove workflow from the dropdown."
+    );
   }
 };
 
