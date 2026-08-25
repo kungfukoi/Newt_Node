@@ -2,6 +2,16 @@ export const defaultFalTextModel = "openai/gpt-5.6-terra";
 export const defaultFalVideoTextModel = "google/gemini-3.1-pro-preview";
 export const falVideoTextEndpoint = "openrouter/router/video";
 
+export function nativeVideoAnalysisInput({ videoUrls = [], videoInputs = [], model = defaultFalVideoTextModel } = {}) {
+  return {
+    video_urls: videoUrls,
+    prompt: nativeVideoAnalysisPrompt(videoInputs),
+    system_prompt: "Return only concise, production-useful video context. Do not use markdown.",
+    model,
+    reasoning: true
+  };
+}
+
 export function nativeVideoAnalysisPrompt(videoInputs = []) {
   const labels = videoInputs
     .map((item, index) => `Video ${index + 1}: ${item?.label || "Connected video"}`)

@@ -27,7 +27,7 @@ import {
   defaultFalTextModel,
   defaultFalVideoTextModel,
   falVideoTextEndpoint,
-  nativeVideoAnalysisPrompt
+  nativeVideoAnalysisInput
 } from "../src/textModelDefaults.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
@@ -16101,12 +16101,7 @@ async function describeVideoInputs(videoInputs) {
 
   const videoUrls = await Promise.all(videoInputs.map((item) => localAssetToFalUrl(item.url)));
   const data = await subscribeFal(falVideoTextEndpoint, {
-    input: {
-      video_urls: videoUrls,
-      prompt: nativeVideoAnalysisPrompt(videoInputs),
-      system_prompt: "Return only concise, production-useful video context. Do not use markdown.",
-      model: falVideoTextModel
-    },
+    input: nativeVideoAnalysisInput({ videoUrls, videoInputs, model: falVideoTextModel }),
     logs: true
   });
   const description = extractFalText(data).trim();

@@ -167,7 +167,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
         </div>
       </div>
       <GenerationProgress nodeId={node.id} />
-      {node.data.lastRunModel && <small className="upload-status">Responded with {node.data.lastRunModel}</small>}
+      {node.data.lastRunModel && <small className="upload-status">Last response used {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>
   );

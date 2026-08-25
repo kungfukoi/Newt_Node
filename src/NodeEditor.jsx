@@ -6466,7 +6466,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       outputTarget = outputTargetForSourceNode(currentNode);
       requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
-      updateNode(currentNode.id, { status: "running", error: "" });
+      updateNode(currentNode.id, {
+        status: "running",
+        error: "",
+        ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {})
+      });
       markOutputTargetRunning(outputTarget);
 
       if (currentNode.type === "camera") {
