@@ -832,11 +832,6 @@ export function AssemblyNodeBody({
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
         </div>
-        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
-          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
-          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
-          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
-        </div>
         <div className="assembly-track-actions">
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "video"))}><Plus size={13} /> Video</button>
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "audio"))}><Plus size={13} /> Audio</button>
@@ -954,6 +949,11 @@ export function AssemblyNodeBody({
             <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
           ) : <span>{timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
           {probeStatus && <small>{probeStatus}</small>}
+        </div>
+        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
+          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
+          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
+          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
         </div>
         <label><span>W</span><input type="number" min="16" step="2" value={timeline.outputWidth} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputWidth: Number(event.target.value) }), true)} /></label>
         <label><span>H</span><input type="number" min="16" step="2" value={timeline.outputHeight} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputHeight: Number(event.target.value) }), true)} /></label>
