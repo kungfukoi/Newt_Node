@@ -23,6 +23,12 @@ import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
 import { normalizeTextAgentMessages } from "../src/textAgent.js";
+import {
+  defaultFalTextModel,
+  defaultFalVideoTextModel,
+  falVideoTextEndpoint,
+  nativeVideoAnalysisPrompt
+} from "../src/textModelDefaults.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
 import {
@@ -439,15 +445,16 @@ const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENER
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
 let openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
-const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
+const falTextModel = process.env.FAL_TEXT_MODEL || defaultFalTextModel;
 const skillDirectorLlmEndpoint = "openrouter/router";
 const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
-const storyboardVisionTextModel = process.env.STORYBOARD_QC_FAL_MODEL || "openai/gpt-5.6-terra";
-const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
-const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
-const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
+const storyboardTextModel = process.env.STORYBOARD_TEXT_MODEL || falTextModel;
+const storyboardVisionTextModel = process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardTextModel;
+const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || falTextModel;
+const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || falTextModel;
+const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || defaultFalVideoTextModel;
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -3902,8 +3909,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const directorShotList = String(req.body.directorShotList || "").trim();
     const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
     const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    const plan = process.env.GOOGLE_API_KEY
-      ? await generateStoryboardPlanWithGemini({
+    const plan = process.env.FAL_KEY
+      ? await generateStoryboardPlanWithFal({
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
@@ -16093,18 +16100,18 @@ async function describeVideoInputs(videoInputs) {
   if (!videoInputs.length) return { descriptions: [], usages: [] };
 
   const videoUrls = await Promise.all(videoInputs.map((item) => localAssetToFalUrl(item.url)));
-  const data = await subscribeFal("openrouter/router/video", {
+  const data = await subscribeFal(falVideoTextEndpoint, {
     input: {
       video_urls: videoUrls,
-      prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
-      system_prompt: "Return only useful prompt context. Do not use markdown.",
+      prompt: nativeVideoAnalysisPrompt(videoInputs),
+      system_prompt: "Return only concise, production-useful video context. Do not use markdown.",
       model: falVideoTextModel
     },
     logs: true
   });
   const description = extractFalText(data).trim();
   return {
-    descriptions: description ? [`Connected videos: ${description}`] : [],
+    descriptions: description ? [`Connected videos, analyzed natively with temporal and audio context: ${description}`] : [],
     usages: [falResultUsage(data)].filter(Boolean)
   };
 }
@@ -16965,8 +16972,8 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
-  const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+async function generateStoryboardPlanWithFal({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
+  const model = storyboardTextModel;
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -17050,50 +17057,27 @@ ${directorExpansionInstruction
     ? `Create at least the per-CUT keyframes listed above, targeting ${frameCount} storyboard frames. You may add a frame only when the visual logic clearly requires another distinct state, but do not reduce a listed multi-frame CUT to one frame. Preserve every CUT, keep multi-frame CUTS contiguous, and never exceed 35 frames.`
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
-  const text = await generateGeminiText({
+  const text = await generateFalStoryboardText({
     model,
     prompt,
-    responseMimeType: "application/json"
+    systemPrompt: "Return only valid JSON for a production-ready storyboard plan. Do not use markdown."
   });
 
   return parseStoryboardPlanJson(text);
 }
 
-async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
-  return generateGeminiTextFromParts({
-    model,
-    parts: [{ text: prompt }],
-    responseMimeType
-  });
-}
-
-async function generateGeminiTextFromParts({ model, parts, responseMimeType = "text/plain", temperature = 0.45 }) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GOOGLE_API_KEY
+async function generateFalStoryboardText({ model = storyboardTextModel, prompt, systemPrompt }) {
+  const data = await subscribeFal("openrouter/router", {
+    input: {
+      model,
+      prompt,
+      system_prompt: systemPrompt || "Return only the requested storyboard text. Do not use markdown."
     },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts
-        }
-      ],
-      generationConfig: {
-        temperature,
-        responseMimeType
-      }
-    })
+    logs: true
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || "Gemini text generation failed.", { raw: data });
-  }
-
-  const parsed = extractGeminiImageData(data);
-  return parsed.text || "";
+  const text = extractFalText(data).trim();
+  if (!text) throw httpError(502, "Fal GPT-5.6 Terra returned no storyboard text.", { raw: data });
+  return text;
 }
 
 function parseStoryboardPlanJson(text) {
@@ -17188,27 +17172,6 @@ function normalizeStoryboardQcResult(result = {}) {
     issues,
     correctionPrompt: correctionPrompt || (issues.length ? `Correct these storyboard problems: ${issues.join("; ")}.` : "")
   };
-}
-
-async function storyboardQcInlineImagePart(publicPath, label, { required = false } = {}) {
-  if (!publicPath) return [];
-  try {
-    const asset = await readLocalAsset(publicPath);
-    if (!String(asset.mimeType || "").startsWith("image/")) return [];
-    return [
-      { text: `${label}:` },
-      {
-        inlineData: {
-          mimeType: asset.mimeType || "image/png",
-          data: asset.buffer.toString("base64")
-        }
-      }
-    ];
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
-    return [];
-  }
 }
 
 function storyboardQcReviewPrompt({
@@ -17323,50 +17286,6 @@ async function reviewStoryboardFrameWithFal({
   return normalizeStoryboardQcResult(parseStoryboardPlanJson(extractFalText(data)));
 }
 
-async function reviewStoryboardFrameWithGemini({
-  sourceUrl,
-  previousFrameUrl = "",
-  spatialAnchorUrl = "",
-  sceneDescription = "",
-  framePrompt = "",
-  frameNumber = 1,
-  shot = "",
-  angle = "",
-  notes = ""
-} = {}) {
-  const parts = [{
-    text: storyboardQcReviewPrompt({
-      sceneDescription,
-      framePrompt,
-      frameNumber,
-      shot,
-      angle,
-      notes,
-      imageLabels: [
-        "Generated frame to review",
-        previousFrameUrl ? "Previous approved frame for continuity" : "",
-        spatialAnchorUrl ? "Spatial anchor frame for room geography" : ""
-      ].filter(Boolean)
-    })
-  }];
-
-  const imageParts = [
-    ...(await storyboardQcInlineImagePart(sourceUrl, "Generated frame to review", { required: true })),
-    ...(await storyboardQcInlineImagePart(previousFrameUrl, "Previous approved frame for continuity")),
-    ...(await storyboardQcInlineImagePart(spatialAnchorUrl, "Spatial anchor frame for room geography"))
-  ];
-  if (!imageParts.length) return storyboardQcPass("No readable image was available for QC.");
-
-  const text = await generateGeminiTextFromParts({
-    model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-    parts: [...parts, ...imageParts],
-    responseMimeType: "application/json",
-    temperature: 0.18
-  });
-
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(text));
-}
-
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
   const cleanScene = String(sceneDescription || "A clear cinematic scene").trim();
   const shots = ["WS", "MS", "CU", "MS", "CU", "WS", "OTS", "ECU", "EWS"];
@@ -17401,7 +17320,7 @@ function storyboardExportFrameExtension(fileName = "") {
 
 async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!process.env.FAL_KEY) return fallback;
 
   try {
     const frameText = frames.map((frame, index) => [
@@ -17412,9 +17331,9 @@ async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDes
       frame.notes ? `Continuity note: ${frame.notes}` : "",
       [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
     ].filter(Boolean).join("\n")).join("\n\n");
-    const text = await generateGeminiText({
-      model: process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-      responseMimeType: "application/json",
+    const text = await generateFalStoryboardText({
+      model: storyboardTextModel,
+      systemPrompt: "Return only valid JSON containing concise production-board captions. Do not use markdown.",
       prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
@@ -17448,15 +17367,14 @@ Descriptions must be in the same order as the frames. Keep each caption short, c
 
 async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!process.env.FAL_KEY) return fallback;
 
   const descriptions = [...fallback];
   const batchSize = 4;
 
   for (let batchStart = 0; batchStart < frames.length; batchStart += batchSize) {
     const batch = frames.slice(batchStart, batchStart + batchSize);
-    const parts = [{
-      text: `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
+    const prompt = `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
 Scene brief: ${sceneDescription || "None"}
@@ -17473,22 +17391,15 @@ Rules:
 - Describe the visible action, subject, or story beat in each image.
 - Keep each caption short, complete, readable, and useful below a storyboard panel.
 - Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
-- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
-    }];
+- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`;
     const readableFrames = [];
+    const imageUrls = [];
 
     for (const [offset, frame] of batch.entries()) {
       try {
-        const asset = await readLocalAsset(frame.sourceUrl);
-        if (!String(asset.mimeType || "").startsWith("image/")) continue;
+        const imageUrl = await localAssetToFalUrl(frame.sourceUrl);
         readableFrames.push({ frame, index: batchStart + offset });
-        parts.push({ text: `Frame ${batchStart + offset + 1}:` });
-        parts.push({
-          inlineData: {
-            mimeType: asset.mimeType || "image/png",
-            data: asset.buffer.toString("base64")
-          }
-        });
+        imageUrls.push(imageUrl);
       } catch (error) {
         console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
       }
@@ -17497,12 +17408,16 @@ Rules:
     if (!readableFrames.length) continue;
 
     try {
-      const text = await generateGeminiTextFromParts({
-        model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-        parts,
-        responseMimeType: "application/json",
-        temperature: 0.28
+      const data = await subscribeFal("openrouter/router/vision", {
+        input: {
+          image_urls: imageUrls,
+          prompt,
+          system_prompt: "Return only valid JSON containing one concise caption per image, in image order. Do not use markdown.",
+          model: storyboardVisionTextModel
+        },
+        logs: true
       });
+      const text = extractFalText(data);
       const parsed = parseStoryboardPlanJson(text);
       const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
       readableFrames.forEach(({ index }, localIndex) => {

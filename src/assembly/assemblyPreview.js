@@ -1,7 +1,7 @@
-export function assemblyOutputPortState(portId, renderedVideoUrl = "") {
+export function assemblyOutputPortState() {
   return {
-    disabled: portId === "videoOut" && !renderedVideoUrl,
-    disabledReason: portId === "videoOut" ? "Render the Timeline first" : ""
+    disabled: false,
+    disabledReason: ""
   };
 }
 
