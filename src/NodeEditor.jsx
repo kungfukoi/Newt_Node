@@ -148,6 +148,7 @@ import {
   supportedFilesFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
+import { previewSelectionForNode } from "./previewSelection.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
@@ -2269,6 +2270,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         event.preventDefault();
         event.stopPropagation();
         importImageToStoryboardFrame(storyboardNode, frameId, outputItem?.type === "image" ? { outputItem } : { file: imageFile });
+        if (outputItem) clearOutputItemDragData();
         return;
       }
     }
@@ -2279,6 +2281,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const position = pointerNodePosition(event);
     if (outputItem) {
       createMediaNodeFromOutputItem(outputItem, position);
+      clearOutputItemDragData();
       return;
     }
     const droppedFiles = await supportedFilesFromDataTransfer(dataTransfer);
@@ -3713,8 +3716,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       importImageToStoryboardFrame(storyboardNode, frameId, { outputItem: item });
     }
 
+    function clearFinishedOutputDrag() {
+      clearOutputItemDragData();
+    }
+
     window.addEventListener(outputDragEndEvent, handleOutputDragEnd);
-    return () => window.removeEventListener(outputDragEndEvent, handleOutputDragEnd);
+    window.addEventListener("dragend", clearFinishedOutputDrag);
+    window.addEventListener("blur", clearFinishedOutputDrag);
+    return () => {
+      window.removeEventListener(outputDragEndEvent, handleOutputDragEnd);
+      window.removeEventListener("dragend", clearFinishedOutputDrag);
+      window.removeEventListener("blur", clearFinishedOutputDrag);
+    };
   });
 
   function syncStoryboardPreparedCharacters(nodeId, characters) {
@@ -12222,6 +12235,7 @@ function NodeBody({
     function startPreviewThumbDrag(event, item, index) {
       if (!item?.url || !item?.type) return;
       const dragItem = {
+        ...item,
         id: `preview:${previewSource.id}:${index}`,
         url: item.url,
         type: item.type,
@@ -12231,7 +12245,9 @@ function NodeBody({
         sourceNodeId: previewSource.sourceNodeId,
         sourcePort: previewSource.sourcePort
       };
-      setOutputItemDragData(event.dataTransfer, dragItem, outputDragMime);
+      if (!setOutputItemDragData(event.dataTransfer, dragItem, outputDragMime)) {
+        event.preventDefault();
+      }
     }
 
     function startPreviewStageDrag(event, stopPropagation = false) {
@@ -12291,7 +12307,10 @@ function NodeBody({
         return;
       }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-      if (outputItem?.type === "image") addLayoutItem(outputItem, beforeId);
+      if (outputItem?.type === "image") {
+        addLayoutItem(outputItem, beforeId);
+        clearOutputItemDragData();
+      }
     }
 
     function startLayoutItemDrag(event, item) {
@@ -21367,32 +21386,6 @@ function previewVideoSourceForNode(node, incomingByNode) {
   const previewSources = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
   const { item } = previewSelectionForNode(node, previewSources);
   return item?.type === "video" ? item : null;
-}
-
-function previewSelectionForNode(node, previewSources = []) {
-  if (!previewSources.length) return { source: null, item: null, itemIndex: 0 };
-  const data = node?.data || {};
-  const source =
-    selectedPreviewSource(previewSources, data.previewSourceId) ||
-    previewSources.find((previewSource) => previewSource.items.some((item) => item.sourceSelectedResult)) ||
-    previewSources.at(-1);
-  const itemIndex = previewSelectedItemIndexForSource(node, source);
-  return {
-    source,
-    item: source?.items?.[itemIndex] || null,
-    itemIndex
-  };
-}
-
-function previewSelectedItemIndexForSource(node, source) {
-  const items = source?.items || [];
-  const sourceSelectedIndex = items.findIndex((item) => item.sourceSelectedResult);
-  return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
-}
-
-function selectedPreviewSource(sources = [], selectedId) {
-  if (!sources.length) return null;
-  return sources.find((source) => source.id === selectedId) || sources.at(-1);
 }
 
 function previewMediaType(source, edge) {

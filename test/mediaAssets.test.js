@@ -5,6 +5,7 @@ import {
   fullResolutionContextPreparedAttribute,
   clearOutputItemDragData,
   displayMediaUrl,
+  finishOutputItemDragData,
   fullResolutionImageProps,
   fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
@@ -56,6 +57,63 @@ test("active Newt Node output drags remain droppable when the browser hides cust
     assert.equal(hasOutputItemDragData(dataTransfer), false);
   } finally {
     globalThis.window = previousWindow;
+  }
+});
+
+test("an invalid preview drag clears an older cached drag payload", () => {
+  const previousWindow = globalThis.window;
+  const dataTransfer = {
+    types: [],
+    effectAllowed: "none",
+    setData() {},
+    getData() { return ""; }
+  };
+  globalThis.window = { location: { origin: "http://localhost" } };
+
+  try {
+    setOutputItemDragData(dataTransfer, { id: "old", url: "/outputs/old.png", type: "image" });
+    assert.equal(hasOutputItemDragData({ types: [] }), true);
+    const next = setOutputItemDragData(dataTransfer, {
+      id: "thumbnail-only",
+      url: "/outputs/Test/thumbnails/image-preview.jpg",
+      type: "image"
+    });
+    assert.equal(next, null);
+    assert.equal(hasOutputItemDragData({ types: [] }), false);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("finishing a drag always clears cached state after a source rerender", () => {
+  const previousWindow = globalThis.window;
+  const previousCustomEvent = globalThis.CustomEvent;
+  const dataTransfer = {
+    effectAllowed: "none",
+    setData() {},
+    getData() { return ""; }
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, options) {
+      this.type = type;
+      this.detail = options?.detail;
+    }
+  };
+  globalThis.window = {
+    location: { origin: "http://localhost" },
+    dispatchEvent() {}
+  };
+
+  try {
+    setOutputItemDragData(dataTransfer, { id: "before-render", url: "/outputs/live.png", type: "image" });
+    finishOutputItemDragData(
+      { id: "after-render", url: "/outputs/replaced.png", type: "image" },
+      { clientX: 10, clientY: 20 }
+    );
+    assert.equal(hasOutputItemDragData({ types: [] }), false);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousCustomEvent;
   }
 });
 

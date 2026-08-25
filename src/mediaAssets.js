@@ -251,6 +251,7 @@ export function outputItemFromDataTransfer(dataTransfer) {
 }
 
 export function setOutputItemDragData(dataTransfer, item, mimeType = outputDragMime) {
+  clearOutputItemDragData();
   const dragItem = fullResolutionOutputItem(item);
   if (!dragItem?.url || !dragItem?.type) return null;
 
@@ -287,7 +288,9 @@ export function finishOutputItemDragData(item, event) {
       }
     }));
   }
-  clearOutputItemDragData(item || activeItem);
+  // Drag state is one browser interaction. End it even if the source rerendered
+  // and replaced the item object while the pointer was down.
+  clearOutputItemDragData();
 }
 
 export function currentDraggedOutputItem() {
