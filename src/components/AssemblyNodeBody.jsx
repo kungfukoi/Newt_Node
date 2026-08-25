@@ -109,6 +109,7 @@ export function AssemblyNodeBody({
   const lastGraphPreviewCheckpointRef = React.useRef(0);
   const lastExternalStateRef = React.useRef(JSON.stringify(initialState));
   const clipDragCleanupRef = React.useRef(null);
+  const scrubCleanupRef = React.useRef(null);
   const previewFailureRef = React.useRef("");
   const videoFrameCancelRef = React.useRef(new Map());
   const timelineScrubbingRef = React.useRef(false);
@@ -131,7 +132,10 @@ export function AssemblyNodeBody({
     onProbeMediaRef.current = onProbeMedia;
   }, [onProbeMedia]);
 
-  React.useEffect(() => () => clipDragCleanupRef.current?.(), []);
+  React.useEffect(() => () => {
+    clipDragCleanupRef.current?.();
+    scrubCleanupRef.current?.();
+  }, []);
   React.useEffect(() => () => {
     videoFrameCancelRef.current.forEach((cancel) => cancel?.());
     videoFrameCancelRef.current.clear();
@@ -272,7 +276,12 @@ export function AssemblyNodeBody({
   }
 
   function seek(time, persist = false) {
-    const nextTime = clockRef.current?.seek(time) ?? Math.max(0, Number(time) || 0);
+    if (clockRef.current) {
+      clockRef.current.seek(time);
+      if (persist) persistTimeline(timelineRef.current);
+      return;
+    }
+    const nextTime = Math.max(0, Number(time) || 0);
     const next = setAssemblyPlayhead(timelineRef.current, nextTime);
     timelineRef.current = next;
     setTimeline(next);
@@ -311,8 +320,10 @@ export function AssemblyNodeBody({
   }
 
   function syncMediaElementsUnsafe(state, time, shouldPlay) {
-    const visualItems = assemblyActiveClips(state, time, "visual");
-    const audioItems = assemblyActiveClips(state, time, "audio");
+    const allVisualItems = assemblyActiveClips(state, time, "visual");
+    const scrubbing = timelineScrubbingRef.current;
+    const visualItems = scrubbing ? allVisualItems.slice(0, 1) : allVisualItems;
+    const audioItems = scrubbing ? [] : assemblyActiveClips(state, time, "audio");
     const activeByClip = new Map(visualItems.map((item) => [item.id, { item, audible: false }]));
     audioItems.forEach((item) => activeByClip.set(item.id, { item, audible: true }));
     mediaElementsRef.current.forEach((element, clipId) => {
@@ -438,36 +449,61 @@ export function AssemblyNodeBody({
     if (!ruler) return;
     event.preventDefault();
     event.stopPropagation();
+    if (playingRef.current) clockRef.current?.pause();
+    scrubCleanupRef.current?.();
     timelineScrubbingRef.current = true;
     scrubPreviewPendingRef.current = true;
     const captureTarget = event.currentTarget;
     const pointerId = event.pointerId;
     const pointerTime = (pointerEvent) => assemblyTimeAtClientX(ruler, pointerEvent.clientX, pixelsPerSecond);
     const grabOffset = preserveGrabOffset ? pointerTime(event) - timelineRef.current.playhead : 0;
-    const update = (pointerEvent) => seek(pointerTime(pointerEvent) - grabOffset, false);
+    let frameId = null;
+    let pendingTime = null;
+    const flush = () => {
+      frameId = null;
+      if (pendingTime === null) return;
+      const nextTime = pendingTime;
+      pendingTime = null;
+      seek(nextTime, false);
+    };
+    const update = (pointerEvent, immediate = false) => {
+      pendingTime = pointerTime(pointerEvent) - grabOffset;
+      if (immediate) {
+        if (frameId !== null) window.cancelAnimationFrame(frameId);
+        flush();
+        return;
+      }
+      if (frameId === null) frameId = window.requestAnimationFrame(flush);
+    };
     const cleanup = () => {
       window.removeEventListener("pointermove", update);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", cancel);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = null;
+      pendingTime = null;
       try {
         captureTarget.releasePointerCapture?.(pointerId);
       } catch {
         // Pointer capture may already have ended outside the timeline.
       }
       timelineScrubbingRef.current = false;
+      scrubCleanupRef.current = null;
       renderCompositionFrame(timelineRef.current, timelineRef.current.playhead, true);
     };
     const finish = (pointerEvent) => {
-      update(pointerEvent);
+      update(pointerEvent, true);
       persistTimeline(timelineRef.current);
       cleanup();
     };
     const cancel = () => {
+      flush();
       persistTimeline(timelineRef.current);
       cleanup();
     };
+    scrubCleanupRef.current = cleanup;
     captureTarget.setPointerCapture?.(pointerId);
-    update(event);
+    update(event, true);
     window.addEventListener("pointermove", update);
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", cancel);

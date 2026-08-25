@@ -3,13 +3,19 @@ export function assemblyPreviewSeekTolerance(frameRate = 24) {
   return Math.max(0.004, 0.55 / fps);
 }
 
+export function assemblyPreviewPlaybackCorrectionTolerance(frameRate = 24) {
+  const fps = Math.max(1, Number(frameRate) || 24);
+  return Math.max(0.75, 6 / fps);
+}
+
 export function assemblyPreviewSeekTarget(element, sourceTime = 0, frameRate = 24, playing = false) {
   const duration = Number(element?.duration);
   if (!Number.isFinite(duration) || duration <= 0) return null;
   const maximum = Math.max(0, duration - Math.min(0.01, duration / 2));
   const requested = Math.min(Math.max(0, Number(sourceTime) || 0), maximum);
   const current = Number(element?.currentTime);
-  const tolerance = playing ? 0.16 : assemblyPreviewSeekTolerance(frameRate);
+  if (playing && element?.seeking) return null;
+  const tolerance = playing ? assemblyPreviewPlaybackCorrectionTolerance(frameRate) : assemblyPreviewSeekTolerance(frameRate);
   const needsDecodedFrame = Number(element?.readyState) < 2;
   if (!needsDecodedFrame && Number.isFinite(current) && Math.abs(current - requested) <= tolerance) return null;
   if (needsDecodedFrame && requested === 0 && maximum > 0) return Math.min(0.001, maximum);
@@ -105,11 +111,12 @@ export function assemblyPreviewElementState(media, element, sourceTime = 0, fram
   const height = Number(element.videoHeight) || Number(media.height) || 0;
   const currentTime = Number(element.currentTime);
   const expectedTime = Math.max(0, Number(sourceTime) || 0);
-  const tolerance = playing ? 0.2 : assemblyPreviewSeekTolerance(frameRate);
+  const tolerance = playing ? assemblyPreviewPlaybackCorrectionTolerance(frameRate) : assemblyPreviewSeekTolerance(frameRate);
   const atRequestedFrame = Number.isFinite(currentTime) && Math.abs(currentTime - expectedTime) <= tolerance;
+  const decoded = Boolean(element.readyState >= 2 && width && height);
   return {
-    ready: Boolean(element.readyState >= 2 && width && height && atRequestedFrame),
-    decoded: Boolean(element.readyState >= 2 && width && height),
+    ready: Boolean(decoded && (atRequestedFrame || (playing && !element.seeking))),
+    decoded,
     width,
     height
   };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewPlaybackCorrectionTolerance, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
 
 test("Timeline live preview waits for an image to decode", () => {
   const loading = assemblyPreviewElementState({ type: "image" }, { complete: false, naturalWidth: 1920, naturalHeight: 1080 });
@@ -51,9 +51,28 @@ test("Timeline live preview waits for the requested scrubbed video frame", () =>
 });
 
 test("Timeline playback tolerates normal decoder clock drift", () => {
-  const video = { readyState: 4, videoWidth: 1280, videoHeight: 720, currentTime: 4.86 };
+  const video = { readyState: 4, videoWidth: 1280, videoHeight: 720, currentTime: 4.4, seeking: false };
   assert.equal(assemblyPreviewElementState({ type: "video" }, video, 5, 24, true).ready, true);
   assert.equal(assemblyPreviewElementState({ type: "video" }, video, 5, 24, false).ready, false);
+});
+
+test("Timeline playback does not seek-chase a decoding video channel", () => {
+  const decoding = { duration: 10, currentTime: 4.4, readyState: 4, seeking: false };
+  assert.equal(assemblyPreviewPlaybackCorrectionTolerance(24), 0.75);
+  assert.equal(assemblyPreviewSeekTarget(decoding, 5, 24, true), null);
+
+  decoding.currentTime = 3.5;
+  assert.equal(assemblyPreviewSeekTarget(decoding, 5, 24, true), 5);
+
+  decoding.seeking = true;
+  assert.equal(assemblyPreviewSeekTarget(decoding, 5.2, 24, true), null);
+});
+
+test("Timeline playback keeps decoded layers visible but waits during an active correction", () => {
+  const video = { readyState: 4, videoWidth: 1280, videoHeight: 720, currentTime: 3.5, seeking: false };
+  assert.equal(assemblyPreviewElementState({ type: "video" }, video, 5, 24, true).ready, true);
+  video.seeking = true;
+  assert.equal(assemblyPreviewElementState({ type: "video" }, video, 5, 24, true).ready, false);
 });
 
 test("Timeline live preview gives repeated source clips independent media elements", () => {
