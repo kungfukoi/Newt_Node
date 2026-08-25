@@ -12227,9 +12227,16 @@ function NodeBody({
         type: item.type,
         label: item.label || `${previewSource.label} ${index + 1}`,
         fileName: item.fileName || fileNameFromLocalUrl(item.url),
-        mimeType: item.mimeType || mimeForOutputItem(item)
+        mimeType: item.mimeType || mimeForOutputItem(item),
+        sourceNodeId: previewSource.sourceNodeId,
+        sourcePort: previewSource.sourcePort
       };
       setOutputItemDragData(event.dataTransfer, dragItem, outputDragMime);
+    }
+
+    function startPreviewStageDrag(event, stopPropagation = false) {
+      if (stopPropagation) event.stopPropagation();
+      startPreviewThumbDrag(event, previewItem, previewIndex);
     }
 
     function previewLayoutDropAllowed(event) {
@@ -12385,11 +12392,37 @@ function NodeBody({
 
         {activePreviewTab === "preview" ? (
           <>
-            <div className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+            <div
+              className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`}
+              draggable={previewItem?.type === "image" || previewItem?.type === "video"}
+              onPointerDown={(event) => event.stopPropagation()}
+              onDragStart={startPreviewStageDrag}
+              onDragEnd={(event) => finishOutputItemDragData(previewItem, event)}
+              title={previewItem?.type === "video"
+                ? "Drag video to the canvas to create a Video node"
+                : previewItem?.type === "image" ? "Drag image to the canvas to create an Image node" : undefined}
+            >
               {previewItem?.type === "image" && (previewItem.live
                 ? <TimelineLivePreviewImage item={previewItem} sourceLabel={previewSource.label} />
                 : <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />)}
               {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "video" && (
+                <button
+                  type="button"
+                  className="video-output-drag-handle"
+                  draggable
+                  title="Drag video to the canvas or Timeline media bin"
+                  aria-label="Drag preview video"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onDragStart={(event) => startPreviewStageDrag(event, true)}
+                  onDragEnd={(event) => {
+                    event.stopPropagation();
+                    finishOutputItemDragData(previewItem, event);
+                  }}
+                >
+                  <GripVertical size={14} />
+                </button>
+              )}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>

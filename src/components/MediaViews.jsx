@@ -18,8 +18,6 @@ function clampedProjectOutputDrawerWidth(width, workspace) {
 }
 
 export function MediaPreview({ node, onPreviewOpen }) {
-  const videoDragModifierRef = React.useRef(false);
-
   if (!node.data.resultUrl) {
     return (
       <div className="media-preview empty">
@@ -44,17 +42,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   }
 
   function endPreviewDrag(event) {
-    videoDragModifierRef.current = false;
     finishOutputItemDragData(dragItem, event);
-  }
-
-  function startVideoPreviewDrag(event) {
-    if (!event.ctrlKey && !event.metaKey && !videoDragModifierRef.current) {
-      event.preventDefault();
-      return;
-    }
-
-    startPreviewDrag(event);
   }
 
   function startVideoHandleDrag(event) {
@@ -65,16 +53,6 @@ export function MediaPreview({ node, onPreviewOpen }) {
   function endVideoHandleDrag(event) {
     event.stopPropagation();
     endPreviewDrag(event);
-  }
-
-  function startVideoPreviewPointer(event) {
-    event.stopPropagation();
-    videoDragModifierRef.current = Boolean(event.ctrlKey || event.metaKey);
-  }
-
-  function stopVideoPreviewPointer(event) {
-    event.stopPropagation();
-    videoDragModifierRef.current = false;
   }
 
   if (node.type === "image") {
@@ -111,12 +89,10 @@ export function MediaPreview({ node, onPreviewOpen }) {
       <div
         className="media-preview aspect-safe-media-frame"
         draggable
-        onPointerDown={startVideoPreviewPointer}
-        onPointerUp={stopVideoPreviewPointer}
-        onPointerCancel={stopVideoPreviewPointer}
-        onDragStart={startVideoPreviewDrag}
+        onPointerDown={(event) => event.stopPropagation()}
+        onDragStart={startPreviewDrag}
         onDragEnd={endPreviewDrag}
-        title="Scrub with left-drag. Ctrl/Command-drag the video or use the grip to create another node or add it to Timeline."
+        title="Drag video to the canvas to create another Video node, or add it to Timeline."
       >
         <video src={displayMediaUrl(node.data.resultUrl)} controls muted loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />
         <button
@@ -1922,13 +1898,12 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 }
 
 export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult, onPreviewOpen, editContext, sourceNodeId = "", sourcePort = "" }) {
-  const videoDragModifierRef = React.useRef(false);
   const items = normalizedResultItems(resultItems, resultUrl, type);
   const activeIndex = Math.min(Math.max(Number(selectedIndex) || 0, 0), Math.max(items.length - 1, 0));
   const activeItem = items[activeIndex];
   const canDragActiveItem = activeItem?.type === "image" || activeItem?.type === "video";
   const activeDragTitle = activeItem?.type === "video"
-    ? "Scrub video with left-drag. Ctrl/Command-drag to use this video in another node or Timeline."
+    ? "Drag video to the canvas to create another Video node, or add it to Timeline."
     : canDragActiveItem ? "Drag result into another node" : undefined;
 
   function selectOffset(offset) {
@@ -1945,13 +1920,12 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
     link.click();
   }
 
-  function startResultDrag(event, forceVideoDrag = false) {
-    const modifierDrag = event.ctrlKey || event.metaKey || videoDragModifierRef.current;
-    if (!canDragActiveItem || !activeItem?.url || (activeItem.type === "video" && !modifierDrag && !forceVideoDrag)) {
+  function startResultDrag(event, stopPropagation = false) {
+    if (!canDragActiveItem || !activeItem?.url) {
       event.preventDefault();
       return;
     }
-    if (forceVideoDrag) event.stopPropagation();
+    if (stopPropagation) event.stopPropagation();
 
     const dragItem = {
       id: activeItem.id || `${activeItem.type || type}:${activeItem.url}`,
@@ -1971,21 +1945,13 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
       {activeItem && (
         <div
           className="result-carousel"
-          onPointerDown={(event) => {
-            event.stopPropagation();
-            videoDragModifierRef.current = Boolean(event.ctrlKey || event.metaKey);
-          }}
-          onPointerUp={() => { videoDragModifierRef.current = false; }}
-          onPointerCancel={() => { videoDragModifierRef.current = false; }}
+          onPointerDown={(event) => event.stopPropagation()}
         >
           <div
             className="result-item"
             draggable={canDragActiveItem}
             onDragStart={startResultDrag}
-            onDragEnd={(event) => {
-              videoDragModifierRef.current = false;
-              finishOutputItemDragData(activeItem, event);
-            }}
+            onDragEnd={(event) => finishOutputItemDragData(activeItem, event)}
             onDoubleClick={(event) => {
               if (activeItem.type !== "image") return;
               event.preventDefault();

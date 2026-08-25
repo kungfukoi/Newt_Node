@@ -6989,6 +6989,7 @@ video.newtnode-video-fallback {
 }
 
 .preview-stage {
+  position: relative;
   display: grid;
   overflow: hidden;
   min-height: 0;
