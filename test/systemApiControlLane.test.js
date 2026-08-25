@@ -60,3 +60,36 @@ test("workflow save requests use the responsive control lane", async () => {
     globalThis.window = previousWindow;
   }
 });
+
+test("workflow JSON saves retry directly when the client proxy stops responding", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const urls = [];
+  globalThis.window = {
+    location: { hostname: "127.0.0.1", port: "5176" }
+  };
+  globalThis.fetch = (url, options = {}) => {
+    urls.push(String(url));
+    if (String(url) !== "/api/system/save-workflow-file") return Promise.resolve(jsonResponse({ ok: true }));
+    return new Promise((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")), { once: true });
+    });
+  };
+
+  try {
+    const { response } = await (await import("../src/api/newtApi.js")).fetchJsonApi(
+      "/api/system/save-workflow-file",
+      { method: "POST", body: "{}" },
+      "Save workflow",
+      { preferClientProxy: true, timeoutMs: 5 }
+    );
+    assert.equal(response.ok, true);
+    assert.deepEqual(urls, [
+      "/api/system/save-workflow-file",
+      "http://127.0.0.1:3336/api/system/save-workflow-file"
+    ]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    globalThis.window = previousWindow;
+  }
+});

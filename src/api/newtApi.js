@@ -11,21 +11,21 @@ function ensureOk(response, data, fallbackMessage) {
   return data;
 }
 
-export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false } = {}) {
+export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : localApiFetchUrl(path);
   let response;
   try {
-    response = await fetch(requestUrl, options);
+    response = await fetchWithTimeout(requestUrl, options, timeoutMs);
   } catch (error) {
     if (retryLocalApi && requestUrl === path && canRetryLocalApi(path)) {
       try {
-        response = await fetch(`${localApiBaseUrl}${path}`, options);
+        response = await fetchWithTimeout(`${localApiBaseUrl}${path}`, options, timeoutMs);
       } catch {
         throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
       }
     } else if (requestUrl !== path && retryLocalApi) {
       try {
-        response = await fetch(path, options);
+        response = await fetchWithTimeout(path, options, timeoutMs);
       } catch {
         throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
       }
@@ -60,6 +60,19 @@ export async function fetchJsonApi(path, options = {}, label = "Request", { retr
         `${label} failed. ${retryError.message || "Could not reach the updated backend route."} Restart npm run dev so the updated server is active.`
       );
     }
+  }
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const duration = Math.max(0, Number(timeoutMs) || 0);
+  if (!duration || options?.signal) return fetch(url, options);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), duration);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -322,7 +335,7 @@ export const systemApi = {
   },
 
   saveWorkflowFile(body, label = "Save workflow") {
-    return controlJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
+    return controlJsonApi("/api/system/save-workflow-file", jsonBody(body), label, { timeoutMs: 15000 });
   },
 
   comfyWanStatus({ workflow = "", rootPath = "" } = {}) {
@@ -348,11 +361,11 @@ async function systemDialogRequest(path, body, label) {
   return controlJsonApi(path, jsonBody(body), label);
 }
 
-function controlJsonApi(path, options, label) {
+function controlJsonApi(path, options, label, requestOptions = {}) {
   // Generations keep long-lived requests open against the API origin. Sending
   // desktop controls through the client proxy gives them an independent
   // browser connection pool while reaching the same local Express server.
-  return fetchJsonApi(path, options, label, { preferClientProxy: true });
+  return fetchJsonApi(path, options, label, { preferClientProxy: true, ...requestOptions });
 }
 
 async function controlRequestData(path, options, fallbackMessage) {
