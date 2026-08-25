@@ -14,7 +14,7 @@ import {
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
-import { normalizeTextAgentMessages } from "../textAgent.js";
+import { normalizeTextAgentMessages, replaceLatestTextAgentAssistantMessage } from "../textAgent.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
@@ -138,9 +138,16 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
           aria-label="Text Agent response"
           aria-live="polite"
           aria-busy={running}
-          readOnly
+          readOnly={running}
           value={response}
           placeholder={running ? "Thinking..." : "Responses will appear here"}
+          onChange={(event) => {
+            const resultText = event.target.value;
+            onUpdate(node.id, {
+              resultText,
+              agentMessages: replaceLatestTextAgentAssistantMessage(messages, resultText)
+            });
+          }}
         />
         <div className="text-agent-composer">
           <textarea

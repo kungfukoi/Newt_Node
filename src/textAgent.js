@@ -36,6 +36,24 @@ export function appendTextAgentMessage(messages, message) {
   return normalizeTextAgentMessages([...normalizeTextAgentMessages(messages), message]);
 }
 
+export function replaceLatestTextAgentAssistantMessage(messages, text) {
+  const normalized = normalizeTextAgentMessages(messages);
+  const value = String(text || "").trim();
+  let assistantIndex = -1;
+  for (let index = normalized.length - 1; index >= 0; index -= 1) {
+    if (normalized[index].role === "assistant") {
+      assistantIndex = index;
+      break;
+    }
+  }
+
+  if (assistantIndex < 0) {
+    return value ? appendTextAgentMessage(normalized, createTextAgentMessage("assistant", value)) : normalized;
+  }
+  if (!value) return normalized.filter((_message, index) => index !== assistantIndex);
+  return normalized.map((message, index) => index === assistantIndex ? { ...message, text: value } : message);
+}
+
 export function textAgentRequestMessages(messages = []) {
   return normalizeTextAgentMessages(messages, textAgentRequestMessageLimit).map(({ role, text }) => ({ role, text }));
 }
