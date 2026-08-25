@@ -23,6 +23,7 @@ import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
 import {
   generationProgressMiddleware,
   listGenerationProgress,
@@ -711,6 +712,7 @@ function buildHealthPayload() {
       storyboardQc: true,
       mediaThumbnail: true,
       generationProgress: true,
+      workflowAutosave: true,
       settings: true
     },
     ffmpeg: {
@@ -2522,6 +2524,25 @@ app.post("/api/saved-workflows/register-package", async (req, res) => {
     console.error(error);
     res.status(400).json({ error: error.message || "Could not register workflow package." });
   }
+});
+
+app.post("/api/saved-workflows/autosave", async (req, res) => {
+  await timedApi("workflows:autosave", async () => {
+    try {
+      const workflow = req.body.workflow || req.body;
+      const packagePath = await registeredAutosavePackagePath({
+        workflowId: req.body.workflowId || workflow.id,
+        packagePath: req.body.packagePath || workflow.packagePath || workflow.package?.rootPath
+      });
+      const saved = await saveWorkflowAutosave(packagePath, workflow, {
+        workflowFileName: req.body.workflowFileName || workflow.package?.workflowFileName || workflow.fileName
+      });
+      res.json(saved);
+    } catch (error) {
+      console.error(error);
+      res.status(error.status || 500).json({ error: error.message || "Could not autosave workflow." });
+    }
+  });
 });
 
 app.delete("/api/saved-workflows/:fileName", async (req, res) => {
@@ -9428,6 +9449,7 @@ async function ensureWorkflowPackageDirs(packagePath) {
     mkdir(path.join(packagePath, workflowPackageOutputDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageThumbnailDirName), { recursive: true }),
+    mkdir(path.join(packagePath, workflowAutosaveDirectoryName), { recursive: true }),
     mkdir(metadataDir, { recursive: true })
   ]);
   await hideWorkflowPackageMetadataDir(metadataDir);
@@ -10043,14 +10065,14 @@ async function readWorkflowFromFilePath(filePath) {
     throw new Error("That JSON file is not a NewtNode workflow.");
   }
 
-  const workflowFileName = path.basename(workflowFilePath);
-  const packagePath = path.dirname(workflowFilePath);
+  const openContext = workflowAutosaveOpenContext(workflowFilePath, workflow);
+  const { packagePath, workflowFileName } = openContext;
   const openedWorkflow = {
     ...workflow,
     id: workflow.id || null,
     name: workflow.name || path.basename(workflowFileName, ".json") || "Untitled node project",
     fileName: workflowFileName,
-    filePath: workflowFilePath
+    filePath: openContext.displayFilePath
   };
 
   if (!workflowShouldRegisterOpenedPackage(openedWorkflow, packagePath)) {
@@ -10058,19 +10080,43 @@ async function readWorkflowFromFilePath(filePath) {
   }
 
   const registeredWorkflowId = openedWorkflow.id || randomUUID();
-  return writeWorkflowFile(
-    normalizeWorkflowPackageRegistration({
-      ...openedWorkflow,
-      id: registeredWorkflowId,
-      packagePath,
-      package: {
-        ...(openedWorkflow.package || {}),
-        rootPath: packagePath,
-        workflowFileName
-      },
-      graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
-    })
-  );
+  const normalizedWorkflow = normalizeWorkflowPackageRegistration({
+    ...openedWorkflow,
+    id: registeredWorkflowId,
+    packagePath,
+    package: {
+      ...(openedWorkflow.package || {}),
+      rootPath: packagePath,
+      workflowFileName
+    },
+    graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
+  });
+  const autosave = normalizedWorkflow.autosave;
+  if (openContext.isAutosave) delete normalizedWorkflow.autosave;
+  const registered = await writeWorkflowFile(normalizedWorkflow);
+  return openContext.isAutosave ? { ...registered, autosave } : registered;
+}
+
+async function registeredAutosavePackagePath({ workflowId = "", packagePath = "" } = {}) {
+  const id = String(workflowId || "").trim();
+  const packageRoot = normalizeWorkflowPackagePath(packagePath);
+  if (!id || !packageRoot || !existsSync(packageRoot)) {
+    const error = new Error("Autosave requires a saved NewtNode workflow package.");
+    error.status = 400;
+    throw error;
+  }
+
+  const candidates = await findRegisteredWorkflowPackages(id);
+  const isRegistered = candidates.some((workflow) => sameWorkflowPath(
+    workflow.packagePath || workflow.package?.rootPath,
+    packageRoot
+  ));
+  if (!isRegistered) {
+    const error = new Error("Autosave package is not registered. Save or reopen the workflow package first.");
+    error.status = 400;
+    throw error;
+  }
+  return packageRoot;
 }
 
 async function saveWorkflowToFilePath(filePath, workflow) {

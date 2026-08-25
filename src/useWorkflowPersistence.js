@@ -10,6 +10,7 @@ import {
 import { lastPackageParentPath, rememberOpenedWorkflowPath, rememberPackageParentPath, workflowPickerDefaultPath } from "./workflowPreferences.js";
 import { appendWorkflowRequestContextToForm, createWorkflowSessionId, currentWorkflowDisplayPath, selectedWorkflowProjectName, workflowRequestContextForState } from "./workflowSession.js";
 import { createNodeId, remapImportedGraph, workflowStateFingerprint } from "./workflowState.js";
+import { shouldAutosaveWorkflow, workflowAutosaveIntervalMs } from "./workflowAutosave.js";
 
 export function useWorkflowPersistence({
   savedDraft,
@@ -51,6 +52,9 @@ export function useWorkflowPersistence({
   const localWorkflowHandleRef = React.useRef(null);
   const unsavedPromptResolverRef = React.useRef(null);
   const saveInFlightRef = React.useRef(null);
+  const autosaveInFlightRef = React.useRef(null);
+  const autosaveStateRef = React.useRef(null);
+  const lastAutosavedFingerprintRef = React.useRef("");
   const [cleanWorkflowFingerprint, setCleanWorkflowFingerprint] = React.useState(() => workflowStateFingerprint(savedDraft));
   const [projects, setProjects] = React.useState([]);
   const [localWorkflowFileName, setLocalWorkflowFileName] = React.useState("");
@@ -67,6 +71,31 @@ export function useWorkflowPersistence({
     () => currentWorkflowDisplayPath({ workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName }),
     [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]
   );
+
+  React.useEffect(() => {
+    autosaveStateRef.current = {
+      projectId,
+      projectName,
+      savedProjectName,
+      projectPackagePath,
+      workflowFilePath,
+      nodes,
+      edges,
+      groups,
+      viewport,
+      currentFingerprint: currentWorkflowFingerprint,
+      cleanFingerprint: cleanWorkflowFingerprint
+    };
+  }, [projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath, nodes, edges, groups, viewport, currentWorkflowFingerprint, cleanWorkflowFingerprint]);
+
+  React.useEffect(() => {
+    lastAutosavedFingerprintRef.current = "";
+    if (!projectId || !projectPackagePath) return undefined;
+    const interval = window.setInterval(() => {
+      void autosaveCurrentWorkflow();
+    }, workflowAutosaveIntervalMs);
+    return () => window.clearInterval(interval);
+  }, [projectId, projectPackagePath]);
 
   React.useEffect(() => {
     if (!currentWorkflowPath && !saveStatus) {
@@ -166,6 +195,63 @@ export function useWorkflowPersistence({
 
   function workflowFileNameFromPath(filePath) {
     return String(filePath || "").trim().split(/[\\/]/).filter(Boolean).pop() || "";
+  }
+
+  async function autosaveCurrentWorkflow() {
+    const state = autosaveStateRef.current;
+    if (!state || autosaveInFlightRef.current) return false;
+    if (!shouldAutosaveWorkflow({
+      projectId: state.projectId,
+      packagePath: state.projectPackagePath,
+      currentFingerprint: state.currentFingerprint,
+      cleanFingerprint: state.cleanFingerprint,
+      lastAutosavedFingerprint: lastAutosavedFingerprintRef.current
+    })) return false;
+
+    const saveNodes = typeof prepareNodesForSave === "function" ? prepareNodesForSave(state.nodes) : state.nodes;
+    const autosaveFingerprint = workflowStateFingerprint({
+      nodes: saveNodes,
+      edges: state.edges,
+      groups: state.groups,
+      projectName: state.projectName,
+      projectPackagePath: state.projectPackagePath
+    });
+    if (autosaveFingerprint === state.cleanFingerprint || autosaveFingerprint === lastAutosavedFingerprintRef.current) return false;
+
+    const workflowFileName = workflowFileNameFromPath(state.workflowFilePath)
+      || workflowFileNameForProject(state.savedProjectName || state.projectName);
+    const workflow = buildWorkflowDocument({
+      id: state.projectId,
+      name: state.projectName,
+      fileName: workflowFileName,
+      packagePath: state.projectPackagePath,
+      nodes: saveNodes,
+      edges: state.edges,
+      groups: state.groups,
+      viewport: state.viewport
+    });
+
+    autosaveInFlightRef.current = workflowApi.autosave({
+      workflowId: state.projectId,
+      packagePath: state.projectPackagePath,
+      workflowFileName,
+      workflow
+    });
+    try {
+      const saved = await autosaveInFlightRef.current;
+      lastAutosavedFingerprintRef.current = autosaveFingerprint;
+      const savedTime = new Date(saved.savedAt);
+      const label = Number.isNaN(savedTime.getTime())
+        ? "Autosaved"
+        : `Autosaved ${savedTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      setSaveStatus(label);
+      return true;
+    } catch (error) {
+      setSaveStatus(error.message || "Could not autosave workflow.");
+      return false;
+    } finally {
+      autosaveInFlightRef.current = null;
+    }
   }
 
   function isWritableWorkflowJsonPath(filePath) {
@@ -459,14 +545,19 @@ export function useWorkflowPersistence({
     setSelectedEdgeId(null);
     clearUndoStack?.();
     setProjectMenuOpen(false);
-    markWorkflowClean({
-      nodes: graph.nodes,
-      edges: graph.edges,
-      groups: graph.groups,
-      projectName: nextProjectName,
-      projectPackagePath: nextPackagePath
-    });
-    setSaveStatus(displayPath ? `${sourceLabel} ${displayPath}` : sourceLabel);
+    if (project.autosave?.version) {
+      setCleanWorkflowFingerprint(`autosave-recovery:${project.autosave.savedAt || Date.now()}`);
+    } else {
+      markWorkflowClean({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        groups: graph.groups,
+        projectName: nextProjectName,
+        projectPackagePath: nextPackagePath
+      });
+    }
+    const openedLabel = project.autosave?.version ? "Opened autosave" : sourceLabel;
+    setSaveStatus(displayPath ? `${openedLabel} ${displayPath}` : openedLabel);
   }
 
   async function createNewWorkflow() {

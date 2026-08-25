@@ -605,6 +605,12 @@ Portable packages are the default Save As shape for workflows that need to move 
   ```text
   WorkflowName/
     WorkflowName.json
+    autosaves/
+      autosave-1.json
+      autosave-2.json
+      autosave-3.json
+      autosave-4.json
+      autosave-5.json
     inputs/
     outputs/
     dependencies/
@@ -613,6 +619,8 @@ Portable packages are the default Save As shape for workflows that need to move 
   ```
 
 - `inputs/` contains uploaded source media used by graph nodes.
+- `autosaves/` contains five rotating JSON-only recovery snapshots. A dirty packaged workflow is captured every two minutes; unchanged states are skipped, the oldest slot is overwritten, and existing package assets are referenced rather than duplicated.
+- Autosaving must not overwrite the primary workflow JSON, mark the workflow clean, block manual saves, or add recovery commands to the File menu. Recovery uses the existing Open command on an `autosave-N.json` file, resolves assets against the parent package root, and leaves the restored graph dirty until the user saves it manually.
 - `outputs/` contains generated media and explicit node outputs.
 - `dependencies/` contains derived helper assets needed to rerun or inspect the graph, such as padded frames, composed mood boards, masks, and other intermediate support files that are not primary user uploads or final outputs.
 - `.newtnode/manifest.json` records package metadata and copied asset entries. It should help diagnose missing assets without becoming required runtime state. Keep the package root visually focused on the workflow JSON and asset folders.

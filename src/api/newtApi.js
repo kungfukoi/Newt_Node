@@ -92,6 +92,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("saved-workflows/autosave")) return "workflowAutosave";
   if (path.includes("open-project-output-folder")) return "projectOutputFolder";
   if (path.includes("edit-preview")) return "editPreview";
   if (path.includes("edit-media")) return "editMedia";
@@ -419,6 +420,10 @@ export const workflowApi = {
 
   save(workflow) {
     return postJson("/api/saved-workflows", workflow, "Could not save workflow.");
+  },
+
+  autosave(body) {
+    return postJson("/api/saved-workflows/autosave", body, "Could not autosave workflow.");
   },
 
   registerPackage(workflow) {

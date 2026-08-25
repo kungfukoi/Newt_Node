@@ -11,6 +11,7 @@ import {
   MousePointer2,
   Minus,
   Pause,
+  PanelLeftDashed,
   Play,
   Plus,
   Redo2,
@@ -39,6 +40,7 @@ import {
   normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
+  removeAssemblyMedia,
   retimeAssemblyClip,
   setAssemblyInPoint,
   setAssemblyLoopInOut,
@@ -58,7 +60,7 @@ import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
 import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
 import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
-import { assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
+import { assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
 import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
@@ -78,6 +80,7 @@ export function AssemblyNodeBody({
   onUpdate,
   onRun,
   onProbeMedia,
+  onRemoveMediaConnection,
   running,
   onConnectStart,
   onDisconnectInput,
@@ -90,6 +93,7 @@ export function AssemblyNodeBody({
   const [dragTargetTrackId, setDragTargetTrackId] = React.useState("");
   const [draggingClipId, setDraggingClipId] = React.useState("");
   const [clipClipboard, setClipClipboard] = React.useState(null);
+  const [splitGuide, setSplitGuide] = React.useState(null);
   const historyRef = React.useRef(createAssemblyHistory(initialState));
   const timelineRef = React.useRef(initialState);
   const clockRef = React.useRef(null);
@@ -576,9 +580,20 @@ export function AssemblyNodeBody({
   function handleClipClick(event, clip) {
     event.stopPropagation();
     if (timeline.tool !== "blade") return;
-    const rect = event.currentTarget.parentElement.getBoundingClientRect();
-    const time = (event.clientX - rect.left) / pixelsPerSecond;
-    commitTimeline(splitAssemblyClip(timelineRef.current, clip.id, time));
+    const guide = assemblySplitGuide(event.currentTarget.parentElement, event.clientX, pixelsPerSecond, clip, timeline.frameRate);
+    if (!guide) return;
+    setSplitGuide(null);
+    commitTimeline(splitAssemblyClip(timelineRef.current, clip.id, guide.time));
+  }
+
+  function handleClipPointerMove(event, clip) {
+    if (timeline.tool !== "blade") return;
+    const guide = assemblySplitGuide(event.currentTarget.parentElement, event.clientX, pixelsPerSecond, clip, timeline.frameRate);
+    setSplitGuide((current) => {
+      const next = guide ? { clipId: clip.id, ...guide } : null;
+      if (current?.clipId === next?.clipId && current?.time === next?.time) return current;
+      return next;
+    });
   }
 
   function handleLaneDrop(event, trackId) {
@@ -599,7 +614,16 @@ export function AssemblyNodeBody({
     return true;
   }
 
+  function handleMediaBinRemove(media) {
+    const next = removeAssemblyMedia(timelineRef.current, media.id);
+    if (next === timelineRef.current) return;
+    if (clipClipboard?.clip?.mediaId === media.id) setClipClipboard(null);
+    commitTimeline(next);
+    if (media.linkedSource) onRemoveMediaConnection?.(node.id, media);
+  }
+
   function selectTool(tool) {
+    setSplitGuide(null);
     const next = setAssemblyView(timelineRef.current, { tool });
     replaceTimeline(next, true);
   }
@@ -779,6 +803,7 @@ export function AssemblyNodeBody({
       <AssemblyMediaBin
         media={timeline.media}
         onOutputDrop={handleMediaBinOutputDrop}
+        onRemove={handleMediaBinRemove}
         connectionControls={(
           <div className="assembly-input-ports">
             {inputPorts.map((port) => (
@@ -808,6 +833,7 @@ export function AssemblyNodeBody({
         <div className="assembly-tool-group" role="toolbar" aria-label="Timeline edit tools">
           <IconButton active={timeline.tool === "select"} title="Select and move clips" onClick={() => selectTool("select")}><MousePointer2 size={14} /></IconButton>
           <IconButton active={timeline.tool === "blade"} title="Split clips" onClick={() => selectTool("blade")}><Scissors size={14} /></IconButton>
+          <IconButton title="Split selected clip at playhead" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><PanelLeftDashed size={14} /></IconButton>
           <IconButton active={timeline.tool === "slip"} title="Slip clip source timing" onClick={() => selectTool("slip")}><span className="assembly-slip-icon">Slip</span></IconButton>
           <IconButton active={timeline.ripple} title="Ripple trim and delete" onClick={() => replaceTimeline(setAssemblyView(timelineRef.current, { ripple: !timeline.ripple }), true)}><span className="assembly-ripple-icon">Ripple</span></IconButton>
         </div>
@@ -816,7 +842,6 @@ export function AssemblyNodeBody({
           <IconButton title="Redo" disabled={!historyRef.current.canRedo()} onClick={redo}><Redo2 size={14} /></IconButton>
           <IconButton title="Copy selected clip (Ctrl/Cmd+C)" disabled={!timeline.selectedClipId} onClick={copySelectedClip}><Copy size={14} /></IconButton>
           <IconButton title="Paste clip at playhead (Ctrl/Cmd+V)" disabled={!clipClipboard} onClick={pasteCopiedClip}><ClipboardPaste size={14} /></IconButton>
-          <IconButton title="Split selected clip at playhead" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><Scissors size={14} /></IconButton>
           <IconButton title="Delete selected clip (Delete/Backspace)" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(removeAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.ripple))}><Trash2 size={14} /></IconButton>
         </div>
         <div className="assembly-marker-tools" role="toolbar" aria-label="Timeline range markers">
@@ -893,15 +918,22 @@ export function AssemblyNodeBody({
                   return (
                     <div
                       key={clip.id}
-                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
+                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
                       style={{ left: clip.start * pixelsPerSecond, width: Math.max(10, clip.duration * pixelsPerSecond), "--assembly-waveform": media.waveformUrl ? `url("${displayMediaUrl(media.waveformUrl)}")` : "none" }}
                       onPointerDown={(event) => handleClipPointerDown(event, clip, track)}
+                      onPointerMove={(event) => handleClipPointerMove(event, clip)}
+                      onPointerLeave={() => setSplitGuide((current) => current?.clipId === clip.id ? null : current)}
                       onClick={(event) => handleClipClick(event, clip)}
                       title={`${media.label}\n${formatTimecode(clip.duration, timeline.frameRate)}`}
                     >
                       <button type="button" className="assembly-trim-handle left" aria-label="Trim clip start" onPointerDown={(event) => beginTrim(event, clip.id, "left")} />
                       <span>{media.label}</span>
                       <small>{formatClipDuration(clip.duration)}{clip.speed !== 100 ? ` | ${clip.speed}%` : ""}{clip.reverse ? " | R" : ""}</small>
+                      {timeline.tool === "blade" && splitGuide?.clipId === clip.id ? (
+                        <div className="assembly-split-guide" style={{ left: splitGuide.left }} aria-hidden="true">
+                          <i>{formatTimecode(splitGuide.time, timeline.frameRate)}</i>
+                        </div>
+                      ) : null}
                       <button type="button" className="assembly-trim-handle right" aria-label="Trim clip end" onPointerDown={(event) => beginTrim(event, clip.id, "right")} />
                     </div>
                   );

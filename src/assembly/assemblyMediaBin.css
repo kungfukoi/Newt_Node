@@ -231,6 +231,7 @@
 }
 
 .assembly-media-bin-item {
+  position: relative;
   flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
@@ -241,6 +242,30 @@
   background: #1a1a1a;
   cursor: grab;
   user-select: none;
+}
+
+.assembly-media-bin-remove {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  color: #d8d8d8;
+  background: rgba(10, 10, 10, 0.8);
+  cursor: pointer;
+}
+
+.assembly-media-bin-remove:hover,
+.assembly-media-bin-remove:focus-visible {
+  border-color: #e8d229;
+  color: #111;
+  background: #e8d229;
 }
 
 .assembly-media-bin-item:hover,

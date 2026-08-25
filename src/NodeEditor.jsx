@@ -5069,6 +5069,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus("Disconnected input");
   }
 
+  function disconnectAssemblyMedia(nodeId, media) {
+    const targetPort = media?.type === "image" ? "imageIn" : media?.type === "audio" ? "audioIn" : "videoIn";
+    const edgeIds = edgesRef.current
+      .filter((edge) => edge.to.nodeId === nodeId && edge.to.port === targetPort)
+      .filter((edge) => edge.from.nodeId === media?.sourceNodeId && edge.from.port === media?.sourcePort)
+      .map((edge) => edge.id);
+    removeEdges(edgeIds);
+  }
+
   function selectEdge(event, edgeId) {
     event.preventDefault();
     event.stopPropagation();
@@ -7108,6 +7117,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onFrameItCapture={captureFrameItFrame}
         onFrameItGenerate={generateFrameItMedia}
         onAssemblyProbe={probeAssemblyMedia}
+        onAssemblyMediaDisconnect={disconnectAssemblyMedia}
         onCanvasPanStart={beginCanvasPan}
         running={node.data?.status === "running"}
         transferCompiling={compilingTransferNodeId === node.id}
@@ -7893,6 +7903,7 @@ function NodeCard({
   onFrameItCapture,
   onFrameItGenerate,
   onAssemblyProbe,
+  onAssemblyMediaDisconnect,
   onCanvasPanStart,
   running,
   transferCompiling,
@@ -8237,6 +8248,7 @@ function NodeCard({
         onFrameItCapture={onFrameItCapture}
         onFrameItGenerate={onFrameItGenerate}
         onAssemblyProbe={onAssemblyProbe}
+        onAssemblyMediaDisconnect={onAssemblyMediaDisconnect}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
@@ -10607,6 +10619,7 @@ function NodeBody({
   onFrameItCapture,
   onFrameItGenerate,
   onAssemblyProbe,
+  onAssemblyMediaDisconnect,
   onCanvasPanStart,
   incomingByNode,
   transferCompiling,
@@ -10714,6 +10727,7 @@ function NodeBody({
         onUpdate={onUpdate}
         onRun={onRun}
         onProbeMedia={onAssemblyProbe}
+        onRemoveMediaConnection={onAssemblyMediaDisconnect}
         running={running}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}

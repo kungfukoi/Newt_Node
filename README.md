@@ -117,12 +117,20 @@ NewtNode stores runtime workflow state, recent workflow indexes, uploads, genera
 ```text
 WorkflowName/
   WorkflowName.json
+  autosaves/
+    autosave-1.json
+    autosave-2.json
+    autosave-3.json
+    autosave-4.json
+    autosave-5.json
   inputs/
   outputs/
   dependencies/
   .newtnode/
     manifest.json
 ```
+
+Dirty packaged workflows are snapshotted every two minutes. The five autosave files rotate in place, reference the package's existing assets, and can be opened manually with **File > Open**. Autosaving does not replace the main workflow JSON or mark changes as manually saved.
 
 ## Named References
 
