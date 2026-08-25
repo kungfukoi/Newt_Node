@@ -49,3 +49,38 @@ test("Text Model runner sends resolved node-reference text and referenced media"
   assert.equal(requestBody.nodeTitle, "Text Model");
   assert.equal(requestBody.projectName, "Project");
 });
+
+test("Text Agent runner sends prior turns separately and keeps connected inputs", async () => {
+  let requestBody = null;
+  nodeApi.processText = async (body) => {
+    requestBody = body;
+    return {
+      response: { ok: true },
+      data: { text: "The interface should use the second layout.", model: "test-agent-model" }
+    };
+  };
+
+  const result = await runTextNodeProcessing({
+    node: { id: "agent-1", data: { title: "Design Agent" } },
+    incoming: {
+      textIn: [{ source: { type: "plainText", data: { title: "Requirements", text: "Keep the controls compact." } } }]
+    },
+    workflowContext: { projectId: "project-1", projectName: "Project" },
+    sourceLabel: (source) => source?.data?.title || source?.type || "",
+    promptPiecesForSource: () => [],
+    mode: "agent",
+    messages: [
+      { id: "one", role: "user", text: "Which layout is clearer?" },
+      { id: "two", role: "assistant", text: "The second is clearer." }
+    ],
+    text: "Refine that recommendation."
+  });
+
+  assert.equal(result.text, "The interface should use the second layout.");
+  assert.equal(requestBody.mode, "agent");
+  assert.deepEqual(requestBody.messages, [
+    { role: "user", text: "Which layout is clearer?" },
+    { role: "assistant", text: "The second is clearer." }
+  ]);
+  assert.deepEqual(requestBody.textInputs, [{ label: "Requirements", text: "Keep the controls compact." }]);
+});

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
+import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import {
@@ -14,6 +14,7 @@ import {
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
+import { normalizeTextAgentMessages } from "../textAgent.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
@@ -84,6 +85,94 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
         {running ? "Running..." : "Run Text Model"}
       </button>
       {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
+      {node.data.error && <small className="upload-error">{node.data.error}</small>}
+    </div>
+  );
+}
+
+export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const historyRef = useRef(null);
+  const draft = String(node.data.agentDraft || "");
+  const messages = normalizeTextAgentMessages(node.data.agentMessages);
+  const inputPorts = ["textIn", "imageIn", "videoIn", "styleIn"]
+    .map((id) => config.input.find((port) => port.id === id))
+    .filter(Boolean);
+
+  useEffect(() => {
+    const history = historyRef.current;
+    if (!history) return;
+    history.scrollTop = history.scrollHeight;
+  }, [messages.length, messages[messages.length - 1]?.text, running]);
+
+  const sendMessage = () => {
+    if (running || !draft.trim()) return;
+    onRun(node, { agentMessage: draft });
+  };
+
+  return (
+    <div className="node-body text-node-body text-agent-node-body">
+      <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <div className="text-input-port-stack" aria-label="Text Agent node inputs">
+        {inputPorts.map((port) => (
+          <PortHandle
+            key={port.id}
+            node={node}
+            port={port}
+            side="input"
+            onConnectStart={onConnectStart}
+            onDisconnectInput={onDisconnectInput}
+            connectedPortKeys={connectedPortKeys}
+          />
+        ))}
+      </div>
+      <div className="text-agent-shell">
+        <div className="text-agent-toolbar">
+          <span>Conversation</span>
+          <button
+            type="button"
+            className="icon-button text-agent-clear"
+            title="Clear conversation"
+            aria-label="Clear conversation"
+            disabled={running || !messages.length}
+            onClick={() => onUpdate(node.id, { agentMessages: [], resultText: "", error: "" })}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+        <div ref={historyRef} className="text-agent-history" aria-live="polite">
+          {!messages.length && !running && <div className="text-agent-empty">Responses will appear here</div>}
+          {messages.map((message) => (
+            <div key={message.id} className={`text-agent-message ${message.role}`}>
+              <span>{message.role === "assistant" ? "Agent" : "You"}</span>
+              <p>{message.text}</p>
+            </div>
+          ))}
+          {running && (
+            <div className="text-agent-message assistant pending">
+              <span>Agent</span>
+              <p>Thinking...</p>
+            </div>
+          )}
+        </div>
+        <div className="text-agent-composer">
+          <textarea
+            aria-label="Message Text Agent"
+            placeholder="Message Text Agent"
+            value={draft}
+            onChange={(event) => onUpdate(node.id, { agentDraft: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent?.isComposing) return;
+              event.preventDefault();
+              sendMessage();
+            }}
+          />
+          <button type="button" className="text-agent-send" title="Send message" aria-label="Send message" disabled={running || !draft.trim()} onClick={sendMessage}>
+            <Send size={17} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <GenerationProgress nodeId={node.id} />
+      {node.data.lastRunModel && <small className="upload-status">Responded with {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>
   );

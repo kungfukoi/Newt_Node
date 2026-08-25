@@ -8,6 +8,13 @@ test("Coverage appears directly beneath Storyboard in the node sidebar", () => {
   assert.equal(nodeTypeDefinitions[storyboardIndex + 1]?.type, "coverage");
 });
 
+test("Text Agent appears alongside Text Model without replacing saved Text Model nodes", () => {
+  const textModelIndex = nodeTypeDefinitions.findIndex(({ type }) => type === "text");
+  assert.notEqual(textModelIndex, -1);
+  assert.equal(nodeTypeDefinitions[textModelIndex + 1]?.type, "textAgent");
+  assert.equal(nodeTypeLabel("textAgent"), "Text Agent");
+});
+
 
 test("Timeline is the public label for the legacy assembly node type", () => {
   assert.equal(nodeTypeLabel("assembly"), "Timeline");

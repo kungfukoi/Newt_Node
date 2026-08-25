@@ -21,6 +21,7 @@ import {
   Lock,
   Maximize2,
   Megaphone,
+  MessageSquareText,
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -68,7 +69,7 @@ import {
   useNewtNodeVideoFallback,
   useNewtNodeVideoReady
 } from "./components/MediaViews.jsx";
-import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
+import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextAgentNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
@@ -333,6 +334,7 @@ import {
 } from "./filmDirectorRevision.js";
 import { filmDirectorUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
+import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentReferenceText } from "./textAgent.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -457,7 +459,8 @@ const nodeIcons = {
   videoModel: Film,
   storyboard: Clapperboard,
   skillDirector: Megaphone,
-  text: Type
+  text: Type,
+  textAgent: MessageSquareText
 };
 
 const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
@@ -478,6 +481,13 @@ const nodeHelpContent = {
     lines: [
       "Turns connected references and written direction into cleaner prompt text.",
       "Run the node, then use the yellow output wherever that text should drive another node."
+    ]
+  },
+  textAgent: {
+    title: "Text Agent",
+    lines: [
+      "Carries an ongoing conversation with the active text model and saves that history with the workflow.",
+      "Connected text, images, video, and style are available as context; the latest reply leaves through the yellow Prompt output."
     ]
   },
   skillDirector: {
@@ -5530,7 +5540,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModel: ["promptIn"],
         utility: ["promptIn"],
         storyboard: ["sceneDescriptionIn"],
-        text: ["textIn"]
+        text: ["textIn"],
+        textAgent: ["textIn"]
       },
       director: {
         videoModel: ["directorIn"],
@@ -5551,6 +5562,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModel: ["startFrameIn", "referenceImageIn", "endFrameIn"],
         utility: utilityImageInputPortIds,
         text: ["imageIn"],
+        textAgent: ["imageIn"],
         skillDirector: ["imageIn", "locationIn"]
       },
       video: {
@@ -5560,7 +5572,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         edit: ["videoIn"],
         assembly: ["videoIn"],
         utility: ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"],
-        text: ["videoIn"]
+        text: ["videoIn"],
+        textAgent: ["videoIn"]
       },
       audio: {
         videoModel: ["referenceAudioIn"],
@@ -5617,7 +5630,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "video" || source.type === "videoModel") return "video";
     if (source.type === "audio") return "audio";
     if (source.type === "skillDirector") return "director";
-    if (source.type === "plainText" || source.type === "text") return "prompt";
+    if (["plainText", "text", "textAgent"].includes(source.type)) return "prompt";
     if (source.type === "image" || source.type === "imageModel") return "image";
     return "";
   }
@@ -5667,7 +5680,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
+      if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       return "Auto Aspect outputs connect to image inputs or previews";
@@ -5685,7 +5698,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
+      if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       return "Coverage output connects to image inputs or previews";
     }
@@ -5693,7 +5706,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "camera") {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "imageIn") return "";
+        if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
         if (target.type === "camera" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
@@ -5717,7 +5730,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         && (!source.data.stylePreset || source.data.stylePreset === "None")
       ) return "Add custom grade colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
-      if (target.type === "text" && to.port === "styleIn") return "";
+      if (["text", "textAgent"].includes(target.type) && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting a custom Style";
         return "";
@@ -5769,7 +5782,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (utilityOutputType(source, from.port) === "video") {
         if (target.type === "output" && to.port === "sourceIn") return "";
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "videoIn") return "";
+        if (["text", "textAgent"].includes(target.type) && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"].includes(to.port)) return "";
         if (target.type === "edit" && to.port === "videoIn") return "";
@@ -5786,7 +5799,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && isUtilityVideoStitchModel(target.data?.utilityVideoModel) && to.port === "referenceVideoIn") return "";
       if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
+      if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       return "Utility image output connects to image inputs";
     }
@@ -5794,7 +5807,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "edit") {
       if (editOutputType(source) === "video") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "videoIn") return "";
+        if (["text", "textAgent"].includes(target.type) && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
         if (target.type === "edit" && to.port === "videoIn") return "";
@@ -5807,7 +5820,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
+      if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
@@ -5816,7 +5829,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (target?.type === "utility") {
       if (to.port === "promptIn") {
-        if (["plainText", "text", "skillDirector", "imageModel", "videoModel"].includes(source.type)) return "";
+        if (["plainText", "text", "textAgent", "skillDirector", "imageModel", "videoModel"].includes(source.type)) return "";
         return "Prompt input accepts text outputs";
       }
 
@@ -5895,7 +5908,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
-        if (target.type === "text" && to.port === "imageIn") return "";
+        if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
         if (target.type === "edit" && to.port === "imageIn") return "";
         if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
         return "Composer frame output connects to image inputs";
@@ -5921,10 +5934,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return `${inputLabel} accepts image outputs`;
     }
 
-    if (target?.type === "text") {
+    if (["text", "textAgent"].includes(target?.type)) {
       if (to.port === "textIn") {
-        if (["plainText", "text", "skillDirector", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Text Model input accepts text outputs";
+        if (["plainText", "text", "textAgent", "skillDirector", "imageModel", "videoModel"].includes(source.type)) return "";
+        return "Text input accepts text outputs";
       }
 
       if (to.port === "imageIn") {
@@ -6381,7 +6394,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return data.media || null;
   }
 
-  async function runNode(node) {
+  async function runNode(node, runOptions = {}) {
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     let currentNode =
       storedNode
@@ -6430,7 +6443,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = ["text", "imageModel", "videoModel"].includes(currentNode.type)
+    const generationGroupId = ["text", "textAgent", "imageModel", "videoModel"].includes(currentNode.type)
       ? createGenerationGroupId(currentNode.type)
       : "";
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
@@ -6538,6 +6551,43 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         updateNode(currentNode.id, {
           status: "complete",
           error: "",
+          resultText: processed.text,
+          lastRunModel: processed.model
+        });
+        if (outputTarget) {
+          const saved = await saveTextToOutputTarget(outputTarget, currentNode, processed.text, requestContext);
+          if (saved) markOutputTargetSaved(outputTarget, [saved], "text");
+        }
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "textAgent") {
+        const agentMessage = String(runOptions.agentMessage ?? currentNode.data.agentDraft ?? "").trim();
+        if (!agentMessage) throw new Error("Enter a message before running Text Agent.");
+        const previousMessages = normalizeTextAgentMessages(currentNode.data.agentMessages);
+        const userMessage = createTextAgentMessage("user", agentMessage);
+        const messagesWithUser = appendTextAgentMessage(previousMessages, userMessage);
+        updateNode(currentNode.id, { agentDraft: "", agentMessages: messagesWithUser });
+
+        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current, agentMessage);
+        const resolvedText = resolveNodeReferencesInText(agentMessage, nodeReferenceContext, currentNode.id);
+        const processed = await runTextNodeProcessing({
+          node: currentNode,
+          incoming,
+          workflowContext: requestContext,
+          sourceLabel,
+          promptPiecesForSource,
+          text: resolvedText,
+          nodeReferences,
+          generationGroupId,
+          mode: "agent",
+          messages: previousMessages
+        });
+        const assistantMessage = createTextAgentMessage("assistant", processed.text);
+        updateNode(currentNode.id, {
+          status: "complete",
+          error: "",
+          agentMessages: appendTextAgentMessage(messagesWithUser, assistantMessage),
           resultText: processed.text,
           lastRunModel: processed.model
         });
@@ -10697,6 +10747,23 @@ function NodeBody({
     );
   }
 
+  if (node.type === "textAgent") {
+    return (
+      <TextAgentNodeBody
+        node={node}
+        config={config}
+        outputPort={outputPort}
+        incoming={incoming}
+        onUpdate={onUpdate}
+        onRun={onRun}
+        running={running}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
+    );
+  }
+
   if (node.type === "skillDirector") {
     return (
       <SkillDirectorNodeBody
@@ -12250,11 +12317,6 @@ function NodeBody({
       }
     }
 
-    function startPreviewStageDrag(event, stopPropagation = false) {
-      if (stopPropagation) event.stopPropagation();
-      startPreviewThumbDrag(event, previewItem, previewIndex);
-    }
-
     function previewLayoutDropAllowed(event) {
       const types = Array.from(event.dataTransfer?.types || []);
       return types.includes(previewLayoutDragMime) || hasOutputItemDragData(event.dataTransfer);
@@ -12413,35 +12475,12 @@ function NodeBody({
           <>
             <div
               className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`}
-              draggable={previewItem?.type === "image" || previewItem?.type === "video"}
               onPointerDown={(event) => event.stopPropagation()}
-              onDragStart={startPreviewStageDrag}
-              onDragEnd={(event) => finishOutputItemDragData(previewItem, event)}
-              title={previewItem?.type === "video"
-                ? "Drag video to the canvas to create a Video node"
-                : previewItem?.type === "image" ? "Drag image to the canvas to create an Image node" : undefined}
             >
               {previewItem?.type === "image" && (previewItem.live
                 ? <TimelineLivePreviewImage item={previewItem} sourceLabel={previewSource.label} />
                 : <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />)}
               {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
-              {previewItem?.type === "video" && (
-                <button
-                  type="button"
-                  className="video-output-drag-handle"
-                  draggable
-                  title="Drag video to the canvas or Timeline media bin"
-                  aria-label="Drag preview video"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onDragStart={(event) => startPreviewStageDrag(event, true)}
-                  onDragEnd={(event) => {
-                    event.stopPropagation();
-                    finishOutputItemDragData(previewItem, event);
-                  }}
-                >
-                  <GripVertical size={14} />
-                </button>
-              )}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
@@ -16572,6 +16611,16 @@ function getNodeConfig(type) {
       ],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
+    textAgent: {
+      icon: MessageSquareText,
+      input: [
+        { id: "textIn", label: "Text", color: portColors.prompt },
+        { id: "imageIn", label: "Image", color: portColors.image },
+        { id: "videoIn", label: "Video", color: portColors.video },
+        { id: "styleIn", label: "Style", color: portColors.style }
+      ],
+      output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
+    },
     skillDirector: {
       icon: Megaphone,
       input: [
@@ -16757,6 +16806,7 @@ function createDefaultNodeData(type, label, count) {
 
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
+  if (type === "textAgent") return { title, agentDraft: "", agentMessages: [], resultText: "" };
   if (type === "skillDirector") {
     const directorData = {
       title,
@@ -18605,7 +18655,7 @@ function outputPortDefinitionsForNode(node) {
     disabled: !normalizedResultItems(node?.data?.resultItems, node?.data?.resultUrl, "image").length,
     disabledReason: "Generate Coverage before connecting it"
   }));
-  if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
+  if (["text", "textAgent"].includes(node?.type)) return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
 }
 
@@ -18666,7 +18716,7 @@ function portKindForNodePort(node, portId, role) {
   if (role === "output" && node.type === "utility") return utilityOutputType(node, portId) === "video" ? "video" : "image";
   if (role === "output" && node.type === "edit" && portId === "editMaskOut") return "image";
   if (role === "output" && node.type === "edit" && portId === "editOut") return editOutputType(node);
-  if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
+  if (role === "output" && ["text", "textAgent"].includes(node.type) && portId === "promptOut") return "prompt";
   return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
 }
 
@@ -18976,6 +19026,8 @@ function buildReferenceTagHighlights(nodes, incomingByNode, groups = []) {
       ? node.data.text || ""
       : node.type === "text"
         ? [node.data.text || "", node.data.resultText || ""].join("\n")
+        : node.type === "textAgent"
+          ? [textAgentReferenceText(node.data), node.data.resultText || ""].join("\n")
         : "";
     const highlightIncoming = node.type === "storyboard" ? expandStoryboardDirectorIncoming(incoming, incomingByNode) : incoming;
     const prompt = node.type === "storyboard"
@@ -19068,6 +19120,7 @@ function connectedText(items = [], referenceContext = null) {
 
 function rawConnectedTextForSource(source) {
   if (source.type === "text") return source.data.resultText || source.data.text;
+  if (source.type === "textAgent") return source.data.resultText || source.data.agentDraft;
   if (source.type === "skillDirector") return source.data.resultText || source.data.text;
   if (source.type === "plainText") return source.data.text;
   if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
@@ -19106,9 +19159,10 @@ function nodeReferenceInputsForText(text, nodes = [], ownerNodeOrId = "", groups
   return { textInputs, imageInputs, videoInputs, mentions: [...uniqueMentions.values()] };
 }
 
-function textModelNodeReferenceInputs(node, incoming = {}, nodes = [], groups = []) {
+function textModelNodeReferenceInputs(node, incoming = {}, nodes = [], groups = [], pendingText = "") {
   const merged = emptyNodeReferenceInputs();
-  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(node?.data?.text || "", nodes, node, groups));
+  const referenceText = node?.type === "textAgent" ? textAgentReferenceText(node.data, pendingText) : node?.data?.text || "";
+  mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(referenceText, nodes, node, groups));
   (incoming.textIn || []).forEach(({ source }) => {
     mergeNodeReferenceInputs(merged, nodeReferenceInputsForText(rawConnectedTextForSource(source), nodes, source, groups));
   });
@@ -19262,6 +19316,7 @@ function nodeReferenceText(node) {
   if (!node) return "";
   if (node.type === "plainText") return String(node.data?.text || "").trim();
   if (node.type === "text") return String(node.data?.resultText || node.data?.text || "").trim();
+  if (node.type === "textAgent") return String(node.data?.resultText || node.data?.agentDraft || "").trim();
 
   const outputItem = nodeReferenceOutputItem(node);
   const mediaType = nodeResultMediaType(node);
@@ -19468,7 +19523,7 @@ function nodeReferenceSyntheticEdge(node) {
 
 function nodeReferenceOutputPort(node) {
   if (!node) return "";
-  if (node.type === "plainText" || node.type === "text") return "promptOut";
+  if (["plainText", "text", "textAgent"].includes(node.type)) return "promptOut";
   if (node.type === "image") return "imageOut";
   if (node.type === "video") return "videoOut";
   if (node.type === "audio") return "audioOut";
@@ -19633,7 +19688,7 @@ function outputPreviewSourceInfo(items = []) {
   const source = connection?.source;
   if (!source) return { sourceTitle: "", sourceFileName: "", mediaType: "" };
   const outputItem = connectedOutputItem(source, connection.edge);
-  const isTextSource = ["plainText", "text", "skillDirector"].includes(source.type);
+  const isTextSource = ["plainText", "text", "textAgent", "skillDirector"].includes(source.type);
   const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
   const outputFileName = outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || "");
   const sourceTitle = outputSourceNodeTitle(source, sourceLabel(source) || nodeTypeLabel(source.type) || "source");
@@ -22363,6 +22418,20 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "textAgent") {
+    return {
+      ...nextNode,
+      data: {
+        ...createDefaultNodeData("textAgent", data.title || "Text Agent", 1),
+        ...data,
+        title: data.title || "Text Agent",
+        agentDraft: String(data.agentDraft || ""),
+        agentMessages: normalizeTextAgentMessages(data.agentMessages),
+        resultText: String(data.resultText || "")
+      }
+    };
+  }
+
   if (nextNode.type === "skillDirector") {
     const sceneOverview = data.sceneOverview ?? data.text ?? "";
     const legacyShotCount = data.skillShotCount || data.skillSceneCount || data.shotCount || "3";
@@ -24140,7 +24209,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 function isCameraImageEdge(edge, target) {
   if (edge.from.port === "imageOut") return true;
   if (edge.to.port === "sourceIn") return true;
-  if (target?.type === "text" && edge.to.port === "imageIn") return true;
+  if (["text", "textAgent"].includes(target?.type) && edge.to.port === "imageIn") return true;
   if (target?.type === "camera" && edge.to.port === "imageIn") return true;
   if (target?.type === "composer" && edge.to.port === "imageIn") return true;
   if (target?.type === "model3d" && isModel3DImageInputPort(edge.to.port)) return true;

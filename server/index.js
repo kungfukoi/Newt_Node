@@ -22,6 +22,7 @@ import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
+import { normalizeTextAgentMessages } from "../src/textAgent.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
 import {
@@ -2945,16 +2946,18 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
 
 app.post("/api/node/process-text", async (req, res) => {
   try {
-    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Processing text" });
+    const mode = req.body.mode === "agent" ? "agent" : "process";
+    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: mode === "agent" ? "Thinking" : "Processing text" });
     const text = String(req.body.text || "").trim();
+    const messages = normalizeTextAgentMessages(req.body.messages);
     const textInputs = normalizedTextInputs(req.body.textInputs);
     const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
     const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video");
-    if (!text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
-      return res.status(400).json({ error: "Text is required." });
+    if (mode === "agent" ? !text : !text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
+      return res.status(400).json({ error: mode === "agent" ? "Enter a message before running Text Agent." : "Text is required." });
     }
 
-    const result = textLlmProvider === "openai" ? await processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) : await processTextWithFal({ text, textInputs, imageInputs, videoInputs });
+    const result = textLlmProvider === "openai" ? await processTextWithOpenAi({ mode, messages, text, textInputs, imageInputs, videoInputs }) : await processTextWithFal({ mode, messages, text, textInputs, imageInputs, videoInputs });
     const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
@@ -2965,7 +2968,7 @@ app.post("/api/node/process-text", async (req, res) => {
       provider: result.provider,
       modelName: result.model,
       endpoint: result.endpoint,
-      mode: "Text processing",
+      mode: mode === "agent" ? "Text agent" : "Text processing",
       prompt: text || textInputs.map((item) => item.text).join("\n\n"),
       submittedPrompt: result.submittedPrompt || text,
       project: projectFromBody(req.body),
@@ -2973,6 +2976,7 @@ app.post("/api/node/process-text", async (req, res) => {
       settings: {
         model: result.model,
         provider: result.provider,
+        conversationTurnCount: mode === "agent" ? messages.length + 1 : 0,
         textInputCount: textInputs.length,
         imageInputCount: imageInputs.length,
         videoInputCount: videoInputs.length
@@ -14984,7 +14988,23 @@ function textInputContext(textInputs) {
   return textInputs.map((item, index) => `Text input ${index + 1} (${item.label}):\n${item.text}`).join("\n\n");
 }
 
-function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
+function buildTextProcessingPrompt({ mode = "process", messages = [], text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
+  if (mode === "agent") {
+    const conversation = normalizeTextAgentMessages(messages)
+      .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}:\n${message.text}`)
+      .join("\n\n");
+    return [
+      textAgentInstructions(),
+      conversation ? `Conversation history:\n${conversation}` : "",
+      textInputContext(textInputs),
+      imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
+      videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : "",
+      `Current user message:\n${text}`,
+      "Reply directly to the current user message."
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
   return [
     textProcessingInstructions(),
     text ? `Original prompt:\n${text}` : "",
@@ -14997,7 +15017,7 @@ function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], v
     .join("\n\n");
 }
 
-async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }) {
+async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!process.env.FAL_KEY) {
     throw new Error("No active Fal API key is selected in Settings.");
   }
@@ -15005,12 +15025,12 @@ async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }
   const model = falTextModel;
   const imageContext = await describeImageInputs(imageInputs);
   const videoContext = await describeVideoInputs(videoInputs);
-  const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
+  const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
   const data = await subscribeFal("openrouter/router", {
     input: {
       model,
       prompt,
-      system_prompt: textProcessingInstructions()
+      system_prompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions()
     },
     logs: true
   });
@@ -15904,13 +15924,15 @@ async function runSkillDirectorWithFal({
   };
 }
 
-async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) {
+async function processTextWithOpenAi({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!openAiTextApiKey) {
     throw new Error("No OpenAI text API key is configured.");
   }
 
   const model = openAiTextModel;
   const prompt = buildTextProcessingPrompt({
+    mode,
+    messages,
     text,
     textInputs,
     imageDescriptions: imageInputs.map((item, index) => `Image ${index + 1} (${item.label}): ${item.url}`),
@@ -15924,7 +15946,7 @@ async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInput
     },
     body: JSON.stringify({
       model,
-      instructions: textProcessingInstructions(),
+      instructions: mode === "agent" ? textAgentInstructions() : textProcessingInstructions(),
       input: prompt
     })
   });
@@ -15952,6 +15974,10 @@ async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInput
 
 function textProcessingInstructions() {
   return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
+}
+
+function textAgentInstructions() {
+  return "You are NewtNode's Text Agent. Continue the saved conversation naturally and helpfully. Use connected text, style, image, and video context when relevant, preserve the user's intent, and do not rewrite their request unless they ask you to.";
 }
 
 async function describeImageInputs(imageInputs) {
