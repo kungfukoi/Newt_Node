@@ -5616,7 +5616,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function autoConnectionOutputKind(source, from) {
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
-    if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "image" : "";
+    if (source.type === "coverage") return "image";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "frameIt") return "image";
@@ -5687,9 +5687,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (source.type === "coverage") {
-      if (!normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) {
-        return "Generate Coverage before connecting it";
-      }
       if (target.type === "preview" && to.port === "sourceIn") return "";
       if (target.type === "storyboard" && ["sceneReferenceIn", "propsIn"].includes(to.port)) return "";
       if (["autoAspect", "coverage"].includes(target.type) && to.port === "imageIn") return "";
@@ -18654,11 +18651,6 @@ function outputPortDefinitionsForNode(node) {
     }
     return ports;
   }
-  if (node?.type === "coverage") return basePorts.map((port) => ({
-    ...port,
-    disabled: !normalizedResultItems(node?.data?.resultItems, node?.data?.resultUrl, "image").length,
-    disabledReason: "Generate Coverage before connecting it"
-  }));
   if (["text", "textAgent"].includes(node?.type)) return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
 }
@@ -19100,7 +19092,6 @@ function buildInactiveEdgeIds(nodes, edges) {
         if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedInput(target, edge.to.port)) return true;
         if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
-        if (source?.type === "coverage" && !normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) return true;
         if (source?.type === "frameIt" && !source.data?.resultUrl) return true;
         if (source?.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return true;
         return (
