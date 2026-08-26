@@ -312,6 +312,7 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 ## Output Node Standard
 
 - Output uses internal type `output`, has one generic `sourceIn` sink, and accepts prompt, image, camera, style, transfer, character, director, video, audio, and 3D output kinds. The connection is an edge keyed by source and Output node ids; source titles are filename metadata only.
+- The default Path is the current project's root output folder with no date subfolder. Output nodes marked `project-default` follow that project root when the active project changes; user-selected custom paths remain unchanged.
 - Connecting Output to a runnable source makes it that source's save target. A separate overwrite toggle is not needed. Running Output directly copies the selected existing source result; running the source routes each newly generated result to the same target.
 - The configured Path and Filename both expand tokens server-side. The visible insertion strip exposes `$node`, `$date`, `$index`, and `$time`. The server also preserves legacy/explicit aliases `$node_name`, `$source_node_name`, `$workflow_name`, `$output_node`, and `$output_node_name` for saved workflows and request compatibility.
 - `$node`, `$node_name`, and `$source_node_name` resolve to the connected input node's current title. `$output_node` and `$output_node_name` resolve to the Output node title. `$date` uses local `YYYY-MM-DD`; `$time` uses local `HH-MM-SS`; `$index` is a zero-padded, incrementing available-file index.

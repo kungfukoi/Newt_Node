@@ -9475,7 +9475,7 @@ async function openProjectOutputFolder(body = {}) {
 
 async function resolveProjectOutputPath(body = {}) {
   return {
-    path: path.join(await projectOutputDirectoryFromBody(body), "$date")
+    path: await projectOutputDirectoryFromBody(body)
   };
 }
 

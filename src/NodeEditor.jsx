@@ -10581,7 +10581,7 @@ function OutputNodeBody({
           <input
             ref={pathInputRef}
             value={node.data.outputPath || ""}
-            placeholder="Project outputs\\$date"
+            placeholder="Project output folder"
             onFocus={(event) => rememberTokenTarget("path", event)}
             onSelect={(event) => rememberTokenTarget("path", event)}
             onKeyUp={(event) => rememberTokenTarget("path", event)}
