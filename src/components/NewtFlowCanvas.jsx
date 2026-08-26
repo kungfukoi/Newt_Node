@@ -26,7 +26,11 @@ import {
   flowOverviewEnabled,
   flowRenderMode
 } from "../flowOverview.js";
-import { buildNodeConnectionKeys } from "../flowNodeConnections.js";
+import {
+  buildNodeConnectionKeys,
+  buildNodeInputDependencyRefs,
+  sameNodeInputDependencyRefs
+} from "../flowNodeConnections.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 
@@ -92,6 +96,10 @@ function NewtFlowCanvasInner({
     () => buildNodeConnectionKeys(graphNodes, graphEdges),
     [graphEdges, graphNodes]
   );
+  const inputDependencyRefsByNode = React.useMemo(
+    () => buildNodeInputDependencyRefs(graphNodes, graphEdges),
+    [graphEdges, graphNodes]
+  );
   const desiredNodes = React.useMemo(
     () => graphNodes.map((node) => {
       const width = normalizedNodeWidth(node.data?.nodeWidth, node.type) || estimatedNodeWidth(node.type);
@@ -111,6 +119,7 @@ function NewtFlowCanvasInner({
         data: {
           node,
           connectionKey: connectionKeysByNode.get(node.id) || "",
+          inputDependencyRefs: inputDependencyRefsByNode.get(node.id) || [],
           bootstrapHandles: handles,
           bootstrapSize: { width, height }
         },
@@ -118,7 +127,7 @@ function NewtFlowCanvasInner({
         zIndex: selectedSet.has(node.id) ? 20 : 2
       };
     }),
-    [bootstrapPortsByNode, connectionKeysByNode, graphNodes, selectedSet]
+    [bootstrapPortsByNode, connectionKeysByNode, graphNodes, inputDependencyRefsByNode, selectedSet]
   );
   const [flowNodes, setFlowNodes] = React.useState(desiredNodes);
 
@@ -482,6 +491,7 @@ function mergeFlowNodes(current, desired, dragging) {
     const position = keepLocalPosition ? previous.position : node.position;
     const data = previous.data?.node === node.data.node
       && previous.data?.connectionKey === node.data.connectionKey
+      && sameNodeInputDependencyRefs(previous.data?.inputDependencyRefs, node.data.inputDependencyRefs)
       ? previous.data
       : node.data;
     const selected = node.selected;
