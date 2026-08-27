@@ -71,6 +71,7 @@ import {
 } from "./components/MediaViews.jsx";
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextAgentNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
+import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBehavior.js";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { runTrackedGeneration } from "./generationProgressStore.js";
@@ -5093,6 +5094,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus("Disconnected input");
   }
 
+  function handleCanvasPortClick(event) {
+    const port = event.target.closest?.("[data-port-role='input']");
+    if (!port || !shouldDisconnectInputPort(port.dataset.portRole, port.classList.contains("connected"))) return;
+    disconnectInputPort(event, port.dataset.nodeId, port.dataset.portId);
+  }
+
   function disconnectAssemblyMedia(nodeId, media) {
     const targetPort = media?.type === "image" ? "imageIn" : media?.type === "audio" ? "audioIn" : "videoIn";
     const edgeIds = edgesRef.current
@@ -5400,29 +5407,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
         const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
-        setEdges((current) => {
-          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
-          const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
-          const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
-          const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
-          let nextEdges = current.filter((edge) => {
-            if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-            if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-            if (replacesSingleCoverageInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-            if (replacesSingleStoryboardSceneInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-            return !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
-          });
-
-          return [
-            ...nextEdges,
-            {
-              id: `edge-${Date.now()}`,
-              from: draftEdge.from,
-              to,
-              color: draftEdge.color
-            }
-          ];
-        });
+        setEdges((current) => appendInputConnection(current, {
+          id: `edge-${Date.now()}`,
+          from: draftEdge.from,
+          to,
+          color: draftEdge.color
+        }));
         if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
         if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
       }
@@ -5466,20 +5456,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
     const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
     const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
-    setEdges((current) => {
-      const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
-      const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
-      const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
-      const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
-      const nextEdges = current.filter((edge) => {
-        if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-        if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-        if (replacesSingleCoverageInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-        if (replacesSingleStoryboardSceneInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
-        return !(edge.from.nodeId === from.nodeId && edge.from.port === from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
-      });
-      return [...nextEdges, { id: `edge-${Date.now()}`, from, to, color }];
-    });
+    setEdges((current) => appendInputConnection(current, { id: `edge-${Date.now()}`, from, to, color }));
     if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
     if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
     setSaveStatus("Connected nodes");
@@ -7344,6 +7321,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onPointerMove={handlePointerMove}
         onPointerUp={finishConnection}
         onPointerCancel={stopNodeDrag}
+        onClickCapture={handleCanvasPortClick}
         onContextMenu={openCanvasContextMenu}
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}

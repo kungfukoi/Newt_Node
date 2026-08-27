@@ -271,6 +271,10 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Connector endpoints and all connection lookups use node ids and port ids. Titles are never connection keys.
 - React Flow owns the live viewport, node transforms, handle geometry, selection, and edge paths. Do not add an independently transformed wire layer or a second viewport cache.
 - Ports render as React Flow handles while preserving Newt's node ids, port ids, media colors, connection rules, and click-to-disconnect behavior. Dynamic port changes must call React Flow's node-internals update path.
+- Connections begin at output ports and end at input ports. Dragging from an output must show the live connector line through completion; do not enable React Flow's click-to-connect mode as a substitute for the established drag interaction.
+- Every compatible input port accepts additional incoming edges. Dropping a line on an already-connected input appends it without replacing existing lines; only an exact duplicate source-to-input connection is de-duplicated.
+- Clicking a connected input dot without dragging removes every edge terminating at that node and port. Completing a dragged connection must never invoke this click-to-disconnect action.
+- Image Model `imagePromptIn` retains every connected image and sends them as Image Prompt references.
 - If a connected control section is collapsed, keep its handle mounted or provide a stable equivalent handle position. Presentation changes must never remove the saved edge or make a valid connection appear detached.
 - Collapsing an input section changes only presentation. It must not remove the edge, invalidate its saved port id, or make its connector disappear; expanding it must remeasure the real endpoint immediately.
 - Seed initial node dimensions and connected handle bounds from persisted or estimated graph geometry. Virtualization must not require every heavy node body to mount once before offscreen culling begins.

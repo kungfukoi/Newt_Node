@@ -65,6 +65,10 @@
   transform: none !important;
 }
 
+.newt-react-flow .inline-port.react-flow__handle.input {
+  pointer-events: auto;
+}
+
 .newt-flow-edge-visible,
 .newt-flow-connection-line {
   fill: none;

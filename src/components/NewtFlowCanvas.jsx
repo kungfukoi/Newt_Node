@@ -33,6 +33,7 @@ import {
 } from "../flowNodeConnections.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
+import { flowConnectOnClick, flowPortConnectability } from "../nodePortBehavior.js";
 
 const NewtFlowRenderContext = React.createContext(null);
 const flowMultiSelectionKeys = ["Shift", "Control", "Meta"];
@@ -366,6 +367,7 @@ function NewtFlowCanvasInner({
         maxZoom={2.5}
         onlyRenderVisibleElements={flowOnlyRenderVisibleElements}
         nodesConnectable
+        connectOnClick={flowConnectOnClick}
         nodesDraggable
         noDragClassName="nodrag"
         elementsSelectable
@@ -675,18 +677,18 @@ function NewtConnectionLine({ fromX, fromY, toX, toY, fromPosition = Position.Ri
   return <path className="newt-flow-connection-line" d={path} />;
 }
 
-export function FlowPortHandle({ id, side, disabled, className, style, title, onPointerDown, dataAttributes = {} }) {
+export function FlowPortHandle({ id, side, disabled, className, style, title, dataAttributes = {} }) {
+  const connectability = flowPortConnectability(side, disabled);
   return (
     <Handle
       id={id}
       type={side === "output" ? "source" : "target"}
       position={side === "output" ? Position.Right : Position.Left}
-      isConnectable={!disabled}
+      {...connectability}
       className={className}
       style={style}
       title={title}
       aria-disabled={disabled || undefined}
-      onPointerDown={onPointerDown}
       {...dataAttributes}
     />
   );

@@ -7,7 +7,11 @@ export function PortHandle({ node, port, side, onConnectStart, onDisconnectInput
   const connected = connectedPortKeys.has(`${node.id}:${port.id}`);
   const disabled = Boolean(port.disabled);
   const className = `inline-port ${side} ${connected ? "connected" : ""} ${disabled ? "disabled" : ""}`;
-  const title = disabled ? port.disabledReason || `${port.label} is not supported` : side === "input" ? `Disconnect ${port.label}` : `Connect ${port.label}`;
+  const title = disabled
+    ? port.disabledReason || `${port.label} is not supported`
+    : side === "input"
+        ? `Disconnect ${port.label}`
+        : `Connect ${port.label}`;
   const dataAttributes = {
     "data-port-role": side,
     "data-node-id": node.id,
@@ -21,7 +25,6 @@ export function PortHandle({ node, port, side, onConnectStart, onDisconnectInput
       return;
     }
     if (flowManaged) {
-      if (side === "input" && connected) onDisconnectInput(event, node.id, port.id);
       return;
     }
     if (side === "output") {
@@ -40,7 +43,6 @@ export function PortHandle({ node, port, side, onConnectStart, onDisconnectInput
         className={className}
         style={{ "--port-color": port.color }}
         title={title}
-        onPointerDown={handlePointerDown}
         dataAttributes={dataAttributes}
       />
     );
