@@ -127,6 +127,10 @@ export function registerCoreRoutes(
     }
   });
 
+  app.get("/api/system/control-health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
   app.get("/api/health", (_req, res) => {
     res.json(buildHealthPayload());
   });

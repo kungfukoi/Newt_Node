@@ -14,14 +14,15 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
-  const requestUrl = preferControlServer ? `${localControlApiBaseUrl}${path}` : preferClientProxy ? path : localApiFetchUrl(path);
+  const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
   try {
     response = await fetchWithTimeout(requestUrl, options, timeoutMs);
   } catch (error) {
     if (retryLocalApi && requestUrl === path && canRetryLocalApi(path)) {
       try {
-        response = await fetchWithTimeout(`${localApiBaseUrl}${path}`, options, timeoutMs);
+        const fallbackBaseUrl = preferControlServer ? localControlApiBaseUrl : localApiBaseUrl;
+        response = await fetchWithTimeout(`${fallbackBaseUrl}${path}`, options, timeoutMs);
       } catch {
         throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
       }
@@ -348,8 +349,10 @@ export const systemApi = {
     return getJson(`/api/comfy-wan/status${suffix}`, "Could not check ComfyUI.");
   },
 
-  openProjectOutputFolder(body, label = "Open output folder") {
-    return controlJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
+  async openProjectOutputFolder(body, label = "Open output folder") {
+    const path = "/api/system/open-project-output-folder";
+    const lane = await selectControlLane(path, label);
+    return controlJsonApi(path, jsonBody(body), label, { preferClientProxy: lane === "proxy", timeoutMs: 5000 });
   },
 
   projectOutputPath(body) {
@@ -359,8 +362,8 @@ export const systemApi = {
 
 async function systemDialogRequest(path, body, label) {
   await exitFullscreenForSystemDialog();
-  await ensureSystemDialogServer(path, label);
-  return controlJsonApi(path, jsonBody(body), label);
+  const lane = await selectControlLane(path, label);
+  return controlJsonApi(path, jsonBody(body), label, { preferClientProxy: lane === "proxy" });
 }
 
 function controlJsonApi(path, options, label, requestOptions = {}) {
@@ -375,21 +378,24 @@ async function controlRequestData(path, options, fallbackMessage) {
   return ensureOk(response, data, fallbackMessage);
 }
 
-async function ensureSystemDialogServer(path, label) {
-  if (!canRetryLocalApi(path)) return;
+async function selectControlLane(path, label) {
+  if (!canRetryLocalApi(path)) return "direct";
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  const timeout = globalThis.setTimeout(() => controller.abort(), 3000);
   try {
-    const response = await Promise.any([
-      fetch(`${localControlApiBaseUrl}/api/health`, { signal: controller.signal }).then(requireHealthyResponse),
-      fetch("/api/health", { signal: controller.signal }).then(requireHealthyResponse)
+    return await Promise.any([
+      fetch(`${localControlApiBaseUrl}/api/system/control-health`, { signal: controller.signal })
+        .then(requireHealthyResponse)
+        .then(() => "direct"),
+      fetch("/api/system/control-health", { signal: controller.signal })
+        .then(requireHealthyResponse)
+        .then(() => "proxy")
     ]);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch {
     throw new Error(`${label} could not open because the local app server is offline. Restart NewtNode and try again.`);
   } finally {
-    window.clearTimeout(timeout);
+    globalThis.clearTimeout(timeout);
   }
 }
 

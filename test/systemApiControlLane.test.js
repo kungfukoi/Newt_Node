@@ -26,8 +26,12 @@ test("canvas folder actions use the control server while generations stay on the
     await systemApi.openProjectOutputFolder({ workflowPackageId: "project-1" });
     await nodeApi.generateImage({ prompt: "test" });
 
-    assert.equal(urls[0], "http://127.0.0.1:3337/api/system/open-project-output-folder");
-    assert.equal(urls[1], "http://127.0.0.1:3336/api/node/generate-image");
+    assert.deepEqual(urls.slice(0, 3), [
+      "http://127.0.0.1:3337/api/system/control-health",
+      "/api/system/control-health",
+      "http://127.0.0.1:3337/api/system/open-project-output-folder"
+    ]);
+    assert.equal(urls[3], "http://127.0.0.1:3336/api/node/generate-image");
   } finally {
     globalThis.fetch = previousFetch;
     globalThis.window = previousWindow;
@@ -78,8 +82,8 @@ test("workflow file dialogs use the dedicated control server", async () => {
   try {
     await systemApi.openWorkflowFile({ title: "Open workflow" });
     assert.deepEqual(urls, [
-      "http://127.0.0.1:3337/api/health",
-      "/api/health",
+      "http://127.0.0.1:3337/api/system/control-health",
+      "/api/system/control-health",
       "http://127.0.0.1:3337/api/system/open-workflow-file"
     ]);
   } finally {
@@ -114,6 +118,34 @@ test("workflow JSON saves retry through the client proxy when the control server
     assert.deepEqual(urls, [
       "http://127.0.0.1:3337/api/system/save-workflow-file",
       "/api/system/save-workflow-file"
+    ]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    globalThis.window = previousWindow;
+  }
+});
+
+test("dialog requests use the control proxy when its health check wins", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const urls = [];
+  globalThis.window = {
+    location: { hostname: "127.0.0.1", port: "5176" },
+    setTimeout,
+    clearTimeout
+  };
+  globalThis.fetch = (url) => {
+    urls.push(String(url));
+    if (String(url).startsWith("http://127.0.0.1:3337/")) return new Promise(() => {});
+    return Promise.resolve(jsonResponse({ ok: true, path: "C:\\Project" }));
+  };
+
+  try {
+    await systemApi.selectFolder({ title: "Choose folder" });
+    assert.deepEqual(urls, [
+      "http://127.0.0.1:3337/api/system/control-health",
+      "/api/system/control-health",
+      "/api/system/select-folder"
     ]);
   } finally {
     globalThis.fetch = previousFetch;

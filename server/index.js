@@ -9493,13 +9493,19 @@ async function projectOutputDirectoryFromBody(body = {}) {
   const packageContext = workflowPackageContextFromBody(body);
   if (packageContext?.packagePath) {
     const packagePath = packageContext.packagePath;
-    const registeredWorkflow = packageContext.id ? await findRegisteredWorkflowPackage(packageContext.id).catch(() => null) : null;
-    const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
-    const isRegisteredPackage = registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath);
     const hasPackageManifest = existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath));
     const hasPackageDirs = [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
       existsSync(path.join(packagePath, directoryName))
     );
+    let isRegisteredPackage = false;
+
+    // Most package opens can be validated locally. Avoid hydrating every saved
+    // workflow, especially when package files live in a busy OneDrive folder.
+    if (!hasPackageManifest && !hasPackageDirs && packageContext.id) {
+      const registeredWorkflow = await findRegisteredWorkflowPackage(packageContext.id).catch(() => null);
+      const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
+      isRegisteredPackage = Boolean(registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath));
+    }
 
     if (!isRegisteredPackage && !hasPackageManifest && !hasPackageDirs) {
       throw new Error("Workflow package path is not registered or does not look like a NewtNode package.");
@@ -9513,9 +9519,13 @@ async function projectOutputDirectoryFromBody(body = {}) {
 }
 
 function openDirectoryWithSystemShell(directoryPath) {
-  const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  if (process.platform === "win32") {
+    return runWindowsDialogHelper({ mode: "explore", title: "Open folder", defaultPath: directoryPath });
+  }
+  const command = process.platform === "darwin" ? "open" : "xdg-open";
+  const args = [directoryPath];
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [directoryPath], {
+    const child = spawn(command, args, {
       detached: true,
       stdio: "ignore",
       windowsHide: false
@@ -10253,6 +10263,8 @@ function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
 
 async function selectFolderWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  return runWindowsDialogHelper({ mode: "folder", title, defaultPath: selectedPath });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 $typeDefinition = @"
@@ -10407,9 +10419,17 @@ exit 2
 `;
 
   return runFolderDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectWorkflowFileWithWindowsDialog({ title, defaultPath }) {
+  return runWindowsDialogHelper({
+    mode: "open",
+    title,
+    defaultPath: normalizeWorkflowPackagePath(defaultPath),
+    filter: "NewtNode workflow JSON (*.json)|*.json|JSON files (*.json)|*.json|All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10440,10 +10460,18 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectLoraFileWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  return runWindowsDialogHelper({
+    mode: "open",
+    title,
+    defaultPath: selectedPath,
+    filter: "LoRA weights (*.safetensors;*.pt;*.ckpt;*.bin)|*.safetensors;*.pt;*.ckpt;*.bin|SafeTensors (*.safetensors)|*.safetensors|All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10484,12 +10512,22 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectSavePathWithWindowsDialog({ title, defaultPath, defaultName, extension }) {
   const selectedPath = existingDirectoryPath(defaultPath) || rootDir;
   const normalizedExtension = String(extension || "").replace(/^\.+/, "").replace(/[^A-Za-z0-9]+/g, "");
   const safeDefaultName = path.basename(String(defaultName || "export"));
+  return runWindowsDialogHelper({
+    mode: "save",
+    title,
+    defaultPath: selectedPath,
+    defaultName: safeDefaultName,
+    extension: normalizedExtension,
+    filter: normalizedExtension ? `${normalizedExtension.toUpperCase()} files (*.${normalizedExtension})|*.${normalizedExtension}|All files (*.*)|*.*` : "All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10511,6 +10549,85 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
+}
+
+let windowsDialogHelperPathPromise = null;
+let windowsDialogInFlight = false;
+
+async function runWindowsDialogHelper({ mode, title = "NewtNode", defaultPath = "", defaultName = "", extension = "", filter = "" }) {
+  if (windowsDialogInFlight) {
+    const busyError = new Error("A Windows file dialog is already open.");
+    busyError.code = "DIALOG_BUSY";
+    throw busyError;
+  }
+
+  windowsDialogInFlight = true;
+  const token = randomUUID();
+  const resultPath = path.join(tmpdir(), `newtnode-dialog-${token}.txt`);
+  const errorPath = `${resultPath}.error`;
+  try {
+    const helperPath = await ensureWindowsDialogHelper();
+    await execFile(helperPath, [mode, resultPath, title, defaultPath, defaultName, extension, filter], {
+      windowsHide: false,
+      timeout: 120000
+    });
+    const selectedPath = String(await readFile(resultPath, "utf8")).trim();
+    if (!selectedPath) {
+      const canceled = new Error("File selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    return selectedPath;
+  } catch (error) {
+    if (error?.code === 2 || error?.code === "DIALOG_CANCELED") {
+      const canceled = new Error("File selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    const helperDetail = String(await readFile(errorPath, "utf8").catch(() => "")).trim();
+    const nextError = new Error(helperDetail || (error?.killed ? "Windows file dialog timed out." : error?.message) || "Windows file dialog failed.");
+    nextError.code = error?.killed ? "DIALOG_TIMEOUT" : error?.code || "DIALOG_FAILED";
+    throw nextError;
+  } finally {
+    windowsDialogInFlight = false;
+    await Promise.all([
+      rm(resultPath, { force: true }).catch(() => {}),
+      rm(errorPath, { force: true }).catch(() => {})
+    ]);
+  }
+}
+
+async function ensureWindowsDialogHelper() {
+  if (windowsDialogHelperPathPromise) return windowsDialogHelperPathPromise;
+  windowsDialogHelperPathPromise = (async () => {
+    const sourcePath = path.join(rootDir, "server", "windows-dialog-helper.cs");
+    const source = await readFile(sourcePath);
+    const sourceHash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+    const helperPath = path.join(tmpdir(), `NewtNodeWindowsDialog-${sourceHash}.exe`);
+    if (existsSync(helperPath)) return helperPath;
+
+    const windowsRoot = process.env.WINDIR || "C:\\Windows";
+    const compilerPath = [
+      path.join(windowsRoot, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+      path.join(windowsRoot, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe")
+    ].find((candidate) => existsSync(candidate));
+    if (!compilerPath) throw new Error("The Windows file-dialog runtime is unavailable.");
+
+    await execFile(compilerPath, [
+      "/nologo",
+      "/target:winexe",
+      `/out:${helperPath}`,
+      "/reference:System.Windows.Forms.dll",
+      "/reference:System.Drawing.dll",
+      sourcePath
+    ], { windowsHide: true, timeout: 30000 });
+    return helperPath;
+  })().catch((error) => {
+    windowsDialogHelperPathPromise = null;
+    throw error;
+  });
+  return windowsDialogHelperPathPromise;
 }
 
 function powershellStringLiteral(value) {

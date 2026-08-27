@@ -5048,6 +5048,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function openNodeContextMenuAtPoint(clientX, clientY, pendingConnection = null) {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    window.getSelection?.()?.removeAllRanges();
     const rect = canvas.getBoundingClientRect();
     const clampedClientX = clamp(clientX, rect.left, rect.right);
     const clampedClientY = clamp(clientY, rect.top, rect.bottom);
@@ -7497,7 +7498,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           />
         )}
         {contextMenu && (
-          <div ref={contextMenuRef} className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`} style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div
+            ref={contextMenuRef}
+            className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`}
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
             {nodeCatalog.map((item) => {
               const Icon = item.icon;
               return (

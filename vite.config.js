@@ -3,7 +3,19 @@ import react from "@vitejs/plugin-react";
 
 const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
 const apiPort = Number(process.env.VITE_API_PORT || process.env.PORT || 3336);
+const controlApiPort = Number(process.env.VITE_CONTROL_API_PORT || process.env.NEWTNODE_CONTROL_PORT || apiPort + 1);
 const apiTarget = `http://127.0.0.1:${apiPort}`;
+const controlApiTarget = `http://127.0.0.1:${controlApiPort}`;
+
+const apiProxy = {
+  "/api/system": controlApiTarget,
+  "/api/saved-workflows": controlApiTarget,
+  "/api": apiTarget,
+  "/uploads": apiTarget,
+  "/outputs": apiTarget,
+  "/external-outputs": apiTarget,
+  "/workflow-assets": apiTarget
+};
 
 export default defineConfig({
   plugins: [react()],
@@ -28,23 +40,11 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: clientPort,
-    proxy: {
-      "/api": apiTarget,
-      "/uploads": apiTarget,
-      "/outputs": apiTarget,
-      "/external-outputs": apiTarget,
-      "/workflow-assets": apiTarget
-    }
+    proxy: apiProxy
   },
   preview: {
     host: "127.0.0.1",
     port: clientPort,
-    proxy: {
-      "/api": apiTarget,
-      "/uploads": apiTarget,
-      "/outputs": apiTarget,
-      "/external-outputs": apiTarget,
-      "/workflow-assets": apiTarget
-    }
+    proxy: apiProxy
   }
 });
