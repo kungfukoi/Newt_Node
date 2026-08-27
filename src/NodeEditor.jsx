@@ -1591,7 +1591,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [selectedNodeIds]);
 
   React.useEffect(() => {
-    if (!active) return undefined;
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
@@ -1601,6 +1600,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         saveProject();
         return;
       }
+
+      if (!active) return;
 
       if (event.key === "Backspace" || event.key === "Delete") {
         const edgeId = selectedEdgeIdRef.current || selectedEdgeId;
