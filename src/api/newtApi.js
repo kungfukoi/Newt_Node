@@ -2,6 +2,8 @@ import { apiErrorMessage } from "../apiErrors.js";
 
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
+const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
+const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
@@ -11,8 +13,8 @@ function ensureOk(response, data, fallbackMessage) {
   return data;
 }
 
-export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, timeoutMs = 0 } = {}) {
-  const requestUrl = preferClientProxy ? path : localApiFetchUrl(path);
+export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
+  const requestUrl = preferControlServer ? `${localControlApiBaseUrl}${path}` : preferClientProxy ? path : localApiFetchUrl(path);
   let response;
   try {
     response = await fetchWithTimeout(requestUrl, options, timeoutMs);
@@ -362,10 +364,10 @@ async function systemDialogRequest(path, body, label) {
 }
 
 function controlJsonApi(path, options, label, requestOptions = {}) {
-  // Generations keep long-lived requests open against the API origin. Sending
-  // desktop controls through the client proxy gives them an independent
-  // browser connection pool while reaching the same local Express server.
-  return fetchJsonApi(path, options, label, { preferClientProxy: true, ...requestOptions });
+  // Generations keep long-lived requests open against the primary API origin.
+  // A dedicated loopback origin keeps desktop controls in their own browser
+  // connection pool without depending on the Vite proxy.
+  return fetchJsonApi(path, options, label, { preferControlServer: true, ...requestOptions });
 }
 
 async function controlRequestData(path, options, fallbackMessage) {
@@ -379,13 +381,21 @@ async function ensureSystemDialogServer(path, label) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 3000);
   try {
-    const response = await fetch("/api/health", { signal: controller.signal });
+    const response = await Promise.any([
+      fetch(`${localControlApiBaseUrl}/api/health`, { signal: controller.signal }).then(requireHealthyResponse),
+      fetch("/api/health", { signal: controller.signal }).then(requireHealthyResponse)
+    ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch {
     throw new Error(`${label} could not open because the local app server is offline. Restart NewtNode and try again.`);
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+function requireHealthyResponse(response) {
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response;
 }
 
 async function exitFullscreenForSystemDialog() {

@@ -289,6 +289,7 @@ let runtimeModelProviderPreferences = defaultModelProviderPreferences;
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
+const controlPort = Number(process.env.NEWTNODE_CONTROL_PORT || process.env.VITE_CONTROL_API_PORT || port + 1);
 const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
 const updatePreservedDirectories = [
   "saved_workflows",
@@ -759,6 +760,7 @@ function buildHealthPayload() {
     falVideoTextModel,
     imageGenerationConcurrency,
     mediaPersistenceConcurrency,
+    controlPort,
     outputDirectory: outputsDir
   };
 }
@@ -1574,11 +1576,11 @@ function commandErrorSummary(commands) {
     .join("\n\n");
 }
 
-function updateStopPorts(values = [port, clientPort]) {
+function updateStopPorts(values = [port, controlPort, clientPort]) {
   const ports = (Array.isArray(values) ? values : [values])
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0 && value < 65536);
-  return [...new Set(ports.length ? ports : [3336, 5176])];
+  return [...new Set(ports.length ? ports : [3336, 3337, 5176])];
 }
 
 function powershellQuote(value) {
@@ -9248,8 +9250,16 @@ const httpServer = app.listen(port, "127.0.0.1", () => {
   console.log(`NewtNode server running on http://127.0.0.1:${port}`);
 });
 
+const controlHttpServer = controlPort === port ? null : app.listen(controlPort, "127.0.0.1", () => {
+  console.log(`NewtNode control server running on http://127.0.0.1:${controlPort}`);
+});
+
 httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
+});
+
+controlHttpServer?.on("error", (error) => {
+  console.error("NewtNode control server failed to start.", error);
 });
 
 function resolveRoute({ startFrame, references }) {
