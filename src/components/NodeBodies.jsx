@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { concatenatePlainTextInputs } from "../plainText.js";
 import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHistory.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import {
@@ -17,14 +18,34 @@ import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 import { normalizeTextAgentMessages, replaceLatestTextAgentAssistantMessage } from "../textAgent.js";
 
-export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+export function PlainTextNodeBody({ node, inputPort, outputPort, incoming, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const textInputs = incoming.textIn || [];
+  const resultText = concatenatePlainTextInputs(textInputs, node.data.text);
+
+  useEffect(() => {
+    if (String(node.data.resultText || "") === resultText) return;
+    onUpdate(node.id, { resultText });
+  }, [node.id, node.data.resultText, onUpdate, resultText]);
+
   return (
     <div className="node-body text-node-body plain-text-node-body">
-      <OutputPortRow node={node} port={outputPort} label="" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-      <div className="text-single-panel">
+      <OutputPortRow node={node} port={outputPort} label="Result" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <NodeRow label="Text input" inputPort={inputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <span className={textInputs.length ? "plain-text-input-summary connected" : "plain-text-input-summary"}>
+          {textInputs.length ? `${textInputs.length} connected` : "Connect text"}
+        </span>
+      </NodeRow>
+      <div className={textInputs.length ? "text-split-panel" : "text-single-panel"}>
         <label className="text-field-group">
+          <span>Text</span>
           <textarea aria-label="Text prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
         </label>
+        {textInputs.length > 0 && (
+          <label className="text-field-group plain-text-result-group">
+            <span>Result</span>
+            <textarea aria-label="Concatenated text result" readOnly value={resultText} />
+          </label>
+        )}
       </div>
     </div>
   );

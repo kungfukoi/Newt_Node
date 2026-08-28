@@ -220,7 +220,8 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 
 ## Text Node Roles
 
-- `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
+- `Text` is the lightweight concatenation node: it has one multi-connection Text input, one editable local textarea, one live Result, one Prompt output, no run button, and no backend call.
+- Text inputs concatenate in saved edge order, followed by the node's local text when it is non-empty. Persist the combined value in `data.resultText` so Prompt connections, `@` references, Output saves, and chained Text nodes all consume the same result. Reject circular Text-to-Text input chains.
 - `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. Its default generation model is GPT-5.6 Terra through Fal/OpenRouter, with explicit environment overrides for model changes.
 - `Text Agent` uses the same text, image, video, and style inputs as Text Model. `data.agentDraft` stores the unsent composer, `data.agentMessages` stores normalized user/assistant turns with the workflow, and `data.resultText` mirrors the latest assistant reply so existing Prompt connections and Output nodes continue to work. Enter sends a turn, Shift+Enter inserts a line break, and clearing the conversation also clears the current Prompt output.
 - Text Agent's Previous/Next prompt buttons recall its earlier sent user turns without submitting them and restore the unfinished draft when navigation returns past the newest turn.

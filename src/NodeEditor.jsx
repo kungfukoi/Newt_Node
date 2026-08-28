@@ -308,6 +308,7 @@ import {
   rectsOverlap
 } from "./nodeGeometry.js";
 import { catalogNodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
+import { textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -5530,6 +5531,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModel: ["promptIn"],
         utility: ["promptIn"],
         storyboard: ["sceneDescriptionIn"],
+        plainText: ["textIn"],
         text: ["textIn"],
         textAgent: ["textIn"]
       },
@@ -5919,6 +5921,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
       if (["image", "imageModel"].includes(source.type)) return "";
       return `${inputLabel} accepts image outputs`;
+    }
+
+    if (target?.type === "plainText" && to.port === "textIn") {
+      if (!["plainText", "text", "textAgent", "skillDirector", "imageModel", "videoModel"].includes(source.type)) {
+        return "Text input accepts text outputs";
+      }
+      if (wouldCreatePlainTextCycle({ edges: edgesRef.current, nodes: graphNodes, sourceNodeId: source.id, targetNodeId: target.id })) {
+        return "Text inputs cannot create a circular Text chain";
+      }
+      return "";
     }
 
     if (["text", "textAgent"].includes(target?.type)) {
@@ -10813,7 +10825,9 @@ function NodeBody({
     return (
       <PlainTextNodeBody
         node={node}
+        inputPort={config.input.find((port) => port.id === "textIn")}
         outputPort={outputPort}
+        incoming={incoming}
         onUpdate={onUpdate}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
@@ -16817,7 +16831,7 @@ function getNodeConfig(type) {
   const configs = {
     plainText: {
       icon: Type,
-      input: [],
+      input: [{ id: "textIn", label: "Text", color: portColors.prompt }],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
     text: {
@@ -17023,7 +17037,7 @@ function unsupportedNodeConfig(type) {
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
 
-  if (type === "plainText") return { title, text: "" };
+  if (type === "plainText") return { title, text: "", resultText: "" };
   if (type === "text") return { title, text: "" };
   if (type === "textAgent") {
     return { title, agentDraft: "", agentMessages: [], resultText: "", textPromptHistoryIndex: null, textPromptHistoryDraft: "" };
@@ -19310,7 +19324,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode, groups = []) {
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
     const textNodePrompt = node.type === "plainText"
-      ? node.data.text || ""
+      ? node.data.resultText || node.data.text || ""
       : node.type === "text"
         ? [node.data.text || "", node.data.resultText || ""].join("\n")
         : node.type === "textAgent"
@@ -19405,12 +19419,7 @@ function connectedText(items = [], referenceContext = null) {
 }
 
 function rawConnectedTextForSource(source) {
-  if (source.type === "text") return source.data.resultText || source.data.text;
-  if (source.type === "textAgent") return source.data.resultText || source.data.agentDraft;
-  if (source.type === "skillDirector") return source.data.resultText || source.data.text;
-  if (source.type === "plainText") return source.data.text;
-  if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
-  return source.data.title;
+  return textOutputForNode(source);
 }
 
 function resolveNodeReferencesInText(text, referenceContext = null, ownerNodeId = "") {
@@ -19600,7 +19609,7 @@ function nodeReferenceTextInput(node, label) {
 
 function nodeReferenceText(node) {
   if (!node) return "";
-  if (node.type === "plainText") return String(node.data?.text || "").trim();
+  if (node.type === "plainText") return String(node.data?.resultText || node.data?.text || "").trim();
   if (node.type === "text") return String(node.data?.resultText || node.data?.text || "").trim();
   if (node.type === "textAgent") return String(node.data?.resultText || node.data?.agentDraft || "").trim();
 
@@ -22791,7 +22800,8 @@ function normalizeCurrentNode(node) {
       data: {
         ...data,
         title: data.title || "Text",
-        text: data.text || ""
+        text: data.text || "",
+        resultText: data.resultText || data.text || ""
       }
     };
   }
