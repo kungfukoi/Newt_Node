@@ -222,6 +222,7 @@ function NewtFlowCanvasInner({
       if (viewportElement) {
         viewportElement.style.transform = `translate(${normalized.x}px, ${normalized.y}px) scale(${normalized.zoom})`;
       }
+      if (!flowOverviewEnabled) return Promise.resolve();
       const now = performance.now();
       if (now - lastViewportSyncRef.current >= 100) {
         lastViewportSyncRef.current = now;

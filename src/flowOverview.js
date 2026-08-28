@@ -6,6 +6,16 @@ export const flowDetailExitZoomThreshold = 0.15;
 export const flowOverviewEnabled = false;
 export const flowOnlyRenderVisibleElements = false;
 
+export const canvasDistantZoomEnterThreshold = 0.13;
+export const canvasDistantZoomExitThreshold = 0.17;
+
+export function shouldUseDistantCanvasVisuals(zoom, currentlyDistant = false) {
+  const scale = Number(zoom);
+  if (!Number.isFinite(scale)) return Boolean(currentlyDistant);
+  if (currentlyDistant) return scale < canvasDistantZoomExitThreshold;
+  return scale <= canvasDistantZoomEnterThreshold;
+}
+
 export function flowRenderMode(nodeCount, zoom, previousMode = "detail") {
   if (!flowOverviewEnabled) return "detail";
   const count = Math.max(0, Number(nodeCount) || 0);

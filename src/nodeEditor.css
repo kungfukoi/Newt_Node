@@ -1268,16 +1268,26 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 14px;
   background-color: #090909;
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
-  background-position: var(--grid-x, 0) var(--grid-y, 0);
-  background-size: var(--grid-size, 28px) var(--grid-size, 28px);
   overscroll-behavior: contain;
   touch-action: none;
   cursor: grab;
 }
 
-.node-canvas.is-distant-zoom {
-  background-image: none;
+.node-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-position: var(--grid-x, 0) var(--grid-y, 0);
+  background-size: var(--grid-size, 28px) var(--grid-size, 28px);
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+.node-canvas.is-distant-zoom::before {
+  opacity: 0;
 }
 
 .node-canvas:active {
