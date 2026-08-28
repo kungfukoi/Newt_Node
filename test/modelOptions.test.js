@@ -27,6 +27,13 @@ test("Qwen Camera Edit is exposed in Utility image models", () => {
   assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.qwenCameraEdit));
 });
 
+test("Auto Aspect and Coverage are exposed in Utility image models", () => {
+  assert.equal(utilityImageModelNames.autoAspect, "Auto Aspect");
+  assert.equal(utilityImageModelNames.coverage, "Coverage");
+  assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.autoAspect));
+  assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.coverage));
+});
+
 test("DWPose Video is exposed in Utility video models", () => {
   assert.equal(utilityVideoModelNames.dwposeVideo, "DWPose Video");
   assert.ok(

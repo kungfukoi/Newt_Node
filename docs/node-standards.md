@@ -23,7 +23,7 @@ This branch is the current development line for the next mainline merge. Treat t
 - Image, video, and text model runs expose per-node generation progress with queue, generation, download, finalization, batch, elapsed-time, and terminal states.
 - The File menu owns New, Save, Save As, Open, and Import. New starts a blank workflow through the same unsaved-change guard as Open and Import.
 - Text Model defaults to the Fal OpenRouter route with Gemini Flash model ids unless environment variables override them.
-- Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2`, `REVE 2.1`, and `Krea 2 Large`. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `MiniMax H3`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `Wan 2.7 Reference-to-Video`, `Happy Horse`, and `Creatify Aurora`; callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
+- Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2`, `REVE 2.1`, and `Krea 2 Large`. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `MiniMax H3`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `Wan 2.7 Reference-to-Video`, and `Creatify Aurora`. New Video Model nodes prefer `Seedance 2.5` when it is enabled; callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
 - Utility coverage includes local media transforms, pose/depth/matte tools, hosted Wan/VACE and upscaling models, and local ComfyUI WanBlend/WanSegment/WanWarp workflows. SAM 3 options remain hidden while `sam3SegmentationModelsEnabled` is false.
 - Stable node ids are the canonical graph identity. Visible titles and `@tokens` may change, but saved edges, reference bindings, Output routing, and dependency scheduling must continue to resolve by id.
 - An attached Output node redirects generated files to its configured target without replacing the source node's playable result URLs or breaking Preview nodes after save/reopen.
@@ -156,14 +156,14 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 | `video` | Video | Uploaded or connected video media |
 | `preview` | Preview | Multi-result image, video, and 3D inspection |
 | `output` | Output | Explicit filesystem save target |
-| `autoAspect` | Auto Aspect | Image aspect preparation |
+| `autoAspect` | Auto Aspect | Legacy load-only type; new work uses Utility Image / Auto Aspect |
 | `skillDirector` | Film Director | Scene package and shot-list direction |
 | `storyboard` | Storyboard | Planned and generated shot frames |
-| `coverage` | Coverage | Coverage-image generation |
+| `coverage` | Coverage | Legacy load-only type; new work uses Utility Image / Coverage |
 | `character` | Character | Locked character identity, wardrobe, and voice |
 | `camera` | Camera | Camera instruction |
-| `composer` | Composer | Spatial image-guide composition |
-| `frameIt` | Frame It | Camera and figure composition |
+| `composer` | Composer | Composer and Frame It image-guide modes |
+| `frameIt` | Frame It | Legacy load-only type retained for saved workflows |
 | `style` | Style | Style instruction |
 | `transfer` | Mood Board | Locked visual-transfer collage |
 | `utility` | Utility | Local, hosted, and Comfy-backed image/video tools |
@@ -178,6 +178,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
 - `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost. The default text and vision-text route is Gemini Flash-class through Fal/OpenRouter route constants in `server/index.js`, with explicit environment overrides for model changes.
+- Successful Text Model user prompts are retained in `data.textPromptHistory`. The prompt-header Previous/Next arrow buttons recall earlier prompts without submitting them and restore the unfinished draft when navigation returns past the newest history item.
 - Text and Text Model prompts may mention nodes by name with `@Node Name`. An unbound mention initially matches the visible node title, including spaces, or a compact alias such as `@NodeName` or `@Node-Name`; after that match, the referencing node stores the selected source node id in `data.nodeReferenceBindings`. Text Model sends referenced text, image, and video nodes as structured model context; Image and Video Model prompts that consume referenced Text output also receive referenced media nodes as prompt-side references when compatible.
 - Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
 - The default text-processing provider is Fal via `TEXT_LLM_PROVIDER=fal`. The current default model ids are `google/gemini-2.5-flash` for `FAL_TEXT_MODEL`, `FAL_VISION_TEXT_MODEL`, `FAL_VISION_TEXT_FALLBACK_MODEL`, and `FAL_VIDEO_TEXT_MODEL`.
@@ -345,6 +346,8 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 
 ## Composer Node Standard
 
+- Composer is the catalog owner for two modes: `Composer` and `Frame It`. Keep the mode in `data.composerMode`; switching modes must preserve both modes' scene data and the shared image output.
+- The standalone `frameIt` type is hidden from the new-node catalog but remains fully loadable and editable for saved-workflow compatibility.
 - Composer is an image-guide node. It exposes one `Image Plane` input and one `Frame` output.
 - Composer should not expose prompt input or prompt output ports. Written prompts should connect directly to the downstream model that generates the final media.
 - Each Composer maquette exposes a dynamic Character input below the Open Composer action, with the maquette name shown beside the port. The port id must stay tied to the maquette id so renaming the maquette does not break the binding.
@@ -417,7 +420,7 @@ Settings is a local runtime control surface, not an account system.
 Hosted utility models should follow the same request, result, history, and stats contracts as other generation nodes.
 
 - Keep hosted utility labels and option lists in `src/modelOptions.js`; saved workflows rely on stable labels.
-- Current Utility Image catalog labels are `Color ID to Matte`, `Image to Color ID`, `Grab Still Frame`, `DWPose`, `Depth Anything`, `Topaz Image Upscale`, `Patina`, `BiRefNet Image`, and gated `SAM 3 Image`.
+- Current Utility Image catalog labels are `Auto Aspect`, `Coverage`, `Color ID to Matte`, `Image to Color ID`, `Qwen Camera Edit`, `Grab Still Frame`, `DWPose`, `Depth Anything`, `Topaz Image Upscale`, `Patina`, `BiRefNet Image`, and gated `SAM 3 Image`.
 - Current Utility Video catalog labels are `Extract Frame`, `Color ID to Matte`, `Composite Video`, `DWPose Video`, `Depth Anything Video`, `WanBlend`, `WanWarp`, `WanSegment`, `Wan VACE Mask-to-Video`, `Wan VACE 14B Inpainting`, the Wan 2.2 A14B LoRA and VACE variants, gated `SAM 3 Video`, `VOID Video Inpainting`, `BiRefNet Video`, `RIFE Video`, `Bytedance Video Upscaler`, `Flux Video Upscale`, `Topaz SDR to HDR`, and `Topaz Video Upscale`.
 - Only options returned by the enabled Utility preference filters are callable. Hidden legacy handlers may remain for saved-workflow compatibility, but retired labels such as Luma Photon/Ray2 and Wan 2.1 LoRA must not be reintroduced to the current dropdown accidentally.
 - SAM 3 image/video segmentation remains feature-gated by `sam3SegmentationModelsEnabled`; keep both options hidden together until the integration is deliberately re-enabled and reverified.
@@ -645,7 +648,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 ## Frame It Standard
 
-- Frame It uses internal type `frameIt` and owns a camera-plus-mannequin composition that captures an image result for normal image connections.
+- Frame It is the camera-plus-mannequin mode inside the catalog Composer node and captures an image result through Composer's normal image output. Internal type `frameIt` is retained only to load existing standalone nodes.
 - Frame It UI and Three.js behavior live in `src/components/FrameItNodeBody.jsx`, `src/components/FrameItViewport.jsx`, and `src/frameItState.js`; keep reusable pose, normalization, joint-limit, and composition logic out of `NodeEditor.jsx`.
 - Camera and figure state must normalize on load. Built-in and saved poses must respect anatomical joint limits and preserve complete compositions.
 - Ordinary canvas navigation passes through the Frame It surface; only Frame It-specific modified gestures should control its camera. The node's scale is persisted independently from Storyboard and Mood Board scale.
@@ -708,6 +711,7 @@ The Timeline node is Newt Node's basic nonlinear editor and stays modular across
 - Media bin: a fixed one-column rail occupies the left side of the node. It accepts connected sources and direct drops from Newt media-output drag payloads. Connected media is live-linked by source node and output port; direct drops are URL-based snapshots and do not follow later generations unless that source is also connected. Every asset preserves its visible aspect ratio, video and still assets show thumbnails, audio uses its waveform when available, and double-click opens an aspect-safe enlarged viewer.
 - Bin assets are reusable source objects. Each drag to a compatible timeline track creates a fresh independent clip at the drop time, so one connection can supply any number of timeline instances. A connected source refresh preserves those clip edits and media references while replacing the source URL used by all instances.
 - Outputs: `frameOut` emits the Timeline-owned playhead frame as an image; `videoOut` emits the most recent FFmpeg render.
+- Both Timeline output rows and handles live on the right-hand node edge. Preserve the `frameOut` and `videoOut` ids when changing their layout.
 - Preview nodes remain ordinary viewers. Timeline owns playback and publishes throttled playhead-frame updates through existing graph result propagation; do not add timeline state or transport ownership to Preview. Loop In/Out is a persistent Timeline transport mode: it is disabled without a valid two-marker range, starts at In whenever playback begins outside the range, and wraps from Out back to In without pausing.
 - Timeline timeline focus owns clip-editing shortcuts. Ctrl/Cmd+C copies the selected clip instance with its trim and slip state, Ctrl/Cmd+V pastes a fresh instance at the playhead, and Delete/Backspace removes the selected clip. Handled clip shortcuts must stop propagation so canvas-level copy, paste, undo, and node deletion do not run from the same keypress; ordinary text fields retain native editing behavior.
 - Persist only normalized serializable timeline state. DOM media elements, decoder state, request state, and undo/redo stacks remain runtime-only.

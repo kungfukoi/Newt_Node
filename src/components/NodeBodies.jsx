@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
+import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHistory.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import {
   addFilmDirectorScene,
@@ -31,6 +32,9 @@ export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, 
 export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const nodeText = String(node.data.text || "");
   const nodeResultText = String(node.data.resultText || "");
+  const promptHistory = normalizeTextPromptHistory(node.data.textPromptHistory);
+  const promptHistoryIndex = Number.isInteger(node.data.textPromptHistoryIndex) ? node.data.textPromptHistoryIndex : null;
+  const promptHistoryDraft = String(node.data.textPromptHistoryDraft || "");
   const hasOutputPanel = Boolean(nodeResultText) || node.data.status === "running" || node.data.status === "complete";
   const textPort = config.input.find((port) => port.id === "textIn");
   const imagePort = config.input.find((port) => port.id === "imageIn");
@@ -42,6 +46,21 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
     Boolean(incoming.imageIn?.length) ||
     Boolean(incoming.videoIn?.length) ||
     Boolean(incoming.styleIn?.length);
+
+  function recallPrompt(direction) {
+    const recalled = recallTextPrompt({
+      history: promptHistory,
+      index: promptHistoryIndex,
+      direction,
+      currentText: nodeText,
+      draft: promptHistoryDraft
+    });
+    onUpdate(node.id, {
+      text: recalled.text,
+      textPromptHistoryIndex: recalled.index,
+      textPromptHistoryDraft: recalled.draft
+    });
+  }
 
   return (
     <div className="node-body text-node-body">
@@ -61,11 +80,25 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
       </div>
       <div className={hasOutputPanel ? "text-split-panel" : "text-single-panel"}>
         <label className="text-field-group">
-          <span>Original prompt</span>
+          <span className="text-prompt-header">
+            <span>Original prompt</span>
+            <span className="text-prompt-history-controls" aria-label="Prompt history">
+              <button type="button" title="Previous prompt" aria-label="Previous prompt" disabled={!promptHistory.length || promptHistoryIndex === 0} onClick={() => recallPrompt("previous")}>
+                <ChevronLeft size={13} />
+              </button>
+              <button type="button" title="Next prompt" aria-label="Next prompt" disabled={promptHistoryIndex === null} onClick={() => recallPrompt("next")}>
+                <ChevronRight size={13} />
+              </button>
+            </span>
+          </span>
           <textarea
             aria-label="Text Model prompt"
             value={nodeText}
-            onChange={(event) => onUpdate(node.id, { text: event.target.value })}
+            onChange={(event) => onUpdate(node.id, {
+              text: event.target.value,
+              textPromptHistoryIndex: null,
+              textPromptHistoryDraft: event.target.value
+            })}
           />
         </label>
         {hasOutputPanel && (

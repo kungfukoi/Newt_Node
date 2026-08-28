@@ -175,7 +175,6 @@ export const videoModelOptions = [
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
-  videoModelNames.happyHorse,
   videoModelNames.aurora
 ];
 export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
@@ -200,6 +199,8 @@ export const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 
 export const utilityImageModelNames = {
+  autoAspect: "Auto Aspect",
+  coverage: "Coverage",
   colorIdMatte: "Color ID to Matte",
   imageToId: "Image to Color ID",
   qwenCameraEdit: "Qwen Camera Edit",
@@ -212,6 +213,8 @@ export const utilityImageModelNames = {
   birefnetImage: "BiRefNet Image"
 };
 export const utilityImageModelOptions = [
+  utilityImageModelNames.autoAspect,
+  utilityImageModelNames.coverage,
   utilityImageModelNames.colorIdMatte,
   utilityImageModelNames.imageToId,
   utilityImageModelNames.qwenCameraEdit,
@@ -383,7 +386,9 @@ export function firstEnabledImageModel(preferences) {
   return enabledImageModelOptions(preferences)[0] || imageModelNames.zImage;
 }
 export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
-  return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
+  const enabledModels = enabledVideoModelOptions(preferences, { workspaceOnly });
+  if (enabledModels.includes(videoModelNames.seedance25)) return videoModelNames.seedance25;
+  return enabledModels[0] || videoModelNames.seedance25;
 }
 
 export const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
@@ -482,6 +487,8 @@ export const wanVaceInterpolatorOptions = ["film", "rife"];
 export const wanVaceTransparencyOptions = ["content_aware", "white", "black"];
 
 export const utilityModelDescriptions = {
+  [utilityImageModelNames.autoAspect]: "Reframes one connected image into selected delivery aspect ratios while preserving the subject and composition.",
+  [utilityImageModelNames.coverage]: "Generates a standard nine-angle coverage set from one connected reference image.",
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white matte from a picked source-image Color ID.",
   [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
   [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",

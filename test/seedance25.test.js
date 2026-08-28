@@ -13,7 +13,7 @@ import {
   seedance25ReferenceLimits,
   seedance25ResolutionOptions
 } from "../src/seedance25.js";
-import { videoModelNames, videoModelOptions } from "../src/modelOptions.js";
+import { defaultModelPreferences, firstEnabledVideoModel, videoModelNames, videoModelOptions } from "../src/modelOptions.js";
 import { videoModelSupportsFilmDirector } from "../src/nodeRunners/videoModels.js";
 import { supportsKreaModel } from "../src/kreaApi.js";
 
@@ -23,6 +23,11 @@ test("Seedance 2.5 is a distinct dual-provider Video Model option", () => {
   assert.ok(videoModelOptions.includes(seedance25ModelName));
   assert.equal(videoModelSupportsFilmDirector(seedance25ModelName), true);
   assert.equal(supportsKreaModel("video", seedance25ModelName), true);
+});
+
+test("Seedance 2.5 is the preferred default and Happy Horse is no longer selectable", () => {
+  assert.equal(firstEnabledVideoModel(defaultModelPreferences), seedance25ModelName);
+  assert.equal(videoModelOptions.includes(videoModelNames.happyHorse), false);
 });
 
 test("Seedance 2.5 controls match the published Fal schema", () => {

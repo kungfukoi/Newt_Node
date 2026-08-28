@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nodeTypeDefinitions, nodeTypeLabel, timelineNodeTitle } from "../src/nodeRegistry.js";
+import { catalogNodeTypeDefinitions, nodeTypeLabel, timelineNodeTitle } from "../src/nodeRegistry.js";
 
-test("Coverage appears directly beneath Storyboard in the node sidebar", () => {
-  const storyboardIndex = nodeTypeDefinitions.findIndex(({ type }) => type === "storyboard");
-  assert.notEqual(storyboardIndex, -1);
-  assert.equal(nodeTypeDefinitions[storyboardIndex + 1]?.type, "coverage");
+test("consolidated legacy node types remain loadable but are hidden from the catalog", () => {
+  assert.equal(nodeTypeLabel("autoAspect"), "Auto Aspect");
+  assert.equal(nodeTypeLabel("coverage"), "Coverage");
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "autoAspect"), false);
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "coverage"), false);
+  assert.equal(nodeTypeLabel("frameIt"), "Frame It");
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "frameIt"), false);
 });
 
 
