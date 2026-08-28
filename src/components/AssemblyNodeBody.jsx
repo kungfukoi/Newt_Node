@@ -830,6 +830,7 @@ export function AssemblyNodeBody({
               }}
               onConnectStart={onConnectStart}
               onDisconnectInput={onDisconnectInput}
+              align="right"
               connectedPortKeys={connectedPortKeys}
             />
           ))}

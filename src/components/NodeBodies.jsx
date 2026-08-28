@@ -1,13 +1,19 @@
 import { useEffect, useRef } from "react";
-import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
+import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { concatenatePlainTextInputs } from "../plainText.js";
+import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHistory.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
+import { filmDirectorAspectRatioOptions, normalizeFilmDirectorAspectRatio } from "../filmDirectorAspectRatios.js";
+import { filmDirectorDurationOptions } from "../filmDirectorDurations.js";
+import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "../filmDirectorResolutions.js";
+import { filmDirectorStageNeedsDraft, unlockFilmDirectorStages, updateFilmDirectorStageLock } from "../filmDirectorStageLocks.js";
 import {
   addFilmDirectorScene,
   filmDirectorReferencedTags,
   filmDirectorSceneLimit,
   filmDirectorSceneTabs,
-  filmDirectorUsesReferenceTag,
+  filmDirectorUsesReference,
   removeFilmDirectorScene,
   switchFilmDirectorScene
 } from "../filmDirectorScenes.js";
@@ -16,14 +22,34 @@ import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 import { normalizeTextAgentMessages, replaceLatestTextAgentAssistantMessage } from "../textAgent.js";
 
-export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+export function PlainTextNodeBody({ node, inputPort, outputPort, incoming, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const textInputs = incoming.textIn || [];
+  const resultText = concatenatePlainTextInputs(textInputs, node.data.text);
+
+  useEffect(() => {
+    if (String(node.data.resultText || "") === resultText) return;
+    onUpdate(node.id, { resultText });
+  }, [node.id, node.data.resultText, onUpdate, resultText]);
+
   return (
     <div className="node-body text-node-body plain-text-node-body">
-      <OutputPortRow node={node} port={outputPort} label="" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-      <div className="text-single-panel">
+      <OutputPortRow node={node} port={outputPort} label="Result" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <NodeRow label="Text input" inputPort={inputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <span className={textInputs.length ? "plain-text-input-summary connected" : "plain-text-input-summary"}>
+          {textInputs.length ? `${textInputs.length} connected` : "Connect text"}
+        </span>
+      </NodeRow>
+      <div className={textInputs.length ? "text-split-panel" : "text-single-panel"}>
         <label className="text-field-group">
+          <span>Text</span>
           <textarea aria-label="Text prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
         </label>
+        {textInputs.length > 0 && (
+          <label className="text-field-group plain-text-result-group">
+            <span>Result</span>
+            <textarea aria-label="Concatenated text result" readOnly value={resultText} />
+          </label>
+        )}
       </div>
     </div>
   );
@@ -94,9 +120,27 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
   const draft = String(node.data.agentDraft || "");
   const response = String(node.data.resultText || "");
   const messages = normalizeTextAgentMessages(node.data.agentMessages);
+  const promptHistory = normalizeTextPromptHistory(messages.filter((message) => message.role === "user").map((message) => message.text));
+  const promptHistoryIndex = Number.isInteger(node.data.textPromptHistoryIndex) ? node.data.textPromptHistoryIndex : null;
+  const promptHistoryDraft = String(node.data.textPromptHistoryDraft || "");
   const inputPorts = ["textIn", "imageIn", "videoIn", "styleIn"]
     .map((id) => config.input.find((port) => port.id === id))
     .filter(Boolean);
+
+  function recallPrompt(direction) {
+    const recalled = recallTextPrompt({
+      history: promptHistory,
+      index: promptHistoryIndex,
+      direction,
+      currentText: draft,
+      draft: promptHistoryDraft
+    });
+    onUpdate(node.id, {
+      agentDraft: recalled.text,
+      textPromptHistoryIndex: recalled.index,
+      textPromptHistoryDraft: recalled.draft
+    });
+  }
 
   const sendMessage = () => {
     if (running || !draft.trim()) return;
@@ -128,7 +172,13 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
             title="Clear conversation"
             aria-label="Clear conversation"
             disabled={running || !messages.length}
-            onClick={() => onUpdate(node.id, { agentMessages: [], resultText: "", error: "" })}
+            onClick={() => onUpdate(node.id, {
+              agentMessages: [],
+              resultText: "",
+              error: "",
+              textPromptHistoryIndex: null,
+              textPromptHistoryDraft: draft
+            })}
           >
             <Trash2 size={14} aria-hidden="true" />
           </button>
@@ -150,17 +200,34 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
           }}
         />
         <div className="text-agent-composer">
-          <textarea
-            aria-label="Message Text Agent"
-            placeholder="Message Text Agent"
-            value={draft}
-            onChange={(event) => onUpdate(node.id, { agentDraft: event.target.value })}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent?.isComposing) return;
-              event.preventDefault();
-              sendMessage();
-            }}
-          />
+          <div className="text-agent-composer-field">
+            <span className="text-prompt-header">
+              <span>User prompt</span>
+              <span className="text-prompt-history-controls" aria-label="Text Agent prompt history">
+                <button type="button" title="Previous prompt" aria-label="Previous Text Agent prompt" disabled={!promptHistory.length || promptHistoryIndex === 0} onClick={() => recallPrompt("previous")}>
+                  <ChevronLeft size={13} />
+                </button>
+                <button type="button" title="Next prompt" aria-label="Next Text Agent prompt" disabled={promptHistoryIndex === null} onClick={() => recallPrompt("next")}>
+                  <ChevronRight size={13} />
+                </button>
+              </span>
+            </span>
+            <textarea
+              aria-label="Message Text Agent"
+              placeholder="Message Text Agent"
+              value={draft}
+              onChange={(event) => onUpdate(node.id, {
+                agentDraft: event.target.value,
+                textPromptHistoryIndex: null,
+                textPromptHistoryDraft: event.target.value
+              })}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent?.isComposing) return;
+                event.preventDefault();
+                sendMessage();
+              }}
+            />
+          </div>
           <button type="button" className="text-agent-send" title="Send message" aria-label="Send message" disabled={running || !draft.trim()} onClick={sendMessage}>
             <Send size={17} aria-hidden="true" />
           </button>
@@ -173,7 +240,6 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
   );
 }
 
-const skillDirectorDurations = ["5", "10", "15", "20", "30"];
 const skillDirectorShotCounts = Array.from({ length: 25 }, (_value, index) => String(index + 1));
 const skillDirectorDefaultCameraDirection =
   "Use restrained handheld coverage with natural eye-level framing, subtle push-ins only during emotional beats, and clean continuity of screen direction across cuts.";
@@ -343,12 +409,13 @@ export function SkillDirectorNodeBody({
   const referenceItems = [
     ...(incoming.characterIn || []).map(({ source }) => {
       if (!source?.data?.resultUrl) return null;
-      const label = sourceLabel?.(source) || `@${skillDirectorReferenceTag(source.data.characterName || source.data.title || "Character").slice(1)}`;
+      const label = source.data.characterName || source.data.title || sourceLabel?.(source) || "Character";
       return {
         key: skillDirectorReferenceKey(source),
         tag: skillDirectorReferenceTag(label),
         label,
         group: "Character",
+        type: "character",
         defaultDescription: skillDirectorCharacterDescription(source)
       };
     }),
@@ -360,6 +427,7 @@ export function SkillDirectorNodeBody({
         tag: skillDirectorReferenceTag(label),
         label,
         group: "Location",
+        type: "location",
         defaultDescription: "Scene location reference. Use this for environment, layout, production design, lighting, and geography."
       };
     }),
@@ -371,6 +439,7 @@ export function SkillDirectorNodeBody({
         tag: skillDirectorReferenceTag(label),
         label,
         group: "Props",
+        type: "element",
         defaultDescription: "Scene prop reference. Use this as a specific object, product, set dressing, wardrobe item, or visual asset in the scene."
       };
     })
@@ -380,6 +449,8 @@ export function SkillDirectorNodeBody({
   const shotValue = node.data.skillShotCount || node.data.shotCount || "3";
   const autoPlannedShotCount = Number.parseInt(node.data.lastRunActualShotCount || node.data.lastRunShotCount || "", 10);
   const durationValue = node.data.skillDurationSeconds || node.data.durationSeconds || "15";
+  const resolutionValue = normalizeFilmDirectorResolution(node.data.skillResolution);
+  const aspectRatioValue = normalizeFilmDirectorAspectRatio(node.data.skillAspectRatio);
   const sceneName = node.data.sceneName || "";
   const sceneOverview = node.data.sceneOverview ?? node.data.text ?? "";
   const styleDirection = node.data.styleDirection || "";
@@ -416,7 +487,16 @@ export function SkillDirectorNodeBody({
     onUpdate(node.id, removeFilmDirectorScene(node.data, sceneId));
   };
 
-  const updateUnlocked = (patch) => onUpdate(node.id, { ...patch, ...invalidate });
+  const updateUnlocked = (patch, affectedStages = []) => {
+    onUpdate(node.id, {
+      ...patch,
+      ...invalidate,
+      ...(affectedStages.length ? {
+        skillDirectorLocks: unlockFilmDirectorStages(locks, affectedStages),
+        skillDirectorCollapsed: unlockFilmDirectorStages(collapsed, affectedStages)
+      } : {})
+    });
+  };
   const isStageCollapsed = (key) => Boolean(locks[key] && collapsed[key]);
   const toggleStageCollapsed = (key) => {
     onUpdate(node.id, {
@@ -458,98 +538,90 @@ export function SkillDirectorNodeBody({
   const handleSetupLock = () => {
     if (locks.setup) {
       onUpdate(node.id, {
-        skillDirectorLocks: { setup: false, style: false, motion: false, scene: false, shotList: false },
-        skillDirectorCollapsed: { setup: false, style: false, motion: false, scene: false, shotList: false },
-        ...invalidate
+        skillDirectorLocks: updateFilmDirectorStageLock(locks, "setup", false),
+        skillDirectorCollapsed: { ...collapsed, setup: false }
       });
       return;
     }
-    const nextLocks = { setup: true, style: false, motion: false, scene: false, shotList: false };
+    const needsStyleDraft = filmDirectorStageNeedsDraft("style", { styleDirection });
+    const nextLocks = {
+      ...updateFilmDirectorStageLock(locks, "setup", true),
+      ...(needsStyleDraft ? { style: false } : {})
+    };
     const resetPatch = {
       skillDirectorLocks: nextLocks,
-      skillDirectorCollapsed: { setup: true, style: false, motion: false, scene: false, shotList: false },
+      skillDirectorCollapsed: { ...collapsed, setup: false, ...(needsStyleDraft ? { style: false } : {}) },
       skillDirectorQueuedAction: "",
-      skillDirectorQueueId: "",
-      ...invalidate
+      skillDirectorQueueId: ""
     };
     onUpdate(node.id, resetPatch);
-    runActionAfterUpdate("style", resetPatch);
+    if (needsStyleDraft) runActionAfterUpdate("style", resetPatch);
   };
   const handleStyleLock = () => {
     if (locks.style) {
       onUpdate(node.id, {
-        skillDirectorLocks: { ...locks, style: false, motion: false, scene: false, shotList: false },
-        skillDirectorCollapsed: { ...collapsed, style: false, motion: false, scene: false, shotList: false },
-        ...invalidate
+        skillDirectorLocks: updateFilmDirectorStageLock(locks, "style", false),
+        skillDirectorCollapsed: { ...collapsed, style: false }
       });
       return;
     }
-    const nextLocks = { ...locks, style: true, motion: false, scene: false, shotList: false };
     onUpdate(node.id, {
-      skillDirectorLocks: nextLocks,
-      skillDirectorCollapsed: { ...collapsed, style: true, motion: false, scene: false, shotList: false },
+      skillDirectorLocks: updateFilmDirectorStageLock(locks, "style", true),
+      skillDirectorCollapsed: { ...collapsed, style: true },
       skillDirectorQueuedAction: "",
-      skillDirectorQueueId: "",
-      ...invalidate
+      skillDirectorQueueId: ""
     });
   };
   const handleMotionLock = () => {
     if (locks.motion) {
       onUpdate(node.id, {
-        skillDirectorLocks: { ...locks, motion: false, scene: false, shotList: false },
-        skillDirectorCollapsed: { ...collapsed, motion: false, scene: false, shotList: false },
-        ...invalidate
+        skillDirectorLocks: updateFilmDirectorStageLock(locks, "motion", false),
+        skillDirectorCollapsed: { ...collapsed, motion: false }
       });
       return;
     }
-    const nextLocks = { ...locks, motion: true, scene: false, shotList: false };
     const nextMotionDirection = motionDirection.trim() || skillDirectorDefaultCameraDirection;
     onUpdate(node.id, {
-      skillDirectorLocks: nextLocks,
-      skillDirectorCollapsed: { ...collapsed, motion: true, scene: false, shotList: false },
+      skillDirectorLocks: updateFilmDirectorStageLock(locks, "motion", true),
+      skillDirectorCollapsed: { ...collapsed, motion: true },
       motionDirection: nextMotionDirection,
       motionBrief: nextMotionDirection,
       skillDirectorQueuedAction: "",
-      skillDirectorQueueId: "",
-      ...invalidate
+      skillDirectorQueueId: ""
     });
   };
   const handleSceneLock = () => {
     if (locks.scene) {
       onUpdate(node.id, {
-        skillDirectorLocks: { ...locks, scene: false, shotList: false },
-        skillDirectorCollapsed: { ...collapsed, scene: false, shotList: false },
-        ...invalidate
+        skillDirectorLocks: updateFilmDirectorStageLock(locks, "scene", false),
+        skillDirectorCollapsed: { ...collapsed, scene: false }
       });
       return;
     }
-    const nextLocks = { ...locks, scene: true, shotList: false };
-    onUpdate(node.id, {
+    const needsShotListDraft = filmDirectorStageNeedsDraft("shotList", { shotList });
+    const nextLocks = {
+      ...updateFilmDirectorStageLock(locks, "scene", true),
+      ...(needsShotListDraft ? { shotList: false } : {})
+    };
+    const lockPatch = {
       skillDirectorLocks: nextLocks,
-      skillDirectorCollapsed: { ...collapsed, scene: true, shotList: false },
+      skillDirectorCollapsed: { ...collapsed, scene: true, ...(needsShotListDraft ? { shotList: false } : {}) },
       skillDirectorQueuedAction: "",
-      skillDirectorQueueId: "",
-      ...invalidate
-    });
-    runActionAfterUpdate("shotList", {
-      skillDirectorLocks: nextLocks,
-      skillDirectorCollapsed: { ...collapsed, scene: true, shotList: false },
-      skillDirectorQueuedAction: "",
-      skillDirectorQueueId: "",
-      ...invalidate
-    });
+      skillDirectorQueueId: ""
+    };
+    onUpdate(node.id, lockPatch);
+    if (needsShotListDraft) runActionAfterUpdate("shotList", lockPatch);
   };
   const handleShotListLock = () => {
     if (locks.shotList) {
       onUpdate(node.id, {
-        skillDirectorLocks: { ...locks, shotList: false },
-        skillDirectorCollapsed: { ...collapsed, shotList: false },
-        ...invalidate
+        skillDirectorLocks: updateFilmDirectorStageLock(locks, "shotList", false),
+        skillDirectorCollapsed: { ...collapsed, shotList: false }
       });
       return;
     }
     onUpdate(node.id, {
-      skillDirectorLocks: { ...locks, shotList: true },
+      skillDirectorLocks: updateFilmDirectorStageLock(locks, "shotList", true),
       skillDirectorCollapsed: { ...collapsed, shotList: true }
     });
   };
@@ -632,47 +704,46 @@ export function SkillDirectorNodeBody({
         <OutputPortRow node={node} port={directorOutputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       )}
 
-      <div className={`skill-director-stage-card ${locks.setup ? "locked" : ""} ${isStageCollapsed("setup") ? "collapsed" : ""}`}>
+      <div className={`skill-director-stage-card ${locks.setup ? "locked" : ""}`}>
         <div className="skill-director-stage-heading">
           <div>
             <strong>1. Scene Setup</strong>
             <small>{locks.setup ? "Locked" : "Add scene basics and references first"}</small>
           </div>
-          {isStageCollapsed("setup") && (
-            <SkillDirectorCollapsedPortRail
-              node={node}
-              ports={inputPorts}
-              onConnectStart={onConnectStart}
-              onDisconnectInput={onDisconnectInput}
-              connectedPortKeys={connectedPortKeys}
-            />
-          )}
           <div className="skill-director-stage-actions">
-            {locks.setup && (
-              <SkillDirectorCollapseButton
-                collapsed={isStageCollapsed("setup")}
-                label={isStageCollapsed("setup") ? "Expand scene setup" : "Collapse scene setup"}
-                onClick={() => toggleStageCollapsed("setup")}
-              />
-            )}
             <SkillDirectorLockButton locked={locks.setup} disabled={running || (!setupReady && !locks.setup)} label={locks.setup ? "Unlock scene setup" : "Lock scene setup"} onClick={handleSetupLock} />
           </div>
         </div>
 
-        {!isStageCollapsed("setup") && (
-          <>
+        <>
             <div className="skill-director-grid">
               <label className="node-row">
                 <span>Scene Name</span>
-                <input value={sceneName} disabled={running || locks.setup} onChange={(event) => updateUnlocked({ sceneName: event.target.value })} />
+                <input value={sceneName} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { sceneName: event.target.value })} />
               </label>
               <label className="node-row">
                 <span>Duration</span>
-                <select value={durationValue} disabled={running || locks.setup} onChange={(event) => updateUnlocked({ skillDurationSeconds: event.target.value, durationSeconds: event.target.value })}>
-                  {skillDirectorDurations.map((duration) => (
+                <select value={durationValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillDurationSeconds: event.target.value, durationSeconds: event.target.value })}>
+                  {filmDirectorDurationOptions.map((duration) => (
                     <option key={duration} value={duration}>
                       {duration}s
                     </option>
+                  ))}
+                </select>
+              </label>
+              <label className="node-row">
+                <span>Resolution</span>
+                <select value={resolutionValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillResolution: event.target.value })}>
+                  {filmDirectorResolutionOptions.map((resolution) => (
+                    <option key={resolution} value={resolution}>{resolution}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="node-row">
+                <span>Aspect Ratio</span>
+                <select value={aspectRatioValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillAspectRatio: event.target.value })}>
+                  {filmDirectorAspectRatioOptions.map((aspectRatio) => (
+                    <option key={aspectRatio} value={aspectRatio}>{aspectRatio}</option>
                   ))}
                 </select>
               </label>
@@ -681,7 +752,7 @@ export function SkillDirectorNodeBody({
                 <select
                   value={shotValue}
                   disabled={running || locks.setup}
-                  onChange={(event) => updateUnlocked({ skillShotCount: event.target.value })}
+                  onChange={(event) => updateUnlocked({ skillShotCount: event.target.value }, ["shotList"])}
                 >
                   <option value="Auto">
                     {shotValue === "Auto" && autoPlannedShotCount > 0 ? `Auto (${autoPlannedShotCount} planned)` : "Auto"}
@@ -728,10 +799,21 @@ export function SkillDirectorNodeBody({
                   const referenceNotes = node.data.skillReferenceNotes || {};
                   const hasCustomNote = Object.prototype.hasOwnProperty.call(referenceNotes, reference.key);
                   const noteValue = hasCustomNote ? referenceNotes[reference.key] : "";
+                  const referenceUsed = filmDirectorUsesReference(node.data, {
+                    tag: reference.tag,
+                    label: reference.label,
+                    type: reference.type,
+                    categoryCount: referenceItems.filter((item) => item.type === reference.type).length
+                  });
+                  const hasReferenceSelection = Boolean(
+                    node.data.skillDirectorBuilt ||
+                    referencedTags.size ||
+                    (Array.isArray(node.data.lastRunReferenceTags) && node.data.lastRunReferenceTags.length)
+                  );
                   return (
                     <label
                       key={reference.key}
-                      className={`skill-director-reference-row ${referencedTags.size && !filmDirectorUsesReferenceTag(node.data, reference.tag) ? "unused" : "used"}`}
+                      className={`skill-director-reference-row ${hasReferenceSelection && !referenceUsed ? "unused" : "used"}`}
                     >
                       <span title={`${reference.group}: ${reference.label}`}>{reference.tag}</span>
                       <input
@@ -744,7 +826,7 @@ export function SkillDirectorNodeBody({
                               ...(node.data.skillReferenceNotes || {}),
                               [reference.key]: event.target.value
                             }
-                          })
+                          }, ["shotList"])
                         }
                       />
                     </label>
@@ -752,8 +834,7 @@ export function SkillDirectorNodeBody({
                 })}
               </div>
             )}
-          </>
-        )}
+        </>
       </div>
 
       <div className={`skill-director-stage-card ${locks.style ? "locked" : ""} ${styleStageEnabled || running ? "" : "disabled"} ${isStageCollapsed("style") ? "collapsed" : ""}`}>
@@ -823,7 +904,7 @@ export function SkillDirectorNodeBody({
               value={motionDirection}
               readOnly={running || !locks.style || locks.motion}
               placeholder="Describe camera movement, framing, blocking, lens feel, or coverage."
-              onChange={(event) => updateUnlocked({ motionDirection: event.target.value, motionBrief: event.target.value })}
+              onChange={(event) => updateUnlocked({ motionDirection: event.target.value, motionBrief: event.target.value }, ["shotList"])}
             />
           </label>
         )}
@@ -854,7 +935,7 @@ export function SkillDirectorNodeBody({
               value={sceneOverview}
               readOnly={running || !locks.motion || locks.scene}
               placeholder="Summarize the scene, continuity rules, required moments, dialogue beats, or actions."
-              onChange={(event) => updateUnlocked({ sceneOverview: event.target.value, text: event.target.value })}
+              onChange={(event) => updateUnlocked({ sceneOverview: event.target.value, text: event.target.value }, ["shotList"])}
             />
           </label>
         )}

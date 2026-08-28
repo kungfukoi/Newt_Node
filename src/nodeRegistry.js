@@ -6,14 +6,14 @@ export const nodeTypeDefinitions = [
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
   { type: "output", label: "Output" },
-  { type: "autoAspect", label: "Auto Aspect" },
+  { type: "autoAspect", label: "Auto Aspect", catalog: false },
   { type: "skillDirector", label: "Film Director" },
   { type: "storyboard", label: "Storyboard" },
-  { type: "coverage", label: "Coverage" },
+  { type: "coverage", label: "Coverage", catalog: false },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "composer", label: "Composer" },
-  { type: "frameIt", label: "Frame It" },
+  { type: "frameIt", label: "Frame It", catalog: false },
   { type: "style", label: "Style" },
   { type: "transfer", label: "Mood Board" },
   { type: "utility", label: "Utility" },
@@ -26,6 +26,8 @@ export const nodeTypeDefinitions = [
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));
+
+export const catalogNodeTypeDefinitions = nodeTypeDefinitions.filter((definition) => definition.catalog !== false);
 
 export function nodeTypeDefinition(type) {
   return nodeTypeMap.get(type) || null;

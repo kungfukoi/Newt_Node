@@ -106,14 +106,19 @@ import {
   reve21FalTextEndpoint as defaultReve21FalTextEndpoint
 } from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
+import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
+import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
-import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
+import { buildFilmDirectorRevisionPrompt, filmDirectorRevisionActiveReferenceTags } from "../src/filmDirectorRevision.js";
+import { filterFilmDirectorReferencesForOutput } from "../src/filmDirectorScenes.js";
+import { normalizeFilmDirectorResolution } from "../src/filmDirectorResolutions.js";
 import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
   filmDirectorShotMaxCharsPerCut,
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
+import { compactFilmDirectorStyleDirection, filmDirectorStyleDirectionDirective } from "../src/filmDirectorStyle.js";
 import {
   buildGeminiOmniEditPrompt,
   buildGeminiOmniFalInput,
@@ -137,6 +142,7 @@ import {
   protectKlingDirectorPrompt,
   restoreKlingDirectorPrompt
 } from "../src/klingDirectorPromptOptimization.js";
+import { llmProviderUnavailableMessage, resolveLlmProvider } from "../src/llmProviders.js";
 import {
   compactKreaSeedancePrompt,
   estimateKreaSeedanceCost,
@@ -450,9 +456,14 @@ const falTextModel = process.env.FAL_TEXT_MODEL || defaultFalTextModel;
 const skillDirectorLlmEndpoint = "openrouter/router";
 const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
+const skillDirectorOpenAiModel = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || "gpt-5.6-sol";
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
 const storyboardTextModel = process.env.STORYBOARD_TEXT_MODEL || falTextModel;
 const storyboardVisionTextModel = process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardTextModel;
+const storyboardFalModel = process.env.STORYBOARD_FAL_MODEL || storyboardTextModel;
+const storyboardOpenAiModel = process.env.STORYBOARD_OPENAI_MODEL || "gpt-5.6-sol";
+const storyboardVisionFalModel = process.env.STORYBOARD_VISION_FAL_MODEL || storyboardVisionTextModel;
+const storyboardVisionOpenAiModel = process.env.STORYBOARD_VISION_OPENAI_MODEL || storyboardOpenAiModel;
 const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || falTextModel;
 const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || falTextModel;
 const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || defaultFalVideoTextModel;
@@ -3026,6 +3037,8 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
     const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const resolution = normalizeFilmDirectorResolution(req.body.resolution);
+    const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
     const requestedCuts = requestedSkillDirectorShotCount(shotCount);
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
@@ -3040,7 +3053,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       return res.status(400).json({ error: "Add a scene overview or connect scene references before running Film Director." });
     }
 
-    const result = await runSkillDirectorWithFal({
+    const result = await runFilmDirector({
       action,
       sceneName,
       sceneOverview,
@@ -3056,7 +3069,9 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       elementInputs,
       styleInputs,
       shotCount,
-      durationSeconds
+      durationSeconds,
+      resolution,
+      aspectRatio
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
@@ -3082,6 +3097,8 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         shotCount: result.shotCount || shotCount,
         resolvedShotCount: result.resolvedShotCount,
         durationSeconds: result.durationSeconds || durationSeconds,
+        resolution: result.resolution || resolution,
+        aspectRatio: result.aspectRatio || aspectRatio,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
@@ -3108,8 +3125,11 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       shotCount: result.shotCount,
       resolvedShotCount: result.resolvedShotCount,
       durationSeconds: result.durationSeconds,
+      resolution: result.resolution || resolution,
+      aspectRatio: result.aspectRatio || aspectRatio,
       actualShotCount: result.actualShotCount,
       referenceSetup: result.referenceSetup,
+      referenceTags: Array.isArray(result.referenceTags) ? result.referenceTags : undefined,
       styleDirection: result.styleDirection,
       motionDirection: result.motionDirection,
       shotList: result.shotList,
@@ -3911,8 +3931,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const directorShotList = String(req.body.directorShotList || "").trim();
     const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
     const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    const plan = process.env.FAL_KEY
-      ? await generateStoryboardPlanWithFal({
+    const plan = activeLlmProvider()
+      ? await generateStoryboardPlanWithOpenAi({
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
@@ -3945,8 +3965,8 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
       return res.status(400).json({ error: "Storyboard frame URL is required." });
     }
 
-    const qc = process.env.FAL_KEY
-      ? await reviewStoryboardFrameWithFal({
+    const qcProvider = activeLlmProvider();
+    const qcInput = {
         sourceUrl,
         previousFrameUrl: String(req.body.previousFrameUrl || "").trim(),
         spatialAnchorUrl: String(req.body.spatialAnchorUrl || "").trim(),
@@ -3956,8 +3976,10 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         shot: String(req.body.shot || "").trim(),
         angle: String(req.body.angle || "").trim(),
         notes: String(req.body.notes || "").trim()
-      })
-      : storyboardQcPass("Storyboard QC skipped because FAL_KEY is not configured.");
+      };
+    const qc = qcProvider
+      ? await reviewStoryboardFrameWithOpenAi(qcInput)
+      : storyboardQcPass("Storyboard QC needs an enabled Fal or OpenAI API key.");
 
     res.json({ qc });
   } catch (error) {
@@ -5634,7 +5656,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
     const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-    const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+    const directorReferences = filterFilmDirectorReferencesForOutput(Array.isArray(filmDirector?.references) ? filmDirector.references : [], filmDirector?.finalPrompt || "");
     const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
     if (seedance25 && rawReferenceImageUrls.filter(isLocalAssetUrl).length > seedance25ReferenceLimits.images) {
       return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.images} image references.` });
@@ -5913,7 +5935,7 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   const generateAudio = req.body.generateAudio !== false;
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorReferences = filterFilmDirectorReferencesForOutput(Array.isArray(filmDirector?.references) ? filmDirector.references : [], filmDirector?.finalPrompt || "");
   const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
   const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
   const rawCharacterUrls = Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : [];
@@ -6263,7 +6285,7 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel }) {
   }
 
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorReferences = filterFilmDirectorReferencesForOutput(Array.isArray(filmDirector?.references) ? filmDirector.references : [], filmDirector?.finalPrompt || "");
   const mergedReferenceImages = mergeSeedanceDirectorReferences({
     directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
     directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
@@ -6425,7 +6447,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorReferences = filterFilmDirectorReferencesForOutput(Array.isArray(filmDirector?.references) ? filmDirector.references : [], filmDirector?.finalPrompt || "");
   const directorTagForUrl = new Map(
     directorReferences.filter((item) => item?.url && item?.tag).map((item) => [item.url, cleanReferenceName(item.tag)])
   );
@@ -15110,8 +15132,7 @@ function normalizeSkillDirectorShotCount(value) {
 }
 
 function normalizeSkillDirectorDurationSeconds(value) {
-  const count = Number.parseInt(String(value || "15"), 10);
-  return ["5", "10", "15", "20", "30"].includes(String(count)) ? String(count) : "15";
+  return normalizeFilmDirectorDuration(value);
 }
 
 function skillDirectorDurationLabel(durationSeconds = "15") {
@@ -15151,6 +15172,67 @@ function buildTextProcessingPrompt({ mode = "process", messages = [], text, text
     .join("\n\n");
 }
 
+function activeLlmProvider(preferredProvider = textLlmProvider) {
+  return resolveLlmProvider({
+    preferredProvider,
+    falKey: process.env.FAL_KEY,
+    openAiKey: openAiTextApiKey
+  });
+}
+
+function requireActiveLlmProvider(preferredProvider = textLlmProvider) {
+  const provider = activeLlmProvider(preferredProvider);
+  if (provider) return provider;
+  throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
+}
+
+async function runTextLlm({ prompt, systemPrompt = "", preferredProvider = textLlmProvider, falModel = falTextModel, openAiModel = openAiTextModel, reasoningEffort = "low", route = "text-llm" }) {
+  const provider = requireActiveLlmProvider(preferredProvider);
+  if (provider === "fal") {
+    const data = await subscribeFal(skillDirectorLlmEndpoint, { input: { model: falModel, prompt, system_prompt: systemPrompt }, logs: true });
+    const text = extractFalText(data).trim();
+    if (!text) throw new Error("Fal returned no text.");
+    return { text, model: falModel, provider: "fal", endpoint: skillDirectorLlmEndpoint, usage: falResultUsage(data) };
+  }
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiTextApiKey}` },
+    body: JSON.stringify({ model: openAiModel, instructions: systemPrompt, input: prompt, reasoning: { effort: reasoningEffort } })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI text generation failed.", { raw: data });
+  const text = extractOpenAiResponseText(data).trim();
+  if (!text) throw new Error("OpenAI returned no text.");
+  return { text, model: openAiModel, provider: "OpenAI", endpoint: openAiModel, usage: data.usage || null };
+}
+
+async function runMediaDescriptionLlm({ inputs = [], mediaType = "image", prompt, systemPrompt = "Return only useful prompt context. Do not use markdown.", preferredProvider = textLlmProvider, falModel = falVisionTextModel, openAiModel = openAiTextModel, reasoningEffort = "low", route = "media-description" }) {
+  if (!inputs.length) return { text: "", usages: [], provider: "", model: "", endpoint: "" };
+  const provider = requireActiveLlmProvider(preferredProvider);
+  if (provider === "fal") {
+    const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
+    const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
+    const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
+    const data = await subscribeFal(endpoint, { input: { [inputKey]: mediaUrls, prompt, system_prompt: systemPrompt, model: falModel }, logs: true });
+    return { text: extractFalText(data).trim(), usages: [falResultUsage(data)].filter(Boolean), provider: "fal", model: falModel, endpoint };
+  }
+  const content = [{ type: "input_text", text: prompt }];
+  for (const item of inputs) {
+    if (mediaType !== "image") { content.push({ type: "input_text", text: `${item.label || "Video reference"}: ${item.url}` }); continue; }
+    const asset = await readLocalAsset(item.url);
+    if (item.label) content.push({ type: "input_text", text: item.label });
+    content.push({ type: "input_image", image_url: `data:${asset.mimeType || "image/png"};base64,${asset.buffer.toString("base64")}` });
+  }
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiTextApiKey}` },
+    body: JSON.stringify({ model: openAiModel, instructions: systemPrompt, input: [{ role: "user", content }], reasoning: { effort: reasoningEffort } })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI media analysis failed.", { raw: data });
+  return { text: extractOpenAiResponseText(data).trim(), usages: [data.usage].filter(Boolean), provider: "OpenAI", model: openAiModel, endpoint: openAiModel };
+}
+
 async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!process.env.FAL_KEY) {
     throw new Error("No active Fal API key is selected in Settings.");
@@ -15186,7 +15268,7 @@ async function processTextWithFal({ mode = "process", messages = [], text, textI
 }
 
 const skillDirectorSceneRules =
-  "Scene rules: cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental SFX, natural ambience.";
+  "Scene rules: Absolutely no music, no music score, no audio effects. Cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental sounds, natural ambience.";
 const skillDirectorFinalPromptMaxChars = 7000;
 
 function skillDirectorSystemPrompt() {
@@ -15289,7 +15371,10 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   const seenInstructions = new Set(skillDirectorInstructionUnits(skillDirectorSceneRules).map(skillDirectorInstructionKey));
   const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
   const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
-  const cleanStyle = dedupeSkillDirectorInstructions(cleanSkillDirectorMoodBoardReferences(styleDirection), seenInstructions);
+  const cleanStyle = dedupeSkillDirectorInstructions(
+    compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(styleDirection)),
+    seenInstructions
+  );
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
   const finalShotCount = largestSkillDirectorCutNumber(shotList);
@@ -15612,7 +15697,7 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
   return issues;
 }
 
-async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues }) {
+async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags = [] }) {
   const repairShotCount = requestedSkillDirectorShotCount(shotCount) || largestSkillDirectorCutNumber(outputText) || "Auto";
   const repairPrompt = [
     `Repair this ${skillDirectorDurationLabel(durationSeconds)} Film Director shot plan.`,
@@ -15622,46 +15707,29 @@ async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeco
     filmDirectorShotDetailDirective(repairShotCount, durationSeconds),
     "Fix these validation failures:",
     issues.map((issue) => `- ${issue}`).join("\n"),
-    "Preserve the story, connected @tags, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
+    activeReferenceTags.length ? `Keep exactly these active connected tags when their assets appear: ${activeReferenceTags.join(", ")}. Do not restore removed tags.` : "Preserve the active connected @tags.",
+    "Preserve the story, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
     "Give neighboring shots distinct editorial purposes. Do not use markdown or add keys outside the schema.",
     "Original planning context:",
     prompt,
     "Draft to repair:",
     outputText
   ].filter(Boolean).join("\n\n");
-  const data = await subscribeFal(skillDirectorLlmEndpoint, {
-    input: {
-      model,
-      prompt: repairPrompt,
-      system_prompt: skillDirectorSystemPrompt()
-    },
-    logs: true
-  });
-  return {
-    text: stripSkillDirectorFences(extractFalText(data)) || outputText,
-    usage: falResultUsage(data)
-  };
+  const result = await runTextLlm({ prompt: repairPrompt, systemPrompt: skillDirectorSystemPrompt(), falModel: model, openAiModel: skillDirectorOpenAiModel, reasoningEffort: "high", route: "film-director-shot-repair" });
+  return { text: stripSkillDirectorFences(result.text) || outputText, usage: result.usage };
 }
 
-async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, characterTags = [] }) {
+async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, characterTags = [], activeReferenceTags = [] }) {
   let nextText = outputText;
   const usages = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const plan = skillDirectorShotPlanFromOutput(nextText);
     const issues = skillDirectorShotPlanIssues(plan, shotCount, durationSeconds, characterTags);
     if (!issues.length) return { text: nextText, plan, usages };
-    const repaired = await repairSkillDirectorShotPlan({
-      outputText: nextText,
-      shotCount,
-      durationSeconds,
-      prompt,
-      model,
-      issues
-    });
+    const repaired = await repairSkillDirectorShotPlan({ outputText: nextText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags });
     nextText = repaired.text || nextText;
     if (repaired.usage) usages.push(repaired.usage);
   }
-
   const plan = skillDirectorShotPlanFromOutput(nextText);
   const requestedCount = requestedSkillDirectorShotCount(shotCount);
   const actualCount = largestSkillDirectorCutNumber(plan.shotList);
@@ -15704,8 +15772,8 @@ function buildSkillDirectorPrompt({
   if (action === "style") {
     return [
       "Generate the Film Director Style Direction.",
-      'Return strict JSON only: {"styleDirection":"one production-ready paragraph"}',
-      "Describe cinematic look, tone, pacing, lighting mood, color behavior, texture, atmosphere, image quality, color grade, and performance texture.",
+      'Return strict JSON only: {"styleDirection":"one concise literal visual brief"}',
+      filmDirectorStyleDirectionDirective(),
       "If a visual style reference is connected, use it only to infer abstract visual qualities.",
       "Do not mention or name the style reference. Do not describe, name, or reuse any objects, elements, locations, subjects, people, props, compositions, or story content found inside that reference.",
       styleDirection ? `Existing editable Style Direction. Preserve useful user edits and revise only where the current scene context requires:\n${styleDirection}` : "",
@@ -15758,7 +15826,7 @@ function buildSkillDirectorPrompt({
     "MOTION_DIRECTION:",
     "SHOT_LIST:",
     "",
-    "STYLE_DIRECTION should describe the cinematic look, tone, pacing, lighting mood, color behavior, and performance texture. If a visual style reference is connected, use it only to describe the style direction, not as literal scene content.",
+    `STYLE_DIRECTION: ${filmDirectorStyleDirectionDirective()} If a visual style reference is connected, use it only to infer abstract visual qualities, not literal scene content.`,
     "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
     "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
     "Keep Continuity ledger and Must-have shots to one compact line each.",
@@ -15789,7 +15857,7 @@ function buildSkillDirectorPrompt({
     .join("\n\n");
 }
 
-async function runSkillDirectorWithFal({
+async function runFilmDirector({
   action = "build",
   sceneName,
   sceneOverview,
@@ -15805,11 +15873,10 @@ async function runSkillDirectorWithFal({
   elementInputs = [],
   styleInputs = [],
   shotCount = "3",
-  durationSeconds = "15"
+  durationSeconds = "15",
+  resolution = "720p",
+  aspectRatio = "16:9"
 }) {
-  if (!process.env.FAL_KEY) {
-    throw new Error("No active Fal API key is selected in Settings.");
-  }
 
   const model = skillDirectorFalModel;
   const anonymizedStyleInputs = styleInputs.map((item, index) => ({
@@ -15845,6 +15912,8 @@ async function runSkillDirectorWithFal({
       helperUsages: [],
       shotCount,
       durationSeconds,
+      resolution,
+      aspectRatio,
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -15861,6 +15930,8 @@ async function runSkillDirectorWithFal({
       revisionNotes,
       durationLabel: skillDirectorDurationLabel(durationSeconds),
       durationSeconds,
+      resolution,
+      aspectRatio,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -15879,50 +15950,40 @@ async function runSkillDirectorWithFal({
       throw new Error("Add revision notes before updating the Film Director output.");
     }
 
-    const data = await subscribeFal(skillDirectorLlmEndpoint, {
-      input: {
-        model,
-        prompt: revisionPrompt,
-        system_prompt: skillDirectorSystemPrompt()
-      },
-      logs: true
+    const llmResult = await runTextLlm({
+      prompt: revisionPrompt,
+      systemPrompt: skillDirectorSystemPrompt(),
+      falModel: model,
+      openAiModel: skillDirectorOpenAiModel,
+      reasoningEffort: "high",
+      route: "film-director-revision"
     });
-    const outputText = stripSkillDirectorFences(extractFalText(data));
-    if (!outputText) throw new Error("fal returned no Film Director revision.");
+    const outputText = stripSkillDirectorFences(llmResult.text);
+    if (!outputText) throw new Error("Film Director returned no revision.");
 
     const structuredOutput = skillDirectorStructuredObject(outputText);
-    const revisedSceneName = skillDirectorStructuredValue(
-      structuredOutput,
-      ["sceneName", "scene_name", "title"]
-    ) || sceneName;
-    const requestedRevisedDuration = String(
-      skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
-    );
-    const revisedDurationSeconds = ["5", "10", "15", "20", "30"].includes(requestedRevisedDuration)
-      ? requestedRevisedDuration
-      : durationSeconds;
-    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
-      outputText,
-      shotCount: "Auto",
-      durationSeconds: revisedDurationSeconds,
-      prompt: revisionPrompt,
-      model,
-      characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
-    });
+    const revisedSceneName = skillDirectorStructuredValue(structuredOutput, ["sceneName", "scene_name", "title"]) || sceneName;
+    const requestedRevisedDuration = String(skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"]));
+    const revisedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, durationSeconds);
+    const revisedResolution = normalizeFilmDirectorResolution(skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]), resolution);
+    const revisedAspectRatio = normalizeFilmDirectorAspectRatio(skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]), aspectRatio);
+    const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection));
+    const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection);
+    const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview);
+    const availableReferenceInputs = [...characterInputs, ...locationInputs, ...elementInputs];
+    const revisedReferenceTags = filmDirectorRevisionActiveReferenceTags(structuredOutput || {}, availableReferenceInputs.map((item) => item.tag).filter(Boolean), [revisedStyleDirection, revisedMotionDirection, revisedSceneOverview, JSON.stringify(structuredOutput?.cuts || [])].filter(Boolean).join("\n"));
+    const revisedReferenceTagKeys = new Set(revisedReferenceTags.map((tag) => String(tag).replace(/^@+/, "").toLowerCase()));
+    const referenceRemainsActive = (item) => revisedReferenceTagKeys.has(String(item?.tag || "").replace(/^@+/, "").toLowerCase());
+    const revisedCharacterInputs = characterInputs.filter(referenceRemainsActive);
+    const revisedLocationInputs = locationInputs.filter(referenceRemainsActive);
+    const revisedElementInputs = elementInputs.filter(referenceRemainsActive);
+    const revisedReferenceLines = skillDirectorSceneReferenceLines({ characterInputs: revisedCharacterInputs, locationInputs: revisedLocationInputs, elementInputs: revisedElementInputs });
+    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({ outputText, shotCount: "Auto", durationSeconds: revisedDurationSeconds, prompt: revisionPrompt, model, characterTags: revisedCharacterInputs.map((item) => item.tag).filter(Boolean), activeReferenceTags: revisedReferenceTags });
     const revisedPlan = validatedOutput.plan || skillDirectorShotPlanFromOutput(outputText);
-    const revisedStyleDirection = cleanSkillDirectorMoodBoardReferences(
-      skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
-    );
-    const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(
-      skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection
-    );
-    const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(
-      skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview
-    );
     const revisedShotList = revisedPlan.shotList || shotList;
     const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
     const finalPrompt = composeSkillDirectorFinalPrompt({
-      referenceLines,
+      referenceLines: revisedReferenceLines,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       shotList: revisedShotList,
@@ -15933,18 +15994,21 @@ async function runSkillDirectorWithFal({
     return {
       action,
       text: finalPrompt,
-      model,
-      provider: "fal",
-      endpoint: skillDirectorLlmEndpoint,
+      model: llmResult.model,
+      provider: llmResult.provider,
+      endpoint: llmResult.endpoint,
       submittedPrompt: revisionPrompt,
-      usage: falResultUsage(data),
+      usage: llmResult.usage,
       helperUsages: validatedOutput.usages || [],
       shotCount: actualShotCount ? String(actualShotCount) : shotCount,
       durationSeconds: revisedDurationSeconds,
+      resolution: revisedResolution,
+      aspectRatio: revisedAspectRatio,
       actualShotCount,
       resolvedShotCount: actualShotCount,
       sceneName: revisedSceneName,
-      referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      referenceSetup: skillDirectorReferenceSetupFromLines(revisedReferenceLines),
+      referenceTags: revisedReferenceTags,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       sceneOverview: revisedSceneOverview,
@@ -15972,15 +16036,15 @@ async function runSkillDirectorWithFal({
     durationSeconds,
     imageDescriptions: imageContext.descriptions
   });
-  const data = await subscribeFal(skillDirectorLlmEndpoint, {
-    input: {
-      model,
-      prompt,
-      system_prompt: skillDirectorSystemPrompt()
-    },
-    logs: true
+  const llmResult = await runTextLlm({
+    prompt,
+    systemPrompt: skillDirectorSystemPrompt(),
+    falModel: model,
+    openAiModel: skillDirectorOpenAiModel,
+    reasoningEffort: "high",
+    route: "film-director-" + String(action || "build").toLowerCase()
   });
-  const initialOutputText = stripSkillDirectorFences(extractFalText(data));
+  const initialOutputText = stripSkillDirectorFences(llmResult.text);
   let outputText = initialOutputText;
   const helperUsages = [];
   let validatedShotPlan = null;
@@ -15999,15 +16063,15 @@ async function runSkillDirectorWithFal({
   }
 
   if (!outputText) {
-    throw new Error("fal returned no Film Director text.");
+    throw new Error("Film Director returned no text.");
   }
 
   const structuredOutput = skillDirectorStructuredObject(outputText);
-  const generatedStyleDirection = cleanSkillDirectorMoodBoardReferences(
+  const generatedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(
     action === "style"
       ? skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || extractSkillDirectorBlock(outputText, "STYLE_DIRECTION") || outputText || styleDirection || ""
       : styleDirection || ""
-  );
+  ));
   const generatedMotionDirection = cleanSkillDirectorMoodBoardReferences(
     action === "motion"
       ? skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || extractSkillDirectorBlock(outputText, "MOTION_DIRECTION") || outputText || motionDirection || ""
@@ -16040,14 +16104,16 @@ async function runSkillDirectorWithFal({
           : action === "shotList"
             ? generatedShotList
             : "",
-    model,
-    provider: "fal",
-    endpoint: skillDirectorLlmEndpoint,
+    model: llmResult.model,
+    provider: llmResult.provider,
+    endpoint: llmResult.endpoint,
     submittedPrompt: prompt,
-    usage: falResultUsage(data),
+    usage: llmResult.usage,
     helperUsages: [...imageContext.usages, ...helperUsages].filter(Boolean),
     shotCount,
     durationSeconds,
+    resolution,
+    aspectRatio,
     actualShotCount,
     resolvedShotCount,
     referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -16145,23 +16211,10 @@ async function describeImageInputs(imageInputs) {
 async function describeFilmDirectorImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
-  const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
-  const referenceLabels = imageInputs
-    .map((item, index) => `Image ${index + 1}: ${item.tag || item.label || `@Reference${index + 1}`} | type: ${item.type || "image"}`)
-    .join("\n");
-  const typeInstructions = [
-    ...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean)),
-    'Return strict JSON only: {"assets":[{"tag":"@ExactTag","description":"concise production-useful visual description"}]}.',
-    "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."
-  ].join("\n");
-  const data = await describeImagesWithFalVision(
-    imageUrls,
-    skillDirectorVisionFalModel,
-    referenceLabels,
-    typeInstructions,
-    ""
-  );
-  const rawText = extractFalText(data).trim();
+  const referenceLabels = imageInputs.map((item, index) => `Image ${index + 1}: ${item.tag || item.label || `@Reference${index + 1}`} | type: ${item.type || "image"}`).join("\n");
+  const typeInstructions = [...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean)), 'Return strict JSON only: {"assets":[{"tag":"@ExactTag","description":"concise production-useful visual description"}]}.', "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."].join("\n");
+  const result = await runMediaDescriptionLlm({ inputs: imageInputs, mediaType: "image", prompt: `${referenceLabels}\n\n${typeInstructions}`, falModel: skillDirectorVisionFalModel, openAiModel: skillDirectorOpenAiModel, reasoningEffort: "high", route: "film-director-visual-analysis" });
+  const rawText = result.text;
   const parsed = skillDirectorStructuredObject(rawText);
   const parsedAssets = Array.isArray(parsed?.assets) ? parsed.assets : [];
   const descriptions = imageInputs.map((item, index) => {
@@ -16169,14 +16222,9 @@ async function describeFilmDirectorImageInputs(imageInputs) {
     const tagKey = String(tag).replace(/^@/, "").toLowerCase();
     const match = parsedAssets.find((asset) => String(asset?.tag || "").replace(/^@/, "").toLowerCase() === tagKey) || parsedAssets[index];
     const description = String(match?.description || "").replace(/\s+/g, " ").trim();
-    if (!description) return "";
-    return `${tag} (${item.type || "image"}): ${description}`;
+    return description ? `${tag} (${item.type || "image"}): ${description}` : "";
   }).filter(Boolean);
-
-  return {
-    descriptions: descriptions.length ? descriptions : rawText ? [`Connected visual analysis: ${rawText}`] : [],
-    usages: [falResultUsage(data)].filter(Boolean)
-  };
+  return { descriptions: descriptions.length ? descriptions : rawText ? [`Connected visual analysis: ${rawText}`] : [], usages: result.usages };
 }
 
 function skillDirectorVisionInstructionForType(type) {
@@ -17094,8 +17142,7 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithFal({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
-  const model = storyboardTextModel;
+async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -17179,27 +17226,17 @@ ${directorExpansionInstruction
     ? `Create at least the per-CUT keyframes listed above, targeting ${frameCount} storyboard frames. You may add a frame only when the visual logic clearly requires another distinct state, but do not reduce a listed multi-frame CUT to one frame. Preserve every CUT, keep multi-frame CUTS contiguous, and never exceed 35 frames.`
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
-  const text = await generateFalStoryboardText({
-    model,
+  const result = await runTextLlm({
     prompt,
-    systemPrompt: "Return only valid JSON for a production-ready storyboard plan. Do not use markdown."
+    systemPrompt: "You are NewtNode's senior storyboard director. Return only valid JSON and prioritize editorial logic, continuity, blocking, and production-useful frame prompts.",
+    falModel: storyboardFalModel,
+    openAiModel: storyboardOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "storyboard-plan"
   });
 
-  return parseStoryboardPlanJson(text);
-}
-
-async function generateFalStoryboardText({ model = storyboardTextModel, prompt, systemPrompt }) {
-  const data = await subscribeFal("openrouter/router", {
-    input: {
-      model,
-      prompt,
-      system_prompt: systemPrompt || "Return only the requested storyboard text. Do not use markdown."
-    },
-    logs: true
-  });
-  const text = extractFalText(data).trim();
-  if (!text) throw httpError(502, "Fal GPT-5.6 Terra returned no storyboard text.", { raw: data });
-  return text;
+  return parseStoryboardPlanJson(result.text);
 }
 
 function parseStoryboardPlanJson(text) {
@@ -17353,21 +17390,7 @@ Return this exact JSON shape:
 If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
 }
 
-async function storyboardQcFalImageUrl(publicPath, label, { required = false } = {}) {
-  if (!publicPath) return null;
-  try {
-    return {
-      label,
-      url: await localAssetToFalUrl(publicPath)
-    };
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
-    return null;
-  }
-}
-
-async function reviewStoryboardFrameWithFal({
+async function reviewStoryboardFrameWithOpenAi({
   sourceUrl,
   previousFrameUrl = "",
   spatialAnchorUrl = "",
@@ -17378,13 +17401,12 @@ async function reviewStoryboardFrameWithFal({
   angle = "",
   notes = ""
 } = {}) {
-  const imageEntries = (await Promise.all([
-    storyboardQcFalImageUrl(sourceUrl, "Generated frame to review", { required: true }),
-    storyboardQcFalImageUrl(previousFrameUrl, "Previous approved frame for continuity"),
-    storyboardQcFalImageUrl(spatialAnchorUrl, "Spatial anchor frame for room geography")
-  ])).filter(Boolean);
-  if (!imageEntries.length) return storyboardQcPass("No readable image was available for QC.");
-
+  const inputs = [
+    sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
+    previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
+    spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
+  ].filter(Boolean);
+  if (!inputs.length) return storyboardQcPass("No readable image was available for QC.");
   const prompt = storyboardQcReviewPrompt({
     sceneDescription,
     framePrompt,
@@ -17392,20 +17414,20 @@ async function reviewStoryboardFrameWithFal({
     shot,
     angle,
     notes,
-    imageLabels: imageEntries.map((entry) => entry.label)
+    imageLabels: inputs.map((item) => item.label)
   });
-
-  const data = await subscribeFal("openrouter/router/vision", {
-    input: {
-      image_urls: imageEntries.map((entry) => entry.url),
-      prompt,
-      system_prompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
-      model: storyboardVisionTextModel
-    },
-    logs: true
+  const result = await runMediaDescriptionLlm({
+    inputs,
+    mediaType: "image",
+    prompt,
+    systemPrompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
+    falModel: storyboardVisionFalModel,
+    openAiModel: storyboardVisionOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "storyboard-qc"
   });
-
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(extractFalText(data)));
+  return normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text));
 }
 
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
@@ -17442,7 +17464,7 @@ function storyboardExportFrameExtension(fileName = "") {
 
 async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.FAL_KEY) return fallback;
+  if (!activeLlmProvider()) return fallback;
 
   try {
     const frameText = frames.map((frame, index) => [
@@ -17453,9 +17475,12 @@ async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDes
       frame.notes ? `Continuity note: ${frame.notes}` : "",
       [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
     ].filter(Boolean).join("\n")).join("\n\n");
-    const text = await generateFalStoryboardText({
-      model: storyboardTextModel,
-      systemPrompt: "Return only valid JSON containing concise production-board captions. Do not use markdown.",
+    const result = await runTextLlm({
+      falModel: storyboardFalModel,
+      openAiModel: storyboardOpenAiModel,
+      responseMimeType: "application/json",
+      reasoningEffort: "high",
+      route: "storyboard-export-captions",
       prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
@@ -17473,7 +17498,7 @@ Return this exact JSON shape:
 
 Descriptions must be in the same order as the frames. Keep each caption short, complete, readable, and useful below a storyboard panel. Each caption must be a finished sentence or finished noun phrase. Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
     });
-    const parsed = parseStoryboardPlanJson(text);
+    const parsed = parseStoryboardPlanJson(result.text);
     const descriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
     return frames.map((frame, index) => {
       const rawGenerated = String(descriptions[index] || "").trim();
@@ -17489,7 +17514,7 @@ Descriptions must be in the same order as the frames. Keep each caption short, c
 
 async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.FAL_KEY) return fallback;
+  if (!activeLlmProvider()) return fallback;
 
   const descriptions = [...fallback];
   const batchSize = 4;
@@ -17515,13 +17540,17 @@ Rules:
 - Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
 - Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`;
     const readableFrames = [];
-    const imageUrls = [];
 
     for (const [offset, frame] of batch.entries()) {
       try {
-        const imageUrl = await localAssetToFalUrl(frame.sourceUrl);
-        readableFrames.push({ frame, index: batchStart + offset });
-        imageUrls.push(imageUrl);
+        const asset = await readLocalAsset(frame.sourceUrl);
+        if (!String(asset.mimeType || "").startsWith("image/")) continue;
+        readableFrames.push({
+          frame,
+          index: batchStart + offset,
+          url: frame.sourceUrl,
+          label: `Frame ${batchStart + offset + 1}`
+        });
       } catch (error) {
         console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
       }
@@ -17530,17 +17559,18 @@ Rules:
     if (!readableFrames.length) continue;
 
     try {
-      const data = await subscribeFal("openrouter/router/vision", {
-        input: {
-          image_urls: imageUrls,
-          prompt,
-          system_prompt: "Return only valid JSON containing one concise caption per image, in image order. Do not use markdown.",
-          model: storyboardVisionTextModel
-        },
-        logs: true
+      const result = await runMediaDescriptionLlm({
+        inputs: readableFrames,
+        mediaType: "image",
+        prompt,
+        systemPrompt: "Return only valid JSON with concise production-board captions in the supplied frame order.",
+        falModel: storyboardVisionFalModel,
+        openAiModel: storyboardVisionOpenAiModel,
+        responseMimeType: "application/json",
+        reasoningEffort: "high",
+        route: "storyboard-export-visual-captions"
       });
-      const text = extractFalText(data);
-      const parsed = parseStoryboardPlanJson(text);
+      const parsed = parseStoryboardPlanJson(result.text);
       const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
       readableFrames.forEach(({ index }, localIndex) => {
         const rawGenerated = String(generatedDescriptions[localIndex] || "").trim();

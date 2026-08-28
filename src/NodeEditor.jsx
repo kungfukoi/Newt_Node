@@ -307,7 +307,8 @@ import {
   positiveModulo,
   rectsOverlap
 } from "./nodeGeometry.js";
-import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
+import { catalogNodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
+import { textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -334,7 +335,9 @@ import {
   filmDirectorRevisionStatePatch,
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
-import { filmDirectorUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import { filmDirectorOutputUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
+import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentReferenceText } from "./textAgent.js";
 import {
@@ -465,7 +468,7 @@ const nodeIcons = {
   textAgent: MessageSquareText
 };
 
-const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
+const nodeCatalog = catalogNodeTypeDefinitions.map((definition) => ({
   ...definition,
   icon: nodeIcons[definition.type] || Box
 }));
@@ -1457,6 +1460,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             }
           };
         }
+        if (node.type === "utility" && utilityMode(node) === "image") {
+          const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
+          const modelChoices = isUtilityAutoAspectModel(utilityImageModel)
+            ? autoAspectModelOptions.filter((model) => enabledImageModels.includes(model))
+            : isUtilityCoverageModel(utilityImageModel)
+              ? enabledCoverageModels
+              : null;
+          if (modelChoices && !modelChoices.includes(node.data.model)) {
+            const model = modelChoices[0] || imageModelNames.openAiImage2;
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                model,
+                resolution: normalizeImageModelResolutionForModel(node.data.resolution, model)
+              }
+            };
+          }
+        }
         if (node.type === "videoModel" && !isSam3VideoModel(node.data.model) && !enabledVideoModels.includes(node.data.model)) {
           return { ...node, data: { ...node.data, ...videoModelSelectionPatch(node.data, fallbackVideoModel) } };
         }
@@ -2067,7 +2089,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       };
     }
     if (type === "videoModel") {
-      const model = enabledVideoModels[0] || videoModelNames.seedance;
+      const model = enabledVideoModels.includes(videoModelNames.seedance25)
+        ? videoModelNames.seedance25
+        : enabledVideoModels[0] || videoModelNames.seedance25;
       return {
         ...data,
         ...videoModelSelectionPatch(data, model)
@@ -2838,7 +2862,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...node,
           data: {
             ...node.data,
-            model: node.data.frameItVideoModel || enabledVideoModels[0] || videoModelNames.seedance,
+            model: node.data.frameItVideoModel || (enabledVideoModels.includes(videoModelNames.seedance25)
+              ? videoModelNames.seedance25
+              : enabledVideoModels[0] || videoModelNames.seedance25),
             duration: node.data.frameItDuration || "5 seconds",
             resolution: node.data.frameItVideoResolution || "720p",
             aspectRatio: node.data.frameItAspectRatio || "16:9",
@@ -5507,6 +5533,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModel: ["promptIn"],
         utility: ["promptIn"],
         storyboard: ["sceneDescriptionIn"],
+        plainText: ["textIn"],
         text: ["textIn"],
         textAgent: ["textIn"]
       },
@@ -5896,6 +5923,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
       if (["image", "imageModel"].includes(source.type)) return "";
       return `${inputLabel} accepts image outputs`;
+    }
+
+    if (target?.type === "plainText" && to.port === "textIn") {
+      if (!["plainText", "text", "textAgent", "skillDirector", "imageModel", "videoModel"].includes(source.type)) {
+        return "Text input accepts text outputs";
+      }
+      if (wouldCreatePlainTextCycle({ edges: edgesRef.current, nodes: graphNodes, sourceNodeId: source.id, targetNodeId: target.id })) {
+        return "Text inputs cannot create a circular Text chain";
+      }
+      return "";
     }
 
     if (["text", "textAgent"].includes(target?.type)) {
@@ -6535,7 +6572,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const previousMessages = normalizeTextAgentMessages(currentNode.data.agentMessages);
         const userMessage = createTextAgentMessage("user", agentMessage);
         const messagesWithUser = appendTextAgentMessage(previousMessages, userMessage);
-        updateNode(currentNode.id, { agentDraft: "", agentMessages: messagesWithUser });
+        updateNode(currentNode.id, {
+          agentDraft: "",
+          agentMessages: messagesWithUser,
+          textPromptHistoryIndex: null,
+          textPromptHistoryDraft: ""
+        });
 
         const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current, agentMessage);
         const resolvedText = resolveNodeReferencesInText(agentMessage, nodeReferenceContext, currentNode.id);
@@ -6583,6 +6625,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           lastRunDurationSeconds: processed.durationSeconds,
           lastRunActualShotCount: processed.actualShotCount,
           lastRunReferenceSetup: processed.referenceSetup,
+          ...(Array.isArray(processed.referenceTags) ? { lastRunReferenceTags: processed.referenceTags } : {}),
           skillDirectorAction: "",
           skillDirectorQueuedAction: ""
         };
@@ -6592,10 +6635,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             skillDirectorLocks: {
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
-              style: false,
-              motion: false,
-              scene: false,
-              shotList: false
+              style: false
             },
             styleDirection: processed.styleDirection || processed.text || currentNode.data.styleDirection || "",
             skillDirectorBuilt: false,
@@ -6611,9 +6651,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
               style: true,
-              motion: false,
-              scene: false,
-              shotList: false
+              motion: false
             },
             motionDirection: processed.motionDirection || processed.text || currentNode.data.motionDirection || "",
             motionBrief: processed.motionDirection || processed.text || currentNode.data.motionDirection || "",
@@ -6778,6 +6816,96 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       if (currentNode.type === "utility") {
         if (utilityMode(currentNode) === "image") {
+          const utilityImageModel = normalizedUtilityImageModelName(currentNode.data.utilityImageModel);
+          if (isUtilityAutoAspectModel(utilityImageModel)) {
+            const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+            if (!sourceImageUrl) throw new Error("Connect an image to Utility Auto Aspect.");
+            const autoAspectTargets = autoAspectTargetsForData(currentNode.data);
+            if (!autoAspectTargets.length) throw new Error("Select at least one aspect ratio.");
+
+            const settled = await settleSequential(
+              autoAspectTargets,
+              (target, index) => runAutoAspectGeneration({
+                node: currentNode,
+                sourceImageUrl,
+                aspectRatio: target.aspectRatio,
+                workflowContext: requestContext,
+                index
+              }),
+              imageRunStaggerMs
+            );
+            const successes = fulfilledRunValues(settled, { flatten: true });
+            const failures = rejectedRunResults(settled);
+            ensureRunSuccesses(successes, failures, "Auto Aspect generation failed.");
+            const autoAspectResults = successes.map((item) => ({
+              key: item.key || autoAspectTargetKey(item),
+              aspectRatio: item.aspectRatio,
+              url: item.url,
+              label: item.label,
+              text: item.text || "",
+              cost: item.cost ?? null,
+              sourceUrl: item.sourceUrl || ""
+            }));
+            const resultItems = autoAspectResultItems({ autoAspectResults });
+
+            updateNode(currentNode.id, {
+              status: "complete",
+              resultUrl: resultItems[0]?.url || autoAspectResults[0]?.url || "",
+              resultItems,
+              selectedResultIndex: 0,
+              autoAspectResults,
+              resultText: resultTextFromItems(autoAspectResults),
+              resultType: "image",
+              error: batchRunError("image", autoAspectTargets.length, successes, failures)
+            });
+            markOutputTargetSaved(outputTarget, autoAspectResults, "image");
+            loadOutputHistory();
+            return { status: "complete" };
+          }
+
+          if (isUtilityCoverageModel(utilityImageModel)) {
+            const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+            if (!sourceImageUrl) throw new Error("Connect an image to Utility Coverage.");
+            const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod));
+            const aspectRatio = await resolveImageModelAspectRatio(
+              {
+                ...currentNode,
+                data: { ...currentNode.data, aspectRatio: imageModelAutoAspectRatio }
+              },
+              { imagePromptIn: incoming.imageIn || [] }
+            );
+            updateNode(currentNode.id, { ...resetCoverageOutputPatch(), status: "running" });
+            const settled = await settleSequential(
+              shots,
+              (shot, index) => runCoverageGeneration({
+                node: currentNode,
+                sourceImageUrl,
+                shot,
+                aspectRatio,
+                workflowContext: requestContext,
+                index
+              }),
+              imageRunStaggerMs
+            );
+            const successes = fulfilledRunValues(settled, { flatten: true });
+            const failures = rejectedRunResults(settled);
+            ensureRunSuccesses(successes, failures, "Coverage generation failed.");
+            const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
+            updateNode(currentNode.id, {
+              status: "complete",
+              resultUrl: resultItems[firstNewIndex]?.url || successes[0]?.url || "",
+              resultItems,
+              selectedResultIndex: firstNewIndex,
+              coverageResults: resultItems,
+              resultText: resultTextFromItems(successes),
+              resultType: "image",
+              error: batchRunError("image", shots.length, successes, failures)
+            });
+            markOutputTargetSaved(outputTarget, successes, "image");
+            loadOutputHistory();
+            return { status: "complete" };
+          }
+
           const generatedItems = await runUtilityImageGeneration({
             node: currentNode,
             prompt: basePrompt,
@@ -8129,7 +8257,7 @@ function NodeCard({
 
   const moodBoardScalable = node.type === "transfer" && nodeData.locked && nodeData.activated && nodeData.resultUrl;
   const storyboardScalable = node.type === "storyboard";
-  const frameItScalable = node.type === "frameIt";
+  const frameItScalable = node.type === "frameIt" || (node.type === "composer" && nodeData.composerMode === "frameIt");
   const customNodeWidth = normalizedNodeWidth(nodeData.nodeWidth, node.type);
   const customNodeHeight = normalizedNodeHeight(
     nodeData.nodeHeight,
@@ -8141,7 +8269,7 @@ function NodeCard({
   const customNodeHeightClass = Boolean(customNodeHeight);
 
   const customTextareaSize = Boolean(nodeData.textareaResizeMode);
-  const cardClassName = `node-card ${flowManaged ? "flow-managed" : ""} ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
+  const cardClassName = `node-card ${flowManaged ? "flow-managed" : ""} ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable frameIt" : ""} ${customNodeSize ? "custom-node-size" : ""} ${customNodeWidthClass ? "custom-node-width" : ""} ${customNodeHeightClass ? "custom-node-height" : ""} ${customTextareaSize ? "custom-textarea-size" : ""}`;
   const cardStyle = {
     transform: flowManaged ? undefined : `translate(${node.x}px, ${node.y}px)`,
     width: customNodeWidth ? `${customNodeWidth}px` : undefined,
@@ -10695,7 +10823,9 @@ function NodeBody({
     return (
       <PlainTextNodeBody
         node={node}
+        inputPort={config.input.find((port) => port.id === "textIn")}
         outputPort={outputPort}
+        incoming={incoming}
         onUpdate={onUpdate}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
@@ -10792,21 +10922,54 @@ function NodeBody({
   }
 
   if (node.type === "composer") {
+    const composerMode = node.data.composerMode === "frameIt" ? "frameIt" : "composer";
     const imageOutputPort = config.output.find((port) => port.id === "imageOut");
     const imageInputPort = config.input.find((port) => port.id === "imageIn");
     const characterInputPorts = composerCharacterInputPortsForNode(node);
     const composerInputPorts = [imageInputPort, ...characterInputPorts].filter(Boolean);
 
     return (
-      <ComposerNodeBody
-        node={node}
-        imageOutputPort={imageOutputPort}
-        composerInputPorts={composerInputPorts}
-        onOpenComposer={onOpenComposer}
-        onConnectStart={onConnectStart}
-        onDisconnectInput={onDisconnectInput}
-        connectedPortKeys={connectedPortKeys}
-      />
+      <>
+        <div className="utility-mode-tabs composer-mode-tabs" role="tablist" aria-label="Composer mode" onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" role="tab" aria-selected={composerMode === "composer"} className={composerMode === "composer" ? "active" : ""} onClick={() => onUpdate(node.id, { composerMode: "composer", error: "" })}>
+            Composer
+          </button>
+          <button type="button" role="tab" aria-selected={composerMode === "frameIt"} className={composerMode === "frameIt" ? "active" : ""} onClick={() => onUpdate(node.id, { composerMode: "frameIt", error: "" })}>
+            Frame It
+          </button>
+        </div>
+        {composerMode === "frameIt" ? (
+          <FrameItNodeBody
+            node={node}
+            outputPort={{
+              ...imageOutputPort,
+              disabled: !node.data.resultUrl,
+              disabledReason: "Capture the Frame It view before connecting it"
+            }}
+            onUpdate={onUpdate}
+            onCapture={onFrameItCapture}
+            onGenerate={onFrameItGenerate}
+            onCanvasPanStart={onCanvasPanStart}
+            onUndoSnapshot={onUndoSnapshot}
+            onResizeStart={onPreviewResizeStart}
+            onConnectStart={onConnectStart}
+            onDisconnectInput={onDisconnectInput}
+            connectedPortKeys={connectedPortKeys}
+            imageModelOptions={imageModelOptions}
+            videoModelOptions={videoModelOptions}
+          />
+        ) : (
+          <ComposerNodeBody
+            node={node}
+            imageOutputPort={imageOutputPort}
+            composerInputPorts={composerInputPorts}
+            onOpenComposer={onOpenComposer}
+            onConnectStart={onConnectStart}
+            onDisconnectInput={onDisconnectInput}
+            connectedPortKeys={connectedPortKeys}
+          />
+        )}
+      </>
     );
   }
 
@@ -13482,6 +13645,8 @@ function NodeBody({
     const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
     const utilityVideoModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel);
     const isColorIdMatte = isUtilityColorIdMatteModel(utilityImageModel);
+    const isAutoAspect = isUtilityAutoAspectModel(utilityImageModel);
+    const isCoverage = isUtilityCoverageModel(utilityImageModel);
     const isImageToId = isUtilityImageToIdModel(utilityImageModel);
     const isQwenCameraEdit = isUtilityQwenCameraEditModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
@@ -13524,7 +13689,7 @@ function NodeBody({
     const qwenZoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     const utilityOutputPort = {
       ...config.output[0],
-      label: isSam3Image ? "Mask output" : utilityOutputMediaType === "video" ? "Video output" : "Image output",
+      label: isAutoAspect ? "Aspect output" : isCoverage ? "Coverage output" : isSam3Image ? "Mask output" : utilityOutputMediaType === "video" ? "Video output" : "Image output",
       color: utilityOutputMediaType === "video" ? portColors.video : portColors.image
     };
     const controlVideoOutputPort = config.output.find((port) => port.id === "controlVideoOut");
@@ -13586,6 +13751,10 @@ function NodeBody({
         (!isWanVaceMaskToVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(incoming.referenceImageIn?.length) && Boolean(promptValue.trim()))
       : isStillFrame
         ? Boolean(incoming.referenceVideoIn?.length)
+        : isAutoAspect
+          ? Boolean(incoming.imageIn?.length) && normalizedAutoAspectRatios(node.data).length > 0
+        : isCoverage
+          ? Boolean(incoming.imageIn?.length)
         : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
     const utilityRunLabel = isVideoMode
       ? isSam3Video
@@ -13627,6 +13796,10 @@ function NodeBody({
                             : isTopazUpscaler
                               ? "Run Topaz Upscale"
                               : "Run Utility Video"
+      : isAutoAspect
+        ? "Generate Aspects"
+        : isCoverage
+          ? "Generate Coverage"
       : isColorIdMatte
         ? "Run Color Matte"
         : isImageToId
@@ -13647,6 +13820,10 @@ function NodeBody({
                 ? "Run Depth Map"
                 : "Run DWPose";
     const utilityDescription = utilityModelDescription(isVideoMode ? utilityVideoModel : utilityImageModel);
+    const utilityAutoAspectModels = autoAspectModelOptions.filter((model) => imageModelOptions.includes(model));
+    const utilityCoverageModels = coverageModelOptions.filter((model) => imageModelOptions.includes(model));
+    const utilityGenerationModelChoices = isAutoAspect ? utilityAutoAspectModels : utilityCoverageModels;
+    const utilityGenerationModel = utilityGenerationModelChoices.includes(node.data.model) ? node.data.model : utilityGenerationModelChoices[0] || imageModelNames.openAiImage2;
     const referenceVideoLabel = isCompositeVideo
       ? "Base + Layer 1"
       : isWanBlend
@@ -13695,7 +13872,7 @@ function NodeBody({
           </button>
         </div>
         <ResultPane
-          label="Results will appear here"
+          label={isAutoAspect ? "Aspect outputs will appear here" : isCoverage ? "9 coverage angles will appear here" : "Results will appear here"}
           resultUrl={node.data.resultUrl}
           resultItems={node.data.resultItems}
           selectedIndex={node.data.selectedResultIndex}
@@ -14279,7 +14456,86 @@ function NodeBody({
                   <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                     <button className={incoming.imageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
                   </NodeRow>
-                  {isColorIdMatte ? (
+                  {isAutoAspect ? (
+                    <>
+                      <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
+                        {openAiImageAspectRatios.map((ratio) => {
+                          const selectedAspectRatios = normalizedAutoAspectRatios(node.data);
+                          const selected = selectedAspectRatios.includes(ratio);
+                          const outputCount = autoAspectTargetsForRatio(ratio).length;
+                          return (
+                            <div key={ratio} className={`auto-aspect-row ${selected ? "selected" : ""}`}>
+                              <button
+                                type="button"
+                                disabled={running}
+                                onClick={() => {
+                                  const nextSelected = selected
+                                    ? selectedAspectRatios.filter((item) => item !== ratio)
+                                    : [...selectedAspectRatios, ratio];
+                                  const activeKeys = new Set(autoAspectTargetsForData({ selectedAspectRatios: nextSelected }).map(autoAspectTargetKey));
+                                  const autoAspectResults = normalizedAutoAspectResults(node.data).filter((result) => activeKeys.has(result.key));
+                                  const resultItems = autoAspectResultItems({ autoAspectResults });
+                                  onUpdate(node.id, {
+                                    selectedAspectRatios: nextSelected,
+                                    autoAspectResults,
+                                    resultItems,
+                                    resultUrl: resultItems[0]?.url || "",
+                                    selectedResultIndex: 0,
+                                    error: ""
+                                  });
+                                }}
+                              >
+                                <span className="auto-aspect-check" />
+                                <span>{ratio}</span>
+                                <small>{selected ? (outputCount > 1 ? `${outputCount} outputs` : "Selected") : "Select"}</small>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <NodeRow label="Generation Model">
+                        <select value={utilityGenerationModel} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetAutoAspectOutputPatch(), model: normalizeAutoAspectModel(event.target.value) })}>
+                          {utilityGenerationModelChoices.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Resolution">
+                        <select value={normalizeImageModelResolution(node.data.resolution || "2K")} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetAutoAspectOutputPatch(), resolution: normalizeImageModelResolution(event.target.value) })}>
+                          {imageResolutionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Remove Graphics">
+                        <button
+                          type="button"
+                          className={`node-toggle ${node.data.removeTextGraphics ? "enabled" : ""}`}
+                          disabled={running}
+                          onClick={() => onUpdate(node.id, { ...resetAutoAspectOutputPatch(), removeTextGraphics: !node.data.removeTextGraphics })}
+                          aria-pressed={Boolean(node.data.removeTextGraphics)}
+                        >
+                          <span />
+                        </button>
+                      </NodeRow>
+                    </>
+                  ) : isCoverage ? (
+                    <>
+                      <NodeRow label="Generation Model">
+                        <select
+                          value={utilityGenerationModel}
+                          disabled={running}
+                          onChange={(event) => {
+                            const model = event.target.value;
+                            onUpdate(node.id, { ...resetCoverageOutputPatch(), model, resolution: normalizeImageModelResolutionForModel("2K", model) });
+                          }}
+                        >
+                          {utilityGenerationModelChoices.map((option) => <option key={option} value={option}>{coverageModelLabel(option)}</option>)}
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Method">
+                        <select value={normalizeCoverageMethod(node.data.coverageMethod)} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetCoverageOutputPatch(), coverageMethod: normalizeCoverageMethod(event.target.value) })}>
+                          {coverageMethods.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </NodeRow>
+                    </>
+                  ) : isColorIdMatte ? (
                     <React.Suspense fallback={<small className="upload-status color-id-status">Loading picker...</small>}>
                       <ColorIdMattePicker imageUrl={connectedAssetUrls(incoming.imageIn).at(-1)} node={node} onUpdate={onUpdate} rowComponent={NodeRow} />
                     </React.Suspense>
@@ -16573,7 +16829,7 @@ function getNodeConfig(type) {
   const configs = {
     plainText: {
       icon: Type,
-      input: [],
+      input: [{ id: "textIn", label: "Text", color: portColors.prompt }],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
     text: {
@@ -16779,9 +17035,11 @@ function unsupportedNodeConfig(type) {
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
 
-  if (type === "plainText") return { title, text: "" };
+  if (type === "plainText") return { title, text: "", resultText: "" };
   if (type === "text") return { title, text: "" };
-  if (type === "textAgent") return { title, agentDraft: "", agentMessages: [], resultText: "" };
+  if (type === "textAgent") {
+    return { title, agentDraft: "", agentMessages: [], resultText: "", textPromptHistoryIndex: null, textPromptHistoryDraft: "" };
+  }
   if (type === "skillDirector") {
     const directorData = {
       title,
@@ -16790,6 +17048,8 @@ function createDefaultNodeData(type, label, count) {
       text: "",
       skillShotCount: "3",
       skillDurationSeconds: "15",
+      skillResolution: "720p",
+      skillAspectRatio: "16:9",
       styleDirection: "",
       motionBrief: "",
       motionDirection: "",
@@ -16935,13 +17195,44 @@ function createDefaultNodeData(type, label, count) {
   }
   if (type === "composer") {
     const composerScene = defaultComposerScene();
+    const frameItScene = defaultFrameItScene();
     return {
       title,
+      composerMode: "composer",
       composerAspectRatio: "16:9",
       composerShowGuides: true,
       composerSelectedId: composerScene.maquettes[0]?.id || "",
       composerSavedPoses: [],
-      composerScene
+      composerScene,
+      frameItScene,
+      frameItSelectedFigureId: frameItScene.figures[0]?.id || "",
+      frameItSelectedJoint: "upperBodyRot",
+      frameItTool: "rotate",
+      frameItAspectRatio: "16:9",
+      frameItShowFloor: true,
+      frameItShowGrid: true,
+      frameItShowGuides: true,
+      frameItUseLimits: true,
+      frameItSavedPoses: [],
+      frameItSelectedPoseId: defaultFrameItPoseId,
+      frameItViewMode: "shot",
+      frameItShotPreset: "medium",
+      frameItShowShotLabel: false,
+      frameItCreateMode: "image",
+      frameItImageModel: imageModelNames.openAiImage2,
+      frameItVideoModel: videoModelNames.seedance25,
+      frameItPrompt: "",
+      frameItSubjectPrompt: "",
+      frameItEnvironmentPrompt: "",
+      frameItStylePrompt: "",
+      frameItCharacterSheet: true,
+      frameItEnvironmentSheet: true,
+      frameItCameraMotion: "Static",
+      frameItDuration: "5 seconds",
+      frameItImageResolution: "2K",
+      frameItVideoResolution: "720p",
+      frameItGeneratedItems: [],
+      frameItScale: 1
     };
   }
   if (type === "frameIt") {
@@ -16964,7 +17255,7 @@ function createDefaultNodeData(type, label, count) {
       frameItShowShotLabel: false,
       frameItCreateMode: "image",
       frameItImageModel: imageModelNames.openAiImage2,
-      frameItVideoModel: videoModelNames.seedance,
+      frameItVideoModel: videoModelNames.seedance25,
       frameItPrompt: "",
       frameItSubjectPrompt: "",
       frameItEnvironmentPrompt: "",
@@ -17035,6 +17326,13 @@ function createDefaultNodeData(type, label, count) {
       utilityImageModel: utilityImageModelNames.dwpose,
       utilityVideoModel: utilityVideoModelNames.extractFrame,
       stillFrameTime: 0,
+      selectedAspectRatios: autoAspectDefaultRatios,
+      autoAspectResults: [],
+      resolution: "2K",
+      removeTextGraphics: false,
+      advancedOpen: false,
+      coverageMethod: "Standard",
+      coverageResults: [],
       ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
       topazImageUpscalerModel: "Standard V2",
@@ -17271,7 +17569,7 @@ function createDefaultNodeData(type, label, count) {
 
   return {
     title,
-    model: videoModelNames.seedance,
+    model: videoModelNames.seedance25,
     prompt: "",
     duration: "15 seconds",
     resolution: "720p",
@@ -17800,6 +18098,14 @@ function isUtilityStillFrameModel(model) {
   return normalized.includes("still") || normalized.includes("frame");
 }
 
+function isUtilityAutoAspectModel(model) {
+  return String(model || "").trim().toLowerCase() === utilityImageModelNames.autoAspect.toLowerCase();
+}
+
+function isUtilityCoverageModel(model) {
+  return String(model || "").trim().toLowerCase() === utilityImageModelNames.coverage.toLowerCase();
+}
+
 function isUtilitySam3ImageModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("sam") && normalized.includes("image");
@@ -17904,6 +18210,29 @@ function utilityImageModelSelectionPatch(model) {
     resultType: "image",
     error: ""
   };
+
+  if (isUtilityAutoAspectModel(model)) {
+    return {
+      ...patch,
+      selectedAspectRatios: autoAspectDefaultRatios,
+      autoAspectResults: [],
+      model: imageModelNames.openAiImage2,
+      resolution: "2K",
+      removeTextGraphics: false,
+      advancedOpen: false
+    };
+  }
+
+  if (isUtilityCoverageModel(model)) {
+    return {
+      ...patch,
+      model: imageModelNames.openAiImage2,
+      coverageMethod: "Standard",
+      resolution: "2K",
+      quality: openAiImage2Quality,
+      coverageResults: []
+    };
+  }
 
   if (isUtilityTopazImageUpscalerModel(model)) {
     return {
@@ -18147,6 +18476,8 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
+  if (normalized === utilityImageModelNames.autoAspect.toLowerCase()) return utilityImageModelNames.autoAspect;
+  if (normalized === utilityImageModelNames.coverage.toLowerCase()) return utilityImageModelNames.coverage;
   if (normalized.includes("color") && normalized.includes("matte")) return utilityImageModelNames.colorIdMatte;
   if (isUtilityImageToIdModel(normalized)) return utilityImageModelNames.imageToId;
   if (isUtilityQwenCameraEditModel(normalized)) return utilityImageModelNames.qwenCameraEdit;
@@ -18993,7 +19324,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode, groups = []) {
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
     const textNodePrompt = node.type === "plainText"
-      ? node.data.text || ""
+      ? node.data.resultText || node.data.text || ""
       : node.type === "text"
         ? [node.data.text || "", node.data.resultText || ""].join("\n")
         : node.type === "textAgent"
@@ -19088,12 +19419,7 @@ function connectedText(items = [], referenceContext = null) {
 }
 
 function rawConnectedTextForSource(source) {
-  if (source.type === "text") return source.data.resultText || source.data.text;
-  if (source.type === "textAgent") return source.data.resultText || source.data.agentDraft;
-  if (source.type === "skillDirector") return source.data.resultText || source.data.text;
-  if (source.type === "plainText") return source.data.text;
-  if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility" || source.type === "edit") return source.data.resultText;
-  return source.data.title;
+  return textOutputForNode(source);
 }
 
 function resolveNodeReferencesInText(text, referenceContext = null, ownerNodeId = "") {
@@ -19283,7 +19609,7 @@ function nodeReferenceTextInput(node, label) {
 
 function nodeReferenceText(node) {
   if (!node) return "";
-  if (node.type === "plainText") return String(node.data?.text || "").trim();
+  if (node.type === "plainText") return String(node.data?.resultText || node.data?.text || "").trim();
   if (node.type === "text") return String(node.data?.resultText || node.data?.text || "").trim();
   if (node.type === "textAgent") return String(node.data?.resultText || node.data?.agentDraft || "").trim();
 
@@ -19339,29 +19665,32 @@ function connectedDirectorPackageSource(items = []) {
   return directorPackageConnections(items)[0]?.source || null;
 }
 
-function directorSceneUsesConnection(directorSource, itemSource, type = "image") {
+function directorSceneUsesConnection(directorSource, itemSource, type = "image", categoryCount = 0) {
   if (!directorSource?.data || !itemSource) return false;
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorUsesReferenceTag(directorSource.data, tag);
+  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
 }
 
 function directorPackageForVideo(source = null, incomingByNode = {}) {
   if (!source?.data?.skillDirectorBuilt || !source.data.resultText) return null;
   const directorIncoming = incomingByNode[source.id] || {};
+  const characterItems = directorIncoming.characterIn || [];
+  const locationItems = directorIncoming.locationIn || [];
+  const propItems = directorIncoming.imageIn || [];
   const references = [
-    ...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")).map(({ source: itemSource }) => ({
+    ...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)).map(({ source: itemSource }) => ({
       type: "character",
       tag: characterTag(itemSource),
       url: preferredCharacterReferenceForVideo(itemSource)?.url || ""
     })),
-    ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")).map(({ source: itemSource, edge }) => ({
+    ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)).map(({ source: itemSource, edge }) => ({
       type: "location",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
     })),
-    ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")).map(({ source: itemSource, edge }) => ({
+    ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length)).map(({ source: itemSource, edge }) => ({
       type: "prop",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
@@ -19370,6 +19699,8 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
   return {
     sceneName: source.data.sceneName || "",
     durationSeconds: source.data.skillDurationSeconds || "15",
+    resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
+    aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
     styleDirection: source.data.styleDirection || "",
     cameraDirection: source.data.motionDirection || "",
     sceneOverview: source.data.sceneOverview || "",
@@ -19430,12 +19761,15 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
+    const locationItems = directorIncoming.locationIn || [];
+    const propItems = directorIncoming.imageIn || [];
+    const characterItems = directorIncoming.characterIn || [];
     referenceImageIn.push(
-      ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")),
-      ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image"))
+      ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
+      ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
     );
     if (includeCharacters) {
-      characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
+      characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
     }
   });
 
@@ -19456,9 +19790,12 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
-    sceneReferenceIn.push(...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")));
-    propsIn.push(...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")));
-    characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
+    const locationItems = directorIncoming.locationIn || [];
+    const propItems = directorIncoming.imageIn || [];
+    const characterItems = directorIncoming.characterIn || [];
+    sceneReferenceIn.push(...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)));
+    propsIn.push(...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length)));
+    characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
   });
 
   return {
@@ -22419,6 +22756,8 @@ function normalizeCurrentNode(node) {
         text: sceneOverview,
         skillShotCount: legacyShotCount,
         skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
+        skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
         styleDirection: data.styleDirection || "",
         motionBrief: data.motionBrief || "",
         motionDirection: data.motionDirection || "",
@@ -22474,7 +22813,8 @@ function normalizeCurrentNode(node) {
       data: {
         ...data,
         title: data.title || "Text",
-        text: data.text || ""
+        text: data.text || "",
+        resultText: data.resultText || data.text || ""
       }
     };
   }
@@ -23667,7 +24007,7 @@ function normalizeStyleData(data = {}) {
 }
 
 function normalizeVideoModelData(data = {}) {
-  const model = videoModelOptions.includes(data.model) ? data.model : videoModelNames.seedance;
+  const model = videoModelOptions.includes(data.model) ? data.model : videoModelNames.seedance25;
   return {
     ...createDefaultNodeData("videoModel", data.title || "Video Model", 1),
     ...data,
