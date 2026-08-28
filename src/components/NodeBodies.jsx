@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
+import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHistory.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
@@ -15,6 +15,7 @@ import {
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { GenerationProgress } from "./GenerationProgress.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
+import { normalizeTextAgentMessages, replaceLatestTextAgentAssistantMessage } from "../textAgent.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
@@ -32,9 +33,6 @@ export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, 
 export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const nodeText = String(node.data.text || "");
   const nodeResultText = String(node.data.resultText || "");
-  const promptHistory = normalizeTextPromptHistory(node.data.textPromptHistory);
-  const promptHistoryIndex = Number.isInteger(node.data.textPromptHistoryIndex) ? node.data.textPromptHistoryIndex : null;
-  const promptHistoryDraft = String(node.data.textPromptHistoryDraft || "");
   const hasOutputPanel = Boolean(nodeResultText) || node.data.status === "running" || node.data.status === "complete";
   const textPort = config.input.find((port) => port.id === "textIn");
   const imagePort = config.input.find((port) => port.id === "imageIn");
@@ -46,21 +44,6 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
     Boolean(incoming.imageIn?.length) ||
     Boolean(incoming.videoIn?.length) ||
     Boolean(incoming.styleIn?.length);
-
-  function recallPrompt(direction) {
-    const recalled = recallTextPrompt({
-      history: promptHistory,
-      index: promptHistoryIndex,
-      direction,
-      currentText: nodeText,
-      draft: promptHistoryDraft
-    });
-    onUpdate(node.id, {
-      text: recalled.text,
-      textPromptHistoryIndex: recalled.index,
-      textPromptHistoryDraft: recalled.draft
-    });
-  }
 
   return (
     <div className="node-body text-node-body">
@@ -80,25 +63,11 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
       </div>
       <div className={hasOutputPanel ? "text-split-panel" : "text-single-panel"}>
         <label className="text-field-group">
-          <span className="text-prompt-header">
-            <span>Original prompt</span>
-            <span className="text-prompt-history-controls" aria-label="Prompt history">
-              <button type="button" title="Previous prompt" aria-label="Previous prompt" disabled={!promptHistory.length || promptHistoryIndex === 0} onClick={() => recallPrompt("previous")}>
-                <ChevronLeft size={13} />
-              </button>
-              <button type="button" title="Next prompt" aria-label="Next prompt" disabled={promptHistoryIndex === null} onClick={() => recallPrompt("next")}>
-                <ChevronRight size={13} />
-              </button>
-            </span>
-          </span>
+          <span>Original prompt</span>
           <textarea
             aria-label="Text Model prompt"
             value={nodeText}
-            onChange={(event) => onUpdate(node.id, {
-              text: event.target.value,
-              textPromptHistoryIndex: null,
-              textPromptHistoryDraft: event.target.value
-            })}
+            onChange={(event) => onUpdate(node.id, { text: event.target.value })}
           />
         </label>
         {hasOutputPanel && (
@@ -117,6 +86,130 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
         {running ? "Running..." : "Run Text Model"}
       </button>
       {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
+      {node.data.error && <small className="upload-error">{node.data.error}</small>}
+    </div>
+  );
+}
+
+export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const draft = String(node.data.agentDraft || "");
+  const response = String(node.data.resultText || "");
+  const messages = normalizeTextAgentMessages(node.data.agentMessages);
+  const promptHistory = normalizeTextPromptHistory(messages.filter((message) => message.role === "user").map((message) => message.text));
+  const promptHistoryIndex = Number.isInteger(node.data.textPromptHistoryIndex) ? node.data.textPromptHistoryIndex : null;
+  const promptHistoryDraft = String(node.data.textPromptHistoryDraft || "");
+  const inputPorts = ["textIn", "imageIn", "videoIn", "styleIn"]
+    .map((id) => config.input.find((port) => port.id === id))
+    .filter(Boolean);
+
+  function recallPrompt(direction) {
+    const recalled = recallTextPrompt({
+      history: promptHistory,
+      index: promptHistoryIndex,
+      direction,
+      currentText: draft,
+      draft: promptHistoryDraft
+    });
+    onUpdate(node.id, {
+      agentDraft: recalled.text,
+      textPromptHistoryIndex: recalled.index,
+      textPromptHistoryDraft: recalled.draft
+    });
+  }
+
+  const sendMessage = () => {
+    if (running || !draft.trim()) return;
+    onRun(node, { agentMessage: draft });
+  };
+
+  return (
+    <div className="node-body text-node-body text-agent-node-body">
+      <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <div className="text-input-port-stack" aria-label="Text Agent node inputs">
+        {inputPorts.map((port) => (
+          <PortHandle
+            key={port.id}
+            node={node}
+            port={port}
+            side="input"
+            onConnectStart={onConnectStart}
+            onDisconnectInput={onDisconnectInput}
+            connectedPortKeys={connectedPortKeys}
+          />
+        ))}
+      </div>
+      <div className="text-agent-shell">
+        <div className="text-agent-toolbar">
+          <span>Response</span>
+          <button
+            type="button"
+            className="icon-button text-agent-clear"
+            title="Clear conversation"
+            aria-label="Clear conversation"
+            disabled={running || !messages.length}
+            onClick={() => onUpdate(node.id, {
+              agentMessages: [],
+              resultText: "",
+              error: "",
+              textPromptHistoryIndex: null,
+              textPromptHistoryDraft: draft
+            })}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+        <textarea
+          className="text-agent-response"
+          aria-label="Text Agent response"
+          aria-live="polite"
+          aria-busy={running}
+          readOnly={running}
+          value={response}
+          placeholder={running ? "Thinking..." : "Responses will appear here"}
+          onChange={(event) => {
+            const resultText = event.target.value;
+            onUpdate(node.id, {
+              resultText,
+              agentMessages: replaceLatestTextAgentAssistantMessage(messages, resultText)
+            });
+          }}
+        />
+        <div className="text-agent-composer">
+          <div className="text-agent-composer-field">
+            <span className="text-prompt-header">
+              <span>User prompt</span>
+              <span className="text-prompt-history-controls" aria-label="Text Agent prompt history">
+                <button type="button" title="Previous prompt" aria-label="Previous Text Agent prompt" disabled={!promptHistory.length || promptHistoryIndex === 0} onClick={() => recallPrompt("previous")}>
+                  <ChevronLeft size={13} />
+                </button>
+                <button type="button" title="Next prompt" aria-label="Next Text Agent prompt" disabled={promptHistoryIndex === null} onClick={() => recallPrompt("next")}>
+                  <ChevronRight size={13} />
+                </button>
+              </span>
+            </span>
+            <textarea
+              aria-label="Message Text Agent"
+              placeholder="Message Text Agent"
+              value={draft}
+              onChange={(event) => onUpdate(node.id, {
+                agentDraft: event.target.value,
+                textPromptHistoryIndex: null,
+                textPromptHistoryDraft: event.target.value
+              })}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent?.isComposing) return;
+                event.preventDefault();
+                sendMessage();
+              }}
+            />
+          </div>
+          <button type="button" className="text-agent-send" title="Send message" aria-label="Send message" disabled={running || !draft.trim()} onClick={sendMessage}>
+            <Send size={17} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <GenerationProgress nodeId={node.id} />
+      {node.data.lastRunModel && <small className="upload-status">Last response used {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>
   );

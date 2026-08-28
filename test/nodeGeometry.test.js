@@ -59,6 +59,8 @@ test("media-bearing nodes keep enough height for an uncropped preview", () => {
   assert.equal(minimumResizableNodeHeight("preview"), 280);
   assert.equal(minimumResizableNodeHeight("image"), 250);
   assert.equal(minimumResizableNodeHeight("text"), 180);
+  assert.equal(estimatedNodeWidth("textAgent"), 390);
+  assert.equal(minimumResizableNodeHeight("textAgent"), 360);
   assert.equal(normalizedNodeHeight(120, minimumResizableNodeHeight("imageModel")), 320);
 });
 

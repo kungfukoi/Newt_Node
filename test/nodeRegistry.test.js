@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalogNodeTypeDefinitions, nodeTypeLabel, timelineNodeTitle } from "../src/nodeRegistry.js";
+import { catalogNodeTypeDefinitions, nodeTypeDefinitions, nodeTypeLabel, timelineNodeTitle } from "../src/nodeRegistry.js";
 
 test("consolidated legacy node types remain loadable but are hidden from the catalog", () => {
   assert.equal(nodeTypeLabel("autoAspect"), "Auto Aspect");
@@ -9,6 +9,13 @@ test("consolidated legacy node types remain loadable but are hidden from the cat
   assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "coverage"), false);
   assert.equal(nodeTypeLabel("frameIt"), "Frame It");
   assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "frameIt"), false);
+});
+
+test("Text Agent appears alongside Text Model without replacing saved Text Model nodes", () => {
+  const textModelIndex = nodeTypeDefinitions.findIndex(({ type }) => type === "text");
+  assert.notEqual(textModelIndex, -1);
+  assert.equal(nodeTypeDefinitions[textModelIndex + 1]?.type, "textAgent");
+  assert.equal(nodeTypeLabel("textAgent"), "Text Agent");
 });
 
 

@@ -26,9 +26,14 @@ import {
   flowOverviewEnabled,
   flowRenderMode
 } from "../flowOverview.js";
-import { buildNodeConnectionKeys } from "../flowNodeConnections.js";
+import {
+  buildNodeConnectionKeys,
+  buildNodeInputDependencyRefs,
+  sameNodeInputDependencyRefs
+} from "../flowNodeConnections.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
+import { flowConnectOnClick, flowPortConnectability } from "../nodePortBehavior.js";
 
 const NewtFlowRenderContext = React.createContext(null);
 const flowMultiSelectionKeys = ["Shift", "Control", "Meta"];
@@ -92,6 +97,10 @@ function NewtFlowCanvasInner({
     () => buildNodeConnectionKeys(graphNodes, graphEdges),
     [graphEdges, graphNodes]
   );
+  const inputDependencyRefsByNode = React.useMemo(
+    () => buildNodeInputDependencyRefs(graphNodes, graphEdges),
+    [graphEdges, graphNodes]
+  );
   const desiredNodes = React.useMemo(
     () => graphNodes.map((node) => {
       const width = normalizedNodeWidth(node.data?.nodeWidth, node.type) || estimatedNodeWidth(node.type);
@@ -111,6 +120,7 @@ function NewtFlowCanvasInner({
         data: {
           node,
           connectionKey: connectionKeysByNode.get(node.id) || "",
+          inputDependencyRefs: inputDependencyRefsByNode.get(node.id) || [],
           bootstrapHandles: handles,
           bootstrapSize: { width, height }
         },
@@ -118,7 +128,7 @@ function NewtFlowCanvasInner({
         zIndex: selectedSet.has(node.id) ? 20 : 2
       };
     }),
-    [bootstrapPortsByNode, connectionKeysByNode, graphNodes, selectedSet]
+    [bootstrapPortsByNode, connectionKeysByNode, graphNodes, inputDependencyRefsByNode, selectedSet]
   );
   const [flowNodes, setFlowNodes] = React.useState(desiredNodes);
 
@@ -212,6 +222,7 @@ function NewtFlowCanvasInner({
       if (viewportElement) {
         viewportElement.style.transform = `translate(${normalized.x}px, ${normalized.y}px) scale(${normalized.zoom})`;
       }
+      if (!flowOverviewEnabled) return Promise.resolve();
       const now = performance.now();
       if (now - lastViewportSyncRef.current >= 100) {
         lastViewportSyncRef.current = now;
@@ -357,6 +368,7 @@ function NewtFlowCanvasInner({
         maxZoom={2.5}
         onlyRenderVisibleElements={flowOnlyRenderVisibleElements}
         nodesConnectable
+        connectOnClick={flowConnectOnClick}
         nodesDraggable
         noDragClassName="nodrag"
         elementsSelectable
@@ -482,6 +494,7 @@ function mergeFlowNodes(current, desired, dragging) {
     const position = keepLocalPosition ? previous.position : node.position;
     const data = previous.data?.node === node.data.node
       && previous.data?.connectionKey === node.data.connectionKey
+      && sameNodeInputDependencyRefs(previous.data?.inputDependencyRefs, node.data.inputDependencyRefs)
       ? previous.data
       : node.data;
     const selected = node.selected;
@@ -665,18 +678,18 @@ function NewtConnectionLine({ fromX, fromY, toX, toY, fromPosition = Position.Ri
   return <path className="newt-flow-connection-line" d={path} />;
 }
 
-export function FlowPortHandle({ id, side, disabled, className, style, title, onPointerDown, dataAttributes = {} }) {
+export function FlowPortHandle({ id, side, disabled, className, style, title, dataAttributes = {} }) {
+  const connectability = flowPortConnectability(side, disabled);
   return (
     <Handle
       id={id}
       type={side === "output" ? "source" : "target"}
       position={side === "output" ? Position.Right : Position.Left}
-      isConnectable={!disabled}
+      {...connectability}
       className={className}
       style={style}
       title={title}
       aria-disabled={disabled || undefined}
-      onPointerDown={onPointerDown}
       {...dataAttributes}
     />
   );

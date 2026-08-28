@@ -116,6 +116,12 @@ NewtNode stores runtime workflow state, recent workflow indexes, uploads, genera
 ```text
 WorkflowName/
   WorkflowName.json
+  autosaves/
+    autosave-1.json
+    autosave-2.json
+    autosave-3.json
+    autosave-4.json
+    autosave-5.json
   inputs/
   outputs/
   dependencies/
@@ -123,10 +129,20 @@ WorkflowName/
     manifest.json
 ```
 
+Dirty packaged workflows are snapshotted every two minutes. The five autosave files rotate in place, reference the package's existing assets, and can be opened manually with **File > Open**. Autosaving does not replace the main workflow JSON or mark changes as manually saved.
+
 ## Named References
 
 Reference images can be renamed in the thumbnail strip. Use those handles in your prompt with `@`, such as `@product` or `@talent`. The app translates your names to provider-specific reference tokens when needed.
 
 ## Development Standards
 
-Start with `docs/README.md` for the documentation map. Before adding a new feature, read `docs/node-standards.md`; it is the shared checklist for node behavior, UI conventions, workflow packages, asset storage, backend routes, stats, and verification.
+Agents and developers must begin with [`AGENTS.md`](AGENTS.md), then read the canonical standards before changing a feature:
+
+- [`docs/node-standards.md`](docs/node-standards.md): normative engineering and UX contract.
+- [`docs/architecture.md`](docs/architecture.md): current runtime, ownership, storage, and data-flow map.
+- [`docs/development.md`](docs/development.md): setup, implementation loop, validation tiers, and troubleshooting.
+- [`docs/performance.md`](docs/performance.md): canvas and bundle performance baseline.
+- [`docs/README.md`](docs/README.md): complete documentation map, including operational and historical files.
+
+A feature change is not complete until old workflows, ports, results, previews, Output routing, persistence, history/Stats, progress, error states, cross-platform behavior, tests, and affected documentation have been considered at the feature's actual blast radius.

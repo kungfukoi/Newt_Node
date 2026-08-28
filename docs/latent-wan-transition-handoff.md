@@ -1,6 +1,6 @@
 # Latent Wan Transition Handoff
 
-Status: archived research note. It records the 2026-06-04 design exploration and is not the current implementation guide. Current WanSegment/WanWarp behavior lives in `docs/node-standards.md`, `server/wanwarp/`, and the `dev` branch.
+Status: archived research note. It records the 2026-06-04 design exploration and is not the current implementation guide. Current WanSegment/WanWarp behavior lives in `docs/node-standards.md` and `server/wanwarp/` in the current checked-out source.
 
 Date: 2026-06-04
 Historical branch: `wan22-animdiff-transition-dev`

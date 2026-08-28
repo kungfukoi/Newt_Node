@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assemblyOutputPortState, selectAssemblyPreviewSource } from "../src/assembly/assemblyPreview.js";
 
-test("Timeline frameOut remains connectable before the first playhead frame", () => {
+test("Timeline outputs remain connectable before preview or render media exists", () => {
   assert.equal(assemblyOutputPortState("frameOut", "").disabled, false);
-  assert.equal(assemblyOutputPortState("videoOut", "").disabled, true);
+  assert.equal(assemblyOutputPortState("videoOut", "").disabled, false);
+  assert.equal(assemblyOutputPortState("videoOut", "").disabledReason, "");
   assert.equal(assemblyOutputPortState("videoOut", "/render.mp4").disabled, false);
 });
 

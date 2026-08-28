@@ -11,6 +11,7 @@ import {
   MousePointer2,
   Minus,
   Pause,
+  PanelLeftDashed,
   Play,
   Plus,
   Redo2,
@@ -39,6 +40,7 @@ import {
   normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
+  removeAssemblyMedia,
   retimeAssemblyClip,
   setAssemblyInPoint,
   setAssemblyLoopInOut,
@@ -58,7 +60,7 @@ import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
 import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
 import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
-import { assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
+import { assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
 import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
@@ -78,6 +80,7 @@ export function AssemblyNodeBody({
   onUpdate,
   onRun,
   onProbeMedia,
+  onRemoveMediaConnection,
   running,
   onConnectStart,
   onDisconnectInput,
@@ -90,6 +93,7 @@ export function AssemblyNodeBody({
   const [dragTargetTrackId, setDragTargetTrackId] = React.useState("");
   const [draggingClipId, setDraggingClipId] = React.useState("");
   const [clipClipboard, setClipClipboard] = React.useState(null);
+  const [splitGuide, setSplitGuide] = React.useState(null);
   const historyRef = React.useRef(createAssemblyHistory(initialState));
   const timelineRef = React.useRef(initialState);
   const clockRef = React.useRef(null);
@@ -105,6 +109,7 @@ export function AssemblyNodeBody({
   const lastGraphPreviewCheckpointRef = React.useRef(0);
   const lastExternalStateRef = React.useRef(JSON.stringify(initialState));
   const clipDragCleanupRef = React.useRef(null);
+  const scrubCleanupRef = React.useRef(null);
   const previewFailureRef = React.useRef("");
   const videoFrameCancelRef = React.useRef(new Map());
   const timelineScrubbingRef = React.useRef(false);
@@ -127,7 +132,10 @@ export function AssemblyNodeBody({
     onProbeMediaRef.current = onProbeMedia;
   }, [onProbeMedia]);
 
-  React.useEffect(() => () => clipDragCleanupRef.current?.(), []);
+  React.useEffect(() => () => {
+    clipDragCleanupRef.current?.();
+    scrubCleanupRef.current?.();
+  }, []);
   React.useEffect(() => () => {
     videoFrameCancelRef.current.forEach((cancel) => cancel?.());
     videoFrameCancelRef.current.clear();
@@ -268,7 +276,12 @@ export function AssemblyNodeBody({
   }
 
   function seek(time, persist = false) {
-    const nextTime = clockRef.current?.seek(time) ?? Math.max(0, Number(time) || 0);
+    if (clockRef.current) {
+      clockRef.current.seek(time);
+      if (persist) persistTimeline(timelineRef.current);
+      return;
+    }
+    const nextTime = Math.max(0, Number(time) || 0);
     const next = setAssemblyPlayhead(timelineRef.current, nextTime);
     timelineRef.current = next;
     setTimeline(next);
@@ -307,8 +320,10 @@ export function AssemblyNodeBody({
   }
 
   function syncMediaElementsUnsafe(state, time, shouldPlay) {
-    const visualItems = assemblyActiveClips(state, time, "visual");
-    const audioItems = assemblyActiveClips(state, time, "audio");
+    const allVisualItems = assemblyActiveClips(state, time, "visual");
+    const scrubbing = timelineScrubbingRef.current;
+    const visualItems = scrubbing ? allVisualItems.slice(0, 1) : allVisualItems;
+    const audioItems = scrubbing ? [] : assemblyActiveClips(state, time, "audio");
     const activeByClip = new Map(visualItems.map((item) => [item.id, { item, audible: false }]));
     audioItems.forEach((item) => activeByClip.set(item.id, { item, audible: true }));
     mediaElementsRef.current.forEach((element, clipId) => {
@@ -434,36 +449,61 @@ export function AssemblyNodeBody({
     if (!ruler) return;
     event.preventDefault();
     event.stopPropagation();
+    if (playingRef.current) clockRef.current?.pause();
+    scrubCleanupRef.current?.();
     timelineScrubbingRef.current = true;
     scrubPreviewPendingRef.current = true;
     const captureTarget = event.currentTarget;
     const pointerId = event.pointerId;
     const pointerTime = (pointerEvent) => assemblyTimeAtClientX(ruler, pointerEvent.clientX, pixelsPerSecond);
     const grabOffset = preserveGrabOffset ? pointerTime(event) - timelineRef.current.playhead : 0;
-    const update = (pointerEvent) => seek(pointerTime(pointerEvent) - grabOffset, false);
+    let frameId = null;
+    let pendingTime = null;
+    const flush = () => {
+      frameId = null;
+      if (pendingTime === null) return;
+      const nextTime = pendingTime;
+      pendingTime = null;
+      seek(nextTime, false);
+    };
+    const update = (pointerEvent, immediate = false) => {
+      pendingTime = pointerTime(pointerEvent) - grabOffset;
+      if (immediate) {
+        if (frameId !== null) window.cancelAnimationFrame(frameId);
+        flush();
+        return;
+      }
+      if (frameId === null) frameId = window.requestAnimationFrame(flush);
+    };
     const cleanup = () => {
       window.removeEventListener("pointermove", update);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", cancel);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = null;
+      pendingTime = null;
       try {
         captureTarget.releasePointerCapture?.(pointerId);
       } catch {
         // Pointer capture may already have ended outside the timeline.
       }
       timelineScrubbingRef.current = false;
+      scrubCleanupRef.current = null;
       renderCompositionFrame(timelineRef.current, timelineRef.current.playhead, true);
     };
     const finish = (pointerEvent) => {
-      update(pointerEvent);
+      update(pointerEvent, true);
       persistTimeline(timelineRef.current);
       cleanup();
     };
     const cancel = () => {
+      flush();
       persistTimeline(timelineRef.current);
       cleanup();
     };
+    scrubCleanupRef.current = cleanup;
     captureTarget.setPointerCapture?.(pointerId);
-    update(event);
+    update(event, true);
     window.addEventListener("pointermove", update);
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", cancel);
@@ -576,9 +616,20 @@ export function AssemblyNodeBody({
   function handleClipClick(event, clip) {
     event.stopPropagation();
     if (timeline.tool !== "blade") return;
-    const rect = event.currentTarget.parentElement.getBoundingClientRect();
-    const time = (event.clientX - rect.left) / pixelsPerSecond;
-    commitTimeline(splitAssemblyClip(timelineRef.current, clip.id, time));
+    const guide = assemblySplitGuide(event.currentTarget.parentElement, event.clientX, pixelsPerSecond, clip, timeline.frameRate);
+    if (!guide) return;
+    setSplitGuide(null);
+    commitTimeline(splitAssemblyClip(timelineRef.current, clip.id, guide.time));
+  }
+
+  function handleClipPointerMove(event, clip) {
+    if (timeline.tool !== "blade") return;
+    const guide = assemblySplitGuide(event.currentTarget.parentElement, event.clientX, pixelsPerSecond, clip, timeline.frameRate);
+    setSplitGuide((current) => {
+      const next = guide ? { clipId: clip.id, ...guide } : null;
+      if (current?.clipId === next?.clipId && current?.time === next?.time) return current;
+      return next;
+    });
   }
 
   function handleLaneDrop(event, trackId) {
@@ -599,7 +650,16 @@ export function AssemblyNodeBody({
     return true;
   }
 
+  function handleMediaBinRemove(media) {
+    const next = removeAssemblyMedia(timelineRef.current, media.id);
+    if (next === timelineRef.current) return;
+    if (clipClipboard?.clip?.mediaId === media.id) setClipClipboard(null);
+    commitTimeline(next);
+    if (media.linkedSource) onRemoveMediaConnection?.(node.id, media);
+  }
+
   function selectTool(tool) {
+    setSplitGuide(null);
     const next = setAssemblyView(timelineRef.current, { tool });
     replaceTimeline(next, true);
   }
@@ -780,6 +840,7 @@ export function AssemblyNodeBody({
       <AssemblyMediaBin
         media={timeline.media}
         onOutputDrop={handleMediaBinOutputDrop}
+        onRemove={handleMediaBinRemove}
         connectionControls={(
           <div className="assembly-input-ports">
             {inputPorts.map((port) => (
@@ -809,6 +870,7 @@ export function AssemblyNodeBody({
         <div className="assembly-tool-group" role="toolbar" aria-label="Timeline edit tools">
           <IconButton active={timeline.tool === "select"} title="Select and move clips" onClick={() => selectTool("select")}><MousePointer2 size={14} /></IconButton>
           <IconButton active={timeline.tool === "blade"} title="Split clips" onClick={() => selectTool("blade")}><Scissors size={14} /></IconButton>
+          <IconButton title="Split selected clip at playhead" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><PanelLeftDashed size={14} /></IconButton>
           <IconButton active={timeline.tool === "slip"} title="Slip clip source timing" onClick={() => selectTool("slip")}><span className="assembly-slip-icon">Slip</span></IconButton>
           <IconButton active={timeline.ripple} title="Ripple trim and delete" onClick={() => replaceTimeline(setAssemblyView(timelineRef.current, { ripple: !timeline.ripple }), true)}><span className="assembly-ripple-icon">Ripple</span></IconButton>
         </div>
@@ -817,7 +879,6 @@ export function AssemblyNodeBody({
           <IconButton title="Redo" disabled={!historyRef.current.canRedo()} onClick={redo}><Redo2 size={14} /></IconButton>
           <IconButton title="Copy selected clip (Ctrl/Cmd+C)" disabled={!timeline.selectedClipId} onClick={copySelectedClip}><Copy size={14} /></IconButton>
           <IconButton title="Paste clip at playhead (Ctrl/Cmd+V)" disabled={!clipClipboard} onClick={pasteCopiedClip}><ClipboardPaste size={14} /></IconButton>
-          <IconButton title="Split selected clip at playhead" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><Scissors size={14} /></IconButton>
           <IconButton title="Delete selected clip (Delete/Backspace)" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(removeAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.ripple))}><Trash2 size={14} /></IconButton>
         </div>
         <div className="assembly-marker-tools" role="toolbar" aria-label="Timeline range markers">
@@ -832,11 +893,6 @@ export function AssemblyNodeBody({
           <IconButton title={playing ? "Pause" : "Play"} onClick={togglePlayback}>{playing ? <Pause size={15} /> : <Play size={15} />}</IconButton>
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
-        </div>
-        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
-          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
-          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
-          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
         </div>
         <div className="assembly-track-actions">
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "video"))}><Plus size={13} /> Video</button>
@@ -899,15 +955,22 @@ export function AssemblyNodeBody({
                   return (
                     <div
                       key={clip.id}
-                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
+                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
                       style={{ left: clip.start * pixelsPerSecond, width: Math.max(10, clip.duration * pixelsPerSecond), "--assembly-waveform": media.waveformUrl ? `url("${displayMediaUrl(media.waveformUrl)}")` : "none" }}
                       onPointerDown={(event) => handleClipPointerDown(event, clip, track)}
+                      onPointerMove={(event) => handleClipPointerMove(event, clip)}
+                      onPointerLeave={() => setSplitGuide((current) => current?.clipId === clip.id ? null : current)}
                       onClick={(event) => handleClipClick(event, clip)}
                       title={`${media.label}\n${formatTimecode(clip.duration, timeline.frameRate)}`}
                     >
                       <button type="button" className="assembly-trim-handle left" aria-label="Trim clip start" onPointerDown={(event) => beginTrim(event, clip.id, "left")} />
                       <span>{media.label}</span>
                       <small>{formatClipDuration(clip.duration)}{clip.speed !== 100 ? ` | ${clip.speed}%` : ""}{clip.reverse ? " | R" : ""}</small>
+                      {timeline.tool === "blade" && splitGuide?.clipId === clip.id ? (
+                        <div className="assembly-split-guide" style={{ left: splitGuide.left }} aria-hidden="true">
+                          <i>{formatTimecode(splitGuide.time, timeline.frameRate)}</i>
+                        </div>
+                      ) : null}
                       <button type="button" className="assembly-trim-handle right" aria-label="Trim clip end" onPointerDown={(event) => beginTrim(event, clip.id, "right")} />
                     </div>
                   );
@@ -955,6 +1018,11 @@ export function AssemblyNodeBody({
             <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
           ) : <span>{timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
           {probeStatus && <small>{probeStatus}</small>}
+        </div>
+        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
+          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
+          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
+          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
         </div>
         <label><span>W</span><input type="number" min="16" step="2" value={timeline.outputWidth} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputWidth: Number(event.target.value) }), true)} /></label>
         <label><span>H</span><input type="number" min="16" step="2" value={timeline.outputHeight} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputHeight: Number(event.target.value) }), true)} /></label>

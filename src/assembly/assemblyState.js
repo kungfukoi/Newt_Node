@@ -270,6 +270,21 @@ export function updateAssemblyMedia(state, mediaId, patch = {}) {
   return next;
 }
 
+export function removeAssemblyMedia(state, mediaId) {
+  const current = normalizeAssemblyState(state);
+  if (!current.media.some((item) => item.id === mediaId)) return current;
+
+  const next = cloneAssemblyState(current);
+  next.media = next.media.filter((item) => item.id !== mediaId);
+  next.tracks.forEach((track) => {
+    track.clips = track.clips.filter((clip) => clip.mediaId !== mediaId);
+  });
+  if (!next.tracks.some((track) => track.clips.some((clip) => clip.id === next.selectedClipId))) {
+    next.selectedClipId = "";
+  }
+  return next;
+}
+
 export function addAssemblyTrack(state, type) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const count = next.tracks.filter((track) => track.type === type).length + 1;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createAssemblyState, importAssemblyOutputItem } from "../src/assembly/assemblyState.js";
+import { createAssemblyState, importAssemblyOutputItem, insertAssemblyMediaClip, removeAssemblyMedia } from "../src/assembly/assemblyState.js";
 
 const videoOutput = {
   id: "video-node-1:/outputs/shot.mp4",
@@ -47,4 +47,16 @@ test("a directly dropped output and its later connection share one bin asset", (
 test("Timeline direct drops reject unsupported output types", () => {
   const state = createAssemblyState();
   assert.equal(importAssemblyOutputItem(state, { ...videoOutput, type: "model3d", url: "/outputs/model.glb" }).media.length, 0);
+});
+
+test("removing Timeline bin media also removes every clip that uses it", () => {
+  const imported = importAssemblyOutputItem(createAssemblyState(), videoOutput);
+  const mediaId = imported.media[0].id;
+  const videoTrackId = imported.tracks.find((track) => track.type === "video").id;
+  const withClip = insertAssemblyMediaClip(imported, mediaId, videoTrackId, 0);
+  const removed = removeAssemblyMedia(withClip, mediaId);
+
+  assert.equal(removed.media.length, 0);
+  assert.equal(removed.tracks.flatMap((track) => track.clips).length, 0);
+  assert.equal(removed.selectedClipId, "");
 });

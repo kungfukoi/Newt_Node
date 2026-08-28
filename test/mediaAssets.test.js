@@ -5,6 +5,7 @@ import {
   fullResolutionContextPreparedAttribute,
   clearOutputItemDragData,
   displayMediaUrl,
+  finishOutputItemDragData,
   fullResolutionImageProps,
   fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
@@ -13,12 +14,14 @@ import {
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
   nextFullResolutionImageFallback,
+  outputItemFromDataTransfer,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
   restoreFullResolutionImagePreview,
   setOutputItemDragData,
   supportedFilesFromDataTransfer
 } from "../src/mediaAssets.js";
+import { nodeTypeForOutputItem } from "../src/nodeRegistry.js";
 
 test("active Newt Node output drags remain droppable when the browser hides custom MIME types", () => {
   const previousWindow = globalThis.window;
@@ -28,6 +31,9 @@ test("active Newt Node output drags remain droppable when the browser hides cust
     effectAllowed: "none",
     setData(type, value) {
       values.set(type, value);
+    },
+    getData(type) {
+      return values.get(type) || "";
     }
   };
   const item = {
@@ -43,10 +49,71 @@ test("active Newt Node output drags remain droppable when the browser hides cust
     setOutputItemDragData(dataTransfer, item);
     assert.equal(hasOutputItemDragData(dataTransfer), true);
     assert.equal(JSON.parse(values.get("application/x-newtnode-output")).sourceNodeId, "video-node-1");
+    const droppedItem = outputItemFromDataTransfer(dataTransfer);
+    assert.equal(droppedItem.type, "video");
+    assert.equal(droppedItem.url, "/outputs/shot.mp4");
+    assert.equal(nodeTypeForOutputItem(droppedItem), "video");
     clearOutputItemDragData(item);
     assert.equal(hasOutputItemDragData(dataTransfer), false);
   } finally {
     globalThis.window = previousWindow;
+  }
+});
+
+test("an invalid preview drag clears an older cached drag payload", () => {
+  const previousWindow = globalThis.window;
+  const dataTransfer = {
+    types: [],
+    effectAllowed: "none",
+    setData() {},
+    getData() { return ""; }
+  };
+  globalThis.window = { location: { origin: "http://localhost" } };
+
+  try {
+    setOutputItemDragData(dataTransfer, { id: "old", url: "/outputs/old.png", type: "image" });
+    assert.equal(hasOutputItemDragData({ types: [] }), true);
+    const next = setOutputItemDragData(dataTransfer, {
+      id: "thumbnail-only",
+      url: "/outputs/Test/thumbnails/image-preview.jpg",
+      type: "image"
+    });
+    assert.equal(next, null);
+    assert.equal(hasOutputItemDragData({ types: [] }), false);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("finishing a drag always clears cached state after a source rerender", () => {
+  const previousWindow = globalThis.window;
+  const previousCustomEvent = globalThis.CustomEvent;
+  const dataTransfer = {
+    effectAllowed: "none",
+    setData() {},
+    getData() { return ""; }
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, options) {
+      this.type = type;
+      this.detail = options?.detail;
+    }
+  };
+  globalThis.window = {
+    location: { origin: "http://localhost" },
+    dispatchEvent() {}
+  };
+
+  try {
+    setOutputItemDragData(dataTransfer, { id: "before-render", url: "/outputs/live.png", type: "image" });
+    finishOutputItemDragData(
+      { id: "after-render", url: "/outputs/replaced.png", type: "image" },
+      { clientX: 10, clientY: 20 }
+    );
+    assert.equal(hasOutputItemDragData({ types: [] }), false);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousCustomEvent;
   }
 });
 

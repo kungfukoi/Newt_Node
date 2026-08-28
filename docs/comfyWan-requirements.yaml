@@ -16,7 +16,7 @@
 schema_version: 1
 name: comfyWan
 status: production_ready
-newt_branch: dev
+newt_release: "v3.0.0-beta.0"
 comfy_root_placeholder: "%COMFYUI_ROOT%"
 
 runtime:

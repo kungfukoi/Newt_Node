@@ -22,7 +22,15 @@ import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
+import { normalizeTextAgentMessages } from "../src/textAgent.js";
+import {
+  defaultFalTextModel,
+  defaultFalVideoTextModel,
+  falVideoTextEndpoint,
+  nativeVideoAnalysisInput
+} from "../src/textModelDefaults.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
 import {
   generationProgressMiddleware,
   listGenerationProgress,
@@ -281,6 +289,7 @@ let runtimeModelProviderPreferences = defaultModelProviderPreferences;
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
+const controlPort = Number(process.env.NEWTNODE_CONTROL_PORT || process.env.VITE_CONTROL_API_PORT || port + 1);
 const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
 const updatePreservedDirectories = [
   "saved_workflows",
@@ -437,15 +446,16 @@ const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENER
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
 let openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
-const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
+const falTextModel = process.env.FAL_TEXT_MODEL || defaultFalTextModel;
 const skillDirectorLlmEndpoint = "openrouter/router";
 const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
-const storyboardVisionTextModel = process.env.STORYBOARD_QC_FAL_MODEL || "openai/gpt-5.6-terra";
-const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
-const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
-const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
+const storyboardTextModel = process.env.STORYBOARD_TEXT_MODEL || falTextModel;
+const storyboardVisionTextModel = process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardTextModel;
+const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || falTextModel;
+const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || falTextModel;
+const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || defaultFalVideoTextModel;
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -711,6 +721,7 @@ function buildHealthPayload() {
       storyboardQc: true,
       mediaThumbnail: true,
       generationProgress: true,
+      workflowAutosave: true,
       settings: true
     },
     ffmpeg: {
@@ -749,6 +760,7 @@ function buildHealthPayload() {
     falVideoTextModel,
     imageGenerationConcurrency,
     mediaPersistenceConcurrency,
+    controlPort,
     outputDirectory: outputsDir
   };
 }
@@ -1564,11 +1576,11 @@ function commandErrorSummary(commands) {
     .join("\n\n");
 }
 
-function updateStopPorts(values = [port, clientPort]) {
+function updateStopPorts(values = [port, controlPort, clientPort]) {
   const ports = (Array.isArray(values) ? values : [values])
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0 && value < 65536);
-  return [...new Set(ports.length ? ports : [3336, 5176])];
+  return [...new Set(ports.length ? ports : [3336, 3337, 5176])];
 }
 
 function powershellQuote(value) {
@@ -2524,6 +2536,25 @@ app.post("/api/saved-workflows/register-package", async (req, res) => {
   }
 });
 
+app.post("/api/saved-workflows/autosave", async (req, res) => {
+  await timedApi("workflows:autosave", async () => {
+    try {
+      const workflow = req.body.workflow || req.body;
+      const packagePath = await registeredAutosavePackagePath({
+        workflowId: req.body.workflowId || workflow.id,
+        packagePath: req.body.packagePath || workflow.packagePath || workflow.package?.rootPath
+      });
+      const saved = await saveWorkflowAutosave(packagePath, workflow, {
+        workflowFileName: req.body.workflowFileName || workflow.package?.workflowFileName || workflow.fileName
+      });
+      res.json(saved);
+    } catch (error) {
+      console.error(error);
+      res.status(error.status || 500).json({ error: error.message || "Could not autosave workflow." });
+    }
+  });
+});
+
 app.delete("/api/saved-workflows/:fileName", async (req, res) => {
   const fileName = safeWorkflowFileName(req.params.fileName);
   if (!fileName) {
@@ -2924,16 +2955,18 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
 
 app.post("/api/node/process-text", async (req, res) => {
   try {
-    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Processing text" });
+    const mode = req.body.mode === "agent" ? "agent" : "process";
+    updateCurrentGenerationProgress({ status: "running", phase: "generating", message: mode === "agent" ? "Thinking" : "Processing text" });
     const text = String(req.body.text || "").trim();
+    const messages = normalizeTextAgentMessages(req.body.messages);
     const textInputs = normalizedTextInputs(req.body.textInputs);
     const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
     const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video");
-    if (!text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
-      return res.status(400).json({ error: "Text is required." });
+    if (mode === "agent" ? !text : !text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
+      return res.status(400).json({ error: mode === "agent" ? "Enter a message before running Text Agent." : "Text is required." });
     }
 
-    const result = textLlmProvider === "openai" ? await processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) : await processTextWithFal({ text, textInputs, imageInputs, videoInputs });
+    const result = textLlmProvider === "openai" ? await processTextWithOpenAi({ mode, messages, text, textInputs, imageInputs, videoInputs }) : await processTextWithFal({ mode, messages, text, textInputs, imageInputs, videoInputs });
     const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
@@ -2944,7 +2977,7 @@ app.post("/api/node/process-text", async (req, res) => {
       provider: result.provider,
       modelName: result.model,
       endpoint: result.endpoint,
-      mode: "Text processing",
+      mode: mode === "agent" ? "Text agent" : "Text processing",
       prompt: text || textInputs.map((item) => item.text).join("\n\n"),
       submittedPrompt: result.submittedPrompt || text,
       project: projectFromBody(req.body),
@@ -2952,6 +2985,7 @@ app.post("/api/node/process-text", async (req, res) => {
       settings: {
         model: result.model,
         provider: result.provider,
+        conversationTurnCount: mode === "agent" ? messages.length + 1 : 0,
         textInputCount: textInputs.length,
         imageInputCount: imageInputs.length,
         videoInputCount: videoInputs.length
@@ -3877,8 +3911,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const directorShotList = String(req.body.directorShotList || "").trim();
     const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
     const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    const plan = process.env.GOOGLE_API_KEY
-      ? await generateStoryboardPlanWithGemini({
+    const plan = process.env.FAL_KEY
+      ? await generateStoryboardPlanWithFal({
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
@@ -9216,8 +9250,16 @@ const httpServer = app.listen(port, "127.0.0.1", () => {
   console.log(`NewtNode server running on http://127.0.0.1:${port}`);
 });
 
+const controlHttpServer = controlPort === port ? null : app.listen(controlPort, "127.0.0.1", () => {
+  console.log(`NewtNode control server running on http://127.0.0.1:${controlPort}`);
+});
+
 httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
+});
+
+controlHttpServer?.on("error", (error) => {
+  console.error("NewtNode control server failed to start.", error);
 });
 
 function resolveRoute({ startFrame, references }) {
@@ -9428,6 +9470,7 @@ async function ensureWorkflowPackageDirs(packagePath) {
     mkdir(path.join(packagePath, workflowPackageOutputDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageThumbnailDirName), { recursive: true }),
+    mkdir(path.join(packagePath, workflowAutosaveDirectoryName), { recursive: true }),
     mkdir(metadataDir, { recursive: true })
   ]);
   await hideWorkflowPackageMetadataDir(metadataDir);
@@ -9442,7 +9485,7 @@ async function openProjectOutputFolder(body = {}) {
 
 async function resolveProjectOutputPath(body = {}) {
   return {
-    path: path.join(await projectOutputDirectoryFromBody(body), "$date")
+    path: await projectOutputDirectoryFromBody(body)
   };
 }
 
@@ -9450,13 +9493,19 @@ async function projectOutputDirectoryFromBody(body = {}) {
   const packageContext = workflowPackageContextFromBody(body);
   if (packageContext?.packagePath) {
     const packagePath = packageContext.packagePath;
-    const registeredWorkflow = packageContext.id ? await findRegisteredWorkflowPackage(packageContext.id).catch(() => null) : null;
-    const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
-    const isRegisteredPackage = registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath);
     const hasPackageManifest = existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath));
     const hasPackageDirs = [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
       existsSync(path.join(packagePath, directoryName))
     );
+    let isRegisteredPackage = false;
+
+    // Most package opens can be validated locally. Avoid hydrating every saved
+    // workflow, especially when package files live in a busy OneDrive folder.
+    if (!hasPackageManifest && !hasPackageDirs && packageContext.id) {
+      const registeredWorkflow = await findRegisteredWorkflowPackage(packageContext.id).catch(() => null);
+      const registeredPackagePath = normalizeWorkflowPackagePath(registeredWorkflow?.packagePath || registeredWorkflow?.package?.rootPath);
+      isRegisteredPackage = Boolean(registeredPackagePath && path.resolve(registeredPackagePath) === path.resolve(packagePath));
+    }
 
     if (!isRegisteredPackage && !hasPackageManifest && !hasPackageDirs) {
       throw new Error("Workflow package path is not registered or does not look like a NewtNode package.");
@@ -9470,9 +9519,13 @@ async function projectOutputDirectoryFromBody(body = {}) {
 }
 
 function openDirectoryWithSystemShell(directoryPath) {
-  const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  if (process.platform === "win32") {
+    return runWindowsDialogHelper({ mode: "explore", title: "Open folder", defaultPath: directoryPath });
+  }
+  const command = process.platform === "darwin" ? "open" : "xdg-open";
+  const args = [directoryPath];
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [directoryPath], {
+    const child = spawn(command, args, {
       detached: true,
       stdio: "ignore",
       windowsHide: false
@@ -10043,14 +10096,14 @@ async function readWorkflowFromFilePath(filePath) {
     throw new Error("That JSON file is not a NewtNode workflow.");
   }
 
-  const workflowFileName = path.basename(workflowFilePath);
-  const packagePath = path.dirname(workflowFilePath);
+  const openContext = workflowAutosaveOpenContext(workflowFilePath, workflow);
+  const { packagePath, workflowFileName } = openContext;
   const openedWorkflow = {
     ...workflow,
     id: workflow.id || null,
     name: workflow.name || path.basename(workflowFileName, ".json") || "Untitled node project",
     fileName: workflowFileName,
-    filePath: workflowFilePath
+    filePath: openContext.displayFilePath
   };
 
   if (!workflowShouldRegisterOpenedPackage(openedWorkflow, packagePath)) {
@@ -10058,19 +10111,43 @@ async function readWorkflowFromFilePath(filePath) {
   }
 
   const registeredWorkflowId = openedWorkflow.id || randomUUID();
-  return writeWorkflowFile(
-    normalizeWorkflowPackageRegistration({
-      ...openedWorkflow,
-      id: registeredWorkflowId,
-      packagePath,
-      package: {
-        ...(openedWorkflow.package || {}),
-        rootPath: packagePath,
-        workflowFileName
-      },
-      graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
-    })
-  );
+  const normalizedWorkflow = normalizeWorkflowPackageRegistration({
+    ...openedWorkflow,
+    id: registeredWorkflowId,
+    packagePath,
+    package: {
+      ...(openedWorkflow.package || {}),
+      rootPath: packagePath,
+      workflowFileName
+    },
+    graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
+  });
+  const autosave = normalizedWorkflow.autosave;
+  if (openContext.isAutosave) delete normalizedWorkflow.autosave;
+  const registered = await writeWorkflowFile(normalizedWorkflow);
+  return openContext.isAutosave ? { ...registered, autosave } : registered;
+}
+
+async function registeredAutosavePackagePath({ workflowId = "", packagePath = "" } = {}) {
+  const id = String(workflowId || "").trim();
+  const packageRoot = normalizeWorkflowPackagePath(packagePath);
+  if (!id || !packageRoot || !existsSync(packageRoot)) {
+    const error = new Error("Autosave requires a saved NewtNode workflow package.");
+    error.status = 400;
+    throw error;
+  }
+
+  const candidates = await findRegisteredWorkflowPackages(id);
+  const isRegistered = candidates.some((workflow) => sameWorkflowPath(
+    workflow.packagePath || workflow.package?.rootPath,
+    packageRoot
+  ));
+  if (!isRegistered) {
+    const error = new Error("Autosave package is not registered. Save or reopen the workflow package first.");
+    error.status = 400;
+    throw error;
+  }
+  return packageRoot;
 }
 
 async function saveWorkflowToFilePath(filePath, workflow) {
@@ -10186,6 +10263,8 @@ function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
 
 async function selectFolderWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  return runWindowsDialogHelper({ mode: "folder", title, defaultPath: selectedPath });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 $typeDefinition = @"
@@ -10340,9 +10419,17 @@ exit 2
 `;
 
   return runFolderDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectWorkflowFileWithWindowsDialog({ title, defaultPath }) {
+  return runWindowsDialogHelper({
+    mode: "open",
+    title,
+    defaultPath: normalizeWorkflowPackagePath(defaultPath),
+    filter: "NewtNode workflow JSON (*.json)|*.json|JSON files (*.json)|*.json|All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10373,10 +10460,18 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectLoraFileWithWindowsDialog({ title, defaultPath }) {
   const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  return runWindowsDialogHelper({
+    mode: "open",
+    title,
+    defaultPath: selectedPath,
+    filter: "LoRA weights (*.safetensors;*.pt;*.ckpt;*.bin)|*.safetensors;*.pt;*.ckpt;*.bin|SafeTensors (*.safetensors)|*.safetensors|All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10417,12 +10512,22 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
 }
 
 async function selectSavePathWithWindowsDialog({ title, defaultPath, defaultName, extension }) {
   const selectedPath = existingDirectoryPath(defaultPath) || rootDir;
   const normalizedExtension = String(extension || "").replace(/^\.+/, "").replace(/[^A-Za-z0-9]+/g, "");
   const safeDefaultName = path.basename(String(defaultName || "export"));
+  return runWindowsDialogHelper({
+    mode: "save",
+    title,
+    defaultPath: selectedPath,
+    defaultName: safeDefaultName,
+    extension: normalizedExtension,
+    filter: normalizedExtension ? `${normalizedExtension.toUpperCase()} files (*.${normalizedExtension})|*.${normalizedExtension}|All files (*.*)|*.*` : "All files (*.*)|*.*"
+  });
+  /* c8 ignore start */
   const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -10444,6 +10549,85 @@ exit 2
 `;
 
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  /* c8 ignore stop */
+}
+
+let windowsDialogHelperPathPromise = null;
+let windowsDialogInFlight = false;
+
+async function runWindowsDialogHelper({ mode, title = "NewtNode", defaultPath = "", defaultName = "", extension = "", filter = "" }) {
+  if (windowsDialogInFlight) {
+    const busyError = new Error("A Windows file dialog is already open.");
+    busyError.code = "DIALOG_BUSY";
+    throw busyError;
+  }
+
+  windowsDialogInFlight = true;
+  const token = randomUUID();
+  const resultPath = path.join(tmpdir(), `newtnode-dialog-${token}.txt`);
+  const errorPath = `${resultPath}.error`;
+  try {
+    const helperPath = await ensureWindowsDialogHelper();
+    await execFile(helperPath, [mode, resultPath, title, defaultPath, defaultName, extension, filter], {
+      windowsHide: false,
+      timeout: 120000
+    });
+    const selectedPath = String(await readFile(resultPath, "utf8")).trim();
+    if (!selectedPath) {
+      const canceled = new Error("File selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    return selectedPath;
+  } catch (error) {
+    if (error?.code === 2 || error?.code === "DIALOG_CANCELED") {
+      const canceled = new Error("File selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    const helperDetail = String(await readFile(errorPath, "utf8").catch(() => "")).trim();
+    const nextError = new Error(helperDetail || (error?.killed ? "Windows file dialog timed out." : error?.message) || "Windows file dialog failed.");
+    nextError.code = error?.killed ? "DIALOG_TIMEOUT" : error?.code || "DIALOG_FAILED";
+    throw nextError;
+  } finally {
+    windowsDialogInFlight = false;
+    await Promise.all([
+      rm(resultPath, { force: true }).catch(() => {}),
+      rm(errorPath, { force: true }).catch(() => {})
+    ]);
+  }
+}
+
+async function ensureWindowsDialogHelper() {
+  if (windowsDialogHelperPathPromise) return windowsDialogHelperPathPromise;
+  windowsDialogHelperPathPromise = (async () => {
+    const sourcePath = path.join(rootDir, "server", "windows-dialog-helper.cs");
+    const source = await readFile(sourcePath);
+    const sourceHash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+    const helperPath = path.join(tmpdir(), `NewtNodeWindowsDialog-${sourceHash}.exe`);
+    if (existsSync(helperPath)) return helperPath;
+
+    const windowsRoot = process.env.WINDIR || "C:\\Windows";
+    const compilerPath = [
+      path.join(windowsRoot, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+      path.join(windowsRoot, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe")
+    ].find((candidate) => existsSync(candidate));
+    if (!compilerPath) throw new Error("The Windows file-dialog runtime is unavailable.");
+
+    await execFile(compilerPath, [
+      "/nologo",
+      "/target:winexe",
+      `/out:${helperPath}`,
+      "/reference:System.Windows.Forms.dll",
+      "/reference:System.Drawing.dll",
+      sourcePath
+    ], { windowsHide: true, timeout: 30000 });
+    return helperPath;
+  })().catch((error) => {
+    windowsDialogHelperPathPromise = null;
+    throw error;
+  });
+  return windowsDialogHelperPathPromise;
 }
 
 function powershellStringLiteral(value) {
@@ -14938,7 +15122,23 @@ function textInputContext(textInputs) {
   return textInputs.map((item, index) => `Text input ${index + 1} (${item.label}):\n${item.text}`).join("\n\n");
 }
 
-function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
+function buildTextProcessingPrompt({ mode = "process", messages = [], text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
+  if (mode === "agent") {
+    const conversation = normalizeTextAgentMessages(messages)
+      .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}:\n${message.text}`)
+      .join("\n\n");
+    return [
+      textAgentInstructions(),
+      conversation ? `Conversation history:\n${conversation}` : "",
+      textInputContext(textInputs),
+      imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
+      videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : "",
+      `Current user message:\n${text}`,
+      "Reply directly to the current user message."
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
   return [
     textProcessingInstructions(),
     text ? `Original prompt:\n${text}` : "",
@@ -14951,7 +15151,7 @@ function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], v
     .join("\n\n");
 }
 
-async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }) {
+async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!process.env.FAL_KEY) {
     throw new Error("No active Fal API key is selected in Settings.");
   }
@@ -14959,12 +15159,12 @@ async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }
   const model = falTextModel;
   const imageContext = await describeImageInputs(imageInputs);
   const videoContext = await describeVideoInputs(videoInputs);
-  const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
+  const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
   const data = await subscribeFal("openrouter/router", {
     input: {
       model,
       prompt,
-      system_prompt: textProcessingInstructions()
+      system_prompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions()
     },
     logs: true
   });
@@ -15858,13 +16058,15 @@ async function runSkillDirectorWithFal({
   };
 }
 
-async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) {
+async function processTextWithOpenAi({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!openAiTextApiKey) {
     throw new Error("No OpenAI text API key is configured.");
   }
 
   const model = openAiTextModel;
   const prompt = buildTextProcessingPrompt({
+    mode,
+    messages,
     text,
     textInputs,
     imageDescriptions: imageInputs.map((item, index) => `Image ${index + 1} (${item.label}): ${item.url}`),
@@ -15878,7 +16080,7 @@ async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInput
     },
     body: JSON.stringify({
       model,
-      instructions: textProcessingInstructions(),
+      instructions: mode === "agent" ? textAgentInstructions() : textProcessingInstructions(),
       input: prompt
     })
   });
@@ -15906,6 +16108,10 @@ async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInput
 
 function textProcessingInstructions() {
   return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
+}
+
+function textAgentInstructions() {
+  return "You are NewtNode's Text Agent. Continue the saved conversation naturally and helpfully. Use connected text, style, image, and video context when relevant, preserve the user's intent, and do not rewrite their request unless they ask you to.";
 }
 
 async function describeImageInputs(imageInputs) {
@@ -16021,18 +16227,13 @@ async function describeVideoInputs(videoInputs) {
   if (!videoInputs.length) return { descriptions: [], usages: [] };
 
   const videoUrls = await Promise.all(videoInputs.map((item) => localAssetToFalUrl(item.url)));
-  const data = await subscribeFal("openrouter/router/video", {
-    input: {
-      video_urls: videoUrls,
-      prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
-      system_prompt: "Return only useful prompt context. Do not use markdown.",
-      model: falVideoTextModel
-    },
+  const data = await subscribeFal(falVideoTextEndpoint, {
+    input: nativeVideoAnalysisInput({ videoUrls, videoInputs, model: falVideoTextModel }),
     logs: true
   });
   const description = extractFalText(data).trim();
   return {
-    descriptions: description ? [`Connected videos: ${description}`] : [],
+    descriptions: description ? [`Connected videos, analyzed natively with temporal and audio context: ${description}`] : [],
     usages: [falResultUsage(data)].filter(Boolean)
   };
 }
@@ -16893,8 +17094,8 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
-  const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+async function generateStoryboardPlanWithFal({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
+  const model = storyboardTextModel;
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -16978,50 +17179,27 @@ ${directorExpansionInstruction
     ? `Create at least the per-CUT keyframes listed above, targeting ${frameCount} storyboard frames. You may add a frame only when the visual logic clearly requires another distinct state, but do not reduce a listed multi-frame CUT to one frame. Preserve every CUT, keep multi-frame CUTS contiguous, and never exceed 35 frames.`
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
-  const text = await generateGeminiText({
+  const text = await generateFalStoryboardText({
     model,
     prompt,
-    responseMimeType: "application/json"
+    systemPrompt: "Return only valid JSON for a production-ready storyboard plan. Do not use markdown."
   });
 
   return parseStoryboardPlanJson(text);
 }
 
-async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
-  return generateGeminiTextFromParts({
-    model,
-    parts: [{ text: prompt }],
-    responseMimeType
-  });
-}
-
-async function generateGeminiTextFromParts({ model, parts, responseMimeType = "text/plain", temperature = 0.45 }) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GOOGLE_API_KEY
+async function generateFalStoryboardText({ model = storyboardTextModel, prompt, systemPrompt }) {
+  const data = await subscribeFal("openrouter/router", {
+    input: {
+      model,
+      prompt,
+      system_prompt: systemPrompt || "Return only the requested storyboard text. Do not use markdown."
     },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts
-        }
-      ],
-      generationConfig: {
-        temperature,
-        responseMimeType
-      }
-    })
+    logs: true
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || "Gemini text generation failed.", { raw: data });
-  }
-
-  const parsed = extractGeminiImageData(data);
-  return parsed.text || "";
+  const text = extractFalText(data).trim();
+  if (!text) throw httpError(502, "Fal GPT-5.6 Terra returned no storyboard text.", { raw: data });
+  return text;
 }
 
 function parseStoryboardPlanJson(text) {
@@ -17116,27 +17294,6 @@ function normalizeStoryboardQcResult(result = {}) {
     issues,
     correctionPrompt: correctionPrompt || (issues.length ? `Correct these storyboard problems: ${issues.join("; ")}.` : "")
   };
-}
-
-async function storyboardQcInlineImagePart(publicPath, label, { required = false } = {}) {
-  if (!publicPath) return [];
-  try {
-    const asset = await readLocalAsset(publicPath);
-    if (!String(asset.mimeType || "").startsWith("image/")) return [];
-    return [
-      { text: `${label}:` },
-      {
-        inlineData: {
-          mimeType: asset.mimeType || "image/png",
-          data: asset.buffer.toString("base64")
-        }
-      }
-    ];
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
-    return [];
-  }
 }
 
 function storyboardQcReviewPrompt({
@@ -17251,50 +17408,6 @@ async function reviewStoryboardFrameWithFal({
   return normalizeStoryboardQcResult(parseStoryboardPlanJson(extractFalText(data)));
 }
 
-async function reviewStoryboardFrameWithGemini({
-  sourceUrl,
-  previousFrameUrl = "",
-  spatialAnchorUrl = "",
-  sceneDescription = "",
-  framePrompt = "",
-  frameNumber = 1,
-  shot = "",
-  angle = "",
-  notes = ""
-} = {}) {
-  const parts = [{
-    text: storyboardQcReviewPrompt({
-      sceneDescription,
-      framePrompt,
-      frameNumber,
-      shot,
-      angle,
-      notes,
-      imageLabels: [
-        "Generated frame to review",
-        previousFrameUrl ? "Previous approved frame for continuity" : "",
-        spatialAnchorUrl ? "Spatial anchor frame for room geography" : ""
-      ].filter(Boolean)
-    })
-  }];
-
-  const imageParts = [
-    ...(await storyboardQcInlineImagePart(sourceUrl, "Generated frame to review", { required: true })),
-    ...(await storyboardQcInlineImagePart(previousFrameUrl, "Previous approved frame for continuity")),
-    ...(await storyboardQcInlineImagePart(spatialAnchorUrl, "Spatial anchor frame for room geography"))
-  ];
-  if (!imageParts.length) return storyboardQcPass("No readable image was available for QC.");
-
-  const text = await generateGeminiTextFromParts({
-    model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-    parts: [...parts, ...imageParts],
-    responseMimeType: "application/json",
-    temperature: 0.18
-  });
-
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(text));
-}
-
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
   const cleanScene = String(sceneDescription || "A clear cinematic scene").trim();
   const shots = ["WS", "MS", "CU", "MS", "CU", "WS", "OTS", "ECU", "EWS"];
@@ -17329,7 +17442,7 @@ function storyboardExportFrameExtension(fileName = "") {
 
 async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!process.env.FAL_KEY) return fallback;
 
   try {
     const frameText = frames.map((frame, index) => [
@@ -17340,9 +17453,9 @@ async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDes
       frame.notes ? `Continuity note: ${frame.notes}` : "",
       [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
     ].filter(Boolean).join("\n")).join("\n\n");
-    const text = await generateGeminiText({
-      model: process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-      responseMimeType: "application/json",
+    const text = await generateFalStoryboardText({
+      model: storyboardTextModel,
+      systemPrompt: "Return only valid JSON containing concise production-board captions. Do not use markdown.",
       prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
@@ -17376,15 +17489,14 @@ Descriptions must be in the same order as the frames. Keep each caption short, c
 
 async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!process.env.FAL_KEY) return fallback;
 
   const descriptions = [...fallback];
   const batchSize = 4;
 
   for (let batchStart = 0; batchStart < frames.length; batchStart += batchSize) {
     const batch = frames.slice(batchStart, batchStart + batchSize);
-    const parts = [{
-      text: `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
+    const prompt = `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
 Scene brief: ${sceneDescription || "None"}
@@ -17401,22 +17513,15 @@ Rules:
 - Describe the visible action, subject, or story beat in each image.
 - Keep each caption short, complete, readable, and useful below a storyboard panel.
 - Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
-- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
-    }];
+- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`;
     const readableFrames = [];
+    const imageUrls = [];
 
     for (const [offset, frame] of batch.entries()) {
       try {
-        const asset = await readLocalAsset(frame.sourceUrl);
-        if (!String(asset.mimeType || "").startsWith("image/")) continue;
+        const imageUrl = await localAssetToFalUrl(frame.sourceUrl);
         readableFrames.push({ frame, index: batchStart + offset });
-        parts.push({ text: `Frame ${batchStart + offset + 1}:` });
-        parts.push({
-          inlineData: {
-            mimeType: asset.mimeType || "image/png",
-            data: asset.buffer.toString("base64")
-          }
-        });
+        imageUrls.push(imageUrl);
       } catch (error) {
         console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
       }
@@ -17425,12 +17530,16 @@ Rules:
     if (!readableFrames.length) continue;
 
     try {
-      const text = await generateGeminiTextFromParts({
-        model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-        parts,
-        responseMimeType: "application/json",
-        temperature: 0.28
+      const data = await subscribeFal("openrouter/router/vision", {
+        input: {
+          image_urls: imageUrls,
+          prompt,
+          system_prompt: "Return only valid JSON containing one concise caption per image, in image order. Do not use markdown.",
+          model: storyboardVisionTextModel
+        },
+        logs: true
       });
+      const text = extractFalText(data);
       const parsed = parseStoryboardPlanJson(text);
       const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
       readableFrames.forEach(({ index }, localIndex) => {

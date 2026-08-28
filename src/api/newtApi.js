@@ -2,6 +2,8 @@ import { apiErrorMessage } from "../apiErrors.js";
 
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
+const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
+const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
@@ -11,15 +13,22 @@ function ensureOk(response, data, fallbackMessage) {
   return data;
 }
 
-export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true } = {}) {
-  const requestUrl = localApiFetchUrl(path);
+export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
+  const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
   try {
-    response = await fetch(requestUrl, options);
+    response = await fetchWithTimeout(requestUrl, options, timeoutMs);
   } catch (error) {
-    if (requestUrl !== path && retryLocalApi) {
+    if (retryLocalApi && requestUrl === path && canRetryLocalApi(path)) {
       try {
-        response = await fetch(path, options);
+        const fallbackBaseUrl = preferControlServer ? localControlApiBaseUrl : localApiBaseUrl;
+        response = await fetchWithTimeout(`${fallbackBaseUrl}${path}`, options, timeoutMs);
+      } catch {
+        throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
+      }
+    } else if (requestUrl !== path && retryLocalApi) {
+      try {
+        response = await fetchWithTimeout(path, options, timeoutMs);
       } catch {
         throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
       }
@@ -54,6 +63,19 @@ export async function fetchJsonApi(path, options = {}, label = "Request", { retr
         `${label} failed. ${retryError.message || "Could not reach the updated backend route."} Restart npm run dev so the updated server is active.`
       );
     }
+  }
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const duration = Math.max(0, Number(timeoutMs) || 0);
+  if (!duration || options?.signal) return fetch(url, options);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), duration);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -92,6 +114,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("saved-workflows/autosave")) return "workflowAutosave";
   if (path.includes("open-project-output-folder")) return "projectOutputFolder";
   if (path.includes("edit-preview")) return "editPreview";
   if (path.includes("edit-media")) return "editMedia";
@@ -315,7 +338,7 @@ export const systemApi = {
   },
 
   saveWorkflowFile(body, label = "Save workflow") {
-    return fetchJsonApi("/api/system/save-workflow-file", jsonBody(body), label);
+    return controlJsonApi("/api/system/save-workflow-file", jsonBody(body), label, { timeoutMs: 15000 });
   },
 
   comfyWanStatus({ workflow = "", rootPath = "" } = {}) {
@@ -326,34 +349,59 @@ export const systemApi = {
     return getJson(`/api/comfy-wan/status${suffix}`, "Could not check ComfyUI.");
   },
 
-  openProjectOutputFolder(body, label = "Open output folder") {
-    return fetchJsonApi("/api/system/open-project-output-folder", jsonBody(body), label);
+  async openProjectOutputFolder(body, label = "Open output folder") {
+    const path = "/api/system/open-project-output-folder";
+    const lane = await selectControlLane(path, label);
+    return controlJsonApi(path, jsonBody(body), label, { preferClientProxy: lane === "proxy", timeoutMs: 5000 });
   },
 
   projectOutputPath(body) {
-    return fetchJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
+    return controlJsonApi("/api/system/project-output-path", jsonBody(body), "Project output path");
   }
 };
 
 async function systemDialogRequest(path, body, label) {
   await exitFullscreenForSystemDialog();
-  await ensureSystemDialogServer(path, label);
-  return fetchJsonApi(path, jsonBody(body), label, { retryLocalApi: false });
+  const lane = await selectControlLane(path, label);
+  return controlJsonApi(path, jsonBody(body), label, { preferClientProxy: lane === "proxy" });
 }
 
-async function ensureSystemDialogServer(path, label) {
-  if (!canRetryLocalApi(path)) return;
+function controlJsonApi(path, options, label, requestOptions = {}) {
+  // Generations keep long-lived requests open against the primary API origin.
+  // A dedicated loopback origin keeps desktop controls in their own browser
+  // connection pool without depending on the Vite proxy.
+  return fetchJsonApi(path, options, label, { preferControlServer: true, ...requestOptions });
+}
+
+async function controlRequestData(path, options, fallbackMessage) {
+  const { response, data } = await controlJsonApi(path, options, fallbackMessage);
+  return ensureOk(response, data, fallbackMessage);
+}
+
+async function selectControlLane(path, label) {
+  if (!canRetryLocalApi(path)) return "direct";
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  const timeout = globalThis.setTimeout(() => controller.abort(), 3000);
   try {
-    const response = await fetch(`${localApiBaseUrl}/api/health`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await Promise.any([
+      fetch(`${localControlApiBaseUrl}/api/system/control-health`, { signal: controller.signal })
+        .then(requireHealthyResponse)
+        .then(() => "direct"),
+      fetch("/api/system/control-health", { signal: controller.signal })
+        .then(requireHealthyResponse)
+        .then(() => "proxy")
+    ]);
   } catch {
     throw new Error(`${label} could not open because the local app server is offline. Restart NewtNode and try again.`);
   } finally {
-    window.clearTimeout(timeout);
+    globalThis.clearTimeout(timeout);
   }
+}
+
+function requireHealthyResponse(response) {
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response;
 }
 
 async function exitFullscreenForSystemDialog() {
@@ -410,23 +458,31 @@ export const composerApi = {
 
 export const workflowApi = {
   listSummary() {
-    return getJson("/api/saved-workflows?summary=1", "Could not load saved workflows.");
+    return controlRequestData("/api/saved-workflows?summary=1", { method: "GET" }, "Could not load saved workflows.");
   },
 
   open(fileName) {
-    return getJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not load workflow.");
+    return controlRequestData(`/api/saved-workflows/${encodeURIComponent(fileName)}`, { method: "GET" }, "Could not load workflow.");
   },
 
   save(workflow) {
-    return postJson("/api/saved-workflows", workflow, "Could not save workflow.");
+    return controlRequestData("/api/saved-workflows", jsonBody(workflow), "Could not save workflow.");
+  },
+
+  autosave(body) {
+    return controlRequestData("/api/saved-workflows/autosave", jsonBody(body), "Could not autosave workflow.");
   },
 
   registerPackage(workflow) {
-    return postJson("/api/saved-workflows/register-package", workflow, "Could not register workflow package.");
+    return controlRequestData("/api/saved-workflows/register-package", jsonBody(workflow), "Could not register workflow package.");
   },
 
   remove(fileName) {
-    return deleteJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not remove workflow from the dropdown.");
+    return controlRequestData(
+      `/api/saved-workflows/${encodeURIComponent(fileName)}`,
+      { method: "DELETE" },
+      "Could not remove workflow from the dropdown."
+    );
   }
 };
 

@@ -5,7 +5,7 @@ import { displayMediaUrl, hasOutputItemDragData, outputItemFromDataTransfer } fr
 
 const mediaDragType = "application/x-newtnode-assembly-media";
 
-export function AssemblyMediaBin({ media = [], connectionControls = null, onOutputDrop = null }) {
+export function AssemblyMediaBin({ media = [], connectionControls = null, onOutputDrop = null, onRemove = null }) {
   const [viewerMediaId, setViewerMediaId] = React.useState("");
   const [outputDropActive, setOutputDropActive] = React.useState(false);
   const viewerMedia = media.find((item) => item.id === viewerMediaId) || null;
@@ -82,6 +82,21 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
                 setViewerMediaId(item.id);
               }}
             >
+              <button
+                type="button"
+                className="assembly-media-bin-remove"
+                draggable={false}
+                title="Remove from Timeline"
+                aria-label={`Remove ${item.label} from Timeline`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRemove?.(item);
+                }}
+              >
+                <X size={11} />
+              </button>
               <MediaThumbnail media={item} />
               <div className="assembly-media-bin-caption">
                 <strong>{item.label}</strong>

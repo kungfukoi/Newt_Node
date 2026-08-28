@@ -2,6 +2,8 @@
 
 NewtNode's application dependencies are declared in `package.json` and pinned by `package-lock.json`. Do not maintain a separate hand-written install list; update both package files whenever an npm runtime dependency changes.
 
+For setup commands, validation tiers, environment overrides, and troubleshooting, see `development.md`.
+
 ## Runtime Requirements
 
 - Node.js 20 or newer.

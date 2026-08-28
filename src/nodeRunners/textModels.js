@@ -1,6 +1,7 @@
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
+import { textAgentRequestMessages } from "../textAgent.js";
 
 export async function runTextNodeProcessing({
   node,
@@ -10,17 +11,22 @@ export async function runTextNodeProcessing({
   promptPiecesForSource,
   text,
   nodeReferences = {},
-  generationGroupId = ""
+  generationGroupId = "",
+  mode = "process",
+  messages = []
 }) {
+  const agentMode = mode === "agent";
   const { response, data } = await runTrackedGeneration({
     nodeId: node.id,
     nodeTitle: node.data.title,
     kind: "text",
-    label: "Text Model",
+    label: agentMode ? "Text Agent" : "Text Model",
     groupId: generationGroupId,
     batchIndex: 1,
     batchTotal: 1
   }, (progress) => nodeApi.processText({
+    mode: agentMode ? "agent" : "process",
+    messages: agentMode ? textAgentRequestMessages(messages) : [],
     text: text ?? node.data.text,
     textInputs: [
       ...normalizedReferenceInputs(nodeReferences.textInputs),
@@ -56,7 +62,7 @@ function connectedTextInputItems(items = [], sourceLabel) {
   return items
     .map(({ source }) => ({
       label: sourceLabel(source),
-      text: ["plainText", "text"].includes(source.type) ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt || source.data.title
+      text: ["plainText", "text", "textAgent"].includes(source.type) ? source.data.resultText || source.data.text || source.data.agentDraft : source.data.resultText || source.data.prompt || source.data.title
     }))
     .filter((item) => item.text);
 }

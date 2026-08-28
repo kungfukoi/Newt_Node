@@ -25,10 +25,6 @@
   z-index: 2;
 }
 
-.node-canvas.is-mouse-wheel-zooming:not(.is-distant-zoom) .newt-react-flow .react-flow__viewport {
-  transition: transform 110ms cubic-bezier(0.2, 0.7, 0.25, 1);
-}
-
 .newt-react-flow .react-flow__pane {
   cursor: grab;
 }
@@ -63,6 +59,10 @@
   min-width: 18px;
   min-height: 18px;
   transform: none !important;
+}
+
+.newt-react-flow .inline-port.react-flow__handle.input {
+  pointer-events: auto;
 }
 
 .newt-flow-edge-visible,
@@ -145,10 +145,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .node-canvas.is-mouse-wheel-zooming:not(.is-distant-zoom) .newt-react-flow .react-flow__viewport {
-    transition: none;
-  }
-
   .newt-flow-edge.active .newt-flow-edge-visible,
   .newt-flow-connection-line {
     animation: none;

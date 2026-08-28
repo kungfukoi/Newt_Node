@@ -579,6 +579,13 @@ test("buildUtilityVideoRequest preserves Depth Anything Video controls", () => {
   assert.equal(request.depthAnythingVideo.sideBySide, true);
 });
 
+test("Text Agent participates in the same leading batch stage as Text Model", () => {
+  const node = { id: "agent", type: "textAgent", data: { agentDraft: "Continue" } };
+  assert.equal(isRunnableNode(node), true);
+  assert.equal(nodeRunPriority(node), 0);
+  assert.equal(runStageLabel(node.type), "text agent");
+});
+
 test("buildUtilityVideoRequest preserves Topaz SDR to HDR output format", () => {
   const request = buildUtilityVideoRequest({
     node: {
