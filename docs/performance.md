@@ -40,7 +40,7 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for `v3.0.0-beta.0` on `dev` after the React Flow canvas migration and generation-progress work, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-08-16.
+Measured for package version `3.0.0-beta.0` on `main`, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-08-28. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
 
 | Area | Current behavior |
 | --- | --- |
@@ -59,24 +59,26 @@ Recent production build summary:
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
 | `index.html` | document | 0.66 kB | 0.36 kB |
-| `assets/index-*.js` | entry script | 66.13 kB | 22.29 kB |
-| `assets/index-*.css` | entry style | 25.80 kB | 5.42 kB |
-| `assets/vendor-icons-*.js` | modulepreload | 19.03 kB | 6.24 kB |
+| `assets/index-*.js` | entry script | 70.71 kB | 23.87 kB |
+| `assets/index-*.css` | entry style | 26.06 kB | 5.50 kB |
+| `assets/vendor-icons-*.js` | modulepreload | 22.26 kB | 7.17 kB |
 | `assets/vendor-react-*.js` | modulepreload | 188.00 kB | 58.94 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 821.51 kB | 224.12 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 149.75 kB | 25.16 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 909.03 kB | 249.03 kB |
+| `assets/NodeEditor-*.css` | lazy editor style | 170.33 kB | 28.75 kB |
 | `assets/vendor-*.js` | lazy shared/editor vendor | 175.46 kB | 57.52 kB |
+| `assets/vendor-*.css` | lazy shared/editor vendor style | 15.50 kB | 2.61 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
-| `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 12.98 kB | 3.31 kB |
-| `assets/SettingsPage-*.js` | lazy Settings page | 19.60 kB | 6.03 kB |
-| `assets/StatsDashboard-*.js` | lazy Stats page | 23.21 kB | 7.45 kB |
+| `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 13.35 kB | 3.38 kB |
+| `assets/openAiImage2-*.js` | lazy OpenAI Image 2 helper | 4.23 kB | 1.63 kB |
+| `assets/SettingsPage-*.js` | lazy Settings page | 19.59 kB | 6.03 kB |
+| `assets/StatsDashboard-*.js` | lazy Stats page | 25.55 kB | 7.98 kB |
 | `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |
 
 Current totals:
 
-- Initial shell: 299.62 kB, 93.24 kB gzip.
-- Lazy/generated: 2020.23 kB, 536.10 kB gzip.
-- All assets: 2319.85 kB, 629.34 kB gzip.
+- Initial shell: 307.68 kB, 95.84 kB gzip.
+- Lazy/generated: 2133.58 kB, 566.15 kB gzip.
+- All assets: 2441.26 kB, 661.98 kB gzip.
 
 Vite currently reports the expected large-chunk warning for the node editor and Three.js runtime. Treat the editor chunk as the next code-splitting target; do not move node-editor dependencies into the initial shell to hide the warning.
 
@@ -90,7 +92,7 @@ Vite currently reports the expected large-chunk warning for the node editor and 
 
 ## React Flow Canvas Baseline
 
-The `dev` branch uses React Flow for node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths. Newt continues to own graph execution, persistence, uploads, previews, model behavior, grouping, and workflow state.
+The current app uses React Flow for node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths. Newt continues to own graph execution, persistence, uploads, previews, model behavior, grouping, and workflow state.
 
 - `flowOverviewEnabled` is `false` and `flowOnlyRenderVisibleElements` is `false`. Proxy, compact, map, warm-hydration, and offscreen-culling paths are inactive.
 - The canvas stays in full-detail mode from the 5% minimum zoom through the 250% maximum. Every node and edge remains mounted while panning and zooming.

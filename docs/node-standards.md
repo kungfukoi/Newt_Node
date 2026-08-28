@@ -2,6 +2,8 @@
 
 This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
+Snapshot verified against package version `3.0.0-beta.0` on 2026-08-28. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
+
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
 ## Goals
@@ -14,9 +16,33 @@ Before starting any new feature, read this document first. If the feature change
 - Keep saved workflows portable enough that another user can open and run a packaged graph from a shared drive when the needed assets are included.
 - Keep runtime configuration, update, and restart behavior local, visible, and cross-platform.
 
-## Current Branch Scope
+## How Agents Must Use This Standard
 
-This branch is the current development line for the next mainline merge. Treat these as durable surfaces, even if the branch name or release version changes during promotion:
+Before implementation:
+
+1. Read `AGENTS.md`, this document, `architecture.md`, and `development.md`.
+2. Inspect the current branch and dirty worktree. Preserve changes not created for the task.
+3. Identify the internal node type, persisted fields, port ids, routes, result types, and compatibility names involved.
+4. Complete the feature-impact audit below and find the current owner in the code-ownership map.
+5. Read the closest tests and representative old workflow normalization before editing.
+
+During implementation:
+
+- Extend an existing contract instead of creating a node-local result, request, storage, preview, or persistence shape.
+- Design old-workflow normalization before renaming or removing persisted data.
+- Keep reusable behavior out of `NodeEditor.jsx`; move pure logic into a focused owner and test it there.
+- Treat frontend, backend, persistence, history/Stats, progress, error states, and documentation as one feature when the change crosses those boundaries.
+
+Before completion:
+
+- Run the validation tier in `development.md` plus the relevant checks at the end of this document.
+- Inspect the final diff and worktree for credentials, generated files, machine paths, and accidental runtime data.
+- Update this document when a durable rule changed and update `architecture.md` when ownership or data flow changed.
+- Do not commit, merge, pull, push, switch branches, or discard work unless the user explicitly requests it.
+
+## Current Product Snapshot
+
+These are durable current surfaces independent of the checked-out branch name:
 
 - The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.
 - React Flow is the active canvas runtime. Proxy, compact, and map render modes are currently disabled; complete node bodies and all edges remain mounted from the minimum 5% zoom through working zoom.
@@ -28,7 +54,7 @@ This branch is the current development line for the next mainline merge. Treat t
 - Stable node ids are the canonical graph identity. Visible titles and `@tokens` may change, but saved edges, reference bindings, Output routing, and dependency scheduling must continue to resolve by id.
 - An attached Output node redirects generated files to its configured target without replacing the source node's playable result URLs or breaking Preview nodes after save/reopen.
 - Workflow saves should stay fast: the client upserts the returned project summary, and the server rebuilds workflow indexes after the save response rather than blocking the write path.
-- When this branch is merged or released, app version displays should derive from package metadata and be updated with the release bump, not hard-coded in UI copy.
+- App version displays derive from package metadata and update with the release bump; never hard-code a version in UI copy.
 
 ## New Feature Checklist
 
@@ -42,6 +68,23 @@ Use this quick pass before implementing a feature, and again before committing i
 - Keep generated files and copied dependencies inside the current workflow package when a package is attached.
 - When a frontend/server change affects startup, routing, or lazy assets, run `npm run smoke:app` with the dev server running in addition to tests/build.
 - Update this document when the feature intentionally changes one of these standards.
+
+## Feature Impact Matrix
+
+Audit every applicable row before declaring a feature complete.
+
+| Change area | Required surfaces to inspect |
+| --- | --- |
+| Node type or control | Catalog/icon, config, defaults, normalization, UI body, resize, CSS, empty/disabled/error states, tests |
+| Ports or references | Port ids/colors, compatibility, auto-connect, edge normalization, handle measurement, dependency order, `@` bindings, copy/import |
+| Provider or model | Stable label, enabled-model Settings, credential/provider routing, capability-specific controls, request builder, validation, response normalization, progress, failure diagnostics |
+| Generated or derived media | Managed local persistence, result items, selected index, Preview, output rail, download, drag/drop, downstream connections, save/reopen |
+| Paid operation | Provider/endpoint/model metadata, duration/resolution/input counts, reproducible settings, cost or unpriced state, history, Stats |
+| Workflow persistence | Current document shape, old normalization, Save As, autosave, Recent, package identity, asset rebasing, missing-file behavior |
+| Canvas or geometry | React Flow ownership, live resize/drag, handles/edges, selection, text editing, pan/zoom, 5/8/30/100% checks, large graph behavior |
+| Backend or control route | Input/schema validation, route owner, API wrapper, health capability, smoke test, timeout/cancellation, small response shape |
+| Filesystem or desktop action | Path containment, filename sanitation, managed roots, Explorer/Finder/dialog parity, Windows/macOS launch/restart/update behavior |
+| Heavy UI or dependency | Focused module/component, lazy boundary, package files, dependency preflight, production bundle report |
 
 ## Refactored Code Ownership
 
@@ -199,6 +242,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 - Copy and Import create fresh ids for copied nodes. Remap `nodeReferenceBindings` whenever the referenced node is included in the copied graph, just as edges and group membership are remapped. A binding whose source is not included may fall back to normal title resolution in the destination workflow; it must never silently bind to an unrelated stale id.
 - Keep reusable parsing, binding-key normalization, duplicate ranking, and visible-token replacement in `src/nodeReferences.js`. Keep graph id and binding remapping in `src/workflowState.js`.
 - `$node` in an Output node may render the connected source's current title into a path or filename, but the Output connection itself remains identified by edge/node ids.
+- Product labels may differ from legacy internal types, route ids, or source filenames. Preserve internal compatibility unless a deliberate migration updates old workflows, normalization, tests, and documentation together; Timeline / `assembly`, WanWarp / `videoStitch`, and WanSegment / `transitionBuilder` are current examples.
 
 ## Node Definition Checklist
 
@@ -325,6 +369,9 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Absolute external targets are exposed to the browser as `/external-outputs/<encoded-absolute-path>/<encoded-filename>`. Persist the public URL in results; keep `externalPath` as backend/history metadata and never use a raw absolute path or browser object URL as an HTML media source.
 - On reopen, every existing external Output result should resolve from its saved URL. If the original user root changed, the server may rebase the path or recover one unique nearby filename match; ambiguous or missing files should fail clearly and may then show the logo fallback.
 - Redirecting storage must not sever provenance. The source node remains the result owner, Stats/history retain the generating node/model/provider, and Preview/downstream nodes continue to consume the source result normally.
+- Explicit still export choices are PNG and JPEG. Explicit video choices are H.264 MP4 and ProRes 422 HQ MOV.
+- Local ProRes export uses FFmpeg `prores_ks`, profile 3, `yuv422p10le`, and PCM 24-bit audio. Describe it as a 10-bit mezzanine transcode, not as restored source precision, native 10-bit generation, 16-bit media, EXR, or HDR.
+- A container/codec transcode must never be presented as improving source dynamic range or bit depth. HDR labels require a real HDR transform and correct transfer, primaries, matrix, range, and metadata handling; Topaz SDR to HDR is the current explicit HDR Utility path.
 
 ## Run And Dependency Standards
 
@@ -388,6 +435,23 @@ Local API routes should live in the smallest backend owner that fits the route. 
 - Keep request fields aligned with the provider's current API schema.
 - Keep response payloads small and predictable: `image`, `video`, `model`, `thumbnail`, `cost`, `seed`, `text`, as appropriate.
 
+## Security And Trust Boundaries
+
+NewtNode handles local files, provider credentials, remote media, workflow packages, and desktop control actions. Treat every browser request, workflow value, imported filename, provider response, and package reference as untrusted at the server boundary.
+
+- Provider credentials are server-side local configuration. Never send a reusable key to the browser, include it in progress/history/errors, or log request headers and environment values.
+- UI code calls Newt's local API; it must not call paid providers directly with a credential embedded in browser state.
+- Validate route bodies, expected media type, required fields, numeric ranges, list counts, provider limits, and output schemas before use. Preserve useful provider diagnostics without echoing secrets or entire sensitive payloads.
+- Resolve local media through existing managed-asset helpers. Reject path traversal, unsupported URL schemes, arbitrary browser-supplied absolute paths, and files outside approved uploads, outputs, workflow assets, or explicitly selected Output roots.
+- Normalize and sanitize filenames server-side. Use Node `path` APIs, containment checks, recursive directory creation under an approved root, and collision-safe reservation.
+- Validate remote downloads by status, declared/observed media type, size/timeout limits where required, and provider response shape. Copy durable results into managed local storage before persisting them.
+- Browser object URLs, temporary preview files, Comfy temp paths, and provider URLs are runtime transport, not durable workflow identity.
+- Keep temporary preview routes free of history, Stats, and project-output side effects. Clean up temporary files through the existing lifecycle.
+- Do not serve arbitrary filesystem roots to the browser. External Output URLs must stay encoded and resolved by the server's constrained external-output handler.
+- Desktop actions such as restart, update, dialogs, folder launch, and workflow file operations use the local control route and validate requested actions/paths server-side.
+- Keep CORS and listener scope local by default. A feature that exposes Newt beyond loopback requires an explicit security design, authentication decision, and documentation update.
+- Tests and fixtures use placeholders only. Before completion, inspect the diff for keys, bearer tokens, personal paths, signed provider URLs, workflow media, runtime settings, and generated logs.
+
 ## Settings And Runtime Update Standards
 
 Settings is a local runtime control surface, not an account system.
@@ -424,7 +488,7 @@ Settings is a local runtime control surface, not an account system.
 Hosted utility models should follow the same request, result, history, and stats contracts as other generation nodes.
 
 - Keep hosted utility labels and option lists in `src/modelOptions.js`; saved workflows rely on stable labels.
-- Current Utility Image catalog labels are `Color ID to Matte`, `Image to Color ID`, `Grab Still Frame`, `DWPose`, `Depth Anything`, `Topaz Image Upscale`, `Patina`, `BiRefNet Image`, and gated `SAM 3 Image`.
+- Current Utility Image catalog labels are `Color ID to Matte`, `Image to Color ID`, `Qwen Camera Edit`, `Grab Still Frame`, `DWPose`, `Depth Anything`, `Topaz Image Upscale`, `Patina`, `BiRefNet Image`, and gated `SAM 3 Image`.
 - Current Utility Video catalog labels are `Extract Frame`, `Color ID to Matte`, `Composite Video`, `DWPose Video`, `Depth Anything Video`, `WanBlend`, `WanWarp`, `WanSegment`, `Wan VACE Mask-to-Video`, `Wan VACE 14B Inpainting`, the Wan 2.2 A14B LoRA and VACE variants, gated `SAM 3 Video`, `VOID Video Inpainting`, `BiRefNet Video`, `RIFE Video`, `Bytedance Video Upscaler`, `Flux Video Upscale`, `Topaz SDR to HDR`, and `Topaz Video Upscale`.
 - Only options returned by the enabled Utility preference filters are callable. Hidden legacy handlers may remain for saved-workflow compatibility, but retired labels such as Luma Photon/Ray2 and Wan 2.1 LoRA must not be reintroduced to the current dropdown accidentally.
 - SAM 3 image/video segmentation remains feature-gated by `sam3SegmentationModelsEnabled`; keep both options hidden together until the integration is deliberately re-enabled and reverified.
@@ -777,11 +841,12 @@ The 3D node establishes the standard for model generation nodes.
 
 ## Verification Checklist
 
-Before committing node or UI changes:
+Before completing source changes:
 
-- Run `npm run build`.
+- Run focused tests while iterating, then run `npm test` when shared node, graph, workflow, runner, result, geometry, provider, or server behavior changed.
+- Run `npm run build` for every source change that can affect the client or server contract.
 - Run `npm run bundle:report` after startup-loading, lazy-loading, or heavy UI ownership changes.
-- Run `npm test` when pure helpers, workflow state, node runner scheduling, or geometry changed.
+- Run `git diff --check` for every change.
 - Run `node --check server/index.js` and any touched `server/routes/*.js` file when the server changed.
 - When Settings, update, restart, or health payload behavior changes, verify `/api/settings`, `/api/settings/update`, `/api/settings/restart`, and `/api/health` with the dev server running.
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
@@ -800,6 +865,23 @@ Before committing node or UI changes:
 - For generation-progress changes, verify provider percent, estimated percent, queue position, batch aggregation, terminal success/failure, polling shutdown, and progressbar accessibility.
 - Check Stats after a recorded run or with representative history.
 - Restart `npm run dev` when route changes are not visible in the running backend.
+
+## Definition Of Done
+
+A NewtNode feature is complete only when every applicable statement is true:
+
+- Its visible behavior, internal data, route contract, and documentation describe the same feature.
+- Existing workflows normalize without losing nodes, edges, references, results, settings, package assets, or legacy internal identities.
+- New ports connect, reject, auto-connect, animate, and reanchor correctly; run scheduling respects every dependency.
+- Results propagate to the source node, Preview, output rail, downstream nodes, Output routes, downloads, save/reopen, and direct drag/drop as applicable.
+- Paid/model work uses the selected credential and provider, reports useful failures, exposes honest progress, and records reproducible history/cost/Stats data.
+- Media remains fully visible and aspect-correct in nodes, layouts, rails, modals, and previews except inside an explicit crop/edit operation.
+- Loading, empty, disabled, success, partial-success, cancellation/timeout, missing-asset, and failure states are handled where relevant.
+- Keyboard, focus, text editing, resize, pan, zoom, selection, and large-workflow behavior have not regressed.
+- Files remain managed, portable, sanitized, and inside approved roots; no secret, personal path, signed URL, runtime data, or generated media is present in the diff.
+- Windows and macOS behavior remains aligned for every platform-sensitive surface.
+- Required focused tests, full tests, build, syntax, smoke, bundle, and manual checks pass at the feature's risk level.
+- The final diff contains only intentional work and the user has not been promised a commit/push that was not actually requested and verified.
 
 ## Amendment Rule
 
