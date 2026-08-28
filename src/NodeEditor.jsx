@@ -335,7 +335,9 @@ import {
   filmDirectorRevisionStatePatch,
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
-import { filmDirectorUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import { filmDirectorOutputUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
+import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentReferenceText } from "./textAgent.js";
 import {
@@ -6623,6 +6625,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           lastRunDurationSeconds: processed.durationSeconds,
           lastRunActualShotCount: processed.actualShotCount,
           lastRunReferenceSetup: processed.referenceSetup,
+          ...(Array.isArray(processed.referenceTags) ? { lastRunReferenceTags: processed.referenceTags } : {}),
           skillDirectorAction: "",
           skillDirectorQueuedAction: ""
         };
@@ -6632,10 +6635,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             skillDirectorLocks: {
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
-              style: false,
-              motion: false,
-              scene: false,
-              shotList: false
+              style: false
             },
             styleDirection: processed.styleDirection || processed.text || currentNode.data.styleDirection || "",
             skillDirectorBuilt: false,
@@ -6651,9 +6651,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
               style: true,
-              motion: false,
-              scene: false,
-              shotList: false
+              motion: false
             },
             motionDirection: processed.motionDirection || processed.text || currentNode.data.motionDirection || "",
             motionBrief: processed.motionDirection || processed.text || currentNode.data.motionDirection || "",
@@ -17050,6 +17048,8 @@ function createDefaultNodeData(type, label, count) {
       text: "",
       skillShotCount: "3",
       skillDurationSeconds: "15",
+      skillResolution: "720p",
+      skillAspectRatio: "16:9",
       styleDirection: "",
       motionBrief: "",
       motionDirection: "",
@@ -19665,29 +19665,32 @@ function connectedDirectorPackageSource(items = []) {
   return directorPackageConnections(items)[0]?.source || null;
 }
 
-function directorSceneUsesConnection(directorSource, itemSource, type = "image") {
+function directorSceneUsesConnection(directorSource, itemSource, type = "image", categoryCount = 0) {
   if (!directorSource?.data || !itemSource) return false;
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorUsesReferenceTag(directorSource.data, tag);
+  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
 }
 
 function directorPackageForVideo(source = null, incomingByNode = {}) {
   if (!source?.data?.skillDirectorBuilt || !source.data.resultText) return null;
   const directorIncoming = incomingByNode[source.id] || {};
+  const characterItems = directorIncoming.characterIn || [];
+  const locationItems = directorIncoming.locationIn || [];
+  const propItems = directorIncoming.imageIn || [];
   const references = [
-    ...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")).map(({ source: itemSource }) => ({
+    ...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)).map(({ source: itemSource }) => ({
       type: "character",
       tag: characterTag(itemSource),
       url: preferredCharacterReferenceForVideo(itemSource)?.url || ""
     })),
-    ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")).map(({ source: itemSource, edge }) => ({
+    ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)).map(({ source: itemSource, edge }) => ({
       type: "location",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
     })),
-    ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")).map(({ source: itemSource, edge }) => ({
+    ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length)).map(({ source: itemSource, edge }) => ({
       type: "prop",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
@@ -19696,6 +19699,8 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
   return {
     sceneName: source.data.sceneName || "",
     durationSeconds: source.data.skillDurationSeconds || "15",
+    resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
+    aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
     styleDirection: source.data.styleDirection || "",
     cameraDirection: source.data.motionDirection || "",
     sceneOverview: source.data.sceneOverview || "",
@@ -19756,12 +19761,15 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
+    const locationItems = directorIncoming.locationIn || [];
+    const propItems = directorIncoming.imageIn || [];
+    const characterItems = directorIncoming.characterIn || [];
     referenceImageIn.push(
-      ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")),
-      ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image"))
+      ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
+      ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
     );
     if (includeCharacters) {
-      characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
+      characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
     }
   });
 
@@ -19782,9 +19790,12 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
-    sceneReferenceIn.push(...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")));
-    propsIn.push(...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")));
-    characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
+    const locationItems = directorIncoming.locationIn || [];
+    const propItems = directorIncoming.imageIn || [];
+    const characterItems = directorIncoming.characterIn || [];
+    sceneReferenceIn.push(...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)));
+    propsIn.push(...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length)));
+    characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
   });
 
   return {
@@ -22745,6 +22756,8 @@ function normalizeCurrentNode(node) {
         text: sceneOverview,
         skillShotCount: legacyShotCount,
         skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
+        skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
         styleDirection: data.styleDirection || "",
         motionBrief: data.motionBrief || "",
         motionDirection: data.motionDirection || "",
