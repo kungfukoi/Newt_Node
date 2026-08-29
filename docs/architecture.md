@@ -12,6 +12,7 @@ NewtNode is a local-first React application backed by a local Express service.
 | Main API | `http://127.0.0.1:3336` | `server/index.js` |
 | Control API | `http://127.0.0.1:3337` | `server/index.js`, `server/routes/core.js` |
 | ComfyUI API | `http://127.0.0.1:8188` | external ComfyUI, configured by Settings/environment |
+| MiniMax H3 SGLang API | `http://127.0.0.1:30010` | optional external local inference service |
 
 The client uses the control lane for Settings, file dialogs, workflow control, update, and restart requests so long generation requests cannot starve those actions. Vite proxies `/api/system` and `/api/saved-workflows` to the control port; generation, uploads, outputs, workflow assets, and most `/api` routes use the main API port.
 
@@ -97,6 +98,8 @@ Current explicit export choices are PNG/JPEG for stills and H.264 MP4/ProRes 422
 Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history.
 
 Local ComfyUI integrations live in focused server engines such as `server/wanwarp/` and `server/wanblend/`. Browser code sends normalized settings and managed asset URLs, while server engines own template patching, queueing, polling, output recovery, and diagnostics.
+Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed Newt assets to server-visible `file://` URIs, submits asynchronous video jobs to loopback SGLang, polls completion, and copies content back into managed outputs. FL2VA/T2VA use the primary URL; Ref2VA may use a separately configured service because it is a distinct deployment variant.
+
 
 Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/probe work, Output transcoding, and related Utility operations. Use `ffmpeg-static` and `ffprobe-static` by default, with documented environment overrides for controlled installations.
 

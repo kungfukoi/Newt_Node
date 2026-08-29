@@ -59,7 +59,7 @@ The Windows and macOS launchers check these npm dependencies before startup and 
 
 Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, and OpenAI values into the local gitignored `.env` file automatically. Disabled keys remain saved as commented `.env` entries and are restored into Settings without being activated.
 
-Models available through multiple services use the separate **Model Providers** setting. Seedance 2.0 and Seedance 2.5 can be routed through Fal or Krea, while Google video/Veo and Nano Banana Pro image generation can be routed through Google or Fal without changing which credentials are saved.
+Models available through multiple services use the separate **Model Providers** setting. MiniMax H3 can be routed through Fal or a loopback SGLang service, Seedance 2.0 and Seedance 2.5 through Fal or Krea, and Google video/Veo and Nano Banana Pro image generation through Google or Fal without changing which credentials are saved.
 
 ### macOS
 

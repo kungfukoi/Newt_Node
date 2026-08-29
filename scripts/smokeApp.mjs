@@ -10,6 +10,7 @@ const requiredHealthRoutes = [
   "extractVideoFrame",
   "generate3d",
   "settingsKeyValidation",
+  "minimaxH3LocalStatus",
   "utilityImage",
   "utilityVideo"
 ];

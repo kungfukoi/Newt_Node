@@ -40,3 +40,5 @@ npm run deps:ensure
 ```
 
 ComfyUI custom nodes, Python packages, and Wan model files are separate machine-level dependencies documented in `comfyWan-requirements.yaml`.
+
+SGLang, its Python/CUDA environment, and MiniMax H3 weights are optional machine-level dependencies for the Local MiniMax H3 provider. They are intentionally not npm dependencies; setup and shared-path mapping are documented in `minimaxH3-local.md`.

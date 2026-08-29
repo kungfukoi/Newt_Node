@@ -21,7 +21,8 @@ export function registerCoreRoutes(
     validateRuntimeApiKeys,
     pullRuntimeUpdate,
     requestServerRestart,
-    readComfyWanStatus
+    readComfyWanStatus,
+    readMinimaxH3LocalStatus
   }
 ) {
   app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -141,6 +142,12 @@ export function registerCoreRoutes(
         workflow: String(req.query.workflow || ""),
         rootPath: String(req.query.rootPath || "")
       }));
+    });
+  });
+
+  app.get("/api/minimax-h3-local/status", async (_req, res) => {
+    await timedApi("minimax-h3-local:status", async () => {
+      res.json(await readMinimaxH3LocalStatus());
     });
   });
 

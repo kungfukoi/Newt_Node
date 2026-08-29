@@ -349,6 +349,10 @@ export const systemApi = {
     return getJson(`/api/comfy-wan/status${suffix}`, "Could not check ComfyUI.");
   },
 
+  minimaxH3LocalStatus() {
+    return getJson("/api/minimax-h3-local/status", "Could not check Local MiniMax H3.");
+  },
+
   async openProjectOutputFolder(body, label = "Open output folder") {
     const path = "/api/system/open-project-output-folder";
     const lane = await selectControlLane(path, label);

@@ -60,6 +60,13 @@ import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFram
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import {
+  buildMinimaxH3LocalRequest,
+  minimaxH3LocalConfigFromEnv,
+  minimaxH3LocalFileUri,
+  readMinimaxH3LocalStatus,
+  runMinimaxH3LocalJob
+} from "./minimaxH3Local/engine.js";
+import {
   createOutputTargetAsset,
   externalOutputFilePathFromPublicPath,
   previewOutputTargetAsset
@@ -674,7 +681,8 @@ registerCoreRoutes(app, {
   validateRuntimeApiKeys,
   pullRuntimeUpdate,
   requestServerRestart,
-  readComfyWanStatus
+  readComfyWanStatus,
+  readMinimaxH3LocalStatus
 });
 
 app.post("/api/system/client-diagnostic", (req, res) => {
@@ -726,6 +734,7 @@ function buildHealthPayload() {
       settings: true,
       settingsKeyValidation: true,
       comfyWanStatus: true,
+      minimaxH3LocalStatus: true,
       projectOutputFolder: true,
       projectOutputPath: true,
       skillDirector: true,
@@ -5581,6 +5590,14 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
     }
 
+    if (selectedVideoModel.provider === "fal-minimax-h3") {
+      const runtimeProvider = runtimeModelProviderPreferences.minimaxH3;
+      if (runtimeProvider === "fal" && !process.env.FAL_KEY) {
+        return res.status(400).json({ error: "MiniMax H3 is routed to Fal and needs an enabled Fal API key in Settings." });
+      }
+      return runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtimeProvider });
+    }
+
     if (
       !["fal-seedance", "fal-seedance-25"].includes(selectedVideoModel.provider) &&
       !process.env.FAL_KEY &&
@@ -5589,10 +5606,6 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(400).json({
         error: `${selectedVideoModel.displayName} is not available through Krea and needs an enabled Fal API key in Settings.`
       });
-    }
-
-    if (selectedVideoModel.provider === "fal-minimax-h3") {
-      return runMinimaxH3Video(req, res, { prompt, selectedVideoModel });
     }
 
     if (selectedVideoModel.provider === "fal-kling-o3-pro") {
@@ -6277,7 +6290,7 @@ async function generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio
   };
 }
 
-async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel }) {
+async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtimeProvider = "fal" }) {
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
   if (endFrameUrl && !startFrameUrl) {
@@ -6331,12 +6344,34 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel }) {
   const videoNames = normalizeReferenceNames(referenceVideos.map((item) => item.label), referenceVideos.length, "Video");
   const audioNames = normalizeReferenceNames(referenceAudios.map((item) => item.label), referenceAudios.length, "Audio");
   const submittedPrompt = routeKind === "reference-to-video"
-    ? rewriteMinimaxH3ReferenceMentions(prompt, { imageNames, videoNames, audioNames })
+    ? rewriteMinimaxH3ReferenceMentions(prompt, { imageNames, videoNames, audioNames, syntax: runtimeProvider === "local" ? "sglang" : "fal" })
     : prompt;
   const duration = normalizeMinimaxH3Duration(req.body.duration);
   const resolution = normalizeMinimaxH3Resolution(req.body.resolution);
   const aspectRatio = normalizeMinimaxH3AspectRatio(req.body.aspectRatio, routeKind);
   const h3Settings = req.body.minimaxH3 && typeof req.body.minimaxH3 === "object" ? req.body.minimaxH3 : {};
+  if (runtimeProvider === "local") {
+    return runMinimaxH3LocalVideo(req, res, {
+      prompt,
+      submittedPrompt,
+      selectedVideoModel,
+      routeKind,
+      duration,
+      resolution,
+      aspectRatio,
+      h3Settings,
+      startFrameUrl,
+      endFrameUrl,
+      referenceImageUrls,
+      referenceVideoUrls,
+      referenceAudioUrls,
+      imageNames,
+      videoNames,
+      audioNames,
+      referenceVideoDurations,
+      referenceAudioDurations
+    });
+  }
   const uploadedStartFrame = startFrameUrl ? await uploadLocalOutputToFal(startFrameUrl) : "";
   const uploadedEndFrame = endFrameUrl ? await uploadLocalOutputToFal(endFrameUrl) : "";
   const uploadedReferenceImages = routeKind === "reference-to-video"
@@ -6428,11 +6463,150 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel }) {
   });
 }
 
-function rewriteMinimaxH3ReferenceMentions(prompt, { imageNames = [], videoNames = [], audioNames = [] } = {}) {
+async function runMinimaxH3LocalVideo(req, res, {
+  prompt,
+  submittedPrompt,
+  selectedVideoModel,
+  routeKind,
+  duration,
+  resolution,
+  aspectRatio,
+  h3Settings,
+  startFrameUrl,
+  endFrameUrl,
+  referenceImageUrls,
+  referenceVideoUrls,
+  referenceAudioUrls,
+  imageNames,
+  videoNames,
+  audioNames,
+  referenceVideoDurations,
+  referenceAudioDurations
+}) {
+  const config = minimaxH3LocalConfigFromEnv();
+  const localAssetUri = async (url) => {
+    if (!url) return "";
+    const { filePath } = await resolveLocalAssetPathFromUrl(url);
+    return minimaxH3LocalFileUri(filePath, config);
+  };
+  const [
+    firstFrameUri,
+    lastFrameUri,
+    referenceImageUris,
+    referenceVideoUris,
+    referenceAudioUris
+  ] = await Promise.all([
+    localAssetUri(startFrameUrl),
+    localAssetUri(endFrameUrl),
+    Promise.all(referenceImageUrls.map(localAssetUri)),
+    Promise.all(referenceVideoUrls.map(localAssetUri)),
+    Promise.all(referenceAudioUrls.map(localAssetUri))
+  ]);
+  const input = buildMinimaxH3LocalRequest({
+    route: routeKind,
+    prompt: submittedPrompt,
+    duration,
+    resolution,
+    aspectRatio,
+    seed: req.body.seed,
+    model: config.model,
+    firstFrameUri,
+    lastFrameUri,
+    referenceImageUris,
+    referenceVideoUris,
+    referenceAudioUris
+  });
+  const result = await runMinimaxH3LocalJob({
+    input,
+    onProgress: ({ status, percent }) => {
+      const providerPercent = Number(percent);
+      updateCurrentGenerationProgress({
+        status: "running",
+        phase: "generating",
+        ...(Number.isFinite(providerPercent) ? { percent: Math.min(92, Math.round(10 + providerPercent * 0.82)) } : {}),
+        message: `Local MiniMax H3: ${status || "generating"}`
+      });
+    }
+  });
+  const output = await downloadVideo(req, result.contentUrl, `minimax-h3-local-${routeKind}`, { extension: ".mp4" });
+  const cost = {
+    amountUsd: 0,
+    currency: "USD",
+    unitRateUsd: 0,
+    units: duration,
+    unit: "local GPU seconds requested",
+    mediaType: "video",
+    pricingBasis: "Local MiniMax H3 inference through SGLang",
+    pricingSource: "local-sglang"
+  };
+  const localVideo = {
+    url: output.publicPath,
+    content_type: "video/mp4",
+    file_name: output.fileName
+  };
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "local-sglang",
+    modelName: selectedVideoModel.displayName,
+    endpoint: result.endpoint,
+    mode: `MiniMax H3 ${routeKind}`,
+    prompt,
+    submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      provider: "local",
+      task: input.task,
+      route: routeKind,
+      duration: `${duration} seconds`,
+      resolution,
+      aspectRatio: routeKind === "image-to-video" ? "source image" : aspectRatio,
+      seed: result.seed,
+      enablePromptExpansionRequested: h3Settings.enablePromptExpansion !== false,
+      nativeAudio: true,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0,
+      referenceImageCount: routeKind === "reference-to-video" ? referenceImageUrls.length : 0,
+      referenceImageNames: routeKind === "reference-to-video" ? imageNames : [],
+      referenceVideoCount: routeKind === "reference-to-video" ? referenceVideoUrls.length : 0,
+      referenceVideoNames: routeKind === "reference-to-video" ? videoNames : [],
+      referenceVideoDurationSeconds: referenceVideoDurations.reduce((total, seconds) => total + seconds, 0),
+      referenceAudioCount: routeKind === "reference-to-video" ? referenceAudioUrls.length : 0,
+      referenceAudioNames: routeKind === "reference-to-video" ? audioNames : [],
+      referenceAudioDurationSeconds: referenceAudioDurations.reduce((total, seconds) => total + seconds, 0)
+    },
+    cost,
+    remoteVideo: localVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint: result.endpoint,
+    modelName: selectedVideoModel.displayName,
+    submittedPrompt,
+    seed: result.seed,
+    cost,
+    video: {
+      ...localVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+function rewriteMinimaxH3ReferenceMentions(prompt, { imageNames = [], videoNames = [], audioNames = [], syntax = "fal" } = {}) {
   const mentionMap = new Map();
-  imageNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), `Image ${index + 1}`));
-  videoNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), `Video ${index + 1}`));
-  audioNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), `Audio ${index + 1}`));
+  const mediaToken = (type, index) => syntax === "sglang"
+    ? `<${type === "Image" ? "Picture" : type} ${index + 1}>`
+    : `${type} ${index + 1}`;
+  imageNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Image", index)));
+  videoNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Video", index)));
+  audioNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Audio", index)));
   return String(prompt || "").replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
 }
 

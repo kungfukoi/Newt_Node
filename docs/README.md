@@ -22,6 +22,7 @@ This directory separates the current product contract from architecture, build g
 
 - `dependencies.md`: npm/runtime requirements and automatic launcher installation behavior.
 - `comfyWan-requirements.yaml`: machine-readable ComfyUI custom-node and model requirements for WanBlend/WanWarp.
+- `minimaxH3-local.md`: SGLang runtime, media-path mapping, and verification for the Local MiniMax H3 provider.
 - `../.env.example`: documented credential, port, local-tool, ComfyUI, concurrency, and model override variables.
 
 ## Drafts And Historical Notes

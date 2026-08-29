@@ -44,6 +44,8 @@ export default function SettingsPage() {
   const [comfyWanRootPath, setComfyWanRootPath] = React.useState("");
   const [comfyWanStatus, setComfyWanStatus] = React.useState(null);
   const [comfyWanBusy, setComfyWanBusy] = React.useState(false);
+  const [minimaxH3LocalStatus, setMinimaxH3LocalStatus] = React.useState(null);
+  const [minimaxH3LocalBusy, setMinimaxH3LocalBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [openSections, setOpenSections] = React.useState({
     credentials: true,
@@ -76,6 +78,7 @@ export default function SettingsPage() {
       setLastUpdated(new Date());
       await refreshKeyValidation();
       refreshComfyWanStatus(data.comfyWanRootPath || "", { quiet: true });
+      refreshMinimaxH3LocalStatus({ quiet: true });
     } catch (error) {
       setStatus("error");
       setMessage(error.message || "Could not load settings.");
@@ -115,6 +118,7 @@ export default function SettingsPage() {
       setLastUpdated(new Date());
       await refreshKeyValidation();
       refreshComfyWanStatus(data.comfyWanRootPath || comfyWanRootPath, { quiet: true });
+      refreshMinimaxH3LocalStatus({ quiet: true });
     } catch (error) {
       setMessage(error.message || "Could not save settings.");
     } finally {
@@ -211,6 +215,22 @@ export default function SettingsPage() {
       if (!quiet) setMessage(error.message || "Could not check ComfyUI.");
     } finally {
       setComfyWanBusy(false);
+    }
+  }
+
+  async function refreshMinimaxH3LocalStatus({ quiet = false } = {}) {
+    setMinimaxH3LocalBusy(true);
+    if (!quiet) setMessage("");
+    try {
+      const data = await systemApi.minimaxH3LocalStatus();
+      setMinimaxH3LocalStatus(data);
+      if (!quiet) setMessage(data.available ? "Local MiniMax H3 is ready." : data.message || "Local MiniMax H3 needs attention.");
+    } catch (error) {
+      const status = { available: false, message: error.message || "Could not check Local MiniMax H3." };
+      setMinimaxH3LocalStatus(status);
+      if (!quiet) setMessage(status.message);
+    } finally {
+      setMinimaxH3LocalBusy(false);
     }
   }
 
@@ -369,6 +389,21 @@ export default function SettingsPage() {
           wide
         >
           <div className="settings-provider-routing">
+            <label className="settings-field">
+              <span>MiniMax H3</span>
+              <select
+                value={modelProviderPreferences.minimaxH3}
+                onChange={(event) => {
+                  const provider = event.target.value;
+                  setModelProviderPreferences((current) => ({ ...current, minimaxH3: provider }));
+                  if (provider === "local") refreshMinimaxH3LocalStatus({ quiet: true });
+                }}
+              >
+                <option value="fal">Fal</option>
+                <option value="local">Local</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.minimaxH3, activeCredentialIds, "MiniMax H3", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
+            </label>
             <label className="settings-field">
               <span>Seedance 2.0 / 2.5</span>
               <select
@@ -831,8 +866,13 @@ function providerConfiguredField(provider) {
   return "openAiApiKeyConfigured";
 }
 
-function modelProviderDetail(provider, activeCredentialIds, modelLabel) {
+function modelProviderDetail(provider, activeCredentialIds, modelLabel, localStatus = null, localBusy = false) {
   const providerLabel = providerPreferenceLabel(provider);
+  if (provider === "local") {
+    if (localBusy) return "Checking the local SGLang service";
+    if (localStatus?.available) return `SGLang is ready at ${localStatus.url}`;
+    return localStatus?.message || "Start the local SGLang MiniMax H3 service, then render at 768P";
+  }
   return activeCredentialIds?.[provider]
     ? `${providerLabel} will render ${modelLabel}`
     : `Select an active ${providerLabel} key above`;

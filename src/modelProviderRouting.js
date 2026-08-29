@@ -1,7 +1,8 @@
 export const defaultModelProviderPreferences = Object.freeze({
   seedance: "fal",
   veo: "google",
-  imageGeneration: "google"
+  imageGeneration: "google",
+  minimaxH3: "fal"
 });
 
 export function normalizeModelProviderPreferences(value = {}, availability = {}) {
@@ -12,11 +13,14 @@ export function normalizeModelProviderPreferences(value = {}, availability = {})
     veo: normalizedProvider(incoming.veo, ["google", "fal"])
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.veo),
     imageGeneration: normalizedProvider(incoming.imageGeneration, ["google", "fal"])
-      || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.imageGeneration)
+      || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.imageGeneration),
+    minimaxH3: normalizedProvider(incoming.minimaxH3, ["fal", "local"])
+      || defaultModelProviderPreferences.minimaxH3
   };
 }
 
 export function providerPreferenceLabel(provider) {
+  if (provider === "local") return "Local";
   if (provider === "krea") return "Krea";
   if (provider === "google") return "Google";
   return "Fal";
