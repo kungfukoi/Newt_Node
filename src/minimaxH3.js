@@ -69,6 +69,54 @@ export function minimaxH3Endpoint(route) {
   return minimaxH3Endpoints.text;
 }
 
+export function buildMinimaxH3ReferencePrompt(prompt, {
+  imageNames = [],
+  videoNames = [],
+  audioNames = [],
+  syntax = "fal",
+  ensureAllReferences = false
+} = {}) {
+  const mentionMap = new Map();
+  const references = [];
+  const mediaToken = (type, index) => syntax === "sglang"
+    ? `<${type === "Image" ? "Picture" : type} ${index + 1}>`
+    : `${type} ${index + 1}`;
+  const addReferences = (type, names) => {
+    names.forEach((rawName, index) => {
+      const name = String(rawName || "").trim();
+      const token = mediaToken(type, index);
+      if (name) mentionMap.set(name.toLowerCase(), token);
+      mentionMap.set(`${type}${index + 1}`.toLowerCase(), token);
+      mentionMap.set(`${type}-${index + 1}`.toLowerCase(), token);
+      references.push({ type, name, token });
+    });
+  };
+
+  addReferences("Image", imageNames);
+  addReferences("Video", videoNames);
+  addReferences("Audio", audioNames);
+
+  let submittedPrompt = String(prompt || "").replace(
+    /@([A-Za-z0-9_-]+)/g,
+    (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch
+  );
+  if (!ensureAllReferences) return submittedPrompt;
+
+  const missingReferences = references.filter(({ token }) => !submittedPrompt.includes(token));
+  if (!missingReferences.length) return submittedPrompt;
+
+  const referenceInstructions = missingReferences.map(({ type, name, token }) => {
+    const compactToken = token.replace(/[<>\s]/g, "").toLowerCase();
+    const label = name && name.toLowerCase() !== compactToken ? ` (${name})` : "";
+    if (type === "Image") return `Use ${token}${label} as a visual identity/style reference.`;
+    if (type === "Video") return `Use ${token}${label} as a motion/camera reference.`;
+    return `Use ${token}${label} as an audio/voice reference.`;
+  });
+  return [submittedPrompt.trim(), `Reference bindings: ${referenceInstructions.join(" ")}`]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function buildMinimaxH3Input({
   route,
   prompt,
@@ -85,8 +133,17 @@ export function buildMinimaxH3Input({
   referenceAudioUrls = []
 } = {}) {
   const normalizedRoute = ["text-to-video", "image-to-video", "reference-to-video"].includes(route) ? route : "text-to-video";
+  const normalizedPrompt = String(prompt || "").trim();
   const input = {
-    prompt: String(prompt || "").trim(),
+    prompt: normalizedRoute === "reference-to-video"
+      ? buildMinimaxH3ReferencePrompt(normalizedPrompt, {
+        imageNames: referenceImageUrls.map((_url, index) => `Image${index + 1}`),
+        videoNames: referenceVideoUrls.map((_url, index) => `Video${index + 1}`),
+        audioNames: referenceAudioUrls.map((_url, index) => `Audio${index + 1}`),
+        syntax: "fal",
+        ensureAllReferences: true
+      })
+      : normalizedPrompt,
     duration: normalizeMinimaxH3Duration(duration),
     resolution: normalizeMinimaxH3Resolution(resolution),
     enable_prompt_expansion: enablePromptExpansion !== false,

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildMinimaxH3Input,
+  buildMinimaxH3ReferencePrompt,
   estimateMinimaxH3Cost,
   isMinimaxH3Model,
   minimaxH3DurationOptions,
@@ -93,7 +94,35 @@ test("MiniMax H3 builds the route-specific Fal input shape", () => {
   assert.deepEqual(referenceInput.reference_image_urls, ["https://example.com/ref.png"]);
   assert.deepEqual(referenceInput.reference_video_urls, ["https://example.com/ref.mp4"]);
   assert.deepEqual(referenceInput.reference_audio_urls, ["https://example.com/ref.wav"]);
+  assert.match(referenceInput.prompt, /Use Audio 1 as an audio\/voice reference/);
   assert.equal(referenceInput.aspect_ratio, "adaptive");
+});
+
+test("MiniMax H3 binds named, positional, and otherwise uncited Fal references", () => {
+  assert.equal(buildMinimaxH3ReferencePrompt("Keep @Bob consistent and use @Audio1 for dialogue.", {
+    imageNames: ["Bob"],
+    audioNames: ["BobVoice"],
+    syntax: "fal",
+    ensureAllReferences: true
+  }), "Keep Image 1 consistent and use Audio 1 for dialogue.");
+
+  assert.equal(buildMinimaxH3ReferencePrompt("A slow push in.", {
+    imageNames: ["Bob"],
+    videoNames: ["CameraMove"],
+    audioNames: ["BobVoice"],
+    syntax: "fal",
+    ensureAllReferences: true
+  }), [
+    "A slow push in.",
+    "Reference bindings: Use Image 1 (Bob) as a visual identity/style reference. Use Video 1 (CameraMove) as a motion/camera reference. Use Audio 1 (BobVoice) as an audio/voice reference."
+  ].join("\n\n"));
+
+  assert.equal(buildMinimaxH3ReferencePrompt("Use @Bob and @Audio1.", {
+    imageNames: ["Bob"],
+    audioNames: ["BobVoice"],
+    syntax: "sglang",
+    ensureAllReferences: false
+  }), "Use <Picture 1> and <Audio 1>.");
 });
 
 test("MiniMax H3 rejects invalid reference combinations before submission", () => {
