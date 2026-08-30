@@ -3,11 +3,25 @@ import assert from "node:assert/strict";
 
 import {
   buildMinimaxH3LocalRequest,
+  ensureMinimaxH3LocalVariant,
+  minimaxH3LocalConfigFromEnv,
   minimaxH3LocalFileUri,
   normalizeMinimaxH3LocalUrl,
   readMinimaxH3LocalStatus,
   runMinimaxH3LocalJob
 } from "../server/minimaxH3Local/engine.js";
+
+test("local config enables validated WSL variant switching", () => {
+  const config = minimaxH3LocalConfigFromEnv({
+    MINIMAX_H3_LOCAL_WSL_DISTRO: "Newt-MiniMax-H3",
+    MINIMAX_H3_LOCAL_WSL_REF2VA_SERVICE: "minimax-h3-ref2va.service"
+  });
+  assert.equal(config.wslDistro, "Newt-MiniMax-H3");
+  assert.equal(config.ref2vaService, "minimax-h3-ref2va.service");
+  assert.throws(() => minimaxH3LocalConfigFromEnv({
+    MINIMAX_H3_LOCAL_WSL_DISTRO: "unsafe distro; command"
+  }), /unsupported characters/i);
+});
 
 test("local URL only accepts loopback HTTP services", () => {
   assert.equal(normalizeMinimaxH3LocalUrl("http://localhost:30010/"), "http://localhost:30010");
@@ -112,4 +126,28 @@ test("local jobs submit, poll, and expose the content endpoint", async () => {
   ]);
   assert.equal(result.contentUrl, "http://127.0.0.1:30010/v1/videos/job-7/content");
   assert.equal(progress.at(-1).percent, 100);
+});
+
+test("WSL switching starts the requested variant and waits for health", async () => {
+  const commands = [];
+  let healthChecks = 0;
+  const config = minimaxH3LocalConfigFromEnv({
+    MINIMAX_H3_LOCAL_WSL_DISTRO: "Newt-MiniMax-H3",
+    MINIMAX_H3_LOCAL_STARTUP_POLL_INTERVAL_MS: "1"
+  });
+  await ensureMinimaxH3LocalVariant({
+    task: "ref2va",
+    baseUrl: "http://127.0.0.1:30010",
+    config,
+    execFileImpl: async (command, args) => commands.push({ command, args }),
+    fetchImpl: async () => {
+      healthChecks += 1;
+      return new Response("ok", { status: healthChecks === 1 ? 503 : 200 });
+    }
+  });
+  assert.deepEqual(commands, [{
+    command: "wsl.exe",
+    args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "systemctl", "start", "minimax-h3-ref2va.service"]
+  }]);
+  assert.equal(healthChecks, 2);
 });

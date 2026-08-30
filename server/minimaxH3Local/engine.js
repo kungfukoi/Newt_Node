@@ -1,9 +1,14 @@
+import { execFile as execFileCallback } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 export const defaultMinimaxH3LocalUrl = "http://127.0.0.1:30010";
 export const defaultMinimaxH3LocalModel = "MiniMaxAI/MiniMax-H3";
 export const minimaxH3LocalResolution = "768P";
+
+const execFile = promisify(execFileCallback);
+let localVariantQueue = Promise.resolve();
 
 export function minimaxH3LocalConfigFromEnv(env = process.env) {
   const url = normalizeMinimaxH3LocalUrl(env.MINIMAX_H3_LOCAL_URL || defaultMinimaxH3LocalUrl);
@@ -19,6 +24,12 @@ export function minimaxH3LocalConfigFromEnv(env = process.env) {
     model: String(env.MINIMAX_H3_LOCAL_MODEL || defaultMinimaxH3LocalModel).trim() || defaultMinimaxH3LocalModel,
     timeoutMs: positiveInteger(env.MINIMAX_H3_LOCAL_TIMEOUT_MS, 6 * 60 * 60 * 1000),
     pollIntervalMs: positiveInteger(env.MINIMAX_H3_LOCAL_POLL_INTERVAL_MS, 1000),
+    wslDistro: safeWslName(env.MINIMAX_H3_LOCAL_WSL_DISTRO, "MINIMAX_H3_LOCAL_WSL_DISTRO"),
+    wslUser: safeWslName(env.MINIMAX_H3_LOCAL_WSL_USER || "root", "MINIMAX_H3_LOCAL_WSL_USER"),
+    fl2vaService: safeSystemdUnit(env.MINIMAX_H3_LOCAL_WSL_FL2VA_SERVICE || "minimax-h3-fl2va.service"),
+    ref2vaService: safeSystemdUnit(env.MINIMAX_H3_LOCAL_WSL_REF2VA_SERVICE || "minimax-h3-ref2va.service"),
+    startupTimeoutMs: positiveInteger(env.MINIMAX_H3_LOCAL_STARTUP_TIMEOUT_MS, 30 * 60 * 1000),
+    startupPollIntervalMs: positiveInteger(env.MINIMAX_H3_LOCAL_STARTUP_POLL_INTERVAL_MS, 5000),
     hostMediaRoot,
     engineMediaRoot
   };
@@ -155,10 +166,58 @@ export async function runMinimaxH3LocalJob({
   input,
   fetchImpl = fetch,
   env = process.env,
-  onProgress = () => {}
+  onProgress = () => {},
+  execFileImpl = execFile
 } = {}) {
   const config = minimaxH3LocalConfigFromEnv(env);
   const baseUrl = input?.task === "ref2va" ? config.referenceUrl : config.url;
+  if (!config.wslDistro) return runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress });
+
+  return withLocalVariantLock(async () => {
+    await ensureMinimaxH3LocalVariant({ task: input?.task, baseUrl, config, fetchImpl, execFileImpl, onProgress });
+    return runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress });
+  });
+}
+
+export async function ensureMinimaxH3LocalVariant({
+  task,
+  baseUrl,
+  config,
+  fetchImpl = fetch,
+  execFileImpl = execFile,
+  onProgress = () => {}
+} = {}) {
+  if (!config?.wslDistro) return;
+  const reference = task === "ref2va";
+  const service = reference ? config.ref2vaService : config.fl2vaService;
+  onProgress({ status: "loading-model", percent: 0, variant: reference ? "ref2va" : "fl2va" });
+  try {
+    await execFileImpl("wsl.exe", [
+      "-d", config.wslDistro,
+      "-u", config.wslUser,
+      "--", "systemctl", "start", service
+    ], { windowsHide: true, timeout: config.startupTimeoutMs });
+  } catch (error) {
+    const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
+    throw new Error(`Could not start MiniMax H3 ${reference ? "Ref2VA" : "FL2VA"} in WSL: ${detail}`);
+  }
+
+  const startedAt = Date.now();
+  let lastError = "service is not ready";
+  while (Date.now() - startedAt <= config.startupTimeoutMs) {
+    try {
+      const response = await fetchWithTimeout(`${baseUrl}/health`, {}, 5000, fetchImpl);
+      if (response.ok) return;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error.message;
+    }
+    await wait(config.startupPollIntervalMs);
+  }
+  throw new Error(`MiniMax H3 ${reference ? "Ref2VA" : "FL2VA"} did not become ready within ${Math.round(config.startupTimeoutMs / 60000)} minutes: ${lastError}`);
+}
+
+async function runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress }) {
   const submitted = await fetchJson(`${baseUrl}/v1/videos`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -189,6 +248,18 @@ export async function runMinimaxH3LocalJob({
     seed: job?.seed ?? submitted?.seed ?? input?.seed ?? null,
     status: job
   };
+}
+
+async function withLocalVariantLock(operation) {
+  const previous = localVariantQueue;
+  let release;
+  localVariantQueue = new Promise((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
 }
 
 function normalizedLocalRoute(route) {
@@ -273,6 +344,21 @@ function localContentUrl(job, baseUrl, requestId) {
 function positiveInteger(value, fallback) {
   const number = Math.round(Number(value));
   return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function safeWslName(value, label) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (!/^[A-Za-z0-9_.-]+$/.test(normalized)) throw new Error(`${label} contains unsupported characters.`);
+  return normalized;
+}
+
+function safeSystemdUnit(value) {
+  const normalized = String(value || "").trim();
+  if (!/^[A-Za-z0-9_.@-]+\.service$/.test(normalized)) {
+    throw new Error("MiniMax H3 WSL service names must be valid .service unit names.");
+  }
+  return normalized;
 }
 
 function wait(milliseconds) {
