@@ -106,6 +106,14 @@ test("MiniMax H3 binds named, positional, and otherwise uncited Fal references",
     ensureAllReferences: true
   }), "Keep Image 1 consistent and use Audio 1 for dialogue.");
 
+  assert.equal(buildMinimaxH3ReferencePrompt("Use @Image, @Video, and @Audio.", {
+    imageNames: ["Bob"],
+    videoNames: ["CameraMove"],
+    audioNames: ["BobVoice"],
+    syntax: "fal",
+    ensureAllReferences: true
+  }), "Use Image 1, Video 1, and Audio 1.");
+
   assert.equal(buildMinimaxH3ReferencePrompt("A slow push in.", {
     imageNames: ["Bob"],
     videoNames: ["CameraMove"],

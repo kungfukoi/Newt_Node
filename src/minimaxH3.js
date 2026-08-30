@@ -86,6 +86,7 @@ export function buildMinimaxH3ReferencePrompt(prompt, {
       const name = String(rawName || "").trim();
       const token = mediaToken(type, index);
       if (name) mentionMap.set(name.toLowerCase(), token);
+      if (index === 0) mentionMap.set(type.toLowerCase(), token);
       mentionMap.set(`${type}${index + 1}`.toLowerCase(), token);
       mentionMap.set(`${type}-${index + 1}`.toLowerCase(), token);
       references.push({ type, name, token });
