@@ -879,7 +879,7 @@ function modelProviderDetail(provider, activeCredentialIds, modelLabel, localSta
   if (provider === "local") {
     if (localBusy) return "Checking the local SGLang service";
     if (localStatus?.available) return `SGLang is ready at ${localStatus.url}`;
-    return localStatus?.message || "Start the local SGLang MiniMax H3 service, then render at 768P";
+    return localStatus?.message || "Start the local SGLang MiniMax H3 service, then render at 576P";
   }
   return activeCredentialIds?.[provider]
     ? `${providerLabel} will render ${modelLabel}`

@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 
 export const defaultMinimaxH3LocalUrl = "http://127.0.0.1:30010";
 export const defaultMinimaxH3LocalModel = "MiniMaxAI/MiniMax-H3";
-export const minimaxH3LocalResolution = "768P";
+export const minimaxH3LocalResolution = "576P";
+export const minimaxH3LocalInferenceSteps = 20;
 
 const execFile = promisify(execFileCallback);
 let localVariantQueue = Promise.resolve();
@@ -81,14 +82,14 @@ export function buildMinimaxH3LocalRequest({
   referenceImageUris = [],
   referenceVideoUris = [],
   referenceAudioUris = [],
-  numInferenceSteps = 50,
+  numInferenceSteps = minimaxH3LocalInferenceSteps,
   flowShift = 12,
   audioFlowShift = 3
 } = {}) {
   const normalizedRoute = normalizedLocalRoute(route);
   const normalizedResolution = String(resolution || "").trim().toUpperCase();
   if (normalizedResolution !== minimaxH3LocalResolution) {
-    throw new Error(`MiniMax H3 Local currently supports ${minimaxH3LocalResolution} only. Select 768P on the Video Model node.`);
+    throw new Error(`MiniMax H3 Local supports ${minimaxH3LocalResolution} only. Select 576P on the Video Model node.`);
   }
 
   const seconds = Math.min(15, Math.max(5, Math.round(Number(duration) || 5)));
@@ -112,12 +113,12 @@ export function buildMinimaxH3LocalRequest({
     task: localTaskForRoute(normalizedRoute),
     conditions,
     target: {
-      short_edge: 768,
+      short_edge: 576,
       aspect_ratio: normalizedRoute === "image-to-video" ? "auto" : String(aspectRatio || "16:9"),
       duration_seconds: seconds
     },
     num_outputs_per_prompt: 1,
-    num_inference_steps: positiveInteger(numInferenceSteps, 50),
+    num_inference_steps: positiveInteger(numInferenceSteps, minimaxH3LocalInferenceSteps),
     flow_shift: Number.isFinite(Number(flowShift)) ? Number(flowShift) : 12,
     audio_flow_shift: Number.isFinite(Number(audioFlowShift)) ? Number(audioFlowShift) : 3
   };

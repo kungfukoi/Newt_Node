@@ -33,11 +33,12 @@ test("MiniMax H3 controls match the published Fal schemas", () => {
   assert.equal(minimaxH3DurationOptions[0], "5 seconds");
   assert.equal(minimaxH3DurationOptions.at(-1), "15 seconds");
   assert.deepEqual(minimaxH3ResolutionOptions, ["768P", "2K"]);
-  assert.deepEqual(minimaxH3LocalResolutionOptions, ["768P"]);
+  assert.deepEqual(minimaxH3LocalResolutionOptions, ["576P"]);
   assert.deepEqual(minimaxH3ResolutionOptionsForProvider("fal"), ["768P", "2K"]);
-  assert.deepEqual(minimaxH3ResolutionOptionsForProvider("local"), ["768P"]);
+  assert.deepEqual(minimaxH3ResolutionOptionsForProvider("local"), ["576P"]);
   assert.equal(normalizeMinimaxH3Resolution("4K", "fal"), "2K");
-  assert.equal(normalizeMinimaxH3Resolution("2K", "local"), "768P");
+  assert.equal(normalizeMinimaxH3Resolution("768P", "local"), "576P");
+  assert.equal(normalizeMinimaxH3Resolution("2K", "local"), "576P");
   assert.deepEqual(minimaxH3TextAspectRatioOptions, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]);
   assert.deepEqual(minimaxH3ReferenceAspectRatioOptions, ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]);
   assert.deepEqual(minimaxH3ReferenceLimits, {

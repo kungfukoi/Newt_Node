@@ -51,18 +51,19 @@ test("local requests map Newt routes to SGLang H3 tasks", () => {
     route: "text-to-video",
     prompt: "A storm",
     duration: 5,
-    resolution: "768P",
+    resolution: "576P",
     aspectRatio: "16:9"
   });
   assert.equal(text.task, "t2va");
-  assert.equal(text.target.short_edge, 768);
+  assert.equal(text.target.short_edge, 576);
+  assert.equal(text.num_inference_steps, 20);
   assert.deepEqual(text.conditions, []);
 
   const frames = buildMinimaxH3LocalRequest({
     route: "image-to-video",
     prompt: "She turns",
     duration: 10,
-    resolution: "768P",
+    resolution: "576P",
     firstFrameUri: "file:///start.png",
     lastFrameUri: "file:///end.png"
   });
@@ -73,7 +74,7 @@ test("local requests map Newt routes to SGLang H3 tasks", () => {
     route: "reference-to-video",
     prompt: "<Picture 1> speaks",
     duration: 8,
-    resolution: "768P",
+    resolution: "576P",
     aspectRatio: "9:16",
     referenceImageUris: ["file:///person.png"],
     referenceAudioUris: ["file:///voice.wav"]
@@ -84,8 +85,8 @@ test("local requests map Newt routes to SGLang H3 tasks", () => {
     route: "text-to-video",
     prompt: "A storm",
     duration: 5,
-    resolution: "1080P"
-  }), /768P/);
+    resolution: "768P"
+  }), /576P/);
 });
 
 test("local status reports SGLang health without throwing", async () => {

@@ -7,7 +7,7 @@ Newt can route the MiniMax H3 Video Model through Fal or a loopback [SGLang](htt
 - An SGLang server reachable from Windows at `http://127.0.0.1:30010`.
 - The asynchronous OpenAI-compatible video API: `POST /v1/videos`, `GET /v1/videos/:id`, and `GET /v1/videos/:id/content`.
 - A healthy `GET /health` response.
-- `768P` selected on the Video Model node.
+- `576P` selected on the Video Model node. Local H3 uses 20 inference steps, matching NewtBuilder's proven standard compute profile.
 - Media paths visible to both Newt and the inference environment.
 
 The primary service handles text-to-video and first/last-frame video. Reference-to-video is a distinct H3 variant. It can use a separate URL, or Newt can switch mutually exclusive WSL systemd services automatically on one URL. Automatic switching avoids trying to keep both very large deployments resident at once.
@@ -28,10 +28,11 @@ sglang serve \
   --layerwise-offload-components dit,text_encoder \
   --dit-offload-prefetch-size 1 \
   --dit-layerwise-resident-layers 0 \
+  --vae-cpu-offload true \
   --port 30010
 ```
 
-Use the version-matched official example if an option name differs. Ref2VA uses the same command shape with `--model-variant ref2va` and its matching transformer checkpoint.
+Use the version-matched official example if an option name differs. Ref2VA uses the same command shape with `--model-variant ref2va` and its matching transformer checkpoint. Keep `--vae-cpu-offload true` enabled on 24 GB GPUs so the video VAE does not consume denoising memory after condition encoding.
 
 SGLang expects a complete loadable H3 model repository or snapshot. A standalone ComfyUI `.safetensors` file is not by itself the expected model directory, but SGLang can use compatible single-file weights as component overrides when the repository supplies the component configuration.
 
@@ -66,7 +67,7 @@ Newt serializes local H3 jobs while switching is enabled. It starts the task-app
 
 1. Open `http://127.0.0.1:30010/health`; it should return success.
 2. Open Newt Settings. The MiniMax H3 Local detail should say SGLang is ready.
-3. Choose **Local**, save routing, and select **768P** on the H3 Video Model node.
+3. Choose **Local**, save routing, and select **576P** on the H3 Video Model node.
 4. Start with a short text-to-video or Start Frame job.
 5. Connect a Reference Image, Reference Video, or Reference Audio input to select Ref2VA. Newt switches the WSL service automatically when the WSL settings above are present.
 

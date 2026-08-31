@@ -193,7 +193,7 @@ Operational local state under `server/data/`, output trees, uploads, workflow pa
 - Edge appears detached: check node/port ids, handle measurement, normalization, and React Flow internal updates; do not patch the line with screen coordinates.
 - Provider says input is missing/invalid: inspect the server-side normalized request and local-to-provider upload path without logging credentials or full sensitive payloads.
 - Comfy workflow fails: check `/api/comfy-wan/status`, Comfy reachability, required nodes/models, template output node ids, prompt history, and timeout diagnostics.
-- Local MiniMax H3 fails: check `/api/minimax-h3-local/status`, confirm SGLang is listening on the configured loopback port, select `768P`, and verify host/engine media-root mapping when SGLang runs in WSL or a container.
+- Local MiniMax H3 fails: check `/api/minimax-h3-local/status`, confirm SGLang is listening on the configured loopback port, select `576P`, and verify host/engine media-root mapping when SGLang runs in WSL or a container. The local path intentionally uses 20 inference steps to stay within the supported 24 GB GPU profile.
 - Large graph is sluggish: profile graph state updates, node remounts, edge recalculation, media decode, and React rendering separately before adding proxy/culling behavior.
 
 ## Git Hygiene

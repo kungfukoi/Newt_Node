@@ -8,7 +8,7 @@ export const minimaxH3Endpoints = {
 
 export const minimaxH3DurationOptions = Array.from({ length: 11 }, (_value, index) => `${index + 5} seconds`);
 export const minimaxH3ResolutionOptions = ["768P", "2K"];
-export const minimaxH3LocalResolutionOptions = ["768P"];
+export const minimaxH3LocalResolutionOptions = ["576P"];
 export const minimaxH3TextAspectRatioOptions = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
 export const minimaxH3ReferenceAspectRatioOptions = ["adaptive", ...minimaxH3TextAspectRatioOptions];
 
