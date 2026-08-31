@@ -8,6 +8,7 @@ import {
   isMinimaxH3Model,
   minimaxH3DurationOptions,
   minimaxH3Endpoint,
+  minimaxH3ExactAudioSource,
   minimaxH3ReferenceAspectRatioOptions,
   minimaxH3ReferenceLimits,
   minimaxH3ResolutionOptions,
@@ -52,6 +53,12 @@ test("MiniMax H3 selects text, image, and reference routes contextually", () => 
   assert.equal(minimaxH3Endpoint("text-to-video"), "minimax/h3/text-to-video");
   assert.equal(minimaxH3Endpoint("image-to-video"), "minimax/h3/image-to-video");
   assert.equal(minimaxH3Endpoint("reference-to-video"), "minimax/h3/reference-to-video");
+});
+
+test("MiniMax H3 uses one connected reference audio file as the exact output soundtrack", () => {
+  assert.equal(minimaxH3ExactAudioSource(["/uploads/bob.wav"], "reference-to-video"), "/uploads/bob.wav");
+  assert.equal(minimaxH3ExactAudioSource(["/uploads/a.wav", "/uploads/b.wav"], "reference-to-video"), "");
+  assert.equal(minimaxH3ExactAudioSource(["/uploads/bob.wav"], "image-to-video"), "");
 });
 
 test("MiniMax H3 builds the route-specific Fal input shape", () => {

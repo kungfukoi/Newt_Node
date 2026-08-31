@@ -63,6 +63,11 @@ export function minimaxH3Route({ hasStartFrame = false, referenceImageCount = 0,
   return "text-to-video";
 }
 
+export function minimaxH3ExactAudioSource(referenceAudioUrls = [], route = "") {
+  const urls = (Array.isArray(referenceAudioUrls) ? referenceAudioUrls : []).filter(Boolean);
+  return route === "reference-to-video" && urls.length === 1 ? urls[0] : "";
+}
+
 export function minimaxH3Endpoint(route) {
   if (route === "image-to-video") return minimaxH3Endpoints.image;
   if (route === "reference-to-video") return minimaxH3Endpoints.reference;

@@ -335,7 +335,7 @@ import {
   filmDirectorRevisionStatePatch,
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
-import { filmDirectorOutputUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import { filmDirectorUsesReference, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
 import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
@@ -19670,7 +19670,21 @@ function directorSceneUsesConnection(directorSource, itemSource, type = "image",
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
+  return filmDirectorUsesReference(directorSource.data, {
+    tag,
+    label: itemSource.data?.title || sourceLabel(itemSource),
+    type,
+    categoryCount
+  });
+}
+
+function directorReferenceBindingText(references = []) {
+  const bindings = references.map((reference) => {
+    if (reference.type === "character") return `Use ${reference.tag} as the character identity reference.`;
+    if (reference.type === "location") return `Use ${reference.tag} as the exact location and stage reference.`;
+    return `Use ${reference.tag} as a prop reference.`;
+  });
+  return bindings.length ? `Director reference bindings: ${bindings.join(" ")}` : "";
 }
 
 function directorPackageForVideo(source = null, incomingByNode = {}) {
@@ -19696,6 +19710,9 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
       url: connectedOutputUrl(itemSource, edge)
     }))
   ].filter((item) => item.tag && item.url);
+  const finalPrompt = [source.data.resultText || "", directorReferenceBindingText(references)]
+    .filter(Boolean)
+    .join("\n\n");
   return {
     sceneName: source.data.sceneName || "",
     durationSeconds: source.data.skillDurationSeconds || "15",
@@ -19706,7 +19723,7 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
     sceneOverview: source.data.sceneOverview || "",
     shotList: source.data.shotList || "",
     shotListNotes: source.data.shotListNotes || "",
-    finalPrompt: source.data.resultText || "",
+    finalPrompt,
     references
   };
 }

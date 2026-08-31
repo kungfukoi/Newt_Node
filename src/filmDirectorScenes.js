@@ -312,5 +312,8 @@ export function filmDirectorUsesReference(data = {}, {
   if (type === "character" && Number(categoryCount) === 1) {
     return /\b(character|person|subject|actor|patient|doctor|nurse|ceo|man|woman|boy|girl|child|kid|he|she|him|her|they|them)\b/i.test(text);
   }
+  if (type === "location" && Number(categoryCount) === 1) {
+    return /\b(location|setting|stage|set|room|interior|exterior|environment|venue|studio|office|home|house|street|city|landscape)\b/i.test(text);
+  }
   return false;
 }

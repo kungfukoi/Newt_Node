@@ -170,10 +170,12 @@ import {
 } from "../src/seedance25.js";
 import {
   buildMinimaxH3Input,
+  buildMinimaxH3ReferencePrompt,
   estimateMinimaxH3Cost,
   isMinimaxH3Model,
   minimaxH3CostPerSecond,
   minimaxH3Endpoint,
+  minimaxH3ExactAudioSource,
   minimaxH3ModelName,
   minimaxH3ReferenceLimits,
   minimaxH3Route,
@@ -6298,7 +6300,7 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
   }
 
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = filterFilmDirectorReferencesForOutput(Array.isArray(filmDirector?.references) ? filmDirector.references : [], filmDirector?.finalPrompt || "");
+  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
   const mergedReferenceImages = mergeSeedanceDirectorReferences({
     directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
     directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
@@ -6404,6 +6406,11 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
   if (!remoteVideo?.url) throw httpError(502, "Fal returned no MiniMax H3 video URL.");
 
   const output = await downloadVideo(req, remoteVideo.url, `minimax-h3-${routeKind}`);
+  const exactAudioSource = minimaxH3ExactAudioSource(referenceAudioUrls, routeKind);
+  if (exactAudioSource) {
+    const audio = await resolveLocalAssetPathFromUrl(exactAudioSource);
+    output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
+  }
   const cost = estimateMinimaxH3Cost({
     duration,
     resolution,
@@ -6429,7 +6436,8 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
       seed: input.seed ?? null,
       enablePromptExpansion: input.enable_prompt_expansion,
       enableSafetyChecker: input.enable_safety_checker,
-      nativeAudio: true,
+      nativeAudio: !exactAudioSource,
+      exactConnectedAudio: Boolean(exactAudioSource),
       startFrameCount: startFrameUrl ? 1 : 0,
       endFrameCount: endFrameUrl ? 1 : 0,
       referenceImageCount: routeKind === "reference-to-video" ? referenceImageUrls.length : 0,
@@ -6529,6 +6537,11 @@ async function runMinimaxH3LocalVideo(req, res, {
     }
   });
   const output = await downloadVideo(req, result.contentUrl, `minimax-h3-local-${routeKind}`, { extension: ".mp4" });
+  const exactAudioSource = minimaxH3ExactAudioSource(referenceAudioUrls, routeKind);
+  if (exactAudioSource) {
+    const audio = await resolveLocalAssetPathFromUrl(exactAudioSource);
+    output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
+  }
   const cost = {
     amountUsd: 0,
     currency: "USD",
@@ -6565,7 +6578,8 @@ async function runMinimaxH3LocalVideo(req, res, {
       aspectRatio: routeKind === "image-to-video" ? "source image" : aspectRatio,
       seed: result.seed,
       enablePromptExpansionRequested: h3Settings.enablePromptExpansion !== false,
-      nativeAudio: true,
+      nativeAudio: !exactAudioSource,
+      exactConnectedAudio: Boolean(exactAudioSource),
       startFrameCount: startFrameUrl ? 1 : 0,
       endFrameCount: endFrameUrl ? 1 : 0,
       referenceImageCount: routeKind === "reference-to-video" ? referenceImageUrls.length : 0,
@@ -6600,14 +6614,13 @@ async function runMinimaxH3LocalVideo(req, res, {
 }
 
 function rewriteMinimaxH3ReferenceMentions(prompt, { imageNames = [], videoNames = [], audioNames = [], syntax = "fal" } = {}) {
-  const mentionMap = new Map();
-  const mediaToken = (type, index) => syntax === "sglang"
-    ? `<${type === "Image" ? "Picture" : type} ${index + 1}>`
-    : `${type} ${index + 1}`;
-  imageNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Image", index)));
-  videoNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Video", index)));
-  audioNames.forEach((name, index) => mentionMap.set(String(name).toLowerCase(), mediaToken("Audio", index)));
-  return String(prompt || "").replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
+  return buildMinimaxH3ReferencePrompt(prompt, {
+    imageNames,
+    videoNames,
+    audioNames,
+    syntax,
+    ensureAllReferences: true
+  });
 }
 
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
@@ -11505,6 +11518,39 @@ async function removeVideoAudioTrack(filePath) {
     return (await stat(filePath)).size;
   } finally {
     await rm(silentPath, { force: true }).catch(() => {});
+  }
+}
+
+async function replaceVideoAudioTrack(videoPath, audioPath) {
+  const extension = path.extname(videoPath) || ".mp4";
+  const remuxedPath = `${videoPath.slice(0, -extension.length)}-audio-${randomUUID()}${extension}`;
+
+  try {
+    await runFfmpeg([
+      "-y",
+      "-i",
+      videoPath,
+      "-i",
+      audioPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-af",
+      "apad",
+      "-shortest",
+      remuxedPath
+    ], "MiniMax connected-audio remux");
+    await copyFile(remuxedPath, videoPath);
+    return (await stat(videoPath)).size;
+  } finally {
+    await rm(remuxedPath, { force: true }).catch(() => {});
   }
 }
 
