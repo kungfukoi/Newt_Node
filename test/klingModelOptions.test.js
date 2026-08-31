@@ -156,7 +156,7 @@ test("Film Director resolution respects fixed-resolution video models", () => {
   assert.equal(filmDirectorVideoResolution("Gemini Omni Flash", "1080p", "720p"), "720p");
   assert.equal(filmDirectorVideoResolution("Kling O3 Pro", "480p", "1080p"), "1080p");
   assert.equal(filmDirectorVideoResolution("Kling O3 4K", "720p", "4K"), "4K");
-  assert.equal(filmDirectorVideoResolution("MiniMax H3", "4K", "2K"), "4K");
+  assert.equal(filmDirectorVideoResolution("MiniMax H3", "4K", "2K"), "2K");
 });
 
 test("Film Director timing respects each connected model's duration limits", () => {

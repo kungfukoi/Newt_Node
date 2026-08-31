@@ -114,6 +114,7 @@ export default function SettingsPage() {
       };
       applyLoadedSettings(data);
       dispatchModelPreferences(savedModelPreferences);
+      dispatchModelProviderPreferences(data.modelProviderPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
       await refreshKeyValidation();
@@ -774,6 +775,13 @@ function dispatchModelPreferences(preferences) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent("newtnode:model-settings-updated", {
     detail: normalizeModelPreferences(preferences)
+  }));
+}
+
+function dispatchModelProviderPreferences(preferences) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("newtnode:model-provider-settings-updated", {
+    detail: normalizeModelProviderPreferences(preferences)
   }));
 }
 

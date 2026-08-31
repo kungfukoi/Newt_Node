@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 
 import {
   buildMinimaxH3LocalRequest,
   ensureMinimaxH3LocalVariant,
+  ensureMinimaxH3WslKeepAlive,
   minimaxH3LocalConfigFromEnv,
   minimaxH3LocalFileUri,
   normalizeMinimaxH3LocalUrl,
@@ -130,6 +132,10 @@ test("local jobs submit, poll, and expose the content endpoint", async () => {
 
 test("WSL switching starts the requested variant and waits for health", async () => {
   const commands = [];
+  const keepAlive = new EventEmitter();
+  keepAlive.exitCode = null;
+  keepAlive.killed = false;
+  keepAlive.kill = () => { keepAlive.killed = true; };
   let healthChecks = 0;
   const config = minimaxH3LocalConfigFromEnv({
     MINIMAX_H3_LOCAL_WSL_DISTRO: "Newt-MiniMax-H3",
@@ -139,15 +145,44 @@ test("WSL switching starts the requested variant and waits for health", async ()
     task: "ref2va",
     baseUrl: "http://127.0.0.1:30010",
     config,
+    spawnImpl: (command, args, options) => {
+      commands.push({ command, args, options });
+      return keepAlive;
+    },
     execFileImpl: async (command, args) => commands.push({ command, args }),
     fetchImpl: async () => {
       healthChecks += 1;
       return new Response("ok", { status: healthChecks === 1 ? 503 : 200 });
     }
   });
-  assert.deepEqual(commands, [{
-    command: "wsl.exe",
-    args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "systemctl", "start", "minimax-h3-ref2va.service"]
-  }]);
+  assert.deepEqual(commands.map(({ command, args }) => ({ command, args })), [
+    {
+      command: "wsl.exe",
+      args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "sh", "-lc", "trap 'exit 0' TERM INT HUP; while :; do sleep 3600; done"]
+    },
+    {
+      command: "wsl.exe",
+      args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "systemctl", "start", "minimax-h3-ref2va.service"]
+    }
+  ]);
   assert.equal(healthChecks, 2);
+});
+
+test("WSL keepalive is reused for the same distro", () => {
+  const children = [];
+  const config = minimaxH3LocalConfigFromEnv({
+    MINIMAX_H3_LOCAL_WSL_DISTRO: "Newt-MiniMax-H3-Reused"
+  });
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.killed = false;
+    child.kill = () => { child.killed = true; };
+    children.push(child);
+    return child;
+  };
+  const first = ensureMinimaxH3WslKeepAlive({ config, spawnImpl });
+  const second = ensureMinimaxH3WslKeepAlive({ config, spawnImpl });
+  assert.equal(first, second);
+  assert.equal(children.length, 1);
 });

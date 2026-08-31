@@ -63,9 +63,10 @@ import { isGeminiOmniModel } from "./geminiOmni.js";
 import {
   isMinimaxH3Model,
   minimaxH3DurationOptions,
-  minimaxH3ResolutionOptions,
+  minimaxH3ResolutionOptionsForProvider,
   minimaxH3TextAspectRatioOptions
 } from "./minimaxH3.js";
+import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -159,6 +160,7 @@ function App() {
   const [generateAudio, setGenerateAudio] = React.useState(true);
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
+  const [modelProviderPreferences, setModelProviderPreferences] = React.useState(defaultModelProviderPreferences);
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
@@ -202,6 +204,15 @@ function App() {
   }, []);
 
   React.useEffect(() => {
+    function handleModelProviderSettingsUpdated(event) {
+      setModelProviderPreferences(normalizeModelProviderPreferences(event.detail));
+    }
+
+    window.addEventListener("newtnode:model-provider-settings-updated", handleModelProviderSettingsUpdated);
+    return () => window.removeEventListener("newtnode:model-provider-settings-updated", handleModelProviderSettingsUpdated);
+  }, []);
+
+  React.useEffect(() => {
     if (workspaceMode === "nodes") {
       setNodeWorkspaceLoaded(true);
     }
@@ -217,7 +228,10 @@ function App() {
     () => imageAspectRatiosForModel(imageModel),
     [imageModel]
   );
-  const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
+  const activeVideoSettings = React.useMemo(
+    () => videoSettingsForModel(videoModel, modelProviderPreferences),
+    [modelProviderPreferences, videoModel]
+  );
   const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel) || isGeminiOmniModel(videoModel);
   const supportsVideoEndFrame = !isGeminiOmniModel(videoModel);
   const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel) || isMinimaxH3Model(videoModel);
@@ -275,6 +289,7 @@ function App() {
     try {
       const data = await settingsApi.load();
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+      setModelProviderPreferences(normalizeModelProviderPreferences(data.modelProviderPreferences));
     } catch {
       setModelPreferences(defaultModelPreferences);
     } finally {
@@ -818,7 +833,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelPreferencesReady={modelPreferencesLoaded} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
@@ -1080,13 +1095,13 @@ function formatKrea2Creativity(value) {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-function videoSettingsForModel(model) {
+function videoSettingsForModel(model, modelProviderPreferences = defaultModelProviderPreferences) {
   if (isMinimaxH3Model(model)) {
     return {
       durations: minimaxH3DurationOptions.map(durationLabelToValue),
       durationValues: minimaxH3DurationOptions.map(durationLabelToValue),
       defaultDuration: "5",
-      resolutions: minimaxH3ResolutionOptions,
+      resolutions: minimaxH3ResolutionOptionsForProvider(normalizeModelProviderPreferences(modelProviderPreferences).minimaxH3),
       aspectRatios: minimaxH3TextAspectRatioOptions
     };
   }

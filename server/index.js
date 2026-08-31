@@ -6349,7 +6349,7 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
     ? rewriteMinimaxH3ReferenceMentions(prompt, { imageNames, videoNames, audioNames, syntax: runtimeProvider === "local" ? "sglang" : "fal" })
     : prompt;
   const duration = normalizeMinimaxH3Duration(req.body.duration);
-  const resolution = normalizeMinimaxH3Resolution(req.body.resolution);
+  const resolution = normalizeMinimaxH3Resolution(req.body.resolution, runtimeProvider);
   const aspectRatio = normalizeMinimaxH3AspectRatio(req.body.aspectRatio, routeKind);
   const h3Settings = req.body.minimaxH3 && typeof req.body.minimaxH3 === "object" ? req.body.minimaxH3 : {};
   if (runtimeProvider === "local") {

@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn as spawnChild } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -9,6 +9,8 @@ export const minimaxH3LocalResolution = "768P";
 
 const execFile = promisify(execFileCallback);
 let localVariantQueue = Promise.resolve();
+const wslKeepAliveProcesses = new Map();
+let wslKeepAliveCleanupRegistered = false;
 
 export function minimaxH3LocalConfigFromEnv(env = process.env) {
   const url = normalizeMinimaxH3LocalUrl(env.MINIMAX_H3_LOCAL_URL || defaultMinimaxH3LocalUrl);
@@ -167,14 +169,15 @@ export async function runMinimaxH3LocalJob({
   fetchImpl = fetch,
   env = process.env,
   onProgress = () => {},
-  execFileImpl = execFile
+  execFileImpl = execFile,
+  spawnImpl = spawnChild
 } = {}) {
   const config = minimaxH3LocalConfigFromEnv(env);
   const baseUrl = input?.task === "ref2va" ? config.referenceUrl : config.url;
   if (!config.wslDistro) return runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress });
 
   return withLocalVariantLock(async () => {
-    await ensureMinimaxH3LocalVariant({ task: input?.task, baseUrl, config, fetchImpl, execFileImpl, onProgress });
+    await ensureMinimaxH3LocalVariant({ task: input?.task, baseUrl, config, fetchImpl, execFileImpl, spawnImpl, onProgress });
     return runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress });
   });
 }
@@ -185,12 +188,14 @@ export async function ensureMinimaxH3LocalVariant({
   config,
   fetchImpl = fetch,
   execFileImpl = execFile,
+  spawnImpl = spawnChild,
   onProgress = () => {}
 } = {}) {
   if (!config?.wslDistro) return;
   const reference = task === "ref2va";
   const service = reference ? config.ref2vaService : config.fl2vaService;
   onProgress({ status: "loading-model", percent: 0, variant: reference ? "ref2va" : "fl2va" });
+  ensureMinimaxH3WslKeepAlive({ config, spawnImpl });
   try {
     await execFileImpl("wsl.exe", [
       "-d", config.wslDistro,
@@ -211,10 +216,78 @@ export async function ensureMinimaxH3LocalVariant({
       lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error.message;
+      const serviceState = await readWslServiceState({ config, service, execFileImpl });
+      if (!serviceState.running) {
+        throw new Error(
+          `MiniMax H3 ${reference ? "Ref2VA" : "FL2VA"} stopped while loading in WSL (${serviceState.state}). ${serviceState.detail}`.trim()
+        );
+      }
     }
     await wait(config.startupPollIntervalMs);
   }
   throw new Error(`MiniMax H3 ${reference ? "Ref2VA" : "FL2VA"} did not become ready within ${Math.round(config.startupTimeoutMs / 60000)} minutes: ${lastError}`);
+}
+
+export function ensureMinimaxH3WslKeepAlive({ config, spawnImpl = spawnChild } = {}) {
+  if (!config?.wslDistro) return null;
+  const key = `${config.wslDistro}:${config.wslUser}`;
+  const existing = wslKeepAliveProcesses.get(key);
+  if (existing && existing.exitCode === null && !existing.killed) return existing;
+
+  let child;
+  try {
+    child = spawnImpl("wsl.exe", [
+      "-d", config.wslDistro,
+      "-u", config.wslUser,
+      "--", "sh", "-lc", "trap 'exit 0' TERM INT HUP; while :; do sleep 3600; done"
+    ], {
+      windowsHide: true,
+      stdio: "ignore"
+    });
+  } catch (error) {
+    throw new Error(`Could not keep the MiniMax H3 WSL environment running: ${error.message}`);
+  }
+
+  wslKeepAliveProcesses.set(key, child);
+  const removeChild = () => {
+    if (wslKeepAliveProcesses.get(key) === child) wslKeepAliveProcesses.delete(key);
+  };
+  child.once("exit", removeChild);
+  child.once("error", removeChild);
+  child.unref?.();
+  registerWslKeepAliveCleanup();
+  return child;
+}
+
+function registerWslKeepAliveCleanup() {
+  if (wslKeepAliveCleanupRegistered) return;
+  wslKeepAliveCleanupRegistered = true;
+  process.once("exit", () => {
+    for (const child of wslKeepAliveProcesses.values()) {
+      try {
+        child.kill();
+      } catch {
+        // The WSL session may already have exited.
+      }
+    }
+    wslKeepAliveProcesses.clear();
+  });
+}
+
+async function readWslServiceState({ config, service, execFileImpl }) {
+  try {
+    const result = await execFileImpl("wsl.exe", [
+      "-d", config.wslDistro,
+      "-u", config.wslUser,
+      "--", "systemctl", "is-active", service
+    ], { windowsHide: true, timeout: 15000 });
+    const state = String(result?.stdout || "active").trim().toLowerCase() || "active";
+    return { running: ["active", "activating", "reloading"].includes(state), state, detail: "" };
+  } catch (error) {
+    const state = String(error?.stdout || "").trim().toLowerCase() || "inactive";
+    const detail = String(error?.stderr || error?.message || "Restart Newt Node and try again.").trim();
+    return { running: false, state, detail };
+  }
 }
 
 async function runPreparedMinimaxH3LocalJob({ input, fetchImpl, config, baseUrl, onProgress }) {

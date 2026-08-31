@@ -11,9 +11,12 @@ import {
   minimaxH3ExactAudioSource,
   minimaxH3ReferenceAspectRatioOptions,
   minimaxH3ReferenceLimits,
+  minimaxH3LocalResolutionOptions,
   minimaxH3ResolutionOptions,
+  minimaxH3ResolutionOptionsForProvider,
   minimaxH3Route,
   minimaxH3TextAspectRatioOptions,
+  normalizeMinimaxH3Resolution,
   validateMinimaxH3References
 } from "../src/minimaxH3.js";
 import { videoModelNames, videoModelOptions } from "../src/modelOptions.js";
@@ -29,7 +32,12 @@ test("MiniMax H3 is a contextual Video Model catalog option", () => {
 test("MiniMax H3 controls match the published Fal schemas", () => {
   assert.equal(minimaxH3DurationOptions[0], "5 seconds");
   assert.equal(minimaxH3DurationOptions.at(-1), "15 seconds");
-  assert.deepEqual(minimaxH3ResolutionOptions, ["480P", "768P", "2K", "4K"]);
+  assert.deepEqual(minimaxH3ResolutionOptions, ["768P", "2K"]);
+  assert.deepEqual(minimaxH3LocalResolutionOptions, ["768P"]);
+  assert.deepEqual(minimaxH3ResolutionOptionsForProvider("fal"), ["768P", "2K"]);
+  assert.deepEqual(minimaxH3ResolutionOptionsForProvider("local"), ["768P"]);
+  assert.equal(normalizeMinimaxH3Resolution("4K", "fal"), "2K");
+  assert.equal(normalizeMinimaxH3Resolution("2K", "local"), "768P");
   assert.deepEqual(minimaxH3TextAspectRatioOptions, ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]);
   assert.deepEqual(minimaxH3ReferenceAspectRatioOptions, ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]);
   assert.deepEqual(minimaxH3ReferenceLimits, {
@@ -149,9 +157,8 @@ test("MiniMax H3 rejects invalid reference combinations before submission", () =
 });
 
 test("MiniMax H3 billing uses output seconds and paid reference images", () => {
-  assert.equal(estimateMinimaxH3Cost({ duration: 10, resolution: "480P", referenceImageCount: 5 }).amountUsd, 0.5);
+  assert.equal(estimateMinimaxH3Cost({ duration: 10, resolution: "768P", referenceImageCount: 5 }).amountUsd, 0.6);
   assert.equal(estimateMinimaxH3Cost({ duration: 10, resolution: "2K", referenceImageCount: 7 }).amountUsd, 1.46);
-  assert.equal(estimateMinimaxH3Cost({ duration: 15, resolution: "4K", referenceImageCount: 0 }).amountUsd, 2.4);
 });
 
 test("Video runner forwards MiniMax H3 provider settings and audio labels", () => {

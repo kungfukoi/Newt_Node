@@ -269,13 +269,14 @@ import {
   minimaxH3DurationOptions,
   minimaxH3ReferenceAspectRatioOptions,
   minimaxH3ReferenceLimits,
-  minimaxH3ResolutionOptions,
+  minimaxH3ResolutionOptionsForProvider,
   minimaxH3Route,
   minimaxH3TextAspectRatioOptions,
   normalizeMinimaxH3AspectRatio,
   normalizeMinimaxH3DurationLabel,
   normalizeMinimaxH3Resolution
 } from "./minimaxH3.js";
+import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -1165,7 +1166,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
@@ -1445,6 +1446,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!modelPreferencesReady) return;
     const fallbackImageModel = firstEnabledImageModel(modelPreferences);
     const fallbackVideoModel = firstEnabledVideoModel(modelPreferences);
+    const minimaxH3Provider = normalizeModelProviderPreferences(modelProviderPreferences).minimaxH3;
     setNodes((current) =>
       current.map((node) => {
         if (node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !enabledImageModels.includes(node.data.model)) {
@@ -1482,10 +1484,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (node.type === "videoModel" && !isSam3VideoModel(node.data.model) && !enabledVideoModels.includes(node.data.model)) {
           return { ...node, data: { ...node.data, ...videoModelSelectionPatch(node.data, fallbackVideoModel) } };
         }
+        if (node.type === "videoModel" && isMinimaxH3Model(node.data.model)) {
+          const resolution = normalizeMinimaxH3Resolution(node.data.resolution, minimaxH3Provider);
+          if (resolution !== node.data.resolution) return { ...node, data: { ...node.data, resolution } };
+        }
         return node;
       })
     );
-  }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
+  }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady, modelProviderPreferences]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -7286,6 +7292,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModelOptions={enabledVideoModels}
         utilityImageModelOptions={enabledUtilityImageModels}
         utilityVideoModelOptions={enabledUtilityVideoModels}
+        modelProviderPreferences={modelProviderPreferences}
         flowManaged
       />
     </NodeCardBoundary>
@@ -8079,6 +8086,7 @@ function NodeCard({
   videoModelOptions,
   utilityImageModelOptions,
   utilityVideoModelOptions,
+  modelProviderPreferences,
   flowManaged = false
 }) {
   const config = getNodeConfig(node.type);
@@ -8421,6 +8429,7 @@ function NodeCard({
         videoModelOptions={videoModelOptions}
         utilityImageModelOptions={utilityImageModelOptions}
         utilityVideoModelOptions={utilityVideoModelOptions}
+        modelProviderPreferences={modelProviderPreferences}
       />
       <button
         type="button"
@@ -10792,7 +10801,8 @@ function NodeBody({
   imageModelOptions = [],
   videoModelOptions = [],
   utilityImageModelOptions = [],
-  utilityVideoModelOptions = []
+  utilityVideoModelOptions = [],
+  modelProviderPreferences = defaultModelProviderPreferences
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
@@ -15050,6 +15060,8 @@ function NodeBody({
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isGeminiOmni = isGeminiOmniModel(node.data.model);
   const isMinimaxH3 = isMinimaxH3Model(node.data.model);
+  const minimaxH3Provider = normalizeModelProviderPreferences(modelProviderPreferences).minimaxH3;
+  const activeMinimaxH3ResolutionOptions = minimaxH3ResolutionOptionsForProvider(minimaxH3Provider);
   const isSam3Video = isSam3VideoModel(node.data.model);
   const isSeedance25 = isSeedance25Model(node.data.model);
   const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
@@ -15365,8 +15377,8 @@ function NodeBody({
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
-              <select value={normalizeMinimaxH3Resolution(node.data.resolution)} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {minimaxH3ResolutionOptions.map((option) => <option key={option}>{option}</option>)}
+              <select value={normalizeMinimaxH3Resolution(node.data.resolution, minimaxH3Provider)} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {activeMinimaxH3ResolutionOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">

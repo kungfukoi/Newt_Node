@@ -7,7 +7,8 @@ export const minimaxH3Endpoints = {
 };
 
 export const minimaxH3DurationOptions = Array.from({ length: 11 }, (_value, index) => `${index + 5} seconds`);
-export const minimaxH3ResolutionOptions = ["480P", "768P", "2K", "4K"];
+export const minimaxH3ResolutionOptions = ["768P", "2K"];
+export const minimaxH3LocalResolutionOptions = ["768P"];
 export const minimaxH3TextAspectRatioOptions = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
 export const minimaxH3ReferenceAspectRatioOptions = ["adaptive", ...minimaxH3TextAspectRatioOptions];
 
@@ -45,9 +46,17 @@ export function normalizeMinimaxH3DurationLabel(value) {
   return `${normalizeMinimaxH3Duration(value)} seconds`;
 }
 
-export function normalizeMinimaxH3Resolution(value) {
-  const normalized = String(value || "2K").toUpperCase();
-  return minimaxH3ResolutionOptions.find((option) => option.toUpperCase() === normalized) || "2K";
+export function minimaxH3ResolutionOptionsForProvider(provider = "fal") {
+  return String(provider || "").trim().toLowerCase() === "local"
+    ? minimaxH3LocalResolutionOptions
+    : minimaxH3ResolutionOptions;
+}
+
+export function normalizeMinimaxH3Resolution(value, provider = "fal") {
+  const options = minimaxH3ResolutionOptionsForProvider(provider);
+  const fallback = options.includes("2K") ? "2K" : options[0];
+  const normalized = String(value || fallback).toUpperCase();
+  return options.find((option) => option.toUpperCase() === normalized) || fallback;
 }
 
 export function normalizeMinimaxH3AspectRatio(value, route = "text-to-video") {
