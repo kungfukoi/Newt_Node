@@ -23,6 +23,7 @@ import {
 } from "./modelOptions.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
+import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
 
 const providerDefinitions = Object.freeze([
   Object.freeze({ id: "fal", label: "Fal" }),
@@ -47,15 +48,7 @@ export default function SettingsPage() {
   const [minimaxH3LocalStatus, setMinimaxH3LocalStatus] = React.useState(null);
   const [minimaxH3LocalBusy, setMinimaxH3LocalBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
-  const [openSections, setOpenSections] = React.useState({
-    credentials: true,
-    providers: true,
-    models: false,
-    repository: false,
-    restart: false,
-    status: true,
-    comfy: false
-  });
+  const [openSections, setOpenSections] = React.useState(readSettingsOpenSections);
   const [status, setStatus] = React.useState("loading");
   const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
   const [busy, setBusy] = React.useState("");
@@ -314,7 +307,7 @@ export default function SettingsPage() {
   }
 
   function toggleSection(section) {
-    setOpenSections((current) => ({ ...current, [section]: !current[section] }));
+    setOpenSections((current) => writeSettingsOpenSections({ ...current, [section]: !current[section] }));
   }
 
   return (
