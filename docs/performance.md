@@ -40,7 +40,7 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for package version `3.0.0-beta.0` on `main`, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-08-28. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
+Measured for package version `3.0.0-beta.0` on `dev`, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-09-02. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
 
 | Area | Current behavior |
 | --- | --- |
@@ -49,6 +49,7 @@ Measured for package version `3.0.0-beta.0` on `main`, using `npm.cmd run build`
 | Stats dashboard | `src/StatsDashboard.jsx` is loaded through `React.lazy`. |
 | Settings page | `src/SettingsPage.jsx` is loaded through `React.lazy`. |
 | Edit node controls | Edit effect UI and live preview state are part of the lazy node editor chunk; effect definitions live in `src/editEffects.js`. |
+| Character sheet library | Character library normalization, selection, and downstream-reference helpers load inside the lazy node editor boundary; they do not increase the initial shell. |
 | Generation progress | Progress aggregation, polling, and node UI are part of the lazy node editor path; the initial shell does not load them. |
 | Color ID to Matte controls | `src/components/ColorIdMatteControls.jsx` loads only when the relevant Utility controls render. |
 | 3D result viewer | `src/components/Model3DViewer.jsx` loads only when a 3D preview/result renders. |
@@ -59,26 +60,26 @@ Recent production build summary:
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
 | `index.html` | document | 0.66 kB | 0.36 kB |
-| `assets/index-*.js` | entry script | 70.71 kB | 23.87 kB |
+| `assets/index-*.js` | entry script | 72.21 kB | 24.36 kB |
 | `assets/index-*.css` | entry style | 26.06 kB | 5.50 kB |
 | `assets/vendor-icons-*.js` | modulepreload | 22.26 kB | 7.17 kB |
 | `assets/vendor-react-*.js` | modulepreload | 188.00 kB | 58.94 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 909.03 kB | 249.03 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 170.33 kB | 28.75 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 927.21 kB | 253.92 kB |
+| `assets/NodeEditor-*.css` | lazy editor style | 172.99 kB | 29.18 kB |
 | `assets/vendor-*.js` | lazy shared/editor vendor | 175.46 kB | 57.52 kB |
 | `assets/vendor-*.css` | lazy shared/editor vendor style | 15.50 kB | 2.61 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 13.35 kB | 3.38 kB |
 | `assets/openAiImage2-*.js` | lazy OpenAI Image 2 helper | 4.23 kB | 1.63 kB |
-| `assets/SettingsPage-*.js` | lazy Settings page | 19.59 kB | 6.03 kB |
-| `assets/StatsDashboard-*.js` | lazy Stats page | 25.55 kB | 7.98 kB |
+| `assets/SettingsPage-*.js` | lazy Settings page | 20.65 kB | 6.32 kB |
+| `assets/StatsDashboard-*.js` | lazy Stats page | 25.56 kB | 7.98 kB |
 | `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |
 
 Current totals:
 
-- Initial shell: 307.68 kB, 95.84 kB gzip.
-- Lazy/generated: 2133.58 kB, 566.15 kB gzip.
-- All assets: 2441.26 kB, 661.98 kB gzip.
+- Initial shell: 309.18 kB, 96.32 kB gzip.
+- Lazy/generated: 2155.48 kB, 571.74 kB gzip.
+- All assets: 2464.66 kB, 668.07 kB gzip.
 
 Vite currently reports the expected large-chunk warning for the node editor and Three.js runtime. Treat the editor chunk as the next code-splitting target; do not move node-editor dependencies into the initial shell to hide the warning.
 

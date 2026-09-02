@@ -155,11 +155,20 @@ import { previewSelectionForNode } from "./previewSelection.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
-  characterVideoCustomSheetWardrobePrompt,
   characterVideoSheetPrompt,
   characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
+import {
+  activeCharacterSheetId,
+  activeCharacterSheetVariant,
+  characterDefaultWardrobeId,
+  characterSheetChoices,
+  characterSheetVariantForSelection,
+  customCharacterSheetId,
+  generatedCharacterSheetId,
+  normalizeCharacterCustomSheets
+} from "./characterSheetLibrary.js";
 import { characterSheetModelOptions, mergeGeneratedCharacterSheetVariants, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
@@ -697,7 +706,7 @@ const coverageModelOptions = [
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
-const characterDefaultWardrobeId = "__default-wardrobe__";
+const maxCharacterCustomSheets = 16;
 const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const cinematicCharacterSheetPrompt =
@@ -3007,7 +3016,43 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function uploadCharacterPortrait(node, file, target = "portrait") {
-    if (!file || !file.type.startsWith("image/")) return;
+    if (target === "customSheet") {
+      const existing = normalizeCharacterCustomSheets(node.data);
+      const files = Array.from(file?.length !== undefined && !file.type ? file : [file])
+        .filter((item) => item?.type?.startsWith("image/"))
+        .slice(0, maxCharacterCustomSheets - existing.length);
+      if (!files.length) return false;
+
+      pushUndoSnapshot();
+      updateNode(node.id, { status: "uploading", error: "" });
+      try {
+        const uploaded = [];
+        for (const item of files) {
+          const asset = await uploadNodeAsset(item, "character");
+          uploaded.push({ ...asset, id: `character-custom-sheet-${Date.now()}-${uploaded.length}` });
+        }
+        const nextSheets = [...existing, ...uploaded].slice(0, maxCharacterCustomSheets);
+        const selectedId = customCharacterSheetId(uploaded.at(-1)?.id || nextSheets.at(-1)?.id);
+        const nextData = { ...node.data, characterCustomSheets: nextSheets, activeCharacterSheetId: selectedId };
+        const selectedVariant = characterSheetVariantForSelection(nextData, selectedId);
+        updateNode(node.id, {
+          characterCustomSheets: nextSheets,
+          activeCharacterSheetId: selectedId,
+          useCustomCharacterSheet: false,
+          customCharacterSheet: null,
+          characterSheetPreviewKind: "image",
+          ...(node.data.locked && selectedVariant ? characterVariantDisplayPatch(selectedVariant) : {}),
+          status: "ready",
+          error: ""
+        });
+        return true;
+      } catch (error) {
+        updateNode(node.id, { status: "error", error: error.message });
+        return false;
+      }
+    }
+
+    if (!file || !file.type.startsWith("image/")) return false;
 
     pushUndoSnapshot();
     updateNode(node.id, { status: "uploading", error: "" });
@@ -3015,67 +3060,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       const asset = await uploadNodeAsset(file, "character");
       updateNode(node.id, {
-        ...(target === "customSheet"
-          ? { customCharacterSheet: asset, useCustomCharacterSheet: true }
-          : { characterPortrait: asset }),
+        characterPortrait: asset,
         status: "ready",
         error: ""
       });
+      return true;
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
+      return false;
     }
   }
 
   async function uploadCharacterSheetReplacement(node, file) {
-    if (!file || !file.type.startsWith("image/")) return;
-
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
-    const activeWardrobe = activeCharacterWardrobe(currentNode);
-    const targetWardrobeId = characterWardrobeVariantId(activeWardrobe);
-    const activeVoice = activeCharacterVoice(currentNode);
-
-    pushUndoSnapshot();
-    updateNode(currentNode.id, { status: "uploading", error: "" });
-
-    try {
-      const asset = await uploadNodeAsset(file, "character");
-      const generated = {
-        url: asset.localUrl,
-        type: "image",
-        label: `@${characterTag(currentNode)} Character Sheet`,
-        fileName: asset.fileName,
-        mimeType: asset.mimeType,
-        text: "Uploaded character sheet.",
-        cost: null
-      };
-      const replacementVariant = {
-        wardrobeId: targetWardrobeId,
-        wardrobeUrl: activeWardrobe?.localUrl || "",
-        wardrobeFileName: activeWardrobe?.fileName || "Uploaded character sheet",
-        generated
-      };
-      const existingVariants = normalizeCharacterSheetVariants(currentNode.data);
-      const nextVariants = existingVariants.some((variant) => variant.wardrobeId === targetWardrobeId)
-        ? existingVariants.map((variant) => (variant.wardrobeId === targetWardrobeId ? replacementVariant : variant))
-        : [...existingVariants, replacementVariant];
-
-      updateNode(currentNode.id, {
-        activated: true,
-        locked: true,
-        characterTab: "sheet",
-        characterSheetVariants: nextVariants,
-        activeWardrobeId: targetWardrobeId === characterDefaultWardrobeId ? "" : targetWardrobeId,
-        compiledTraitPrompt: characterTraitPrompt(currentNode.data),
-        compiledVoicePrompt: activeVoice ? characterVoicePrompt : "",
-        characterBatchProgress: null,
-        characterVariantNotice: "",
-        ...characterVariantDisplayPatch(replacementVariant),
-        status: "ready",
-        error: ""
-      });
-      setSaveStatus("Replaced character sheet image");
-    } catch (error) {
-      updateNode(currentNode.id, { status: "error", error: error.message });
+    if (await uploadCharacterPortrait(currentNode, file, "customSheet")) {
+      setSaveStatus("Added and selected custom character sheet");
     }
   }
 
@@ -3219,13 +3218,29 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     pushUndoSnapshot();
-    updateNode(node.id, {
-      ...(target === "customSheet"
-        ? { customCharacterSheet: assetFromOutputItem(item), useCustomCharacterSheet: true }
-        : { characterPortrait: assetFromOutputItem(item) }),
-      status: "ready",
-      error: ""
-    });
+    if (target === "customSheet") {
+      const existing = normalizeCharacterCustomSheets(node.data);
+      if (existing.length >= maxCharacterCustomSheets) {
+        updateNode(node.id, { error: `Character accepts up to ${maxCharacterCustomSheets} custom sheets.` });
+        return;
+      }
+      const sheet = { ...assetFromOutputItem(item), id: `character-custom-sheet-output-${Date.now()}` };
+      const nextSheets = [...existing, sheet];
+      const selectedId = customCharacterSheetId(sheet.id);
+      const selectedVariant = characterSheetVariantForSelection({ ...node.data, characterCustomSheets: nextSheets }, selectedId);
+      updateNode(node.id, {
+        characterCustomSheets: nextSheets,
+        activeCharacterSheetId: selectedId,
+        useCustomCharacterSheet: false,
+        customCharacterSheet: null,
+        characterSheetPreviewKind: "image",
+        ...(node.data.locked && selectedVariant ? characterVariantDisplayPatch(selectedVariant) : {}),
+        status: "ready",
+        error: ""
+      });
+    } else {
+      updateNode(node.id, { characterPortrait: assetFromOutputItem(item), status: "ready", error: "" });
+    }
     setSaveStatus(target === "customSheet" ? "Added output image as custom character sheet" : "Added output image as character portrait");
   }
 
@@ -3264,11 +3279,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const wardrobes = (node.data.characterWardrobes || []).filter((item) => item.id !== wardrobeId);
     const variants = (node.data.characterSheetVariants || []).filter((variant) => variant.wardrobeId !== wardrobeId);
     const activeWardrobeId = node.data.activeWardrobeId === wardrobeId ? wardrobes[0]?.id || "" : node.data.activeWardrobeId;
-    const selectedVariant = characterSheetVariantForWardrobeId({ ...node.data, characterSheetVariants: variants }, activeWardrobeId);
+    const nextData = { ...node.data, characterSheetVariants: variants, activeWardrobeId };
+    const selectedVariant = activeCharacterSheetVariant(nextData);
+    const selectedId = activeCharacterSheetId(nextData);
     pushUndoSnapshot();
     const patch = {
       characterWardrobes: wardrobes,
-      activeWardrobeId
+      activeWardrobeId,
+      activeCharacterSheetId: selectedId
     };
     if (node.data.locked && selectedVariant) {
       updateNode(nodeId, {
@@ -3281,13 +3299,43 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     updateNode(nodeId, {
       ...patch,
-      characterSheetVariants: [],
+      characterSheetVariants: variants,
       activated: false,
       locked: false,
       resultUrl: "",
       resultItems: [],
       compiledWardrobeUrl: "",
       characterVariantNotice: "",
+      error: ""
+    });
+  }
+
+  function removeCharacterCustomSheet(nodeId, sheetId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const customSheets = normalizeCharacterCustomSheets(node.data).filter((sheet) => sheet.id !== sheetId);
+    const removedSelectionId = customCharacterSheetId(sheetId);
+    const nextData = {
+      ...node.data,
+      characterCustomSheets: customSheets,
+      customCharacterSheet: null,
+      useCustomCharacterSheet: false,
+      activeCharacterSheetId: node.data.activeCharacterSheetId === removedSelectionId ? "" : node.data.activeCharacterSheetId
+    };
+    const fallbackId = activeCharacterSheetId(nextData);
+    const fallbackVariant = activeCharacterSheetVariant({ ...nextData, activeCharacterSheetId: fallbackId });
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      characterCustomSheets: customSheets,
+      customCharacterSheet: null,
+      useCustomCharacterSheet: false,
+      activeCharacterSheetId: fallbackId,
+      characterSheetPreviewKind: "image",
+      ...(node.data.locked && fallbackVariant
+        ? characterVariantDisplayPatch(fallbackVariant)
+        : node.data.locked
+          ? { activated: false, locked: false, resultUrl: "", resultItems: [], fileName: "" }
+          : {}),
       error: ""
     });
   }
@@ -3306,14 +3354,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function activateCharacterNode(node) {
     const portrait = node.data.characterPortrait;
-    const customSheet = node.data.customCharacterSheet;
-    const useCustomSheet = Boolean(node.data.useCustomCharacterSheet);
+    const selectedExistingVariant = activeCharacterSheetVariant(node.data);
     const name = String(node.data.characterName || "").trim();
-    if (useCustomSheet && !customSheet?.localUrl) {
-      updateNode(node.id, { error: "Upload a custom character sheet first." });
-      return;
-    }
-    if (!useCustomSheet && !portrait?.localUrl) {
+    if (!portrait?.localUrl && !selectedExistingVariant?.generated?.url) {
       updateNode(node.id, { error: "Upload a character portrait first." });
       return;
     }
@@ -3332,64 +3375,22 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const existingVariants = normalizeCharacterSheetVariants(node.data);
     let completedVariantCount = 0;
 
-    if (useCustomSheet) {
-      try {
-        updateNode(node.id, {
-          status: generateCuVideoSheet ? "compiling" : "ready",
-          characterBatchProgress: generateCuVideoSheet ? { completed: 0, total: 1 } : null,
-          characterVariantNotice: "",
-          error: ""
-        });
-        const generated = {
-          url: customSheet.localUrl,
-          thumbnailUrl: customSheet.thumbnailUrl || "",
-          type: "image",
-          label: `@${characterTag(node)} Character Sheet`,
-          fileName: customSheet.fileName || "Custom character sheet",
-          text: "",
-          cost: null
-        };
-        const videoGenerated = generateCuVideoSheet
-          ? await runCharacterSheetGeneration({
-              node,
-              prompt: [characterVideoSheetPrompt, characterVideoCustomSheetWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
-              portrait: customSheet,
-              wardrobe: null,
-              workflowContext: workflowRequestContext(),
-              characterTag: characterTag(node),
-              sheetKind: "video"
-            })
-          : null;
-        const selectedVariant = {
-          wardrobeId: characterDefaultWardrobeId,
-          wardrobeUrl: "",
-          wardrobeFileName: "Custom character sheet",
-          generated,
-          ...(videoGenerated ? { videoGenerated } : {})
-        };
-        pushUndoSnapshot();
-        updateNode(node.id, {
-          activated: true,
-          locked: true,
-          characterTab: "sheet",
-          characterSheetPreviewKind: "image",
-          characterSheetVariants: [selectedVariant],
-          activeWardrobeId: "",
-          compiledTraitPrompt: characterTraitPrompt(node.data),
-          compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
-          characterBatchProgress: null,
-          characterVariantNotice: "",
-          ...characterVariantDisplayPatch(selectedVariant),
-          status: "ready",
-          error: ""
-        });
-      } catch (error) {
-        updateNode(node.id, {
-          status: "error",
-          characterBatchProgress: null,
-          error: error.message
-        });
-      }
+    if (!portrait?.localUrl && selectedExistingVariant?.generated?.url) {
+      pushUndoSnapshot();
+      updateNode(node.id, {
+        activated: true,
+        locked: true,
+        characterTab: "sheet",
+        characterSheetPreviewKind: "image",
+        activeCharacterSheetId: activeCharacterSheetId(node.data),
+        compiledTraitPrompt: characterTraitPrompt(node.data),
+        compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
+        characterBatchProgress: null,
+        characterVariantNotice: "",
+        ...characterVariantDisplayPatch(selectedExistingVariant),
+        status: "ready",
+        error: ""
+      });
       return;
     }
 
@@ -3464,6 +3465,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         characterTab: "sheet",
         characterSheetPreviewKind: "image",
         characterSheetVariants: variants,
+        activeCharacterSheetId: generatedCharacterSheetId(selectedVariant.wardrobeId),
         activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
         compiledTraitPrompt: characterTraitPrompt(node.data),
         compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
@@ -7261,6 +7263,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
         onCharacterVoicesUpload={uploadCharacterVoices}
         onCharacterWardrobeRemove={removeCharacterWardrobe}
+        onCharacterCustomSheetRemove={removeCharacterCustomSheet}
         onCharacterVoiceRemove={removeCharacterVoice}
         onCharacterActivate={activateCharacterNode}
         onCharacterUnlock={unlockCharacterNode}
@@ -7554,6 +7557,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
                 onCharacterVoicesUpload={uploadCharacterVoices}
                 onCharacterWardrobeRemove={removeCharacterWardrobe}
+                onCharacterCustomSheetRemove={removeCharacterCustomSheet}
                 onCharacterVoiceRemove={removeCharacterVoice}
                 onCharacterActivate={activateCharacterNode}
                 onCharacterUnlock={unlockCharacterNode}
@@ -8055,6 +8059,7 @@ function NodeCard({
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
+  onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
@@ -8402,6 +8407,7 @@ function NodeCard({
         onCharacterWardrobeImport={onCharacterWardrobeImport}
         onCharacterVoicesUpload={onCharacterVoicesUpload}
         onCharacterWardrobeRemove={onCharacterWardrobeRemove}
+        onCharacterCustomSheetRemove={onCharacterCustomSheetRemove}
         onCharacterVoiceRemove={onCharacterVoiceRemove}
         onCharacterActivate={onCharacterActivate}
         onCharacterUnlock={onCharacterUnlock}
@@ -10774,6 +10780,7 @@ function NodeBody({
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
+  onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
@@ -11026,8 +11033,7 @@ function NodeBody({
 
   if (node.type === "character") {
     const portrait = node.data.characterPortrait;
-    const customSheet = node.data.customCharacterSheet;
-    const useCustomSheet = Boolean(node.data.useCustomCharacterSheet);
+    const customSheets = normalizeCharacterCustomSheets(node.data);
     const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const voices = Array.isArray(node.data.characterVoices) ? node.data.characterVoices : [];
     const activeWardrobe = activeCharacterWardrobe(node);
@@ -11035,6 +11041,8 @@ function NodeBody({
     const selectedTraits = Array.isArray(node.data.characterTraits) ? node.data.characterTraits : [];
     const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
     const characterVariants = Array.isArray(node.data.characterSheetVariants) ? node.data.characterSheetVariants : [];
+    const sheetChoices = characterSheetChoices(node.data);
+    const selectedSheetId = activeCharacterSheetId(node.data);
     const variantCount = characterVariants.length;
     const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url).length;
     const targetVariantCount = Math.max(1, wardrobes.length);
@@ -11047,7 +11055,7 @@ function NodeBody({
       Math.max(Number(node.data.selectedResultIndex) || 0, 0),
       Math.max(characterResultItems.length - 1, 0)
     );
-    const activeCharacterVariant = characterSheetVariantForWardrobeId(node.data, node.data.activeWardrobeId);
+    const activeCharacterVariant = activeCharacterSheetVariant(node.data);
     const hasCuVideoSheet = Boolean(activeCharacterVariant?.videoGenerated?.url);
     const characterSheetPreviewKind = node.data.characterSheetPreviewKind === "video" && hasCuVideoSheet ? "video" : "image";
     const selectedCharacterSheet = characterSheetPreviewKind === "video" ? activeCharacterVariant?.videoGenerated : activeCharacterVariant?.generated;
@@ -11077,8 +11085,22 @@ function NodeBody({
       if (locked && !variant) return;
       onUpdate(node.id, {
         activeWardrobeId: wardrobe.id,
+        ...(variant ? { activeCharacterSheetId: generatedCharacterSheetId(variant.wardrobeId) } : {}),
         characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant?.videoGenerated?.url ? "video" : "image",
         ...(locked && variant ? characterVariantDisplayPatch(variant) : {})
+      });
+    }
+
+    function selectCharacterSheet(choice) {
+      const variant = choice?.variant;
+      if (!variant?.generated?.url) return;
+      onUpdate(node.id, {
+        activeCharacterSheetId: choice.id,
+        ...(choice.source === "generated" && variant.wardrobeId !== characterDefaultWardrobeId
+          ? { activeWardrobeId: variant.wardrobeId }
+          : {}),
+        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image",
+        ...(locked ? characterVariantDisplayPatch(variant) : {})
       });
     }
 
@@ -11107,8 +11129,7 @@ function NodeBody({
         if (file) onCharacterSheetReplace?.(node, file);
       }
       if (zone === "customSheet") {
-        const file = firstAcceptedFile(event.dataTransfer.files, "image");
-        if (file) onCharacterPortraitUpload(node, file, "customSheet");
+        onCharacterPortraitUpload(node, event.dataTransfer.files, "customSheet");
         return;
       }
       if (zone === "wardrobe") {
@@ -11230,7 +11251,7 @@ function NodeBody({
                   <input
                     type="checkbox"
                     checked={Boolean(node.data.cinematicCharacterSheet)}
-                    disabled={compiling || locked || useCustomSheet}
+                    disabled={compiling || locked}
                     onChange={(event) => onUpdate(node.id, { cinematicCharacterSheet: event.target.checked })}
                   />
                   <span>
@@ -11250,58 +11271,65 @@ function NodeBody({
                     <small>Creates a simplified close-up video sheet for every wardrobe</small>
                   </span>
                 </label>
-                <label className="character-section character-option-row">
-                  <input
-                    type="checkbox"
-                    checked={useCustomSheet}
-                    disabled={compiling || locked}
-                    onChange={(event) => onUpdate(node.id, { useCustomCharacterSheet: event.target.checked })}
-                  />
-                  <span>
-                    <strong>Use Custom Sheet</strong>
-                    <small>Override generation with your own completed character sheet</small>
-                  </span>
-                </label>
-                {useCustomSheet && (
-                  <section
-                    className={`character-section character-custom-sheet drop-enabled ${customSheet?.localUrl ? "has-image" : ""}`}
-                    onDragOver={allowFileDrop}
-                    onDrop={(event) => handleCharacterDrop(event, "customSheet")}
-                  >
-                    <div className="character-section-head">
-                      <span className="character-section-label">Custom Character Sheet</span>
-                      {customSheet?.localUrl && !locked && (
-                        <button
-                          type="button"
-                          className="character-add-button"
-                          title="Remove custom character sheet"
-                          onClick={() => {
-                            onUndoSnapshot?.();
-                            onUpdate(node.id, { customCharacterSheet: null });
-                          }}
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                    <label className="character-custom-sheet-upload" title={customSheet?.localUrl ? "Replace custom character sheet" : "Upload custom character sheet"}>
-                      {customSheet?.localUrl ? (
-                        <img {...fullResolutionImageProps(customSheet)} src={displayMediaUrl(previewImageUrl(customSheet))} alt="Custom character sheet" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
-                      ) : (
-                        <>
-                          <ImagePlus size={20} />
-                          <span>Drop or upload a completed sheet</span>
-                        </>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        disabled={compiling || locked}
-                        onChange={(event) => onCharacterPortraitUpload(node, event.target.files?.[0], "customSheet")}
-                      />
-                    </label>
-                  </section>
-                )}
+                <section
+                  className="character-section character-sheet-library drop-enabled"
+                  onDragOver={allowFileDrop}
+                  onDrop={(event) => handleCharacterDrop(event, "customSheet")}
+                >
+                  <div className="character-section-head">
+                    <span className="character-section-label">Character Sheets</span>
+                    {customSheets.length < maxCharacterCustomSheets && (
+                      <label className="character-add-button" title="Upload custom character sheets">
+                        <Plus size={13} />
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          multiple
+                          disabled={compiling}
+                          onChange={(event) => onCharacterPortraitUpload(node, event.target.files, "customSheet")}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <div className="character-sheet-library-strip">
+                    {sheetChoices.map((choice) => (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        className={`character-sheet-library-item ${choice.id === selectedSheetId ? "active" : ""}`}
+                        disabled={compiling}
+                        onClick={() => selectCharacterSheet(choice)}
+                        title={`Use ${choice.label}`}
+                      >
+                        <img {...fullResolutionImageProps(choice.item)} src={displayMediaUrl(previewImageUrl(choice.item))} alt={choice.label} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                        <span className="character-sheet-source">{choice.source === "custom" ? "Custom" : "Generated"}</span>
+                        <span className="character-sheet-name">{choice.label}</span>
+                        {choice.source === "custom" && (
+                          <span
+                            className="character-remove"
+                            role="button"
+                            aria-label={`Remove ${choice.label}`}
+                            title={`Remove ${choice.label}`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onCharacterCustomSheetRemove(node.id, choice.sheet.id);
+                            }}
+                          >
+                            <X size={10} />
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                    {!sheetChoices.length && (
+                      <label className="character-sheet-library-empty">
+                        <ImagePlus size={16} />
+                        <span>Drop or upload completed sheets</span>
+                        <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={compiling} onChange={(event) => onCharacterPortraitUpload(node, event.target.files, "customSheet")} />
+                      </label>
+                    )}
+                  </div>
+                </section>
                 <details className="character-section character-collapsible characteristics" defaultOpen={hasCharacterTraits}>
                   <summary>
                     <span className="character-section-label">Characteristics <span className="character-optional-label">(Optional)</span></span>
@@ -11363,19 +11391,9 @@ function NodeBody({
                   : node.data.characterVariantNotice
                     ? node.data.characterVariantNotice
                   : locked
-                    ? useCustomSheet
-                      ? node.data.cuVideoGeneration
-                        ? `Custom image sheet and CU video sheet ready for @${characterTag(node)}.`
-                        : `Custom character sheet ready. @${characterTag(node)} uses the uploaded override.`
-                      : node.data.cuVideoGeneration
+                    ? node.data.cuVideoGeneration
                         ? `${variantCount} image sheet${variantCount === 1 ? "" : "s"} and ${cuVideoVariantCount} CU video sheet${cuVideoVariantCount === 1 ? "" : "s"} ready.`
-                        : `${variantCount} outfit sheet${variantCount === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected outfit.`
-                    : useCustomSheet
-                      ? customSheet?.localUrl
-                        ? node.data.cuVideoGeneration
-                          ? "The custom image sheet and one CU video sheet will be prepared on lock."
-                          : "Custom character sheet will be used on lock."
-                        : "Upload a completed custom character sheet."
+                        : `${sheetChoices.length} sheet${sheetChoices.length === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected sheet.`
                     : node.data.cuVideoGeneration
                       ? `${targetVariantCount} image sheet${targetVariantCount === 1 ? "" : "s"} and ${targetVariantCount} CU video sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`
                       : `${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`}
@@ -11383,9 +11401,9 @@ function NodeBody({
               <button
                 className={`style-lock-button ${locked ? "locked" : ""}`}
                 type="button"
-                disabled={compiling || (!locked && (!(useCustomSheet ? customSheet?.localUrl : portrait?.localUrl) || !String(node.data.characterName || "").trim()))}
+                disabled={compiling || (!locked && (!(portrait?.localUrl || customSheets.length) || !String(node.data.characterName || "").trim()))}
                 onClick={() => (locked ? onCharacterUnlock(node.id) : onCharacterActivate(node))}
-                title={locked ? "Unlock character" : useCustomSheet ? "Lock custom character sheet" : `Generate and lock ${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"}`}
+                title={locked ? "Unlock character" : portrait?.localUrl ? `Generate and lock ${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"}` : "Lock the selected custom character sheet"}
               >
                 {compiling ? "Generating..." : locked ? <Lock size={15} /> : <Unlock size={15} />}
               </button>
@@ -11440,9 +11458,9 @@ function NodeBody({
                 <span>Generate a character sheet from Character Build</span>
               </div>
             )}
-            <label className="character-sheet-replace-button" title={node.data.resultUrl ? "Replace character sheet image" : "Upload character sheet image"} onPointerDown={(event) => event.stopPropagation()}>
+            <label className="character-sheet-replace-button" title="Add a custom character sheet" onPointerDown={(event) => event.stopPropagation()}>
               <ImagePlus size={14} />
-              <span>{node.data.resultUrl ? "Replace Sheet" : "Upload Sheet"}</span>
+              <span>Add Sheet</span>
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onCharacterSheetReplace?.(node, event.target.files?.[0])} />
             </label>
           </section>
@@ -17298,6 +17316,8 @@ function createDefaultNodeData(type, label, count) {
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
       customCharacterSheet: null,
+      characterCustomSheets: [],
+      activeCharacterSheetId: "",
       characterVoices: [],
       activeVoiceId: "",
       characterTab: "build",
@@ -22945,6 +22965,7 @@ function normalizeCurrentNode(node) {
 
   if (nextNode.type === "character") {
     const characterSheetVariants = normalizeCharacterSheetVariants(data);
+    const characterCustomSheets = normalizeCharacterCustomSheets({ ...data, characterSheetVariants });
     const normalizedData = {
       ...createDefaultNodeData("character", "Character", 1),
       ...data,
@@ -22953,10 +22974,14 @@ function normalizeCurrentNode(node) {
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       characterSheetVariants,
+      characterCustomSheets,
+      customCharacterSheet: null,
+      useCustomCharacterSheet: false,
       characterBatchProgress: null,
       characterTab: data.characterTab === "sheet" && data.resultUrl ? "sheet" : "build"
     };
-    const selectedVariant = characterSheetVariantForWardrobeId(normalizedData, normalizedData.activeWardrobeId);
+    normalizedData.activeCharacterSheetId = activeCharacterSheetId(normalizedData);
+    const selectedVariant = activeCharacterSheetVariant(normalizedData);
     return {
       ...nextNode,
       data: selectedVariant && normalizedData.locked && normalizedData.activated

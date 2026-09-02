@@ -1,3 +1,5 @@
+import { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
+
 export const characterVideoSheetPrompt = `Make one image:
 
 Study the reference image of the character and preserve the person's identity, physical features, body proportions, and selected wardrobe as closely as possible. The result must look realistic and authentic, with natural skin texture, true-to-life skin tones, fine detail, subtle film grain, and restrained cinematic finishing. Photograph the character with the appearance of a real cinema camera and a high-quality 35mm prime lens, high dynamic range, natural lens softness, and feature-film production quality.
@@ -29,13 +31,7 @@ export const characterVideoWardrobePrompt =
 export const characterVideoCustomSheetWardrobePrompt =
   "Wardrobe rule: preserve exactly the one selected outfit visible in the supplied completed character sheet. Reconstruct its clothing, footwear, fit, materials, colors, and styling consistently in both body panels and the visible neckline of the portrait. Do not introduce alternate clothing or a wardrobe comparison.";
 
-const defaultWardrobeId = "__default-wardrobe__";
-
-export function activeCharacterSheetVariant(data = {}) {
-  const targetId = data.activeWardrobeId || defaultWardrobeId;
-  const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
-  return variants.find((variant) => variant?.wardrobeId === targetId) || variants[0] || null;
-}
+export { activeCharacterSheetVariant };
 
 export function characterVideoSheetForNode(node) {
   if (!node?.data?.cuVideoGeneration) return null;

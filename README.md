@@ -31,6 +31,7 @@ Current release: `v3.0.0-beta.0`
 - **React Flow canvas**: Stable node identities, handles, selection, resizing, and non-scaling connection lines remain responsive across large graphs. Full node interfaces stay available at every zoom level; proxy/map modes are currently disabled.
 - **Provider routing**: Store multiple named Fal, Google, Krea, and OpenAI credentials, select one active key per service, and explicitly route Seedance, Google video/Veo, and Nano Banana Pro image generation to their supported provider.
 - **Film Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
+- **Character Sheet Library**: Build wardrobe-specific character sheets, add completed custom sheets without replacing generated variants, select the active identity reference, and preserve that selection for downstream image, video, Composer, and Storyboard work.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
 - **Current image models**: Work with OpenAI Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, REVE 2.1, Krea 2 Large, and Z-Image from the same reference-aware image workflow.
 - **Composer**: Choose Composer or Frame It mode. Block scenes with maquettes, Character bindings, props, and image planes, or pose and frame multiple 3D figures, then capture a shared guide-frame output for downstream image models.
