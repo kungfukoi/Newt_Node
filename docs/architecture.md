@@ -85,6 +85,8 @@ The active Character sheet is the full-resolution identity reference consumed by
 
 Generated and custom sheets coexist. Regeneration merges successful wardrobe variants and retains previous variants for failed wardrobes; removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
 
+`runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
+
 ## Persistence And Storage
 
 Workflow persistence is coordinated by `src/useWorkflowPersistence.js`, with draft state in `src/useNodeEditorDraft.js` and file/session/context helpers under `src/workflow*.js`.

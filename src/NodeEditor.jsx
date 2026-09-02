@@ -11181,7 +11181,7 @@ function NodeBody({
                   <span className="character-section-label">Notes</span>
                   <textarea
                     value={node.data.characterReferenceNotes || ""}
-                    placeholder="Personal reference notes"
+                    placeholder="Appearance or wardrobe details"
                     onChange={(event) => onUpdate(node.id, { characterReferenceNotes: event.target.value })}
                   />
                 </label>
