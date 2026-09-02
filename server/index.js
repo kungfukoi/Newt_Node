@@ -38,7 +38,7 @@ import {
   updateCurrentGenerationProgress
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
-import { sam3ImageOutputs } from "./sam3Outputs.js";
+import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "./sam3Outputs.js";
 import {
   activeProviderCredentials,
   legacyProviderCredentialStore,
@@ -4294,16 +4294,11 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
   }
 
   const endpoint = "fal-ai/sam-3/image";
-  const input = {
-    image_url: await uploadLocalOutputToFal(imageUrl),
+  const input = sam3ImageMaskInput({
+    imageUrl: await uploadLocalOutputToFal(imageUrl),
     prompt,
-    apply_mask: true,
-    output_format: "png",
-    return_multiple_masks: true,
-    max_masks: 3,
-    include_scores: true,
-    include_boxes: true
-  };
+    maxMasks: 3
+  });
 
   const result = await subscribeFal(endpoint, { input, logs: true });
   const { masks: remoteMasks, preview: remotePreview } = sam3ImageOutputs(result?.data);
@@ -7296,13 +7291,11 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
 
   const endpoint = "fal-ai/sam-3/video";
   const options = req.body.sam3Video || {};
-  const input = {
-    video_url: await uploadLocalOutputToFal(videoUrl),
+  const input = sam3VideoMaskInput({
+    videoUrl: await uploadLocalOutputToFal(videoUrl),
     prompt,
-    apply_mask: false,
-    video_output_type: "X264 (.mp4)",
-    detection_threshold: clampNumber(options.detectionThreshold, 0, 1, 0.5)
-  };
+    detectionThreshold: clampNumber(options.detectionThreshold, 0, 1, 0.5)
+  });
 
   const result = await subscribeFal(endpoint, { input, logs: true });
   const remoteVideo = normalizeFalFile(result?.data?.video);

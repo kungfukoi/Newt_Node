@@ -1,6 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sam3ImageOutputs } from "../server/sam3Outputs.js";
+import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "../server/sam3Outputs.js";
+
+test("SAM 3 image requests raw PNG mattes instead of masked RGB previews", () => {
+  assert.deepEqual(sam3ImageMaskInput({
+    imageUrl: "https://example.com/source.png",
+    prompt: "the foreground person",
+    maxMasks: 3
+  }), {
+    image_url: "https://example.com/source.png",
+    prompt: "the foreground person",
+    apply_mask: false,
+    output_format: "png",
+    return_multiple_masks: true,
+    max_masks: 3,
+    include_scores: true,
+    include_boxes: true
+  });
+});
+
+test("SAM 3 video requests an unapplied mask video", () => {
+  assert.deepEqual(sam3VideoMaskInput({
+    videoUrl: "https://example.com/source.mp4",
+    prompt: "the foreground person",
+    detectionThreshold: 0.65
+  }), {
+    video_url: "https://example.com/source.mp4",
+    prompt: "the foreground person",
+    apply_mask: false,
+    video_output_type: "X264 (.mp4)",
+    detection_threshold: 0.65
+  });
+});
 
 test("SAM 3 outputs keep masks primary and preview separate", () => {
   const output = sam3ImageOutputs({

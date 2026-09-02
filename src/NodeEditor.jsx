@@ -13717,7 +13717,7 @@ function NodeBody({
     const qwenZoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     const utilityOutputPort = {
       ...config.output[0],
-      label: isAutoAspect ? "Aspect output" : isCoverage ? "Coverage output" : isSam3Image ? "Mask output" : utilityOutputMediaType === "video" ? "Video output" : "Image output",
+      label: isAutoAspect ? "Aspect output" : isCoverage ? "Coverage output" : isSam3Image ? "Mask output" : isSam3Video ? "Mask video output" : utilityOutputMediaType === "video" ? "Video output" : "Image output",
       color: utilityOutputMediaType === "video" ? portColors.video : portColors.image
     };
     const controlVideoOutputPort = config.output.find((port) => port.id === "controlVideoOut");
