@@ -75,6 +75,7 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
+import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { runTrackedGeneration } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
@@ -7983,53 +7984,6 @@ function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
   return changed ? nextNodes : nodes;
 }
 
-const flowNodeNoDragSelector = [
-  "button",
-  "input",
-  "textarea",
-  "select",
-  "option",
-  "summary",
-  "label",
-  "a[href]",
-  "video",
-  "audio",
-  "canvas",
-  "[contenteditable='true']",
-  "[draggable='true']",
-  "[role='button']",
-  "[role='tab']",
-  "[role='tablist']",
-  "[role='slider']",
-  "[role='checkbox']",
-  "[role='radio']",
-  "[role='switch']",
-  "[role='menuitem']",
-  "[role='dialog']",
-  "[role='toolbar']",
-  "[data-node-drag-block]",
-  ".inline-port",
-  ".react-flow__resize-control",
-  ".media-preview",
-  ".preview-stage",
-  ".result-carousel",
-  ".composer-node-preview",
-  ".camera-viewport-shell",
-  ".model-3d-viewer",
-  ".edit-trim-timeline",
-  ".edit-image-tool-surface",
-  ".edit-brush-dialog",
-  ".edit-live-preview",
-  ".color-id-picker"
-].join(",");
-
-function markFlowNodeNoDragElements(root) {
-  if (!root || typeof root.matches !== "function") return;
-  const matches = root.matches(flowNodeNoDragSelector) ? [root] : [];
-  root.querySelectorAll?.(flowNodeNoDragSelector).forEach((element) => matches.push(element));
-  matches.forEach((element) => element.classList.add("nodrag"));
-}
-
 function NodeCard({
   node,
   defaultOutputPath,
@@ -8120,12 +8074,8 @@ function NodeCard({
     if (!flowManaged || !cardRef.current) return undefined;
     const card = cardRef.current;
     markFlowNodeNoDragElements(card);
-    const observer = new MutationObserver((records) => {
-      records.forEach((record) => {
-        record.addedNodes.forEach(markFlowNodeNoDragElements);
-      });
-    });
-    observer.observe(card, { childList: true, subtree: true });
+    const observer = new MutationObserver(markFlowNodeNoDragMutations);
+    observer.observe(card, flowNodeNoDragObserverOptions);
     return () => observer.disconnect();
   }, [flowManaged]);
 
@@ -11435,7 +11385,7 @@ function NodeBody({
             )}
             {characterSheetPreviewItem ? (
               <div
-                className="character-sheet-drag-source"
+                className="character-sheet-drag-source nodrag"
                 draggable
                 onPointerDown={(event) => event.stopPropagation()}
                 onDragStart={(event) => {
