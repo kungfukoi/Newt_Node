@@ -59,7 +59,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
     const itemIndex = Math.max(0, normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image").findIndex((item) => item.url === node.data.resultUrl));
     return (
       <div
-        className="media-preview aspect-safe-media-frame"
+        className="media-preview aspect-safe-media-frame nodrag"
         draggable
         onPointerDown={(event) => event.stopPropagation()}
         onDragStart={startPreviewDrag}
@@ -87,7 +87,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   if (node.type === "video") {
     return (
       <div
-        className="media-preview aspect-safe-media-frame"
+        className="media-preview aspect-safe-media-frame nodrag"
         draggable
         onPointerDown={(event) => event.stopPropagation()}
         onDragStart={startPreviewDrag}

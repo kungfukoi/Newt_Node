@@ -206,12 +206,18 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
 export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag, sheetKind = "image" }) {
   const isVideoSheet = sheetKind === "video";
   const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
+  const referenceNotes = node.type === "character" && typeof node.data.characterReferenceNotes === "string"
+    ? node.data.characterReferenceNotes.trim()
+    : "";
+  const sheetPrompt = referenceNotes
+    ? `${prompt}\n\nCharacter reference notes (preserve the required panel layout, portrait identity, and selected wardrobe):\n${referenceNotes}`
+    : prompt;
   const references = [
     { url: portrait.localUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
   ];
   const { response, data } = await nodeApi.generateImage({
-    prompt,
+    prompt: sheetPrompt,
     ...generationSettings,
     aspectRatio: "16:9",
     imagePromptUrls: references.map((item) => item.url),

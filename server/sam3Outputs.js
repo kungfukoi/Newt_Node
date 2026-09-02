@@ -9,6 +9,29 @@ function normalizeRemoteImage(value) {
   return null;
 }
 
+export function sam3ImageMaskInput({ imageUrl = "", prompt = "", maxMasks = 3 } = {}) {
+  return {
+    image_url: imageUrl,
+    prompt,
+    apply_mask: false,
+    output_format: "png",
+    return_multiple_masks: true,
+    max_masks: maxMasks,
+    include_scores: true,
+    include_boxes: true
+  };
+}
+
+export function sam3VideoMaskInput({ videoUrl = "", prompt = "", detectionThreshold = 0.5 } = {}) {
+  return {
+    video_url: videoUrl,
+    prompt,
+    apply_mask: false,
+    video_output_type: "X264 (.mp4)",
+    detection_threshold: detectionThreshold
+  };
+}
+
 export function sam3ImageOutputs(data = {}) {
   const masks = (Array.isArray(data.masks) ? data.masks : [data.mask])
     .map(normalizeRemoteImage)
