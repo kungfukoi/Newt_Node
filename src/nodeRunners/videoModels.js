@@ -205,7 +205,8 @@ export function normalizeVideoGenerationResult(data, index) {
     filePath: data.video.filePath || "",
     mimeType: data.video.mimeType || "",
     seed: data.seed,
-    cost: data.cost
+    cost: data.cost,
+    ...(data.generationRunId ? { generationRunId: data.generationRunId } : {})
   };
 }
 

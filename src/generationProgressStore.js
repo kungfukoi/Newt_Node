@@ -147,6 +147,7 @@ function refreshNodeSnapshot(nodeId) {
 
 function progressEntryVisible(entry, now = Date.now()) {
   if (!isTerminalProgressStatus(entry.status)) return true;
+  if ([...entriesByRunId.values()].some((other) => other.groupId === entry.groupId && !isTerminalProgressStatus(other.status))) return true;
   return now - Date.parse(entry.updatedAt || entry.startedAt || "") <= generationProgressTerminalDisplayMs;
 }
 

@@ -82,3 +82,14 @@ test("provider progress accepts direct, percentage-log, and step-log formats", (
   assert.equal(providerProgressPercent({ logs: [{ message: "Sampling step 12/30" }] }), 40);
   assert.equal(providerProgressPercent({ status: "IN_PROGRESS" }), null);
 });
+
+test("202 acceptance and browser disconnect do not complete or fail durable jobs", () => {
+  const request = { body: { generationRunId: "durable", nodeId: "video" }, durableGenerationOwned: true };
+  const response = new EventEmitter();
+  response.statusCode = 202;
+  generationProgressMiddleware(request, response, () => {});
+  response.emit("close");
+  assert.equal(listGenerationProgress()[0].status, "queued");
+  response.emit("finish");
+  assert.equal(listGenerationProgress()[0].status, "queued");
+});

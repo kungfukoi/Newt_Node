@@ -62,6 +62,8 @@ Configure provider credentials inside **Settings > API Credentials**. Each servi
 
 Models available through multiple services use the separate **Model Providers** setting. MiniMax H3 can be routed through Fal or a loopback SGLang service, Seedance 2.0 and Seedance 2.5 through Fal or Krea, and Google video/Veo and Nano Banana Pro image generation through Google or Fal without changing which credentials are saved.
 
+Seedance 2.0/2.5 Video Model generations now keep tracking accepted jobs beyond 20 minutes, recover after a restart, and show completed batch clips individually. Temporary network/download problems retry against the original job without submitting another paid generation. See [Seedance Generation Recovery](docs/remote-video-recovery.md) for behavior and limitations.
+
 ### macOS
 
 From Terminal in the repository folder:

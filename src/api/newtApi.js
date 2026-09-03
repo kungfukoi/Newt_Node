@@ -1,9 +1,20 @@
 import { apiErrorMessage } from "../apiErrors.js";
+import { supportsDurableVideo } from "../remoteVideoJobs.js";
+import { waitForRemoteVideo } from "../remoteVideoJobClient.js";
 
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
+
+export const remoteVideoJobsApi = {
+  get(runId) {
+    return fetchJsonApi(`/api/remote-video-jobs/${encodeURIComponent(runId)}`, {}, "Generation status", { preferControlServer: true, timeoutMs: 15000 });
+  },
+  list(scope) {
+    return fetchJsonApi(`/api/remote-video-jobs?scope=${encodeURIComponent(scope)}`, {}, "Pending generations", { preferControlServer: true, timeoutMs: 15000 });
+  }
+};
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
@@ -288,6 +299,16 @@ export const nodeApi = {
   },
 
   generateVideo(body, label = "Video generation") {
+    if (supportsDurableVideo(body.model)) {
+      const request = {
+        ...body, durableGeneration: true,
+        generationRunId: body.generationRunId || `video-${globalThis.crypto.randomUUID()}`
+      };
+      return waitForRemoteVideo(request, {
+        submit: (payload) => fetchJsonApi("/api/node/generate-video", jsonBody(payload), label, { retryLocalApi: false, timeoutMs: 120000 }),
+        get: remoteVideoJobsApi.get
+      });
+    }
     return fetchJsonApi("/api/node/generate-video", jsonBody(body), label);
   },
 

@@ -67,6 +67,8 @@ The normal remote-generation path is:
 
 Generation progress is request-scoped in `server/generation-progress.js`, aggregated by client helpers, and rendered by `src/components/GenerationProgress.jsx`. Progress polling is shared and must not rebuild the graph on every tick.
 
+Seedance 2.0/2.5 node requests additionally use durable background jobs in `server/remote-video-jobs.js`, provider adapters in `server/seedance-job-provider.js`, and HTTP acceptance/lookup in `server/routes/remote-video-jobs.js`. A saved provider ID outlives its originating HTTP connection. The client waits through `src/remoteVideoJobClient.js`; `src/useRemoteVideoRecovery.js` reconciles original-workflow Video Model results after reload. Downloads reuse saved targets and history deduplicates by generation run ID. See [Seedance Generation Recovery](remote-video-recovery.md) for state transitions, limitations, and verification.
+
 ## Media And Preview Flow
 
 `src/mediaAssets.js` owns accepted media and drag/drop/import shapes. `src/mediaResults.js` owns normalized result items. `src/components/MediaViews.jsx` owns shared image/video/3D preview surfaces, result navigation, output rail, and lightbox behavior.

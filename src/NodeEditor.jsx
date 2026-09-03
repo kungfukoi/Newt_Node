@@ -369,6 +369,8 @@ import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersist
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { createWorkflowSessionId } from "./workflowSession.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
+import { useRemoteVideoRecovery } from "./useRemoteVideoRecovery.js";
+import { appendUniqueVideoResults, remoteVideoScope } from "./remoteVideoJobs.js";
 import {
   createWorkflowClipboardPayload,
   normalizeWorkflowClipboardPayload,
@@ -1282,6 +1284,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => nodes.filter((node) => selectedNodeSet.has(node.id) && previewVideoSourceForNode(node, incomingByNode)),
     [nodes, selectedNodeSet, incomingByNode]
   );
+  const currentVideoScopeRef = React.useRef("");
+  currentVideoScopeRef.current = remoteVideoScope({ projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath });
+  useRemoteVideoRecovery({
+    context: { projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath },
+    nodesRef, edgesRef, updateNode, loadOutputHistory
+  });
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const overviewRendering = false;
   const renderedNodes = nodes;
@@ -7084,6 +7092,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming, {
         includeCharacterInstructions: !directorPackagePrompt
       });
+      const completedVideos = [];
+      const runScope = remoteVideoScope(requestContext);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
           node: currentNode,
@@ -7094,13 +7104,33 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           index,
           generationGroupId,
           batchTotal: batchCount
+        }).then((generated) => {
+          completedVideos.push(generated);
+          if (currentVideoScopeRef.current !== runScope) return generated;
+          const resultItems = appendUniqueVideoResults(previousVideoResults, completedVideos);
+          updateNode(currentNode.id, {
+            status: "running", resultItems, resultUrl: generated.url,
+            remoteVideoRunIds: [...new Set([...(currentNode.data.remoteVideoRunIds || []), ...completedVideos.map((item) => item.generationRunId).filter(Boolean)])],
+            selectedResultIndex: resultItems.findIndex((item) => item.url === generated.url), resultText: ""
+          });
+          markOutputTargetSaved(outputTarget, completedVideos, "video");
+          loadOutputHistory();
+          return generated;
         })
       );
       const settled = await Promise.allSettled(runs);
       const successes = fulfilledRunValues(settled);
       const failures = rejectedRunResults(settled);
+      if (currentVideoScopeRef.current !== runScope) return { status: "complete" };
+      const remoteVideoRunIds = [...new Set([
+        ...(currentNode.data.remoteVideoRunIds || []),
+        ...successes.map((item) => item.generationRunId),
+        ...failures.map((item) => item.reason?.generationRunId)
+      ].filter(Boolean))];
+      updateNode(currentNode.id, { remoteVideoRunIds });
       ensureRunSuccesses(successes, failures, "Video generation failed.");
-      const { resultItems, firstNewIndex } = appendedNodeResultState(previousVideoResults, successes, "video");
+      const resultItems = appendUniqueVideoResults(previousVideoResults, successes);
+      const firstNewIndex = resultItems.findIndex((item) => item.url === successes[0].url);
 
       updateNode(currentNode.id, {
         status: "complete",
@@ -20882,7 +20912,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     ...progress
   }));
   if (!response.ok) {
-    throw new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`);
+    throw Object.assign(new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`), { generationRunId: data.generationRunId });
   }
 
   return normalizeVideoGenerationResult(data, index);

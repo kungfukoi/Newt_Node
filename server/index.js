@@ -38,6 +38,10 @@ import {
   updateCurrentGenerationProgress
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
+import { createRemoteVideoJobs } from "./remote-video-jobs.js";
+import { createSeedanceJobAdapter, providerKeyFingerprint } from "./seedance-job-provider.js";
+import { durableVideoRequestHandler, registerRemoteVideoJobRoutes } from "./routes/remote-video-jobs.js";
+import { workflowContextPayload } from "../src/workflowContext.js";
 import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "./sam3Outputs.js";
 import {
   activeProviderCredentials,
@@ -592,6 +596,18 @@ await Promise.all([
 
 await refreshRuntimeConfigFromEnvFile();
 
+const remoteVideoJobs = await createRemoteVideoJobs({
+  filePath: path.join(dataDir, "remote-video-jobs.json"),
+  adapter: createSeedanceJobAdapter({
+    getKey: async (provider) => {
+      await refreshRuntimeConfigFromEnvFile();
+      return provider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY;
+    },
+    extractKreaVideo: extractKreaJobResultUrl
+  }),
+  finalize: finalizeSeedanceVideo
+});
+
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadsDir),
   filename: (_req, file, callback) => {
@@ -660,8 +676,11 @@ app.use("/api", async (_req, _res, next) => {
 app.use("/api/node", generationProgressMiddleware);
 app.get("/api/generation-progress", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ entries: listGenerationProgress(), serverTime: new Date().toISOString() });
+  const entries = new Map(listGenerationProgress().map((entry) => [entry.runId, entry]));
+  remoteVideoJobs.progress().forEach((entry) => entries.set(entry.runId, entry));
+  res.json({ entries: [...entries.values()], serverTime: new Date().toISOString() });
 });
+registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
   safeRelativeAssetPath,
   resolveLocalAssetPath,
@@ -743,6 +762,7 @@ function buildHealthPayload() {
       storyboardQc: true,
       mediaThumbnail: true,
       generationProgress: true,
+      remoteVideoJobs: true,
       workflowAutosave: true,
       settings: true
     },
@@ -5565,7 +5585,7 @@ async function runTransitionBuilderUtilityVideo(req, res, { startFrameUrls, endF
   );
 }
 
-app.post("/api/node/generate-video", async (req, res) => {
+app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res) => {
   try {
     updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing video generation" });
     const prompt = String(req.body.prompt || "").trim();
@@ -5779,9 +5799,33 @@ app.post("/api/node/generate-video", async (req, res) => {
     let resultSeed = requestedSeed ?? null;
     let remoteVideo;
     let cost;
-    let providerName;
     let runtimeAspectRatio = aspectRatio;
     let runtimeDurationSeconds = durationToSeconds(duration);
+
+    function seedanceJobSpec(input) {
+      return {
+        provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
+        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY),
+        body: {
+          ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
+          outputFileNameBase: req.body.outputFileNameBase,
+          generationGroupId: req.body.generationGroupId,
+          generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal
+        },
+        prompt, submittedPrompt, routeKind, seedance25, cost,
+        runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
+        settings: {
+          resolution, duration, aspectRatio, generateAudio, seed: requestedSeed ?? null, runtimeProvider,
+          startFrameCount: startFrameUrl ? 1 : 0, endFrameCount: endFrameUrl ? 1 : 0,
+          referenceImageCount: referenceImageUrls.length, referenceImageNames,
+          referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length
+        }
+      };
+    }
+    async function acceptSeedanceJob(input) {
+      const job = await remoteVideoJobs.create(req.body.generationRunId, seedanceJobSpec(input), req.durableRequestHash);
+      return res.status(202).json({ job });
+    }
 
     if (runtimeProvider === "fal") {
       const input = {
@@ -5805,12 +5849,12 @@ app.post("/api/node/generate-video", async (req, res) => {
       }
 
       endpoint = seedance25 ? seedance25Endpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
+      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, modelName: selectedVideoModel.displayName, inputVideoDurationSeconds: referenceVideoDurationSeconds });
+      if (req.durableRequestHash) return await acceptSeedanceJob(input);
       const result = await subscribeFal(endpoint, { input, logs: true });
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? requestedSeed ?? null;
       remoteVideo = result?.data?.video;
-      providerName = "fal.ai";
-      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, modelName: selectedVideoModel.displayName, inputVideoDurationSeconds: referenceVideoDurationSeconds });
 
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
@@ -5846,10 +5890,6 @@ app.post("/api/node/generate-video", async (req, res) => {
         if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, audioLimit).map(uploadLocalOutputToKrea));
       }
 
-      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
-      requestId = kreaResult.requestId;
-      remoteVideo = kreaResult.remoteVideo;
-      providerName = "Krea";
       cost = estimateKreaSeedanceCost({
         modelName: selectedVideoModel.displayName,
         durationSeconds: runtimeDurationSeconds,
@@ -5858,86 +5898,69 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
       cost.aspectRatio = kreaAspectRatio;
       cost.routeKind = routeKind;
+      if (req.durableRequestHash) return await acceptSeedanceJob(input);
+      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
+      requestId = kreaResult.requestId;
+      remoteVideo = kreaResult.remoteVideo;
     }
 
-    const output = await downloadVideo(req, remoteVideo.url, routeKind, { stripAudio: !generateAudio });
-    if (seedance25) {
-      remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-      if (runtimeProvider === "fal") {
-        cost = estimateSeedanceCost({
-          duration,
-          durationSeconds: remoteVideo.duration,
-          inputVideoDurationSeconds: referenceVideoDurationSeconds,
-          resolution,
-          aspectRatio: runtimeAspectRatio,
-          endpoint,
-          routeKind,
-          modelName: selectedVideoModel.displayName
-        });
-      } else {
-        cost = estimateKreaSeedanceCost({
-          modelName: selectedVideoModel.displayName,
-          durationSeconds: positiveNumber(remoteVideo.duration) || runtimeDurationSeconds,
-          resolution,
-          hasVideoReference: referenceVideoUrls.length > 0
-        });
-        cost.aspectRatio = runtimeAspectRatio;
-        cost.routeKind = routeKind;
-      }
-    }
-    await appendHistory({
-      id: requestId || randomUUID(),
-      createdAt: new Date().toISOString(),
-      mediaType: "video",
-      provider: providerName,
-      modelName: selectedVideoModel.displayName,
-      endpoint,
-      mode: routeKindLabel(routeKind),
-      prompt,
-      submittedPrompt,
-      project: projectFromBody(req.body),
-      node: nodeFromBody(req.body),
-      settings: {
-        resolution,
-        duration,
-        aspectRatio,
-        generateAudio,
-        startFrameCount: startFrameUrl ? 1 : 0,
-        endFrameCount: endFrameUrl ? 1 : 0,
-        referenceImageCount: referenceImageUrls.length,
-        referenceImageNames,
-        referenceVideoCount: referenceVideoUrls.length,
-        referenceVideoNames,
-        referenceAudioCount: referenceAudioUrls.length,
-        seed: resultSeed,
-        runtimeProvider
-      },
-      cost,
-      remoteVideo,
-      localVideo: output.publicPath,
-      outputFileName: output.fileName,
-      outputBytes: output.bytes
-    });
-
-    res.json({
-      requestId,
-      seed: resultSeed,
-      endpoint,
-      provider: providerName,
-      modelName: selectedVideoModel.displayName,
-      submittedPrompt,
-      cost,
-      video: {
-        ...remoteVideo,
-        localUrl: output.publicPath,
-        fileName: output.fileName
-      }
-    });
+    res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(), requestId, remote: { video: remoteVideo, seed: resultSeed } }));
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Video generation failed.");
   }
-});
+}, remoteVideoJobs));
+
+async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
+  const spec = job.spec;
+  const { body, settings, endpoint, routeKind, modelName } = spec;
+  const request = { body };
+  let remoteVideo = job.remote.video;
+  const resultSeed = job.remote.seed ?? settings.seed;
+  let cost = spec.cost;
+  let target = job.target;
+  if (!target) {
+    target = await createManagedAssetTarget(request, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4");
+    if (job.runId) {
+      // Persist the reservation on disk too: in-memory Output reservations expire
+      // and disappear on restart while a durable download can still be pending.
+      await writeFile(target.filePath, "", { flag: "wx" });
+    }
+    await checkpoint({ target });
+  }
+  // Reserve the output once, then overwrite that same target on save retries.
+  let output = job.savedOutput;
+  if (!output || !existsSync(output.filePath)) {
+    output = await downloadVideo(request, remoteVideo.url, routeKind, { stripAudio: !settings.generateAudio, target, timeoutMs: 5 * 60 * 1000 });
+    await checkpoint({ savedOutput: output });
+  }
+  if (spec.seedance25) {
+    remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+    cost = spec.provider === "fal" ? estimateSeedanceCost({
+      duration: settings.duration, durationSeconds: remoteVideo.duration,
+      inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
+      aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
+    }) : estimateKreaSeedanceCost({
+      modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
+      resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
+    });
+    if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
+  }
+  const provider = spec.provider === "fal" ? "fal.ai" : "Krea";
+  await appendHistory({
+    id: job.requestId || job.runId || randomUUID(), createdAt: job.createdAt || new Date().toISOString(),
+    mediaType: "video", provider, modelName, endpoint, mode: routeKindLabel(routeKind),
+    prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
+    project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed },
+    cost, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
+    ...(job.runId ? { generationRunId: job.runId } : {})
+  }, { deduplicate: Boolean(job.runId) });
+  return {
+    requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
+    submittedPrompt: spec.submittedPrompt, cost,
+    video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
+  };
+}
 
 async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   const durationSeconds = normalizeGeminiOmniDuration(req.body.duration);
@@ -11471,17 +11494,19 @@ async function uploadToFal(file) {
   return fal.storage.upload(falFile);
 }
 
-async function downloadVideo(req, url, kind, { stripAudio = false, extension: requestedExtension = "" } = {}) {
+async function downloadVideo(req, url, kind, { stripAudio = false, extension: requestedExtension = "", target = null, timeoutMs = 0 } = {}) {
   updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 93, message: "Queued generated video for local save" });
   return queueMediaPersistence(async () => {
     updateCurrentGenerationProgress({ status: "running", phase: "downloading", percent: 94, message: "Downloading generated video" });
-    const response = await fetch(url);
+    const response = await fetch(url, timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {});
     if (!response.ok) {
-      throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
+      throw Object.assign(new Error(`Could not download generated video: ${response.status} ${response.statusText}`), {
+        refreshRemote: [403, 404].includes(response.status)
+      });
     }
 
     const extension = requestedExtension || path.extname(new URL(url).pathname) || ".mp4";
-    const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+    const output = target || await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
     const bytes = Buffer.from(await response.arrayBuffer());
     await writeFileWithRetry(output.filePath, bytes);
     const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
@@ -14428,9 +14453,10 @@ function truncateString(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
-async function appendHistory(item) {
+async function appendHistory(item, { deduplicate = false } = {}) {
   const write = historyWriteQueue.then(async () => {
     const history = await readHistory();
+    if (deduplicate && history.some((entry) => entry.generationRunId === item.generationRunId)) return;
     history.unshift(item);
     await writeHistory(history.slice(0, maxHistoryItems));
   });

@@ -398,8 +398,10 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Supported phases are `queued`, `generating`, `downloading`, `finalizing`, `complete`, and `failed`. The UI must show a real filling track, a phase label, elapsed time, batch completion, queue position when available, and a terminal result.
 - Prefer provider-reported percent or step/frame logs. When a provider supplies no usable percent, show a clearly labeled estimate derived from phase and elapsed time; never present an estimate as provider-reported truth.
 - Batch progress aggregates all runs in a generation group. Preserve completed batch items when another item fails, and retain the terminal bar long enough for the user to read it.
+- Keep terminal sibling entries in batch accounting while any sibling is pending, even when the normal terminal display period has expired.
+- Seedance 2.0/2.5 node requests use durable job acceptance and recovery. A 20-minute elapsed time warns; it does not prove failure. Persist provider IDs before polling, retry status/downloads without a new paid submission, bind recovery to the original credential, publish each completed clip immediately, and deduplicate output/history reconciliation. Never silently retry an ambiguous paid POST. See [Seedance Generation Recovery](remote-video-recovery.md).
 - The progress component is node-scoped and accessible: expose `role=progressbar`, value bounds, a numeric value when determinate, and useful text when indeterminate.
-- Progress polling must stop when there are no active runs and must not trigger full graph updates on each poll. Keep subscription and aggregation logic outside `NodeEditor.jsx`.
+- High-frequency progress polling must stop when there are no active runs; a lower-frequency mounted-workspace discovery poll may find recovered jobs. Polling must not trigger full graph updates unless result or node status actually changes. Keep subscription, recovery, and aggregation logic outside `NodeEditor.jsx`.
 
 ## Composer Node Standard
 
@@ -676,6 +678,7 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.
 - Clear stale `running` state on load.
+- After load, reconcile saved remote-video jobs only into their original workflow/package scope and existing node IDs. Preserve `data.remoteVideoRunIds` acknowledgements so completed jobs are not reinserted after the user removes a result. Do not copy job ownership into Save As workflows or newly pasted nodes.
 - Keep `resultItems`, `resultUrl`, and selected result indexes compatible with existing workflows.
 - Store reusable assets under `public/models` or `public/models/poses` only when they should be versioned with the repo.
 - Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, unpackaged helper dependencies under `/outputs/<workflow-name>/dependencies/`, and registry copies of saved workflows under `/saved_workflows`.

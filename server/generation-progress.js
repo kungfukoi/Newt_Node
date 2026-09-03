@@ -23,13 +23,14 @@ export function generationProgressMiddleware(req, res, next) {
   let responseFinished = false;
   res.once("finish", () => {
     responseFinished = true;
+    if (res.statusCode === 202) return;
     const failed = res.statusCode >= 400;
     updateGenerationProgress(runId, failed
       ? { status: "failed", phase: "failed", message: `Generation failed (HTTP ${res.statusCode}).` }
       : { status: "completed", phase: "complete", percent: 100, message: "Complete" });
   });
   res.once("close", () => {
-    if (!responseFinished && !res.writableEnded) {
+    if (!responseFinished && !res.writableEnded && !req.durableGenerationOwned) {
       updateGenerationProgress(runId, { status: "failed", phase: "failed", message: "Generation connection closed." });
     }
   });
