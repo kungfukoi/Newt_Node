@@ -1,6 +1,6 @@
 export const nodeTypeDefinitions = [
   { type: "plainText", label: "Text" },
-  { type: "text", label: "Text Model" },
+  { type: "text", label: "Text Model", catalog: false },
   { type: "textAgent", label: "Text Agent" },
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },

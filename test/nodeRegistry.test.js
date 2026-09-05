@@ -11,11 +11,14 @@ test("consolidated legacy node types remain loadable but are hidden from the cat
   assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "frameIt"), false);
 });
 
-test("Text Agent appears alongside Text Model without replacing saved Text Model nodes", () => {
+test("Text Model remains loadable but is hidden while Text Agent stays available", () => {
   const textModelIndex = nodeTypeDefinitions.findIndex(({ type }) => type === "text");
   assert.notEqual(textModelIndex, -1);
   assert.equal(nodeTypeDefinitions[textModelIndex + 1]?.type, "textAgent");
+  assert.equal(nodeTypeLabel("text"), "Text Model");
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "text"), false);
   assert.equal(nodeTypeLabel("textAgent"), "Text Agent");
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "textAgent"), true);
 });
 
 
