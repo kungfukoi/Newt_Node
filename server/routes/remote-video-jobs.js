@@ -2,9 +2,17 @@ import { createHash } from "node:crypto";
 import { supportsDurableVideo } from "../../src/remoteVideoJobs.js";
 
 export function registerRemoteVideoJobRoutes(app, jobs) {
+  app.post("/api/remote-video-jobs/:runId/recover", async (req, res) => {
+    try { res.json({ job: await jobs.recover(req.params.runId, req.body) }); }
+    catch (error) {
+      const status = [400, 403, 404, 409].includes(error.statusCode) ? error.statusCode : 503;
+      res.status(status).json({ error: status === 503 ? "Recovery could not be verified. Check the original provider key, job ID, and local media, then retry this recovery action." : error.message });
+    }
+  });
   app.get("/api/remote-video-jobs", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json({ jobs: jobs.list(String(req.query.scope || "")) });
+    const scope = String(req.query.scope || "");
+    res.json(jobs.changes ? jobs.changes(scope, req.query.cursor) : { jobs: jobs.list(scope) });
   });
   app.get("/api/remote-video-jobs/:runId", (req, res) => {
     res.setHeader("Cache-Control", "no-store");

@@ -37,17 +37,18 @@ Current release: `v3.0.0-beta.0`
 - **Composer**: Choose Composer or Frame It mode. Block scenes with maquettes, Character bindings, props, and image planes, or pose and frame multiple 3D figures, then capture a shared guide-frame output for downstream image models.
 - **Edit node**: Image and Video modes expose only compatible local ffmpeg-backed tools. Controls include source-sized scale, interactive crop, rotate, flip, trim with a draggable timeline, FPS, reverse, color controls, blur, sharpening, vignette, noise, Invert, edge detect, text overlay, and brush inpaint with mask output. Local preview frames update while controls change.
 - **Timeline node**: Connected sources and directly dropped video, still, or audio outputs populate a reusable one-column media bin with uncropped thumbnails and enlarged source viewing. Connected bin sources remain linked by source node and output port, so a regenerated upstream result replaces the bin asset in place and updates every timeline instance; direct drops remain independent snapshots. Drag a bin asset onto compatible tracks as many times as needed, then split, trim, ripple, slip, move, copy/paste/delete clips contextually, zoom, scrub against generated audio waveforms, set visible In/Out markers with I and O, jump to them with { and }, loop playback strictly inside the marked range, undo/redo, and render an H.264/AAC timeline locally with FFmpeg. Timeline owns the playhead and emits live frames to every connected Preview node.
-- **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview without cropping, include an open-output-folder action, and can be dragged back into the graph. After opening a rail image, use Left/Right Arrow to step through the other images.
+- **Preview rail**: A permanent project catalog keeps generations beyond the recent-history window, even after deleting source nodes. The single-column rail loads older results incrementally, uses lightweight video posters, preserves aspect ratios, and includes full-size viewing, open-folder, and drag-back-to-canvas actions. After opening a rail image, use Left/Right Arrow to step through other images.
 - **Video handling**: Video thumbnails and result panes keep native scrub controls; use their drag grip or Ctrl-drag the video to create a media node or add the output directly to an Timeline bin.
 - **Generation progress**: Model nodes show real provider progress when available and a clearly marked estimate otherwise, including batch completion, queue position, elapsed time, and terminal success/failure states.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Settings**: Local API keys, provider routing, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page.
-- **Cross-platform launchers**: Windows and macOS launchers are included for local app-style startup.
+- **Cross-platform launchers**: Windows and macOS share supervised production startup, rotating logs, and bounded crash recovery. Development watch mode remains separate.
+- **Production reliability**: Recoverable history backups, bounded generation scheduling, inline uncertain-job recovery, and opt-in Settings diagnostics protect long-running work. See [Production Reliability](docs/production-reliability.md).
 
 ## Requirements
 
-- Node.js 20 or newer is recommended.
+- Node.js 22.12 or newer on the 22 LTS line is recommended. The current Vite toolchain requires `^20.19.0 || >=22.12.0`.
 - npm.
 - Application packages, including the `@xyflow/react` canvas runtime, are declared in `package.json` and pinned by `package-lock.json`.
 - At least one supported provider API key for remote generation.

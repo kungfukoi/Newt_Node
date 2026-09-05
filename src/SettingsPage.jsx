@@ -24,6 +24,7 @@ import {
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
+import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
 const providerDefinitions = Object.freeze([
   Object.freeze({ id: "fal", label: "Fal" }),
@@ -67,7 +68,7 @@ export default function SettingsPage() {
       const data = await settingsApi.load();
       applyLoadedSettings(data);
       setStatus("ready");
-      setMessage(data.apiKeysFound ? "" : "No API keys found.");
+      setMessage(data.historyRecoveryNotice || (data.apiKeysFound ? "" : "No API keys found."));
       setLastUpdated(new Date());
       await refreshKeyValidation();
       refreshComfyWanStatus(data.comfyWanRootPath || "", { quiet: true });
@@ -526,6 +527,10 @@ export default function SettingsPage() {
               <span>{busy === "restart" ? "Restarting" : "Restart"}</span>
             </button>
           </div>
+        </CollapsibleSettingsSection>
+
+        <CollapsibleSettingsSection title="Diagnostics" open={openSections.diagnostics} onToggle={() => toggleSection("diagnostics")} wide>
+          {openSections.diagnostics && <DiagnosticsPanel />}
         </CollapsibleSettingsSection>
 
         {(message || updateLog) && (

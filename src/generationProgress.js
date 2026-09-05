@@ -55,6 +55,7 @@ export function progressEntryFromRequestMetadata(metadata, now = new Date().toIS
 }
 
 export function generationEntryProgress(entry = {}, now = Date.now()) {
+  if (entry.status === "attention") return { percent: null, estimated: false };
   const exactPercent = normalizedPercent(entry.percent);
   if (exactPercent !== null) return { percent: exactPercent, estimated: false };
 
@@ -102,15 +103,17 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
   const active = latestGroup.filter((entry) => !isTerminalProgressStatus(entry.status));
   const terminal = latestGroup.filter((entry) => isTerminalProgressStatus(entry.status));
   const failed = terminal.filter((entry) => entry.status === "failed");
+  const attention = terminal.filter((entry) => entry.status === "attention");
   const batchTotal = Math.max(1, ...latestGroup.map((entry) => positiveInteger(entry.batchTotal, 1)));
   const settledCount = Math.min(batchTotal, terminal.length);
   const groupIncomplete = settledCount < batchTotal;
   const completedCount = Math.min(batchTotal, terminal.filter((entry) => entry.status === "completed").length);
   const current = [...active].sort((first, second) => entryUpdatedAt(second) - entryUpdatedAt(first))[0] || latestUpdated;
-  const phase = progressPhase(active, failed, groupIncomplete);
-  const status = active.length || groupIncomplete
+  const needsAttention = !active.length && attention.length > 0;
+  const phase = needsAttention ? "attention" : progressPhase(active, failed, groupIncomplete);
+  const status = needsAttention ? "attention" : active.length || groupIncomplete
     ? (phase === "queued" ? "queued" : "running")
-    : failed.length
+    : attention.length ? "attention" : failed.length
       ? "failed"
       : "completed";
   const activeProgress = active.map((entry) => generationEntryProgress(entry, now));
@@ -120,9 +123,9 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
   let percent = null;
   let determinate = false;
   let estimated = false;
-  if (!active.length && !groupIncomplete) {
-    percent = 100;
-    determinate = true;
+  if (needsAttention || (!active.length && !groupIncomplete)) {
+    percent = attention.length ? null : 100;
+    determinate = !attention.length;
   } else if (batchTotal > 1 && (settledCount > 0 || numericActiveProgress.length)) {
     percent = Math.min(99, ((settledCount + numericActiveProgress.reduce((sum, value) => sum + value / 100, 0)) / batchTotal) * 100);
     determinate = true;
@@ -150,6 +153,7 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
     settledCount,
     completedCount,
     failedCount: failed.length,
+    attentionCount: attention.length,
     queuePosition: current.queuePosition ?? null,
     message: current.message || phaseLabel(phase),
     startedAt: Number.isFinite(startedAt) ? new Date(startedAt).toISOString() : current.startedAt,
@@ -165,7 +169,8 @@ export function phaseLabel(phase) {
     downloading: "Downloading",
     finalizing: "Finalizing",
     complete: "Complete",
-    failed: "Failed"
+    failed: "Failed",
+    attention: "Needs attention"
   })[phase] || "Generating";
 }
 
@@ -177,7 +182,7 @@ export function formatGenerationElapsed(milliseconds) {
 }
 
 export function isTerminalProgressStatus(status) {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "failed" || status === "attention";
 }
 
 export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {

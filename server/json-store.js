@@ -1,13 +1,15 @@
 import path from "node:path";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, open, readdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
-  copyFileWithRetry,
   readFileWithRetry,
   renameFileWithRetry,
-  statFileWithRetry,
-  writeFileWithRetry
+  retryTransientFileOperation,
+  statFileWithRetry
 } from "./file-write.js";
+
+const pendingWrites = new Map();
 
 export async function readJsonFile(filePath, fallback) {
   try {
@@ -17,24 +19,36 @@ export async function readJsonFile(filePath, fallback) {
   }
 }
 
-export async function writeJsonAtomic(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true });
+export function writeJsonAtomic(filePath, value, { renameFile = renameFileWithRetry } = {}) {
+  const key = path.resolve(filePath);
   const json = JSON.stringify(value, null, 2);
   JSON.parse(json);
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  const operation = (pendingWrites.get(key) || Promise.resolve()).catch(() => {}).then(() => replaceJson(filePath, json, renameFile));
+  pendingWrites.set(key, operation);
+  operation.finally(() => {
+    if (pendingWrites.get(key) === operation) pendingWrites.delete(key);
+  }).catch(() => {});
+  return operation;
+}
+
+async function replaceJson(filePath, json, renameFile) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
 
   try {
-    await writeFileWithRetry(tempPath, json);
-    try {
-      await renameFileWithRetry(tempPath, filePath, { attempts: 3, initialDelayMs: 50, maximumDelayMs: 100 });
-    } catch (error) {
-      if (!["EPERM", "EACCES", "EEXIST"].includes(error?.code)) throw error;
-      await copyFileWithRetry(tempPath, filePath);
-      await rm(tempPath, { force: true }).catch(() => {});
-    }
-  } catch (error) {
+    await retryTransientFileOperation(async () => {
+      const handle = await open(tempPath, "w");
+      try {
+        await handle.writeFile(json, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    });
+    // Never copy over a live document: readers must see the old or new JSON in full.
+    await renameFile(tempPath, filePath);
+  } finally {
     await rm(tempPath, { force: true }).catch(() => {});
-    throw error;
   }
 }
 

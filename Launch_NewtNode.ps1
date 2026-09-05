@@ -59,7 +59,7 @@ try {
   Write-Host "NewtNode server is already running on port $apiPort."
 } catch {
   Write-Host "Starting NewtNode server on port $apiPort..."
-  Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "server") -WorkingDirectory $root -WindowStyle Minimized
+  Start-Process -FilePath (Get-Command node).Source -ArgumentList @('"' + (Join-Path $root "scripts\localServerSupervisor.mjs") + '"') -WorkingDirectory $root -WindowStyle Hidden
 }
 
 Write-Host "Waiting for the NewtNode API..."
@@ -86,7 +86,7 @@ try {
   Write-Host "NewtNode client is already running."
 } catch {
   Write-Host "Starting the optimized NewtNode client on port $clientPort..."
-  Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "preview", "--", "--port", "$clientPort", "--strictPort") -WorkingDirectory $root -WindowStyle Minimized
+  Start-Process -FilePath (Get-Command node).Source -ArgumentList @('"' + (Join-Path $root "scripts\localServerSupervisor.mjs") + '"', "--client") -WorkingDirectory $root -WindowStyle Hidden
 }
 
 Write-Host "Waiting for NewtNode..."

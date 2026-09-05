@@ -1539,6 +1539,11 @@ textarea::placeholder {
   gap: 8px;
 }
 
+.runtime-diagnostics > label { display: flex; align-items: center; gap: 8px; }
+.runtime-diagnostics dl { margin: 16px 0; }
+.runtime-diagnostics dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 6px 0; }
+.runtime-diagnostics dd { margin: 0; overflow-wrap: anywhere; }
+
 .settings-actions button {
   display: inline-flex;
   align-items: center;

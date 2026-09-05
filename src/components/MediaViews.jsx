@@ -128,14 +128,28 @@ export function UploadIcon({ type }) {
 
 export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
   items,
+  total = 0,
   onClose,
   onOpenFolder,
   onRefresh,
+  onLoadMore,
+  hasMore = false,
+  loading = false,
+  error = "",
   onPreviewOpen,
   openFolderBusy = false,
   outputDragMime = defaultOutputDragMime
 }) {
   const drawerRef = React.useRef(null);
+  const moreRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!hasMore || loading || error || !moreRef.current || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) onLoadMore?.();
+    }, { root: moreRef.current.closest(".project-output-list"), rootMargin: "180px" });
+    observer.observe(moreRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loading, error, onLoadMore]);
   const resizeDragRef = React.useRef(null);
   const resizeFrameRef = React.useRef(null);
   const [drawerWidth, setDrawerWidth] = React.useState(projectOutputDrawerDefaultWidth);
@@ -261,6 +275,7 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
         <GripVertical size={12} aria-hidden="true" />
       </div>
       <div className="output-drawer-header">
+        <small className="project-output-count" title="Project outputs">{Math.max(total, items.length).toLocaleString()}</small>
         <div className="output-drawer-actions">
           <button onClick={onOpenFolder} disabled={!onOpenFolder || openFolderBusy} title="Open output folder" aria-label="Open output folder">
             <FolderOpen size={14} />
@@ -273,7 +288,7 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
           </button>
         </div>
       </div>
-      <div className="project-output-list">
+      <div className="project-output-list" aria-busy={loading}>
         {items.length ? (
           items.map((item) => (
             <ProjectOutputThumb
@@ -289,6 +304,8 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
             <ImagePlus size={22} />
           </div>
         )}
+        {error && <button type="button" className="project-output-more" title={error} aria-label={error} onClick={onRefresh}><RefreshCw size={16} /></button>}
+        {hasMore && <button ref={moreRef} type="button" className="project-output-more" title="Load more project outputs" aria-label="Load more project outputs" disabled={loading} onClick={onLoadMore}><Plus size={16} /></button>}
       </div>
     </aside>
   );
@@ -296,7 +313,9 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
 
 const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onDragEnd, onPreviewOpen }) {
   const thumbRef = React.useRef(null);
-  const mediaSrc = useLazyRailMediaSrc(thumbRef, displayMediaUrl(item.type === "image" ? previewImageUrl(item) : item.thumbnailUrl || item.url));
+  const posterUrl = item.thumbnailUrl && /\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(item.thumbnailUrl) ? item.thumbnailUrl : `/api/video-poster?url=${encodeURIComponent(item.url)}`;
+  const mediaSrc = useLazyRailMediaSrc(thumbRef, displayMediaUrl(item.type === "image" ? previewImageUrl(item) : item.type === "video" ? posterUrl : item.thumbnailUrl || ""));
+  const [failedPoster, setFailedPoster] = React.useState("");
   const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
 
   return (
@@ -310,8 +329,8 @@ const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDrag
       title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
     >
       {item.type === "image" && mediaSrc && <img {...fullResolutionImageProps(item)} src={mediaSrc} alt={item.label || item.fileName || "Generated output"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-      {item.type === "video" && mediaSrc && <video src={mediaSrc} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
-      {(item.type === "model3d" || item.type === "audio" || !mediaSrc) && (
+      {item.type === "video" && mediaSrc && failedPoster !== mediaSrc && <img src={mediaSrc} alt={item.label || "Video output"} draggable={false} loading="lazy" decoding="async" onError={() => setFailedPoster(mediaSrc)} />}
+      {(item.type === "model3d" || item.type === "audio" || !mediaSrc || failedPoster === mediaSrc) && (
         <div className="project-output-placeholder">
           <KindIcon size={22} />
         </div>

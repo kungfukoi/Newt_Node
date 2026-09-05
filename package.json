@@ -11,8 +11,12 @@
     "build": "vite build",
     "bundle:report": "node scripts/reportBundle.mjs",
     "smoke:app": "node scripts/smokeApp.mjs",
+    "smoke:isolated": "node scripts/smokeIsolated.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "playwright test",
+    "test:performance": "node scripts/checkPerformance.mjs",
+    "server:start": "node scripts/localServerSupervisor.mjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.8.0",
@@ -30,5 +34,8 @@
     "react-dom": "^19.1.1",
     "three": "^0.184.0",
     "vite": "^7.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

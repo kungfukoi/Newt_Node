@@ -27,13 +27,13 @@ import {
   flowRenderMode
 } from "../flowOverview.js";
 import {
-  buildNodeConnectionKeys,
-  buildNodeInputDependencyRefs,
+  createFlowConnectionIndex,
   sameNodeInputDependencyRefs
 } from "../flowNodeConnections.js";
 import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 import { flowConnectOnClick, flowPortConnectability } from "../nodePortBehavior.js";
+import { observeNodePortGeometry } from "../flowNodeGeometry.js";
 
 const NewtFlowRenderContext = React.createContext(null);
 const flowMultiSelectionKeys = ["Shift", "Control", "Meta"];
@@ -89,18 +89,8 @@ function NewtFlowCanvasInner({
   const [warmNodeIds, setWarmNodeIds] = React.useState(warmNodeIdsRef.current);
   const selectedSet = React.useMemo(() => new Set(selectedNodeIds || []), [selectedNodeIds]);
   const overviewActive = renderMode !== "detail";
-  const bootstrapPortsByNode = React.useMemo(
-    () => buildBootstrapPorts(graphNodes, graphEdges),
-    [graphEdges, graphNodes]
-  );
-  const connectionKeysByNode = React.useMemo(
-    () => buildNodeConnectionKeys(graphNodes, graphEdges),
-    [graphEdges, graphNodes]
-  );
-  const inputDependencyRefsByNode = React.useMemo(
-    () => buildNodeInputDependencyRefs(graphNodes, graphEdges),
-    [graphEdges, graphNodes]
-  );
+  const connectionIndex = React.useMemo(createFlowConnectionIndex, []);
+  const { bootstrapPortsByNode, connectionKeysByNode, inputDependencyRefsByNode } = connectionIndex(graphNodes, graphEdges);
   const desiredNodes = React.useMemo(
     () => graphNodes.map((node) => {
       const width = normalizedNodeWidth(node.data?.nodeWidth, node.type) || estimatedNodeWidth(node.type);
@@ -444,15 +434,6 @@ function normalizeViewport(viewport) {
   };
 }
 
-function buildBootstrapPorts(nodes, edges) {
-  const portsByNode = new Map((nodes || []).map((node) => [node.id, { source: new Set(), target: new Set() }]));
-  (edges || []).forEach((edge) => {
-    portsByNode.get(edge.from?.nodeId)?.source.add(edge.from?.port);
-    portsByNode.get(edge.to?.nodeId)?.target.add(edge.to?.port);
-  });
-  return portsByNode;
-}
-
 function bootstrapHandles(ports, width, height) {
   const sourceIds = [...(ports?.source || [])].filter(Boolean);
   const targetIds = [...(ports?.target || [])].filter(Boolean);
@@ -540,8 +521,10 @@ const NewtFlowNode = React.memo(function NewtFlowNode({ id, data, selected }) {
   }, [navigationActive, shouldRenderFull]);
 
   React.useLayoutEffect(() => {
-    if (shouldRenderFull && (hydrated || !flowOverviewEnabled)) updateNodeInternals(id);
-  }, [data.connectionKey, data.node.data, hydrated, id, shouldRenderFull, updateNodeInternals]);
+    if (!shouldRenderFull || (!hydrated && flowOverviewEnabled)) return undefined;
+    const card = document.querySelector(`[data-node-card-id="${CSS.escape(id)}"]`);
+    return observeNodePortGeometry(card, () => updateNodeInternals(id));
+  }, [data.connectionKey, hydrated, id, shouldRenderFull, updateNodeInternals]);
 
   const showPlaceholder = flowOverviewEnabled && (!shouldRenderFull || !hydrated);
 

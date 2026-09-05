@@ -1,11 +1,12 @@
 import { capitalizeMediaType, fileNameFromLocalUrl, isLocalOutputUrl, mimeForOutputItem, outputMediaTypeForUrl } from "./mediaAssets.js";
 import { normalizedResultItems } from "./mediaResults.js";
 
-const defaultMaxProjectOutputItems = 500;
+const defaultMaxProjectOutputItems = Infinity;
 
 export function buildProjectOutputItems({
   nodes = [],
   history = [],
+  catalog = [],
   projectId,
   projectName,
   getNodeResultMediaType,
@@ -51,6 +52,8 @@ export function buildProjectOutputItems({
         });
       });
     });
+
+  catalog.forEach((item) => addProjectOutput(outputMap, item));
 
   return [...outputMap.values()]
     .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))

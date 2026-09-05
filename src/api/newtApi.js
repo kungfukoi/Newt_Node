@@ -1,20 +1,25 @@
 import { apiErrorMessage } from "../apiErrors.js";
 import { supportsDurableVideo } from "../remoteVideoJobs.js";
 import { waitForRemoteVideo } from "../remoteVideoJobClient.js";
+import { createRemoteVideoRequests } from "../remoteVideoRequests.js";
 
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
-export const remoteVideoJobsApi = {
+export function recoverRemoteVideoJob(runId, input) {
+  return fetchJsonApi(`/api/remote-video-jobs/${encodeURIComponent(runId)}/recover`, jsonBody(input), "Generation recovery", { preferControlServer: true, timeoutMs: 120000, retryLocalApi: false });
+}
+
+export const remoteVideoJobsApi = createRemoteVideoRequests({
   get(runId) {
     return fetchJsonApi(`/api/remote-video-jobs/${encodeURIComponent(runId)}`, {}, "Generation status", { preferControlServer: true, timeoutMs: 15000 });
   },
-  list(scope) {
-    return fetchJsonApi(`/api/remote-video-jobs?scope=${encodeURIComponent(scope)}`, {}, "Pending generations", { preferControlServer: true, timeoutMs: 15000 });
+  list(scope, cursor = "") {
+    return fetchJsonApi(`/api/remote-video-jobs?scope=${encodeURIComponent(scope)}&cursor=${encodeURIComponent(cursor)}`, {}, "Pending generations", { preferControlServer: true, timeoutMs: 15000 });
   }
-};
+});
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
@@ -179,6 +184,10 @@ export async function deleteJson(path, fallbackMessage) {
 }
 
 export const historyApi = {
+  projectOutputs({ projectId = "", projectName = "", cursor = "", limit = 100 } = {}) {
+    const params = new URLSearchParams({ projectId, projectName, cursor, limit: String(limit) });
+    return getJson(`/api/project-outputs?${params}`, "Could not load project outputs. Existing previews are unchanged.");
+  },
   listSummary({ limit = 200, cursor = "" } = {}) {
     const params = new URLSearchParams({
       summary: "1",

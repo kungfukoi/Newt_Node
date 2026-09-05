@@ -9123,6 +9123,25 @@ video.newtnode-video-fallback {
   animation: none;
 }
 
+.project-output-more {
+  flex: 0 0 32px;
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.generation-progress.attention .generation-progress-fill {
+  width: 100%;
+  background: #d7a540;
+  animation: none;
+}
+
+.generation-progress.attention .generation-progress-labels {
+  color: #d7a540;
+}
+
 
 .node-row {
   display: grid;
@@ -10177,3 +10196,21 @@ video.newtnode-video-fallback {
     grid-template-columns: 1fr;
   }
 }
+.project-output-count {
+  margin-right: auto;
+  align-self: center;
+  color: var(--muted, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+.remote-video-attention {
+  min-width: 0;
+  padding: 6px 0;
+  color: #ddc631;
+  font-size: 12px;
+}
+.remote-video-attention > :not(summary) { margin-top: 6px; }
+.remote-video-attention label, .remote-video-attention a { display: flex; align-items: center; gap: 6px; }
+.remote-video-attention input:not([type="checkbox"]):not([type="file"]) { width: 100%; min-width: 0; }
+.remote-video-recovery-actions { display: flex; gap: 8px; }
+.remote-video-recovery-actions button { width: 28px; height: 28px; display: grid; place-items: center; }
+.remote-video-attention small { display: block; overflow-wrap: anywhere; }

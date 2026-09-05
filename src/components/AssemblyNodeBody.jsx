@@ -102,6 +102,7 @@ export function AssemblyNodeBody({
   const rulerRef = React.useRef(null);
   const canvasRef = React.useRef(null);
   const mediaElementsRef = React.useRef(new Map());
+  const mediaElementCallbacksRef = React.useRef(new Map());
   const onProbeMediaRef = React.useRef(onProbeMedia);
   const playingRef = React.useRef(false);
   const probedMediaRef = React.useRef(new Set());
@@ -1035,20 +1036,30 @@ export function AssemblyNodeBody({
       <canvas ref={canvasRef} className="assembly-frame-canvas" aria-hidden="true" />
       <div className="assembly-media-pool" aria-hidden="true">
         {previewMediaInstances.map(({ key, media }) => media.type === "image" ? (
-          <img key={key} ref={(element) => rememberMediaElement(key, element)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} alt="" onLoad={handleMediaReady} />
+          <img key={key} ref={mediaElementCallback(key)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} alt="" onLoad={handleMediaReady} />
         ) : media.type === "video" ? (
-          <video key={key} ref={(element) => rememberMediaElement(key, element)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} preload="metadata" playsInline onLoadedMetadata={handleMediaReady} onLoadedData={(event) => handleVideoMediaReady(key, event.currentTarget)} onSeeked={(event) => handleVideoMediaReady(key, event.currentTarget)} />
+          <video key={key} ref={mediaElementCallback(key)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} preload="metadata" playsInline onLoadedMetadata={handleMediaReady} onLoadedData={(event) => handleVideoMediaReady(key, event.currentTarget)} onSeeked={(event) => handleVideoMediaReady(key, event.currentTarget)} />
         ) : (
-          <audio key={key} ref={(element) => rememberMediaElement(key, element)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} preload="metadata" onLoadedMetadata={handleMediaReady} />
+          <audio key={key} ref={mediaElementCallback(key)} crossOrigin="anonymous" src={displayMediaUrl(media.url)} preload="metadata" onLoadedMetadata={handleMediaReady} />
         ))}
       </div>
     </div>
   );
 
+  function mediaElementCallback(clipId) {
+    // Ref churn must not cancel a pending decoded-frame notification on each
+    // playhead/graph update. Only a real media unmount should do that.
+    if (!mediaElementCallbacksRef.current.has(clipId)) {
+      mediaElementCallbacksRef.current.set(clipId, (element) => rememberMediaElement(clipId, element));
+    }
+    return mediaElementCallbacksRef.current.get(clipId);
+  }
+
   function rememberMediaElement(clipId, element) {
     if (element) mediaElementsRef.current.set(clipId, element);
     else {
       mediaElementsRef.current.delete(clipId);
+      mediaElementCallbacksRef.current.delete(clipId);
       videoFrameCancelRef.current.get(clipId)?.();
       videoFrameCancelRef.current.delete(clipId);
     }

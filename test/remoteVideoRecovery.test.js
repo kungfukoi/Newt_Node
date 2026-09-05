@@ -62,6 +62,17 @@ test("confirmed local preparation errors do not cause endless upload retries", a
   assert.equal(submits, 1);
 });
 
+test("uncertain submissions release the foreground waiter without claiming provider failure", async () => {
+  const value = await waitForRemoteVideo(body, {
+    submit: async () => response({ runId: "one", state: "uncertain", message: "Needs attention: acceptance unknown" }, 202),
+    get: async () => assert.fail("must not keep polling an uncertain submission"),
+    delay: async () => assert.fail("must not wait indefinitely")
+  });
+  assert.equal(value.data.needsAttention, true);
+  assert.equal(value.data.code, "SUBMISSION_UNCERTAIN");
+  assert.equal(activeRemoteVideoNodeIds(remoteVideoScope(body)).size, 0);
+});
+
 const nodes = [
   { id: "video", type: "videoModel", data: { status: "idle", resultItems: [] } },
   { id: "output", type: "output", data: {} }
@@ -85,6 +96,17 @@ test("recovery never overwrites rewired outputs or reapplies dismissed completio
   assert.equal(patches.length, 1);
   assert.deepEqual(recoveredVideoPatches([{ ...nodes[0], data: { remoteVideoRunIds: ["one"] } }], [completed]), []);
   assert.deepEqual(recoveredVideoPatches([{ id: "different", type: "videoModel", data: {} }], [completed]), []);
+});
+
+test("uncertain recovery stops busy nodes while retaining the run for later reconciliation", () => {
+  const uncertain = { ...completed, state: "uncertain", result: null, message: "Needs attention: acceptance unknown" };
+  const patch = recoveredVideoPatches(nodes, [uncertain])[0].patch;
+  assert.equal(patch.status, "error");
+  assert.match(patch.error, /Needs attention/);
+  assert.deepEqual(patch.remoteVideoRunIds, []);
+  const updated = [{ ...nodes[0], data: { ...nodes[0].data, ...patch } }];
+  assert.deepEqual(recoveredVideoPatches(updated, [uncertain]), []);
+  assert.equal(recoveredVideoPatches(updated, [completed])[0].patch.resultItems.length, 1);
 });
 
 test("scope differentiates Save As paths and handles Windows/macOS paths", () => {

@@ -4,7 +4,7 @@ This is the practical build and verification guide for agents and developers. Re
 
 ## Prerequisites
 
-- Node.js 20 or newer.
+- Node.js 22.12 or newer on the 22 LTS line is recommended (CI uses Node 22). The current Vite toolchain requires Node `^20.19.0 || >=22.12.0`.
 - npm from the same Node installation.
 - Network access when npm dependencies or remote providers are needed.
 - A local ComfyUI installation only for Comfy-backed Utility features.
@@ -39,13 +39,43 @@ Provider credentials should be entered and selected in Settings. Do not put real
 | `npm run dev` | Run watched Express server and Vite client together. |
 | `npm run client` | Run only Vite. |
 | `npm run server` | Run only the watched local API. |
+| `npm run server:start` | Run the supervised production API without source watch. |
 | `npm test` | Run the Node test suite. |
+| `npm run test:performance` | Check dirty-fingerprint correctness and relative timing budgets on fixed 271/600-node fixtures. |
+| `npm run test:browser` | Exercise the built client with Playwright, generated media, and mocked APIs. Run build first. |
 | `npm run build` | Build the production client. |
 | `npm run bundle:report` | Report initial and lazy asset sizes after a build. |
 | `npm run preview` | Serve the production build locally. |
 | `npm run smoke:app` | Verify client assets and API health on a running app. |
+| `npm run smoke:isolated` | Start a temporary real API and verify catalog, posters, diagnostics, recovery import, Save As, and reopen without user data/provider calls. |
 
 Use `npm.cmd` instead of `npm` in PowerShell only when the machine's script-execution policy blocks `npm.ps1`.
+
+### Browser And Platform Checks
+
+Install the test browser once after `npm ci` or `deps:ensure`:
+
+```bash
+npx playwright install chromium
+npm run build
+npm run test:browser
+npm run test:performance
+npm run smoke:isolated
+```
+
+Playwright uses its own production preview server on port 5286 (`NEWTNODE_E2E_PORT` overrides it) and refuses to reuse an existing listener. All application APIs are mocked; external requests are blocked. Generated test-pattern PNG/MP4 fixtures live in ignored `e2e/.generated/`. Failure screenshots/traces are under ignored `test-results/` and `playwright-report/`.
+
+`.github/workflows/validation.yml` runs Node tests, performance budget, build, isolated API smoke, and Chromium tests on Windows and macOS. CI configuration is not evidence that a native Mac check passed locally. Native folder dialogs, launch-from-Finder behavior, GPU drivers, and paid provider completion need separate authorized checks.
+
+### Production Runtime
+
+Use the normal Windows/macOS launchers for user sessions. Both start the API and built client through `localServerSupervisor.mjs`; `--client` selects the client service. Logs are `.newtnode_logs/server-<port>.log` and `client-<port>.log`, rotating at 2 MiB with four backups. Service locks prevent duplicate supervisors in the same checkout/port. Crashes back off from one to thirty seconds; the restart marker requests a prompt restart. `Restart_NewtNode.ps1` uses the local restart endpoint rather than killing arbitrary port owners.
+
+`npm run dev` and `npm run server` are explicitly watched development sessions. Existing sessions are not converted in place: close/relaunch a legacy watch session after generation has settled to adopt the production supervisor. Settings > Diagnostics reports current supervision/restart status. Do not restart a user's active generation just to test launch behavior; the supervisor regression uses a temporary fixture process.
+
+### Work Budgets
+
+`.env.example` documents conservative defaults: selected-node global concurrency 4, provider concurrency 2, local GPU concurrency 1, and local media concurrency 2. `VITE_NEWTNODE_*_CONCURRENCY` values are build-time client settings, requiring a rebuild. `NEWTNODE_FAL_VIDEO_CONCURRENCY` and `NEWTNODE_KREA_VIDEO_CONCURRENCY` govern durable Seedance admission; `NEWTNODE_FFMPEG_CONCURRENCY` bounds the main server's FFmpeg work. These server values require restart. Existing image-generation/media-persistence limits remain in place. Do not raise GPU admission without measuring memory headroom.
 
 ## Feature Implementation Loop
 
@@ -126,6 +156,8 @@ node --check server/routes/core.js
 
 Start the app and verify `/api/health`. Add or update a health-route capability flag and the smoke harness when the route is part of normal startup.
 
+Prefer `npm run smoke:isolated` for automated route/persistence tests. It copies source into a checked temporary root, links installed dependencies, uses generated media and empty credentials, and cleans up only its own process/files. It does not load the user's runtime settings, history, or workflows.
+
 ### Startup, Settings, Persistence, Or API Changes
 
 Run the app and then:
@@ -140,7 +172,7 @@ Exercise the affected UI path, not only the route. For Settings/update/restart w
 
 Use a production-scale workflow. Verify:
 
-- 5%, 8%, 30%, and 100% zoom;
+- 5%, 8%, 15%, 30%, and 100% zoom;
 - repeated pan and wheel zoom across distant graph regions;
 - marquee and modifier multi-selection;
 - text selection/editing inside controls;

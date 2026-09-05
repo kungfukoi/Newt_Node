@@ -12,10 +12,16 @@ saved_workflows/outputs/
 saved_workflows/dependencies/
 saved_workflows/.*.tmp
 server/data/history.json
+server/data/history.json.bak
+server/data/history.json.corrupt-*
 server/data/node-projects.json
 server/data/recent-workflows.json
 server/data/runtime-settings.json
 server/data/remote-video-jobs.json
+server/data/remote-video-jobs.json.d/
+server/data/remote-video-jobs.json.legacy-backup
+server/data/project-outputs/
+**/.newtnode/output-records/
 server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log
@@ -31,3 +37,6 @@ public/models/poses/.*.tmp
 !uploads/.gitkeep
 !outputs/.gitkeep
 !saved_workflows/.gitkeep
+playwright-report/
+test-results/
+e2e/.generated/

@@ -17,31 +17,15 @@ if ($env:VITE_CLIENT_PORT -match '^\d+$') {
 $env:PORT = "$apiPort"
 $env:VITE_API_PORT = "$apiPort"
 $env:VITE_CLIENT_PORT = "$clientPort"
-$ports = @($apiPort) + ($clientPort..($clientPort + 23))
-$processIds = New-Object System.Collections.Generic.HashSet[int]
-
-Write-Host "Stopping NewtNode server/client processes on API port $apiPort and client ports $clientPort-$($clientPort + 23)..."
-
-foreach ($port in $ports) {
-  $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-  foreach ($connection in $connections) {
-    if ($connection.OwningProcess -and $connection.OwningProcess -ne 0) {
-      [void]$processIds.Add([int]$connection.OwningProcess)
-    }
-  }
+Write-Host "Requesting a supervised NewtNode restart..."
+try {
+  Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/settings/restart" -ContentType "application/json" -Body '{}' -TimeoutSec 5 | Out-Null
+} catch {
+  # A busy API may not answer. Only signal this checkout's supervisor/watch process.
+  & node (Join-Path $root "scripts\requestRestart.mjs")
+  if ($LASTEXITCODE -ne 0) { throw "Could not request the NewtNode restart." }
 }
-
-foreach ($processId in $processIds) {
-  try {
-    $process = Get-Process -Id $processId -ErrorAction Stop
-    Write-Host "Stopping PID $processId ($($process.ProcessName))"
-    Stop-Process -Id $processId -Force -ErrorAction Stop
-  } catch {
-    Write-Host "PID $processId already stopped."
-  }
-}
-
-Start-Sleep -Seconds 1
+Start-Sleep -Seconds 2
 
 Write-Host "Restarting NewtNode..."
 $appUrl = & (Join-Path $root "Launch_NewtNode.ps1")

@@ -43,8 +43,8 @@ export async function runTrackedGeneration(metadata, request) {
     const succeeded = result?.response?.ok !== false;
     upsertProgressEntry({
       ...entriesByRunId.get(requestMetadata.generationRunId),
-      status: succeeded ? "completed" : "failed",
-      phase: succeeded ? "complete" : "failed",
+      status: result?.data?.needsAttention ? "attention" : succeeded ? "completed" : "failed",
+      phase: result?.data?.needsAttention ? "attention" : succeeded ? "complete" : "failed",
       percent: succeeded ? 100 : null,
       message: succeeded ? "Complete" : progressErrorMessage(result?.data),
       updatedAt: new Date().toISOString()

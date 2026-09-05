@@ -46,7 +46,9 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { composerApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
+import { nodeSchedulingKey } from "./nodeScheduling.js";
 import { AssemblyNodeBody } from "./components/AssemblyNodeBody.jsx";
 import { assemblyRenderPayload, createAssemblyState, normalizeAssemblyState } from "./assembly/assemblyState.js";
 import { selectAssemblyPreviewSource } from "./assembly/assemblyPreview.js";
@@ -58,6 +60,7 @@ import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasCh
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import { GenerationProgress } from "./components/GenerationProgress.jsx";
+import { RemoteVideoAttention } from "./components/RemoteVideoAttention.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import {
   Model3DViewer,
@@ -1198,10 +1201,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const clipboardRef = React.useRef(null);
   const lastPointerClientRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
-  const outputHistoryLoadedRef = React.useRef(false);
   const nodeDraftPatchesRef = React.useRef({});
-  const outputHistoryLoadPromiseRef = React.useRef(null);
-  const outputHistoryReloadRequestedRef = React.useRef(false);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
   const distantZoomRef = React.useRef(shouldUseDistantCanvasVisuals(savedDraft.viewport.scale));
@@ -1231,7 +1231,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
   const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
-  const [outputHistory, setOutputHistory] = React.useState([]);
+  const outputCatalog = useProjectOutputCatalog({ projectId, projectName, enabled: active && !outputsCollapsed });
   const [defaultProjectOutputPath, setDefaultProjectOutputPath] = React.useState("");
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [previewLightboxSource, setPreviewLightboxSource] = React.useState("");
@@ -1382,8 +1382,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
   useNodeEditorDraftPersistence(draftSnapshot);
   const projectOutputs = React.useMemo(
-    () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
-    [nodes, outputHistory, projectId, projectName]
+    () => buildProjectOutputItems({ nodes, catalog: outputCatalog.items, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
+    [nodes, outputCatalog.items, projectId, projectName]
   );
   const openPreviewLightbox = React.useCallback((item) => {
     setPreviewLightboxSource("");
@@ -1604,11 +1604,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [active]);
 
   React.useEffect(() => {
-    if (!active || outputsCollapsed || outputHistoryLoadedRef.current) return;
-    loadOutputHistory();
-  }, [active, outputsCollapsed]);
-
-  React.useEffect(() => {
     if (!active) return undefined;
     const handleResize = () => updatePortPositions();
     window.addEventListener("resize", handleResize);
@@ -1723,9 +1718,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (event.key === "Backspace" || event.key === "Delete") {
-        if (selectedNodeIds.length) {
+        const selectedIds = currentSelectedNodeIds();
+        if (selectedIds.length) {
           event.preventDefault();
-          removeNodes(selectedNodeIds);
+          removeNodes(selectedIds);
         }
       }
     }
@@ -6067,14 +6063,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus("Redone");
   }
 
-  function copySelection() {
-    if (!selectedNodeIds.length) return;
+  function currentSelectedNodeIds() {
+    // React Flow selection can lead the frame-coalesced persisted selection.
+    const flowNodes = flowCanvasRef.current?.getNodes?.();
+    return flowNodes ? flowNodes.filter((node) => node.selected).map((node) => node.id) : selectedNodeIds;
+  }
 
-    const ids = new Set(selectedNodeIds);
+  function copySelection() {
+    const selectedIds = currentSelectedNodeIds();
+    if (!selectedIds.length) return;
+
+    const ids = new Set(selectedIds);
     const clipboard = createWorkflowClipboardPayload({
       nodes: nodes.filter((node) => ids.has(node.id)).map((node) => cloneNode(node)),
       edges: edges.filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId)).map((edge) => cloneEdge(edge)),
-      groups: getSelectedGroupsForNodeIds(selectedNodeIds).map((group) => ({
+      groups: getSelectedGroupsForNodeIds(selectedIds).map((group) => ({
         ...group,
         nodeIds: getNodeIdsInsideGroup(group).filter((nodeId) => ids.has(nodeId))
       }))
@@ -6084,7 +6087,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     clipboardRef.current = clipboard;
     writeWorkflowClipboardToStorage(clipboard);
     void writeWorkflowClipboardToSystemClipboard(clipboard);
-    setSaveStatus(`${selectedNodeIds.length} node${selectedNodeIds.length === 1 ? "" : "s"} copied`);
+    setSaveStatus(`${selectedIds.length} node${selectedIds.length === 1 ? "" : "s"} copied`);
   }
 
   async function readWorkflowClipboardSelection() {
@@ -6175,30 +6178,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function loadOutputHistory() {
-    if (outputHistoryLoadPromiseRef.current) {
-      outputHistoryReloadRequestedRef.current = true;
-      return outputHistoryLoadPromiseRef.current;
-    }
-
-    outputHistoryLoadPromiseRef.current = (async () => {
-      try {
-        const history = await historyApi.listSummary({ limit: 500 });
-        setOutputHistory(Array.isArray(history) ? history : []);
-        outputHistoryLoadedRef.current = true;
-      } catch {
-        // The output rail is helpful, but it should never block the graph editor.
-      }
-    })();
-
-    try {
-      await outputHistoryLoadPromiseRef.current;
-    } finally {
-      outputHistoryLoadPromiseRef.current = null;
-      if (outputHistoryReloadRequestedRef.current) {
-        outputHistoryReloadRequestedRef.current = false;
-        window.setTimeout(loadOutputHistory, 250);
-      }
-    }
+    return outputCatalog.refresh();
   }
 
   async function ensureComfyWanAvailableForRun(node) {
@@ -7258,6 +7238,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function runNodesByDependencyOrder(runnableNodes) {
     return runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
       runNode,
+      maxConcurrent: import.meta.env?.VITE_NEWTNODE_RUN_CONCURRENCY || 4,
+      providerLimits: {
+        fal: import.meta.env?.VITE_NEWTNODE_FAL_CONCURRENCY || 2,
+        krea: import.meta.env?.VITE_NEWTNODE_KREA_CONCURRENCY || 2,
+        google: import.meta.env?.VITE_NEWTNODE_GOOGLE_CONCURRENCY || 2,
+        openai: import.meta.env?.VITE_NEWTNODE_OPENAI_CONCURRENCY || 2,
+        localGpu: import.meta.env?.VITE_NEWTNODE_LOCAL_GPU_CONCURRENCY || 1,
+        localMedia: import.meta.env?.VITE_NEWTNODE_LOCAL_MEDIA_CONCURRENCY || 2
+      },
+      resourceKey: (node) => nodeSchedulingKey(node, modelProviderPreferences),
       onStatus: setSaveStatus,
       onNodeSkipped: (nodeId, message) => updateNode(nodeId, { status: "error", error: message })
     });
@@ -7668,6 +7658,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {!outputsCollapsed && (
         <ProjectOutputDrawer
           items={projectOutputs}
+          total={outputCatalog.total}
+          onLoadMore={outputCatalog.loadMore}
+          hasMore={Boolean(outputCatalog.nextCursor)}
+          loading={outputCatalog.loading}
+          error={outputCatalog.error}
           onClose={() => setOutputsCollapsed(true)}
           onOpenFolder={openProjectOutputFolder}
           onRefresh={loadOutputHistory}
@@ -15132,6 +15127,7 @@ function NodeBody({
         sourcePort={outputPort.id}
       />
       <GenerationProgress nodeId={node.id} />
+      <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...` : "Run Video"}
       </button>

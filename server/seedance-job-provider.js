@@ -18,6 +18,7 @@ export function createSeedanceJobAdapter({ getKey, fetchImpl = fetch, extractKre
     }
     const falProvider = spec.provider === "fal";
     const headers = { Authorization: `${falProvider ? "Key" : "Bearer"} ${key}`, "Content-Type": "application/json" };
+    const safeMessage = (value) => String(value).replaceAll(key, "[redacted]").replace(/https?:\/\/[^\s]+/gi, "[provider URL]").slice(0, 600);
     // Direct queue HTTP avoids the SDK's automatic retries of paid POSTs.
     async function request(url, { submit = false, input, result = false } = {}) {
       const response = await fetchImpl(url, {
@@ -27,12 +28,13 @@ export function createSeedanceJobAdapter({ getKey, fetchImpl = fetch, extractKre
       });
       const body = await response.json();
       if (!response.ok) {
-        const message = typeof body?.detail === "string" ? body.detail : typeof body?.error === "string" ? body.error : typeof body?.message === "string" ? body.message : `Provider returned HTTP ${response.status}.`;
+        const detail = typeof body?.detail === "string" ? body.detail : typeof body?.error === "string" ? body.error : typeof body?.message === "string" ? body.message : `Provider returned HTTP ${response.status}.`;
+        const message = safeMessage(detail);
         // A missing status/result, auth problem or 5xx is not proof the render failed.
         if ((submit && [400, 401, 403, 404, 422].includes(response.status)) || (result && [400, 422].includes(response.status))) {
-          throw confirmedProviderFailure(message);
+          throw Object.assign(confirmedProviderFailure(message), { statusCode: response.status });
         }
-        throw new Error(message);
+        throw Object.assign(new Error(message), { statusCode: response.status });
       }
       return body;
     }
@@ -47,11 +49,11 @@ export function createSeedanceJobAdapter({ getKey, fetchImpl = fetch, extractKre
         const data = await request(falProvider ? `${queueRoot}/requests/${id}/status?logs=1` : `${kreaApiBaseUrl}/jobs/${id}`);
         const status = String(data.status || "").toLowerCase();
         if (["failed", "cancelled", "canceled"].includes(status)) {
-          throw confirmedProviderFailure(typeof data.error === "string" ? data.error : `Provider ${status} this generation.`);
+          throw confirmedProviderFailure(safeMessage(typeof data.error === "string" ? data.error : `Provider ${status} this generation.`));
         }
         if (status === "completed") {
           const result = falProvider ? await request(`${queueRoot}/requests/${id}`, { result: true }) : data;
-          if (result.error) throw confirmedProviderFailure(typeof result.error === "string" ? result.error : "Provider reported generation failure.");
+          if (result.error) throw confirmedProviderFailure(safeMessage(typeof result.error === "string" ? result.error : "Provider reported generation failure."));
           const video = falProvider ? result.video : { url: extractKreaVideo(result), content_type: "video/mp4", file_name: "video.mp4" };
           if (!video?.url) throw new Error("Completed job has no downloadable video yet.");
           return { providerStatus: data.status, remote: { video, seed: result.seed ?? null } };

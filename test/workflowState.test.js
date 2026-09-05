@@ -19,6 +19,28 @@ test("workflowStateFingerprint ignores viewport changes", () => {
   assert.equal(workflowStateFingerprint(base), workflowStateFingerprint({ ...base, viewport: { x: 100, y: -20, scale: 1.5 } }));
 });
 
+test("incremental fingerprints preserve exact legacy JSON and recognize undo/reopen", () => {
+  const state = {
+    nodes: [
+      { id: "a", type: "plainText", x: 0, y: 0, data: { prompt: 'quoted "text"\nline', resultItems: [{ url: "/outputs/a.png" }] } },
+      { id: "b", type: "assembly", data: { assemblyFrameUrl: "blob:live", assemblyFrameTime: 3 } }
+    ],
+    edges: [{ from: { nodeId: "a", port: "promptOut" }, to: { nodeId: "b", port: "input" } }],
+    groups: [{ nodeIds: ["a", "b"] }], projectName: "Example", projectPackagePath: "/project"
+  };
+  const initial = workflowStateFingerprint(state);
+  const parsed = JSON.parse(initial);
+  assert.equal(parsed.nodes[1].data.assemblyFrameUrl, "");
+  assert.equal(parsed.nodes[1].data.assemblyFrameTime, 0);
+  assert.equal(workflowStateFingerprint(JSON.parse(JSON.stringify(state))), initial);
+  const edited = { ...state, nodes: [{ ...state.nodes[0], data: { ...state.nodes[0].data, prompt: "edited" } }, state.nodes[1]] };
+  assert.notEqual(workflowStateFingerprint(edited), initial);
+  assert.equal(workflowStateFingerprint(state), initial);
+  const moved = { ...state, nodes: [{ ...state.nodes[0], x: 10 }, state.nodes[1]] };
+  assert.notEqual(workflowStateFingerprint(moved), initial);
+  assert.notEqual(workflowStateFingerprint({ ...state, projectPackagePath: "/saved-as" }), initial);
+});
+
 test("remapImportedGraph remaps node, edge, and group ids with an offset", () => {
   const graph = {
     nodes: [

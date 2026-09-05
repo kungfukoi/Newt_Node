@@ -6,7 +6,7 @@ For setup commands, validation tiers, environment overrides, and troubleshooting
 
 ## Runtime Requirements
 
-- Node.js 20 or newer.
+- Node.js 22.12 or newer on the 22 LTS line is recommended (CI uses Node 22). Current Vite requires Node `^20.19.0 || >=22.12.0`.
 - npm, distributed with Node.js.
 - Network access to the npm registry when dependencies are missing or the lockfile changes.
 - FFmpeg and FFprobe are supplied by `ffmpeg-static` and `ffprobe-static`.
@@ -40,5 +40,11 @@ npm run deps:ensure
 ```
 
 ComfyUI custom nodes, Python packages, and Wan model files are separate machine-level dependencies documented in `comfyWan-requirements.yaml`.
+
+## Test Dependencies
+
+`@playwright/test` is a development dependency for the checked-in Chromium regression suite. Install its browser explicitly with `npx playwright install chromium` before `npm run test:browser`; normal application launch does not download a Playwright browser. Local generated fixtures use the existing bundled FFmpeg. CI installs Chromium on Windows and macOS after `npm ci`.
+
+The 2026-09-04 reliability pass updated compatible lockfile resolutions without changing runtime dependency ranges. Re-run `npm audit` for current advisory status rather than treating a historical clean result as permanent.
 
 SGLang, its Python/CUDA environment, and MiniMax H3 weights are optional machine-level dependencies for the Local MiniMax H3 provider. They are intentionally not npm dependencies; setup and shared-path mapping are documented in `minimaxH3-local.md`.

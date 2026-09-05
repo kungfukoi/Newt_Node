@@ -9,23 +9,38 @@ export function cloneGraphState(state) {
   };
 }
 
-export function workflowStateFingerprint(state = {}) {
-  return JSON.stringify({
-    nodes: (state.nodes || []).map(cloneNode),
-    edges: (state.edges || []).map(cloneEdge),
-    groups: (state.groups || []).map(cloneGroup),
-    projectName: String(state.projectName || "Untitled node project").trim() || "Untitled node project",
-    projectPackagePath: state.projectPackagePath || ""
-  });
+export function createWorkflowFingerprint() {
+  const nodeCache = new WeakMap();
+  const edgeCache = new WeakMap();
+  const groupCache = new WeakMap();
+  function serialized(item, cache, prepare) {
+    if (!cache.has(item)) cache.set(item, JSON.stringify(prepare(item)));
+    return cache.get(item);
+  }
+  return (state = {}) => {
+    const nodes = (state.nodes || []).map((node) => serialized(node, nodeCache, (value) => ({ ...value, data: persistedNodeData(value) })));
+    const edges = (state.edges || []).map((edge) => serialized(edge, edgeCache, cloneEdge));
+    const groups = (state.groups || []).map((group) => serialized(group, groupCache, cloneGroup));
+    const projectName = JSON.stringify(String(state.projectName || "Untitled node project").trim() || "Untitled node project");
+    const projectPackagePath = JSON.stringify(state.projectPackagePath || "");
+    // Exact JSON equality, not a lossy hash; immutable graph objects reuse their serialization.
+    return `{"nodes":[${nodes.join(",")}],"edges":[${edges.join(",")}],"groups":[${groups.join(",")}],"projectName":${projectName},"projectPackagePath":${projectPackagePath}}`;
+  };
+}
+
+export const workflowStateFingerprint = createWorkflowFingerprint();
+
+function persistedNodeData(node) {
+  const { remoteVideoAttention, ...data } = node?.data || {};
+  return node?.type === "assembly"
+    ? { ...data, assemblyFrameUrl: "", assemblyFrameTime: 0 }
+    : data;
 }
 
 export function cloneNode(node) {
-  const data = node?.type === "assembly"
-    ? { ...(node?.data || {}), assemblyFrameUrl: "", assemblyFrameTime: 0 }
-    : node?.data || {};
   return {
     ...node,
-    data: JSON.parse(JSON.stringify(data))
+    data: JSON.parse(JSON.stringify(persistedNodeData(node)))
   };
 }
 

@@ -20,6 +20,9 @@ This directory separates the current product contract from architecture, build g
 
 ## Operational
 
+- `production-reliability.md`: production stores, supervision, scheduling, diagnostics, verification, and known limits from the September 2026 improvement pass.
+- `remote-video-recovery.md`: durable Seedance acceptance, retry, uncertain-result recovery, original-key binding, and storage migration.
+- `improvement-checklist.md`: scoped audit implementation and verification record, not a replacement for the standards.
 - `dependencies.md`: npm/runtime requirements and automatic launcher installation behavior.
 - `comfyWan-requirements.yaml`: machine-readable ComfyUI custom-node and model requirements for WanBlend/WanWarp.
 - `minimaxH3-local.md`: SGLang runtime, media-path mapping, and verification for the Local MiniMax H3 provider.

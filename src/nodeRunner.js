@@ -1,4 +1,5 @@
 import { appendResultItems } from "./mediaResults.js";
+import { createWorkScheduler } from "./workScheduler.js";
 
 export function nodeBatchCount(node, maxCount = 4) {
   const count = Number(node.data.batchCount || 1);
@@ -116,7 +117,7 @@ export function nodeTitle(node) {
 export async function runRunnableNodesByDependencyOrder(
   runnableNodes,
   edges,
-  { runNode, onStatus, onNodeSkipped, delayMs = 0 } = {}
+  { runNode, onStatus, onNodeSkipped, delayMs = 0, maxConcurrent = 4, providerLimits = {}, resourceKey = () => "other", signal } = {}
 ) {
   if (typeof runNode !== "function") {
     throw new Error("runRunnableNodesByDependencyOrder requires a runNode callback.");
@@ -128,6 +129,7 @@ export async function runRunnableNodesByDependencyOrder(
   const failed = new Map();
   const skipped = new Map();
   const dependencies = buildSelectedRunnableDependencies(runnableNodes, edges);
+  const scheduler = createWorkScheduler({ maxConcurrent, limits: { localGpu: 1, localMedia: 2, ...providerLimits } });
 
   while (pending.size) {
     const blocked = [...pending].filter((nodeId) =>
@@ -159,7 +161,8 @@ export async function runRunnableNodesByDependencyOrder(
     const batchNodes = batchIds.map((nodeId) => nodeMap.get(nodeId));
     onStatus?.(`Running ${batchNodes.length} ${runStageLabel(batchNodes[0]?.type)} node${batchNodes.length === 1 ? "" : "s"}...`);
 
-    const results = await Promise.all(batchNodes.map((node) => runNode(node)));
+    const results = await Promise.all(batchNodes.map((node) => scheduler.run(() => runNode(node), { key: resourceKey(node), signal })
+      .catch((error) => ({ status: "error", error }))));
     results.forEach((result, index) => {
       const nodeId = batchIds[index];
       pending.delete(nodeId);

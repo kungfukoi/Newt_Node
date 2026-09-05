@@ -34,11 +34,11 @@ if [ "$BUILD_REQUIRED" -eq 1 ]; then
 fi
 
 if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
-  nohup node scripts/localServerSupervisor.mjs > "$LOG_DIR/server.log" 2>&1 &
+  nohup node scripts/localServerSupervisor.mjs > "$LOG_DIR/server-launch.log" 2>&1 &
 fi
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then
-  nohup npm run preview -- --port "$CLIENT_PORT" --strictPort > "$LOG_DIR/client.log" 2>&1 &
+  nohup node scripts/localServerSupervisor.mjs --client > "$LOG_DIR/client-launch.log" 2>&1 &
 fi
 
 for _ in {1..80}; do
@@ -50,13 +50,13 @@ done
 
 if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
   echo "Could not start the NewtNode API at $API_HEALTH_URL"
-  echo "See $LOG_DIR/server.log for details."
+  echo "See $LOG_DIR/server-$API_PORT.log for details."
   exit 1
 fi
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then
   echo "Could not start the NewtNode client at $URL"
-  echo "See $LOG_DIR/client.log for details."
+  echo "See $LOG_DIR/client-$CLIENT_PORT.log for details."
   exit 1
 fi
 

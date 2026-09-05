@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildNodeConnectionKeys,
   buildNodeInputDependencyRefs,
+  createFlowConnectionIndex,
   sameNodeInputDependencyRefs
 } from "../src/flowNodeConnections.js";
 
@@ -78,4 +79,27 @@ test("input dependency refs ignore source position-only updates", () => {
   ], edges);
 
   assert.equal(sameNodeInputDependencyRefs(before.get("preview"), after.get("preview")), true);
+});
+
+test("connection index reuses topology and unrelated inputs but refreshes connected results", () => {
+  const index = createFlowConnectionIndex();
+  const nodes = [{ id: "source", data: { resultUrl: "old.png" } }, { id: "viewer", data: {} }, { id: "other", data: {} }];
+  const edges = [{ from: { nodeId: "source", port: "imageOut" }, to: { nodeId: "viewer", port: "sourceIn" } }];
+  const before = index(nodes, edges);
+  const moved = index(nodes.map((node) => ({ ...node, x: 100 })), edges);
+  assert.equal(moved.connectionKeysByNode, before.connectionKeysByNode);
+  assert.equal(moved.bootstrapPortsByNode, before.bootstrapPortsByNode);
+  assert.equal(moved.inputDependencyRefsByNode, before.inputDependencyRefsByNode);
+  const updated = nodes.map((node) => node.id === "source" ? { ...node, data: { resultUrl: "new.png" } } : node);
+  const after = index(updated, edges);
+  assert.equal(after.connectionKeysByNode, before.connectionKeysByNode);
+  assert.equal(after.inputDependencyRefsByNode.get("other"), before.inputDependencyRefsByNode.get("other"));
+  assert.equal(after.inputDependencyRefsByNode.get("viewer")[0], updated[0].data);
+  assert.deepEqual(after.inputDependencyRefsByNode, buildNodeInputDependencyRefs(updated, edges));
+  const rewiredEdges = [{ ...edges[0], to: { nodeId: "other", port: "sourceIn" } }];
+  const rewired = index(updated, rewiredEdges);
+  assert.deepEqual(rewired.connectionKeysByNode, buildNodeConnectionKeys(updated, rewiredEdges));
+  assert.deepEqual(rewired.inputDependencyRefsByNode, buildNodeInputDependencyRefs(updated, rewiredEdges));
+  const deleted = index(updated.slice(1), rewiredEdges);
+  assert.deepEqual(deleted.inputDependencyRefsByNode, buildNodeInputDependencyRefs(updated.slice(1), rewiredEdges));
 });

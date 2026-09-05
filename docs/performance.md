@@ -40,7 +40,7 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for package version `3.0.0-beta.0` on `dev`, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-09-02. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
+Measured for package version `3.0.0-beta.0` on `main` with uncommitted reliability improvements, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-09-04. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
 
 | Area | Current behavior |
 | --- | --- |
@@ -60,26 +60,26 @@ Recent production build summary:
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
 | `index.html` | document | 0.66 kB | 0.36 kB |
-| `assets/index-*.js` | entry script | 72.21 kB | 24.36 kB |
-| `assets/index-*.css` | entry style | 26.06 kB | 5.50 kB |
-| `assets/vendor-icons-*.js` | modulepreload | 22.26 kB | 7.17 kB |
+| `assets/index-*.js` | entry script | 76.74 kB | 25.98 kB |
+| `assets/index-*.css` | entry style | 26.33 kB | 5.56 kB |
+| `assets/vendor-icons-*.js` | modulepreload | 22.64 kB | 7.29 kB |
 | `assets/vendor-react-*.js` | modulepreload | 188.00 kB | 58.94 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 927.21 kB | 253.92 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 172.99 kB | 29.18 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 940.54 kB | 258.86 kB |
+| `assets/NodeEditor-*.css` | lazy editor style | 173.91 kB | 29.36 kB |
 | `assets/vendor-*.js` | lazy shared/editor vendor | 175.46 kB | 57.52 kB |
 | `assets/vendor-*.css` | lazy shared/editor vendor style | 15.50 kB | 2.61 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 13.35 kB | 3.38 kB |
 | `assets/openAiImage2-*.js` | lazy OpenAI Image 2 helper | 4.23 kB | 1.63 kB |
-| `assets/SettingsPage-*.js` | lazy Settings page | 20.65 kB | 6.32 kB |
+| `assets/SettingsPage-*.js` | lazy Settings page | 23.27 kB | 7.13 kB |
 | `assets/StatsDashboard-*.js` | lazy Stats page | 25.56 kB | 7.98 kB |
 | `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |
 
 Current totals:
 
-- Initial shell: 309.18 kB, 96.32 kB gzip.
-- Lazy/generated: 2155.48 kB, 571.74 kB gzip.
-- All assets: 2464.66 kB, 668.07 kB gzip.
+- Initial shell: 314.36 kB, 98.13 kB gzip.
+- Lazy/generated: 2172.33 kB, 577.68 kB gzip.
+- All assets: 2486.70 kB, 675.81 kB gzip.
 
 Vite currently reports the expected large-chunk warning for the node editor and Three.js runtime. Treat the editor chunk as the next code-splitting target; do not move node-editor dependencies into the initial shell to hide the warning.
 
@@ -106,4 +106,30 @@ The current app uses React Flow for node transforms, handle geometry, selection,
 - Mouse-wheel zoom keeps Newt's configured increment and smooth transient transform behavior. Trackpad pinch remains native and must not be converted to wheel-step zoom.
 - Media regions keep `object-fit: contain`; resizing a node may add unused space but must never crop or cover the source image/video.
 
-Validate canvas changes with a production build, the complete Node test suite, and a browser interaction pass on a production-scale workflow. Test 5%, 8%, 30%, and 100% zoom; pan repeatedly across distant regions; verify all nodes remain present, edges stay behind and attached, line weight remains stable, selection and text editing work, media stays uncropped, and the viewport never snaps back.
+Validate canvas changes with a production build, the complete Node test suite, and a browser interaction pass on a production-scale workflow. Test 5%, 8%, 15%, 30%, and 100% zoom; pan repeatedly across distant regions; verify all nodes remain present, edges stay behind and attached, line weight remains stable, selection and text editing work, media stays uncropped, and the viewport never snaps back.
+
+## September Reliability Optimizations
+
+- `workflowState.js` reuses serialization for unchanged immutable objects while producing the same persisted-content fingerprint, including undo-to-saved correctness.
+- `flowNodeConnections.js` caches topology until node IDs or edges change. Input data references still refresh connected viewers immediately; unrelated arrays retain identity.
+- `flowNodeGeometry.js` coalesces real card/port changes into one animation-frame measurement and ignores progress-only mutations. No nodes are hidden to achieve this.
+- The rail requests permanent catalog pages and cached video posters. It preserves older pages and proportional single-column layout on refresh. Rail-only virtualization remains a possible later optimization, not an enabled behavior.
+- Durable job writes update one checkpoint instead of rewriting all historical specifications. Unchanged heartbeat disk writes are coalesced to 30 seconds, while acceptance and completion persist immediately. Scoped cursor polling and shared status reads reduce duplicate traffic.
+- Selected-node/provider admission and FFmpeg budgets bound competing work. API/control listeners remain one process; the second port is not event-loop isolation.
+
+### Reproducible Budget
+
+Run `npm run test:performance`. On this Windows machine with Node 22.16.0, the 2026-09-04 fixed-fixture run measured:
+
+| Nodes | Persisted bytes | Full-clone reference median | Warm cached median |
+| ---: | ---: | ---: | ---: |
+| 271 | 1,713,427 | 5.429 ms | 0.255 ms |
+| 600 | 3,794,101 | 10.927 ms | 0.547 ms |
+
+The script checks exact equality against the full-clone reference, a single-node edit, and undo. Each median uses 21 samples. The enforced budget is cached time below 40% of the full-clone reference on the same runner, not a fixed machine-dependent millisecond threshold. Cold serialization still processes the whole document. This is not an FPS or end-to-end zoom-speed claim.
+
+### Browser Regressions
+
+After a build and `npx playwright install chromium`, run `npm run test:browser`. Fixtures include 271 full-detail nodes at all five zoom levels, attached edge endpoints within 2 screen pixels after pan/zoom, live node/text resizing, immediate multi-select/copy/paste, proportional rail posters and page refresh, generation-to-Preview propagation, Save As/reload, inline recovery, opt-in diagnostics, and actual decoded Timeline pixels changing on scrub without turning black after an Out marker.
+
+All media is generated locally and all provider APIs are mocked. The suite guards measurable interactions, not every GPU/driver condition or perceptual frame pacing. Use Settings > Diagnostics for opt-in long-task, decode/drop, and event-loop measurements when profiling a real workflow. Windows/macOS CI runs the same fixtures; native dialogs and paid generations require separate authorized verification.

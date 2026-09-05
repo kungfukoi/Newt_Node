@@ -30,6 +30,11 @@ import {
   nativeVideoAnalysisInput
 } from "../src/textModelDefaults.js";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { createHistoryStore } from "./history-store.js";
+import { createProjectOutputStore } from "./project-output-store.js";
+import { createWorkScheduler, concurrencyLimit } from "../src/workScheduler.js";
+import { createRuntimeDiagnostics } from "./runtime-diagnostics.js";
+import { readPackageOutputItems, writePackageOutputRecord } from "./project-output-package.js";
 import { sameWorkflowPath, saveWorkflowAutosave, workflowAutosaveDirectoryName, workflowAutosaveOpenContext } from "./workflow-autosaves.js";
 import {
   generationProgressMiddleware,
@@ -264,7 +269,16 @@ const clientRuntimeLogPath = path.join(clientRuntimeLogDir, "client-runtime.log"
 const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
-let historyWriteQueue = Promise.resolve();
+let historyRecoveryNotice = "";
+const projectOutputStore = createProjectOutputStore({ directory: path.join(dataDir, "project-outputs") });
+const projectOutputPackageImports = new Map();
+const historyStore = createHistoryStore({
+  filePath: historyPath,
+  limit: maxHistoryItems,
+  onRecovery: (message) => { historyRecoveryNotice = message; console.warn(message); },
+  onAppend: archiveProjectOutput,
+  onWrite: (history) => writeHistoryIndex(summarizeHistoryItems(history)).catch(() => {})
+});
 let updatePromise = null;
 let restartRequested = false;
 let clientDiagnosticWriteQueue = Promise.resolve();
@@ -277,7 +291,11 @@ let registeredWorkflowPackageCache = null;
 let registeredWorkflowPackageLoadPromise = null;
 let registeredWorkflowPackageCacheGeneration = 0;
 const registeredWorkflowPackageCandidateCache = new Map();
-const execFile = promisify(execFileCallback);
+const execFileUnscheduled = promisify(execFileCallback);
+const localMediaScheduler = createWorkScheduler({ maxConcurrent: concurrencyLimit(process.env.NEWTNODE_FFMPEG_CONCURRENCY, 2), defaultLimit: 32 });
+const execFile = (file, args, options) => file === ffmpegBinaryPath
+  ? localMediaScheduler.run(() => execFileUnscheduled(file, args, options), { signal: options?.signal })
+  : execFileUnscheduled(file, args, options);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
 const apiKeyRuntimeConfig = Object.freeze({
   fal: Object.freeze({ envKey: "FAL_KEY" }),
@@ -598,6 +616,7 @@ await refreshRuntimeConfigFromEnvFile();
 
 const remoteVideoJobs = await createRemoteVideoJobs({
   filePath: path.join(dataDir, "remote-video-jobs.json"),
+  providerLimits: { fal: concurrencyLimit(process.env.NEWTNODE_FAL_VIDEO_CONCURRENCY, 2), krea: concurrencyLimit(process.env.NEWTNODE_KREA_VIDEO_CONCURRENCY, 2) },
   adapter: createSeedanceJobAdapter({
     getKey: async (provider) => {
       await refreshRuntimeConfigFromEnvFile();
@@ -605,7 +624,14 @@ const remoteVideoJobs = await createRemoteVideoJobs({
     },
     extractKreaVideo: extractKreaJobResultUrl
   }),
-  finalize: finalizeSeedanceVideo
+  finalize: finalizeSeedanceVideo,
+  importResult: importSeedanceResult
+});
+const runtimeDiagnostics = createRuntimeDiagnostics({
+  version: appVersion,
+  getCommit: () => gitHeadForDirectory(rootDir),
+  getJobs: remoteVideoJobs.diagnostics,
+  getWork: () => ({ localMedia: localMediaScheduler.snapshot() })
 });
 
 const storage = multer.diskStorage({
@@ -653,6 +679,15 @@ app.get("/api/media-thumbnail", runtimeThumbnailRequestLimiter, async (req, res)
     res.redirect(302, thumbnailUrl);
   } catch (error) {
     sendApiError(res, error, "Could not create image preview.");
+  }
+});
+app.get("/api/video-poster", runtimeThumbnailRequestLimiter, async (req, res) => {
+  try {
+    const thumbnailUrl = await ensureRuntimeImageThumbnail(String(req.query.url || "").trim(), { video: true });
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(302, thumbnailUrl);
+  } catch (error) {
+    sendApiError(res, error, "Could not create video poster.");
   }
 });
 app.get("/api/video-preview", runtimeThumbnailRequestLimiter, async (req, res) => {
@@ -710,6 +745,14 @@ app.post("/api/system/client-diagnostic", (req, res) => {
   queueClientDiagnostic(req.body);
   res.status(202).json({ ok: true });
 });
+app.get("/api/system/performance-diagnostics", async (_req, res) => {
+  res.json(await runtimeDiagnostics.snapshot());
+});
+app.post("/api/system/performance-diagnostics", async (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled must be a boolean" });
+  runtimeDiagnostics.setEnabled(req.body.enabled);
+  res.json(await runtimeDiagnostics.snapshot());
+});
 
 registerComposerPoseRoutes(app, {
   composerPosesDir,
@@ -763,6 +806,10 @@ function buildHealthPayload() {
       mediaThumbnail: true,
       generationProgress: true,
       remoteVideoJobs: true,
+      remoteVideoRecovery: true,
+      projectOutputs: true,
+      videoPoster: true,
+      performanceDiagnostics: true,
       workflowAutosave: true,
       settings: true
     },
@@ -928,6 +975,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
   const payload = {
     version: appVersion,
+    historyRecoveryNotice,
     falKeyConfigured: configuredKeys.fal,
     googleApiKeyConfigured: configuredKeys.google,
     kreaApiKeyConfigured: configuredKeys.krea,
@@ -2255,6 +2303,11 @@ function trimTrailingBlankLines(lines) {
   return nextLines;
 }
 
+app.get("/api/project-outputs", async (req, res) => {
+  await importProjectOutputPackage(String(req.query.projectId || ""));
+  res.json(await projectOutputStore.list(req.query, readHistorySummaries));
+});
+
 app.get("/api/history", async (req, res) => {
   await timedApi("history:list", async () => {
     if (wantsSummary(req)) {
@@ -2553,6 +2606,8 @@ app.post("/api/saved-workflows", async (req, res) => {
         }
       };
 
+      await importProjectOutputPackage(sourceWorkflowId || id);
+      workflow.projectOutputs = await projectOutputStore.all(sourceWorkflowId || id, readHistorySummaries);
       const savedWorkflow = packagePath
         ? await writeWorkflowPackage(workflow, packagePath, { detachMissingAssets: identity.isPackageClone })
         : workflow;
@@ -2654,15 +2709,7 @@ app.delete("/api/node-projects/:id", async (req, res) => {
 });
 
 app.delete("/api/history/:id", async (req, res) => {
-  const history = await readHistory();
-  const nextHistory = history.filter((item) => item.id !== req.params.id);
-
-  if (nextHistory.length === history.length) {
-    return res.status(404).json({ error: "History item not found." });
-  }
-
-  await writeHistory(nextHistory);
-  res.json(nextHistory);
+  res.json(await historyStore.remove(req.params.id));
 });
 
 async function handleNodeAssetUpload(req, res) {
@@ -5959,6 +6006,22 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
     submittedPrompt: spec.submittedPrompt, cost,
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
+  };
+}
+
+async function importSeedanceResult(job, assetUrl) {
+  const publicPath = String(assetUrl || "");
+  if (!isLocalAssetUrl(publicPath)) throw Object.assign(new Error("Import a local video file first."), { statusCode: 400 });
+  const source = await resolveLocalAssetPathFromUrl(publicPath);
+  const metadata = await probeVideoFile(source.filePath);
+  if (!(metadata.duration > 0) || !(metadata.width > 0) || !(metadata.height > 0)) throw Object.assign(new Error("The imported file is not a readable video."), { statusCode: 400 });
+  const target = await createManagedAssetTarget({ body: job.spec.body }, job.spec.routeKind, path.extname(source.filePath) || ".mp4");
+  await copyFile(source.filePath, target.filePath);
+  const bytes = (await stat(target.filePath)).size;
+  return {
+    target,
+    savedOutput: { ...target, bytes },
+    remote: { video: { ...metadata, url: publicPath, content_type: mimeForExtension(path.extname(target.filePath)) } }
   };
 }
 
@@ -9938,11 +10001,13 @@ function normalizeWorkflowPackageRegistration(value) {
 async function writeWorkflowPackage(workflow, packagePath, options = {}) {
   await ensureWorkflowPackageDirs(packagePath);
   const workflowFileName = workflowFileNameForName(workflow.name || "workflow");
-  const assets = await copyWorkflowAssetsToPackage(workflow.graph, workflow.id, packagePath, options);
+  const projectOutputs = workflow.projectOutputs || await projectOutputStore.all(workflow.id, readHistorySummaries);
+  const assets = await copyWorkflowAssetsToPackage({ graph: workflow.graph, projectOutputs }, workflow.id, packagePath, options);
   const graph = rewriteWorkflowAssetUrls(workflow.graph, assets.urlMap);
   const updatedAt = new Date().toISOString();
   const packagedWorkflow = {
     ...workflow,
+    projectOutputs: rewriteWorkflowAssetUrls(projectOutputs, assets.urlMap).filter((item) => item.url),
     fileName: workflow.fileName || workflowFileName,
     updatedAt,
     packagePath,
@@ -9968,6 +10033,7 @@ async function writeWorkflowPackage(workflow, packagePath, options = {}) {
 
   await writeJsonAtomic(path.join(packagePath, workflowFileName), packagedWorkflow);
   await writeJsonAtomic(workflowPackageManifestPath(packagePath), manifest);
+  await projectOutputStore.remap(workflow.id, assets.urlMap);
   await rm(legacyWorkflowPackageManifestPath(packagePath), { force: true }).catch(() => {});
   return packagedWorkflow;
 }
@@ -10339,6 +10405,9 @@ async function readWorkflowFromFilePath(filePath) {
   const normalizedWorkflow = normalizeWorkflowPackageRegistration({
     ...openedWorkflow,
     id: registeredWorkflowId,
+    projectOutputs: rewriteWorkflowPackageAssetReferences([
+      ...(openedWorkflow.projectOutputs || []), ...await readPackageOutputItems(packagePath)
+    ], registeredWorkflowId, packagePath),
     packagePath,
     package: {
       ...(openedWorkflow.package || {}),
@@ -11362,6 +11431,7 @@ async function writeWorkflowFile(workflow) {
     fileName: safeWorkflowFileName(workflowData.fileName) || workflowFileNameForName(workflowData.name || "workflow")
   };
   await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
+  await projectOutputStore.ingest({ id: workflow.id, name: workflow.name }, workflow.projectOutputs || []);
   invalidateRegisteredWorkflowPackageCache();
   await addRecentWorkflowFileName(registryWorkflow.fileName);
   return {
@@ -13744,14 +13814,14 @@ async function createImagePreview(requestLike, source, kind = "image") {
   }
 }
 
-async function ensureRuntimeImageThumbnail(value) {
+async function ensureRuntimeImageThumbnail(value, { video = false } = {}) {
   const publicPath = localPublicPathFromUrl(value);
   const cleanPath = publicPath.split("?")[0].split("#")[0];
   if (/\/(?:thumbnails)\//i.test(cleanPath) || /-preview(?:-\d+)?\.jpe?g$/i.test(cleanPath)) {
     return cleanPath;
   }
-  if (!/\.(?:png|jpe?g|webp|gif)$/i.test(cleanPath)) {
-    throw httpError(400, "Only local image assets can be previewed.");
+  if (!(video ? /\.(?:mp4|mov|qt|webm)$/i : /\.(?:png|jpe?g|webp|gif)$/i).test(cleanPath)) {
+    throw httpError(400, "Only supported local media assets can be previewed.");
   }
 
   const source = await resolveLocalAssetPath(cleanPath);
@@ -14100,26 +14170,15 @@ function falFileMatchesMedia(file, mimePrefix) {
 }
 
 async function readHistory() {
-  if (!existsSync(historyPath)) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(await readFile(historyPath, "utf8"));
-  } catch {
-    await rm(historyPath, { force: true });
-    await rm(historyIndexPath, { force: true }).catch(() => {});
-    return [];
-  }
+  return historyStore.read();
 }
 
 async function readHistorySummaries() {
   const source = await fileMetadata(historyPath);
-  if (!source.exists) return [];
 
   const cached = await readJsonFile(historyIndexPath, null);
   if (
-    cached?.version === 1 &&
+    source.exists && cached?.version === 1 &&
     cached.source?.size === source.size &&
     cached.source?.mtimeMs === source.mtimeMs &&
     Array.isArray(cached.items)
@@ -14454,19 +14513,7 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item, { deduplicate = false } = {}) {
-  const write = historyWriteQueue.then(async () => {
-    const history = await readHistory();
-    if (deduplicate && history.some((entry) => entry.generationRunId === item.generationRunId)) return;
-    history.unshift(item);
-    await writeHistory(history.slice(0, maxHistoryItems));
-  });
-  historyWriteQueue = write.catch(() => {});
-  return write;
-}
-
-async function writeHistory(history) {
-  await writeJsonAtomic(historyPath, history);
-  await writeHistoryIndex(summarizeHistoryItems(history)).catch(() => {});
+  return historyStore.append(item, { deduplicate });
 }
 
 function errorStatusCode(error) {
@@ -15316,6 +15363,33 @@ function projectFromBody(body) {
     id: id || "node-workspace",
     name: name || "Node workspace"
   };
+}
+
+async function archiveProjectOutput(item, history) {
+  const summary = historyMetadataSummary(item);
+  await projectOutputStore.append(summary, summarizeHistoryItems(history));
+  const registered = item.project?.id ? await findRegisteredWorkflowPackage(item.project.id) : null;
+  const packagePath = registered?.packagePath || registered?.package?.rootPath;
+  if (packagePath) await writePackageOutputRecord(packagePath, summary);
+}
+
+async function importProjectOutputPackage(projectId) {
+  if (!projectId) return;
+  const workflow = await findRegisteredWorkflowPackage(projectId);
+  const packagePath = workflow?.packagePath || workflow?.package?.rootPath;
+  if (!packagePath) return;
+  const key = JSON.stringify([projectId, packagePath]);
+  if (!projectOutputPackageImports.has(key)) {
+    const importing = (async () => {
+      const items = rewriteWorkflowPackageAssetReferences([
+        ...(workflow.projectOutputs || []), ...await readPackageOutputItems(packagePath)
+      ], projectId, packagePath);
+      await projectOutputStore.ingest({ id: projectId, name: workflow.name }, items);
+    })();
+    projectOutputPackageImports.set(key, importing);
+    importing.catch(() => projectOutputPackageImports.delete(key));
+  }
+  await projectOutputPackageImports.get(key);
 }
 
 function nodeFromBody(body) {

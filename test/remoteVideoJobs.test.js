@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
@@ -12,6 +12,64 @@ const spec = {
   credentialFingerprint: "fingerprint", body: { projectId: "p", nodeId: "n", generationGroupId: "g", generationBatchTotal: 2, generationBatchIndex: 1 }
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
+
+test("uncertain runs support verified ID attachment, local import and dismissal without another paid submission", async (t) => {
+  let submits = 0;
+  const f = await fixture(t, {
+    adapter: async () => ({
+      submit: async () => { submits++; throw new Error("lost acceptance"); },
+      poll: async (job) => { assert.equal(job.requestId, "original-job-123"); return { state: "running" }; }
+    }),
+    importResult: async (_job, assetUrl) => { assert.equal(assetUrl, "/outputs/manual.mp4"); return { remote: video }; }
+  });
+  let service = await f.open();
+  for (const id of ["attach", "import", "dismiss"]) { await service.create(id, spec, id); await service.step(id); }
+  const context = { scope: remoteVideoScope(spec.body), acknowledged: true };
+  await assert.rejects(service.recover("attach", { ...context, scope: "another-project", action: "attach", requestId: "original-job-123" }), /different workflow/);
+  await assert.rejects(service.recover("attach", { ...context, action: "attach", requestId: "https://provider.test/jobs/123" }), /not a URL/);
+  await service.recover("attach", { ...context, action: "attach", requestId: "original-job-123" });
+  assert.equal(service.get("attach").requestId, "original-job-123");
+  await assert.rejects(service.recover("dismiss", { ...context, action: "attach", requestId: "original-job-123" }), /already tracked/);
+  await service.recover("import", { ...context, action: "import", assetUrl: "/outputs/manual.mp4" });
+  await service.recover("dismiss", { ...context, action: "dismiss" });
+  await service.close();
+  service = await f.open();
+  await service.step("import");
+  await service.step("dismiss");
+  assert.equal(service.get("import").state, "completed");
+  assert.equal(service.get("dismiss").state, "dismissed");
+  assert.match(service.get("dismiss").message, /does not cancel/);
+  assert.equal(service.progress().find((entry) => entry.runId === "dismiss").phase, "failed");
+  assert.equal(submits, 3);
+});
+
+test("concurrent recovery cannot attach one provider ID to two runs", async (t) => {
+  const f = await fixture(t, { adapter: async () => ({
+    submit: async () => { throw new Error("lost acceptance"); },
+    poll: async () => { await new Promise((resolve) => setTimeout(resolve, 20)); return { state: "running" }; }
+  }) });
+  const service = await f.open();
+  for (const id of ["one", "two"]) { await service.create(id, spec); await service.step(id); }
+  const action = { scope: remoteVideoScope(spec.body), acknowledged: true, action: "attach", requestId: "original-job-123" };
+  const results = await Promise.allSettled([service.recover("one", action), service.recover("two", action)]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.match(results.find((result) => result.status === "rejected").reason.message, /already tracked/);
+});
+
+test("durable provider admission is bounded across simultaneous batches and survives restart", async (t) => {
+  const f = await fixture(t, { providerLimits: { krea: 1 } });
+  let service = await f.open();
+  await service.create("one", spec, "1");
+  await service.create("two", spec, "2");
+  await Promise.all([service.step("one"), service.step("two")]);
+  assert.equal(f.counts().submits, 1);
+  assert.equal(service.get("two").state, "accepted");
+  await service.close();
+  service = await f.open();
+  await service.step("two");
+  assert.equal(f.counts().submits, 1);
+  assert.match(service.get("two").message, /provider slot/);
+});
 
 async function fixture(t, overrides = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "newt-remote-jobs-"));
@@ -164,4 +222,62 @@ test("corrupt store fails closed instead of losing IDs and permitting resubmissi
   await writeFile(f.filePath, "broken json");
   await assert.rejects(f.open());
   assert.equal(await readFile(f.filePath, "utf8"), "broken json");
+});
+
+test("legacy jobs migrate with original IDs and a preserved backup", async (t) => {
+  const f = await fixture(t);
+  const legacy = { version: 1, jobs: [{ runId: "one", spec, requestHash: "hash", requestId: "original", state: "running", createdAt: "2026-09-03T00:00:00Z" }] };
+  await writeFile(f.filePath, JSON.stringify(legacy));
+  const service = await f.open();
+  await service.step("one");
+  assert.equal(f.counts().submits, 0);
+  assert.equal(service.get("one").requestId, "original");
+  assert.deepEqual(JSON.parse(await readFile(`${f.filePath}.legacy-backup`, "utf8")), legacy);
+  assert.equal(JSON.parse(await readFile(f.filePath, "utf8")).version, 2);
+});
+
+test("unchanged heartbeats update memory but do not rewrite durable checkpoints", async (t) => {
+  const f = await fixture(t);
+  const service = await f.open();
+  await service.create("one", spec);
+  await service.step("one");
+  const name = (await readdir(`${f.filePath}.d`)).find((name) => name.endsWith(".state.json"));
+  const snapshot = await readFile(path.join(`${f.filePath}.d`, name), "utf8");
+  f.advance(3000);
+  await service.step("one");
+  assert.equal(await readFile(path.join(`${f.filePath}.d`, name), "utf8"), snapshot);
+  assert.notEqual(service.get("one").lastContactAt, JSON.parse(snapshot).lastContactAt);
+  f.advance(30000);
+  await service.step("one");
+  assert.notEqual(await readFile(path.join(`${f.filePath}.d`, name), "utf8"), snapshot);
+  assert.doesNotMatch(snapshot, /private prompt|fingerprint/);
+});
+
+test("uncertain progress is attention, with allowlisted diagnostic causes", async (t) => {
+  const f = await fixture(t, { adapter: async () => ({ submit: async () => {
+    throw Object.assign(new Error("https://secret.example/?token=secret private prompt"), { cause: { code: "ECONNRESET" } });
+  } }) });
+  const service = await f.open();
+  await service.create("one", spec);
+  await service.step("one");
+  assert.equal(service.progress()[0].status, "attention");
+  assert.equal(service.get("one").lastError.code, "ECONNRESET");
+  assert.doesNotMatch(JSON.stringify(service.get("one")), /secret|private prompt|fingerprint/);
+});
+
+test("job change cursors return only new revisions and reset safely after restart", async (t) => {
+  const f = await fixture(t);
+  let service = await f.open();
+  await service.create("one", spec);
+  const scope = remoteVideoScope(spec.body);
+  const first = service.changes(scope);
+  assert.equal(first.reset, true);
+  assert.equal(first.jobs.length, 1);
+  assert.deepEqual(service.changes(scope, first.cursor).jobs, []);
+  await service.step("one");
+  assert.equal(service.changes(scope, first.cursor).jobs.length, 1);
+  await service.close();
+  service = await f.open();
+  assert.equal(service.changes(scope, first.cursor).reset, true);
+  assert.equal(service.changes(scope, first.cursor).jobs[0].requestId, "provider-1");
 });

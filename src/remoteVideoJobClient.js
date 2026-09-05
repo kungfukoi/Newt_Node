@@ -1,4 +1,4 @@
-import { remoteVideoScope, remoteVideoTerminal } from "./remoteVideoJobs.js";
+import { remoteVideoScope, remoteVideoTerminal, remoteVideoNeedsAttention } from "./remoteVideoJobs.js";
 
 const activeRuns = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,6 +33,12 @@ export async function waitForRemoteVideo(body, { submit, get, delay = sleep }) {
           }
         }
         if (result?.data?.job) job = result.data.job;
+        if (remoteVideoNeedsAttention(job)) {
+          return { response: { ok: false, status: 409 }, data: {
+            error: job.message, code: "SUBMISSION_UNCERTAIN", generationRunId: job.runId,
+            needsAttention: true
+          } };
+        }
         if (remoteVideoTerminal(job)) {
           return job.state === "completed"
             ? { response: { ok: true, status: 200 }, data: job.result }

@@ -128,6 +128,7 @@ function localApiServedMediaPath(value) {
 function isApiServedMediaPath(value) {
   const clean = String(value || "").split("?")[0].split("#")[0];
   return clean === "/api/media-thumbnail"
+    || clean === "/api/video-poster"
     || clean === "/api/video-preview"
     || clean.startsWith("/uploads/")
     || clean.startsWith("/outputs/")

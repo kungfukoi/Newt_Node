@@ -15,7 +15,11 @@ export function remoteVideoScope(context = {}) {
 }
 
 export function remoteVideoTerminal(job) {
-  return job?.state === "completed" || job?.state === "failed";
+  return job?.state === "completed" || job?.state === "failed" || job?.state === "dismissed";
+}
+
+export function remoteVideoNeedsAttention(job) {
+  return job?.state === "uncertain";
 }
 
 export function appendUniqueVideoResults(previous = [], incoming = []) {

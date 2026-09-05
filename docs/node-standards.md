@@ -2,7 +2,7 @@
 
 This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
-Snapshot verified against package version `3.0.0-beta.0` on 2026-08-28. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
+Snapshot verified against package version `3.0.0-beta.0` on 2026-09-04. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
 
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
@@ -112,7 +112,7 @@ Audit every applicable row before declaring a feature complete.
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
 | Settings page | `src/SettingsPage.jsx`, `server/index.js` settings routes | Runtime API key entry, repository update, restart, branch status, loaded app version, and enabled-model preferences live here. Keep settings data local and avoid exposing secret values in logs, history, or docs. |
-| Project output rail data | `src/projectOutputs.js` | Build, filter, and navigate project output rail items here; keep filesystem/history filtering and adjacent-image selection out of render code. |
+| Project output rail data | `src/projectOutputs.js`, `src/projectOutputLoader.js`, `src/useProjectOutputCatalog.js`, `server/project-output-store.js` | Separate permanent project output records from bounded recent history. Merge paginated refreshes without dropping loaded items or changing scroll position. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
 | Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
 | Color ID to Matte UI/helpers | `src/components/ColorIdMatteControls.jsx`, `src/colorIdMatte.js` | Picker UI state lives in the component file; color normalization, matte preview rendering, sample radius/tolerance bounds, and matte run item normalization live in the helper file. |
@@ -346,13 +346,13 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - 3D outputs should be displayed with the shared lazy Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
 - Result item normalization and append behavior belongs in `src/mediaResults.js` and `src/nodeRunner.js`; do not duplicate result merging logic inside individual node branches.
-- The project output rail should show every retained local output from the current graph and matching project history, up to the backend's 500-generation retention window. A new generation must add to the rail rather than replacing earlier project generations. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
+- The project output rail must retain every cataloged local project generation independently of the bounded 500-entry recent-history cache. Use permanent project records, a total count, and cursor pagination, merged with live graph results. Refresh/new generations must not replace previously loaded items. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs. Save As and relocation must carry the catalog and referenced assets, including results from deleted source nodes.
 - Assign every new or otherwise unidentified workflow a unique session ID before its first generation. Preserve that ID through normal saves so output history remains attached to the workflow, and issue a fresh ID when starting another new workflow.
 - Project output rail data belongs in `src/projectOutputs.js`; shared preview/result UI belongs in `src/components/MediaViews.jsx`.
 - Route API-served local media through `displayMediaUrl`. During split-port development, `/uploads`, `/outputs`, `/external-outputs`, `/workflow-assets`, `/api/media-thumbnail`, and `/api/video-preview` must resolve through the backend origin instead of accidentally requesting them from Vite.
 - When a thumbnail fails, retry its known full-resolution source before showing the NewtNode logo. The logo is a missing/unresolved-media fallback, never a replacement for an existing local file.
 - A model or Utility run redirected by an Output node must still write the real saved public URL into the source node's `resultItems`/`resultUrl`. Connected Preview nodes must receive those same playable items; do not substitute the Output node title, a filename-only string, or the logo.
-- Fetch output history lazily when the output rail first opens. Manual refresh and generation completion may still refresh it immediately.
+- Fetch catalog pages lazily when the output rail first opens. Manual refresh and generation completion refresh the newest page while retaining older loaded pages. Passive video items use cached poster images; open/drag still resolves the original video. Do not introduce canvas culling as a rail optimization.
 - Output rail thumbnails should keep layout stable and lazy-load image/video media as they near the visible rail; the full-size lightbox owns eager preview loading after double-click. When a lightbox was opened from the output rail, unmodified Left/Right Arrow keys step through image items only, skip other media types, and wrap at the ends. Do not capture those keys while a text or form control is being edited.
 - The project output rail must resize horizontally from its left-edge grip while always retaining one thumbnail column. Resizing changes only that column's width and the preview size within it. Every image and video fills the column width, derives its height from the media's native aspect ratio, remains fully visible, and must never crop, stretch, or cover preview media.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
@@ -379,6 +379,8 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 
 ## Run And Dependency Standards
 
+- Extend the existing dependency scheduler with bounded admission; do not replace graph execution or provider routing. Use `workScheduler.js` and `nodeScheduling.js` for global/provider/local-resource budgets. Durable workers also enforce server-side provider admission across batches. Queue pressure is not generation failure, and admission must never submit a second paid request for an accepted run.
+
 - `Run All` must respect dependencies.
 - Selected-node dependency scheduling belongs in `src/nodeRunner.js`; `NodeEditor.jsx` should pass callbacks for UI status and skipped-node updates.
 - Prompt/Text processing runs before media generation.
@@ -400,6 +402,8 @@ When adding or changing a resizable node, verify its minimum size, width-only gr
 - Batch progress aggregates all runs in a generation group. Preserve completed batch items when another item fails, and retain the terminal bar long enough for the user to read it.
 - Keep terminal sibling entries in batch accounting while any sibling is pending, even when the normal terminal display period has expired.
 - Seedance 2.0/2.5 node requests use durable job acceptance and recovery. A 20-minute elapsed time warns; it does not prove failure. Persist provider IDs before polling, retry status/downloads without a new paid submission, bind recovery to the original credential, publish each completed clip immediately, and deduplicate output/history reconciliation. Never silently retry an ambiguous paid POST. See [Seedance Generation Recovery](remote-video-recovery.md).
+- Unknown submission acceptance is `Needs attention`, not running or provider failure. Release the foreground waiter, retain the durable run, and offer confirmed inline ID attachment, local result import, or local dismissal. Attachment must validate the original provider/model/credential and reject duplicate job IDs. Dismissal does not cancel a provider job or imply a refund. Never generate again as an automatic recovery action.
+- Preserve immutable job specifications separately from mutable checkpoints. Persist acceptance and finalization checkpoints immediately; coalesce unchanged heartbeat writes and coordinate incremental polling. Keep diagnostic events bounded and allowlisted, with no credentials, signed URLs, or prompt payloads.
 - The progress component is node-scoped and accessible: expose `role=progressbar`, value bounds, a numeric value when determinate, and useful text when indeterminate.
 - High-frequency progress polling must stop when there are no active runs; a lower-frequency mounted-workspace discovery poll may find recovered jobs. Polling must not trigger full graph updates unless result or node status actually changes. Keep subscription, recovery, and aggregation logic outside `NodeEditor.jsx`.
 
@@ -488,7 +492,7 @@ Settings is a local runtime control surface, not an account system.
 - Settings is the source of truth for Fal, Google, Krea, and OpenAI credentials. Each provider may store multiple locally named credentials, with at most one active credential selected by radio control; choosing `None` disables that provider. Saving Settings atomically materializes the four provider values into `.env` while preserving unrelated environment configuration: active credentials are uncommented and disabled credentials remain commented out. Existing single Settings keys and active or commented `.env` provider keys are imported as named profiles during migration, after which users should not need to edit `.env` directly.
 - The update action must stay constrained to the configured repository and the currently checked-out branch. It should first try `git pull --ff-only` against that repository and branch. If that fast-forward pull fails, it should stage a fresh replacement clone, install dependencies, preserve local `.env`, `server/data`, workflows, inputs, uploads, and outputs, swap the app folder, relaunch through the platform launcher, and remove the old install only after the replacement reports healthy. Keep Windows PowerShell and macOS bash handoff scripts aligned; do not add merge, reset, or branch-changing behavior to the Settings button.
 - Branch status should compare the current local branch with the configured remote branch head and report a plain state such as up to date, update available, local changes, local ahead, repository differs, or check failed.
-- Restart requests should go through `/api/settings/restart` and the restart marker flow. Preserve Windows and macOS launchers/watchers when changing restart behavior.
+- Restart requests should go through `/api/settings/restart` and the restart marker flow. Both production launchers use the shared supervisor, per-service ownership locks, rotating logs, bounded crash backoff, and explicit restart status. Source watching is for development only. Never terminate unrelated processes merely because they own a port.
 - If the Settings branch tile or health payload shows the app version, derive it from package metadata so release bumps update the display automatically.
 
 ## Image And Video Model Standards
@@ -674,6 +678,9 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Server saves should migrate legacy projects when needed, read summary files for collision/existing checks, write the workflow/package, return the registered workflow promptly, and schedule the workflow-index rebuild in the background.
 - Background workflow-index rebuilds should log success or failure but must not make an already-successful save look failed to the user.
 - The dirty/unsaved fingerprint includes nodes, edges, groups, project name, and package path. It intentionally excludes viewport pan/zoom.
+- Fingerprint caches require immutable node/edge/group updates. Undo back to saved content must become clean; runtime progress, recovery controls, and Timeline frame payloads must not mark the document dirty. Measure actual geometry changes before invalidating React Flow handles; do not remeasure on every progress tick.
+- A missing history file is different from an unreadable or corrupt one. Retry transient failures, preserve the last-good backup, quarantine recoverable corruption, and refuse writes after unresolved read failure. Never delete history/index data or replace it with an empty array to hide a read error. Atomic JSON writes must not fall back to copy-overwriting the destination.
+- Project output records are independent of source-node lifetime and recent-history retention. Package copies must remap catalog assets as well as graph assets; old recent-history URLs must not override remapped catalog records on restart.
 - Add normalization for new node fields.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.
@@ -870,6 +877,9 @@ The 3D node establishes the standard for model generation nodes.
 - Stats should count 3D runs in media mix and estimated spend.
 
 ## Verification Checklist
+
+- Changes to shared persistence, scheduling, runtime launch, or canvas behavior require the full Node suite, production build, isolated API smoke, fixed-fixture performance check, and relevant checked-in Playwright tests. Keep Windows/macOS CI current. Tests must not call paid providers or mutate real project data. Native dialogs/GPU checks require the corresponding platform and must be reported separately.
+- Performance diagnostics remain opt-in, expire automatically, and export allowlisted counters/events rather than raw logs or workflow content. Never expose provider credentials, signed URLs, prompts, or local asset paths in the support snapshot.
 
 Before completing source changes:
 
