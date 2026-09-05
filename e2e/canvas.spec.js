@@ -38,6 +38,38 @@ for (const scale of [0.05, 0.08, 0.15, 0.3, 1]) {
   });
 }
 
+test("groups resize from every corner while the opposite corner stays anchored", async ({ page }) => {
+  const { errors } = await openFixture(page, { count: 2, scale: 0.8, group: true });
+  const group = page.locator(".node-group-backdrop");
+  await expect(group.locator(".group-resize-handle")).toHaveCount(4);
+  const nodeBefore = await page.locator('[data-node-card-id="fixture-0"]').boundingBox();
+
+  async function dragCorner(corner, deltaX, deltaY, fixedEdges) {
+    const before = await group.boundingBox();
+    const handle = await group.locator(`.group-resize-handle-${corner}`).boundingBox();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2 + deltaX, handle.y + handle.height / 2 + deltaY, { steps: 8 });
+    await page.mouse.up();
+    const after = await group.boundingBox();
+    for (const edge of fixedEdges) {
+      const value = edge === "right" ? (box) => box.x + box.width : edge === "bottom" ? (box) => box.y + box.height : (box) => box[edge === "left" ? "x" : "y"];
+      expect(value(after)).toBeCloseTo(value(before), 0);
+    }
+    expect(Math.abs(after.width - before.width) + Math.abs(after.height - before.height)).toBeGreaterThan(30);
+  }
+
+  await dragCorner("top-left", 40, 30, ["right", "bottom"]);
+  await dragCorner("top-right", -40, 30, ["left", "bottom"]);
+  await dragCorner("bottom-right", 40, 30, ["left", "top"]);
+  await dragCorner("bottom-left", 40, -30, ["right", "top"]);
+
+  const nodeAfter = await page.locator('[data-node-card-id="fixture-0"]').boundingBox();
+  expect(nodeAfter.x).toBeCloseTo(nodeBefore.x, 0);
+  expect(nodeAfter.y).toBeCloseTo(nodeBefore.y, 0);
+  expect(errors).toEqual([]);
+});
+
 test("rail uses proportional still posters, retains items after refresh, and loads older generations", async ({ page }) => {
   const { errors } = await openFixture(page, { count: 12, scale: 0.3 });
   await page.getByTitle("Show project outputs", { exact: true }).click();

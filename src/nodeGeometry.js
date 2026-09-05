@@ -234,6 +234,38 @@ export function groupToRect(group) {
   };
 }
 
+export function resizeGroupFromCorner(group, corner, deltaX = 0, deltaY = 0, minimumSize = 1) {
+  const x = finiteCoordinate(group?.x);
+  const y = finiteCoordinate(group?.y);
+  const width = Math.max(1, Number(group?.width) || 1);
+  const height = Math.max(1, Number(group?.height) || 1);
+  const minimum = Math.max(1, Number(minimumSize) || 1);
+  const right = Math.round(x + width);
+  const bottom = Math.round(y + height);
+  const moveLeft = corner === "top-left" || corner === "bottom-left";
+  const moveTop = corner === "top-left" || corner === "top-right";
+
+  const nextX = moveLeft
+    ? Math.round(Math.min(right - minimum, x + finiteCoordinate(deltaX)))
+    : Math.round(x);
+  const nextY = moveTop
+    ? Math.round(Math.min(bottom - minimum, y + finiteCoordinate(deltaY)))
+    : Math.round(y);
+  const nextWidth = moveLeft
+    ? right - nextX
+    : Math.round(Math.max(minimum, width + finiteCoordinate(deltaX)));
+  const nextHeight = moveTop
+    ? bottom - nextY
+    : Math.round(Math.max(minimum, height + finiteCoordinate(deltaY)));
+
+  return {
+    x: nextX,
+    y: nextY,
+    width: nextWidth,
+    height: nextHeight
+  };
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }

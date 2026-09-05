@@ -1626,15 +1626,42 @@
 .group-resize-handle {
   position: absolute;
   z-index: 2;
-  right: -5px;
-  bottom: -5px;
   width: 15px;
   height: 15px;
   border: 1px solid color-mix(in srgb, var(--group-color) 56%, rgba(255, 255, 255, 0.2));
   border-radius: 999px;
   background: #202020;
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.24);
+}
+
+.group-resize-handle-top-left,
+.group-resize-handle-bottom-right {
   cursor: nwse-resize;
+}
+
+.group-resize-handle-top-right,
+.group-resize-handle-bottom-left {
+  cursor: nesw-resize;
+}
+
+.group-resize-handle-top-left {
+  top: -5px;
+  left: -5px;
+}
+
+.group-resize-handle-top-right {
+  top: -5px;
+  right: -5px;
+}
+
+.group-resize-handle-bottom-right {
+  right: -5px;
+  bottom: -5px;
+}
+
+.group-resize-handle-bottom-left {
+  bottom: -5px;
+  left: -5px;
 }
 
 .zoom-controls {

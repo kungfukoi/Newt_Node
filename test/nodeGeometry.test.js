@@ -17,6 +17,7 @@ import {
   mergeMeasuredPortPositions,
   pastedNodePositions,
   positiveModulo,
+  resizeGroupFromCorner,
   rectsOverlap
 } from "../src/nodeGeometry.js";
 
@@ -80,6 +81,21 @@ test("clamp helpers bound values predictably", () => {
   assert.equal(clamp(-4, 0, 10), 0);
   assert.equal(positiveModulo(-3, 28), 25);
   assert.deepEqual(clampContextMenuPosition(500, -20, { width: 320, height: 180 }, { width: 100, height: 80, inset: 8 }), { x: 212, y: 8 });
+});
+
+test("group corner resizing keeps the opposite corner anchored", () => {
+  const group = { x: 100, y: 200, width: 300, height: 240 };
+  assert.deepEqual(resizeGroupFromCorner(group, "bottom-right", 40, 30), { x: 100, y: 200, width: 340, height: 270 });
+  assert.deepEqual(resizeGroupFromCorner(group, "bottom-left", 40, 30), { x: 140, y: 200, width: 260, height: 270 });
+  assert.deepEqual(resizeGroupFromCorner(group, "top-right", 40, 30), { x: 100, y: 230, width: 340, height: 210 });
+  assert.deepEqual(resizeGroupFromCorner(group, "top-left", 40, 30), { x: 140, y: 230, width: 260, height: 210 });
+});
+
+test("group corner resizing stops at the minimum size without moving the opposite corner", () => {
+  assert.deepEqual(
+    resizeGroupFromCorner({ x: 100, y: 200, width: 300, height: 240 }, "top-left", 500, 500, 20),
+    { x: 380, y: 420, width: 20, height: 20 }
+  );
 });
 
 test("pasted nodes anchor at the cursor while preserving relative spacing", () => {

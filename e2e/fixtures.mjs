@@ -1,5 +1,5 @@
 export const fixtureProjectId = "browser-regression-project";
-export function canvasFixture({ count = 271, scale = 0.08, timeline = false, generation = false, attention = false } = {}) {
+export function canvasFixture({ count = 271, scale = 0.08, timeline = false, generation = false, attention = false, group = false } = {}) {
   const nodes = Array.from({ length: count }, (_, index) => {
     const type = ["plainText", index % 12 === 1 ? "video" : "image", "preview", "style"][index % 4];
     return { id: `fixture-${index}`, type, x: 30 + index % 16 * 480, y: 30 + Math.floor(index / 16) * 650,
@@ -29,5 +29,8 @@ export function canvasFixture({ count = 271, scale = 0.08, timeline = false, gen
     nodes.splice(0, nodes.length, { id: "model", type: "videoModel", x: 30, y: 30, data: { title: "Uncertain fixture", model: "Seedance 2.5", prompt: "Local fixture", status: "running" } });
     edges.splice(0, edges.length);
   }
-  return { nodes, edges, groups: [], viewport: { x: 20, y: 20, scale }, projectId: fixtureProjectId, projectName: "Browser regression", savedProjectName: "Browser regression", projectPackagePath: "", workflowFilePath: "" };
+  const groups = group
+    ? [{ id: "fixture-group", name: "Resizable group", color: "#ddc631", x: 10, y: 60, width: 1000, height: 500, nodeIds: nodes.map((node) => node.id) }]
+    : [];
+  return { nodes, edges, groups, viewport: { x: 20, y: 20, scale }, projectId: fixtureProjectId, projectName: "Browser regression", savedProjectName: "Browser regression", projectPackagePath: "", workflowFilePath: "" };
 }

@@ -306,6 +306,8 @@ Every catalog node uses the shared bottom-right resize handle. Resizing changes 
 
 When adding or changing a resizable node, verify its minimum size, width-only growth, height-only growth, diagonal growth, shrink-back behavior, saved/reopened dimensions, controls at both extremes, media aspect ratio, scroll reachability, and every connected port before considering the layout complete.
 
+Group backdrops expose resize handles at all four corners. A corner resize keeps the opposite corner anchored, updates position and dimensions live during the gesture, stops at the group minimum size, and persists the resulting bounds without moving contained nodes.
+
 ## Port And Connection Standards
 
 - Ports should be typed by media and colored from `portColors`.

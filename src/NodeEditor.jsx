@@ -319,7 +319,8 @@ import {
   pastedNodePositions,
   pointInRect,
   positiveModulo,
-  rectsOverlap
+  rectsOverlap,
+  resizeGroupFromCorner
 } from "./nodeGeometry.js";
 import { catalogNodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
 import { textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
@@ -2458,7 +2459,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  function startGroupResize(event, group) {
+  function startGroupResize(event, group, corner = "bottom-right") {
     event.preventDefault();
     event.stopPropagation();
     pushUndoSnapshot();
@@ -2469,8 +2470,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setDragState({
       type: "groupResize",
       groupId: group.id,
+      corner,
       startPointer: pointer,
       group: {
+        x: group.x,
+        y: group.y,
         width: group.width,
         height: group.height
       }
@@ -4935,11 +4939,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       setGroups((current) =>
         current.map((group) =>
           group.id === dragState.groupId
-            ? {
-                ...group,
-                width: Math.round(Math.max(groupSizeFloor, dragState.group.width + deltaX)),
-                height: Math.round(Math.max(groupSizeFloor, dragState.group.height + deltaY))
-              }
+            ? { ...group, ...resizeGroupFromCorner(dragState.group, dragState.corner, deltaX, deltaY, groupSizeFloor) }
             : group
         )
       );
@@ -7782,6 +7782,7 @@ function ComfyWanMissingRequirements({ customNodes = [], models = [] }) {
 function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }) {
   const color = group.color || groupPalette[0];
   const moveEdges = ["top", "right", "bottom", "left"];
+  const resizeCorners = ["top-left", "top-right", "bottom-right", "bottom-left"];
 
   return (
     <section
@@ -7826,7 +7827,15 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
           aria-hidden="true"
         />
       ))}
-      <span className="group-resize-handle" onPointerDown={(event) => onResizeStart(event, group)} />
+      {resizeCorners.map((corner) => (
+        <span
+          key={corner}
+          className={`group-resize-handle group-resize-handle-${corner}`}
+          onPointerDown={(event) => onResizeStart(event, group, corner)}
+          title={`Resize group from ${corner.replace("-", " ")}`}
+          aria-hidden="true"
+        />
+      ))}
     </section>
   );
 }
