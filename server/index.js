@@ -129,6 +129,12 @@ import { buildFilmDirectorRevisionPrompt, filmDirectorRevisionActiveReferenceTag
 import { filterFilmDirectorReferencesForOutput } from "../src/filmDirectorScenes.js";
 import { normalizeFilmDirectorResolution } from "../src/filmDirectorResolutions.js";
 import {
+  filmDirectorAudioPolicyPrompt,
+  filmDirectorVisualSceneRules,
+  normalizeFilmDirectorAudioMode
+} from "../src/filmDirectorAudio.js";
+import { normalizeFilmDirectorVideoModel } from "../src/filmDirectorVideoModels.js";
+import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
   filmDirectorShotMaxCharsPerCut,
@@ -210,9 +216,11 @@ import {
   normalizeFluxVideoUpscaleSafetyTolerance
 } from "../src/fluxVideoUpscale.js";
 import {
+  buildKreaMiniMaxH3Input,
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
+  estimateKreaMiniMaxH3Cost,
   extractKreaJobResultUrl,
   kreaApiBaseUrl,
   kreaEndpointForModel,
@@ -3115,8 +3123,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
     const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const videoModel = normalizeFilmDirectorVideoModel(req.body.videoModel);
     const resolution = normalizeFilmDirectorResolution(req.body.resolution);
     const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
+    const audioMode = normalizeFilmDirectorAudioMode(req.body.audioMode);
     const requestedCuts = requestedSkillDirectorShotCount(shotCount);
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
@@ -3148,8 +3158,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       styleInputs,
       shotCount,
       durationSeconds,
+      videoModel,
       resolution,
-      aspectRatio
+      aspectRatio,
+      audioMode
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
@@ -3175,8 +3187,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         shotCount: result.shotCount || shotCount,
         resolvedShotCount: result.resolvedShotCount,
         durationSeconds: result.durationSeconds || durationSeconds,
+        videoModel: result.videoModel || videoModel,
         resolution: result.resolution || resolution,
         aspectRatio: result.aspectRatio || aspectRatio,
+        audioMode: result.audioMode || audioMode,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
@@ -3203,8 +3217,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       shotCount: result.shotCount,
       resolvedShotCount: result.resolvedShotCount,
       durationSeconds: result.durationSeconds,
+      videoModel: result.videoModel || videoModel,
       resolution: result.resolution || resolution,
       aspectRatio: result.aspectRatio || aspectRatio,
+      audioMode: result.audioMode || audioMode,
       actualShotCount: result.actualShotCount,
       referenceSetup: result.referenceSetup,
       referenceTags: Array.isArray(result.referenceTags) ? result.referenceTags : undefined,
@@ -3459,7 +3475,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         imagePromptLabels,
         aspectRatio,
         resolution: req.body.resolution,
-        quality: req.body.quality
+        quality: req.body.quality,
+        editMaskDataUrl: req.body.editMaskDataUrl
       });
       const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
 
@@ -5659,6 +5676,9 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       if (runtimeProvider === "fal" && !process.env.FAL_KEY) {
         return res.status(400).json({ error: "MiniMax H3 is routed to Fal and needs an enabled Fal API key in Settings." });
       }
+      if (runtimeProvider === "krea" && !process.env.KREA_API_KEY) {
+        return res.status(400).json({ error: "MiniMax H3 is routed to Krea and needs an enabled Krea API key in Settings." });
+      }
       return runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtimeProvider });
     }
 
@@ -6455,6 +6475,27 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
       referenceAudioDurations
     });
   }
+  if (runtimeProvider === "krea") {
+    return runMinimaxH3KreaVideo(req, res, {
+      prompt,
+      submittedPrompt,
+      selectedVideoModel,
+      routeKind,
+      duration,
+      resolution,
+      aspectRatio,
+      startFrameUrl,
+      endFrameUrl,
+      referenceImageUrls,
+      referenceVideoUrls,
+      referenceAudioUrls,
+      imageNames,
+      videoNames,
+      audioNames,
+      referenceVideoDurations,
+      referenceAudioDurations
+    });
+  }
   const uploadedStartFrame = startFrameUrl ? await uploadLocalOutputToFal(startFrameUrl) : "";
   const uploadedEndFrame = endFrameUrl ? await uploadLocalOutputToFal(endFrameUrl) : "";
   const uploadedReferenceImages = routeKind === "reference-to-video"
@@ -6486,8 +6527,10 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
   const remoteVideo = result?.data?.video;
   if (!remoteVideo?.url) throw httpError(502, "Fal returned no MiniMax H3 video URL.");
 
-  const output = await downloadVideo(req, remoteVideo.url, `minimax-h3-${routeKind}`);
   const exactAudioSource = minimaxH3ExactAudioSource(referenceAudioUrls, routeKind);
+  const output = await downloadVideo(req, remoteVideo.url, `minimax-h3-${routeKind}`, {
+    stripAudio: req.body.generateAudio === false && !exactAudioSource
+  });
   if (exactAudioSource) {
     const audio = await resolveLocalAssetPathFromUrl(exactAudioSource);
     output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
@@ -6518,6 +6561,7 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
       enablePromptExpansion: input.enable_prompt_expansion,
       enableSafetyChecker: input.enable_safety_checker,
       nativeAudio: !exactAudioSource,
+      generateAudio: req.body.generateAudio !== false,
       exactConnectedAudio: Boolean(exactAudioSource),
       startFrameCount: startFrameUrl ? 1 : 0,
       endFrameCount: endFrameUrl ? 1 : 0,
@@ -6549,6 +6593,106 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
       localUrl: output.publicPath,
       fileName: output.fileName
     }
+  });
+}
+
+async function runMinimaxH3KreaVideo(req, res, {
+  prompt,
+  submittedPrompt,
+  selectedVideoModel,
+  routeKind,
+  duration,
+  resolution,
+  aspectRatio,
+  startFrameUrl,
+  endFrameUrl,
+  referenceImageUrls,
+  referenceVideoUrls,
+  referenceAudioUrls,
+  imageNames,
+  videoNames,
+  audioNames,
+  referenceVideoDurations,
+  referenceAudioDurations
+}) {
+  const endpoint = kreaEndpointForModel("video", selectedVideoModel.displayName);
+  if (!endpoint) throw httpError(400, "MiniMax H3 is not available through the configured Krea API.");
+  const [startImage, endImage, referenceImages, referenceVideos, referenceAudios] = await Promise.all([
+    startFrameUrl ? uploadLocalOutputToKrea(startFrameUrl) : "",
+    endFrameUrl ? uploadLocalOutputToKrea(endFrameUrl) : "",
+    Promise.all(referenceImageUrls.map((url) => uploadLocalOutputToKrea(url))),
+    Promise.all(referenceVideoUrls.map((url) => uploadLocalOutputToKrea(url))),
+    Promise.all(referenceAudioUrls.map((url) => uploadLocalOutputToKrea(url)))
+  ]);
+  const input = buildKreaMiniMaxH3Input({
+    prompt: submittedPrompt,
+    startImage,
+    endImage,
+    referenceImages,
+    referenceVideos,
+    referenceAudios,
+    aspectRatio,
+    duration
+  });
+  const result = await runKreaGeneration({ endpoint, input, label: "MiniMax H3" });
+  const videoUrl = extractKreaJobResultUrl(result.job);
+  if (!videoUrl) throw httpError(502, "Krea completed MiniMax H3 but returned no video URL.", { body: result.job });
+  const remoteVideo = { url: videoUrl, content_type: "video/mp4", file_name: "minimax-h3.mp4" };
+  const exactAudioSource = minimaxH3ExactAudioSource(referenceAudioUrls, routeKind);
+  const output = await downloadVideo(req, videoUrl, `minimax-h3-krea-${routeKind}`, {
+    stripAudio: req.body.generateAudio === false && !exactAudioSource
+  });
+  if (exactAudioSource) {
+    const audio = await resolveLocalAssetPathFromUrl(exactAudioSource);
+    output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
+  }
+  const cost = estimateKreaMiniMaxH3Cost({ durationSeconds: duration, referenceImageCount: referenceImageUrls.length });
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "Krea",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: `MiniMax H3 ${routeKind}`,
+    prompt,
+    submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      provider: "krea",
+      route: routeKind,
+      duration: `${duration} seconds`,
+      requestedResolution: resolution,
+      resolution: "Krea provider default",
+      aspectRatio,
+      generateAudio: req.body.generateAudio !== false,
+      exactConnectedAudio: Boolean(exactAudioSource),
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0,
+      referenceImageCount: referenceImageUrls.length,
+      referenceImageNames: imageNames,
+      referenceVideoCount: referenceVideoUrls.length,
+      referenceVideoNames: videoNames,
+      referenceVideoDurationSeconds: referenceVideoDurations.reduce((total, seconds) => total + seconds, 0),
+      referenceAudioCount: referenceAudioUrls.length,
+      referenceAudioNames: audioNames,
+      referenceAudioDurationSeconds: referenceAudioDurations.reduce((total, seconds) => total + seconds, 0)
+    },
+    cost,
+    remoteVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    submittedPrompt,
+    provider: "Krea",
+    cost,
+    video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName }
   });
 }
 
@@ -6617,8 +6761,11 @@ async function runMinimaxH3LocalVideo(req, res, {
       });
     }
   });
-  const output = await downloadVideo(req, result.contentUrl, `minimax-h3-local-${routeKind}`, { extension: ".mp4" });
   const exactAudioSource = minimaxH3ExactAudioSource(referenceAudioUrls, routeKind);
+  const output = await downloadVideo(req, result.contentUrl, `minimax-h3-local-${routeKind}`, {
+    extension: ".mp4",
+    stripAudio: req.body.generateAudio === false && !exactAudioSource
+  });
   if (exactAudioSource) {
     const audio = await resolveLocalAssetPathFromUrl(exactAudioSource);
     output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
@@ -6660,6 +6807,7 @@ async function runMinimaxH3LocalVideo(req, res, {
       seed: result.seed,
       enablePromptExpansionRequested: h3Settings.enablePromptExpansion !== false,
       nativeAudio: !exactAudioSource,
+      generateAudio: req.body.generateAudio !== false,
       exactConnectedAudio: Boolean(exactAudioSource),
       startFrameCount: startFrameUrl ? 1 : 0,
       endFrameCount: endFrameUrl ? 1 : 0,
@@ -15580,8 +15728,6 @@ async function processTextWithFal({ mode = "process", messages = [], text, textI
   };
 }
 
-const skillDirectorSceneRules =
-  "Scene rules: Absolutely no music, no music score, no audio effects. Cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental sounds, natural ambience.";
 const skillDirectorFinalPromptMaxChars = 7000;
 
 function skillDirectorSystemPrompt() {
@@ -15680,8 +15826,11 @@ function stripSkillDirectorFences(text) {
     .trim();
 }
 
-function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "" } = {}) {
-  const seenInstructions = new Set(skillDirectorInstructionUnits(skillDirectorSceneRules).map(skillDirectorInstructionKey));
+function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production" } = {}) {
+  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode);
+  const seenInstructions = new Set(
+    skillDirectorInstructionUnits(`${filmDirectorVisualSceneRules}\n${audioPolicy}`).map(skillDirectorInstructionKey)
+  );
   const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
   const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
   const cleanStyle = dedupeSkillDirectorInstructions(
@@ -15690,12 +15839,15 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   );
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
+  const cleanOverview = cleanSkillDirectorMoodBoardReferences(sceneOverview).trim();
   const finalShotCount = largestSkillDirectorCutNumber(shotList);
   const maxCharsPerCut = filmDirectorShotMaxCharsPerCut(finalShotCount || "Auto");
   const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
   let finalPrompt = [
     dedupeSkillDirectorLines(referenceLines).join("\n"),
-    skillDirectorSceneRules,
+    filmDirectorVisualSceneRules,
+    audioPolicy,
+    cleanOverview ? `Scene Overview:\n${cleanOverview}` : "",
     cleanStyle ? `Style Direction:\n${cleanStyle}` : "",
     cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
     cleanContinuity ? `Scene Continuity:\n${cleanContinuity}` : "",
@@ -15709,7 +15861,9 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
     finalPrompt = [
       clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
-      skillDirectorSceneRules,
+      filmDirectorVisualSceneRules,
+      audioPolicy,
+      cleanOverview ? `Scene Overview:\n${clipSkillDirectorText(cleanOverview, 1200)}` : "",
       cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
       cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
       cleanContinuity ? `Scene Continuity:\n${clipSkillDirectorText(cleanContinuity, 500)}` : "",
@@ -16115,6 +16269,7 @@ function buildSkillDirectorPrompt({
   if (action === "shotList") {
     return [
       `Create the Shot List for one cinematic ${durationLabel} AI video scene.`,
+      "The current Scene Overview is the sole story authority for this pass and fully replaces every earlier version. Do not carry forward any prior event, action, prop, dialogue, evidence detail, or story beat that is absent from the current Scene Overview and connected asset descriptions. Do not turn an abstract beat into a newly invented concrete prop.",
       "Return strict JSON only with this exact shape:",
       `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(shotCount, durationSeconds)}"}]}`,
       skillDirectorContinuityMapDirective(durationLabel),
@@ -16187,8 +16342,10 @@ async function runFilmDirector({
   styleInputs = [],
   shotCount = "3",
   durationSeconds = "15",
+  videoModel = "",
   resolution = "720p",
-  aspectRatio = "16:9"
+  aspectRatio = "16:9",
+  audioMode = "production"
 }) {
 
   const model = skillDirectorFalModel;
@@ -16206,10 +16363,12 @@ async function runFilmDirector({
   if (action === "build") {
     const finalPrompt = composeSkillDirectorFinalPrompt({
       referenceLines,
+      sceneOverview,
       styleDirection,
       motionDirection,
       shotList,
-      shotListNotes
+      shotListNotes,
+      audioMode
     });
     if (!finalPrompt) {
       throw new Error("Lock generated Film Director sections before building the scene.");
@@ -16225,8 +16384,10 @@ async function runFilmDirector({
       helperUsages: [],
       shotCount,
       durationSeconds,
+      videoModel,
       resolution,
       aspectRatio,
+      audioMode,
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -16243,8 +16404,10 @@ async function runFilmDirector({
       revisionNotes,
       durationLabel: skillDirectorDurationLabel(durationSeconds),
       durationSeconds,
+      videoModel,
       resolution,
       aspectRatio,
+      audioMode,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -16278,6 +16441,8 @@ async function runFilmDirector({
     const revisedSceneName = skillDirectorStructuredValue(structuredOutput, ["sceneName", "scene_name", "title"]) || sceneName;
     const requestedRevisedDuration = String(skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"]));
     const revisedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, durationSeconds);
+    const revisedVideoModel = normalizeFilmDirectorVideoModel(skillDirectorStructuredValue(structuredOutput, ["videoModel", "video_model"]), videoModel);
+    const revisedAudioMode = normalizeFilmDirectorAudioMode(skillDirectorStructuredValue(structuredOutput, ["audioMode", "audio_mode"]), audioMode);
     const revisedResolution = normalizeFilmDirectorResolution(skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]), resolution);
     const revisedAspectRatio = normalizeFilmDirectorAspectRatio(skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]), aspectRatio);
     const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection));
@@ -16297,10 +16462,12 @@ async function runFilmDirector({
     const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
     const finalPrompt = composeSkillDirectorFinalPrompt({
       referenceLines: revisedReferenceLines,
+      sceneOverview: revisedSceneOverview,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       shotList: revisedShotList,
-      shotListNotes: revisedShotListNotes
+      shotListNotes: revisedShotListNotes,
+      audioMode: revisedAudioMode
     });
     const actualShotCount = largestSkillDirectorCutNumber(revisedShotList);
 
@@ -16315,8 +16482,10 @@ async function runFilmDirector({
       helperUsages: validatedOutput.usages || [],
       shotCount: actualShotCount ? String(actualShotCount) : shotCount,
       durationSeconds: revisedDurationSeconds,
+      videoModel: revisedVideoModel,
       resolution: revisedResolution,
       aspectRatio: revisedAspectRatio,
+      audioMode: revisedAudioMode,
       actualShotCount,
       resolvedShotCount: actualShotCount,
       sceneName: revisedSceneName,
@@ -16425,8 +16594,10 @@ async function runFilmDirector({
     helperUsages: [...imageContext.usages, ...helperUsages].filter(Boolean),
     shotCount,
     durationSeconds,
+    videoModel,
     resolution,
     aspectRatio,
+    audioMode,
     actualShotCount,
     resolvedShotCount,
     referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -18944,7 +19115,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality }) {
+async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -18956,7 +19127,8 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     });
   }
 
-  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality });
+  const editMaskInput = editMaskDataUrl ? imageDataUrlAsset(editMaskDataUrl, "character-wardrobe-mask.png") : null;
+  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
 }
 
 async function generateOpenAiImage2FromInputs(options) {
@@ -19018,7 +19190,7 @@ async function generateKreaOpenAiImage2FromInputs({
   };
 }
 
-async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality }) {
+async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const quality = normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
@@ -19034,6 +19206,7 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
 
   if (imageInputs.length) {
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
+    if (editMaskInput) input.mask_url = await uploadImageInputToFal(editMaskInput, imageInputs.length);
   }
 
   const result = await subscribeFal(endpoint, { input, logs: true });

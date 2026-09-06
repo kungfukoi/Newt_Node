@@ -14,7 +14,7 @@ export function normalizeModelProviderPreferences(value = {}, availability = {})
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.veo),
     imageGeneration: normalizedProvider(incoming.imageGeneration, ["google", "fal"])
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.imageGeneration),
-    minimaxH3: normalizedProvider(incoming.minimaxH3, ["fal", "local"])
+    minimaxH3: normalizedProvider(incoming.minimaxH3, ["fal", "krea", "local"])
       || defaultModelProviderPreferences.minimaxH3
   };
 }

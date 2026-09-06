@@ -16,6 +16,7 @@ import { reve21CostPerImage } from "./reve21.js";
 import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
 import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
 import { estimateMinimaxH3Cost, minimaxH3CostPerSecond, minimaxH3ReferenceLimits } from "./minimaxH3.js";
+import { estimateKreaMiniMaxH3Cost } from "./kreaApi.js";
 
 const defaultPricing = {
   seedance: {
@@ -478,7 +479,7 @@ function buildUsageStats(history, pricing) {
 
   const models = aggregateRows(modelMap);
   const projects = aggregateRows(projectMap);
-  const totalCost = round(normalized.reduce((sum, item) => sum + item.cost, 0));
+  const pricedTotalCost = round(normalized.reduce((sum, item) => sum + item.cost, 0));
   const totalCount = normalized.length;
   const pricedCount = normalized.filter((item) => item.hasCostEstimate).length;
   const unpricedCount = totalCount - pricedCount;
@@ -490,7 +491,7 @@ function buildUsageStats(history, pricing) {
 
   return {
     days,
-    totalCost,
+    totalCost: pricedCount ? pricedTotalCost : null,
     totalCount,
     imageCount,
     videoCount,
@@ -500,7 +501,7 @@ function buildUsageStats(history, pricing) {
     unpricedCount,
     videoSeconds,
     fastCount: normalized.filter((item) => item.isFast).length,
-    averageCost: pricedCount ? round(totalCost / pricedCount) : 0,
+    averageCost: pricedCount ? round(pricedTotalCost / pricedCount) : null,
     topProject: projects[0],
     models,
     projects,
@@ -517,7 +518,7 @@ function normalizeUsageItem(item, pricing) {
   const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
   const cost = resolvedItemCost(item, mediaType, pricing);
   const hasCostEstimate = Number.isFinite(cost);
-  const durationSeconds = mediaType === "video" ? durationToSeconds(settings.duration) : 0;
+  const durationSeconds = mediaType === "video" ? durationToSeconds(item.remoteVideo?.duration ?? settings.duration) : 0;
   const cutoff = startOfDay(new Date());
   cutoff.setDate(cutoff.getDate() - 29);
 
@@ -544,10 +545,8 @@ function resolvedItemCost(item, mediaType, pricing) {
   const estimatedCost = estimateItemCost(item, mediaType, pricing);
   const trustedSource = item.cost?.pricingSource && item.cost.pricingSource !== "configured-pricing-v1";
 
-  if (storedCost !== null && item.cost?.pricingSource === "fal-usage-response") return storedCost;
-  if (storedCost !== null && item.cost?.pricingSource === "krea-api-pricing-2026-07-12") return storedCost;
-  if (estimatedCost !== null) return estimatedCost;
   if (storedCost !== null && trustedSource) return storedCost;
+  if (estimatedCost !== null) return estimatedCost;
   return storedCost;
 }
 
@@ -931,6 +930,14 @@ function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {
 }
 
 function estimateMinimaxH3StatsCost(item, settings, pricing) {
+  const provider = String(item.provider || settings.runtimeProvider || settings.provider || "").toLowerCase();
+  if (provider.includes("local")) return 0;
+  if (provider.includes("krea")) {
+    return estimateKreaMiniMaxH3Cost({
+      durationSeconds: settings.duration || item.cost?.durationSeconds || item.cost?.units,
+      referenceImageCount: settings.referenceImageCount || item.cost?.referenceImageCount
+    }).amountUsd;
+  }
   const modelPricing = pricing.minimaxH3 || defaultPricing.minimaxH3;
   return estimateMinimaxH3Cost({
     duration: settings.duration || item.cost?.durationSeconds || item.cost?.units,
@@ -1101,9 +1108,9 @@ function dayKey(date) {
 }
 
 function durationToSeconds(duration) {
-  if (duration === "auto") return 15;
-  const match = String(duration || "15").match(/\d+/);
-  return Number(match?.[0] || 15);
+  if (String(duration || "").trim().toLowerCase() === "auto") return 0;
+  const match = String(duration || "").match(/\d+(?:\.\d+)?/);
+  return Number(match?.[0] || 0);
 }
 
 function normalizeChoice(value, choices, fallback) {
@@ -1126,6 +1133,7 @@ function unpricedSuffix(count) {
 }
 
 function formatCurrency(value) {
+  if (value === null || value === undefined || value === "") return "Unpriced";
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "Unpriced";
   const absolute = Math.abs(amount);

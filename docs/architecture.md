@@ -91,7 +91,7 @@ Character nodes persist generated wardrobe variants in `characterSheetVariants`,
 
 The active Character sheet is the full-resolution identity reference consumed by downstream image, video, Composer, Film Director, and Storyboard paths. `src/characterVideoSheets.js` resolves the selected image or matching CU Video sheet for video generation. Changing a node title updates the visible `@token`, while node ids and persisted reference bindings keep the relationship stable.
 
-Generated and custom sheets coexist. Regeneration merges successful wardrobe variants and retains previous variants for failed wardrobes; removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
+Generated and custom sheets coexist. New Character generation first creates a neutral Base Identity sheet, then creates wardrobe-specific variants as edits of that base. Base and wardrobe signatures allow current variants to be reused, while the per-wardrobe action regenerates only that dependency. Regenerate Base deliberately invalidates generated wardrobe dependencies; ordinary retries and partial failures retain successful prior variants. Legacy generated sheets without signatures remain selectable and are not rebuilt merely because an older workflow was opened. Removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
 
 `runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
 
@@ -125,7 +125,7 @@ Current explicit export choices are PNG/JPEG for stills and H.264 MP4/ProRes 422
 
 ## Local Engines And Providers
 
-Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history.
+Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history. MiniMax H3 supports authoritative Fal, Krea, and Local routes. The Krea route uses the same validated multimodal reference contract as the H3 node and never falls back to Fal or Local after submission failure.
 
 Local ComfyUI integrations live in focused server engines such as `server/wanwarp/` and `server/wanblend/`. Browser code sends normalized settings and managed asset URLs, while server engines own template patching, queueing, polling, output recovery, and diagnostics.
 Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed Newt assets to server-visible `file://` URIs, submits asynchronous video jobs to loopback SGLang, polls completion, and copies content back into managed outputs. FL2VA/T2VA use the primary URL; Ref2VA may use a separately configured service because it is a distinct deployment variant.

@@ -1,6 +1,6 @@
 # Local MiniMax H3
 
-Newt can route the MiniMax H3 Video Model through Fal or a loopback [SGLang](https://docs.sglang.ai/) service. Choose the route in **Settings > Model Providers > MiniMax H3**. The selected route is authoritative; Newt never falls back silently.
+Newt can route the MiniMax H3 Video Model through Fal, Krea, or a loopback [SGLang](https://docs.sglang.ai/) service. Choose the route in **Settings > Model Providers > MiniMax H3**. The selected route is authoritative; Newt never falls back silently. Krea and Fal use the same validated Image, Video, and Audio reference limits from the node, while Local uses the runtime described below.
 
 ## What Newt Expects
 

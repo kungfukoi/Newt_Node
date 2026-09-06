@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildKreaMiniMaxH3Input,
   buildKreaImageInput,
+  estimateKreaMiniMaxH3Cost,
   estimateKreaKlingCost,
   extractKreaJobResultUrl,
   extractKreaJobResultUrls,
@@ -31,10 +33,35 @@ test("current shared NewtNode models resolve to Krea endpoints", () => {
 
   assert.equal(kreaEndpointForModel("video", "Seedance 2.0"), "/generate/video/bytedance/seedance-2");
   assert.equal(kreaEndpointForModel("video", "Seedance 2.5"), "/generate/video/bytedance/seedance-2-5");
+  assert.equal(kreaEndpointForModel("video", "MiniMax H3"), "/generate/video/minimax/hailuo-3");
   assert.equal(kreaEndpointForModel("video", "Kling O3 Pro"), "/generate/video/kling/kling-3.0");
   assert.equal(kreaEndpointForModel("video", "Gemini Omni Flash"), "/generate/video/google/gemini-omni-flash");
   assert.equal(kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro"), "/generate/3d/tencent/hunyuan3d-3.1-pro");
   assert.equal(supportsKreaModel("image", "REVE 2.1"), false);
+});
+
+test("MiniMax H3 Krea input keeps the validated multimodal references", () => {
+  const input = buildKreaMiniMaxH3Input({
+    prompt: "Use the supplied identity, motion, and voice",
+    startImage: "https://example.com/start.png",
+    endImage: "https://example.com/end.png",
+    referenceImages: ["https://example.com/identity.png"],
+    referenceVideos: ["https://example.com/motion.mp4"],
+    referenceAudios: ["https://example.com/voice.wav"],
+    aspectRatio: "Adaptive",
+    duration: "15 seconds"
+  });
+  assert.deepEqual(input, {
+    prompt: "Use the supplied identity, motion, and voice",
+    start_image: "https://example.com/start.png",
+    end_image: "https://example.com/end.png",
+    aspect_ratio: "adaptive",
+    reference_images: ["https://example.com/identity.png"],
+    reference_videos: ["https://example.com/motion.mp4"],
+    reference_audios: ["https://example.com/voice.wav"],
+    duration: 15
+  });
+  assert.equal(estimateKreaMiniMaxH3Cost({ durationSeconds: 10, referenceImageCount: 7 }).amountUsd, 1.449);
 });
 
 test("OpenAI Image 2 Krea input preserves high quality, references, and output controls", () => {

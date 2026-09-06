@@ -108,7 +108,7 @@ export default function SettingsPage() {
       };
       applyLoadedSettings(data);
       dispatchModelPreferences(savedModelPreferences);
-      dispatchModelProviderPreferences(data.modelProviderPreferences);
+      dispatchModelProviderPreferences(data);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
       await refreshKeyValidation();
@@ -395,6 +395,7 @@ export default function SettingsPage() {
                 }}
               >
                 <option value="fal">Fal</option>
+                <option value="krea">Krea</option>
                 <option value="local">Local</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.minimaxH3, activeCredentialIds, "MiniMax H3", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
@@ -776,10 +777,19 @@ function dispatchModelPreferences(preferences) {
   }));
 }
 
-function dispatchModelProviderPreferences(preferences) {
+function dispatchModelProviderPreferences(settings) {
   if (typeof window === "undefined") return;
+  const preferences = settings?.modelProviderPreferences || settings;
   window.dispatchEvent(new CustomEvent("newtnode:model-provider-settings-updated", {
-    detail: normalizeModelProviderPreferences(preferences)
+    detail: {
+      preferences: normalizeModelProviderPreferences(preferences),
+      availability: {
+        fal: Boolean(settings?.falKeyConfigured),
+        google: Boolean(settings?.googleApiKeyConfigured),
+        krea: Boolean(settings?.kreaApiKeyConfigured),
+        openai: Boolean(settings?.openAiApiKeyConfigured || settings?.openAiKeyConfigured)
+      }
+    }
   }));
 }
 

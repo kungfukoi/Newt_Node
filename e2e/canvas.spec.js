@@ -215,7 +215,7 @@ test("Timeline scrubbing updates a nonblack connected preview", async ({ page },
 
 test("generated images propagate without a nudge, stay contained on resize, and survive Save As/reload", async ({ page }) => {
   const { errors, requests } = await openFixture(page, { generation: true, scale: 0.8 });
-  await page.getByRole("button", { name: "Run Image", exact: true }).click();
+  await page.getByRole("button", { name: /^Run Image(?: \(.+\))?$/ }).click();
   const viewer = page.locator('[data-node-card-id="viewer"]');
   const image = viewer.locator("img").first();
   await expect(image).toBeVisible();

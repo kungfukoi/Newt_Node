@@ -161,6 +161,7 @@ function App() {
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [modelProviderPreferences, setModelProviderPreferences] = React.useState(defaultModelProviderPreferences);
+  const [modelProviderAvailability, setModelProviderAvailability] = React.useState({});
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
@@ -205,7 +206,9 @@ function App() {
 
   React.useEffect(() => {
     function handleModelProviderSettingsUpdated(event) {
-      setModelProviderPreferences(normalizeModelProviderPreferences(event.detail));
+      const detail = event.detail || {};
+      setModelProviderPreferences(normalizeModelProviderPreferences(detail.preferences || detail));
+      if (detail.availability) setModelProviderAvailability(detail.availability);
     }
 
     window.addEventListener("newtnode:model-provider-settings-updated", handleModelProviderSettingsUpdated);
@@ -290,6 +293,7 @@ function App() {
       const data = await settingsApi.load();
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
       setModelProviderPreferences(normalizeModelProviderPreferences(data.modelProviderPreferences));
+      setModelProviderAvailability(providerAvailabilityFromSettings(data));
     } catch {
       setModelPreferences(defaultModelPreferences);
     } finally {
@@ -833,7 +837,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelPreferencesReady={modelPreferencesLoaded} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
@@ -1093,6 +1097,15 @@ function imageResolutionOptionsForModel(model) {
 function formatKrea2Creativity(value) {
   const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "raw";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+function providerAvailabilityFromSettings(settings = {}) {
+  return {
+    fal: Boolean(settings.falKeyConfigured),
+    google: Boolean(settings.googleApiKeyConfigured),
+    krea: Boolean(settings.kreaApiKeyConfigured),
+    openai: Boolean(settings.openAiApiKeyConfigured || settings.openAiKeyConfigured)
+  };
 }
 
 function videoSettingsForModel(model, modelProviderPreferences = defaultModelProviderPreferences) {

@@ -1,4 +1,6 @@
 import { workflowContextPayload } from "../workflowContext.js";
+import { normalizeFilmDirectorVideoModel } from "../filmDirectorVideoModels.js";
+import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorGenerateAudio } from "../filmDirectorAudio.js";
 import { isGeminiOmniModel } from "../geminiOmni.js";
 import {
   geminiOmniDurationOptions,
@@ -122,6 +124,20 @@ function defaultedField(value, fallback) {
   return value === "" || value === undefined || value === null ? fallback : value;
 }
 
+export function filmDirectorVideoSettings(data, director) {
+  if (!director) return data;
+  const model = normalizeFilmDirectorVideoModel(director.videoModel) || data.model;
+  if (!videoModelSupportsFilmDirector(model)) return data;
+  return {
+    ...data,
+    model,
+    duration: filmDirectorVideoDuration(model, director.durationSeconds, data.duration),
+    resolution: filmDirectorVideoResolution(model, director.resolution, data.resolution),
+    aspectRatio: filmDirectorVideoAspectRatio(model, director.aspectRatio, data.aspectRatio),
+    generateAudio: director.audioMode ? filmDirectorGenerateAudio(director.audioMode) : data.generateAudio
+  };
+}
+
 export function buildVideoGenerationRequest({
   node,
   prompt,
@@ -141,9 +157,11 @@ export function buildVideoGenerationRequest({
   filmDirector = null,
   outputTargetIndex = ""
 }) {
+  node = { ...node, data: filmDirectorVideoSettings(node.data, filmDirector) };
   const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
+  const generateAudio = node.data.generateAudio !== false;
   return {
-    prompt,
+    prompt: activeFilmDirector?.audioMode ? applyFilmDirectorAudioPolicyToPrompt(prompt, activeFilmDirector.audioMode) : prompt,
     model: node.data.model,
     duration: activeFilmDirector
       ? filmDirectorVideoDuration(node.data.model, activeFilmDirector.durationSeconds, node.data.duration)
@@ -154,7 +172,7 @@ export function buildVideoGenerationRequest({
     aspectRatio: activeFilmDirector
       ? filmDirectorVideoAspectRatio(node.data.model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
-    generateAudio: node.data.generateAudio,
+    generateAudio,
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
     seed: node.data.seed || "",
@@ -167,8 +185,8 @@ export function buildVideoGenerationRequest({
     characterReferenceLabels,
     referenceVideoUrls,
     referenceVideoLabels,
-    referenceAudioUrls,
-    referenceAudioLabels,
+    referenceAudioUrls: generateAudio ? referenceAudioUrls : [],
+    referenceAudioLabels: generateAudio ? referenceAudioLabels : [],
     filmDirector: activeFilmDirector,
     minimaxH3: {
       enablePromptExpansion: node.data.minimaxH3EnablePromptExpansion !== false
