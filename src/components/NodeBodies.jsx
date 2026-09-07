@@ -1088,7 +1088,8 @@ export function SkillDirectorNodeBody({
   );
 }
 
-export function MediaAssetNodeBody({ node, outputPort, onUpload, onOutputImport, onPreviewOpen, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+export function MediaAssetNodeBody({ node, outputPort, outputPorts, onUpload, onOutputImport, onPreviewOpen, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const visibleOutputPorts = outputPorts?.length ? outputPorts : [outputPort].filter(Boolean);
   return (
     <div
       className="node-body media-node-body"
@@ -1105,7 +1106,9 @@ export function MediaAssetNodeBody({ node, outputPort, onUpload, onOutputImport,
         if (file) onUpload(node, file);
       }}
     >
-      <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      {visibleOutputPorts.map((port) => (
+        <OutputPortRow key={port.id} node={node} port={port} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      ))}
       <MediaPreview node={node} onPreviewOpen={onPreviewOpen} />
       <label className="media-upload-card">
         <UploadIcon type={node.type} />

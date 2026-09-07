@@ -161,6 +161,7 @@ import {
   supportedFilesFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
+import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
 import { previewSelectionForNode } from "./previewSelection.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
@@ -5699,7 +5700,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
     if (source.type === "model3d") return "model3d";
-    if (source.type === "video" || source.type === "videoModel") return "video";
+    if (source.type === "video" || source.type === "videoModel") return videoNodeOutputKind(source, from.port);
     if (source.type === "audio") return "audio";
     if (source.type === "skillDirector") return "director";
     if (["plainText", "text", "textAgent"].includes(source.type)) return "prompt";
@@ -10977,6 +10978,7 @@ function NodeBody({
       <MediaAssetNodeBody
         node={node}
         outputPort={outputPort}
+        outputPorts={config.output}
         onUpload={onUpload}
         onOutputImport={onOutputImport}
         onPreviewOpen={onPreviewOpen}
@@ -15277,6 +15279,7 @@ function NodeBody({
           : formatPricedRunLabel("Run Video", videoRunCost)}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
         <div className="model-input-port-stack video-model-input-port-stack" aria-label="Video model inputs">
           {collapsedPorts.filter(Boolean).map((port) => (
@@ -17104,7 +17107,7 @@ function getNodeConfig(type) {
     video: {
       icon: Video,
       input: [],
-      output: [{ id: "videoOut", label: "Video", color: portColors.video }]
+      output: videoNodeOutputPortDefinitions(portColors)
     },
     audio: {
       icon: FileAudio,
@@ -17173,7 +17176,7 @@ function getNodeConfig(type) {
         { id: "referenceAudioIn", label: "Reference Audio", color: portColors.audio },
         { id: "characterIn", label: "Character", color: portColors.character }
       ],
-      output: [{ id: "videoOut", label: "Video", color: portColors.video }]
+      output: videoNodeOutputPortDefinitions(portColors)
     }
   };
 
@@ -20143,7 +20146,7 @@ function connectedOutputItem(source, edge) {
   return {
     ...outputItem,
     url,
-    type: outputItem?.type || outputType,
+    type: videoNodeOutputKind(source, sourcePort) || outputItem?.type || outputType,
     label: sourceResultLabelForPort(source, sourcePort) || sourceLabel(source) || outputItem?.label,
     text: outputItem?.text || source?.data?.resultText || ""
   };
@@ -20412,6 +20415,7 @@ function sourceResultUrlForPort(source, portId = "") {
 
 function sourceResultLabelForPort(source, portId = "") {
   if (source?.type === "assembly") return portId === "frameOut" ? "Timeline frame" : "Timeline render";
+  if (videoNodeOutputKind(source, portId) === "audio") return videoNodeOutputLabel(source, portId);
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     return transitionBuilderResultItemForPort(source, portId)?.label || "";
   }
@@ -21936,7 +21940,7 @@ function previewMediaType(source, edge) {
   if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
   if (source.type === "edit") return edge?.from?.port === "editMaskOut" ? "image" : editOutputType(source);
   if (source.type === "model3d") return "model3d";
-  if (source.type === "video" || source.type === "videoModel") return "video";
+  if (source.type === "video" || source.type === "videoModel") return videoNodeOutputKind(source, edge?.from?.port);
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
   if (/\.(mp4|mov|qt|webm)$/i.test(source.data.resultUrl || "")) return "video";
   return "image";
@@ -24681,6 +24685,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "characterOut";
       nextEdge.color = portColors.character;
     }
+  }
+
+  if (["video", "videoModel"].includes(source.type)) {
+    nextEdge.color = nextEdge.from.port === embeddedAudioOutputPortId ? portColors.audio : portColors.video;
   }
 
   if (target?.type === "composer" && isComposerCharacterInputPort(nextEdge.to.port, target)) {
