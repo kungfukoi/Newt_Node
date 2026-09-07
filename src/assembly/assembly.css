@@ -2,5 +2,6 @@
 
 .assembly-split-guide{position:absolute;z-index:5;top:0;bottom:0;width:2px;pointer-events:none;background:#f2d820;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
 .assembly-clip.blade-ready{cursor:crosshair}
+.assembly-clip.linked-selected{border-color:#f1da24;box-shadow:0 0 0 1px #f1da24}
 .assembly-split-guide::before{content:"";position:absolute;top:0;left:-4px;border-top:6px solid #f2d820;border-right:5px solid transparent;border-left:5px solid transparent}
 .assembly-split-guide>i{position:absolute;top:6px;left:5px;padding:1px 3px;border-radius:2px;color:#111;background:#f2d820;font-size:9px;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}

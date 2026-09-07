@@ -23,7 +23,7 @@ export function createAssemblyRenderPlan(assembly, resolvedMedia = []) {
       if (track.type === "video" && !track.hidden && ["video", "image"].includes(media.type)) {
         visualClips.push({ inputIndex, track, trackIndex, clip, media: { ...media, ...resolved } });
       }
-      if (!track.muted && ((track.type === "audio" && media.type === "audio") || (track.type === "video" && resolved.hasAudio))) {
+      if (!track.muted && ((track.type === "audio" && media.type === "audio") || (track.type === "video" && resolved.hasAudio && !clip.linkGroupId))) {
         audioClips.push({ inputIndex, track, trackIndex, clip, media: { ...media, ...resolved } });
       }
     });

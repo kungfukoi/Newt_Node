@@ -34,8 +34,9 @@ import {
   clearAssemblyInOut,
   createAssemblyClipClipboard,
   createAssemblyHistory,
+  ensureAssemblyEmbeddedAudioClips,
   importAssemblyOutputItem,
-  insertAssemblyMediaClip,
+  insertAssemblyMediaWithLinkedAudio,
   moveAssemblyClip,
   normalizeAssemblyState,
   pasteAssemblyClip,
@@ -122,6 +123,8 @@ export function AssemblyNodeBody({
   const timelineGridWidth = Math.max(8, assemblyRulerSpacing(duration, pixelsPerSecond, timeline.frameRate).minorStep * pixelsPerSecond);
   const selected = findSelectedClip(timeline);
   const selectedMedia = selected ? timeline.media.find((item) => item.id === selected.clip.mediaId) : null;
+  const selectedLinkGroupId = selected?.clip.linkGroupId || "";
+  const binMedia = timeline.media.filter((media) => !media.derivedFromMediaId);
   const mediaProbeKey = timeline.media.map((media) => `${media.id}:${media.url}`).join("|");
   const previewMediaInstances = assemblyPreviewMediaInstances(timeline);
 
@@ -163,7 +166,7 @@ export function AssemblyNodeBody({
     let canceled = false;
     const pending = timeline.media.filter((media) => {
       const probeKey = [media.id, media.url].join(":");
-      return media.url && !probedMediaRef.current.has(probeKey);
+      return media.url && !media.derivedFromMediaId && !probedMediaRef.current.has(probeKey);
     });
     const probeMedia = onProbeMediaRef.current;
     if (!pending.length || typeof probeMedia !== "function") return undefined;
@@ -181,7 +184,8 @@ export function AssemblyNodeBody({
             if (failedMedia) probedMediaRef.current.delete([failedMedia.id, failedMedia.url].join(":"));
             return;
           }
-          next = updateAssemblyMedia(next, entry.value.media.id, entry.value.result);
+          next = updateAssemblyMedia(next, entry.value.media.id, { ...entry.value.result, hasAudioKnown: true });
+          next = ensureAssemblyEmbeddedAudioClips(next, entry.value.media.id);
           completed += 1;
         });
         if (completed) replaceTimeline(next, true);
@@ -640,7 +644,7 @@ export function AssemblyNodeBody({
     event.stopPropagation();
     setDragTargetTrackId("");
     const time = assemblyTimeAtClientX(event.currentTarget, event.clientX, pixelsPerSecond);
-    commitTimeline(insertAssemblyMediaClip(timelineRef.current, mediaId, trackId, time));
+    commitTimeline(insertAssemblyMediaWithLinkedAudio(timelineRef.current, mediaId, trackId, time));
   }
 
   function handleMediaBinOutputDrop(item) {
@@ -839,7 +843,7 @@ export function AssemblyNodeBody({
       </div>
 
       <AssemblyMediaBin
-        media={timeline.media}
+        media={binMedia}
         onOutputDrop={handleMediaBinOutputDrop}
         onRemove={handleMediaBinRemove}
         connectionControls={(
@@ -956,7 +960,7 @@ export function AssemblyNodeBody({
                   return (
                     <div
                       key={clip.id}
-                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
+                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${selectedLinkGroupId && selectedLinkGroupId === clip.linkGroupId ? "linked-selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
                       style={{ left: clip.start * pixelsPerSecond, width: Math.max(10, clip.duration * pixelsPerSecond), "--assembly-waveform": media.waveformUrl ? `url("${displayMediaUrl(media.waveformUrl)}")` : "none" }}
                       onPointerDown={(event) => handleClipPointerDown(event, clip, track)}
                       onPointerMove={(event) => handleClipPointerMove(event, clip)}

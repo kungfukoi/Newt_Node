@@ -106,7 +106,7 @@ export function assemblyActiveClips(state, time = state?.playhead || 0, type = "
     .flatMap((track, trackIndex) => track.clips.map((clip) => ({ ...clip, track, trackIndex, media: normalized.media.find((item) => item.id === clip.mediaId) })))
     .filter((item) => item.media && (requestedVisual
       ? ["video", "image"].includes(item.media.type)
-      : (item.track.type === "audio" && item.media.type === "audio") || (item.track.type === "video" && item.media.type === "video" && item.media.hasAudio)))
+      : (item.track.type === "audio" && item.media.type === "audio") || (item.track.type === "video" && item.media.type === "video" && item.media.hasAudio && !item.linkGroupId)))
     .filter((item) => time >= item.start && time < item.start + item.duration)
     .sort((first, second) => first.trackIndex - second.trackIndex || first.start - second.start);
 }
@@ -137,6 +137,7 @@ export function syncAssemblyInputs(state, inputs = []) {
       const media = mergeAssemblyConnectedMedia(existing, input);
       if (JSON.stringify(existing) !== JSON.stringify(media)) {
         next.media[existingIndex] = media;
+        if (media.type === "video") syncEmbeddedAudioMedia(next, media);
         changed = true;
       }
       return;
@@ -151,7 +152,7 @@ export function syncAssemblyInputs(state, inputs = []) {
     }));
   });
 
-  return changed ? next : current;
+  return ensureAssemblyEmbeddedAudioClips(changed ? next : current);
 }
 
 export function insertAssemblyMediaClip(state, mediaId, targetTrackId, start = state?.playhead || 0) {
@@ -172,34 +173,93 @@ export function insertAssemblyMediaClip(state, mediaId, targetTrackId, start = s
   return next;
 }
 
+export function insertAssemblyMediaWithLinkedAudio(state, mediaId, targetTrackId, start = state?.playhead || 0) {
+  const inserted = insertAssemblyMediaClip(state, mediaId, targetTrackId, start);
+  if (inserted.selectedClipId === normalizeAssemblyState(state).selectedClipId) return inserted;
+  return ensureAssemblyEmbeddedAudioClips(inserted, mediaId);
+}
+
+export function ensureAssemblyEmbeddedAudioClips(state, videoMediaId = "") {
+  const current = normalizeAssemblyState(state);
+  const next = cloneAssemblyState(current);
+  const videoMedia = next.media.filter((media) => (
+    media.type === "video"
+    && media.hasAudio
+    && (!videoMediaId || media.id === videoMediaId)
+  ));
+  let changed = false;
+
+  videoMedia.forEach((media) => {
+    const videoEntries = next.tracks.flatMap((track) => track.type === "video"
+      ? track.clips.filter((clip) => clip.mediaId === media.id && !clip.linkGroupId).map((clip) => ({ track, clip }))
+      : []);
+    if (!videoEntries.length) return;
+    const audioMedia = ensureEmbeddedAudioMedia(next, media);
+    videoEntries.forEach(({ track, clip }) => {
+      const audioTrack = pairedAssemblyTrack(next, track, "audio");
+      if (!audioTrack) return;
+      const linkGroupId = createAssemblyId("clip-link");
+      clip.linkGroupId = linkGroupId;
+      audioTrack.clips.push(normalizeAssemblyClip({
+        ...clip,
+        id: createAssemblyId("clip"),
+        mediaId: audioMedia.id,
+        linkGroupId
+      }));
+      changed = true;
+    });
+  });
+
+  return changed ? next : current;
+}
+
 export function createAssemblyClipClipboard(state, clipId = state?.selectedClipId) {
   const current = normalizeAssemblyState(state);
   const found = findAssemblyClip(current, clipId);
   if (!found?.media) return null;
+  const linkedClips = linkedAssemblyClipEntries(current, clipId).map((item) => ({
+    sourceClipId: item.clip.id,
+    sourceTrackId: item.track.id,
+    sourceTrackType: item.track.type,
+    clip: assemblyClipboardClip(item.clip)
+  }));
   return {
     version: 1,
     sourceTrackId: found.track.id,
     sourceTrackType: found.track.type,
-    clip: {
-      mediaId: found.clip.mediaId,
-      duration: found.clip.duration,
-      sourceIn: found.clip.sourceIn,
-      sourceDuration: found.clip.sourceDuration,
-      translateX: found.clip.translateX,
-      translateY: found.clip.translateY,
-      scale: found.clip.scale,
-      opacity: found.clip.opacity,
-      rotation: found.clip.rotation,
-      flipHorizontal: found.clip.flipHorizontal,
-      flipVertical: found.clip.flipVertical,
-      speed: found.clip.speed,
-      reverse: found.clip.reverse
-    }
+    selectedSourceClipId: found.clip.id,
+    clip: assemblyClipboardClip(found.clip),
+    linkedClips: linkedClips.length > 1 ? linkedClips : []
   };
 }
 
 export function pasteAssemblyClip(state, clipboard, start = state?.playhead || 0) {
   const current = normalizeAssemblyState(state);
+  if (Array.isArray(clipboard?.linkedClips) && clipboard.linkedClips.length > 1) {
+    const next = cloneAssemblyState(current);
+    const targetStart = snapAssemblyTime(next, start);
+    const linkGroupId = createAssemblyId("clip-link");
+    let selectedClipId = "";
+    for (const entry of clipboard.linkedClips) {
+      const media = next.media.find((item) => item.id === entry?.clip?.mediaId);
+      if (!media) return current;
+      const preferredTrack = next.tracks.find((track) => track.id === entry.sourceTrackId);
+      const targetTrack = preferredTrack && !preferredTrack.locked && assemblyTrackAcceptsMedia(preferredTrack, media)
+        ? preferredTrack
+        : next.tracks.find((track) => !track.locked && assemblyTrackAcceptsMedia(track, media));
+      if (!targetTrack) return current;
+      const clip = normalizeAssemblyClip({
+        ...entry.clip,
+        id: createAssemblyId("clip"),
+        start: targetStart,
+        linkGroupId
+      });
+      targetTrack.clips.push(clip);
+      if (entry.sourceClipId === clipboard.selectedSourceClipId) selectedClipId = clip.id;
+    }
+    next.selectedClipId = selectedClipId || next.tracks.flatMap((track) => track.clips).at(-1)?.id || "";
+    return next;
+  }
   const mediaId = String(clipboard?.clip?.mediaId || "");
   const media = current.media.find((item) => item.id === mediaId);
   if (!media) return current;
@@ -258,16 +318,30 @@ export function updateAssemblyMedia(state, mediaId, patch = {}) {
     changed = JSON.stringify(item) !== JSON.stringify(next);
     return next;
   });
-  if (!changed) return current;
-
-  const next = cloneAssemblyState({ ...current, media });
   const updated = media.find((item) => item.id === mediaId);
+  if (!updated) return current;
+  if (!changed) {
+    if (updated.type === "video" && patch.hasAudioKnown && !updated.hasAudio) {
+      return removeEmbeddedAudioMedia(cloneAssemblyState(current), updated.id);
+    }
+    return updated.type === "video" && updated.hasAudio ? ensureAssemblyEmbeddedAudioClips(current, updated.id) : current;
+  }
+
+  let next = cloneAssemblyState({ ...current, media });
+  if (updated.type === "video") {
+    if (patch.hasAudioKnown && !updated.hasAudio) {
+      next = removeEmbeddedAudioMedia(next, updated.id);
+    } else if (updated.hasAudio) {
+      syncEmbeddedAudioMedia(next, updated);
+    }
+  }
+  const derivedAudioIds = new Set(next.media.filter((item) => item.derivedFromMediaId === mediaId).map((item) => item.id));
   next.tracks.forEach((track) => {
-    track.clips = track.clips.map((clip) => clip.mediaId === mediaId && clip.sourceDuration <= 1
+    track.clips = track.clips.map((clip) => (clip.mediaId === mediaId || derivedAudioIds.has(clip.mediaId)) && clip.sourceDuration <= 1
       ? normalizeAssemblyClip({ ...clip, duration: updated.duration, sourceDuration: updated.duration })
       : clip);
   });
-  return next;
+  return updated.type === "video" && updated.hasAudio ? ensureAssemblyEmbeddedAudioClips(next, updated.id) : next;
 }
 
 export function removeAssemblyMedia(state, mediaId) {
@@ -275,9 +349,13 @@ export function removeAssemblyMedia(state, mediaId) {
   if (!current.media.some((item) => item.id === mediaId)) return current;
 
   const next = cloneAssemblyState(current);
-  next.media = next.media.filter((item) => item.id !== mediaId);
+  const removedMediaIds = new Set([
+    mediaId,
+    ...next.media.filter((item) => item.derivedFromMediaId === mediaId).map((item) => item.id)
+  ]);
+  next.media = next.media.filter((item) => !removedMediaIds.has(item.id));
   next.tracks.forEach((track) => {
-    track.clips = track.clips.filter((clip) => clip.mediaId !== mediaId);
+    track.clips = track.clips.filter((clip) => !removedMediaIds.has(clip.mediaId));
   });
   if (!next.tracks.some((track) => track.clips.some((clip) => clip.id === next.selectedClipId))) {
     next.selectedClipId = "";
@@ -310,9 +388,15 @@ export function updateAssemblyClip(state, clipId, patch = {}) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked) return next;
-  const updated = normalizeAssemblyClip({ ...found.clip, ...patch, id: found.clip.id, mediaId: found.clip.mediaId });
-  const index = found.track.clips.findIndex((clip) => clip.id === clipId);
-  found.track.clips[index] = updated;
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
+  const linkedPatch = assemblyLinkedTimingPatch(patch);
+  linkedEntries.forEach((entry) => {
+    const entryPatch = entry.clip.id === clipId ? patch : linkedPatch;
+    const updated = normalizeAssemblyClip({ ...entry.clip, ...entryPatch, id: entry.clip.id, mediaId: entry.clip.mediaId });
+    const index = entry.track.clips.findIndex((clip) => clip.id === entry.clip.id);
+    entry.track.clips[index] = updated;
+  });
   return next;
 }
 
@@ -320,15 +404,19 @@ export function retimeAssemblyClip(state, clipId, speed, ripple = state?.ripple)
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked || found.media.type === "image") return next;
-  const originalDuration = found.clip.duration;
-  const sourceSpan = assemblyClipSourceSpan(found.clip);
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
   const nextSpeed = clampNumber(speed, 1, 1000, found.clip.speed);
   const frame = assemblyFrameDuration(next);
-  const requestedDuration = sourceSpan / (nextSpeed / 100);
-  const nextDuration = Math.max(frame, Math.round(requestedDuration / frame) * frame);
-  found.clip.speed = nextSpeed;
-  found.clip.duration = nextDuration;
-  if (ripple) shiftFollowingClips(found.track, found.clip.start + originalDuration, nextDuration - originalDuration, clipId);
+  linkedEntries.forEach((entry) => {
+    const originalDuration = entry.clip.duration;
+    const sourceSpan = assemblyClipSourceSpan(entry.clip);
+    const requestedDuration = sourceSpan / (nextSpeed / 100);
+    const nextDuration = Math.max(frame, Math.round(requestedDuration / frame) * frame);
+    entry.clip.speed = nextSpeed;
+    entry.clip.duration = nextDuration;
+    if (ripple) shiftFollowingClips(entry.track, entry.clip.start + originalDuration, nextDuration - originalDuration, entry.clip.id);
+  });
   return next;
 }
 
@@ -337,8 +425,21 @@ export function moveAssemblyClip(state, clipId, targetTrackId, start) {
   const source = findAssemblyClip(next, clipId);
   const target = next.tracks.find((track) => track.id === targetTrackId);
   if (!source || !target || target.locked || !assemblyTrackAcceptsMedia(target, source.media)) return next;
-  source.track.clips = source.track.clips.filter((clip) => clip.id !== clipId);
-  target.clips.push({ ...source.clip, start: snapAssemblyTime(next, start) });
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
+  const nextStart = snapAssemblyTime(next, start);
+  const targetTracks = new Map([[source.clip.id, target]]);
+  linkedEntries.forEach((entry) => {
+    if (entry.clip.id === source.clip.id) return;
+    targetTracks.set(entry.clip.id, pairedAssemblyTrack(next, target, entry.track.type));
+  });
+  if (linkedEntries.some((entry) => !targetTracks.get(entry.clip.id) || targetTracks.get(entry.clip.id).locked)) return next;
+  linkedEntries.forEach((entry) => {
+    entry.track.clips = entry.track.clips.filter((clip) => clip.id !== entry.clip.id);
+  });
+  linkedEntries.forEach((entry) => {
+    targetTracks.get(entry.clip.id).clips.push({ ...entry.clip, start: nextStart });
+  });
   next.selectedClipId = clipId;
   return next;
 }
@@ -371,24 +472,32 @@ export function splitAssemblyClip(state, clipId, time = state?.playhead || 0) {
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked) return next;
   const splitTime = snapAssemblyTime(next, time);
-  const localTime = splitTime - found.clip.start;
-  if (localTime <= minimumClipDuration || localTime >= found.clip.duration - minimumClipDuration) return next;
-  const sourceDelta = localTime * assemblyClipPlaybackRate(found.clip);
-  const first = normalizeAssemblyClip({
-    ...found.clip,
-    duration: localTime,
-    sourceIn: found.clip.reverse ? found.clip.sourceIn + assemblyClipSourceSpan(found.clip) - sourceDelta : found.clip.sourceIn
-  });
-  const second = normalizeAssemblyClip({
-    ...found.clip,
-    id: createAssemblyId("clip"),
-    start: splitTime,
-    duration: found.clip.duration - localTime,
-    sourceIn: found.clip.reverse ? found.clip.sourceIn : found.clip.sourceIn + sourceDelta
-  });
-  const index = found.track.clips.findIndex((clip) => clip.id === clipId);
-  found.track.clips.splice(index, 1, first, second);
-  next.selectedClipId = second.id;
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
+  const splitGroupId = linkedEntries.length > 1 ? createAssemblyId("clip-link") : "";
+  let selectedSecondId = "";
+  for (const entry of linkedEntries) {
+    const localTime = splitTime - entry.clip.start;
+    if (localTime <= minimumClipDuration || localTime >= entry.clip.duration - minimumClipDuration) return normalizeAssemblyState(state);
+    const sourceDelta = localTime * assemblyClipPlaybackRate(entry.clip);
+    const first = normalizeAssemblyClip({
+      ...entry.clip,
+      duration: localTime,
+      sourceIn: entry.clip.reverse ? entry.clip.sourceIn + assemblyClipSourceSpan(entry.clip) - sourceDelta : entry.clip.sourceIn
+    });
+    const second = normalizeAssemblyClip({
+      ...entry.clip,
+      id: createAssemblyId("clip"),
+      linkGroupId: splitGroupId,
+      start: splitTime,
+      duration: entry.clip.duration - localTime,
+      sourceIn: entry.clip.reverse ? entry.clip.sourceIn : entry.clip.sourceIn + sourceDelta
+    });
+    const index = entry.track.clips.findIndex((clip) => clip.id === entry.clip.id);
+    entry.track.clips.splice(index, 1, first, second);
+    if (entry.clip.id === clipId) selectedSecondId = second.id;
+  }
+  next.selectedClipId = selectedSecondId;
   return next;
 }
 
@@ -396,37 +505,10 @@ export function trimAssemblyClip(state, clipId, edge, time, ripple = state?.ripp
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked) return next;
-  const original = { ...found.clip };
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
   const frame = assemblyFrameDuration(next);
-  const playbackRate = assemblyClipPlaybackRate(original);
-  const sourceLimit = Math.max(frame * playbackRate, original.sourceDuration || original.duration * playbackRate);
-
-  if (edge === "left") {
-    const maximumStart = original.start + original.duration - frame;
-    const nextStart = clampNumber(snapAssemblyTime(next, time), 0, maximumStart, original.start);
-    const delta = nextStart - original.start;
-    if (original.reverse) {
-      const maximumExtension = Math.max(0, (sourceLimit - (original.sourceIn + assemblyClipSourceSpan(original))) / playbackRate);
-      const appliedDelta = clampNumber(delta, -maximumExtension, original.duration - frame, 0);
-      found.clip.start = original.start + appliedDelta;
-      found.clip.duration = original.duration - appliedDelta;
-    } else {
-      const nextSourceIn = clampNumber(original.sourceIn + delta * playbackRate, 0, sourceLimit - frame * playbackRate, original.sourceIn);
-      const appliedDelta = (nextSourceIn - original.sourceIn) / playbackRate;
-      found.clip.start = original.start + appliedDelta;
-      found.clip.sourceIn = nextSourceIn;
-      found.clip.duration = original.duration - appliedDelta;
-    }
-  } else {
-    const requestedDuration = snapAssemblyTime(next, time) - original.start;
-    const maximumDuration = original.reverse
-      ? Math.max(frame, original.duration + original.sourceIn / playbackRate)
-      : Math.max(frame, (sourceLimit - original.sourceIn) / playbackRate);
-    const nextDuration = clampNumber(requestedDuration, frame, maximumDuration, original.duration);
-    if (original.reverse) found.clip.sourceIn = Math.max(0, original.sourceIn + (original.duration - nextDuration) * playbackRate);
-    found.clip.duration = nextDuration;
-    if (ripple) shiftFollowingClips(found.track, original.start + original.duration, nextDuration - original.duration, clipId);
-  }
+  linkedEntries.forEach((entry) => trimAssemblyClipEntry(next, entry, edge, time, ripple, frame));
   return next;
 }
 
@@ -434,8 +516,12 @@ export function slipAssemblyClip(state, clipId, delta) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked || found.media.type === "image") return next;
-  const maximum = Math.max(0, found.clip.sourceDuration - assemblyClipSourceSpan(found.clip));
-  found.clip.sourceIn = clampNumber(found.clip.sourceIn + Number(delta || 0), 0, maximum, found.clip.sourceIn);
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
+  linkedEntries.forEach((entry) => {
+    const maximum = Math.max(0, entry.clip.sourceDuration - assemblyClipSourceSpan(entry.clip));
+    entry.clip.sourceIn = clampNumber(entry.clip.sourceIn + Number(delta || 0), 0, maximum, entry.clip.sourceIn);
+  });
   return next;
 }
 
@@ -443,9 +529,13 @@ export function removeAssemblyClip(state, clipId, ripple = state?.ripple) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const found = findAssemblyClip(next, clipId);
   if (!found || found.track.locked) return next;
-  found.track.clips = found.track.clips.filter((clip) => clip.id !== clipId);
-  if (ripple) shiftFollowingClips(found.track, found.clip.start + found.clip.duration, -found.clip.duration, clipId);
-  if (next.selectedClipId === clipId) next.selectedClipId = "";
+  const linkedEntries = linkedAssemblyClipEntries(next, clipId);
+  if (linkedEntries.some((entry) => entry.track.locked)) return next;
+  linkedEntries.forEach((entry) => {
+    entry.track.clips = entry.track.clips.filter((clip) => clip.id !== entry.clip.id);
+    if (ripple) shiftFollowingClips(entry.track, entry.clip.start + entry.clip.duration, -entry.clip.duration, entry.clip.id);
+  });
+  if (linkedEntries.some((entry) => entry.clip.id === next.selectedClipId)) next.selectedClipId = "";
   return next;
 }
 
@@ -598,6 +688,7 @@ function normalizeAssemblyMedia(value = {}) {
     sourceNodeId: String(value.sourceNodeId || ""),
     sourcePort: String(value.sourcePort || ""),
     linkedSource: Boolean(value.linkedSource),
+    derivedFromMediaId: String(value.derivedFromMediaId || ""),
     url: String(value.url || ""),
     type,
     label: String(value.label || value.fileName || `${type} clip`),
@@ -608,6 +699,7 @@ function normalizeAssemblyMedia(value = {}) {
     height: Math.max(0, Math.round(finiteNumber(value.height))),
     fps: Math.max(0, finiteNumber(value.fps)),
     hasAudio: Boolean(value.hasAudio || type === "audio"),
+    hasAudioKnown: Boolean(value.hasAudioKnown || type === "audio"),
     waveformUrl: String(value.waveformUrl || "")
   };
 }
@@ -617,6 +709,7 @@ function normalizeAssemblyClip(value = {}) {
   return {
     id: String(value.id || createAssemblyId("clip")),
     mediaId: String(value.mediaId || ""),
+    linkGroupId: String(value.linkGroupId || ""),
     start: Math.max(0, finiteNumber(value.start)),
     duration,
     sourceIn: Math.max(0, finiteNumber(value.sourceIn)),
@@ -658,6 +751,8 @@ function mergeAssemblyConnectedMedia(existing, input) {
     width: Number(input.width) > 0 ? input.width : existing.width,
     height: Number(input.height) > 0 ? input.height : existing.height,
     fps: Number(input.fps) > 0 ? input.fps : existing.fps,
+    hasAudio: Boolean(input.hasAudio || existing.hasAudio),
+    hasAudioKnown: Boolean(input.hasAudioKnown || existing.hasAudioKnown),
     waveformUrl: input.waveformUrl || (urlChanged ? "" : existing.waveformUrl)
   });
 }
@@ -668,6 +763,139 @@ function assemblyMediaKey(item) {
 
 function assemblyTrackAcceptsMedia(track, media) {
   return track.type === "audio" ? media.type === "audio" : track.type === "video" && ["image", "video"].includes(media.type);
+}
+
+function assemblyClipboardClip(clip) {
+  return {
+    mediaId: clip.mediaId,
+    duration: clip.duration,
+    sourceIn: clip.sourceIn,
+    sourceDuration: clip.sourceDuration,
+    translateX: clip.translateX,
+    translateY: clip.translateY,
+    scale: clip.scale,
+    opacity: clip.opacity,
+    rotation: clip.rotation,
+    flipHorizontal: clip.flipHorizontal,
+    flipVertical: clip.flipVertical,
+    speed: clip.speed,
+    reverse: clip.reverse
+  };
+}
+
+function assemblyLinkedTimingPatch(patch = {}) {
+  const timingKeys = ["start", "duration", "sourceIn", "sourceDuration", "speed", "reverse"];
+  return Object.fromEntries(timingKeys.filter((key) => Object.prototype.hasOwnProperty.call(patch, key)).map((key) => [key, patch[key]]));
+}
+
+function linkedAssemblyClipEntries(state, clipId) {
+  const found = findAssemblyClip(state, clipId);
+  if (!found) return [];
+  if (!found.clip.linkGroupId) return [found];
+  return state.tracks.flatMap((track) => track.clips
+    .filter((clip) => clip.linkGroupId === found.clip.linkGroupId)
+    .map((clip) => ({ track, clip, media: state.media.find((item) => item.id === clip.mediaId) })))
+    .filter((entry) => entry.media);
+}
+
+function trimAssemblyClipEntry(state, entry, edge, time, ripple, frame) {
+  const original = { ...entry.clip };
+  const playbackRate = assemblyClipPlaybackRate(original);
+  const sourceLimit = Math.max(frame * playbackRate, original.sourceDuration || original.duration * playbackRate);
+
+  if (edge === "left") {
+    const maximumStart = original.start + original.duration - frame;
+    const nextStart = clampNumber(snapAssemblyTime(state, time), 0, maximumStart, original.start);
+    const delta = nextStart - original.start;
+    if (original.reverse) {
+      const maximumExtension = Math.max(0, (sourceLimit - (original.sourceIn + assemblyClipSourceSpan(original))) / playbackRate);
+      const appliedDelta = clampNumber(delta, -maximumExtension, original.duration - frame, 0);
+      entry.clip.start = original.start + appliedDelta;
+      entry.clip.duration = original.duration - appliedDelta;
+    } else {
+      const nextSourceIn = clampNumber(original.sourceIn + delta * playbackRate, 0, sourceLimit - frame * playbackRate, original.sourceIn);
+      const appliedDelta = (nextSourceIn - original.sourceIn) / playbackRate;
+      entry.clip.start = original.start + appliedDelta;
+      entry.clip.sourceIn = nextSourceIn;
+      entry.clip.duration = original.duration - appliedDelta;
+    }
+    return;
+  }
+
+  const requestedDuration = snapAssemblyTime(state, time) - original.start;
+  const maximumDuration = original.reverse
+    ? Math.max(frame, original.duration + original.sourceIn / playbackRate)
+    : Math.max(frame, (sourceLimit - original.sourceIn) / playbackRate);
+  const nextDuration = clampNumber(requestedDuration, frame, maximumDuration, original.duration);
+  if (original.reverse) entry.clip.sourceIn = Math.max(0, original.sourceIn + (original.duration - nextDuration) * playbackRate);
+  entry.clip.duration = nextDuration;
+  if (ripple) shiftFollowingClips(entry.track, original.start + original.duration, nextDuration - original.duration, entry.clip.id);
+}
+
+function ensureEmbeddedAudioMedia(state, videoMedia) {
+  let audioMedia = state.media.find((item) => item.derivedFromMediaId === videoMedia.id && item.type === "audio");
+  const nextAudioMedia = normalizeAssemblyMedia({
+    ...audioMedia,
+    id: audioMedia?.id || createAssemblyId("media-audio"),
+    sourceNodeId: videoMedia.sourceNodeId,
+    sourcePort: videoMedia.sourcePort,
+    linkedSource: videoMedia.linkedSource,
+    derivedFromMediaId: videoMedia.id,
+    url: videoMedia.url,
+    type: "audio",
+    label: `${videoMedia.label || videoMedia.fileName || "Video"} audio`,
+    fileName: videoMedia.fileName,
+    mimeType: videoMedia.mimeType,
+    duration: videoMedia.duration,
+    hasAudio: true,
+    hasAudioKnown: true,
+    waveformUrl: videoMedia.waveformUrl
+  });
+  if (audioMedia) {
+    const index = state.media.findIndex((item) => item.id === audioMedia.id);
+    state.media[index] = nextAudioMedia;
+  } else {
+    audioMedia = nextAudioMedia;
+    state.media.push(audioMedia);
+  }
+  return nextAudioMedia;
+}
+
+function syncEmbeddedAudioMedia(state, videoMedia) {
+  if (!state.media.some((item) => item.derivedFromMediaId === videoMedia.id)) return;
+  ensureEmbeddedAudioMedia(state, videoMedia);
+}
+
+function removeEmbeddedAudioMedia(state, videoMediaId) {
+  const derivedIds = new Set(state.media.filter((item) => item.derivedFromMediaId === videoMediaId).map((item) => item.id));
+  if (!derivedIds.size) return state;
+  const removedLinkGroupIds = new Set(state.tracks.flatMap((track) => track.clips)
+    .filter((clip) => derivedIds.has(clip.mediaId) && clip.linkGroupId)
+    .map((clip) => clip.linkGroupId));
+  state.media = state.media.filter((item) => !derivedIds.has(item.id));
+  state.tracks.forEach((track) => {
+    track.clips = track.clips
+      .filter((clip) => !derivedIds.has(clip.mediaId))
+      .map((clip) => removedLinkGroupIds.has(clip.linkGroupId) ? { ...clip, linkGroupId: "" } : clip);
+  });
+  if (!state.tracks.some((track) => track.clips.some((clip) => clip.id === state.selectedClipId))) state.selectedClipId = "";
+  return state;
+}
+
+function pairedAssemblyTrack(state, sourceTrack, targetType) {
+  const sourceTracks = state.tracks.filter((track) => track.type === sourceTrack.type);
+  const targetTracks = state.tracks.filter((track) => track.type === targetType);
+  const sourceIndex = Math.max(0, sourceTracks.findIndex((track) => track.id === sourceTrack.id));
+  const correspondingTrack = targetTracks[sourceIndex];
+  if (correspondingTrack && !correspondingTrack.locked) return correspondingTrack;
+  const availableTrack = targetTracks.find((track) => !track.locked);
+  if (availableTrack) return availableTrack;
+
+  const track = createAssemblyTrack(targetType, targetTracks.length + 1);
+  const insertionIndex = state.tracks.findIndex((item) => assemblyTrackSortRank(item.type) > assemblyTrackSortRank(track.type));
+  if (insertionIndex < 0) state.tracks.push(track);
+  else state.tracks.splice(insertionIndex, 0, track);
+  return track;
 }
 
 function findAssemblyClip(state, clipId) {
