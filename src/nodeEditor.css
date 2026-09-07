@@ -7624,7 +7624,8 @@ video.newtnode-video-fallback {
   border-color: rgba(221, 198, 49, 0.5);
 }
 
-.preview-layout-item img {
+.preview-layout-item img,
+.preview-layout-item video {
   display: block;
   width: 100%;
   height: 100%;
@@ -7637,8 +7638,23 @@ video.newtnode-video-fallback {
   background: #000;
 }
 
-.preview-layout-item.has-dimensions img {
+.preview-layout-item.has-dimensions img,
+.preview-layout-item.has-dimensions video {
   object-fit: contain;
+}
+
+.preview-layout-kind {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 5px;
+  color: rgba(244, 240, 232, 0.9);
+  background: rgba(0, 0, 0, 0.68);
+  pointer-events: none;
 }
 
 .preview-layout-item figcaption {

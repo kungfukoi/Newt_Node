@@ -343,7 +343,8 @@ Group backdrops expose resize handles at all four corners. A corner resize keeps
 - Preview nodes should preserve existing preview history and update to the latest connected generation result.
 - Preview nodes should support stepping through multiple connected or generated results.
 - Preview's primary image view uses the full-resolution source, not a proxy thumbnail. Thumbnails are display-only for compact grids and rails; drag, edit, export, download, native Save Image, and downstream connections must resolve to the original media URL.
-- Preview/Layout must fit the complete board inside the resized node. All rows share the available board height, every image uses `object-fit: contain`, and unused cell space remains black. Resizing may scale or letterbox layout images but must never clip a row, crop an image, or change an image's aspect ratio.
+- Preview/Layout accepts image and video results in one persistently ordered board. Tiles can be dragged to reorganize mixed media, and double-click opens the original full-resolution image or playable video in the shared preview. Image export ignores video tiles and retains the visible relative order of the remaining stills.
+- Preview/Layout must fit the complete board inside the resized node. All rows share the available board height, every image and video uses `object-fit: contain`, and unused cell space remains black. Resizing may scale or letterbox layout media but must never clip a row, crop media, or change its aspect ratio.
 - Generated outputs should have a node-level download affordance when possible.
 - 3D outputs should be displayed with the shared lazy Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.

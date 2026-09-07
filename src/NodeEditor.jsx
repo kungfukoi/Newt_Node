@@ -163,6 +163,20 @@ import {
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
 import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
 import { previewSelectionForNode } from "./previewSelection.js";
+import {
+  createPreviewLayoutItem,
+  mergePreviewMediaIntoLayout,
+  movePreviewLayoutItem,
+  normalizedPreviewLayoutHiddenUrls,
+  normalizedPreviewLayoutItems,
+  previewLayoutAspectValue,
+  previewLayoutColumnCount,
+  previewLayoutDimension,
+  previewLayoutExportCaption,
+  previewLayoutSourceItems,
+  previewLayoutVideoPosterUrl,
+  samePreviewLayoutItems
+} from "./previewLayout.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
@@ -4439,7 +4453,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function exportPreviewLayoutBoard(node) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
-    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
+    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems).filter((item) => item.type === "image");
     const frames = layoutItems.map((item, index) => {
       const description = previewLayoutExportCaption(item, index);
       return {
@@ -10890,7 +10904,7 @@ function NodeBody({
     const { source } = previewSelectionForNode(node, previewSources);
     const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls);
-    const nextItems = mergePreviewImagesIntoLayout(currentItems, previewLayoutSourceItems(source), hiddenUrls);
+    const nextItems = mergePreviewMediaIntoLayout(currentItems, previewLayoutSourceItems(source), hiddenUrls);
     if (samePreviewLayoutItems(currentItems, nextItems)) return;
     onUpdate(node.id, { previewLayoutItems: nextItems });
   }, [incoming.sourceIn, node, onUpdate]);
@@ -12529,6 +12543,7 @@ function NodeBody({
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
+    const layoutImageCount = layoutItems.filter((item) => item.type === "image").length;
     const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
     const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -12582,7 +12597,7 @@ function NodeBody({
     }
 
     function addLayoutItem(item, beforeId = "") {
-      if (item?.type !== "image" || !item.url) return;
+      if (!["image", "video"].includes(item?.type) || !item.url) return;
       const nextItem = createPreviewLayoutItem(item);
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
       const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls).filter((url) => url !== nextItem.url && url !== nextItem.sourceUrl);
@@ -12601,13 +12616,7 @@ function NodeBody({
     function moveLayoutItem(fromId, beforeId = "") {
       if (!fromId || fromId === beforeId) return;
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
-      const fromIndex = currentItems.findIndex((item) => item.id === fromId);
-      if (fromIndex < 0) return;
-      const nextItems = [...currentItems];
-      const [moved] = nextItems.splice(fromIndex, 1);
-      const toIndex = beforeId ? nextItems.findIndex((item) => item.id === beforeId) : -1;
-      if (toIndex >= 0) nextItems.splice(toIndex, 0, moved);
-      else nextItems.push(moved);
+      const nextItems = movePreviewLayoutItem(currentItems, fromId, beforeId);
       if (samePreviewLayoutItems(currentItems, nextItems)) return;
       onUndoSnapshot?.();
       onUpdate(node.id, { previewLayoutItems: nextItems });
@@ -12622,7 +12631,7 @@ function NodeBody({
         return;
       }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-      if (outputItem?.type === "image") {
+      if (["image", "video"].includes(outputItem?.type)) {
         addLayoutItem(outputItem, beforeId);
         clearOutputItemDragData();
       }
@@ -12652,9 +12661,9 @@ function NodeBody({
       });
     }
 
-    function rememberLayoutItemImageElement(itemId, image) {
-      const width = previewLayoutDimension(image?.naturalWidth);
-      const height = previewLayoutDimension(image?.naturalHeight);
+    function rememberLayoutItemMediaElement(itemId, media) {
+      const width = previewLayoutDimension(media?.naturalWidth || media?.videoWidth);
+      const height = previewLayoutDimension(media?.naturalHeight || media?.videoHeight);
       if (!itemId || !width || !height) return;
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
       const target = currentItems.find((item) => item.id === itemId);
@@ -12665,29 +12674,29 @@ function NodeBody({
     }
 
     function rememberLayoutItemDimensions(itemId, event) {
-      rememberLayoutItemImageElement(itemId, event?.currentTarget);
+      rememberLayoutItemMediaElement(itemId, event?.currentTarget);
     }
 
     function rememberCachedLayoutItemDimensions(itemId, image) {
       if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return;
-      window.requestAnimationFrame(() => rememberLayoutItemImageElement(itemId, image));
+      window.requestAnimationFrame(() => rememberLayoutItemMediaElement(itemId, image));
     }
 
     function openLayoutItem(item, event) {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       if (!item?.url) return;
-      const image = event?.currentTarget?.querySelector?.("img");
-      const width = previewLayoutDimension(item.width || image?.naturalWidth);
-      const height = previewLayoutDimension(item.height || image?.naturalHeight);
+      const media = event?.currentTarget?.querySelector?.(item.type === "video" ? "video" : "img");
+      const width = previewLayoutDimension(item.width || media?.naturalWidth || media?.videoWidth);
+      const height = previewLayoutDimension(item.height || media?.naturalHeight || media?.videoHeight);
       onPreviewOpen?.({
         ...item,
         ...(width && height ? { width, height } : {}),
-        editContext: {
+        ...(item.type === "image" ? { editContext: {
           type: "previewLayout",
           nodeId: node.id,
           itemId: item.id
-        }
+        } } : {})
       });
     }
 
@@ -12698,7 +12707,7 @@ function NodeBody({
             Preview
           </button>
           <button type="button" role="tab" aria-selected={activePreviewTab === "layout"} className={activePreviewTab === "layout" ? "active" : ""} onClick={() => {
-            const nextItems = mergePreviewImagesIntoLayout(layoutItems, previewLayoutSourceItems(previewSource), normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls));
+            const nextItems = mergePreviewMediaIntoLayout(layoutItems, previewLayoutSourceItems(previewSource), normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls));
             onUpdate(node.id, samePreviewLayoutItems(layoutItems, nextItems) ? { previewTab: "layout" } : { previewTab: "layout", previewLayoutItems: nextItems });
           }}>
             Layout
@@ -12782,12 +12791,12 @@ function NodeBody({
         ) : (
           <section className="preview-layout-panel" onPointerDown={(event) => event.stopPropagation()}>
             <div className="preview-layout-toolbar">
-              <span>{layoutItems.length ? `${layoutItems.length} frame${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
+              <span>{layoutItems.length ? `${layoutItems.length} item${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
               <button
                 type="button"
                 onClick={() => onPreviewLayoutExport?.(node)}
-                disabled={!layoutItems.length || layoutExporting}
-                title="Export layout frames and PDF"
+                disabled={!layoutImageCount || layoutExporting}
+                title="Export layout images"
               >
                 {layoutExporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
                 <span>{layoutExporting ? "Exporting" : "Export"}</span>
@@ -12803,7 +12812,7 @@ function NodeBody({
                   {layoutItems.map((item, index) => (
                     <figure
                       key={item.id}
-                      className={`preview-layout-item ${item.width && item.height ? "has-dimensions" : ""}`}
+                      className={`preview-layout-item ${item.type} ${item.width && item.height ? "has-dimensions" : ""}`}
                       style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
                       draggable
                       onDragStart={(event) => startLayoutItemDrag(event, item)}
@@ -12811,12 +12820,31 @@ function NodeBody({
                       onDragOver={handleLayoutDragOver}
                       onDrop={(event) => handleLayoutDrop(event, item.id)}
                       onDoubleClick={(event) => openLayoutItem(item, event)}
-                      title={`${item.label || `Layout image ${index + 1}`}\nDrag to reorder, double-click to preview`}
+                      title={`${item.label || `Layout ${item.type} ${index + 1}`}\nDrag to reorder, double-click to preview`}
                     >
-                      <img ref={(image) => {
+                      {item.type === "image" && <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
-                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />}
+                      {item.type === "video" && <video
+                        key={displayMediaUrl(item.url)}
+                        src={displayMediaUrl(item.url)}
+                        poster={displayMediaUrl(previewLayoutVideoPosterUrl(item))}
+                        controls
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                        draggable={false}
+                        onLoadedMetadata={(event) => {
+                          useNewtNodeVideoReady(event);
+                          rememberLayoutItemDimensions(item.id, event);
+                        }}
+                        onError={useNewtNodeVideoFallback}
+                      />}
                       <figcaption>{index + 1}</figcaption>
+                      <span className="preview-layout-kind" title={item.type === "video" ? "Video" : "Image"}>
+                        {item.type === "video" ? <Film size={11} /> : <FileImage size={11} />}
+                      </span>
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
                       </button>
@@ -12826,13 +12854,13 @@ function NodeBody({
               ) : (
                 <div className="preview-layout-empty">
                   <ImagePlus size={20} />
-                  <span>Drop image thumbnails here</span>
+                  <span>Drop image or video thumbnails here</span>
                 </div>
               )}
             </div>
             {(node.data.previewLayoutExportError || layoutExport?.folderPath) && (
               <small className={`preview-layout-export-status ${node.data.previewLayoutExportError ? "error" : ""}`} title={layoutExport?.folderPath || ""}>
-                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutItems.length} frame${(layoutExport.frameCount || layoutItems.length) === 1 ? "" : "s"}`}
+                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutImageCount} frame${(layoutExport.frameCount || layoutImageCount) === 1 ? "" : "s"}`}
               </small>
             )}
           </section>
@@ -21447,132 +21475,6 @@ function previewSourceResultItems(source, edge, sourceType = "image") {
     fileName: source.data?.fileName || fileNameFromLocalUrl(localUrl),
     mimeType: source.data?.mimeType || mimeForOutputItem({ url: localUrl, type: sourceType })
   }];
-}
-
-function normalizedPreviewLayoutItems(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map((item, index) => {
-      const url = String(item?.url || "").trim();
-      if (!url) return null;
-      const width = previewLayoutDimension(item?.width || item?.naturalWidth);
-      const height = previewLayoutDimension(item?.height || item?.naturalHeight);
-      const sourceUrl = String(item?.sourceUrl || url).trim();
-      return {
-        id: String(item?.id || `layout-${index}-${url}`).slice(0, 120),
-        url,
-        sourceUrl,
-        thumbnailUrl: String(item?.thumbnailUrl || "").trim(),
-        type: "image",
-        label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || `Layout image ${index + 1}`,
-        fileName: item?.fileName || fileNameFromLocalUrl(url),
-        mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
-        ...(width && height ? { width, height } : {})
-      };
-    })
-    .filter(Boolean);
-}
-
-function createPreviewLayoutItem(item) {
-  const url = String(item?.url || "").trim();
-  const width = previewLayoutDimension(item?.width || item?.naturalWidth);
-  const height = previewLayoutDimension(item?.height || item?.naturalHeight);
-  const sourceUrl = String(item?.sourceUrl || url).trim();
-  return {
-    id: `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    url,
-    sourceUrl,
-    thumbnailUrl: String(item?.thumbnailUrl || "").trim(),
-    type: "image",
-    label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || "Layout image",
-    fileName: item?.fileName || fileNameFromLocalUrl(url),
-    mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
-    ...(width && height ? { width, height } : {})
-  };
-}
-
-function normalizedPreviewLayoutHiddenUrls(urls = []) {
-  return [...new Set((Array.isArray(urls) ? urls : [])
-    .map((url) => String(url || "").trim())
-    .filter(Boolean))];
-}
-
-function previewLayoutImageItems(items = []) {
-  const seen = new Set();
-  return (Array.isArray(items) ? items : [])
-    .filter((item) => item?.type === "image" && item.url)
-    .map((item) => ({ ...item, sourceUrl: item.sourceUrl || item.url }))
-    .filter((item) => {
-      const key = String(item.sourceUrl || item.url || "").trim();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function previewLayoutSourceItems(source = null) {
-  const items = Array.isArray(source?.items) ? source.items : [];
-  const storyboardLayoutItems = items.flatMap((item) => (
-    Array.isArray(item?.layoutItems) ? item.layoutItems : []
-  ));
-  return previewLayoutImageItems(storyboardLayoutItems.length ? storyboardLayoutItems : items);
-}
-
-function mergePreviewImagesIntoLayout(layoutItems = [], sourceItems = [], hiddenUrls = []) {
-  const hidden = new Set(normalizedPreviewLayoutHiddenUrls(hiddenUrls));
-  const existing = new Set();
-  const nextItems = normalizedPreviewLayoutItems(layoutItems);
-  nextItems.forEach((item) => {
-    if (item.url) existing.add(item.url);
-    if (item.sourceUrl) existing.add(item.sourceUrl);
-  });
-
-  previewLayoutImageItems(sourceItems).forEach((item) => {
-    const sourceUrl = String(item.sourceUrl || item.url || "").trim();
-    if (!sourceUrl || hidden.has(sourceUrl) || hidden.has(item.url) || existing.has(sourceUrl) || existing.has(item.url)) return;
-    const nextItem = createPreviewLayoutItem({ ...item, sourceUrl });
-    nextItems.push(nextItem);
-    existing.add(nextItem.url);
-    existing.add(nextItem.sourceUrl);
-  });
-
-  return nextItems;
-}
-
-function previewLayoutDimension(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
-}
-
-function previewLayoutAspectValue(item = {}) {
-  const width = previewLayoutDimension(item.width);
-  const height = previewLayoutDimension(item.height);
-  return width && height ? `${width} / ${height}` : "16 / 9";
-}
-
-function previewLayoutColumnCount(items = []) {
-  return Math.max(1, Math.min(3, items.length || 1));
-}
-
-function previewLayoutExportCaption(item, index = 0) {
-  const label = String(item?.label || "").replace(/\s+/g, " ").trim();
-  if (isUsefulPreviewLayoutCaption(label, item)) return label;
-  return `Frame ${index + 1}.`;
-}
-
-function isUsefulPreviewLayoutCaption(label = "", item = {}) {
-  if (!label) return false;
-  const fileName = String(item?.fileName || fileNameFromLocalUrl(item?.url) || "").trim();
-  const fileBase = fileName ? fileName.replace(/\.[A-Za-z0-9]+$/, "") : "";
-  if (label === fileName || label === fileBase) return false;
-  if (/\.(png|jpe?g|webp|gif|mp4|mov|webm)$/i.test(label)) return false;
-  if (/^20\d{2}-\d{2}-\d{2}T\d{2}/.test(label)) return false;
-  if (/\bgenerated\s+(image|video)\s*,?\s+unique\s+id\b/i.test(label)) return false;
-  return true;
-}
-
-function samePreviewLayoutItems(first = [], second = []) {
-  if (first.length !== second.length) return false;
-  return first.every((item, index) => item.id === second[index]?.id && item.url === second[index]?.url && item.label === second[index]?.label);
 }
 
 async function createEditedPreviewLayoutImageBlob(sourceUrl, edit = {}) {

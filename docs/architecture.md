@@ -81,6 +81,8 @@ Generated or remote media must become a managed local asset before it is treated
 
 Preview nodes are deliberately passive. They render connected producer results and do not own generation, transport, or timeline state. Timeline owns its playhead and publishes `frameOut`; Preview only displays that frame.
 
+Preview/Layout state is normalized by `src/previewLayout.js`. It stores a mixed, ordered set of image and video result references, keeps legacy image-only boards compatible, and uses muted tile playback plus the shared full-size lightbox. Layout export remains a still-image operation.
+
 Every general preview uses contain/letterbox behavior. Cropping is valid only inside an explicit editing operation such as Edit Crop.
 
 The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` for cursor pagination and refresh merging. Passive videos use cached `/api/video-poster` stills, not one decoder per rail item; the original video remains the drag/open source. The rail remains one proportional column. Canvas node mounting and full-detail visibility are unchanged.
