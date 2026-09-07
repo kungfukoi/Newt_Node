@@ -15269,7 +15269,7 @@ function NodeBody({
         sourceNodeId={node.id}
         sourcePort={outputPort.id}
       />
-      <GenerationProgress nodeId={node.id} />
+      <GenerationProgress nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running

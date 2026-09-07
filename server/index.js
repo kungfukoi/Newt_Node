@@ -40,7 +40,8 @@ import {
   generationProgressMiddleware,
   listGenerationProgress,
   providerProgressPercent,
-  updateCurrentGenerationProgress
+  updateCurrentGenerationProgress,
+  updateGenerationProgress
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { createRemoteVideoJobs } from "./remote-video-jobs.js";
@@ -14661,7 +14662,16 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item, { deduplicate = false } = {}) {
-  return historyStore.append(item, { deduplicate });
+  const history = await historyStore.append(item, { deduplicate });
+  if (item?.generationRunId) {
+    updateGenerationProgress(item.generationRunId, {
+      status: "completed",
+      phase: "complete",
+      percent: 100,
+      message: "Complete"
+    });
+  }
+  return history;
 }
 
 function errorStatusCode(error) {
