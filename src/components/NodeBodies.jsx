@@ -1154,21 +1154,18 @@ export function SkillDirectorNodeBody({
 
             <div className={`skill-director-video-options ${hasReferenceVideo ? "active" : "disabled"}`} aria-label="Reference video options">
               {[
-                ["extend", "Extend", "Continue the attached video"],
+                ["extend", "Video Extend", "Continue the attached video"],
                 ["camera", "Camera", "Use its camera movement"],
                 ["reference", "Reference", "Use it as a visual reference"]
               ].map(([key, label, description]) => (
-                <label key={key} className="skill-director-video-option">
+                <label key={key} className="skill-director-video-option" title={description}>
                   <input
                     type="checkbox"
                     checked={referenceVideoOptions[key]}
                     disabled={running || locks.setup || !hasReferenceVideo}
                     onChange={(event) => updateReferenceVideoMode(key, event.target.checked)}
                   />
-                  <span>
-                    <strong>{label}</strong>
-                    <small>{description}</small>
-                  </span>
+                  <span>{label}</span>
                 </label>
               ))}
             </div>

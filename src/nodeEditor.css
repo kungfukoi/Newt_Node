@@ -3606,6 +3606,44 @@
   text-overflow: ellipsis;
 }
 
+.skill-director-video-options {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.skill-director-video-option {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: rgba(244, 240, 232, 0.76);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skill-director-node-body .skill-director-video-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  min-height: 14px;
+  margin: 0;
+  accent-color: #ddc631;
+  cursor: pointer;
+}
+
+.skill-director-video-options.disabled,
+.skill-director-video-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .skill-director-stage-card {
   display: grid;
   gap: 9px;
