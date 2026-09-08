@@ -10,10 +10,11 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
     baseSignature,
     baseVideoSignature = "",
     existingVariant = null,
+    regenerateImage = false,
     regenerateVideo = false,
     onGenerationComplete = () => {}
   } = {}) {
-    let generated = existingVariant?.generated || null;
+    let generated = regenerateImage ? null : existingVariant?.generated || null;
     if (!(generated?.url || generated?.localUrl)) {
       const imageMask = await createCharacterWardrobeEditMaskDataUrl(baseSheet, "image");
       generated = await runCharacterWardrobeEdit({
@@ -21,7 +22,6 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
         prompt: characterWardrobeEditPrompt,
         baseSheet,
         wardrobe,
-        identityReference: node.data.characterPortrait,
         editMaskDataUrl: imageMask,
         workflowContext: workflowContext,
         characterTag: characterTag
@@ -43,8 +43,6 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
           prompt: characterVideoWardrobeEditPrompt,
           baseSheet: baseVideoSheet,
           wardrobe,
-          identityReference: node.data.characterPortrait,
-          consistencySheet: generated,
           editMaskDataUrl: videoMask,
           workflowContext: workflowContext,
           characterTag: characterTag,
@@ -96,4 +94,3 @@ async function createCharacterWardrobeEditMaskDataUrl(baseSheet, sheetKind = "im
   });
   return canvas.toDataURL("image/png");
 }
-

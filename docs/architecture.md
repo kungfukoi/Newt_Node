@@ -95,6 +95,8 @@ The active Character sheet is the full-resolution identity reference consumed by
 
 Generated and custom sheets coexist. New Character generation first creates a neutral Base Identity sheet, then creates wardrobe-specific variants as edits of that base. Base and wardrobe signatures allow current variants to be reused, while the per-wardrobe action regenerates only that dependency. Regenerate Base deliberately invalidates generated wardrobe dependencies; ordinary retries and partial failures retain successful prior variants. Legacy generated sheets without signatures remain selectable and are not rebuilt merely because an older workflow was opened. Removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
 
+`src/characterSheetWorkflow.js` coordinates base-image and CU Video generation as separately checkpointed stages. Persist each successful stage before starting the next one. Wardrobe generation uses the corresponding base sheet as its locked edit source and preserves valid image/video wardrobe halves independently when one side must be regenerated.
+
 `runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
 
 ## Persistence And Storage
@@ -106,6 +108,8 @@ A packaged workflow contains its document and managed `inputs/`, `outputs/`, and
 Runtime data such as credentials, history, generated indexes, caches, uploads, and outputs is local state and must stay outside source control. `server/data/runtime-settings.json` is not a source fixture. `.env` is ignored; `.env.example` documents supported variables without secrets.
 
 Save As creates a new package identity and remaps package-owned asset references. Graph identity inside the copied workflow remains internally coherent; stale references to the old package must not survive.
+
+User-created Newt Presets are a separate local library. `src/newtPresets.js` captures, sanitizes, remaps, places, and binds graph fragments; `src/useNewtPresets.js` owns browser orchestration; `server/newt-presets.js` persists metadata and copied full-resolution dependencies through `server/routes/newtPresets.js`. Preset JSON lives under ignored `server/data/newt-presets/`, while copied dependencies live under the served `outputs/Newt-Presets/dependencies/` tree. Deleting a preset removes its library entry but retains copied media because an existing workflow may still reference it.
 
 ### Reliability Stores
 

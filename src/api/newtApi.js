@@ -130,6 +130,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("newt-presets")) return "newtPresets";
   if (path.includes("saved-workflows/autosave")) return "workflowAutosave";
   if (path.includes("open-project-output-folder")) return "projectOutputFolder";
   if (path.includes("edit-preview")) return "editPreview";
@@ -182,6 +183,21 @@ export async function deleteJson(path, fallbackMessage) {
     method: "DELETE"
   }, fallbackMessage);
 }
+
+export const newtPresetsApi = {
+  list() {
+    return getJson("/api/newt-presets", "Could not load Newt Presets.");
+  },
+  get(id) {
+    return getJson(`/api/newt-presets/${encodeURIComponent(id)}`, "Could not load this Newt Preset.");
+  },
+  save(value) {
+    return postJson("/api/newt-presets", value, "Could not save this Newt Preset.");
+  },
+  remove(id) {
+    return deleteJson(`/api/newt-presets/${encodeURIComponent(id)}`, "Could not delete this Newt Preset.");
+  }
+};
 
 export const historyApi = {
   projectOutputs({ projectId = "", projectName = "", cursor = "", limit = 100 } = {}) {

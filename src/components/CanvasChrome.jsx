@@ -1,5 +1,5 @@
 import React from "react";
-import { Hand, Play, Plus } from "lucide-react";
+import { Hand, Play, Plus, Save } from "lucide-react";
 import { edgeCurveOffset, edgePathData, normalizeRect } from "../nodeGeometry.js";
 
 const emptyEdgeSet = new Set();
@@ -251,7 +251,7 @@ export const SelectionMarquee = React.memo(function SelectionMarquee({ start, cu
   );
 });
 
-export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onMoveStart }) {
+export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onSavePreset, onMoveStart }) {
   const x = viewport.x + (bounds.left + bounds.width / 2) * viewport.scale;
   const y = viewport.y + bounds.top * viewport.scale - 54;
 
@@ -268,6 +268,10 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
       <button onClick={onGroup} disabled={selectedCount < 2} title="Group selected nodes">
         <Plus size={17} />
         <span>Group</span>
+      </button>
+      <button onClick={onSavePreset} disabled={!selectedCount} title="Save selected nodes as a reusable preset">
+        <Save size={17} />
+        <span>Preset</span>
       </button>
     </div>
   );

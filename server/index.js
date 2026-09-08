@@ -10,6 +10,7 @@ import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, write
 import { createWriteStream, existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
@@ -67,8 +68,12 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
+import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, directorReasoningSkill, storyboardReasoningSkill } from "./creative-llm.js";
+import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
+import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
   buildMinimaxH3LocalRequest,
   minimaxH3LocalConfigFromEnv,
@@ -127,11 +132,18 @@ import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatio
 import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt, filmDirectorRevisionActiveReferenceTags } from "../src/filmDirectorRevision.js";
-import { filterFilmDirectorReferencesForOutput } from "../src/filmDirectorScenes.js";
+import {
+  filmDirectorCameraInstruction,
+  filmDirectorExtendInstructionForApproach,
+  filmDirectorReferenceInstruction,
+  filmDirectorReferenceVideoCacheKey,
+  filmDirectorReferenceVideoMode,
+  filterFilmDirectorReferencesForOutput,
+  normalizeFilmDirectorReferenceVideoBlueprint
+} from "../src/filmDirectorScenes.js";
 import { normalizeFilmDirectorResolution } from "../src/filmDirectorResolutions.js";
 import {
   filmDirectorAudioPolicyPrompt,
-  filmDirectorVisualSceneRules,
   normalizeFilmDirectorAudioMode
 } from "../src/filmDirectorAudio.js";
 import { normalizeFilmDirectorVideoModel } from "../src/filmDirectorVideoModels.js";
@@ -142,6 +154,8 @@ import {
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
 import { compactFilmDirectorStyleDirection, filmDirectorStyleDirectionDirective } from "../src/filmDirectorStyle.js";
+import { filmDirectorApproachDirective, filmDirectorSceneRules, filmDirectorSceneTreatment, filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../src/filmDirectorApproaches.js";
+import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import {
   buildGeminiOmniEditPrompt,
   buildGeminiOmniFalInput,
@@ -263,6 +277,9 @@ const workflowPackageMetadataDirName = ".newtnode";
 const workflowPackageManifestFileName = "manifest.json";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
 const dataDir = path.join(__dirname, "data");
+const newtPresetsDir = path.join(dataDir, "newt-presets");
+const newtPresetAssetsDir = path.join(outputsDir, "Newt-Presets", "dependencies");
+const newtPresetAssetsUrl = "/outputs/Newt-Presets/dependencies";
 const historyPath = path.join(dataDir, "history.json");
 const falDebugLogPath = path.join(dataDir, "fal-debug.log");
 const nodeProjectsPath = path.join(dataDir, "node-projects.json");
@@ -334,6 +351,9 @@ const startupProviderCredentials = Object.freeze({
 let runtimeModelProviderPreferences = defaultModelProviderPreferences;
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
+const analyzeDirectorMusic = createDirectorMusicAnalyzer({ resolveAsset: resolveLocalAssetPathFromUrl, ffmpegPath: ffmpegBinaryPath, ffprobePath: ffprobeBinaryPath });
+const reuseDirectorVisualAnalysis = createCreativeAnalysisCache();
+const creativeUsageContext = new AsyncLocalStorage();
 const port = Number(process.env.PORT || 3336);
 const controlPort = Number(process.env.NEWTNODE_CONTROL_PORT || process.env.VITE_CONTROL_API_PORT || port + 1);
 const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
@@ -494,9 +514,9 @@ let openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
 const falTextModel = process.env.FAL_TEXT_MODEL || defaultFalTextModel;
 const skillDirectorLlmEndpoint = "openrouter/router";
-const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
+const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || creativeFalModel;
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
-const skillDirectorOpenAiModel = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || "gpt-5.6-sol";
+const skillDirectorOpenAiModel = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || creativeOpenAiModel;
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
 const storyboardTextModel = process.env.STORYBOARD_TEXT_MODEL || falTextModel;
 const storyboardVisionTextModel = process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardTextModel;
@@ -771,6 +791,15 @@ registerComposerPoseRoutes(app, {
   uniqueComposerPoseFileName
 });
 
+registerNewtPresetRoutes(app, {
+  directory: newtPresetsDir,
+  assetsDirectory: newtPresetAssetsDir,
+  assetsUrl: newtPresetAssetsUrl,
+  resolveAsset: resolveLocalAssetPath,
+  collectAssetUrls: collectWorkflowAssetUrls,
+  rewriteAssetUrls: rewriteWorkflowAssetUrls
+});
+
 function buildHealthPayload() {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY);
   return {
@@ -812,6 +841,7 @@ function buildHealthPayload() {
       projectOutputPath: true,
       skillDirector: true,
       storyboardQc: true,
+      newtPresets: true,
       mediaThumbnail: true,
       generationProgress: true,
       remoteVideoJobs: true,
@@ -3122,24 +3152,43 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location");
     const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element");
     const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
+    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video").slice(-1);
+    const approach = normalizeFilmDirectorApproach(req.body.approach);
+    const audioInputs = filmDirectorSupportsMusic(approach)
+      ? normalizedMediaInputs(req.body.audioInputs, "audio").slice(-1)
+      : [];
+    const referenceVideoMode = filmDirectorReferenceVideoMode(
+      req.body.referenceVideoOptions || { [String(req.body.referenceVideoMode || "")]: true }
+    );
+    const referenceVideoAnalysis = String(req.body.referenceVideoAnalysis || "").trim();
+    const referenceVideoAnalysisSource = String(req.body.referenceVideoAnalysisSource || "").trim();
+    const referenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(req.body.referenceVideoBlueprint);
     const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
     const videoModel = normalizeFilmDirectorVideoModel(req.body.videoModel);
     const resolution = normalizeFilmDirectorResolution(req.body.resolution);
     const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
-    const audioMode = normalizeFilmDirectorAudioMode(req.body.audioMode);
+    const audioMode = filmDirectorUsesMusic(approach, audioInputs)
+      ? "full"
+      : normalizeFilmDirectorAudioMode(req.body.audioMode);
+    const musicError = filmDirectorMusicVideoError({ approach, audioInputs, videoModel });
+    if (musicError) return res.status(400).json({ error: musicError });
     const requestedCuts = requestedSkillDirectorShotCount(shotCount);
     const cutLimit = filmDirectorCutLimit(durationSeconds);
-    if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
+    if (!["camera", "reference"].includes(referenceVideoMode) && ["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
       return res.status(400).json({
-        error: `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Film Director. Reduce the shot count or increase the scene duration.`
+        error: `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Director. Reduce the shot count or increase the scene duration.`
       });
     }
     if (action === "revise" && !revisionNotes) {
-      return res.status(400).json({ error: "Add revision notes before updating the Film Director output." });
+      return res.status(400).json({ error: "Add revision notes before updating the Director output." });
     }
-    if (!sceneName && !sceneOverview && !motionBrief && !styleDirection && !motionDirection && !shotList && !characterInputs.length && !locationInputs.length && !elementInputs.length && !styleInputs.length && action !== "build") {
-      return res.status(400).json({ error: "Add a scene overview or connect scene references before running Film Director." });
+    if (["extend", "camera", "reference"].includes(referenceVideoMode) && !videoInputs.length) {
+      const modeLabel = referenceVideoMode === "camera" ? "Camera" : referenceVideoMode === "reference" ? "Reference" : "Extend";
+      return res.status(400).json({ error: `Connect a reference video before using Director ${modeLabel}.` });
+    }
+    if (!sceneName && !sceneOverview && !motionBrief && !styleDirection && !motionDirection && !shotList && !characterInputs.length && !locationInputs.length && !elementInputs.length && !styleInputs.length && !videoInputs.length && action !== "build") {
+      return res.status(400).json({ error: "Add a scene overview or connect scene references before running Director." });
     }
 
     const result = await runFilmDirector({
@@ -3157,16 +3206,23 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       locationInputs,
       elementInputs,
       styleInputs,
+      videoInputs,
+      audioInputs,
+      referenceVideoMode,
+      referenceVideoAnalysis,
+      referenceVideoAnalysisSource,
+      referenceVideoBlueprint,
       shotCount,
       durationSeconds,
       videoModel,
       resolution,
       aspectRatio,
-      audioMode
+      audioMode,
+      approach
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
-    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs: billedImageInputs, videoInputs: [] });
+    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs: billedImageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
     await appendHistory({
@@ -3176,7 +3232,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       provider: result.provider,
       modelName: result.model,
       endpoint: result.endpoint,
-      mode: "Film Director",
+      mode: "Director",
       prompt: sceneOverview || sceneName,
       submittedPrompt: result.submittedPrompt || sceneOverview,
       project: projectFromBody(req.body),
@@ -3192,6 +3248,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         resolution: result.resolution || resolution,
         aspectRatio: result.aspectRatio || aspectRatio,
         audioMode: result.audioMode || audioMode,
+        approach: result.approach || approach,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
@@ -3202,8 +3259,12 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         locationInputCount: locationInputs.length,
         elementInputCount: elementInputs.length,
         styleInputCount: styleInputs.length,
+        musicInputCount: filmDirectorSupportsMusic(result.approach || approach) ? audioInputs.length : 0,
         imageInputCount: allImageInputs.length,
-        videoInputCount: 0
+        videoInputCount: videoInputs.length,
+        referenceVideoMode: result.referenceVideoMode || referenceVideoMode,
+        referenceVideoShotCount: result.referenceVideoBlueprint?.shotCount || 0,
+        referenceVideoDurationSeconds: result.referenceVideoBlueprint?.sourceDurationSeconds || 0
       },
       cost,
       text: result.text,
@@ -3222,6 +3283,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       resolution: result.resolution || resolution,
       aspectRatio: result.aspectRatio || aspectRatio,
       audioMode: result.audioMode || audioMode,
+      approach: result.approach || approach,
       actualShotCount: result.actualShotCount,
       referenceSetup: result.referenceSetup,
       referenceTags: Array.isArray(result.referenceTags) ? result.referenceTags : undefined,
@@ -3232,12 +3294,16 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       sceneOverview: result.sceneOverview || sceneOverview,
       sceneName: Object.prototype.hasOwnProperty.call(result, "sceneName") ? result.sceneName : sceneName,
       revisionSummary: result.revisionSummary || "",
+      referenceVideoMode: result.referenceVideoMode || referenceVideoMode,
+      referenceVideoAnalysis: result.referenceVideoAnalysis || referenceVideoAnalysis,
+      referenceVideoAnalysisSource: result.referenceVideoAnalysisSource || referenceVideoAnalysisSource,
+      referenceVideoBlueprint: result.referenceVideoBlueprint || referenceVideoBlueprint,
       cost,
       usage: usageRecord
     });
   } catch (error) {
     console.error(error);
-    res.status(error.status || 500).json({ error: error.message || "Film Director failed." });
+    res.status(errorStatusCode(error)).json({ error: publicErrorMessage(error, "Director failed."), cost: error.cost || null });
   }
 });
 
@@ -4027,30 +4093,29 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const directorShotList = String(req.body.directorShotList || "").trim();
     const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
     const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    const plan = activeLlmProvider()
-      ? await generateStoryboardPlanWithOpenAi({
-        sceneDescription,
-        frameCount: requestedFrameCount,
-        characters: Array.isArray(req.body.characters) ? req.body.characters : [],
-        locations: Array.isArray(req.body.locations)
-          ? req.body.locations
-          : Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
-        props: Array.isArray(req.body.props) ? req.body.props : [],
-        notes: String(req.body.notes || "").trim(),
-        directorShotList
-      })
-      : fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
-
-    res.json({ plan: normalizeStoryboardPlan(plan, sceneDescription, requestedFrameCount) });
+    const generated = await generateStoryboardPlanWithOpenAi({
+      sceneDescription,
+      frameCount: requestedFrameCount,
+      characters: Array.isArray(req.body.characters) ? req.body.characters : [],
+      locations: Array.isArray(req.body.locations)
+        ? req.body.locations
+        : Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
+      props: Array.isArray(req.body.props) ? req.body.props : [],
+      notes: String(req.body.notes || "").trim(),
+      directorShotList
+    });
+    await recordStoryboardLlmUsage(generated, req.body, "Storyboard planning");
+    res.json({
+      plan: normalizeStoryboardPlan(generated.plan, sceneDescription, requestedFrameCount),
+      cost: generated.cost
+    });
   } catch (error) {
     console.error(error);
-    const fallbackSceneDescription = String(req.body.sceneDescription || req.body.prompt || "");
-    const fallbackDirectorPlan = storyboardDirectorFramePlan(String(req.body.directorShotList || ""), 35);
-    const fallbackFrameCount = fallbackDirectorPlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    res.status(500).json({
-      error: storyboardPlannerErrorMessage(error),
-      plan: normalizeStoryboardPlan(fallbackStoryboardPlan(fallbackSceneDescription, fallbackFrameCount), fallbackSceneDescription, fallbackFrameCount)
-    });
+    if (error.llmResult) {
+      await recordStoryboardLlmUsage({ result: error.llmResult, cost: error.cost }, req.body, "Storyboard planning (invalid response)")
+        .catch((historyError) => console.error("Could not record failed Storyboard planning usage.", historyError));
+    }
+    res.status(errorStatusCode(error)).json({ error: storyboardPlannerErrorMessage(error), cost: error.cost || null });
   }
 });
 
@@ -4061,7 +4126,6 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
       return res.status(400).json({ error: "Storyboard frame URL is required." });
     }
 
-    const qcProvider = activeLlmProvider();
     const qcInput = {
         sourceUrl,
         previousFrameUrl: String(req.body.previousFrameUrl || "").trim(),
@@ -4073,16 +4137,19 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         angle: String(req.body.angle || "").trim(),
         notes: String(req.body.notes || "").trim()
       };
-    const qc = qcProvider
-      ? await reviewStoryboardFrameWithOpenAi(qcInput)
-      : storyboardQcPass("Storyboard QC needs an enabled Fal or OpenAI API key.");
-
-    res.json({ qc });
+    const reviewed = await reviewStoryboardFrameWithOpenAi(qcInput);
+    await recordStoryboardLlmUsage(reviewed, req.body, "Storyboard QC");
+    res.json({ qc: reviewed.qc, cost: reviewed.cost });
   } catch (error) {
     console.error(error);
-    res.status(500).json({
-      error: error.message || "Storyboard frame QC failed.",
-      qc: storyboardQcPass("Storyboard QC could not run.")
+    if (error.llmResult) {
+      await recordStoryboardLlmUsage({ result: error.llmResult, cost: error.cost }, req.body, "Storyboard QC (invalid response)")
+        .catch((historyError) => console.error("Could not record failed Storyboard QC usage.", historyError));
+    }
+    res.status(errorStatusCode(error)).json({
+      error: publicErrorMessage(error, "Storyboard frame QC failed."),
+      qc: storyboardQcUnavailable("Storyboard QC could not run."),
+      cost: error.cost || null
     });
   }
 });
@@ -5660,6 +5727,25 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
+
+    if (filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
+      const audioInputs = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : [])
+        .filter(isLocalAssetUrl)
+        .map((url) => ({ url }));
+      const musicError = filmDirectorMusicVideoError({
+        approach: req.body.filmDirector.approach,
+        audioInputs,
+        videoModel: selectedVideoModel.displayName
+      });
+      if (musicError) return res.status(400).json({ error: musicError });
+      if (!audioInputs.length) {
+        return res.status(400).json({ error: "The Director music track is missing from the video request. Reconnect the track before generating." });
+      }
+      if (firstLocalOutput(req.body.startFrameUrls) || firstLocalOutput(req.body.endFrameUrls)) {
+        return res.status(400).json({ error: "Director music requires reference-to-video. Move start/end images to Reference Images so the music track is not ignored." });
+      }
+      req.body.generateAudio = true;
+    }
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
       if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY && !process.env.KREA_API_KEY) {
@@ -15657,35 +15743,90 @@ function requireActiveLlmProvider(preferredProvider = textLlmProvider) {
   throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
 }
 
-async function runTextLlm({ prompt, systemPrompt = "", preferredProvider = textLlmProvider, falModel = falTextModel, openAiModel = openAiTextModel, reasoningEffort = "low", route = "text-llm" }) {
+async function runTextLlm({
+  prompt,
+  systemPrompt = "",
+  preferredProvider = textLlmProvider,
+  falModel = falTextModel,
+  openAiModel = openAiTextModel,
+  responseMimeType = "text/plain",
+  reasoningEffort = "low",
+  route = "text-llm"
+}) {
   const provider = requireActiveLlmProvider(preferredProvider);
   if (provider === "fal") {
-    const data = await subscribeFal(skillDirectorLlmEndpoint, { input: { model: falModel, prompt, system_prompt: systemPrompt }, logs: true });
+    const data = await subscribeFal(skillDirectorLlmEndpoint, {
+      input: falLlmInput({ model: falModel, prompt, systemPrompt, route }),
+      logs: true
+    }, { route, model: falModel });
     const text = extractFalText(data).trim();
-    if (!text) throw new Error("Fal returned no text.");
-    return { text, model: falModel, provider: "fal", endpoint: skillDirectorLlmEndpoint, usage: falResultUsage(data) };
+    return checkedCreativeLlmResult({
+      text,
+      model: falModel,
+      provider: "fal",
+      endpoint: skillDirectorLlmEndpoint,
+      usage: falResultUsage(data)
+    }, data, route);
   }
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiTextApiKey}` },
-    body: JSON.stringify({ model: openAiModel, instructions: systemPrompt, input: prompt, reasoning: { effort: reasoningEffort } })
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI text generation failed.", { raw: data });
-  const text = extractOpenAiResponseText(data).trim();
-  if (!text) throw new Error("OpenAI returned no text.");
-  return { text, model: openAiModel, provider: "OpenAI", endpoint: openAiModel, usage: data.usage || null };
+  if (provider === "openai") {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiTextApiKey}` },
+      body: JSON.stringify(openAiLlmBody({ model: openAiModel, prompt, systemPrompt, reasoningEffort, responseMimeType, route })),
+      signal: AbortSignal.timeout(300000)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI text generation failed.", { raw: data });
+    const text = extractOpenAiResponseText(data).trim();
+    return checkedCreativeLlmResult({ text, model: openAiModel, provider: "OpenAI", endpoint: openAiModel, usage: data.usage || null }, data, route);
+  }
+  throw httpError(500, `Unsupported LLM provider: ${provider}`);
 }
 
-async function runMediaDescriptionLlm({ inputs = [], mediaType = "image", prompt, systemPrompt = "Return only useful prompt context. Do not use markdown.", preferredProvider = textLlmProvider, falModel = falVisionTextModel, openAiModel = openAiTextModel, reasoningEffort = "low", route = "media-description" }) {
+function checkedCreativeLlmResult(result, data, route) {
+  if (/^(film-director|storyboard)-/.test(route) && result.provider === "fal") {
+    result = { ...result, text: creativeFinalOutputText(result.text) };
+  }
+  creativeUsageContext.getStore()?.push(result);
+  try {
+    validateCreativeResponse(data, { ...result, route });
+    if (!result.text) throw new Error(`${result.provider} returned no text.`);
+    return result;
+  } catch (error) {
+    error.llmResult = result;
+    error.cost = estimateTextProcessingCost({
+      provider: result.provider,
+      usage: result.usage,
+      helperUsages: result.usages,
+      hasMainRequest: Object.hasOwn(result, "usage")
+    });
+    throw error;
+  }
+}
+
+async function runMediaDescriptionLlm({
+  inputs = [],
+  mediaType = "image",
+  prompt,
+  systemPrompt = "Return only useful prompt context. Do not use markdown.",
+  preferredProvider = textLlmProvider,
+  falModel = falVisionTextModel,
+  openAiModel = openAiTextModel,
+  responseMimeType = "text/plain",
+  reasoningEffort = "low",
+  route = "media-description"
+}) {
   if (!inputs.length) return { text: "", usages: [], provider: "", model: "", endpoint: "" };
   const provider = requireActiveLlmProvider(preferredProvider);
   if (provider === "fal") {
     const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
     const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
     const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
-    const data = await subscribeFal(endpoint, { input: { [inputKey]: mediaUrls, prompt, system_prompt: systemPrompt, model: falModel }, logs: true });
-    return { text: extractFalText(data).trim(), usages: [falResultUsage(data)].filter(Boolean), provider: "fal", model: falModel, endpoint };
+    const data = await subscribeFal(endpoint, {
+      input: { [inputKey]: mediaUrls, ...falLlmInput({ model: falModel, prompt, systemPrompt, route }) },
+      logs: true
+    }, { route, model: falModel });
+    return checkedCreativeLlmResult({ text: extractFalText(data).trim(), usages: [falResultUsage(data)].filter(Boolean), provider: "fal", model: falModel, endpoint }, data, route);
   }
   const content = [{ type: "input_text", text: prompt }];
   for (const item of inputs) {
@@ -15697,51 +15838,16 @@ async function runMediaDescriptionLlm({ inputs = [], mediaType = "image", prompt
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiTextApiKey}` },
-    body: JSON.stringify({ model: openAiModel, instructions: systemPrompt, input: [{ role: "user", content }], reasoning: { effort: reasoningEffort } })
+    body: JSON.stringify(openAiLlmBody({ model: openAiModel, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route })),
+    signal: AbortSignal.timeout(300000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI media analysis failed.", { raw: data });
-  return { text: extractOpenAiResponseText(data).trim(), usages: [data.usage].filter(Boolean), provider: "OpenAI", model: openAiModel, endpoint: openAiModel };
+  return checkedCreativeLlmResult({ text: extractOpenAiResponseText(data).trim(), usages: [data.usage].filter(Boolean), provider: "OpenAI", model: openAiModel, endpoint: openAiModel }, data, route);
 }
 
-async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
-  if (!process.env.FAL_KEY) {
-    throw new Error("No active Fal API key is selected in Settings.");
-  }
-
-  const model = falTextModel;
-  const imageContext = await describeImageInputs(imageInputs);
-  const videoContext = await describeVideoInputs(videoInputs);
-  const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
-  const data = await subscribeFal("openrouter/router", {
-    input: {
-      model,
-      prompt,
-      system_prompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions()
-    },
-    logs: true
-  });
-  const outputText = extractFalText(data).trim();
-
-  if (!outputText) {
-    throw new Error("fal returned no text.");
-  }
-
-  return {
-    text: outputText,
-    model,
-    provider: "fal",
-    endpoint: "openrouter/router",
-    submittedPrompt: prompt,
-    usage: falResultUsage(data),
-    helperUsages: [...imageContext.usages, ...videoContext.usages]
-  };
-}
-
-const skillDirectorFinalPromptMaxChars = 7000;
-
-function skillDirectorSystemPrompt() {
-  return "You are NewtNode's Film Director: a professional director and cinematographer planning production-ready scenes for an AI video generator. Preserve connected @tags and the user's story intent. Prioritize playable pacing, motivated camera coverage, blocking, eyelines, screen direction, spatial geography, prop state, lighting, wardrobe, performance, and emotional continuity. Give neighboring shots distinct editorial purposes and do not invent major scene content. Return only the requested output contract without commentary.";
++function skillDirectorSystemPrompt() {
+  return `You are NewtNode's Director: a professional director and cinematographer planning production-ready scenes for an AI video generator. Preserve connected @tags and the user's story intent. Return only the requested output contract without commentary.\n\n${directorReasoningSkill}`;
 }
 
 function skillDirectorSceneReferenceLines({ characterInputs = [], locationInputs = [], elementInputs = [] } = {}) {
@@ -15779,7 +15885,10 @@ function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "
   return `Shot count: exactly ${shotCount} ${label}. Return exactly ${shotCount} cut object${shotCount === "1" ? "" : "s"} inside one ${durationLabel} scene.`;
 }
 
-function skillDirectorContinuityMapDirective(durationLabel = "15 seconds") {
+function skillDirectorContinuityMapDirective(durationLabel = "15 seconds", approach = "cinematic") {
+  if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
+    return `Before writing SHOT_LIST, plan a compact continuity ledger for the ${durationLabel} sequence. Keep character identity, wardrobe and prop identity coherent throughout. Preserve geography, eyelines, movement and physical state inside each continuous vignette, but explicitly identify intentional location/time jumps and matched transitions between separate vignettes. Do not force every vignette into one continuous room or action. Establish only locations, subjects and actions supplied by the brief. Each clip needs a readable editorial purpose, not filler.`;
+  }
   return [
     "Before writing SHOT_LIST, silently build a Continuity Map for the scene.",
     "The hidden Continuity Map must track: location geography, character starting and ending positions, screen direction and 180-degree line, prop states, lighting/time of day, wardrobe/physical continuity, emotional progression, and action state changes.",
@@ -15788,7 +15897,10 @@ function skillDirectorContinuityMapDirective(durationLabel = "15 seconds") {
   ].join(" ");
 }
 
-function skillDirectorShotLogicDirective(durationLabel = "15 seconds", characterCount = 0) {
+function skillDirectorShotLogicDirective(durationLabel = "15 seconds", characterCount = 0, approach = "cinematic") {
+  if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
+    return `Check every CUT for a clear editorial purpose and playable timing within the ${durationLabel} total. Use varied scales and angles while allowing deliberately matched compositions across different vignettes. Maintain the 180-degree line and action continuity inside each continuous vignette, not across intentional location jumps. Respect the explicit shot count; Auto should choose enough clips to communicate the brief without rushed unreadable filler. For Music Video, align candidate accents with the connected audio context and leave visible vocal performances readable for synchronization.`;
+  }
   const coverageDirection = characterCount > 1
     ? "For multi-character dialogue or reactions, matching shot sizes are welcome when the cut clearly changes subjects, such as a CU of one character followed by a CU of another. If the same character remains the subject, create a more meaningful scale or angle change."
     : "For a continuous single-character scene, avoid neighboring cuts that are too close in scale, such as ECU to CU or CU to MCU. Favor a meaningful contrast such as ECU to MS or WS, unless a closely matched cut has a clear story purpose.";
@@ -15836,10 +15948,18 @@ function stripSkillDirectorFences(text) {
     .trim();
 }
 
-function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production" } = {}) {
-  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode);
+function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production", approach = "cinematic", referenceVideoMode = "", connectedMusic = false } = {}) {
+  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode, approach, connectedMusic);
+  const visualSceneRules = filmDirectorSceneRules(approach);
+  const referenceVideoInstruction = referenceVideoMode === "extend"
+    ? filmDirectorExtendInstructionForApproach(approach)
+    : referenceVideoMode === "camera"
+      ? filmDirectorCameraInstruction
+      : referenceVideoMode === "reference"
+        ? filmDirectorReferenceInstruction
+        : "";
   const seenInstructions = new Set(
-    skillDirectorInstructionUnits(`${filmDirectorVisualSceneRules}\n${audioPolicy}`).map(skillDirectorInstructionKey)
+    skillDirectorInstructionUnits(`${visualSceneRules}\n${audioPolicy}`).map(skillDirectorInstructionKey)
   );
   const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
   const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
@@ -15855,8 +15975,9 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
   const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
   let finalPrompt = [
     dedupeSkillDirectorLines(referenceLines).join("\n"),
-    filmDirectorVisualSceneRules,
+    visualSceneRules,
     audioPolicy,
+    referenceVideoInstruction,
     cleanOverview ? `Scene Overview:\n${cleanOverview}` : "",
     cleanStyle ? `Style Direction:\n${cleanStyle}` : "",
     cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
@@ -15871,8 +15992,9 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
   if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
     finalPrompt = [
       clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
-      filmDirectorVisualSceneRules,
+      visualSceneRules,
       audioPolicy,
+      referenceVideoInstruction,
       cleanOverview ? `Scene Overview:\n${clipSkillDirectorText(cleanOverview, 1200)}` : "",
       cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
       cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
@@ -15929,7 +16051,7 @@ function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
   const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
   if (!source) return "";
   return source
-    .split(/(?=\bCUT\s+\d{1,2}(?:\s+[^\w\s]+)?\s+shot frame:)/gi)
+    .split(/(?=\bCUT\s+\d{1,2}\s+—)/gi)
     .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
     .filter(Boolean)
     .join("\n\n");
@@ -15939,7 +16061,6 @@ function sanitizeSkillDirectorShotListFormatting(text = "") {
   return String(text || "")
     .replace(/\[/g, "")
     .replace(/\]/g, "")
-    .replace(/\b(CUT\s+\d{1,2})\s+[^\w\s]+\s+(?=shot frame:)/gi, "$1 ")
     .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -16095,7 +16216,7 @@ function skillDirectorShotPlanFromOutput(outputText = "") {
     const declaredShotCount = skillDirectorStructuredNumber(parsed, ["recommendedShotCount", "recommended_shot_count", "shotCount", "shot_count"]);
     return {
       shotList: cuts
-        .map((cut) => `CUT ${cut.number} shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
+        .map((cut) => `CUT ${cut.number} — shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
         .join("\n\n"),
       shotListNotes: [
         continuityLedger ? `Continuity ledger: ${continuityLedger}` : "",
@@ -16154,7 +16275,7 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
       );
     }
   }
-  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)(?:\s+[^\w\s]+)?\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
+  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)\s+—\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
   for (let index = 1; index < setupMatches.length; index += 1) {
     const previous = setupMatches[index - 1];
     const current = setupMatches[index];
@@ -16174,46 +16295,80 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
   return issues;
 }
 
-async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags = [] }) {
+async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags = null }) {
   const repairShotCount = requestedSkillDirectorShotCount(shotCount) || largestSkillDirectorCutNumber(outputText) || "Auto";
   const repairPrompt = [
-    `Repair this ${skillDirectorDurationLabel(durationSeconds)} Film Director shot plan.`,
+    `Repair this ${skillDirectorDurationLabel(durationSeconds)} Director shot plan.`,
     "Return strict JSON only with this exact shape:",
     `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(repairShotCount, durationSeconds)}"}]}`,
     skillDirectorShotCountDirective(shotCount, durationSeconds),
     filmDirectorShotDetailDirective(repairShotCount, durationSeconds),
     "Fix these validation failures:",
     issues.map((issue) => `- ${issue}`).join("\n"),
-    activeReferenceTags.length ? `Keep exactly these active connected tags when their assets appear: ${activeReferenceTags.join(", ")}. Do not restore removed tags.` : "Preserve the active connected @tags.",
-    "Preserve the story, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
+    Array.isArray(activeReferenceTags)
+      ? activeReferenceTags.length
+        ? `Only these reference tags remain active: ${activeReferenceTags.join(", ")}. Remove every other @tag and its asset-specific direction from the repaired plan.`
+        : "No connected reference assets remain active. Remove every @tag and its asset-specific direction from the repaired plan."
+      : "",
+    "Preserve the story, connected @tags, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
     "Give neighboring shots distinct editorial purposes. Do not use markdown or add keys outside the schema.",
     "Original planning context:",
     prompt,
     "Draft to repair:",
     outputText
   ].filter(Boolean).join("\n\n");
-  const result = await runTextLlm({ prompt: repairPrompt, systemPrompt: skillDirectorSystemPrompt(), falModel: model, openAiModel: skillDirectorOpenAiModel, reasoningEffort: "high", route: "film-director-shot-repair" });
-  return { text: stripSkillDirectorFences(result.text) || outputText, usage: result.usage };
+  const result = await runTextLlm({
+    prompt: repairPrompt,
+    systemPrompt: skillDirectorSystemPrompt(),
+    falModel: model || skillDirectorFalModel,
+    openAiModel: skillDirectorOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "film-director-shot-repair"
+  });
+  return {
+    text: stripSkillDirectorFences(result.text) || outputText,
+    usage: result.usage
+  };
 }
 
-async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, characterTags = [], activeReferenceTags = [] }) {
+async function validateAndRepairSkillDirectorShotPlan({
+  outputText,
+  shotCount,
+  durationSeconds,
+  prompt,
+  model,
+  characterTags = [],
+  activeReferenceTags = null
+}) {
   let nextText = outputText;
   const usages = [];
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt <= 1; attempt += 1) {
     const plan = skillDirectorShotPlanFromOutput(nextText);
-    const issues = skillDirectorShotPlanIssues(plan, shotCount, durationSeconds, characterTags);
+    // Editorial preferences stay soft; structural/content failures cannot silently pass after repair.
+    const issues = skillDirectorShotPlanIssues(plan, shotCount, durationSeconds, characterTags)
+      .filter((issue) => !issue.includes("too close in framing"));
+    if (Array.isArray(activeReferenceTags)) {
+      const allowed = new Set(activeReferenceTags.map((tag) => String(tag).replace(/^@+/, "").toLowerCase()));
+      const unknown = [...new Set([...`${plan.shotList}\n${plan.shotListNotes}`.matchAll(/@([A-Za-z0-9][A-Za-z0-9_-]*)/g)]
+        .map((match) => match[1]).filter((tag) => !allowed.has(tag.toLowerCase())))];
+      if (unknown.length) issues.push(`Remove inactive or unknown reference tags: ${unknown.map((tag) => `@${tag}`).join(", ")}.`);
+    }
     if (!issues.length) return { text: nextText, plan, usages };
-    const repaired = await repairSkillDirectorShotPlan({ outputText: nextText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags });
+    if (attempt === 1) throw new Error(`Director could not validate the shot plan after one repair. ${issues.join(" ")} Existing work has been preserved.`);
+    const repaired = await repairSkillDirectorShotPlan({
+      outputText: nextText,
+      shotCount,
+      durationSeconds,
+      prompt,
+      model,
+      issues,
+      activeReferenceTags
+    });
     nextText = repaired.text || nextText;
     if (repaired.usage) usages.push(repaired.usage);
   }
-  const plan = skillDirectorShotPlanFromOutput(nextText);
-  const requestedCount = requestedSkillDirectorShotCount(shotCount);
-  const actualCount = largestSkillDirectorCutNumber(plan.shotList);
-  if (requestedCount && actualCount !== requestedCount) {
-    throw new Error(`Film Director returned ${actualCount || "no"} CUT sections, but ${requestedCount} were requested. Please run again.`);
-  }
-  return { text: nextText, plan, usages };
+
 }
 
 function buildSkillDirectorPrompt({
@@ -16231,26 +16386,48 @@ function buildSkillDirectorPrompt({
   styleInputs = [],
   shotCount = "3",
   durationSeconds = "15",
+  approach = "cinematic",
+  referenceVideoMode = "",
+  referenceVideoAnalysis = "",
+  musicContext = "",
   imageDescriptions = []
 }) {
   const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  const sceneTreatment = filmDirectorSceneTreatment(approach);
   const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
   const promptImageDescriptions = imageDescriptions.map(cleanSkillDirectorMoodBoardReferences).filter(Boolean);
+  const referenceVideoAnalysisLabel = referenceVideoMode === "extend"
+    ? "Authoritative reference-video continuity analysis"
+    : referenceVideoMode === "camera"
+      ? "Authoritative camera and edit blueprint"
+      : referenceVideoMode === "reference"
+        ? "Authoritative performance, composition, edit, and sound blueprint"
+        : "";
   const commonContext = [
+    filmDirectorApproachDirective(approach),
+    musicContext ? `Connected music timing context:\n${musicContext}\n${filmDirectorAudioPolicyPrompt("full", approach, true)}` : "",
     sceneName ? `Scene name:\n${sceneName}` : "",
     referenceLines.length ? `Tagged scene assets:\n${referenceLines.join("\n")}` : "",
     referenceLines.length
       ? "Use the @tags naturally inside the planning blocks whenever the asset appears in the scene. Do not rename or drop these tags."
       : "",
     sceneOverview ? `Scene Overview:\n${sceneOverview}` : "",
+    referenceVideoAnalysisLabel && referenceVideoAnalysis && !(["camera", "reference"].includes(referenceVideoMode) && action === "style")
+      ? `${referenceVideoAnalysisLabel}:\n${referenceVideoAnalysis}`
+      : "",
     promptImageDescriptions.length ? `Connected visual analysis:\n${promptImageDescriptions.join("\n\n")}` : ""
   ].filter(Boolean);
 
   if (action === "style") {
     return [
-      "Generate the Film Director Style Direction.",
+      "Generate the Director Style Direction.",
       'Return strict JSON only: {"styleDirection":"one concise literal visual brief"}',
-      filmDirectorStyleDirectionDirective(),
+      filmDirectorStyleDirectionDirective(approach),
+      referenceVideoMode === "extend"
+        ? normalizeFilmDirectorApproach(approach) === "cinematic"
+          ? "Derive the visual style from the attached reference video. Preserve its image texture, lighting, color behavior, atmosphere, production design, character appearance, and performance tone. The user's other style inputs are supplemental only."
+          : "Preserve the reference video's ending state, asset identities, geography and performance continuity, but adapt its capture medium and rendering finish to the selected approach. The selected approach overrides conflicting source-video visual treatment."
+        : "",
       "If a visual style reference is connected, use it only to infer abstract visual qualities.",
       "Do not mention or name the style reference. Do not describe, name, or reuse any objects, elements, locations, subjects, people, props, compositions, or story content found inside that reference.",
       styleDirection ? `Existing editable Style Direction. Preserve useful user edits and revise only where the current scene context requires:\n${styleDirection}` : "",
@@ -16263,9 +16440,16 @@ function buildSkillDirectorPrompt({
 
   if (action === "motion") {
     return [
-      `Generate the Camera Direction for one cinematic ${durationLabel} video scene.`,
+      `Generate the Camera Direction for one ${sceneTreatment} ${durationLabel} video scene.`,
       'Return strict JSON only: {"cameraDirection":"one production-ready paragraph"}',
       "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
+      referenceVideoMode === "extend"
+        ? "Begin from the reference video's exact ending camera position, movement, lens behavior, screen direction, blocking, and subject momentum. Describe a seamless handoff before introducing any new camera move."
+        : referenceVideoMode === "camera"
+          ? "Translate the attached camera blueprint literally into this scene. Preserve its shot order, cut timing, framing progression, camera positions, movement paths, movement speed, and transitions. Use the Scene Overview and connected assets for all subjects, action, location, lighting, and style."
+          : referenceVideoMode === "reference"
+            ? "Translate the attached reference blueprint literally into this scene. Preserve its shot order, cut timing, framing, camera choreography, blocking, body movement, gestures, expressions, eyelines, interactions, and performance cadence. Replace all source identities and visual details with the Scene Overview and connected assets."
+        : "",
       "Do not create the shot list yet.",
       ...commonContext,
       styleDirection ? `Locked Style Direction:\n${styleDirection}` : "",
@@ -16278,12 +16462,19 @@ function buildSkillDirectorPrompt({
 
   if (action === "shotList") {
     return [
-      `Create the Shot List for one cinematic ${durationLabel} AI video scene.`,
+      `Create the Shot List for one ${sceneTreatment} ${durationLabel} AI video scene.`,
       "The current Scene Overview is the sole story authority for this pass and fully replaces every earlier version. Do not carry forward any prior event, action, prop, dialogue, evidence detail, or story beat that is absent from the current Scene Overview and connected asset descriptions. Do not turn an abstract beat into a newly invented concrete prop.",
+      referenceVideoMode === "extend"
+        ? "This is a continuation, not a remake. CUT 1 must begin at the exact final state of the attached reference video, carry forward ongoing motion and performance naturally, and introduce only the requested additional action. Do not spend any cut recreating or summarizing earlier footage."
+        : referenceVideoMode === "camera"
+          ? "Use exactly the shot count, shot order, cut timing, framing progression, and camera choreography in the attached camera blueprint. Map the user's Scene Overview across those shots without borrowing any subject, action, location, lighting, color, or style from the reference video."
+          : referenceVideoMode === "reference"
+            ? "Use exactly the shot count, shot order, cut timing, performance progression, blocking, gestures, expressions, interactions, dialogue timing, composition, and camera choreography in the attached reference blueprint. Re-stage those beats with only the user's connected characters, props, location, and visual style."
+        : "",
       "Return strict JSON only with this exact shape:",
       `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(shotCount, durationSeconds)}"}]}`,
-      skillDirectorContinuityMapDirective(durationLabel),
-      skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
+      skillDirectorContinuityMapDirective(durationLabel, approach),
+      skillDirectorShotLogicDirective(durationLabel, characterInputs.length, approach),
       filmDirectorShotDetailDirective(shotCount, durationSeconds),
       "Preserve every connected @tag exactly when that asset appears.",
       skillDirectorShotCountDirective(shotCount, durationSeconds),
@@ -16298,22 +16489,31 @@ function buildSkillDirectorPrompt({
   }
 
   return [
-    `NewtNode Film Director task: create cinematic video planning blocks for a ${durationLabel} AI video generation prompt.`,
+    `NewtNode Director task: create ${sceneTreatment} video planning blocks for a ${durationLabel} AI video generation prompt.`,
+    filmDirectorApproachDirective(approach),
+    musicContext ? `Connected music timing context:\n${musicContext}` : "",
+    referenceVideoMode === "extend"
+      ? filmDirectorExtendInstructionForApproach(approach)
+      : referenceVideoMode === "camera"
+        ? filmDirectorCameraInstruction
+        : referenceVideoMode === "reference"
+          ? filmDirectorReferenceInstruction
+          : "",
     "Return exactly these section markers, in this order, with no markdown fences and no extra commentary:",
     "STYLE_DIRECTION:",
     "MOTION_DIRECTION:",
     "SHOT_LIST:",
     "",
-    `STYLE_DIRECTION: ${filmDirectorStyleDirectionDirective()} If a visual style reference is connected, use it only to infer abstract visual qualities, not literal scene content.`,
+    `STYLE_DIRECTION: ${filmDirectorStyleDirectionDirective(approach)} If a visual style reference is connected, use it only to infer abstract visual qualities, not literal scene content.`,
     "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
     "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
     "Keep Continuity ledger and Must-have shots to one compact line each.",
     "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
-    skillDirectorContinuityMapDirective(durationLabel),
-    skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
+    skillDirectorContinuityMapDirective(durationLabel, approach),
+    skillDirectorShotLogicDirective(durationLabel, characterInputs.length, approach),
     filmDirectorShotDetailDirective(shotCount, durationSeconds),
     "Each CUT must follow this format exactly:",
-    "CUT 1 shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
+    "CUT 1 — shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
     "the generated shot description",
     "Do not use square brackets anywhere in SHOT_LIST.",
     "",
@@ -16335,7 +16535,23 @@ function buildSkillDirectorPrompt({
     .join("\n\n");
 }
 
-async function runFilmDirector({
+async function runFilmDirector(input) {
+  return creativeUsageContext.run([], async () => {
+    try { return await runFilmDirectorDraft(input); }
+    catch (error) {
+      const results = creativeUsageContext.getStore();
+      if (results.length) {
+        const last = results.at(-1);
+        const usages = results.flatMap((result) => [result.usage, ...(result.usages || [])].filter(Boolean));
+        error.llmResult = { ...last, usage: null, usages, text: "" };
+        error.cost = estimateTextProcessingCost({ provider: last.provider, helperUsages: usages, hasMainRequest: false });
+      }
+      throw error;
+    }
+  });
+}
+
+async function runFilmDirectorDraft({
   action = "build",
   sceneName,
   sceneOverview,
@@ -16350,15 +16566,26 @@ async function runFilmDirector({
   locationInputs = [],
   elementInputs = [],
   styleInputs = [],
+  videoInputs = [],
+  audioInputs = [],
+  referenceVideoMode = "",
+  referenceVideoAnalysis = "",
+  referenceVideoAnalysisSource = "",
+  referenceVideoBlueprint = {},
   shotCount = "3",
   durationSeconds = "15",
   videoModel = "",
   resolution = "720p",
   aspectRatio = "16:9",
-  audioMode = "production"
+  audioMode = "production",
+  approach = "cinematic"
 }) {
-
   const model = skillDirectorFalModel;
+  audioInputs = filmDirectorSupportsMusic(approach) ? audioInputs : [];
+  const musicError = filmDirectorMusicVideoError({ approach, audioInputs, videoModel });
+  if (musicError) throw new Error(musicError);
+  const usesMusic = filmDirectorUsesMusic(approach, audioInputs);
+  if (usesMusic) audioMode = "full";
   const anonymizedStyleInputs = styleInputs.map((item, index) => ({
     ...item,
     label: `Visual style reference ${index + 1}`,
@@ -16369,6 +16596,33 @@ async function runFilmDirector({
     ? [...characterInputs, ...locationInputs, ...elementInputs, ...anonymizedStyleInputs]
     : [...characterInputs, ...locationInputs, ...elementInputs];
   const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
+  const referenceVideoUrl = ["extend", "camera", "reference"].includes(referenceVideoMode) ? String(videoInputs.at(-1)?.url || "") : "";
+  const referenceVideoSource = filmDirectorReferenceVideoCacheKey(referenceVideoMode, referenceVideoUrl);
+  const legacyExtendCacheMatches = referenceVideoMode === "extend" && referenceVideoAnalysisSource === referenceVideoUrl;
+  const referenceVideoCacheMatches = referenceVideoAnalysisSource === referenceVideoSource || legacyExtendCacheMatches;
+  let resolvedReferenceVideoAnalysis = referenceVideoCacheMatches
+    ? referenceVideoAnalysis
+    : "";
+  let resolvedReferenceVideoBlueprint = referenceVideoCacheMatches
+    ? normalizeFilmDirectorReferenceVideoBlueprint(referenceVideoBlueprint)
+    : normalizeFilmDirectorReferenceVideoBlueprint();
+  let referenceVideoContext = { usages: [] };
+  const timedBlueprintMode = ["camera", "reference"].includes(referenceVideoMode);
+  const timedBlueprintMissing = timedBlueprintMode && resolvedReferenceVideoBlueprint.mode !== referenceVideoMode;
+  if (["extend", "camera", "reference"].includes(referenceVideoMode) && referenceVideoUrl && action !== "build" && (!resolvedReferenceVideoAnalysis || timedBlueprintMissing)) {
+    referenceVideoContext = await describeFilmDirectorReferenceVideo(videoInputs.at(-1), referenceVideoMode);
+    resolvedReferenceVideoAnalysis = referenceVideoContext.description;
+    resolvedReferenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(referenceVideoContext.blueprint);
+  }
+  const effectiveDurationSeconds = timedBlueprintMode && resolvedReferenceVideoBlueprint.durationSeconds
+    ? resolvedReferenceVideoBlueprint.durationSeconds
+    : durationSeconds;
+  const effectiveShotCount = timedBlueprintMode && resolvedReferenceVideoBlueprint.shotCount > 0
+    ? String(resolvedReferenceVideoBlueprint.shotCount)
+    : shotCount;
+  const musicContext = usesMusic && audioInputs.length && action !== "build"
+    ? await analyzeDirectorMusic(audioInputs.at(-1), action === "revise" ? 30 : effectiveDurationSeconds)
+    : "";
 
   if (action === "build") {
     const finalPrompt = composeSkillDirectorFinalPrompt({
@@ -16378,28 +16632,36 @@ async function runFilmDirector({
       motionDirection,
       shotList,
       shotListNotes,
-      audioMode
+      audioMode,
+      approach,
+      referenceVideoMode,
+      connectedMusic: usesMusic
     });
     if (!finalPrompt) {
-      throw new Error("Lock generated Film Director sections before building the scene.");
+      throw new Error("Lock generated Director sections before building the scene.");
     }
     return {
       action,
       text: finalPrompt,
-      model: "NewtNode Film Director",
+      model: "NewtNode Director",
       provider: "local",
       endpoint: "local/skill-director-build",
       submittedPrompt: finalPrompt,
       usage: null,
       helperUsages: [],
-      shotCount,
-      durationSeconds,
+      shotCount: effectiveShotCount,
+      durationSeconds: effectiveDurationSeconds,
       videoModel,
       resolution,
       aspectRatio,
       audioMode,
+      approach,
+      referenceVideoMode,
+      referenceVideoAnalysis: resolvedReferenceVideoAnalysis,
+      referenceVideoAnalysisSource: referenceVideoSource,
+      referenceVideoBlueprint: resolvedReferenceVideoBlueprint,
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
-      resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
+      resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(effectiveShotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
       styleDirection,
       motionDirection,
@@ -16410,14 +16672,17 @@ async function runFilmDirector({
 
   if (action === "revise") {
     const currentCutCount = largestSkillDirectorCutNumber(shotList || currentFinalPrompt);
-    const revisionPrompt = buildFilmDirectorRevisionPrompt({
+    const referenceStructureRevisionRequested = timedBlueprintMode
+      && /\b(?:camera|framing|lens|shot\s*count|cuts?|timing|duration|pacing|movement|blocking|gesture|expression|performance|dialogue|audio|sound|angle|transition)\b/i.test(revisionNotes);
+    const baseRevisionPrompt = buildFilmDirectorRevisionPrompt({
       revisionNotes,
-      durationLabel: skillDirectorDurationLabel(durationSeconds),
-      durationSeconds,
+      durationLabel: skillDirectorDurationLabel(effectiveDurationSeconds),
+      durationSeconds: effectiveDurationSeconds,
       videoModel,
       resolution,
       aspectRatio,
       audioMode,
+      approach,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -16428,12 +16693,29 @@ async function runFilmDirector({
       shotList,
       finalPrompt: currentFinalPrompt,
       shotLogic: [
-        skillDirectorContinuityMapDirective(skillDirectorDurationLabel(durationSeconds)),
-        skillDirectorShotLogicDirective(skillDirectorDurationLabel(durationSeconds), characterInputs.length)
+        skillDirectorContinuityMapDirective(skillDirectorDurationLabel(effectiveDurationSeconds), approach),
+        skillDirectorShotLogicDirective(skillDirectorDurationLabel(effectiveDurationSeconds), characterInputs.length, approach)
       ].join(" ")
     });
+    const revisionPrompt = [
+      musicContext ? `Connected music is available (apply only for Music Video or Montage):\n${musicContext}\n${filmDirectorAudioPolicyPrompt("full", approach, true)}` : "No active music file is connected. Do not switch to Music Video; a connected audio file is required. Montage may remain without music.",
+      referenceVideoMode === "extend"
+        ? filmDirectorExtendInstructionForApproach(approach)
+        : referenceVideoMode === "camera"
+          ? filmDirectorCameraInstruction
+          : referenceVideoMode === "reference"
+            ? filmDirectorReferenceInstruction
+            : "",
+      ["extend", "camera", "reference"].includes(referenceVideoMode) && resolvedReferenceVideoAnalysis
+        ? `${referenceVideoMode === "camera" ? "Authoritative camera and edit blueprint" : referenceVideoMode === "reference" ? "Authoritative performance, composition, edit, and sound blueprint" : "Authoritative reference-video continuity analysis"}:\n${resolvedReferenceVideoAnalysis}`
+        : "",
+      timedBlueprintMode && !referenceStructureRevisionRequested
+        ? `The revision does not request a ${referenceVideoMode === "reference" ? "performance, camera, sound, or timing" : "camera or timing"} change. Preserve the reference blueprint's duration, shot count, cut positions, shot order, framing, movement${referenceVideoMode === "reference" ? ", blocking, performance, and dialogue timing" : ""} exactly.`
+        : "",
+      baseRevisionPrompt
+    ].filter(Boolean).join("\n\n");
     if (!revisionPrompt) {
-      throw new Error("Add revision notes before updating the Film Director output.");
+      throw new Error("Add revision notes before updating the Director output.");
     }
 
     const llmResult = await runTextLlm({
@@ -16441,32 +16723,91 @@ async function runFilmDirector({
       systemPrompt: skillDirectorSystemPrompt(),
       falModel: model,
       openAiModel: skillDirectorOpenAiModel,
+      responseMimeType: "application/json",
       reasoningEffort: "high",
       route: "film-director-revision"
     });
     const outputText = stripSkillDirectorFences(llmResult.text);
-    if (!outputText) throw new Error("Film Director returned no revision.");
+    if (!outputText) throw new Error("Director returned no revision.");
 
     const structuredOutput = skillDirectorStructuredObject(outputText);
-    const revisedSceneName = skillDirectorStructuredValue(structuredOutput, ["sceneName", "scene_name", "title"]) || sceneName;
-    const requestedRevisedDuration = String(skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"]));
-    const revisedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, durationSeconds);
-    const revisedVideoModel = normalizeFilmDirectorVideoModel(skillDirectorStructuredValue(structuredOutput, ["videoModel", "video_model"]), videoModel);
-    const revisedAudioMode = normalizeFilmDirectorAudioMode(skillDirectorStructuredValue(structuredOutput, ["audioMode", "audio_mode"]), audioMode);
-    const revisedResolution = normalizeFilmDirectorResolution(skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]), resolution);
-    const revisedAspectRatio = normalizeFilmDirectorAspectRatio(skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]), aspectRatio);
-    const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection));
-    const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection);
-    const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview);
+    const revisedSceneName = skillDirectorStructuredValue(
+      structuredOutput,
+      ["sceneName", "scene_name", "title"]
+    ) || sceneName;
+    const requestedRevisedDuration = String(
+      skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
+    );
+    const requestedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, effectiveDurationSeconds);
+    const revisedDurationSeconds = timedBlueprintMode && !referenceStructureRevisionRequested
+      ? effectiveDurationSeconds
+      : requestedDurationSeconds;
+    const revisedVideoModel = normalizeFilmDirectorVideoModel(
+      skillDirectorStructuredValue(structuredOutput, ["videoModel", "video_model", "model"]),
+      videoModel
+    );
+    const revisedResolution = normalizeFilmDirectorResolution(
+      skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]),
+      resolution
+    );
+    const revisedAspectRatio = normalizeFilmDirectorAspectRatio(
+      skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]),
+      aspectRatio
+    );
+    let revisedAudioMode = normalizeFilmDirectorAudioMode(
+      skillDirectorStructuredValue(structuredOutput, ["audioMode", "audio_mode", "audio"]),
+      audioMode
+    );
+    const revisedApproach = normalizeFilmDirectorApproach(structuredOutput?.approach, normalizeFilmDirectorApproach(approach));
+    const revisedMusicError = filmDirectorMusicVideoError({ approach: revisedApproach, audioInputs, videoModel: revisedVideoModel });
+    if (revisedMusicError) throw new Error(revisedMusicError);
+    const revisedUsesMusic = filmDirectorUsesMusic(revisedApproach, audioInputs);
+    if (revisedUsesMusic) revisedAudioMode = "full";
+    const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
+    ));
+    const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection
+    );
+    const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview
+    );
     const availableReferenceInputs = [...characterInputs, ...locationInputs, ...elementInputs];
-    const revisedReferenceTags = filmDirectorRevisionActiveReferenceTags(structuredOutput || {}, availableReferenceInputs.map((item) => item.tag).filter(Boolean), [revisedStyleDirection, revisedMotionDirection, revisedSceneOverview, JSON.stringify(structuredOutput?.cuts || [])].filter(Boolean).join("\n"));
-    const revisedReferenceTagKeys = new Set(revisedReferenceTags.map((tag) => String(tag).replace(/^@+/, "").toLowerCase()));
-    const referenceRemainsActive = (item) => revisedReferenceTagKeys.has(String(item?.tag || "").replace(/^@+/, "").toLowerCase());
+    const revisedReferenceTags = filmDirectorRevisionActiveReferenceTags(
+      structuredOutput || {},
+      availableReferenceInputs.map((item) => item.tag).filter(Boolean),
+      [
+        revisedStyleDirection,
+        revisedMotionDirection,
+        revisedSceneOverview,
+        JSON.stringify(structuredOutput?.cuts || []),
+        skillDirectorStructuredValue(structuredOutput, ["continuityLedger", "continuity_ledger", "continuity"]),
+        skillDirectorStructuredValue(structuredOutput, ["mustHaveActions", "must_have_actions", "mustHaveShots", "must_have_shots"])
+      ].filter(Boolean).join("\n")
+    );
+    const revisedReferenceTagKeys = new Set(
+      revisedReferenceTags.map((tag) => String(tag).replace(/^@+/, "").toLowerCase())
+    );
+    const referenceRemainsActive = (item) => revisedReferenceTagKeys.has(
+      String(item?.tag || "").replace(/^@+/, "").toLowerCase()
+    );
     const revisedCharacterInputs = characterInputs.filter(referenceRemainsActive);
     const revisedLocationInputs = locationInputs.filter(referenceRemainsActive);
     const revisedElementInputs = elementInputs.filter(referenceRemainsActive);
-    const revisedReferenceLines = skillDirectorSceneReferenceLines({ characterInputs: revisedCharacterInputs, locationInputs: revisedLocationInputs, elementInputs: revisedElementInputs });
-    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({ outputText, shotCount: "Auto", durationSeconds: revisedDurationSeconds, prompt: revisionPrompt, model, characterTags: revisedCharacterInputs.map((item) => item.tag).filter(Boolean), activeReferenceTags: revisedReferenceTags });
+    const revisedReferenceLines = skillDirectorSceneReferenceLines({
+      characterInputs: revisedCharacterInputs,
+      locationInputs: revisedLocationInputs,
+      elementInputs: revisedElementInputs
+    });
+    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
+      outputText,
+      shotCount: timedBlueprintMode && !referenceStructureRevisionRequested ? effectiveShotCount : "Auto",
+      durationSeconds: revisedDurationSeconds,
+      prompt: revisionPrompt,
+      model,
+      characterTags: revisedCharacterInputs.map((item) => item.tag).filter(Boolean),
+      activeReferenceTags: revisedReferenceTags
+    });
     const revisedPlan = validatedOutput.plan || skillDirectorShotPlanFromOutput(outputText);
     const revisedShotList = revisedPlan.shotList || shotList;
     const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
@@ -16477,7 +16818,10 @@ async function runFilmDirector({
       motionDirection: revisedMotionDirection,
       shotList: revisedShotList,
       shotListNotes: revisedShotListNotes,
-      audioMode: revisedAudioMode
+      audioMode: revisedAudioMode,
+      approach: revisedApproach,
+      referenceVideoMode,
+      connectedMusic: revisedUsesMusic
     });
     const actualShotCount = largestSkillDirectorCutNumber(revisedShotList);
 
@@ -16489,13 +16833,18 @@ async function runFilmDirector({
       endpoint: llmResult.endpoint,
       submittedPrompt: revisionPrompt,
       usage: llmResult.usage,
-      helperUsages: validatedOutput.usages || [],
-      shotCount: actualShotCount ? String(actualShotCount) : shotCount,
+      helperUsages: [...referenceVideoContext.usages, ...(validatedOutput.usages || [])],
+      shotCount: actualShotCount ? String(actualShotCount) : effectiveShotCount,
       durationSeconds: revisedDurationSeconds,
       videoModel: revisedVideoModel,
       resolution: revisedResolution,
       aspectRatio: revisedAspectRatio,
       audioMode: revisedAudioMode,
+      approach: revisedApproach,
+      referenceVideoMode,
+      referenceVideoAnalysis: resolvedReferenceVideoAnalysis,
+      referenceVideoAnalysisSource: referenceVideoSource,
+      referenceVideoBlueprint: resolvedReferenceVideoBlueprint,
       actualShotCount,
       resolvedShotCount: actualShotCount,
       sceneName: revisedSceneName,
@@ -16506,7 +16855,7 @@ async function runFilmDirector({
       sceneOverview: revisedSceneOverview,
       shotList: revisedShotList,
       shotListNotes: revisedShotListNotes,
-      revisionSummary: skillDirectorStructuredValue(structuredOutput, ["changeSummary", "change_summary", "summary"]) || "Applied the requested Film Director revisions."
+      revisionSummary: skillDirectorStructuredValue(structuredOutput, ["changeSummary", "change_summary", "summary"]) || "Applied the requested Director revisions."
     };
   }
 
@@ -16524,8 +16873,16 @@ async function runFilmDirector({
     locationInputs,
     elementInputs,
     styleInputs: anonymizedStyleInputs,
-    shotCount,
-    durationSeconds,
+    musicContext,
+    shotCount: effectiveShotCount,
+    durationSeconds: effectiveDurationSeconds,
+    videoModel,
+    resolution,
+    aspectRatio,
+    audioMode,
+    approach,
+    referenceVideoMode,
+    referenceVideoAnalysis: resolvedReferenceVideoAnalysis,
     imageDescriptions: imageContext.descriptions
   });
   const llmResult = await runTextLlm({
@@ -16533,8 +16890,9 @@ async function runFilmDirector({
     systemPrompt: skillDirectorSystemPrompt(),
     falModel: model,
     openAiModel: skillDirectorOpenAiModel,
+    responseMimeType: action === "style" || action === "motion" || action === "shotList" ? "application/json" : "text/plain",
     reasoningEffort: "high",
-    route: "film-director-" + String(action || "build").toLowerCase()
+    route: `film-director-${String(action || "build").toLowerCase()}`
   });
   const initialOutputText = stripSkillDirectorFences(llmResult.text);
   let outputText = initialOutputText;
@@ -16543,11 +16901,12 @@ async function runFilmDirector({
   if (action === "shotList") {
     const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
       outputText,
-      shotCount,
-      durationSeconds,
+      shotCount: effectiveShotCount,
+      durationSeconds: effectiveDurationSeconds,
       prompt,
       model,
-      characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
+      characterTags: characterInputs.map((item) => item.tag).filter(Boolean),
+      activeReferenceTags: [...characterInputs, ...locationInputs, ...elementInputs].map((item) => item.tag).filter(Boolean)
     });
     outputText = validatedOutput.text;
     validatedShotPlan = validatedOutput.plan;
@@ -16555,7 +16914,7 @@ async function runFilmDirector({
   }
 
   if (!outputText) {
-    throw new Error("Film Director returned no text.");
+    throw new Error("Director returned no text.");
   }
 
   const structuredOutput = skillDirectorStructuredObject(outputText);
@@ -16582,9 +16941,11 @@ async function runFilmDirector({
   const generatedShotList = splitShotList.shotList;
   const generatedShotListNotes = splitShotList.shotListNotes || shotListNotes || "";
   const actualShotCount = largestSkillDirectorCutNumber(generatedShotList);
-  const resolvedShotCount = action === "shotList"
-    ? parsedShotPlan.recommendedShotCount || actualShotCount
-    : requestedSkillDirectorShotCount(shotCount) || actualShotCount;
+  const resolvedShotCount = timedBlueprintMode
+    ? requestedSkillDirectorShotCount(effectiveShotCount) || actualShotCount
+    : action === "shotList"
+      ? parsedShotPlan.recommendedShotCount || actualShotCount
+      : requestedSkillDirectorShotCount(effectiveShotCount) || actualShotCount;
 
   return {
     action,
@@ -16601,13 +16962,17 @@ async function runFilmDirector({
     endpoint: llmResult.endpoint,
     submittedPrompt: prompt,
     usage: llmResult.usage,
-    helperUsages: [...imageContext.usages, ...helperUsages].filter(Boolean),
-    shotCount,
-    durationSeconds,
-    videoModel,
+    helperUsages: [...imageContext.usages, ...referenceVideoContext.usages, ...helperUsages].filter(Boolean),
+    shotCount: effectiveShotCount,
+    durationSeconds: effectiveDurationSeconds,
     resolution,
     aspectRatio,
     audioMode,
+    approach,
+    referenceVideoMode,
+    referenceVideoAnalysis: resolvedReferenceVideoAnalysis,
+    referenceVideoAnalysisSource: referenceVideoSource,
+    referenceVideoBlueprint: resolvedReferenceVideoBlueprint,
     actualShotCount,
     resolvedShotCount,
     referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -16615,6 +16980,430 @@ async function runFilmDirector({
     motionDirection: generatedMotionDirection,
     shotList: generatedShotList,
     shotListNotes: generatedShotListNotes
+  };
+}
+
+async function describeFilmDirectorReferenceVideo(videoInput, mode = "extend") {
+  if (!videoInput?.url) return { description: "", usages: [], blueprint: normalizeFilmDirectorReferenceVideoBlueprint() };
+
+  const source = await resolveLocalAssetPathFromUrl(videoInput.url);
+  const metadata = await probeVideoFile(source.filePath);
+  const duration = positiveNumber(metadata.duration) || 0;
+  const analysisId = `.director-video-analysis-${randomUUID()}`;
+  const analysisDir = path.join(outputsDir, analysisId);
+  await mkdir(analysisDir, { recursive: true });
+
+  try {
+    if (["camera", "reference"].includes(mode)) {
+      const performanceMode = mode === "reference";
+      const analysisDuration = Math.min(duration || 30, 30);
+      const outputDuration = String(Math.max(4, Math.min(30, Math.round(analysisDuration || 15))));
+      const maxShotCount = filmDirectorCutLimit(outputDuration);
+      const detectedCuts = await detectFilmDirectorSceneCuts(source.filePath, analysisDuration);
+      const cutTimes = selectFilmDirectorCameraCuts(detectedCuts, maxShotCount - 1);
+      const shotRanges = filmDirectorCameraShotRanges(analysisDuration, cutTimes);
+      const audioContext = performanceMode
+        ? await describeFilmDirectorReferenceAudio(source.filePath, analysisDir, analysisDuration)
+        : { detected: false, transcript: "", summary: "", usages: [] };
+      const frameInputs = [];
+      for (const shot of shotRanges) {
+        const fileName = `shot-${String(shot.number).padStart(2, "0")}.jpg`;
+        const filePath = path.join(analysisDir, fileName);
+        if (performanceMode) {
+          await createFilmDirectorPerformanceStrip(source.filePath, filePath, shot);
+        } else {
+          await createFilmDirectorCameraStrip(source.filePath, filePath, shot);
+        }
+        frameInputs.push({
+          url: `/outputs/${analysisId}/${fileName}`,
+          label: performanceMode
+            ? `Shot ${shot.number}, ${shot.startSeconds.toFixed(2)}-${shot.endSeconds.toFixed(2)} seconds. Six chronological moments read left-to-right across the top row, then the bottom row.`
+            : `Shot ${shot.number}, ${shot.startSeconds.toFixed(2)}-${shot.endSeconds.toFixed(2)} seconds. Left is shot start, center is midpoint, right is shot end.`,
+          type: "image"
+        });
+      }
+
+      const deterministicTiming = shotRanges
+        .map((shot) => `Shot ${shot.number}: ${shot.startSeconds.toFixed(2)}-${shot.endSeconds.toFixed(2)}s (${shot.durationSeconds.toFixed(2)}s)`)
+        .join("\n");
+      const result = await runMediaDescriptionLlm({
+        inputs: frameInputs,
+        mediaType: "image",
+        prompt: (performanceMode ? [
+          "Analyze these chronological six-frame shot strips as a temporal performance, blocking, composition, camera, and edit blueprint for re-staging with different characters and a different visual look.",
+          "Do not describe physical identity, ethnicity, age, wardrobe appearance, logos, location appearance, lighting, color grade, rendering style, or other source-video visual identity. Refer to visible people generically as Performer A, Performer B, and so on.",
+          "For every numbered shot, identify the framing, camera angle and movement, performer blocking and movement paths, body poses, gestures, facial-performance beats, eyelines, interactions, object-use timing, dialogue or reaction timing, and transition. Preserve the deterministic shot boundaries exactly; do not add, remove, combine, or reorder shots.",
+          audioContext.transcript ? `Timed audio transcript and cadence context:\n${audioContext.transcript}` : audioContext.detected ? "The reference contains audio, but no transcript is available. Preserve visible speech timing, reactions, pauses, and performance cadence from the frames and embedded video." : "No reference audio track was detected.",
+          `Deterministic shot timing:\n${deterministicTiming}`,
+          'Return strict JSON only: {"performanceSummary":"concise overall performance, blocking, camera, and edit grammar","audioSummary":"dialogue, vocal cadence, pauses, reactions, and useful natural sound timing without music","shots":[{"number":1,"shotFrame":"MS","cameraAngle":"eye-level three-quarter","lensBehavior":"normal perspective","cameraMovement":"slow left-to-right dolly","movementSpeed":"slow and steady","blocking":"Performer A crosses left to right and stops","performance":"small hand gesture, brief smile, then attentive pause","eyeline":"looks toward Performer B off right","interaction":"none","dialogueTiming":"speaks during the middle third, pauses at the end","transitionIn":"start"}]}. Do not add keys outside this schema.'
+        ] : [
+          "Analyze these chronological three-frame strips solely as a camera and editing reference. Ignore and do not describe the people, wardrobe, objects, location, action, story, lighting, color grade, or visual style.",
+          "For every numbered shot, identify only the framing/shot size, camera height and angle, approximate lens behavior, camera movement path and speed, subject-relative blocking needed to reproduce that camera move, and the transition into the shot. Use the deterministic shot boundaries below exactly; do not add, remove, combine, or reorder shots.",
+          `Deterministic shot timing:\n${deterministicTiming}`,
+          'Return strict JSON only: {"cameraSummary":"concise overall camera grammar","shots":[{"number":1,"shotFrame":"MS","cameraAngle":"eye-level three-quarter","lensBehavior":"normal perspective","cameraMovement":"slow left-to-right dolly","movementSpeed":"slow and steady","transitionIn":"start"}]}. Do not add keys outside this schema.'
+        ]).join("\n\n"),
+        falModel: skillDirectorVisionFalModel,
+        openAiModel: skillDirectorOpenAiModel,
+        responseMimeType: "application/json",
+        reasoningEffort: "high",
+        route: performanceMode ? "film-director-performance-video-analysis" : "film-director-camera-video-analysis"
+      });
+      const parsed = skillDirectorStructuredObject(result.text) || {};
+      const parsedShots = Array.isArray(parsed.shots) ? parsed.shots : [];
+      const blueprintShots = shotRanges.map((shot) => {
+        const interpreted = parsedShots.find((item) => Number(item?.number) === shot.number) || parsedShots[shot.number - 1] || {};
+        const cameraParts = [
+          interpreted.shotFrame || interpreted.shot_frame,
+          interpreted.cameraAngle || interpreted.camera_angle,
+          interpreted.lensBehavior || interpreted.lens_behavior,
+          interpreted.cameraMovement || interpreted.camera_movement,
+          interpreted.movementSpeed || interpreted.movement_speed,
+          performanceMode ? interpreted.blocking : "",
+          performanceMode ? interpreted.performance : "",
+          performanceMode ? interpreted.eyeline : "",
+          performanceMode ? interpreted.interaction : "",
+          performanceMode ? interpreted.dialogueTiming || interpreted.dialogue_timing : "",
+          interpreted.transitionIn || interpreted.transition_in
+        ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+        return {
+          ...shot,
+          description: cameraParts.join("; ") || (performanceMode
+            ? "Preserve the reference shot's performance, blocking, composition, and camera movement."
+            : "Preserve the reference shot's framing and camera movement.")
+        };
+      });
+      const cameraSummary = String(parsed.cameraSummary || parsed.camera_summary || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const performanceSummary = String(parsed.performanceSummary || parsed.performance_summary || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const audioSummary = String(parsed.audioSummary || parsed.audio_summary || audioContext.summary || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const description = [
+        `Reference runtime: ${duration.toFixed(2)}s. ${performanceMode ? "Performance" : "Camera"} blueprint runtime: ${outputDuration}s. Shot count: ${blueprintShots.length}.`,
+        cutTimes.length ? `Detected cut points: ${cutTimes.map((time) => `${time.toFixed(2)}s`).join(", ")}.` : "No internal cut detected; preserve one continuous shot.",
+        performanceMode && performanceSummary ? `Performance grammar: ${performanceSummary}` : "",
+        !performanceMode && cameraSummary ? `Camera grammar: ${cameraSummary}` : "",
+        performanceMode && audioContext.detected ? `Reference audio: detected.${audioSummary ? ` ${audioSummary}` : ""}` : "",
+        performanceMode && audioContext.transcript ? `Timed transcript:\n${audioContext.transcript}` : "",
+        ...blueprintShots.map((shot) => `Shot ${shot.number} [${shot.startSeconds.toFixed(2)}-${shot.endSeconds.toFixed(2)}s]: ${shot.description}`),
+        performanceMode
+          ? "Transfer temporal performance, blocking, composition, camera, edit structure, and available sound timing. Replace all source visual identity with the current Scene Overview, connected assets, and Style Direction."
+          : "Transfer camera and edit structure only. The current Scene Overview and connected assets remain authoritative for all content and visual style."
+      ].filter(Boolean).join("\n");
+
+      return {
+        description,
+        usages: [...(result.usages || []), ...(audioContext.usages || [])],
+        blueprint: normalizeFilmDirectorReferenceVideoBlueprint({
+          mode,
+          sourceDurationSeconds: duration,
+          durationSeconds: outputDuration,
+          shotCount: blueprintShots.length,
+          cutTimes,
+          shots: blueprintShots,
+          audioDetected: audioContext.detected,
+          audioTranscript: audioContext.transcript,
+          audioSummary
+        })
+      };
+    }
+
+    const times = filmDirectorVideoSampleTimes(duration);
+    const frameInputs = await Promise.all(times.map(async (time, index) => {
+      const fileName = `frame-${String(index + 1).padStart(2, "0")}.jpg`;
+      const filePath = path.join(analysisDir, fileName);
+      await runFfmpeg([
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-ss", formatFfmpegSeconds(time),
+        "-i", source.filePath,
+        "-frames:v", "1",
+        "-an",
+        "-vf", "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease",
+        "-q:v", "3",
+        filePath
+      ], "Director reference-video frame extraction");
+      return {
+        url: `/outputs/${analysisId}/${fileName}`,
+        label: `Chronological reference-video frame ${index + 1} at ${time.toFixed(2)} seconds`,
+        type: "image"
+      };
+    }));
+
+    const result = await runMediaDescriptionLlm({
+      inputs: frameInputs,
+      mediaType: "image",
+      prompt: [
+        "Analyze these chronological frames from one reference video for a seamless scene extension. The labels contain timestamps and the final frames are sampled more densely.",
+        "Identify the literal visual style, lighting and color behavior, characters and wardrobe, location and geography, action progression, performance, camera framing and movement, screen direction, and the exact final state that a continuation must inherit.",
+        "Do not invent unseen events or identify real people.",
+        'Return strict JSON only: {"style":"concise visual style and lighting continuity","camera":"camera position, framing, lens behavior, movement, and screen direction","characters":"visible character identity and wardrobe continuity","location":"location and spatial geography","action":"action and performance progression","endingState":"exact final pose, eyeline, object state, camera state, and ongoing motion to continue"}.'
+      ].join("\n\n"),
+      falModel: skillDirectorVisionFalModel,
+      openAiModel: skillDirectorOpenAiModel,
+      responseMimeType: "application/json",
+      reasoningEffort: "high",
+      route: "film-director-reference-video-analysis"
+    });
+    const parsed = skillDirectorStructuredObject(result.text) || {};
+    const sections = [
+      ["Visual style", parsed.style],
+      ["Camera continuity", parsed.camera],
+      ["Characters and wardrobe", parsed.characters],
+      ["Location and geography", parsed.location],
+      ["Action progression", parsed.action],
+      ["Exact ending state", parsed.endingState || parsed.ending_state]
+    ]
+      .filter(([, value]) => String(value || "").trim())
+      .map(([label, value]) => `${label}: ${String(value).replace(/\s+/g, " ").trim()}`);
+    const description = sections.length
+      ? sections.join("\n")
+      : clipSkillDirectorText(String(result.text || "").trim(), 2400);
+
+    return {
+      description,
+      usages: result.usages || [],
+      blueprint: normalizeFilmDirectorReferenceVideoBlueprint({
+        mode: "extend",
+        sourceDurationSeconds: duration
+      })
+    };
+  } finally {
+    await rm(analysisDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function detectFilmDirectorSceneCuts(filePath, duration = 0) {
+  if (!filePath || !duration) return [];
+  const result = await runFfmpeg([
+    "-hide_banner",
+    "-i", filePath,
+    "-vf", "select='gt(scene,0.32)',showinfo",
+    "-an",
+    "-f", "null",
+    "-"
+  ], "Director camera cut detection");
+  const timestamps = [...String(result.stderr || "").matchAll(/pts_time:([0-9]+(?:\.[0-9]+)?)/g)]
+    .map((match) => Number(match[1]))
+    .filter((time) => Number.isFinite(time) && time >= 0.25 && time <= duration - 0.25)
+    .sort((a, b) => a - b);
+  return timestamps.filter((time, index) => index === 0 || time - timestamps[index - 1] >= 0.35);
+}
+
+function selectFilmDirectorCameraCuts(cutTimes = [], maxCuts = 24) {
+  const cuts = [...new Set(cutTimes.map((time) => Number(Number(time).toFixed(3))))]
+    .filter((time) => Number.isFinite(time) && time > 0)
+    .sort((a, b) => a - b);
+  const limit = Math.max(0, Math.min(24, Number(maxCuts) || 0));
+  if (cuts.length <= limit) return cuts;
+  if (!limit) return [];
+  return Array.from({ length: limit }, (_value, index) => cuts[Math.round(index * (cuts.length - 1) / Math.max(1, limit - 1))]);
+}
+
+function filmDirectorCameraShotRanges(duration = 0, cutTimes = []) {
+  const safeDuration = Math.max(0.1, Number(duration) || 0.1);
+  const boundaries = [0, ...cutTimes.filter((time) => time > 0 && time < safeDuration), safeDuration];
+  return boundaries.slice(0, -1).map((startSeconds, index) => {
+    const endSeconds = boundaries[index + 1];
+    return {
+      number: index + 1,
+      startSeconds,
+      endSeconds,
+      durationSeconds: Math.max(0, endSeconds - startSeconds)
+    };
+  });
+}
+
+async function createFilmDirectorCameraStrip(sourcePath, outputPath, shot = {}) {
+  const start = Math.max(0, Number(shot.startSeconds) || 0);
+  const end = Math.max(start + 0.03, Number(shot.endSeconds) || start + 0.03);
+  const inset = Math.min(0.08, Math.max(0.01, (end - start) * 0.12));
+  const times = [start + inset, start + (end - start) / 2, Math.max(start + inset, end - inset)];
+  await runFfmpeg([
+    "-hide_banner",
+    "-loglevel", "error",
+    "-y",
+    "-ss", formatFfmpegSeconds(times[0]), "-i", sourcePath,
+    "-ss", formatFfmpegSeconds(times[1]), "-i", sourcePath,
+    "-ss", formatFfmpegSeconds(times[2]), "-i", sourcePath,
+    "-filter_complex",
+    "[0:v]scale=420:420:force_original_aspect_ratio=decrease,pad=420:420:(ow-iw)/2:(oh-ih)/2:black,setsar=1[a];[1:v]scale=420:420:force_original_aspect_ratio=decrease,pad=420:420:(ow-iw)/2:(oh-ih)/2:black,setsar=1[b];[2:v]scale=420:420:force_original_aspect_ratio=decrease,pad=420:420:(ow-iw)/2:(oh-ih)/2:black,setsar=1[c];[a][b][c]hstack=inputs=3[out]",
+    "-map", "[out]",
+    "-frames:v", "1",
+    "-q:v", "3",
+    outputPath
+  ], `Director camera strip ${shot.number || ""}`.trim());
+}
+
+async function createFilmDirectorPerformanceStrip(sourcePath, outputPath, shot = {}) {
+  const start = Math.max(0, Number(shot.startSeconds) || 0);
+  const end = Math.max(start + 0.06, Number(shot.endSeconds) || start + 0.06);
+  const inset = Math.min(0.06, Math.max(0.005, (end - start) * 0.06));
+  const span = Math.max(0.01, end - start - inset * 2);
+  const times = Array.from({ length: 6 }, (_value, index) => start + inset + span * (index / 5));
+  const inputArgs = times.flatMap((time) => ["-ss", formatFfmpegSeconds(time), "-i", sourcePath]);
+  const filters = times.map((_time, index) => (
+    `[${index}:v]scale=360:300:force_original_aspect_ratio=decrease,pad=360:300:(ow-iw)/2:(oh-ih)/2:black,setsar=1[f${index}]`
+  ));
+  filters.push("[f0][f1][f2]hstack=inputs=3[top]");
+  filters.push("[f3][f4][f5]hstack=inputs=3[bottom]");
+  filters.push("[top][bottom]vstack=inputs=2[out]");
+  await runFfmpeg([
+    "-hide_banner",
+    "-loglevel", "error",
+    "-y",
+    ...inputArgs,
+    "-filter_complex", filters.join(";"),
+    "-map", "[out]",
+    "-frames:v", "1",
+    "-q:v", "3",
+    outputPath
+  ], `Director performance strip ${shot.number || ""}`.trim());
+}
+
+async function probeFilmDirectorAudioTrack(filePath) {
+  if (!filePath) return {};
+  try {
+    const { stdout } = await execFile(
+      ffprobeBinaryPath,
+      [
+        "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name,channels,sample_rate,duration",
+        "-of", "json",
+        filePath
+      ],
+      { windowsHide: true, timeout: 10000 }
+    );
+    const stream = JSON.parse(stdout || "{}")?.streams?.[0] || null;
+    return stream ? {
+      detected: true,
+      codec: String(stream.codec_name || ""),
+      channels: positiveNumber(stream.channels) || 0,
+      sampleRate: positiveNumber(stream.sample_rate) || 0,
+      duration: positiveNumber(stream.duration) || 0
+    } : { detected: false };
+  } catch {
+    return { detected: false };
+  }
+}
+
+async function describeFilmDirectorReferenceAudio(sourcePath, analysisDir, duration = 0) {
+  const metadata = await probeFilmDirectorAudioTrack(sourcePath);
+  if (!metadata.detected) return { detected: false, transcript: "", summary: "", usages: [] };
+  if (!openAiTextApiKey) {
+    return { detected: true, transcript: "", summary: "Audio track present; timed transcription requires an enabled OpenAI key.", usages: [] };
+  }
+
+  const audioPath = path.join(analysisDir, "reference-audio.mp3");
+  try {
+    await runFfmpeg([
+      "-hide_banner",
+      "-loglevel", "error",
+      "-y",
+      "-i", sourcePath,
+      "-t", formatFfmpegSeconds(Math.min(30, Math.max(0.1, Number(duration) || 30))),
+      "-vn",
+      "-ac", "1",
+      "-ar", "16000",
+      "-c:a", "libmp3lame",
+      "-b:a", "96k",
+      audioPath
+    ], "Director reference-audio extraction");
+    const audioBuffer = await readFile(audioPath);
+    const form = new FormData();
+    form.append("file", new File([audioBuffer], "director-reference.mp3", { type: "audio/mpeg" }));
+    form.append("model", "gpt-4o-transcribe-diarize");
+    form.append("response_format", "diarized_json");
+    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openAiTextApiKey}` },
+      body: form
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { detected: true, transcript: "", summary: "Audio track present; timed transcription was unavailable.", usages: [] };
+    }
+    const segments = Array.isArray(data.segments) ? data.segments : [];
+    const transcript = segments.length
+      ? segments.map((segment) => {
+          const text = String(segment.text || "").replace(/\s+/g, " ").trim();
+          if (!text) return "";
+          const start = Math.max(0, Number(segment.start) || 0).toFixed(2);
+          const end = Math.max(0, Number(segment.end) || Number(segment.start) || 0).toFixed(2);
+          const speaker = String(segment.speaker || "Performer").replace(/\s+/g, " ").trim();
+          return `[${start}-${end}s] ${speaker}: ${text}`;
+        }).filter(Boolean).join("\n")
+      : String(data.text || "").replace(/\s+/g, " ").trim();
+    return {
+      detected: true,
+      transcript: transcript.slice(0, 8000),
+      summary: transcript ? "Timed speech transcription available." : "Audio track present without intelligible speech.",
+      usages: [data.usage].filter(Boolean)
+    };
+  } catch {
+    return { detected: true, transcript: "", summary: "Audio track present; timed transcription was unavailable.", usages: [] };
+  }
+}
+
+function filmDirectorVideoSampleTimes(duration = 0) {
+  const safeDuration = Math.max(0, Number(duration) || 0);
+  if (!safeDuration) return [0];
+  const end = Math.max(0, safeDuration - 0.08);
+  const candidates = [
+    Math.min(0.08, end),
+    safeDuration * 0.2,
+    safeDuration * 0.4,
+    safeDuration * 0.6,
+    safeDuration * 0.8,
+    Math.max(0, safeDuration - 2),
+    Math.max(0, safeDuration - 1),
+    end
+  ];
+  const unique = [];
+  candidates.forEach((time) => {
+    const normalized = Math.max(0, Math.min(end, Number(time) || 0));
+    if (!unique.some((existing) => Math.abs(existing - normalized) < 0.05)) unique.push(normalized);
+  });
+  return unique.sort((a, b) => a - b);
+}
+
+
+async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
+  if (!process.env.FAL_KEY) {
+    throw new Error("No active Fal API key is selected in Settings.");
+  }
+
+  const model = falTextModel;
+  const imageContext = await describeImageInputs(imageInputs);
+  const videoContext = await describeVideoInputs(videoInputs);
+  const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
+  const data = await subscribeFal("openrouter/router", {
+    input: {
+      model,
+      prompt,
+      system_prompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions()
+    },
+    logs: true
+  });
+  const outputText = extractFalText(data).trim();
+
+  if (!outputText) {
+    throw new Error("fal returned no text.");
+  }
+
+  return {
+    text: outputText,
+    model,
+    provider: "fal",
+    endpoint: "openrouter/router",
+    submittedPrompt: prompt,
+    usage: falResultUsage(data),
+    helperUsages: [...imageContext.usages, ...videoContext.usages]
   };
 }
 
@@ -17722,15 +18511,44 @@ ${directorExpansionInstruction
 
   const result = await runTextLlm({
     prompt,
-    systemPrompt: "You are NewtNode's senior storyboard director. Return only valid JSON and prioritize editorial logic, continuity, blocking, and production-useful frame prompts.",
+    systemPrompt: `You are NewtNode's senior storyboard director. Return only valid JSON.\n\n${storyboardReasoningSkill}`,
     falModel: storyboardFalModel,
     openAiModel: storyboardOpenAiModel,
     responseMimeType: "application/json",
     reasoningEffort: "high",
     route: "storyboard-plan"
   });
+  const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage });
+  try {
+    const plan = parseStoryboardPlanJson(result.text);
+    const issues = storyboardPlanIssues(plan, directorShotList);
+    if (issues.length) {
+      throw new Error(`Storyboard plan needs correction: ${issues.join(" ")} Existing frames have been preserved.`);
+    }
+    return { plan, cost, result };
+  } catch (error) {
+    error.cost = cost;
+    error.llmResult = result;
+    throw error;
+  }
+}
 
-  return parseStoryboardPlanJson(result.text);
+async function recordStoryboardLlmUsage({ result, cost }, body, mode) {
+  if (!result) return;
+  await appendHistory({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "text",
+    modelName: result.model,
+    provider: result.provider,
+    endpoint: result.endpoint,
+    mode,
+    cost,
+    usage: result.usage || result.usages,
+    node: { id: body.nodeId, title: body.nodeTitle || "Storyboard" },
+    project: { id: body.projectId, name: body.projectName || "Node workspace" },
+    text: result.text
+  });
 }
 
 function parseStoryboardPlanJson(text) {
@@ -17763,7 +18581,7 @@ function repairStoryboardJsonText(text = "") {
 function storyboardPlannerErrorMessage(error) {
   const message = String(error?.message || "");
   if (error instanceof SyntaxError || /JSON|double-quoted property|position \d+/i.test(message)) {
-    return "Storyboard planner returned malformed JSON, so fallback frames were used. Try planning again if the generated beats feel too generic.";
+    return "Storyboard planner returned invalid planning data. Existing frames have been preserved; please try planning again.";
   }
   return message || "Storyboard planning failed.";
 }
@@ -17866,7 +18684,7 @@ Check for these problems:
 1. Physical logic errors: floating objects, impossible contact points, impossible object placement, broken perspective, major anatomy failures.
 2. Character orientation and side-of-room continuity: characters should remain on the correct side of the environment, preserve screen direction and eyelines, and not face the wrong way unless the prompt asks for it.
 3. Spatial consistency: kitchen drawers, counters, doors, props, walls, and other environment details should belong to the room and not float or jump to impossible places.
-4. Shot progression: if previous frame or spatial anchor is provided, this frame should not be nearly identical in scale/composition unless requested. A WS-to-MS must have a clear scale change; if the MS is effectively the same wide camera view, fail it and request a tighter MS/CU or clearer angle shift.
+4. Shot progression: judge the requested frame, not an invented camera move. Within a continuous CUT, the same scale/composition is valid when the action state changes or the camera remains locked. Between cuts, check a requested scale change is visible; matching close-ups of different speakers are valid. Do not force a tighter frame or new angle that contradicts the current prompt.
 5. Background variety with continuity: different shots may share the same environment, but should not keep showing the exact same background from the exact same camera unless the prompt calls for a locked-off repeat.
 6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
 7. Storyboard style: when STORYBOARD STYLE LOCK is present, the frame should read as clean minimal line-art production boards, not realistic grayscale photography.
@@ -17900,7 +18718,7 @@ async function reviewStoryboardFrameWithOpenAi({
     previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
     spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
   ].filter(Boolean);
-  if (!inputs.length) return storyboardQcPass("No readable image was available for QC.");
+  if (!inputs.length) return { qc: storyboardQcUnavailable("No readable image was available for QC."), cost: { amountUsd: 0, currency: "USD" } };
   const prompt = storyboardQcReviewPrompt({
     sceneDescription,
     framePrompt,
@@ -17921,7 +18739,14 @@ async function reviewStoryboardFrameWithOpenAi({
     reasoningEffort: "high",
     route: "storyboard-qc"
   });
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text));
+  const cost = estimateTextProcessingCost({ provider: result.provider, helperUsages: result.usages, hasMainRequest: false });
+  try {
+    return { qc: normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text)), cost, result };
+  } catch (error) {
+    error.cost = cost;
+    error.llmResult = result;
+    throw error;
+  }
 }
 
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {

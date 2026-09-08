@@ -19,6 +19,7 @@
     "server:start": "node scripts/localServerSupervisor.mjs"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "@fal-ai/client": "^1.8.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@xyflow/react": "^12.11.3",

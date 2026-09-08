@@ -238,6 +238,52 @@
   font-size: 11px;
 }
 
+.newt-preset-library {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.newt-preset-library-heading,
+.newt-preset-library-controls {
+  display: grid;
+  align-items: center;
+  gap: 5px;
+}
+
+.newt-preset-library-heading {
+  grid-template-columns: minmax(0, 1fr) 28px;
+  color: rgba(244, 240, 232, 0.68);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.newt-preset-library-controls {
+  grid-template-columns: minmax(0, 1fr) 30px 30px;
+}
+
+.node-toolbar .newt-preset-library .icon-button {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-width: 28px;
+  min-height: 30px;
+  padding: 0;
+  place-items: center;
+}
+
+.newt-preset-bindings {
+  display: grid;
+  gap: 5px;
+}
+
+.newt-preset-bindings label {
+  display: grid;
+  gap: 3px;
+  color: rgba(244, 240, 232, 0.58);
+  font-size: 10px;
+}
+
 .node-toolbar button {
   display: grid;
   grid-template-columns: 17px minmax(0, 1fr) 13px;
@@ -488,6 +534,60 @@
 
 .workflow-prompt-actions button.primary:hover {
   background: #ead94a;
+}
+
+.newt-preset-dialog label,
+.newt-preset-slots {
+  display: grid;
+  gap: 6px;
+  color: rgba(244, 240, 232, 0.72);
+  font-size: 12px;
+}
+
+.newt-preset-dialog input[type="text"],
+.newt-preset-dialog input:not([type]),
+.newt-preset-dialog select {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: #f4f0e8;
+  background: #101010;
+}
+
+.newt-preset-advanced summary {
+  cursor: pointer;
+  color: rgba(244, 240, 232, 0.72);
+  font-size: 12px;
+}
+
+.newt-preset-slots {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+.newt-preset-slots > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  align-items: center;
+  gap: 8px;
+}
+
+.newt-preset-slots label {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+}
+
+.newt-preset-slots input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.newt-preset-dialog .workflow-prompt-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .comfy-wan-dialog {
