@@ -400,6 +400,7 @@ import {
 } from "./nodeRunners/videoModels.js";
 import { adjacentProjectOutputImage, buildProjectOutputItems } from "./projectOutputs.js";
 import { isOutputSinkConnection, outputAcceptedSourceKinds } from "./outputConnections.js";
+import { rebaseOutputPathToProjectOutputs } from "./outputPaths.js";
 import { insertOutputToken, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
@@ -10722,7 +10723,18 @@ function OutputNodeBody({
   React.useEffect(() => {
     const currentPath = String(node.data.outputPath || "").trim();
     const pathMode = String(node.data.outputPathMode || "");
-    if (!defaultOutputPath || pathMode === "custom" || (!pathMode && currentPath)) return;
+    if (!defaultOutputPath) return;
+
+    const rebasedPath = rebaseOutputPathToProjectOutputs(currentPath, defaultOutputPath);
+    if (currentPath && rebasedPath !== currentPath) {
+      onUpdate(node.id, {
+        outputPath: rebasedPath,
+        outputPathMode: pathMode || "custom"
+      });
+      return;
+    }
+
+    if (pathMode === "custom" || (!pathMode && currentPath)) return;
     if (currentPath === defaultOutputPath && pathMode === "project-default") return;
     onUpdate(node.id, {
       outputPath: defaultOutputPath,

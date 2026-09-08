@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { rebaseOutputPathToProjectOutputs } from "../src/outputPaths.js";
 
 export const defaultExternalOutputsPrefix = "/external-outputs";
 const reservedOutputFilePaths = new Map();
@@ -20,7 +21,12 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
     : maybeOptions;
   const rootDir = options.rootDir || process.cwd();
   const outputPrefix = options.outputPrefix || defaultExternalOutputsPrefix;
-  const rawDirectory = String(body.outputTargetPath || body.outputDirectory || "").trim();
+  const requestedDirectory = String(body.outputTargetPath || body.outputDirectory || "").trim();
+  const workflowPackagePath = String(body.workflowPackagePath || body.packagePath || "").trim();
+  const rawDirectory = rebaseOutputPathToProjectOutputs(
+    requestedDirectory,
+    workflowPackagePath ? path.join(workflowPackagePath, "outputs") : ""
+  );
   if (!rawDirectory) return null;
 
   const now = options.now || new Date();

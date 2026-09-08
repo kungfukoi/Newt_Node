@@ -154,6 +154,27 @@ test("Output filename preview resolves tokens without creating the target file",
   });
 });
 
+test("Output target resolution rebases a copied package path to the open workflow package", async () => {
+  await withTempOutputDir(async (directory) => {
+    const packagePath = path.join(directory, "SubwayStation");
+    const target = await previewOutputTargetAsset(
+      {
+        workflowPackagePath: packagePath,
+        outputTargetPath: "C:\\Users\\someone\\Projects\\SubwayStation\\outputs\\Selects",
+        outputTargetFileName: "$node_$index",
+        outputTargetSourceNodeTitle: "Video Model"
+      },
+      "video",
+      ".mp4",
+      "",
+      { rootDir: directory }
+    );
+
+    assert.equal(path.dirname(target.filePath), path.join(packagePath, "outputs", "Selects"));
+    assert.equal(target.fileName, "Video Model_01.mp4");
+  });
+});
+
 test("selected Output format overrides an extension typed in the filename field", async () => {
   await withTempOutputDir(async (directory) => {
     const target = await previewOutputTargetAsset(
