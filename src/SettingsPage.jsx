@@ -327,10 +327,16 @@ export default function SettingsPage() {
           <span className="stats-kicker">Runtime</span>
           <h1>Settings</h1>
         </div>
-        <button onClick={refreshSettings} disabled={status === "loading" || status === "refreshing" || Boolean(busy)} title="Refresh settings">
-          <RefreshCcw className={status === "refreshing" ? "spin" : ""} size={17} />
-          <span>{lastUpdated ? `Updated ${timeLabel(lastUpdated)}` : "Syncing"}</span>
-        </button>
+        <div className="settings-hero-actions">
+          <button onClick={refreshSettings} disabled={status === "loading" || status === "refreshing" || Boolean(busy)} title="Refresh settings">
+            <RefreshCcw className={status === "refreshing" ? "spin" : ""} size={17} />
+            <span>{lastUpdated ? `Updated ${timeLabel(lastUpdated)}` : "Syncing"}</span>
+          </button>
+          <button className="settings-restart-button" onClick={restartServer} disabled={actionsDisabled} title="Restart NewtNode">
+            <RotateCcw className={busy === "restart" ? "spin" : ""} size={17} />
+            <span>{busy === "restart" ? "Restarting" : "Restart"}</span>
+          </button>
+        </div>
       </header>
 
       <div className="stats-metrics settings-metrics">
@@ -550,24 +556,6 @@ export default function SettingsPage() {
             <button type="button" onClick={updateFromRepository} disabled={actionsDisabled || !repository.trim()}>
               <RefreshCcw className={busy === "update" ? "spin" : ""} size={15} />
               <span>{busy === "update" ? "Updating" : "Update"}</span>
-            </button>
-          </div>
-        </CollapsibleSettingsSection>
-
-        <CollapsibleSettingsSection
-          title="Restart"
-          aside={settings?.restartRequested ? "Queued" : "Ready"}
-          open={openSections.restart}
-          onToggle={() => toggleSection("restart")}
-        >
-          <div className="settings-restart-panel">
-            <RotateCcw size={28} />
-            <strong>{busy === "restart" ? "Restarting" : "Server restart"}</strong>
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={restartServer} disabled={actionsDisabled}>
-              <RotateCcw className={busy === "restart" ? "spin" : ""} size={15} />
-              <span>{busy === "restart" ? "Restarting" : "Restart"}</span>
             </button>
           </div>
         </CollapsibleSettingsSection>

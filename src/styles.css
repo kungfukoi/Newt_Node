@@ -819,6 +819,24 @@ textarea::placeholder {
   font-size: 13px;
 }
 
+.settings-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stats-hero .settings-restart-button {
+  color: #f0c83b;
+  border-color: rgba(240, 200, 59, 0.22);
+}
+
+.stats-hero .settings-restart-button:hover:not(:disabled) {
+  color: #fff2a8;
+  background: rgba(240, 200, 59, 0.12);
+}
+
 .stats-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1641,26 +1659,6 @@ textarea::placeholder {
   opacity: 0.42;
 }
 
-.settings-restart-panel {
-  display: grid;
-  min-height: 112px;
-  place-items: center;
-  gap: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
-  color: rgba(244, 240, 232, 0.7);
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.settings-restart-panel svg {
-  color: #ddc631;
-}
-
-.settings-restart-panel strong {
-  color: #f4f0e8;
-  font-size: 14px;
-}
-
 .settings-message {
   margin: 0;
   color: rgba(244, 240, 232, 0.72);
@@ -2078,6 +2076,11 @@ textarea::placeholder {
   .stats-hero {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .settings-hero-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .stats-panel.wide,
