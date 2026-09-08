@@ -11,7 +11,7 @@ Before changing code, read:
 3. `docs/development.md` - the implementation and verification workflow.
 4. The relevant operational document under `docs/`, such as `performance.md`, `dependencies.md`, or `comfyWan-requirements.yaml`.
 
-Do not begin a feature by searching only for the visible UI label. Internal types and compatibility names can differ from product labels. Examples include Timeline / `assembly`, WanWarp / `videoStitch`, and WanSegment / `transitionBuilder`.
+Do not begin a feature by searching only for the visible UI label. Internal types and compatibility names can differ from product labels. Examples include Director / `skillDirector`, Timeline / `assembly`, WanWarp / `videoStitch`, and WanSegment / `transitionBuilder`.
 
 ## Source Of Truth
 

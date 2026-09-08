@@ -185,6 +185,26 @@ export function isTerminalProgressStatus(status) {
   return status === "completed" || status === "failed" || status === "attention";
 }
 
+export function shouldRenderGenerationProgress(progress, nodeStatus = "") {
+  return Boolean(progress && progress.status !== "completed" && String(nodeStatus).toLowerCase() !== "complete");
+}
+
+export function mergeGenerationProgressEntry(previous, incoming) {
+  if (!previous) return incoming ? { ...incoming } : null;
+  if (!incoming) return { ...previous };
+  if (previous.runId !== incoming.runId) return { ...previous, ...incoming };
+
+  const previousUpdatedAt = Date.parse(previous.updatedAt || previous.startedAt || "");
+  const incomingUpdatedAt = Date.parse(incoming.updatedAt || incoming.startedAt || "");
+  if (Number.isFinite(previousUpdatedAt) && Number.isFinite(incomingUpdatedAt) && incomingUpdatedAt < previousUpdatedAt) {
+    return { ...previous };
+  }
+  if (previous.status === "completed" && !isTerminalProgressStatus(incoming.status)) {
+    return { ...previous };
+  }
+  return { ...previous, ...incoming };
+}
+
 export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {
   if (!entry?.runId || !entry?.nodeId) return true;
   if (isTerminalProgressStatus(entry.status)) return true;

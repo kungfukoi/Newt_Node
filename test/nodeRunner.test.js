@@ -11,7 +11,7 @@ import {
   runStageLabel,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
-import { buildUtilityVideoRequest, buildVideoGenerationRequest, composeVideoPrompt } from "../src/nodeRunners/videoModels.js";
+import { buildUtilityVideoRequest, buildVideoGenerationRequest, composeVideoPrompt, filmDirectorVideoSettings } from "../src/nodeRunners/videoModels.js";
 
 test("composeVideoPrompt appends connected text as Director supplemental direction", () => {
   assert.equal(
@@ -45,6 +45,46 @@ test("buildVideoGenerationRequest preserves disabled Seedance audio", () => {
   });
 
   assert.equal(request.generateAudio, false);
+});
+
+test("Film Director settings control the effective video request without dropping connected media", () => {
+  const director = {
+    videoModel: "Seedance 2.5",
+    durationSeconds: "12",
+    resolution: "1080p",
+    aspectRatio: "9:16",
+    audioMode: "silent"
+  };
+  const baseData = {
+    model: "Seedance 2.0",
+    duration: "5 seconds",
+    resolution: "720p",
+    aspectRatio: "16:9",
+    generateAudio: true
+  };
+  const data = filmDirectorVideoSettings(baseData, director);
+  assert.deepEqual(data, {
+    model: "Seedance 2.5",
+    duration: "12 seconds",
+    resolution: "1080p",
+    aspectRatio: "9:16 (Portrait)",
+    generateAudio: false
+  });
+
+  const request = buildVideoGenerationRequest({
+    node: { id: "video", data: { title: "Video", ...baseData } },
+    prompt: "A quiet room.",
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceAudioUrls: ["/uploads/dialogue.wav"],
+    referenceAudioLabels: ["Dialogue"],
+    filmDirector: director
+  });
+  assert.equal(request.model, "Seedance 2.5");
+  assert.equal(request.generateAudio, false);
+  assert.deepEqual(request.referenceAudioUrls, []);
+  assert.match(request.prompt, /Silent output/);
 });
 
 test("Coverage participates in batch graph runs as an image-stage node", () => {

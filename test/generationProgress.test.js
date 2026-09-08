@@ -4,7 +4,9 @@ import {
   aggregateGenerationProgressEntries,
   generationEntryProgress,
   generationRequestMetadata,
+  mergeGenerationProgressEntry,
   progressEntryFromRequestMetadata,
+  shouldRenderGenerationProgress,
   shouldDiscardProgressEntryMissingFromServer
 } from "../src/generationProgress.js";
 
@@ -180,4 +182,33 @@ test("terminal local progress can be discarded when the server no longer retains
     status: "completed",
     startedAt: "2026-08-18T12:00:00.000Z"
   }), true);
+});
+
+test("completed progress disappears while failures and attention remain visible", () => {
+  assert.equal(shouldRenderGenerationProgress(null), false);
+  assert.equal(shouldRenderGenerationProgress({ status: "running" }), true);
+  assert.equal(shouldRenderGenerationProgress({ status: "running" }, "complete"), false);
+  assert.equal(shouldRenderGenerationProgress({ status: "completed" }), false);
+  assert.equal(shouldRenderGenerationProgress({ status: "failed" }), true);
+  assert.equal(shouldRenderGenerationProgress({ status: "attention" }), true);
+});
+
+test("completed progress cannot be resurrected by an older active server snapshot", () => {
+  const completed = {
+    runId: "run-1",
+    nodeId: "video-1",
+    status: "completed",
+    phase: "complete",
+    percent: 100,
+    updatedAt: "2026-09-07T01:41:39.000Z"
+  };
+  const staleDownload = {
+    ...completed,
+    status: "running",
+    phase: "downloading",
+    percent: 94,
+    updatedAt: "2026-09-07T01:41:38.000Z"
+  };
+
+  assert.deepEqual(mergeGenerationProgressEntry(completed, staleDownload), completed);
 });

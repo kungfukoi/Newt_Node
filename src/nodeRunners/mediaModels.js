@@ -203,7 +203,7 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
   };
 }
 
-export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag, sheetKind = "image" }) {
+export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, additionalReferences = [], workflowContext, characterTag, sheetKind = "image" }) {
   const isVideoSheet = sheetKind === "video";
   const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
   const referenceNotes = node.type === "character" && typeof node.data.characterReferenceNotes === "string"
@@ -213,8 +213,9 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     ? `${prompt}\n\nCharacter reference notes (preserve the required panel layout, portrait identity, and selected wardrobe):\n${referenceNotes}`
     : prompt;
   const references = [
-    { url: portrait.localUrl, label: "The Character portrait reference" },
-    ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
+    { url: portrait.localUrl || portrait.url, label: "Original Character Portrait" },
+    ...(wardrobe?.localUrl || wardrobe?.url ? [{ url: wardrobe.localUrl || wardrobe.url, label: "Selected wardrobe sheet" }] : []),
+    ...additionalReferences.map((reference) => ({ url: reference.localUrl || reference.url, label: reference.label || "Base Identity Character Sheet" })).filter((reference) => reference.url)
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt: sheetPrompt,
@@ -227,6 +228,63 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Character Sheet`
   }, "Character sheet generation");
   if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
+
+  return {
+    url: data.image.localUrl,
+    thumbnailUrl: data.image.thumbnailUrl || "",
+    type: "image",
+    label: `@${characterTag}${isVideoSheet ? " CU Video" : ""} Character Sheet`,
+    fileName: data.image.fileName,
+    filePath: data.image.filePath || "",
+    mimeType: data.image.mimeType || "",
+    text: data.text || "",
+    cost: data.cost
+  };
+}
+
+export async function runCharacterWardrobeEdit({
+  node,
+  prompt,
+  baseSheet,
+  wardrobe,
+  identityReference = null,
+  consistencySheet = null,
+  editMaskDataUrl = "",
+  workflowContext,
+  characterTag,
+  sheetKind = "image"
+}) {
+  const isVideoSheet = sheetKind === "video";
+  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
+  const baseUrl = baseSheet?.localUrl || baseSheet?.url || "";
+  const wardrobeUrl = wardrobe?.localUrl || wardrobe?.url || "";
+  const identityUrl = identityReference?.localUrl || identityReference?.url || "";
+  const consistencyUrl = consistencySheet?.localUrl || consistencySheet?.url || "";
+  if (!baseUrl) throw new Error("Generate the Base Identity sheet before applying wardrobe.");
+  if (!wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
+
+  const references = [
+    { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
+    ...(identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
+    { url: wardrobeUrl, label: "Selected wardrobe reference; clothing only" },
+    ...(consistencyUrl ? [{
+      url: consistencyUrl,
+      label: "Matching Full Character Sheet; wardrobe and identity continuity only; ignore its layout, crops, poses, and head visibility"
+    }] : [])
+  ];
+  const { response, data } = await nodeApi.generateImage({
+    prompt: [prompt, node.data.characterReferenceNotes || ""].filter(Boolean).join("\\n\\n"),
+    ...generationSettings,
+    aspectRatio: "16:9",
+    imagePromptUrls: references.map((item) => item.url),
+    imagePromptLabels: references.map((item) => item.label),
+    ...(editMaskDataUrl ? { editMaskDataUrl } : {}),
+    ...workflowContextPayload(workflowContext),
+    nodeId: node.id,
+    nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Wardrobe Edit`
+  }, "Character wardrobe edit");
+  if (!response.ok) throw new Error(data.error || "Character wardrobe edit failed.");
+  if (!data.image?.localUrl) throw new Error("Character wardrobe edit returned no image.");
 
   return {
     url: data.image.localUrl,

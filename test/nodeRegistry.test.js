@@ -21,6 +21,10 @@ test("Text Model remains loadable but is hidden while Text Agent stays available
   assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "textAgent"), true);
 });
 
+test("the legacy skillDirector node is presented as Director", () => {
+  assert.equal(nodeTypeLabel("skillDirector"), "Director");
+});
+
 
 test("Timeline is the public label for the legacy assembly node type", () => {
   assert.equal(nodeTypeLabel("assembly"), "Timeline");

@@ -24,6 +24,7 @@ import {
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
+import { defaultUserPreferences, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
 const providerDefinitions = Object.freeze([
@@ -49,6 +50,7 @@ export default function SettingsPage() {
   const [minimaxH3LocalStatus, setMinimaxH3LocalStatus] = React.useState(null);
   const [minimaxH3LocalBusy, setMinimaxH3LocalBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
+  const [userPreferences, setUserPreferences] = React.useState(defaultUserPreferences);
   const [openSections, setOpenSections] = React.useState(readSettingsOpenSections);
   const [status, setStatus] = React.useState("loading");
   const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
@@ -85,6 +87,7 @@ export default function SettingsPage() {
     setUpdateLog("");
     try {
       const nextModelPreferences = normalizeModelPreferences(modelPreferences);
+      const nextUserPreferences = normalizeUserPreferences(userPreferences);
       const credentialPayload = normalizedCredentialPayload(credentials, activeCredentialIds);
       const payload = {
         repository,
@@ -92,7 +95,8 @@ export default function SettingsPage() {
         modelPreferences: nextModelPreferences,
         credentials: credentialPayload.credentials,
         activeCredentialIds: credentialPayload.activeCredentialIds,
-        modelProviderPreferences: normalizeModelProviderPreferences(modelProviderPreferences)
+        modelProviderPreferences: normalizeModelProviderPreferences(modelProviderPreferences),
+        userPreferences: nextUserPreferences
       };
 
       const savedData = await settingsApi.save(payload);
@@ -104,11 +108,15 @@ export default function SettingsPage() {
           : nextModelPreferences;
       const data = {
         ...(loadedData || {}),
-        modelPreferences: savedModelPreferences
+        modelPreferences: savedModelPreferences,
+        userPreferences: normalizeUserPreferences(
+          loadedData?.userPreferences ?? savedData?.userPreferences ?? nextUserPreferences
+        )
       };
       applyLoadedSettings(data);
       dispatchModelPreferences(savedModelPreferences);
-      dispatchModelProviderPreferences(data.modelProviderPreferences);
+      dispatchModelProviderPreferences(data);
+      dispatchUserPreferences(data.userPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
       await refreshKeyValidation();
@@ -176,6 +184,7 @@ export default function SettingsPage() {
     setRepository(data.repository || "");
     setComfyWanRootPath(data.comfyWanRootPath || "");
     setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+    setUserPreferences(normalizeUserPreferences(data.userPreferences));
   }
 
   async function chooseComfyWanRoot() {
@@ -395,6 +404,7 @@ export default function SettingsPage() {
                 }}
               >
                 <option value="fal">Fal</option>
+                <option value="krea">Krea</option>
                 <option value="local">Local</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.minimaxH3, activeCredentialIds, "MiniMax H3", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
@@ -485,6 +495,39 @@ export default function SettingsPage() {
                   <span>{busy === "save" ? "Saving" : "Save Models"}</span>
                 </button>
               </div>
+        </CollapsibleSettingsSection>
+
+        <CollapsibleSettingsSection
+          title="User Preferences"
+          aside={userPreferences.showPresetPanel ? "Preset panel shown" : "Preset panel hidden"}
+          open={openSections.userPreferences}
+          onToggle={() => toggleSection("userPreferences")}
+        >
+          <div className="settings-preference-list">
+            <label className={`settings-preference-toggle ${userPreferences.showPresetPanel ? "enabled" : ""}`}>
+              <span>
+                <strong>Show Preset Panel</strong>
+                <small>Display the Presets library in the left node sidebar.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={userPreferences.showPresetPanel}
+                onChange={(event) => setUserPreferences((current) => ({
+                  ...current,
+                  showPresetPanel: event.target.checked
+                }))}
+              />
+              <span className="node-toggle compact" aria-hidden="true">
+                <span />
+              </span>
+            </label>
+          </div>
+          <div className="settings-actions">
+            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+              <Save size={15} />
+              <span>{busy === "save" ? "Saving" : "Save Preferences"}</span>
+            </button>
+          </div>
         </CollapsibleSettingsSection>
 
         <CollapsibleSettingsSection
@@ -776,10 +819,26 @@ function dispatchModelPreferences(preferences) {
   }));
 }
 
-function dispatchModelProviderPreferences(preferences) {
+function dispatchModelProviderPreferences(settings) {
   if (typeof window === "undefined") return;
+  const preferences = settings?.modelProviderPreferences || settings;
   window.dispatchEvent(new CustomEvent("newtnode:model-provider-settings-updated", {
-    detail: normalizeModelProviderPreferences(preferences)
+    detail: {
+      preferences: normalizeModelProviderPreferences(preferences),
+      availability: {
+        fal: Boolean(settings?.falKeyConfigured),
+        google: Boolean(settings?.googleApiKeyConfigured),
+        krea: Boolean(settings?.kreaApiKeyConfigured),
+        openai: Boolean(settings?.openAiApiKeyConfigured || settings?.openAiKeyConfigured)
+      }
+    }
+  }));
+}
+
+function dispatchUserPreferences(preferences) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("newtnode:user-preferences-updated", {
+    detail: normalizeUserPreferences(preferences)
   }));
 }
 

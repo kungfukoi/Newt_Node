@@ -1,6 +1,6 @@
 # NewtNode Architecture
 
-This document is the descriptive map of the current NewtNode implementation. `node-standards.md` remains the normative contract. Snapshot verified against package version `3.0.0-beta.0` on 2026-09-04.
+This document is the descriptive map of the current NewtNode implementation. `node-standards.md` remains the normative contract. Snapshot verified against package version `3.0.0-beta.0` on 2026-09-07.
 
 ## Runtime Shape
 
@@ -81,6 +81,8 @@ Generated or remote media must become a managed local asset before it is treated
 
 Preview nodes are deliberately passive. They render connected producer results and do not own generation, transport, or timeline state. Timeline owns its playhead and publishes `frameOut`; Preview only displays that frame.
 
+Preview/Layout state is normalized by `src/previewLayout.js`. It stores a mixed, ordered set of image and video result references, keeps legacy image-only boards compatible, and uses muted tile playback plus the shared full-size lightbox. Layout export remains a still-image operation.
+
 Every general preview uses contain/letterbox behavior. Cropping is valid only inside an explicit editing operation such as Edit Crop.
 
 The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` for cursor pagination and refresh merging. Passive videos use cached `/api/video-poster` stills, not one decoder per rail item; the original video remains the drag/open source. The rail remains one proportional column. Canvas node mounting and full-detail visibility are unchanged.
@@ -89,11 +91,23 @@ The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` 
 
 Character nodes persist generated wardrobe variants in `characterSheetVariants`, uploaded completed sheets in `characterCustomSheets`, and the selected library entry in `activeCharacterSheetId`. `src/characterSheetLibrary.js` normalizes legacy single-sheet data, assigns namespaced generated/custom selection ids, builds the combined library, and resolves deterministic fallbacks without making filenames or display order authoritative.
 
-The active Character sheet is the full-resolution identity reference consumed by downstream image, video, Composer, Film Director, and Storyboard paths. `src/characterVideoSheets.js` resolves the selected image or matching CU Video sheet for video generation. Changing a node title updates the visible `@token`, while node ids and persisted reference bindings keep the relationship stable.
+The active Character sheet is the full-resolution identity reference consumed by downstream image, video, Composer, Director, and Storyboard paths. `src/characterVideoSheets.js` resolves the selected image or matching CU Video sheet for video generation. Changing a node title updates the visible `@token`, while node ids and persisted reference bindings keep the relationship stable.
 
-Generated and custom sheets coexist. Regeneration merges successful wardrobe variants and retains previous variants for failed wardrobes; removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
+Generated and custom sheets coexist. New Character generation first creates a neutral Base Identity sheet, then creates wardrobe-specific variants as edits of that base. Base and wardrobe signatures allow current variants to be reused, while the per-wardrobe action regenerates only that dependency. Regenerate Base deliberately invalidates generated wardrobe dependencies; ordinary retries and partial failures retain successful prior variants. Legacy generated sheets without signatures remain selectable and are not rebuilt merely because an older workflow was opened. Removing an active sheet selects another valid entry before unlocking the Character. Save, Open, autosave, copy, import, and package relocation must preserve this library and its active selection through normal workflow asset handling.
+
+`src/characterSheetWorkflow.js` coordinates base-image and CU Video generation as separately checkpointed stages. Persist each successful stage before starting the next one. Wardrobe generation uses the corresponding base sheet as its locked edit source and preserves valid image/video wardrobe halves independently when one side must be regenerated.
 
 `runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
+
+## Director And Storyboard Flow
+
+Director is the visible product name; `skillDirector` remains the saved node type and the focused implementation modules retain their `filmDirector*` names. Load normalization changes only legacy default titles such as `Film Director` and `Film Director 3` to `Director` and `Director 3`. User-authored titles remain unchanged.
+
+`src/components/NodeBodies.jsx` owns the staged Director interface. Approach rules live in `src/filmDirectorApproaches.js`; reference-video modes, scene snapshots, active reference tags, and reusable shot blueprints live in `src/filmDirectorScenes.js`; audio policy and music validation remain in the focused Director helpers. `src/nodeRunners/skillDirector.js` creates the normalized request and result patch without moving provider logic into the node body.
+
+The server executes Director and Storyboard creative reasoning with strict AJV-backed contracts in `server/creative-llm.js`. Successful repeated analysis can reuse `server/creative-analysis-cache.js` without recording duplicate provider cost. `server/director-music.js` may derive measured waveform-level evidence from local audio, but the connected audio remains the timing authority and analysis must not invent beats, lyrics, instruments, or content it did not measure.
+
+A built Director package can control supported Video Model settings and provide scene/reference context to Storyboard. Storyboard validates cut order, required continuous-shot keyframes, frame numbering, and nonempty prompts before replacing visible work. Failed planning leaves the existing board intact. Visual QC distinguishes a reviewed result from `unreviewed` when the review service is unavailable.
 
 ## Persistence And Storage
 
@@ -104,6 +118,8 @@ A packaged workflow contains its document and managed `inputs/`, `outputs/`, and
 Runtime data such as credentials, history, generated indexes, caches, uploads, and outputs is local state and must stay outside source control. `server/data/runtime-settings.json` is not a source fixture. `.env` is ignored; `.env.example` documents supported variables without secrets.
 
 Save As creates a new package identity and remaps package-owned asset references. Graph identity inside the copied workflow remains internally coherent; stale references to the old package must not survive.
+
+User-created Newt Presets are a separate local library. `src/newtPresets.js` captures, sanitizes, remaps, places, and binds graph fragments; `src/useNewtPresets.js` owns browser orchestration; `server/newt-presets.js` persists metadata and copied full-resolution dependencies through `server/routes/newtPresets.js`. Preset JSON lives under ignored `server/data/newt-presets/`, while copied dependencies live under the served `outputs/Newt-Presets/dependencies/` tree. Deleting a preset removes its library entry but retains copied media because an existing workflow may still reference it.
 
 ### Reliability Stores
 
@@ -125,7 +141,7 @@ Current explicit export choices are PNG/JPEG for stills and H.264 MP4/ProRes 422
 
 ## Local Engines And Providers
 
-Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history.
+Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history. MiniMax H3 supports authoritative Fal, Krea, and Local routes. The Krea route uses the same validated multimodal reference contract as the H3 node and never falls back to Fal or Local after submission failure.
 
 Local ComfyUI integrations live in focused server engines such as `server/wanwarp/` and `server/wanblend/`. Browser code sends normalized settings and managed asset URLs, while server engines own template patching, queueing, polling, output recovery, and diagnostics.
 Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed Newt assets to server-visible `file://` URIs, submits asynchronous video jobs to loopback SGLang, polls completion, and copies content back into managed outputs. FL2VA/T2VA use the primary URL; Ref2VA may use a separately configured service because it is a distinct deployment variant.

@@ -17,6 +17,7 @@ Important direct runtime packages include:
 | --- | --- |
 | `react`, `react-dom` | Application UI runtime. |
 | `@xyflow/react` | Node canvas, handles, viewport behavior, and connector rendering. |
+| `ajv` | Strict JSON-schema validation for Director and Storyboard model responses. |
 | `three` | Frame It and 3D media previews. |
 | `express`, `cors`, `multer` | Local API and uploads. |
 | `@fal-ai/client` | Fal model requests. |

@@ -1,5 +1,8 @@
 import { nodeApi } from "../api/newtApi.js";
-import { filmDirectorUsesReference } from "../filmDirectorScenes.js";
+import { filmDirectorReferenceVideoMode, filmDirectorUsesReference } from "../filmDirectorScenes.js";
+import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
+import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
+import { filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runSkillDirectorNode({
@@ -10,37 +13,59 @@ export async function runSkillDirectorNode({
   sourceLabel
 }) {
   const action = node.data.skillDirectorAction || "build";
+  const audioInputs = filmDirectorSupportsMusic(node.data.skillApproach) ? connectedMediaInputItems(incoming.musicIn, "audio", sourceLabel, {}).slice(-1) : [];
+  const musicError = filmDirectorMusicVideoError({ approach: node.data.skillApproach, audioInputs, videoModel: node.data.skillVideoModel });
+  if (musicError) throw new Error(musicError);
   const characterInputs = connectedCharacterInputItems(incoming.characterIn, sourceLabel, node.data.skillReferenceNotes || {});
   const locationInputs = connectedMediaInputItems(incoming.locationIn, "location", sourceLabel, node.data.skillReferenceNotes || {});
   const elementInputs = connectedMediaInputItems(incoming.imageIn, "element", sourceLabel, node.data.skillReferenceNotes || {});
+  const referenceVideoMode = filmDirectorReferenceVideoMode(node.data.skillDirectorReferenceVideoOptions);
+  const referenceVideoInput = connectedMediaInputItems(incoming.referenceVideoIn, "video", sourceLabel, {}).at(-1) || null;
+  const videoInputs = ["extend", "camera", "reference"].includes(referenceVideoMode) && referenceVideoInput ? [referenceVideoInput] : [];
   const activeCharacterInputs = activeSceneReferenceItems(characterInputs, node.data, action, "character");
   const activeLocationInputs = activeSceneReferenceItems(locationInputs, node.data, action, "location");
   const activeElementInputs = activeSceneReferenceItems(elementInputs, node.data, action, "element");
+  const requestDrafts = filmDirectorShotListDraftsForRequest(action, node.data);
   const { response, data } = await nodeApi.runSkillDirector({
     action,
     sceneName: node.data.sceneName,
     sceneOverview: node.data.sceneOverview ?? node.data.text,
     motionBrief: node.data.motionBrief || node.data.motionDirection,
-    styleDirection: node.data.styleDirection,
+    styleDirection: action === "style"
+      ? filmDirectorStageDraftForRequest("style", node.data.styleDirection, node.data)
+      : node.data.styleDirection,
     motionDirection: node.data.motionDirection,
-    shotList: node.data.shotList,
-    shotListNotes: node.data.shotListNotes,
+    shotList: requestDrafts.shotList,
+    shotListNotes: requestDrafts.shotListNotes,
     revisionNotes: node.data.skillDirectorRevisionNotes,
     currentFinalPrompt: node.data.resultText,
     characterInputs: activeCharacterInputs,
     locationInputs: activeLocationInputs,
     elementInputs: activeElementInputs,
     styleInputs: connectedMediaInputItems(incoming.styleIn, "style", sourceLabel, node.data.skillReferenceNotes || {}),
-    videoInputs: [],
+    videoInputs,
+    audioInputs,
+    referenceVideoMode,
+    referenceVideoAnalysis: node.data.skillDirectorReferenceVideoAnalysis || "",
+    referenceVideoAnalysisSource: node.data.skillDirectorReferenceVideoAnalysisSource || "",
+    referenceVideoBlueprint: node.data.skillDirectorReferenceVideoBlueprint || {},
     shotCount: node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
     durationSeconds: node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    videoModel: node.data.skillVideoModel || "",
     resolution: node.data.skillResolution || "720p",
     aspectRatio: node.data.skillAspectRatio || "16:9",
+    audioMode: filmDirectorUsesMusic(node.data.skillApproach, audioInputs) ? "full" : normalizeFilmDirectorAudioMode(node.data.skillDirectorAudioMode),
+    approach: normalizeFilmDirectorApproach(node.data.skillApproach),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
   });
-  if (!response.ok) throw new Error(data.error || "Film Director failed.");
+  if (!response.ok) throw new Error(data?.error || "Director failed.");
+  const outputFields = { style: "styleDirection", motion: "motionDirection", shotList: "shotList", build: "text", revise: "text" };
+  const output = data?.[outputFields[action]] || data?.text;
+  if (typeof output !== "string" || !output.trim()) {
+    throw new Error("Director returned an invalid or empty result. Retry this step.");
+  }
 
   return {
     action: data.action || node.data.skillDirectorAction || "build",
@@ -51,8 +76,11 @@ export async function runSkillDirectorNode({
     shotCount: data.shotCount || "",
     resolvedShotCount: data.resolvedShotCount || data.actualShotCount || 0,
     durationSeconds: data.durationSeconds || node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    videoModel: Object.prototype.hasOwnProperty.call(data, "videoModel") ? data.videoModel : node.data.skillVideoModel || "",
     resolution: data.resolution || node.data.skillResolution || "720p",
     aspectRatio: data.aspectRatio || node.data.skillAspectRatio || "16:9",
+    audioMode: normalizeFilmDirectorAudioMode(data.audioMode, node.data.skillDirectorAudioMode || "production"),
+    approach: normalizeFilmDirectorApproach(data.approach, normalizeFilmDirectorApproach(node.data.skillApproach)),
     actualShotCount: data.actualShotCount || 0,
     sceneName: Object.prototype.hasOwnProperty.call(data, "sceneName") ? data.sceneName : node.data.sceneName || "",
     referenceSetup: data.referenceSetup || "",
@@ -62,11 +90,16 @@ export async function runSkillDirectorNode({
     shotListNotes: data.shotListNotes || "",
     sceneOverview: data.sceneOverview || node.data.sceneOverview || "",
     revisionSummary: data.revisionSummary || "",
+    referenceVideoMode: data.referenceVideoMode || referenceVideoMode,
+    referenceVideoAnalysis: data.referenceVideoAnalysis || node.data.skillDirectorReferenceVideoAnalysis || "",
+    referenceVideoAnalysisSource: data.referenceVideoAnalysisSource || node.data.skillDirectorReferenceVideoAnalysisSource || "",
+    referenceVideoBlueprint: data.referenceVideoBlueprint || node.data.skillDirectorReferenceVideoBlueprint || {},
     referenceTags: action === "style"
       ? undefined
       : Array.isArray(data.referenceTags)
         ? data.referenceTags
-        : [...activeCharacterInputs, ...activeLocationInputs, ...activeElementInputs].map((item) => item.tag).filter(Boolean)
+        : [...activeCharacterInputs, ...activeLocationInputs, ...activeElementInputs].map((item) => item.tag).filter(Boolean),
+    shotListSourceSignature: action === "shotList" ? filmDirectorShotListSourceSignature(node.data) : ""
   };
 }
 

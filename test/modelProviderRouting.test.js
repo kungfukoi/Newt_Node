@@ -31,6 +31,12 @@ test("explicit model provider routes are preserved even when their key is unavai
   );
 });
 
+test("MiniMax H3 preserves explicit Fal, Krea, and local routing", () => {
+  assert.equal(normalizeModelProviderPreferences({ minimaxH3: "fal" }).minimaxH3, "fal");
+  assert.equal(normalizeModelProviderPreferences({ minimaxH3: "krea" }).minimaxH3, "krea");
+  assert.equal(normalizeModelProviderPreferences({ minimaxH3: "local" }).minimaxH3, "local");
+});
+
 test("model provider labels are human readable", () => {
   assert.equal(providerPreferenceLabel("fal"), "Fal");
   assert.equal(providerPreferenceLabel("google"), "Google");

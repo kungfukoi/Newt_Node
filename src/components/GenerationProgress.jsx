@@ -1,12 +1,12 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { formatGenerationElapsed, phaseLabel } from "../generationProgress.js";
+import { formatGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
 import { generationProgressSnapshot, subscribeGenerationProgress } from "../generationProgressStore.js";
 
-export function GenerationProgress({ nodeId }) {
+export function GenerationProgress({ nodeId, nodeStatus = "" }) {
   const subscribe = useCallback((listener) => subscribeGenerationProgress(nodeId, listener), [nodeId]);
   const getSnapshot = useCallback(() => generationProgressSnapshot(nodeId), [nodeId]);
   const progress = useSyncExternalStore(subscribe, getSnapshot, () => null);
-  if (!progress) return null;
+  if (!shouldRenderGenerationProgress(progress, nodeStatus)) return null;
 
   const phase = phaseLabel(progress.phase);
   const batchDetail = progress.batchTotal > 1 ? `${progress.settledCount}/${progress.batchTotal}` : "";

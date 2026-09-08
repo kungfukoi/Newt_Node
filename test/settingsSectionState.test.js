@@ -21,12 +21,13 @@ function memoryStorage(initialValue = null) {
 }
 
 test("Settings sections restore their saved open and closed state", () => {
-  const storage = memoryStorage(JSON.stringify({ credentials: false, models: true, status: false }));
+  const storage = memoryStorage(JSON.stringify({ credentials: false, models: true, userPreferences: true, status: false }));
 
   assert.deepEqual(readSettingsOpenSections(storage), {
     ...defaultSettingsOpenSections,
     credentials: false,
     models: true,
+    userPreferences: true,
     status: false
   });
 });
@@ -41,12 +42,13 @@ test("Settings section state ignores unknown and malformed saved values", () => 
 
 test("Settings section state persists every known section", () => {
   const storage = memoryStorage();
-  const saved = writeSettingsOpenSections({ credentials: false, comfy: true }, storage);
+  const saved = writeSettingsOpenSections({ credentials: false, userPreferences: true, comfy: true }, storage);
 
   assert.deepEqual(readSettingsOpenSections(storage), saved);
   assert.deepEqual(saved, {
     ...defaultSettingsOpenSections,
     credentials: false,
+    userPreferences: true,
     comfy: true
   });
 });

@@ -12,6 +12,7 @@ export const kreaEndpoints = Object.freeze({
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
     "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
+    "MiniMax H3": "/generate/video/minimax/hailuo-3",
     "Kling O3 Pro": "/generate/video/kling/kling-3.0",
     "Kling O3 4K": "/generate/video/kling/kling-3.0",
     "Gemini Omni Flash": "/generate/video/google/gemini-omni-flash"
@@ -199,6 +200,56 @@ export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) 
     durationSeconds: seconds,
     pricingBasis: `Krea Kling 3.0 ${normalizedMode} per-second estimate${generateAudio ? " with audio" : ""}`,
     pricingSource: "krea-api-docs-2026-07-30"
+  };
+}
+
+export function buildKreaMiniMaxH3Input({
+  prompt,
+  startImage,
+  endImage,
+  referenceImages = [],
+  referenceVideos = [],
+  referenceAudios = [],
+  aspectRatio = "16:9",
+  duration = 5
+} = {}) {
+  const seconds = Math.min(15, Math.max(5, Math.round(Number(String(duration || "").match(/\d+/)?.[0]) || 5)));
+  return compact({
+    prompt: String(prompt || "").trim(),
+    start_image: startImage || undefined,
+    end_image: endImage || undefined,
+    aspect_ratio: normalizeKreaMiniMaxH3AspectRatio(aspectRatio),
+    reference_images: referenceImages.filter(Boolean),
+    reference_videos: referenceVideos.filter(Boolean),
+    reference_audios: referenceAudios.filter(Boolean),
+    duration: seconds
+  });
+}
+
+export function normalizeKreaMiniMaxH3AspectRatio(value) {
+  const normalized = String(value || "16:9").trim().toLowerCase();
+  return ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"].includes(normalized)
+    ? normalized
+    : "16:9";
+}
+
+export function estimateKreaMiniMaxH3Cost({ durationSeconds, referenceImageCount = 0 } = {}) {
+  const seconds = Math.min(15, Math.max(5, Math.round(Number(String(durationSeconds || "").match(/\d+/)?.[0]) || 5)));
+  const additionalReferenceImages = Math.max(0, Math.min(9, Number(referenceImageCount) || 0) - 5);
+  const unitRateUsd = 0.1365;
+  const referenceImageCostUsd = additionalReferenceImages * 0.042;
+  return {
+    amountUsd: roundCurrency(seconds * unitRateUsd + referenceImageCostUsd),
+    currency: "USD",
+    unitRateUsd,
+    units: seconds,
+    unit: "second",
+    mediaType: "video",
+    durationSeconds: seconds,
+    additionalReferenceImages,
+    referenceImageCostUsd: roundCurrency(referenceImageCostUsd),
+    pricingBasis: "Krea MiniMax H3 output seconds plus reference images beyond the first five",
+    pricingSource: "krea-openapi-2026-08-30"
   };
 }
 

@@ -1261,6 +1261,79 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
+.settings-preference-list {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-preference-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  color: rgba(244, 240, 232, 0.68);
+  cursor: pointer;
+}
+
+.settings-preference-toggle > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.settings-preference-toggle strong {
+  color: #f4f0e8;
+  font-size: 13px;
+}
+
+.settings-preference-toggle small {
+  color: rgba(244, 240, 232, 0.46);
+  font-size: 11px;
+}
+
+.settings-preference-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-preference-toggle .node-toggle.compact {
+  display: block;
+  box-sizing: border-box;
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  min-width: 36px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.36);
+}
+
+.settings-preference-toggle .node-toggle.compact span {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f4f0e8;
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.3);
+  transition: transform 160ms ease;
+}
+
+.settings-preference-toggle.enabled .node-toggle.compact {
+  background: rgba(221, 198, 49, 0.88);
+}
+
+.settings-preference-toggle.enabled .node-toggle.compact span {
+  transform: translateX(17px);
+}
+
 .settings-field {
   display: grid;
   gap: 7px;

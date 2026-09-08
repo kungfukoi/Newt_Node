@@ -34,7 +34,7 @@ function generationOptions(data = {}) {
   };
 }
 
-for (const model of [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro, imageModelNames.seedream5Pro]) {
+for (const model of [imageModelNames.nanoBanana2, imageModelNames.nanoBananaPro, imageModelNames.openAiImage2]) {
   for (const sheetKind of ["image", "video"]) {
     test(`Character Notes reach the ${model} ${sheetKind} sheet request`, async (t) => {
       const requests = captureGeneration(t);
@@ -51,11 +51,11 @@ for (const model of [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro
       assert.ok(request.prompt.endsWith("Keep the freckles.\nUse scuffed boots."));
       assert.equal(request.prompt.split("Character reference notes").length, 2);
       assert.equal(request.model, model);
-      assert.equal(request.resolution, model === imageModelNames.seedream5Pro ? "2K" : "4K");
+      assert.equal(request.resolution, "4K");
       assert.equal(request.quality, model === imageModelNames.openAiImage2 ? "high" : undefined);
       assert.equal(request.aspectRatio, "16:9");
       assert.deepEqual(request.imagePromptUrls, [options.portrait.localUrl, options.wardrobe.localUrl]);
-      assert.deepEqual(request.imagePromptLabels, ["The Character portrait reference", "Selected wardrobe sheet"]);
+      assert.deepEqual(request.imagePromptLabels, ["Original Character Portrait", "Selected wardrobe sheet"]);
       assert.equal(request.workflowPackageId, "package-1");
       assert.equal(request.nodeId, options.node.id);
       assert.equal(request.nodeTitle, `Alex${sheetKind === "video" ? " CU Video" : ""} Character Sheet`);

@@ -1,4 +1,11 @@
 import React from "react";
+import { applyCurveToImageData, applyImageAdjustmentsToCanvas } from "./imageAdjustments.js";
+import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
+import { characterBaseGenerationSignature, characterBaseVideoGenerationSignature, characterBaseVariant, characterNeutralBaseWardrobePrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, characterWardrobeVariantIsCurrent, generateCharacterBaseSheets, upsertCharacterWardrobeVariant } from "./characterSheetWorkflow.js";
+import { filmDirectorVideoSettings } from "./nodeRunners/videoModels.js";
+import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeLabel, normalizeFilmDirectorAudioMode } from "./filmDirectorAudio.js";
+import { filmDirectorApproachOptions, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+import { clearFilmDirectorStageStale } from "./filmDirectorStageLocks.js";
 import "@xyflow/react/dist/style.css";
 import {
   Aperture,
@@ -49,6 +56,8 @@ import {
 import { composerApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
 import { nodeSchedulingKey } from "./nodeScheduling.js";
+import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
+import { useNewtPresets } from "./useNewtPresets.js";
 import { AssemblyNodeBody } from "./components/AssemblyNodeBody.jsx";
 import { assemblyRenderPayload, createAssemblyState, normalizeAssemblyState } from "./assembly/assemblyState.js";
 import { selectAssemblyPreviewSource } from "./assembly/assemblyPreview.js";
@@ -60,6 +69,7 @@ import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasCh
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import { GenerationProgress } from "./components/GenerationProgress.jsx";
+import { NewtPresetDialog, NewtPresetLibrary } from "./components/NewtPresetDialog.jsx";
 import { RemoteVideoAttention } from "./components/RemoteVideoAttention.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import {
@@ -77,6 +87,7 @@ import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBehavior.js";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
+import { estimateImageRunCost, estimateVideoRunCost, formatPricedRunLabel, generationProviderForModel } from "./generationPricing.js";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { runTrackedGeneration } from "./generationProgressStore.js";
@@ -155,7 +166,22 @@ import {
   supportedFilesFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
+import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
 import { previewSelectionForNode } from "./previewSelection.js";
+import {
+  createPreviewLayoutItem,
+  mergePreviewMediaIntoLayout,
+  movePreviewLayoutItem,
+  normalizedPreviewLayoutHiddenUrls,
+  normalizedPreviewLayoutItems,
+  previewLayoutAspectValue,
+  previewLayoutColumnCount,
+  previewLayoutDimension,
+  previewLayoutExportCaption,
+  previewLayoutSourceItems,
+  previewLayoutVideoPosterUrl,
+  samePreviewLayoutItems
+} from "./previewLayout.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoBasicWardrobePrompt,
@@ -350,9 +376,18 @@ import {
   filmDirectorRevisionStatePatch,
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
-import { filmDirectorUsesReference, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import {
+  filmDirectorOutputUsesReferenceTag,
+  filmDirectorReferenceVideoMode,
+  filmDirectorSetupInputIsLocked,
+  filmDirectorUsesReference,
+  normalizeFilmDirectorReferenceVideoBlueprint,
+  normalizeFilmDirectorReferenceVideoOptions,
+  normalizeFilmDirectorScenes
+} from "./filmDirectorScenes.js";
 import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
+import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentReferenceText } from "./textAgent.js";
 import {
@@ -368,6 +403,7 @@ import { isOutputSinkConnection, outputAcceptedSourceKinds } from "./outputConne
 import { insertOutputToken, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
+import { requireStoryboardPlanResponse, storyboardQcUnavailable } from "./storyboardPlanValidation.js";
 import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
@@ -513,7 +549,7 @@ const nodeHelpContent = {
     ]
   },
   skillDirector: {
-    title: "Film Director",
+    title: "Director",
     lines: [
       "Builds a cinematic video plan from characters, locations, props, style, and scene direction.",
       "Lock each section in order, build the scene, then connect the blue director output to a video model."
@@ -564,7 +600,7 @@ const nodeHelpContent = {
   storyboard: {
     title: "Storyboard",
     lines: [
-      "Plans and generates ordered storyboard frames from a scene description or Film Director input.",
+      "Plans and generates ordered storyboard frames from a scene description or Director input.",
       "Lock the board to create a compiled storyboard image and connect its blue output downstream."
     ]
   },
@@ -643,7 +679,7 @@ const nodeHelpContent = {
     title: "Video Model",
     lines: [
       "Generates videos from prompt text and supported image, video, audio, storyboard, or director inputs.",
-      "A text prompt or Film Director input is required before running."
+      "A text prompt or Director input is required before running."
     ]
   }
 };
@@ -952,7 +988,7 @@ const storyboardBoardOutputPortId = "storyboardOut";
 const storyboardBaseInstruction =
   "STORYBOARD STYLE LOCK: Create a single clean hand-drawn film storyboard frame. Use black ink linework, simple shapes, open white negative space, minimal grayscale blocking, readable silhouettes, and production-planning clarity. Keep drawings sparse, graphic, and easy to read. This is not a realistic black-and-white photograph, not photorealistic grayscale, not a 3D render, not photographic concept art, and not a fully rendered illustration. Avoid photographic skin texture, realistic camera lighting, glossy realism, heavy shadows, dense background detail, and fully rendered photo detail. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
 const storyboardReferenceStyleGuard =
-  "FINAL STYLE PRIORITY: The clean black-and-white storyboard line-art style overrides every uploaded image reference and every Film Director visual-style phrase. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Simplify all realistic references into sparse line drawing and simple gray fills. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, tonal realism, or polished photo detail from any reference image.";
+  "FINAL STYLE PRIORITY: The clean black-and-white storyboard line-art style overrides every uploaded image reference and every Director visual-style phrase. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Simplify all realistic references into sparse line drawing and simple gray fills. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, tonal realism, or polished photo detail from any reference image.";
 const storyboardMoodBoardStyleInstruction =
   "Use the connected visual style reference only to infer abstract storyboard line-art qualities such as clean ink outlines, simple value grouping, open negative space, and production-planning readability. Do not copy its subjects, locations, props, compositions, realistic shading, texture density, or tonal detail.";
 const storyboardFinalStyleClamp =
@@ -1182,7 +1218,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelPreferencesReady = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
@@ -1347,6 +1383,46 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     importOffsetForNodes: clearImportOffset,
     prepareNodesForSave: captureTextareaLayoutsForSave,
     onStatusChange
+  });
+
+  const newtPresets = useNewtPresets({
+    projectId,
+    onStatus: setSaveStatus,
+    getNodes: () => nodes,
+    capture: () => {
+      const measured = Object.fromEntries(nodesRef.current.map((node) => {
+        const rect = estimatedNodeRect(node);
+        return [node.id, { width: rect.right - rect.left, height: rect.bottom - rect.top }];
+      }));
+      return buildNewtPresetGraph(
+        { nodes: nodesRef.current, edges: edgesRef.current, groups: groupsRef.current },
+        selectedNodeIds,
+        measured
+      );
+    },
+    insert: (graph, bindings = {}) => {
+      const occupied = [
+        ...nodesRef.current.map((node) => estimatedNodeRect(node)),
+        ...groupsRef.current.map((group) => groupToRect(group))
+      ];
+      const instantiated = instantiateNewtPreset(graph, newtPresetOffset(graph, occupied));
+      const bound = bindNewtPresetInputs(instantiated, bindings, nodesRef.current);
+      const insertedNodeIds = new Set(bound.nodes.map((node) => node.id));
+      const combined = normalizeEditorGraph(
+        [...nodesRef.current, ...bound.nodes],
+        [...edgesRef.current, ...bound.edges],
+        [...groupsRef.current, ...bound.groups]
+      );
+      pushUndoSnapshot();
+      nodesRef.current = combined.nodes;
+      edgesRef.current = combined.edges;
+      groupsRef.current = combined.groups;
+      setNodes(combined.nodes);
+      setEdges(combined.edges);
+      setGroups(combined.groups);
+      setSelectedNodeIds(combined.nodes.filter((node) => insertedNodeIds.has(node.id)).map((node) => node.id));
+      setSelectedEdgeId(null);
+    }
   });
 
   React.useEffect(() => {
@@ -2614,14 +2690,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
     }
 
-    if (nextSkillDirectorData && ("skillDirectorBuilt" in patch || "resultText" in patch) && (!nextSkillDirectorData.skillDirectorBuilt || !nextSkillDirectorData.resultText)) {
-      const skillDirectorOutputPorts = new Set(["promptOut", "directorOut"]);
-      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && skillDirectorOutputPorts.has(edge.from.port))));
-      setSelectedEdgeId((current) => {
-        const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
-        return selectedEdge?.from.nodeId === nodeId && skillDirectorOutputPorts.has(selectedEdge?.from.port) ? null : current;
-      });
-    }
 
     if (nextVideoModelData && "model" in patch && !videoModelSupportsFilmDirector(nextVideoModelData.model)) {
       setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === "directorIn")));
@@ -3361,11 +3429,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node) {
+  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "" } = {}) {
+    if (node.data.status === "compiling") return;
+    const existingVariants = normalizeCharacterSheetVariants(node.data);
     const portrait = node.data.characterPortrait;
     const selectedExistingVariant = activeCharacterSheetVariant(node.data);
     const name = String(node.data.characterName || "").trim();
-    if (!portrait?.localUrl && !selectedExistingVariant?.generated?.url) {
+    if (!(portrait?.localUrl || portrait?.url) && !(selectedExistingVariant?.generated?.url || selectedExistingVariant?.generated?.localUrl)) {
       updateNode(node.id, { error: "Upload a character portrait first." });
       return;
     }
@@ -3375,17 +3445,32 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
-    const wardrobeOptions = wardrobes.length ? wardrobes : [null];
     const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
     const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
-    const existingVariants = normalizeCharacterSheetVariants(node.data);
-    let completedVariantCount = 0;
+    const baseSignature = characterBaseGenerationSignature(node.data);
+    const storedBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
+    const canReuseBase = Boolean(
+      !forceRegenerateBase &&
+      (storedBaseSheet?.url || storedBaseSheet?.localUrl)
+      && node.data.characterBaseSignature === baseSignature,
+    );
+    const storedBaseVideoSheet = node.data.characterBaseVideoSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.videoGenerated || null;
+    const expectedBaseVideoSignature = characterBaseVideoGenerationSignature(node.data);
+    const canReuseBaseVideo = Boolean(
+      !forceRegenerateBase &&
+      (storedBaseVideoSheet?.url || storedBaseVideoSheet?.localUrl) &&
+      node.data.characterBaseVideoSignature === expectedBaseVideoSignature
+    );
 
-    if (!portrait?.localUrl && selectedExistingVariant?.generated?.url) {
-      pushUndoSnapshot();
+    const shouldLockExistingSheet = !forceRegenerateBase && (
+      (!wardrobeId && !node.data.characterBaseSignature && selectedExistingVariant?.generated?.url)
+      || selectedExistingVariant?.source === "custom"
+      || !(portrait?.localUrl || portrait?.url)
+    );
+    if (shouldLockExistingSheet && (selectedExistingVariant?.generated?.url || selectedExistingVariant?.generated?.localUrl)) {
       updateNode(node.id, {
         activated: true,
         locked: true,
@@ -3403,70 +3488,132 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
+    pushUndoSnapshot();
     try {
-      const generationCount = wardrobeOptions.length * (generateCuVideoSheet ? 2 : 1);
+      const wardrobePlans = wardrobes.map((wardrobe) => {
+        const existingVariant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
+        const imageCurrent = wardrobe.id !== wardrobeId && canReuseBase && characterWardrobeVariantIsCurrent(existingVariant, wardrobe, baseSignature);
+        const videoCurrent = wardrobe.id !== wardrobeId && canReuseBaseVideo && generateCuVideoSheet && characterWardrobeVariantIsCurrent(
+          existingVariant,
+          wardrobe,
+          baseSignature,
+          { requireVideo: true, baseVideoSignature: expectedBaseVideoSignature }
+        );
+        return {
+          wardrobe,
+          existingVariant: imageCurrent || videoCurrent ? existingVariant : null,
+          needsImage: !imageCurrent,
+          needsVideo: generateCuVideoSheet && !videoCurrent
+        };
+      });
+      const reusableWardrobes = wardrobePlans.filter((plan) => !plan.needsImage && !plan.needsVideo);
+      const wardrobesToGenerate = wardrobePlans.filter((plan) => plan.needsImage || plan.needsVideo);
+      const generationCount =
+        (canReuseBase ? 0 : 1) +
+        (generateCuVideoSheet && !canReuseBaseVideo ? 1 : 0) +
+        wardrobesToGenerate.reduce((total, plan) => total + Number(plan.needsImage) + Number(plan.needsVideo), 0);
+      let completedGenerationCount = 0;
+      const markGenerationComplete = () => {
+        completedGenerationCount += 1;
+        updateNode(node.id, {
+          characterBatchProgress: { completed: completedGenerationCount, total: generationCount }
+        });
+      };
       updateNode(node.id, {
         status: "compiling",
         characterBatchProgress: { completed: 0, total: generationCount },
         characterVariantNotice: "",
         error: ""
       });
-      const results = await Promise.allSettled(
-        wardrobeOptions.map(async (wardrobe) => {
-          try {
-            const prompt = [baseCharacterSheetPrompt, wardrobe ? characterWardrobePrompt : characterBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n");
-            const generated = await runCharacterSheetGeneration({
-              node,
-              prompt,
-              portrait,
-              wardrobe,
-              workflowContext: workflowRequestContext(),
-              characterTag: characterTag(node)
-            });
-            completedVariantCount += 1;
-            updateNode(node.id, {
-              characterBatchProgress: { completed: completedVariantCount, total: generationCount }
-            });
-            const videoGenerated = generateCuVideoSheet
-              ? await runCharacterSheetGeneration({
-                  node,
-                  prompt: [characterVideoSheetPrompt, wardrobe ? characterVideoWardrobePrompt : characterVideoBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
-                  portrait,
-                  wardrobe,
-                  workflowContext: workflowRequestContext(),
-                  characterTag: characterTag(node),
-                  sheetKind: "video"
-                })
-              : null;
-            return {
-              wardrobeId: characterWardrobeVariantId(wardrobe),
-              wardrobeUrl: wardrobe?.localUrl || "",
-              wardrobeFileName: wardrobe?.fileName || "Default black wardrobe",
-              generated,
-              ...(videoGenerated ? { videoGenerated } : {})
-            };
-          } finally {
-            if (generateCuVideoSheet) completedVariantCount += 1;
-            updateNode(node.id, {
-              characterBatchProgress: { completed: Math.min(completedVariantCount, generationCount), total: generationCount }
-            });
-          }
-        })
-      );
-      const generatedVariants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
-      const failures = results.filter((result) => result.status === "rejected");
-      if (!generatedVariants.length) {
-        throw failures[0]?.reason || new Error("Character sheet generation failed.");
+
+      const { baseSheet, baseVideoSheet, baseVideoSignature } = await generateCharacterBaseSheets({
+        baseSheet: canReuseBase ? storedBaseSheet : null,
+        baseVideoSheet: canReuseBaseVideo ? storedBaseVideoSheet : null,
+        baseSignature,
+        baseVideoSignature: expectedBaseVideoSignature,
+        includeVideo: generateCuVideoSheet,
+        generateBase: () => runCharacterSheetGeneration({
+          node,
+          prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          portrait,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node)
+        }),
+        generateVideo: () => runCharacterSheetGeneration({
+          node,
+          prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          portrait,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          sheetKind: "video"
+        }),
+        onCheckpoint: (patch) => {
+          const baseVariant = characterBaseVariant({
+            baseSheet: patch.characterBaseSheet,
+            baseVideoSheet: patch.characterBaseVideoSheet,
+            baseSignature
+          });
+          updateNode(node.id, {
+            ...patch,
+            characterSheetVariants: upsertCharacterWardrobeVariant(
+              wardrobePlans.map((plan) => plan.existingVariant).filter(Boolean),
+              baseVariant
+            ),
+            ...(!canReuseBase ? {
+              ...characterVariantDisplayPatch(baseVariant),
+              activeCharacterSheetId: generatedCharacterSheetId(characterDefaultWardrobeId)
+            } : {})
+          });
+        },
+        onGenerationComplete: markGenerationComplete
+      });
+
+      let variants = [characterBaseVariant({ baseSheet, baseVideoSheet, baseSignature })].filter(Boolean);
+      for (const plan of reusableWardrobes) {
+        if (plan.existingVariant) variants = upsertCharacterWardrobeVariant(variants, plan.existingVariant);
       }
-      const variants = mergeGeneratedCharacterSheetVariants(
-        existingVariants,
-        generatedVariants,
-        wardrobeOptions.map((wardrobe) => characterWardrobeVariantId(wardrobe))
-      );
+
+      const failures = [];
+      const videoFailures = [];
+      for (const plan of wardrobesToGenerate) {
+        const { wardrobe, existingVariant, needsImage, needsVideo } = plan;
+        const completedBeforeWardrobe = completedGenerationCount;
+        try {
+          const { variant, videoError } = await generateCharacterWardrobeVariant(node, wardrobe, {
+            workflowContext: workflowRequestContext(),
+            characterTag: characterTag(node),
+            baseSheet,
+            baseVideoSheet,
+            baseSignature,
+            baseVideoSignature,
+            existingVariant,
+            regenerateImage: needsImage,
+            regenerateVideo: needsVideo,
+            onGenerationComplete: markGenerationComplete
+          });
+          variants = upsertCharacterWardrobeVariant(variants, variant);
+          updateNode(node.id, { characterSheetVariants: variants });
+          if (videoError) videoFailures.push(`${wardrobe.fileName || "Wardrobe"}: ${videoError}`);
+        } catch (error) {
+          failures.push({ wardrobe, error });
+          const remainingForWardrobe = Number(needsImage) + Number(needsVideo);
+          while (completedGenerationCount - completedBeforeWardrobe < remainingForWardrobe) {
+            markGenerationComplete();
+          }
+        }
+      }
+
+      variants = [
+        variants.find((variant) => variant.wardrobeId === characterDefaultWardrobeId),
+        ...wardrobes.map((wardrobe) => variants.find((variant) => variant.wardrobeId === wardrobe.id)).filter(Boolean)
+      ].filter(Boolean);
       const selectedVariant = variants.find((variant) => variant.wardrobeId === desiredWardrobeId) || variants[0];
-      const variantNotice = failures.length
-        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be regenerated; previous sheets were kept where available.`
-        : "";
+      const variantNotice = [
+        failures.length ? `${failures.length} wardrobe sheet${failures.length === 1 ? "" : "s"} could not be generated.` : "",
+        videoFailures.length ? `${videoFailures.length} CU video wardrobe sheet${videoFailures.length === 1 ? "" : "s"} could not be generated.` : ""
+      ].filter(Boolean).join(" ");
       pushUndoSnapshot();
       updateNode(node.id, {
         activated: true,
@@ -3474,6 +3621,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         characterTab: "sheet",
         characterSheetPreviewKind: "image",
         characterSheetVariants: variants,
+        characterBaseSheet: baseSheet,
+        characterBaseSignature: baseSignature,
+        characterBaseVideoSheet: baseVideoSheet,
+        characterBaseVideoSignature: (baseVideoSheet?.url || baseVideoSheet?.localUrl) ? baseVideoSignature : "",
         activeCharacterSheetId: generatedCharacterSheetId(selectedVariant.wardrobeId),
         activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
         compiledTraitPrompt: characterTraitPrompt(node.data),
@@ -3486,7 +3637,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
     } catch (error) {
       updateNode(node.id, {
-        ...(existingVariants.length ? { characterTab: "sheet" } : {}),
         status: "error",
         characterBatchProgress: null,
         error: error.message
@@ -3969,6 +4119,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       updateNode(currentNode.id, { status: "planning", error: "" });
       const { response, data } = await nodeApi.planStoryboard({
+        nodeId: currentNode.id,
+        nodeTitle: currentNode.data.title,
+        ...workflowRequestContext(),
         sceneDescription,
         frameCount: requestedFrameCount,
         notes: directorControlsScene ? "" : currentNode.data.storyboardNotes || "",
@@ -3977,9 +4130,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         props: storyboardPropReferenceSummaries(incoming.propsIn || [], currentIncomingByNode),
         directorShotList: directorSource?.data?.shotList || directorSource?.data?.resultText || ""
       }, "Storyboard planning");
-      const plan = data.plan || fallbackStoryboardPlanForClient(sceneDescription, requestedFrameCount);
+      const plan = requireStoryboardPlanResponse(response, data);
       const plannedFrames = storyboardFramesFromPlan(plan.frames);
-      if (!response.ok && !plannedFrames.length) throw new Error(data.error || "Storyboard planning failed.");
 
       pushUndoSnapshot();
       updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(requestedFrameCount), {
@@ -3988,22 +4140,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         sceneName: plan.sceneTitle || currentNode.data.sceneName || "Scene 1",
         storyboardTab: "view",
         status: "ready",
-        error: response.ok ? "" : data.error || ""
+        error: ""
       });
       return plannedFrames;
     } catch (error) {
-      const fallbackFrames = defaultStoryboardFrames(requestedFrameCount).map((frame, index) => ({
-        ...frame,
-        prompt: `${storyboardFallbackBeat(index)} Single storyboard frame for: ${sceneDescription}. Keep screen direction, blocking, silhouette, eyeline, and continuity clear.`,
-        beat: storyboardFallbackBeat(index)
-      }));
-      updateStoryboardNodeFrames(currentNode.id, fallbackFrames, {
-        storyboardPlanSceneDescription: sceneDescription,
-        storyboardTab: "view",
-        status: "ready",
-        error: `Planner fallback used. ${error.message || ""}`.trim()
+      updateNode(currentNode.id, {
+        status: "error",
+        error: error.message || "Storyboard planning failed. Existing frames have been preserved."
       });
-      return fallbackFrames;
+      return null;
     }
   }
 
@@ -4156,8 +4301,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           fileName: exported.fileName || generated.fileName || "",
           status: "complete",
           error: "",
-          qcPassed: qcResult ? Boolean(qcResult.pass) : null,
-          qcWarning: qcResult && !qcResult.pass ? `QC warning: ${qcResult.summary || "Frame may have continuity or physical logic issues."}` : "",
+          qcPassed: qcResult?.severity === "unreviewed" ? null : qcResult ? Boolean(qcResult.pass) : null,
+          qcWarning: qcResult?.severity === "unreviewed"
+            ? `QC unavailable: ${qcResult.summary || "Frame was not reviewed."}`
+            : qcResult && !qcResult.pass
+              ? `QC warning: ${qcResult.summary || "Frame may have continuity or physical logic issues."}`
+              : "",
           qcSummary: qcResult?.summary || "",
           qcIssues: qcResult?.issues || [],
           qcRetryCount
@@ -4203,14 +4352,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return normalizeStoryboardQcForClient(data.qc);
     } catch (error) {
       console.warn("Storyboard frame QC skipped:", error.message);
-      return {
-        pass: true,
-        shouldRetry: false,
-        severity: "ok",
-        summary: "QC skipped.",
-        issues: [],
-        correctionPrompt: ""
-      };
+      return storyboardQcUnavailable(`QC could not run: ${error.message || "Review unavailable."}`);
     }
   }
 
@@ -4373,7 +4515,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function exportPreviewLayoutBoard(node) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
-    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
+    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems).filter((item) => item.type === "image");
     const frames = layoutItems.map((item, index) => {
       const description = previewLayoutExportCaption(item, index);
       return {
@@ -5580,11 +5722,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         assembly: ["videoIn"],
         utility: ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"],
         text: ["videoIn"],
-        textAgent: ["videoIn"]
+        textAgent: ["videoIn"],
+        skillDirector: ["referenceVideoIn"]
       },
       audio: {
         videoModel: ["referenceAudioIn"],
-        assembly: ["audioIn"]
+        assembly: ["audioIn"],
+        skillDirector: ["musicIn"]
       },
       camera: {
         imageModel: ["cameraIn"]
@@ -5634,7 +5778,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "transfer") return "transfer";
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
     if (source.type === "model3d") return "model3d";
-    if (source.type === "video" || source.type === "videoModel") return "video";
+    if (source.type === "video" || source.type === "videoModel") return videoNodeOutputKind(source, from.port);
     if (source.type === "audio") return "audio";
     if (source.type === "skillDirector") return "director";
     if (["plainText", "text", "textAgent"].includes(source.type)) return "prompt";
@@ -5649,9 +5793,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!source || !target) return "Choose a valid connection";
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
-    if (source.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return "Build Scene before connecting Film Director output";
-    if (target.type === "skillDirector" && ["characterIn", "locationIn", "imageIn", "styleIn"].includes(to.port) && target.data?.skillDirectorLocks?.setup) {
-      return "Unlock Scene Setup before changing Film Director references";
+    if (target.type === "skillDirector" && filmDirectorSetupInputIsLocked(target.data?.skillDirectorLocks, to.port)) {
+      return "Unlock Scene Setup before changing Director inputs";
     }
     if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
     if (isImageModelUnsupportedSource(target, source)) return imageModelUnsupportedInputMessage(target.data?.model);
@@ -5764,7 +5907,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (from.port === "voiceOut") {
         if (!activeCharacterVoice(source)?.localUrl) return "Select a character voice before connecting";
         if (target.type === "videoModel" && to.port === "referenceAudioIn") return "";
-        return "Character voice connects to a Video Model audio input";
+        if (target.type === "skillDirector" && to.port === "musicIn") return "";
+        return "Character voice connects to a Video Model or Director audio input";
       }
       if (target.type === "storyboard" && to.port === "characterIn") {
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
@@ -5788,6 +5932,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (["text", "textAgent"].includes(target.type) && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
+        if (target.type === "skillDirector" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["startFrameIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"].includes(to.port)) return "";
         if (target.type === "edit" && to.port === "videoIn") return "";
         return "Utility video output connects to video inputs";
@@ -5813,6 +5958,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (["text", "textAgent"].includes(target.type) && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
+        if (target.type === "skillDirector" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
         if (target.type === "edit" && to.port === "videoIn") return "";
         return "Edit video output connects to video inputs";
@@ -6419,11 +6565,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const referenceNodes = nodesRef.current.map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
+    if (currentNode.type === "videoModel" && incoming.directorIn?.length) {
+      const source = incoming.directorIn[0].source;
+      if (!source?.data?.skillDirectorBuilt || source.data.skillDirectorOutputStale) {
+        updateNode(currentNode.id, { status: "error", error: "Review and rebuild the connected Director scene before generating." });
+        return { status: "error" };
+      }
+      currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
+    }
     const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
       currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model)
-        ? connectedDirectorPackageText(incoming.directorIn)
+        ? connectedDirectorPackageText(incoming.directorIn, currentIncomingByNode)
         : "";
     const fallbackPrompt = resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
     const basePrompt =
@@ -6467,7 +6621,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, {
         status: "running",
         error: "",
-        ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {})
+        ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {}),
+        ...(currentNode.type === "skillDirector" ? {
+          skillDirectorAction: currentNode.data.skillDirectorAction || "build",
+          skillDirectorQueuedAction: ""
+        } : {})
       });
       markOutputTargetRunning(outputTarget);
 
@@ -6620,11 +6778,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           lastRunSkillName: processed.skillName,
           lastRunShotCount: processed.resolvedShotCount || processed.shotCount,
           lastRunDurationSeconds: processed.durationSeconds,
+          skillDirectorAudioMode: normalizeFilmDirectorAudioMode(processed.audioMode, currentNode.data.skillDirectorAudioMode || "production"),
+          skillApproach: normalizeFilmDirectorApproach(processed.approach, normalizeFilmDirectorApproach(currentNode.data.skillApproach)),
+          skillDirectorLockedApproach: normalizeFilmDirectorApproach(processed.approach, normalizeFilmDirectorApproach(currentNode.data.skillApproach)),
           lastRunActualShotCount: processed.actualShotCount,
           lastRunReferenceSetup: processed.referenceSetup,
+          skillDirectorReferenceVideoAnalysis: processed.referenceVideoAnalysis || currentNode.data.skillDirectorReferenceVideoAnalysis || "",
+          skillDirectorReferenceVideoAnalysisSource: processed.referenceVideoAnalysisSource || currentNode.data.skillDirectorReferenceVideoAnalysisSource || "",
+          skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint(processed.referenceVideoBlueprint || currentNode.data.skillDirectorReferenceVideoBlueprint),
+          ...(["camera", "reference"].includes(processed.referenceVideoMode) ? {
+            skillDurationSeconds: processed.durationSeconds || currentNode.data.skillDurationSeconds || "15",
+            durationSeconds: processed.durationSeconds || currentNode.data.durationSeconds || "15",
+            skillShotCount: String(processed.resolvedShotCount || processed.shotCount || currentNode.data.skillShotCount || "3")
+          } : {}),
           ...(Array.isArray(processed.referenceTags) ? { lastRunReferenceTags: processed.referenceTags } : {}),
           skillDirectorAction: "",
-          skillDirectorQueuedAction: ""
+          skillDirectorQueuedAction: "",
+          skillDirectorForceFreshShotList: false,
+          skillDirectorRebuildAfterShotList: false,
+          skillDirectorStaleStages: ["build", "revise"].includes(action) ? {} : clearFilmDirectorStageStale(currentNode.data.skillDirectorStaleStages, action),
+          skillDirectorOutputStale: !["build", "revise"].includes(action),
+          ...(action === "shotList" ? { skillDirectorShotListSourceSignature: processed.shotListSourceSignature } : {})
         };
         if (action === "style") {
           updateNode(currentNode.id, {
@@ -6680,7 +6854,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "revise") {
           const revisionState = filmDirectorRevisionStatePatch(currentNode.data, {
             ...processed,
-            text: formatSkillDirectorFinalPromptForClient(processed.text),
+            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach),
             shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || "")
           });
           const revisionVersion = appendFilmDirectorRevisionVersionHistory(currentNode.data.skillDirectorRevisionHistory, {
@@ -6704,7 +6878,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
         updateNode(currentNode.id, {
           ...nextSkillPatch,
-          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text) : processed.text,
+          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach) : processed.text,
           styleDirection: processed.styleDirection || currentNode.data.styleDirection || "",
           motionDirection: processed.motionDirection || currentNode.data.motionDirection || "",
           shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || ""),
@@ -7317,6 +7491,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         utilityImageModelOptions={enabledUtilityImageModels}
         utilityVideoModelOptions={enabledUtilityVideoModels}
         modelProviderPreferences={modelProviderPreferences}
+        modelProviderAvailability={modelProviderAvailability}
         flowManaged
       />
     </NodeCardBoundary>
@@ -7348,6 +7523,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onDecision={resolveUnsavedWorkflowPrompt}
         />
       )}
+      {newtPresets.draft && <NewtPresetDialog controller={newtPresets} />}
       {comfyWanDialog && (
         <ComfyWanSetupDialog
           details={comfyWanDialog}
@@ -7443,6 +7619,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               </div>
             )}
           </div>
+          {showPresetPanel && <NewtPresetLibrary controller={newtPresets} />}
         </div>
         {nodeCatalog.map((item) => {
           const Icon = item.icon;
@@ -7621,6 +7798,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
+            onSavePreset={newtPresets.beginSave}
             onMoveStart={startSelectionMove}
           />
         )}
@@ -8080,6 +8258,7 @@ function NodeCard({
   utilityImageModelOptions,
   utilityVideoModelOptions,
   modelProviderPreferences,
+  modelProviderAvailability,
   flowManaged = false
 }) {
   const config = getNodeConfig(node.type);
@@ -8420,6 +8599,7 @@ function NodeCard({
         utilityImageModelOptions={utilityImageModelOptions}
         utilityVideoModelOptions={utilityVideoModelOptions}
         modelProviderPreferences={modelProviderPreferences}
+        modelProviderAvailability={modelProviderAvailability}
       />
       <button
         type="button"
@@ -9064,7 +9244,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   }
 
   function curvePathForPoints(points = curvePoints) {
-    const lookup = previewCurveLookup(points);
+    const lookup = curveLookup(points);
     const samples = 64;
     return Array.from({ length: samples + 1 }, (_, index) => {
       const input = Math.round((index / samples) * 255);
@@ -10793,11 +10973,15 @@ function NodeBody({
   videoModelOptions = [],
   utilityImageModelOptions = [],
   utilityVideoModelOptions = [],
-  modelProviderPreferences = defaultModelProviderPreferences
+  modelProviderPreferences = defaultModelProviderPreferences,
+  modelProviderAvailability = {}
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
   const resolvedPromptText = (items = []) => connectedText(items);
+  const controllingDirector = node.type === "videoModel" ? connectedDirectorPackageSource(incoming.directorIn) : null;
+  const directorSettings = controllingDirector ? directorPackageForVideo(controllingDirector, incomingByNode) : null;
+  if (directorSettings) node = { ...node, data: filmDirectorVideoSettings(node.data, directorSettings) };
 
   React.useEffect(() => {
     if (node.type !== "preview" || node.data.previewTab !== "layout") return;
@@ -10805,7 +10989,7 @@ function NodeBody({
     const { source } = previewSelectionForNode(node, previewSources);
     const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls);
-    const nextItems = mergePreviewImagesIntoLayout(currentItems, previewLayoutSourceItems(source), hiddenUrls);
+    const nextItems = mergePreviewMediaIntoLayout(currentItems, previewLayoutSourceItems(source), hiddenUrls);
     if (samePreviewLayoutItems(currentItems, nextItems)) return;
     onUpdate(node.id, { previewLayoutItems: nextItems });
   }, [incoming.sourceIn, node, onUpdate]);
@@ -10893,6 +11077,7 @@ function NodeBody({
       <MediaAssetNodeBody
         node={node}
         outputPort={outputPort}
+        outputPorts={config.output}
         onUpload={onUpload}
         onOutputImport={onOutputImport}
         onPreviewOpen={onPreviewOpen}
@@ -11303,6 +11488,23 @@ function NodeBody({
                             <X size={10} />
                           </span>
                         )}
+                        {choice.source === "generated" && (
+                          <span
+                            className="character-remove"
+                            role="button"
+                            aria-label={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity" : `Regenerate ${choice.label}`}
+                            title={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity and dependent wardrobe sheets" : `Regenerate ${choice.label} from the current Base Identity`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onCharacterActivate(node, choice.variant?.wardrobeId === characterDefaultWardrobeId
+                                ? { forceRegenerateBase: true }
+                                : { wardrobeId: choice.variant?.wardrobeId });
+                            }}
+                          >
+                            <RotateCcw size={10} />
+                          </span>
+                        )}
                       </button>
                     ))}
                     {!sheetChoices.length && (
@@ -11486,7 +11688,7 @@ function NodeBody({
       ? storyboardDirectorFramePlan(directorSource?.data?.shotList || directorSource?.data?.resultText || "", storyboardMaxFrameCount).frameCount
         || directorPackageShotCount(directorSource)
       : 0;
-    const directorDisabledReason = "Film Director is controlling this storyboard";
+    const directorDisabledReason = "Director is controlling this storyboard";
     const sceneDescriptionConnected = Boolean(connectedSceneDescription.trim());
     const sceneDescription = storyboardSceneDescriptionForNode(node, storyboardIncoming);
     const storyboardPlanCurrent = storyboardPlanIsCurrent(node, sceneDescription);
@@ -11511,7 +11713,7 @@ function NodeBody({
     const frameCountMode = directorControlsScene ? storyboardAutoFrameCount : frameCountValue !== storyboardAutoFrameCount ? "Custom" : storyboardAutoFrameCount;
     const customFrameCountValue = frameCountMode === "Custom" ? frameCountValue : "";
     const displayedSceneName = directorControlsScene
-      ? directorSource?.data?.sceneName || node.data.sceneName || "Film Director Scene"
+      ? directorSource?.data?.sceneName || node.data.sceneName || "Director Scene"
       : node.data.sceneName || "";
 
     function updateFrame(frameId, patch) {
@@ -11713,7 +11915,7 @@ function NodeBody({
                 <TaggedPromptTextarea
                   className="storyboard-tagged-editor"
                   value={sceneDescription}
-                  placeholder={directorConnected ? "Connected Film Director plan" : sceneDescriptionConnected ? "Connected scene description" : "Describe the scene, action, location, and story beat."}
+                  placeholder={directorConnected ? "Connected Director plan" : sceneDescriptionConnected ? "Connected scene description" : "Describe the scene, action, location, and story beat."}
                   tagMatches={sceneCharacterTagMatches}
                   readOnly={storyboardLocked || sceneDescriptionConnected || directorConnected}
                   onChange={(event) => onUpdate(node.id, {
@@ -11759,24 +11961,24 @@ function NodeBody({
                     />
                   </div>
                 </NodeRow>
-                <NodeRow label="Film Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <NodeRow label="Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={directorConnected ? "connected-field" : ""} disabled={storyboardLocked}>
-                    {connectedSummary(incoming.directorIn, "Optional Film Director")}
+                    {connectedSummary(incoming.directorIn, "Optional Director")}
                   </button>
                 </NodeRow>
                 <NodeRow label="Scene Text" inputPort={sceneDescriptionInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={sceneDescriptionConnected ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? "From Film Director" : sceneDescriptionConnected ? connectedSummary(incoming.sceneDescriptionIn, "Connected text") : "Optional Description"}
+                    {directorControlsScene ? "From Director" : sceneDescriptionConnected ? connectedSummary(incoming.sceneDescriptionIn, "Connected text") : "Optional Description"}
                   </button>
                 </NodeRow>
                 <NodeRow label="Location" inputPort={sceneReferenceInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={storyboardIncoming.sceneReferenceIn?.length ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? connectedSummary(storyboardIncoming.sceneReferenceIn, "From Film Director") : connectedSummary(incoming.sceneReferenceIn, "Optional location")}
+                    {directorControlsScene ? connectedSummary(storyboardIncoming.sceneReferenceIn, "From Director") : connectedSummary(incoming.sceneReferenceIn, "Optional location")}
                   </button>
                 </NodeRow>
                 <NodeRow label="Props" inputPort={propsInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={storyboardIncoming.propsIn?.length ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? connectedSummary(storyboardIncoming.propsIn, "From Film Director") : connectedSummary(incoming.propsIn, "Optional props")}
+                    {directorControlsScene ? connectedSummary(storyboardIncoming.propsIn, "From Director") : connectedSummary(incoming.propsIn, "Optional props")}
                   </button>
                 </NodeRow>
               </div>
@@ -11815,14 +12017,14 @@ function NodeBody({
                     <div className="storyboard-character-empty">Drag to upload a headshot of any character consistency needed in the scene</div>
                   )
                 ) : (
-                  <div className="storyboard-character-empty">{directorControlsScene ? connectedSummary(storyboardIncoming.characterIn, "Using Film Director character inputs") : "Internal characters disabled in Advanced"}</div>
+                  <div className="storyboard-character-empty">{directorControlsScene ? connectedSummary(storyboardIncoming.characterIn, "Using Director character inputs") : "Internal characters disabled in Advanced"}</div>
                 )}
               </div>
             </section>
             <div className="storyboard-mood-row compact">
               <label className="storyboard-notes-field">
                 <span>Planning Notes</span>
-                <textarea value={directorControlsScene ? "" : node.data.storyboardNotes || ""} placeholder={directorControlsScene ? "Using Film Director scene rules" : "Optional scene rules"} disabled={storyboardLocked || directorControlsScene} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
+                <textarea value={directorControlsScene ? "" : node.data.storyboardNotes || ""} placeholder={directorControlsScene ? "Using Director scene rules" : "Optional scene rules"} disabled={storyboardLocked || directorControlsScene} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
               </label>
             </div>
             {node.data.storyboardAnalysis && <p className="storyboard-analysis">{node.data.storyboardAnalysis}</p>}
@@ -12426,6 +12628,7 @@ function NodeBody({
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
+    const layoutImageCount = layoutItems.filter((item) => item.type === "image").length;
     const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
     const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -12479,7 +12682,7 @@ function NodeBody({
     }
 
     function addLayoutItem(item, beforeId = "") {
-      if (item?.type !== "image" || !item.url) return;
+      if (!["image", "video"].includes(item?.type) || !item.url) return;
       const nextItem = createPreviewLayoutItem(item);
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
       const hiddenUrls = normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls).filter((url) => url !== nextItem.url && url !== nextItem.sourceUrl);
@@ -12498,13 +12701,7 @@ function NodeBody({
     function moveLayoutItem(fromId, beforeId = "") {
       if (!fromId || fromId === beforeId) return;
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
-      const fromIndex = currentItems.findIndex((item) => item.id === fromId);
-      if (fromIndex < 0) return;
-      const nextItems = [...currentItems];
-      const [moved] = nextItems.splice(fromIndex, 1);
-      const toIndex = beforeId ? nextItems.findIndex((item) => item.id === beforeId) : -1;
-      if (toIndex >= 0) nextItems.splice(toIndex, 0, moved);
-      else nextItems.push(moved);
+      const nextItems = movePreviewLayoutItem(currentItems, fromId, beforeId);
       if (samePreviewLayoutItems(currentItems, nextItems)) return;
       onUndoSnapshot?.();
       onUpdate(node.id, { previewLayoutItems: nextItems });
@@ -12519,7 +12716,7 @@ function NodeBody({
         return;
       }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-      if (outputItem?.type === "image") {
+      if (["image", "video"].includes(outputItem?.type)) {
         addLayoutItem(outputItem, beforeId);
         clearOutputItemDragData();
       }
@@ -12549,9 +12746,9 @@ function NodeBody({
       });
     }
 
-    function rememberLayoutItemImageElement(itemId, image) {
-      const width = previewLayoutDimension(image?.naturalWidth);
-      const height = previewLayoutDimension(image?.naturalHeight);
+    function rememberLayoutItemMediaElement(itemId, media) {
+      const width = previewLayoutDimension(media?.naturalWidth || media?.videoWidth);
+      const height = previewLayoutDimension(media?.naturalHeight || media?.videoHeight);
       if (!itemId || !width || !height) return;
       const currentItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
       const target = currentItems.find((item) => item.id === itemId);
@@ -12562,29 +12759,29 @@ function NodeBody({
     }
 
     function rememberLayoutItemDimensions(itemId, event) {
-      rememberLayoutItemImageElement(itemId, event?.currentTarget);
+      rememberLayoutItemMediaElement(itemId, event?.currentTarget);
     }
 
     function rememberCachedLayoutItemDimensions(itemId, image) {
       if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return;
-      window.requestAnimationFrame(() => rememberLayoutItemImageElement(itemId, image));
+      window.requestAnimationFrame(() => rememberLayoutItemMediaElement(itemId, image));
     }
 
     function openLayoutItem(item, event) {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       if (!item?.url) return;
-      const image = event?.currentTarget?.querySelector?.("img");
-      const width = previewLayoutDimension(item.width || image?.naturalWidth);
-      const height = previewLayoutDimension(item.height || image?.naturalHeight);
+      const media = event?.currentTarget?.querySelector?.(item.type === "video" ? "video" : "img");
+      const width = previewLayoutDimension(item.width || media?.naturalWidth || media?.videoWidth);
+      const height = previewLayoutDimension(item.height || media?.naturalHeight || media?.videoHeight);
       onPreviewOpen?.({
         ...item,
         ...(width && height ? { width, height } : {}),
-        editContext: {
+        ...(item.type === "image" ? { editContext: {
           type: "previewLayout",
           nodeId: node.id,
           itemId: item.id
-        }
+        } } : {})
       });
     }
 
@@ -12595,7 +12792,7 @@ function NodeBody({
             Preview
           </button>
           <button type="button" role="tab" aria-selected={activePreviewTab === "layout"} className={activePreviewTab === "layout" ? "active" : ""} onClick={() => {
-            const nextItems = mergePreviewImagesIntoLayout(layoutItems, previewLayoutSourceItems(previewSource), normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls));
+            const nextItems = mergePreviewMediaIntoLayout(layoutItems, previewLayoutSourceItems(previewSource), normalizedPreviewLayoutHiddenUrls(node.data.previewLayoutHiddenUrls));
             onUpdate(node.id, samePreviewLayoutItems(layoutItems, nextItems) ? { previewTab: "layout" } : { previewTab: "layout", previewLayoutItems: nextItems });
           }}>
             Layout
@@ -12679,12 +12876,12 @@ function NodeBody({
         ) : (
           <section className="preview-layout-panel" onPointerDown={(event) => event.stopPropagation()}>
             <div className="preview-layout-toolbar">
-              <span>{layoutItems.length ? `${layoutItems.length} frame${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
+              <span>{layoutItems.length ? `${layoutItems.length} item${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
               <button
                 type="button"
                 onClick={() => onPreviewLayoutExport?.(node)}
-                disabled={!layoutItems.length || layoutExporting}
-                title="Export layout frames and PDF"
+                disabled={!layoutImageCount || layoutExporting}
+                title="Export layout images"
               >
                 {layoutExporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
                 <span>{layoutExporting ? "Exporting" : "Export"}</span>
@@ -12700,7 +12897,7 @@ function NodeBody({
                   {layoutItems.map((item, index) => (
                     <figure
                       key={item.id}
-                      className={`preview-layout-item ${item.width && item.height ? "has-dimensions" : ""}`}
+                      className={`preview-layout-item ${item.type} ${item.width && item.height ? "has-dimensions" : ""}`}
                       style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
                       draggable
                       onDragStart={(event) => startLayoutItemDrag(event, item)}
@@ -12708,12 +12905,31 @@ function NodeBody({
                       onDragOver={handleLayoutDragOver}
                       onDrop={(event) => handleLayoutDrop(event, item.id)}
                       onDoubleClick={(event) => openLayoutItem(item, event)}
-                      title={`${item.label || `Layout image ${index + 1}`}\nDrag to reorder, double-click to preview`}
+                      title={`${item.label || `Layout ${item.type} ${index + 1}`}\nDrag to reorder, double-click to preview`}
                     >
-                      <img ref={(image) => {
+                      {item.type === "image" && <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
-                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      }} {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Layout image ${index + 1}`} draggable={false} loading="lazy" decoding="async" onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />}
+                      {item.type === "video" && <video
+                        key={displayMediaUrl(item.url)}
+                        src={displayMediaUrl(item.url)}
+                        poster={displayMediaUrl(previewLayoutVideoPosterUrl(item))}
+                        controls
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                        draggable={false}
+                        onLoadedMetadata={(event) => {
+                          useNewtNodeVideoReady(event);
+                          rememberLayoutItemDimensions(item.id, event);
+                        }}
+                        onError={useNewtNodeVideoFallback}
+                      />}
                       <figcaption>{index + 1}</figcaption>
+                      <span className="preview-layout-kind" title={item.type === "video" ? "Video" : "Image"}>
+                        {item.type === "video" ? <Film size={11} /> : <FileImage size={11} />}
+                      </span>
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
                       </button>
@@ -12723,13 +12939,13 @@ function NodeBody({
               ) : (
                 <div className="preview-layout-empty">
                   <ImagePlus size={20} />
-                  <span>Drop image thumbnails here</span>
+                  <span>Drop image or video thumbnails here</span>
                 </div>
               )}
             </div>
             {(node.data.previewLayoutExportError || layoutExport?.folderPath) && (
               <small className={`preview-layout-export-status ${node.data.previewLayoutExportError ? "error" : ""}`} title={layoutExport?.folderPath || ""}>
-                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutItems.length} frame${(layoutExport.frameCount || layoutItems.length) === 1 ? "" : "s"}`}
+                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutImageCount} frame${(layoutExport.frameCount || layoutImageCount) === 1 ? "" : "s"}`}
               </small>
             )}
           </section>
@@ -14875,6 +15091,21 @@ function NodeBody({
     const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
     const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
     const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
+    const imageReferenceCount = imagePromptConnections.length + (characterInputUnsupported ? 0 : incoming.characterIn?.length || 0);
+    const imageRunCost = estimateImageRunCost({
+      model: node.data.model,
+      resolution: node.data.resolution,
+      aspectRatio: node.data.aspectRatio,
+      quality: node.data.quality,
+      referenceCount: imageReferenceCount,
+      batchCount: isSam3Image ? 1 : isSeedream5 && node.data.seedreamLayers ? 1 : node.data.batchCount,
+      provider: generationProviderForModel({
+        model: node.data.model,
+        mediaType: "image",
+        providerPreferences: modelProviderPreferences,
+        providerAvailability: modelProviderAvailability
+      })
+    });
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
       ? [promptPort, imagePromptPort]
@@ -14917,7 +15148,9 @@ function NodeBody({
         )}
         <GenerationProgress nodeId={node.id} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
-          {running ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...` : "Run Image"}
+          {running
+            ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
+            : formatPricedRunLabel("Run Image", imageRunCost)}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -15096,13 +15329,29 @@ function NodeBody({
   const minimaxH3AspectRatioOptions = activeMinimaxH3Route === "reference-to-video"
     ? minimaxH3ReferenceAspectRatioOptions
     : minimaxH3TextAspectRatioOptions;
-  const directorPromptValue = supportsDirectorInput ? connectedDirectorPackageText(incoming.directorIn) : "";
+  const directorPromptValue = supportsDirectorInput ? connectedDirectorPackageText(incoming.directorIn, incomingByNode) : "";
   const promptValue = [directorPromptValue, resolvedPromptText(incoming.promptIn) || node.data.prompt].filter(Boolean).join("\n\n");
   const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
   const directorConnected = supportsDirectorInput && Boolean(incoming.directorIn?.length);
   const hasVideoPrompt = Boolean(String(promptValue || "").trim());
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
   const characterConnected = supportsCharacterInput && Boolean(displayIncoming.characterIn?.length);
+  const videoRunCost = estimateVideoRunCost({
+    model: node.data.model,
+    duration: node.data.duration,
+    resolution: node.data.resolution,
+    aspectRatio: node.data.aspectRatio,
+    generateAudio: node.data.generateAudio !== false,
+    hasVideoReference: Boolean(displayIncoming.referenceVideoIn?.length),
+    referenceImageCount: minimaxH3ImageCount,
+    batchCount: isSam3Video ? 1 : node.data.batchCount,
+    provider: generationProviderForModel({
+      model: node.data.model,
+      mediaType: "video",
+      providerPreferences: modelProviderPreferences,
+      providerAvailability: modelProviderAvailability
+    })
+  });
   const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
@@ -15135,12 +15384,15 @@ function NodeBody({
         sourceNodeId={node.id}
         sourcePort={outputPort.id}
       />
-      <GenerationProgress nodeId={node.id} />
+      <GenerationProgress nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
-        {running ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...` : "Run Video"}
+        {running
+          ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
+          : formatPricedRunLabel("Run Video", videoRunCost)}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
         <div className="model-input-port-stack video-model-input-port-stack" aria-label="Video model inputs">
           {collapsedPorts.filter(Boolean).map((port) => (
@@ -15159,7 +15411,7 @@ function NodeBody({
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
         <NodeRow label="Model">
-          <select value={node.data.model} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
+          <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
             {videoModelOptions.map((model) => (
               <option key={model}>{model}</option>
             ))}
@@ -15177,9 +15429,16 @@ function NodeBody({
           />
         </NodeRow>
         {supportsDirectorInput && (
-          <NodeRow label="Film Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add film director")}</button>
+          <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
           </NodeRow>
+        )}
+        {directorSettings && (
+          <div className="effective-prompt-preview">
+            <span>
+              {`Director controls: ${directorSettings.videoModel || "Connected model"}, ${node.data.duration}, ${node.data.resolution}, ${node.data.aspectRatio}, ${filmDirectorAudioModeLabel(directorSettings.audioMode)}`}
+            </span>
+          </div>
         )}
         {tagMatches.length > 0 && (
           <div className="reference-tag-chips">
@@ -15556,7 +15815,7 @@ function NodeBody({
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
       {isMinimaxH3 && <small className="upload-status model-status-note">{activeMinimaxH3Route.replaceAll("-", " ")} · native audio</small>}
       {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings Â· preview</small>}
-      {isKlingO3 && <small className="upload-status model-status-note">Film Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
+      {isKlingO3 && <small className="upload-status model-status-note">Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
   );
@@ -16873,9 +17132,11 @@ function getNodeConfig(type) {
         { id: "characterIn", label: "Character", color: portColors.character },
         { id: "locationIn", label: "Location", color: portColors.image },
         { id: "imageIn", label: "Props", color: portColors.image },
-        { id: "styleIn", label: "Mood Board", color: portColors.transfer }
+        { id: "styleIn", label: "Mood Board", color: portColors.transfer },
+        { id: "referenceVideoIn", label: "Video", color: portColors.video },
+        { id: "musicIn", label: "Music", color: portColors.audio }
       ],
-      output: [{ id: "directorOut", label: "Film Director", color: portColors.director }]
+      output: [{ id: "directorOut", label: "Director", color: portColors.director }]
     },
     image: {
       icon: FileImage,
@@ -16961,7 +17222,7 @@ function getNodeConfig(type) {
     video: {
       icon: Video,
       input: [],
-      output: [{ id: "videoOut", label: "Video", color: portColors.video }]
+      output: videoNodeOutputPortDefinitions(portColors)
     },
     audio: {
       icon: FileAudio,
@@ -16991,7 +17252,7 @@ function getNodeConfig(type) {
     storyboard: {
       icon: Clapperboard,
       input: [
-        { id: "directorIn", label: "Film Director", color: portColors.director },
+        { id: "directorIn", label: "Director", color: portColors.director },
         { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
         { id: "sceneReferenceIn", label: "Location", color: portColors.image },
         { id: "propsIn", label: "Props", color: portColors.image },
@@ -17022,7 +17283,7 @@ function getNodeConfig(type) {
       icon: Film,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
-        { id: "directorIn", label: "Film Director", color: portColors.director },
+        { id: "directorIn", label: "Director", color: portColors.director },
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
         { id: "endFrameIn", label: "End Frame", color: portColors.image },
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
@@ -17030,7 +17291,7 @@ function getNodeConfig(type) {
         { id: "referenceAudioIn", label: "Reference Audio", color: portColors.audio },
         { id: "characterIn", label: "Character", color: portColors.character }
       ],
-      output: [{ id: "videoOut", label: "Video", color: portColors.video }]
+      output: videoNodeOutputPortDefinitions(portColors)
     }
   };
 
@@ -17063,8 +17324,18 @@ function createDefaultNodeData(type, label, count) {
       text: "",
       skillShotCount: "3",
       skillDurationSeconds: "15",
+      skillVideoModel: "",
       skillResolution: "720p",
       skillAspectRatio: "16:9",
+      skillDirectorAudioMode: "production",
+      skillApproach: "cinematic",
+      skillDirectorLockedApproach: "cinematic",
+      skillDirectorLockedMusicSignature: "",
+      skillDirectorReferenceVideoOptions: normalizeFilmDirectorReferenceVideoOptions(),
+      skillDirectorReferenceVideoAnalysis: "",
+      skillDirectorReferenceVideoAnalysisSource: "",
+      skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint(),
+      skillDirectorLockedReferenceVideoSignature: "",
       styleDirection: "",
       motionBrief: "",
       motionDirection: "",
@@ -17801,7 +18072,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
@@ -19056,7 +19327,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
   if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
-  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Film Director, Mood Board, or Character outputs";
+  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Director, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -19069,7 +19340,7 @@ function humanPortKindLabel(kind) {
     style: "Style",
     transfer: "Mood Board",
     character: "Character",
-    director: "Film Director",
+    director: "Director",
     video: "Video",
     audio: "Audio",
     model3d: "3D",
@@ -19671,9 +19942,14 @@ function directorPackageConnections(items = []) {
   });
 }
 
-function connectedDirectorPackageText(items = []) {
+function connectedDirectorPackageText(items = [], incomingByNode = {}) {
   return directorPackageConnections(items)
-    .map(({ source }) => source.data.resultText)
+    .map(({ source }) => applyFilmDirectorAudioPolicyToPrompt(
+      source.data.resultText,
+      source.data.skillDirectorAudioMode,
+      source.data.skillApproach,
+      filmDirectorUsesMusic(source.data.skillApproach, connectedAssetItems(incomingByNode[source.id]?.musicIn).slice(-1))
+    ))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -19687,12 +19963,7 @@ function directorSceneUsesConnection(directorSource, itemSource, type = "image",
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorUsesReference(directorSource.data, {
-    tag,
-    label: itemSource.data?.title || sourceLabel(itemSource),
-    type,
-    categoryCount
-  });
+  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
 }
 
 function directorReferenceBindingText(references = []) {
@@ -19707,6 +19978,10 @@ function directorReferenceBindingText(references = []) {
 function directorPackageForVideo(source = null, incomingByNode = {}) {
   if (!source?.data?.skillDirectorBuilt || !source.data.resultText) return null;
   const directorIncoming = incomingByNode[source.id] || {};
+  const musicReference = filmDirectorSupportsMusic(source.data.skillApproach)
+    ? connectedAssetItems(directorIncoming.musicIn).at(-1) || null
+    : null;
+  const usesMusic = filmDirectorUsesMusic(source.data.skillApproach, [musicReference]);
   const characterItems = directorIncoming.characterIn || [];
   const locationItems = directorIncoming.locationIn || [];
   const propItems = directorIncoming.imageIn || [];
@@ -19727,12 +20002,22 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
       url: connectedOutputUrl(itemSource, edge)
     }))
   ].filter((item) => item.tag && item.url);
-  const finalPrompt = [source.data.resultText || "", directorReferenceBindingText(references)]
+  const finalPrompt = [
+    applyFilmDirectorAudioPolicyToPrompt(source.data.resultText, source.data.skillDirectorAudioMode, source.data.skillApproach, usesMusic),
+    directorReferenceBindingText(references)
+  ]
     .filter(Boolean)
     .join("\n\n");
+  const referenceVideoMode = filmDirectorReferenceVideoMode(source.data.skillDirectorReferenceVideoOptions);
+  const referenceVideo = referenceVideoMode
+    ? connectedAssetItems(directorIncoming.referenceVideoIn).at(-1) || null
+    : null;
   return {
     sceneName: source.data.sceneName || "",
     durationSeconds: source.data.skillDurationSeconds || "15",
+    videoModel: normalizeFilmDirectorVideoModel(source.data.skillVideoModel),
+    audioMode: usesMusic ? "full" : normalizeFilmDirectorAudioMode(source.data.skillDirectorAudioMode),
+    approach: normalizeFilmDirectorApproach(source.data.skillApproach),
     resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
     aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
     styleDirection: source.data.styleDirection || "",
@@ -19741,7 +20026,10 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
     shotList: source.data.shotList || "",
     shotListNotes: source.data.shotListNotes || "",
     finalPrompt,
-    references
+    references,
+    referenceVideoMode,
+    referenceVideo,
+    musicReference
   };
 }
 
@@ -19753,7 +20041,7 @@ function directorPackageStoryboardSceneDescription(source = null) {
     data.sceneOverview ? `Scene overview:\n${data.sceneOverview}` : "",
     data.motionDirection ? `Camera and blocking direction:\n${data.motionDirection}` : "",
     data.shotList ? `Shot list:\n${data.shotList}` : "",
-    !data.shotList && data.resultText ? `Film Director shot plan:\n${stripDirectorVisualStyleForStoryboard(data.resultText)}` : ""
+    !data.shotList && data.resultText ? `Director shot plan:\n${stripDirectorVisualStyleForStoryboard(data.resultText)}` : ""
   ].filter(Boolean).join("\n\n");
 }
 
@@ -19791,6 +20079,9 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
 
   const referenceImageIn = [...(incoming.referenceImageIn || [])];
   const characterIn = [...(incoming.characterIn || [])];
+  let referenceVideoIn = [...(incoming.referenceVideoIn || [])];
+  let referenceAudioIn = [...(incoming.referenceAudioIn || [])];
+  let directorUsesMusic = false;
   const includeCharacters = options.includeCharacters !== false;
 
   directorItems.forEach(({ source }) => {
@@ -19798,6 +20089,7 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
     const locationItems = directorIncoming.locationIn || [];
     const propItems = directorIncoming.imageIn || [];
     const characterItems = directorIncoming.characterIn || [];
+    const directorReferenceVideoMode = filmDirectorReferenceVideoMode(source.data.skillDirectorReferenceVideoOptions);
     referenceImageIn.push(
       ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
       ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
@@ -19805,12 +20097,22 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
     if (includeCharacters) {
       characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
     }
+    if (["extend", "camera", "reference"].includes(directorReferenceVideoMode) && directorIncoming.referenceVideoIn?.length) {
+      referenceVideoIn = [directorIncoming.referenceVideoIn.at(-1)];
+    }
+    if (filmDirectorUsesMusic(source.data.skillApproach, (directorIncoming.musicIn || []).slice(-1).map(({ source: itemSource }) => ({ url: itemSource?.data?.resultUrl })))) {
+      referenceAudioIn = directorIncoming.musicIn?.length ? [directorIncoming.musicIn.at(-1)] : [];
+      directorUsesMusic = true;
+    }
   });
 
   return {
     ...incoming,
     referenceImageIn: uniqueConnectionItems(referenceImageIn),
-    characterIn: includeCharacters ? uniqueConnectionItems(characterIn) : incoming.characterIn || []
+    characterIn: includeCharacters ? uniqueConnectionItems(characterIn) : incoming.characterIn || [],
+    referenceVideoIn: uniqueConnectionItems(referenceVideoIn),
+    referenceAudioIn: uniqueConnectionItems(referenceAudioIn),
+    directorUsesMusic
   };
 }
 
@@ -19998,7 +20300,7 @@ function connectedOutputItem(source, edge) {
   return {
     ...outputItem,
     url,
-    type: outputItem?.type || outputType,
+    type: videoNodeOutputKind(source, sourcePort) || outputItem?.type || outputType,
     label: sourceResultLabelForPort(source, sourcePort) || sourceLabel(source) || outputItem?.label,
     text: outputItem?.text || source?.data?.resultText || ""
   };
@@ -20267,6 +20569,7 @@ function sourceResultUrlForPort(source, portId = "") {
 
 function sourceResultLabelForPort(source, portId = "") {
   if (source?.type === "assembly") return portId === "frameOut" ? "Timeline frame" : "Timeline render";
+  if (videoNodeOutputKind(source, portId) === "audio") return videoNodeOutputLabel(source, portId);
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     return transitionBuilderResultItemForPort(source, portId)?.label || "";
   }
@@ -21300,132 +21603,6 @@ function previewSourceResultItems(source, edge, sourceType = "image") {
   }];
 }
 
-function normalizedPreviewLayoutItems(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map((item, index) => {
-      const url = String(item?.url || "").trim();
-      if (!url) return null;
-      const width = previewLayoutDimension(item?.width || item?.naturalWidth);
-      const height = previewLayoutDimension(item?.height || item?.naturalHeight);
-      const sourceUrl = String(item?.sourceUrl || url).trim();
-      return {
-        id: String(item?.id || `layout-${index}-${url}`).slice(0, 120),
-        url,
-        sourceUrl,
-        thumbnailUrl: String(item?.thumbnailUrl || "").trim(),
-        type: "image",
-        label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || `Layout image ${index + 1}`,
-        fileName: item?.fileName || fileNameFromLocalUrl(url),
-        mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
-        ...(width && height ? { width, height } : {})
-      };
-    })
-    .filter(Boolean);
-}
-
-function createPreviewLayoutItem(item) {
-  const url = String(item?.url || "").trim();
-  const width = previewLayoutDimension(item?.width || item?.naturalWidth);
-  const height = previewLayoutDimension(item?.height || item?.naturalHeight);
-  const sourceUrl = String(item?.sourceUrl || url).trim();
-  return {
-    id: `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    url,
-    sourceUrl,
-    thumbnailUrl: String(item?.thumbnailUrl || "").trim(),
-    type: "image",
-    label: item?.label || item?.fileName || fileNameFromLocalUrl(url) || "Layout image",
-    fileName: item?.fileName || fileNameFromLocalUrl(url),
-    mimeType: item?.mimeType || mimeForOutputItem({ url, type: "image" }),
-    ...(width && height ? { width, height } : {})
-  };
-}
-
-function normalizedPreviewLayoutHiddenUrls(urls = []) {
-  return [...new Set((Array.isArray(urls) ? urls : [])
-    .map((url) => String(url || "").trim())
-    .filter(Boolean))];
-}
-
-function previewLayoutImageItems(items = []) {
-  const seen = new Set();
-  return (Array.isArray(items) ? items : [])
-    .filter((item) => item?.type === "image" && item.url)
-    .map((item) => ({ ...item, sourceUrl: item.sourceUrl || item.url }))
-    .filter((item) => {
-      const key = String(item.sourceUrl || item.url || "").trim();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function previewLayoutSourceItems(source = null) {
-  const items = Array.isArray(source?.items) ? source.items : [];
-  const storyboardLayoutItems = items.flatMap((item) => (
-    Array.isArray(item?.layoutItems) ? item.layoutItems : []
-  ));
-  return previewLayoutImageItems(storyboardLayoutItems.length ? storyboardLayoutItems : items);
-}
-
-function mergePreviewImagesIntoLayout(layoutItems = [], sourceItems = [], hiddenUrls = []) {
-  const hidden = new Set(normalizedPreviewLayoutHiddenUrls(hiddenUrls));
-  const existing = new Set();
-  const nextItems = normalizedPreviewLayoutItems(layoutItems);
-  nextItems.forEach((item) => {
-    if (item.url) existing.add(item.url);
-    if (item.sourceUrl) existing.add(item.sourceUrl);
-  });
-
-  previewLayoutImageItems(sourceItems).forEach((item) => {
-    const sourceUrl = String(item.sourceUrl || item.url || "").trim();
-    if (!sourceUrl || hidden.has(sourceUrl) || hidden.has(item.url) || existing.has(sourceUrl) || existing.has(item.url)) return;
-    const nextItem = createPreviewLayoutItem({ ...item, sourceUrl });
-    nextItems.push(nextItem);
-    existing.add(nextItem.url);
-    existing.add(nextItem.sourceUrl);
-  });
-
-  return nextItems;
-}
-
-function previewLayoutDimension(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
-}
-
-function previewLayoutAspectValue(item = {}) {
-  const width = previewLayoutDimension(item.width);
-  const height = previewLayoutDimension(item.height);
-  return width && height ? `${width} / ${height}` : "16 / 9";
-}
-
-function previewLayoutColumnCount(items = []) {
-  return Math.max(1, Math.min(3, items.length || 1));
-}
-
-function previewLayoutExportCaption(item, index = 0) {
-  const label = String(item?.label || "").replace(/\s+/g, " ").trim();
-  if (isUsefulPreviewLayoutCaption(label, item)) return label;
-  return `Frame ${index + 1}.`;
-}
-
-function isUsefulPreviewLayoutCaption(label = "", item = {}) {
-  if (!label) return false;
-  const fileName = String(item?.fileName || fileNameFromLocalUrl(item?.url) || "").trim();
-  const fileBase = fileName ? fileName.replace(/\.[A-Za-z0-9]+$/, "") : "";
-  if (label === fileName || label === fileBase) return false;
-  if (/\.(png|jpe?g|webp|gif|mp4|mov|webm)$/i.test(label)) return false;
-  if (/^20\d{2}-\d{2}-\d{2}T\d{2}/.test(label)) return false;
-  if (/\bgenerated\s+(image|video)\s*,?\s+unique\s+id\b/i.test(label)) return false;
-  return true;
-}
-
-function samePreviewLayoutItems(first = [], second = []) {
-  if (first.length !== second.length) return false;
-  return first.every((item, index) => item.id === second[index]?.id && item.url === second[index]?.url && item.label === second[index]?.label);
-}
-
 async function createEditedPreviewLayoutImageBlob(sourceUrl, edit = {}) {
   const image = await loadCanvasImage(sourceUrl);
   const imageWidth = image.naturalWidth || image.width;
@@ -21457,12 +21634,11 @@ async function createEditedPreviewLayoutImageBlob(sourceUrl, edit = {}) {
   context.restore();
 
   if (edit.type === "curves") {
-    applyPreviewCurveToCanvas(context, canvas.width, canvas.height, edit.points);
+    applyCurveToImageData(context, canvas.width, canvas.height, edit.points);
   }
 
   if (edit.type === "tone") {
-    applyPreviewToneAdjustmentsToCanvas(context, canvas.width, canvas.height, edit.adjustments);
-    applyPreviewCurveToCanvas(context, canvas.width, canvas.height, edit.points);
+    applyImageAdjustmentsToCanvas(context, canvas.width, canvas.height, edit.adjustments, edit.points);
   }
 
   if (edit.type === "text") {
@@ -21610,96 +21786,6 @@ function drawPreviewTextOverlay(context, width, height, overlay = {}) {
   context.restore();
 }
 
-function applyPreviewToneAdjustmentsToCanvas(context, width, height, adjustments = {}) {
-  const imageData = context.getImageData(0, 0, width, height);
-  const brightness = clamp(Number(adjustments?.brightness) || 0, -100, 100);
-  const contrast = clamp(Number(adjustments?.contrast) || 0, -100, 100);
-  const saturation = clamp(Number(adjustments?.saturation) || 0, -100, 100);
-  const brightnessOffset = brightness * 2.55;
-  const contrastValue = contrast * 2.55;
-  const contrastFactor = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue));
-  const saturationFactor = 1 + saturation / 100;
-  const pixels = imageData.data;
-  for (let index = 0; index < pixels.length; index += 4) {
-    let red = contrastFactor * (pixels[index] - 128) + 128 + brightnessOffset;
-    let green = contrastFactor * (pixels[index + 1] - 128) + 128 + brightnessOffset;
-    let blue = contrastFactor * (pixels[index + 2] - 128) + 128 + brightnessOffset;
-    const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
-    red = luminance + (red - luminance) * saturationFactor;
-    green = luminance + (green - luminance) * saturationFactor;
-    blue = luminance + (blue - luminance) * saturationFactor;
-    pixels[index] = clamp(red, 0, 255);
-    pixels[index + 1] = clamp(green, 0, 255);
-    pixels[index + 2] = clamp(blue, 0, 255);
-  }
-  context.putImageData(imageData, 0, 0);
-}
-
-function applyPreviewCurveToCanvas(context, width, height, points = []) {
-  const imageData = context.getImageData(0, 0, width, height);
-  const lookup = previewCurveLookup(points);
-  const pixels = imageData.data;
-  for (let index = 0; index < pixels.length; index += 4) {
-    pixels[index] = lookup[pixels[index]];
-    pixels[index + 1] = lookup[pixels[index + 1]];
-    pixels[index + 2] = lookup[pixels[index + 2]];
-  }
-  context.putImageData(imageData, 0, 0);
-}
-
-function previewCurveLookup(points = []) {
-  const normalized = previewCurveControlPoints(points);
-  const lookup = new Uint8ClampedArray(256);
-  for (let input = 0; input < 256; input += 1) {
-    lookup[input] = previewInterpolatedCurveOutput(normalized, input);
-  }
-  return lookup;
-}
-
-function previewInterpolatedCurveOutput(points, input) {
-  if (points.length < 2) return input;
-  let segmentIndex = 0;
-  while (segmentIndex < points.length - 2 && input > points[segmentIndex + 1].input) {
-    segmentIndex += 1;
-  }
-  const p0 = points[Math.max(0, segmentIndex - 1)];
-  const p1 = points[segmentIndex];
-  const p2 = points[Math.min(segmentIndex + 1, points.length - 1)];
-  const p3 = points[Math.min(segmentIndex + 2, points.length - 1)];
-  const range = Math.max(1, p2.input - p1.input);
-  const t = clamp((input - p1.input) / range, 0, 1);
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const output = 0.5 * (
-    (2 * p1.output) +
-    (-p0.output + p2.output) * t +
-    (2 * p0.output - 5 * p1.output + 4 * p2.output - p3.output) * t2 +
-    (-p0.output + 3 * p1.output - 3 * p2.output + p3.output) * t3
-  );
-  return Math.round(clamp(output, 0, 255));
-}
-
-function previewCurveControlPoints(points = []) {
-  const safePoints = Array.isArray(points) && points.length ? points : [{ x: 0, y: 100 }, { x: 100, y: 0 }];
-  const normalized = safePoints
-    .map((point) => ({
-      x: clamp(Number(point?.x) || 0, 0, 100),
-      y: clamp(Number(point?.y) || 0, 0, 100)
-    }))
-    .sort((a, b) => a.x - b.x);
-  const middle = normalized.filter((point) => point.x > 0.5 && point.x < 99.5);
-  const first = normalized.find((point) => point.x <= 0.5) || { x: 0, y: 100 };
-  const last = [...normalized].reverse().find((point) => point.x >= 99.5) || { x: 100, y: 0 };
-  return [
-    { input: 0, output: Math.round(clamp(100 - first.y, 0, 100) * 2.55) },
-    ...middle.map((point) => ({
-      input: Math.round(clamp(point.x, 0, 100) * 2.55),
-      output: Math.round(clamp(100 - point.y, 0, 100) * 2.55)
-    })),
-    { input: 255, output: Math.round(clamp(100 - last.y, 0, 100) * 2.55) }
-  ].filter((point, index, all) => index === 0 || point.input !== all[index - 1].input);
-}
-
 function previewCropRectToPixels(rect, imageWidth, imageHeight) {
   const source = rect && typeof rect === "object" ? rect : {};
   const widthPct = clamp(Number(source.width) || 100, 1, 100);
@@ -21791,7 +21877,7 @@ function previewMediaType(source, edge) {
   if (source.type === "utility") return utilityOutputType(source, edge?.from?.port);
   if (source.type === "edit") return edge?.from?.port === "editMaskOut" ? "image" : editOutputType(source);
   if (source.type === "model3d") return "model3d";
-  if (source.type === "video" || source.type === "videoModel") return "video";
+  if (source.type === "video" || source.type === "videoModel") return videoNodeOutputKind(source, edge?.from?.port);
   if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
   if (/\.(mp4|mov|qt|webm)$/i.test(source.data.resultUrl || "")) return "video";
   return "image";
@@ -22328,11 +22414,12 @@ function colorDistance(first, second) {
 }
 
 function buildEffectiveVideoPrompt(prompt, incoming = {}, { includeCharacterInstructions = true } = {}) {
+  const musicVideo = Boolean(incoming.directorUsesMusic);
   const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...connectedCharacterVoiceUrls(incoming.characterIn)])];
   const characterInstructions = includeCharacterInstructions ? (incoming.characterIn || [])
     .flatMap(({ source }) => {
       const voiceUrl = activeCharacterVoice(source)?.localUrl;
-      const audioIndex = voiceUrl ? audioUrls.indexOf(voiceUrl) + 1 : null;
+      const audioIndex = voiceUrl && !musicVideo ? audioUrls.indexOf(voiceUrl) + 1 : null;
       return characterVideoPromptPieces(source, audioIndex);
     })
     .filter(Boolean) : [];
@@ -22344,7 +22431,7 @@ function storyboardVideoReferencePromptPiece(items = []) {
     source?.type === "storyboard" && Boolean(storyboardOutputItem(source, edge)?.url)
   ));
   return hasStoryboardReference
-    ? "Use the provided storyboard reference as a loose visual guide for shot progression, framing, blocking, and continuity. Do not copy it literally; prioritize the Film Director prompt and preserve natural live-action motion."
+    ? "Use the provided storyboard reference as a loose visual guide for shot progression, framing, blocking, and continuity. Do not copy it literally; prioritize the Director prompt and preserve natural live-action motion."
     : "";
 }
 
@@ -22520,7 +22607,12 @@ function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "storyboard") return source.data.title || "Storyboard";
-  if (source.type === "skillDirector") return source.data.title === "Skill Director" ? "Film Director" : source.data.title || "Film Director";
+  if (source.type === "skillDirector") {
+    const title = String(source.data.title || "");
+    return /^(?:Skill Director|Film Director)(?: \d+)?$/.test(title)
+      ? title.replace(/^(?:Skill Director|Film Director)/, "Director")
+      : title || "Director";
+  }
   if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
   if (source.type === "coverage") return source.data.title || "Coverage";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
@@ -22694,8 +22786,8 @@ function formatSkillDirectorShotListForClient(text = "") {
     .trim();
 }
 
-function formatSkillDirectorFinalPromptForClient(text = "") {
-  return String(text || "")
+function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production", approach = "cinematic") {
+  return applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode, approach)
     .replace(/(Shot List:\s*)([\s\S]*)$/i, (_match, label, body) => `${label.trim()}\n${formatSkillDirectorShotListForClient(body)}`)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -22777,27 +22869,40 @@ function normalizeCurrentNode(node) {
     const legacyShotCount = data.skillShotCount || data.skillSceneCount || data.shotCount || "3";
     const restoredShotList = splitSkillDirectorShotListForClient(data.shotList || "", data.shotListNotes || "");
     const skillDirectorData = { ...data };
-    const filmDirectorTitle = data.title && data.title !== "Skill Director" ? data.title : "Film Director";
+    const legacyDirectorTitle = String(data.title || "");
+    const directorTitle = /^(?:Skill Director|Film Director)(?: \d+)?$/.test(legacyDirectorTitle)
+      ? legacyDirectorTitle.replace(/^(?:Skill Director|Film Director)/, "Director")
+      : legacyDirectorTitle || "Director";
     ["skillCategory", "skillId", "skillEditorOpen", "skillDraft", "skillSceneCount", "shotCount"].forEach((field) => {
       delete skillDirectorData[field];
     });
     const normalizedDirectorData = {
-        ...createDefaultNodeData("skillDirector", filmDirectorTitle, 1),
+        ...createDefaultNodeData("skillDirector", directorTitle, 1),
         ...skillDirectorData,
-        title: filmDirectorTitle,
+        title: directorTitle,
         sceneName: data.sceneName || "",
         sceneOverview,
         text: sceneOverview,
         skillShotCount: legacyShotCount,
         skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
+        skillDirectorAudioMode: normalizeFilmDirectorAudioMode(data.skillDirectorAudioMode),
+        skillApproach: normalizeFilmDirectorApproach(data.skillApproach),
+        skillDirectorLockedApproach: normalizeFilmDirectorApproach(data.skillDirectorLockedApproach),
+        skillDirectorLockedMusicSignature: String(data.skillDirectorLockedMusicSignature || ""),
+        skillDirectorReferenceVideoOptions: normalizeFilmDirectorReferenceVideoOptions(data.skillDirectorReferenceVideoOptions),
+        skillDirectorReferenceVideoAnalysis: String(data.skillDirectorReferenceVideoAnalysis || ""),
+        skillDirectorReferenceVideoAnalysisSource: String(data.skillDirectorReferenceVideoAnalysisSource || ""),
+        skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint(data.skillDirectorReferenceVideoBlueprint),
+        skillDirectorLockedReferenceVideoSignature: String(data.skillDirectorLockedReferenceVideoSignature || ""),
         styleDirection: data.styleDirection || "",
         motionBrief: data.motionBrief || "",
         motionDirection: data.motionDirection || "",
         shotList: restoredShotList.shotList,
         shotListNotes: restoredShotList.shotListNotes,
-        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || ""),
+        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || "", data.skillDirectorAudioMode, data.skillApproach),
         skillDirectorLocks:
           data.skillDirectorLocks && typeof data.skillDirectorLocks === "object"
             ? {
@@ -23431,6 +23536,7 @@ function storyboardFramesFromPlan(frames = []) {
 }
 
 function normalizeStoryboardQcForClient(qc = {}) {
+  if (qc.severity === "unreviewed" || typeof qc.pass !== "boolean") return storyboardQcUnavailable(qc.summary);
   const issues = Array.isArray(qc.issues)
     ? qc.issues.map((issue) => String(issue || "").trim()).filter(Boolean).slice(0, 6)
     : [];
@@ -24536,6 +24642,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "characterOut";
       nextEdge.color = portColors.character;
     }
+  }
+
+  if (["video", "videoModel"].includes(source.type)) {
+    nextEdge.color = nextEdge.from.port === embeddedAudioOutputPortId ? portColors.audio : portColors.video;
   }
 
   if (target?.type === "composer" && isComposerCharacterInputPort(nextEdge.to.port, target)) {

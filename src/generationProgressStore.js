@@ -4,6 +4,7 @@ import {
   generationProgressTerminalDisplayMs,
   generationRequestMetadata,
   isTerminalProgressStatus,
+  mergeGenerationProgressEntry,
   progressEntryFromRequestMetadata,
   shouldDiscardProgressEntryMissingFromServer
 } from "./generationProgress.js";
@@ -110,7 +111,7 @@ function scheduleProgressPoll(delay) {
 function upsertProgressEntry(entry) {
   if (!entry?.runId || !entry?.nodeId) return;
   const previous = entriesByRunId.get(entry.runId);
-  const next = { ...previous, ...entry };
+  const next = mergeGenerationProgressEntry(previous, entry);
   entriesByRunId.set(entry.runId, next);
   refreshNodeSnapshot(next.nodeId);
   if (
