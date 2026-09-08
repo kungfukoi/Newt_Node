@@ -2,7 +2,7 @@
 
 This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
-Snapshot verified against package version `3.0.0-beta.0` on 2026-09-04. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
+Snapshot verified against package version `3.0.0-beta.0` on 2026-09-07. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
 
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
@@ -348,6 +348,8 @@ Group backdrops expose resize handles at all four corners. A corner resize keeps
 - Preview's primary image view uses the full-resolution source, not a proxy thumbnail. Thumbnails are display-only for compact grids and rails; drag, edit, export, download, native Save Image, and downstream connections must resolve to the original media URL.
 - Preview/Layout accepts image and video results in one persistently ordered board. Tiles can be dragged to reorganize mixed media, and double-click opens the original full-resolution image or playable video in the shared preview. Image export ignores video tiles and retains the visible relative order of the remaining stills.
 - Preview/Layout must fit the complete board inside the resized node. All rows share the available board height, every image and video uses `object-fit: contain`, and unused cell space remains black. Resizing may scale or letterbox layout media but must never clip a row, crop media, or change its aspect ratio.
+- Preview/Layout and Edit use `src/imageAdjustments.js` as the shared source of truth for curve points and brightness, contrast, and saturation normalization. Equivalent settings must produce equivalent pixels; do not fork the math or maintain visually divergent copies of the controls.
+- Image adjustment previews must operate on a decoded copy of the source and leave the full-resolution source URL unchanged until the user explicitly applies or exports an edit.
 - Generated outputs should have a node-level download affordance when possible.
 - 3D outputs should be displayed with the shared lazy Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
@@ -755,10 +757,11 @@ Portable packages are the default Save As shape for workflows that need to move 
 
 ## Director And Storyboard Standards
 
+- Director is the public node name. Keep `skillDirector` as the persisted type and retain focused `filmDirector*` implementation names unless a separately planned compatibility migration changes them. Normalize only legacy default titles matching `Skill Director`, `Film Director`, or their numbered defaults; never rename a custom title.
 - Director uses internal type `skillDirector` and emits a built scene package from `directorOut`. Its reusable run logic belongs in `src/nodeRunners/skillDirector.js`; shot-limit, coverage, and revision helpers belong in the focused `src/filmDirector*.js` modules.
 - Director approach values are stable persisted identifiers: `cinematic`, `vintage`, `animation`, `stop-motion`, `commercial`, `music-video`, and `montage`. Approach-specific style, camera, scene rules, audio behavior, and revisions must flow through `src/filmDirectorApproaches.js`; do not implement approach labels as prompt-only UI decoration.
 - `musicIn` accepts connected audio for Music Video and optional music-driven Montage work. Music Video requires audible input and a Director-compatible downstream model. Local waveform analysis may describe measured levels and candidate energy rises, but must never invent BPM, beats, genre, instruments, lyrics, or a listening transcript. The actual connected audio remains the timing and lip-sync authority passed to generation.
-- `referenceVideoIn` has mutually exclusive Extend, Camera, Performance, and Reference modes. Preserve the selected mode, cached source signature, analysis, and any reusable shot blueprint in the scene package. A replaced source invalidates only analysis derived from that source; it must not silently remove unrelated scene work.
+- `referenceVideoIn` has mutually exclusive Extend, Camera, and Reference modes. Reference includes temporal performance, blocking, edit, composition, and sound-timing guidance while replacing source identity and styling with the active scene. Preserve the selected mode, cached source signature, analysis, and any reusable shot blueprint in the scene package. A replaced source invalidates only analysis derived from that source; it must not silently remove unrelated scene work.
 - Director and Storyboard creative LLM routes use the strict schemas and reasoning instructions in `server/creative-llm.js`. Reject malformed, incomplete, refused, mismatched-count, or structurally invalid responses while retaining existing visible drafts. Successful repeated analysis may use `server/creative-analysis-cache.js`; cache hits must not duplicate recorded provider cost.
 - A Director scene package may connect to supported Video Model `directorIn` ports and to Storyboard `directorIn`. Unsupported video models must not serialize or receive a director package.
 - When a supported Video Model also receives a Text prompt, append that text to the Director output as clearly labeled supplemental direction. Keep the effective prompt a string, do not repeat character instructions already present in the Director package, and preserve all inherited visual references.
@@ -776,6 +779,18 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Storyboard frame outputs and the locked-board output are distinct connection targets. Use the shared Storyboard output resolver for previews, drag/drop, connection checks, and saved-edge migration so older frame ports remain compatible.
 - Locking a Storyboard board creates the board output; generating or importing a frame creates a frame output. Lightweight thumbnails are display-only and must never replace the full-resolution URL used for dragging, editing, export, or downstream generation.
 - Saved Storyboard frame images live in a filesystem-safe subfolder derived from the node's scene name. Frame filenames repeat that scene name and preserve the frame's board number with at least two digits, for example `Scene_01/Scene_01_Frame_01.png`; explicit frame exports use the same filename convention. Never overwrite an earlier frame on rerun or re-export: append a version suffix starting at `_v02` when the preferred filename already exists.
+
+## Newt Preset Standards
+
+- Newt Presets are user-created reusable graph fragments, not Style presets and not a bundled System Preset catalog. The left sidebar owns selection, insertion, binding, refresh, and deletion; the floating selection action bar starts capture.
+- Capture selected supported nodes, internal edges whose endpoints are both selected, and a group only when every node in that group is selected. Reject an empty selection and enforce the current 250-node and 5 MB serialized-graph limits with readable errors.
+- Preserve node configuration, measured size, relative placement, internal connections, complete-group membership, and required managed media. Strip credentials, authorization values, passwords, secrets, provider job IDs, transient running state, and prototype-sensitive keys before writing a preset.
+- Preset names contain 1 to 80 characters and are unique case-insensitively. Metadata JSON is local runtime data under `server/data/newt-presets/` and must stay ignored by git. Full-resolution dependencies are copied under `outputs/Newt-Presets/dependencies/<preset-id>/` and served as managed URLs.
+- Every insertion creates fresh node, edge, and group IDs and places the fragment beyond occupied graph bounds. Remap nested node references as well as edge endpoints; repeated insertion must never share graph identity with another copy.
+- Optional reusable slots are typed. Current roles are Image, Location, Prop, Character, Mood Board, Video, and Audio. A binding may target only a current-project node of the slot's stored node type. `Preset default` retains the copied source stored with the preset.
+- Binding replaces the preset input node, reconnects its outgoing internal edges to the selected current-project source, updates matching `@tags`, and clears affected downstream results, locks, generated boards, previews, and Director build state. Insertion and binding must not trigger paid work automatically.
+- Deleting a preset removes its library entry but retains copied dependency media because workflows that already inserted it may still reference those files. Do not recursively delete shared dependency media as part of preset deletion.
+- Preset API work belongs behind `src/api/newtApi.js` and `server/routes/newtPresets.js`; persistence and media copying belong in `server/newt-presets.js`; graph sanitation, remapping, binding, and placement belong in `src/newtPresets.js`.
 
 ## Frame It Standard
 

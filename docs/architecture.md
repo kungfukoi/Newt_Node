@@ -1,6 +1,6 @@
 # NewtNode Architecture
 
-This document is the descriptive map of the current NewtNode implementation. `node-standards.md` remains the normative contract. Snapshot verified against package version `3.0.0-beta.0` on 2026-09-04.
+This document is the descriptive map of the current NewtNode implementation. `node-standards.md` remains the normative contract. Snapshot verified against package version `3.0.0-beta.0` on 2026-09-07.
 
 ## Runtime Shape
 
@@ -98,6 +98,16 @@ Generated and custom sheets coexist. New Character generation first creates a ne
 `src/characterSheetWorkflow.js` coordinates base-image and CU Video generation as separately checkpointed stages. Persist each successful stage before starting the next one. Wardrobe generation uses the corresponding base sheet as its locked edit source and preserves valid image/video wardrobe halves independently when one side must be regenerated.
 
 `runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
+
+## Director And Storyboard Flow
+
+Director is the visible product name; `skillDirector` remains the saved node type and the focused implementation modules retain their `filmDirector*` names. Load normalization changes only legacy default titles such as `Film Director` and `Film Director 3` to `Director` and `Director 3`. User-authored titles remain unchanged.
+
+`src/components/NodeBodies.jsx` owns the staged Director interface. Approach rules live in `src/filmDirectorApproaches.js`; reference-video modes, scene snapshots, active reference tags, and reusable shot blueprints live in `src/filmDirectorScenes.js`; audio policy and music validation remain in the focused Director helpers. `src/nodeRunners/skillDirector.js` creates the normalized request and result patch without moving provider logic into the node body.
+
+The server executes Director and Storyboard creative reasoning with strict AJV-backed contracts in `server/creative-llm.js`. Successful repeated analysis can reuse `server/creative-analysis-cache.js` without recording duplicate provider cost. `server/director-music.js` may derive measured waveform-level evidence from local audio, but the connected audio remains the timing authority and analysis must not invent beats, lyrics, instruments, or content it did not measure.
+
+A built Director package can control supported Video Model settings and provide scene/reference context to Storyboard. Storyboard validates cut order, required continuous-shot keyframes, frame numbering, and nonempty prompts before replacing visible work. Failed planning leaves the existing board intact. Visual QC distinguishes a reviewed result from `unreviewed` when the review service is unavailable.
 
 ## Persistence And Storage
 

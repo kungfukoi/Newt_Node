@@ -18,6 +18,11 @@ This directory separates the current product contract from architecture, build g
 - `development.md`: agent/developer workflow for building and validating features.
 - `performance.md`: current React Flow rendering architecture, measurement commands, and bundle baseline.
 
+## User Guides
+
+- `creative-workflows.md`: Director approaches and inputs, staged scene building, Storyboard validation, Character checkpoint behavior, and shared image adjustments.
+- `newt-presets.md`: creating, inserting, binding, deleting, storing, and troubleshooting user-created Newt Presets.
+
 ## Operational
 
 - `production-reliability.md`: production stores, supervision, scheduling, diagnostics, verification, and known limits from the September 2026 improvement pass.
@@ -44,6 +49,7 @@ When behavior changes:
 3. Update `development.md` when setup, scripts, validation, or troubleshooting changes.
 4. Update `performance.md` when rendering architecture, startup loading, or measured bundle output changes.
 5. Update `../README.md` when user-visible setup, model catalogs, or major capabilities change.
-6. Keep historical notes labeled as historical instead of rewriting them into false present-tense guidance.
+6. Update the relevant user guide when controls, workflow steps, limits, or visible naming change.
+7. Keep historical notes labeled as historical instead of rewriting them into false present-tense guidance.
 
 When a document and implementation disagree, do not merely document the accidental behavior. Determine the intended contract, then make code, tests, and docs agree in the same change.
