@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createCreativeAnalysisCache } from "../server/creative-analysis-cache.js";
-import { creativeOpenAiModel, openAiLlmBody, validateCreativeResponse } from "../server/creative-llm.js";
+import { creativeOpenAiModel, openAiLlmBody, skillDirectorFinalPromptMaxChars, skillDirectorSystemPrompt, validateCreativeResponse } from "../server/creative-llm.js";
 import { directorMusicLevelContext } from "../server/director-music.js";
 import { NewtPresetStore } from "../server/newt-presets.js";
 import {
@@ -48,6 +48,14 @@ test("creative Director responses use strict structured output and cache success
   assert.equal(first.analysis, second.analysis);
   assert.deepEqual(second.usages, []);
   assert.equal(second.cacheHit, true);
+});
+
+test("Director requests always receive the shared reasoning system prompt", () => {
+  const prompt = skillDirectorSystemPrompt();
+  assert.equal(skillDirectorFinalPromptMaxChars, 7000);
+  assert.match(prompt, /NewtNode's Director/);
+  assert.match(prompt, /reconcile the newest user instructions/i);
+  assert.match(prompt, /Return only the requested output contract/);
 });
 
 test("Director approaches validate music and expose distinct creative direction", () => {

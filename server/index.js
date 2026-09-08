@@ -68,7 +68,7 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
-import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, directorReasoningSkill, storyboardReasoningSkill } from "./creative-llm.js";
+import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorFinalPromptMaxChars, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
@@ -15849,10 +15849,6 @@ async function runMediaDescriptionLlm({
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI media analysis failed.", { raw: data });
   return checkedCreativeLlmResult({ text: extractOpenAiResponseText(data).trim(), usages: [data.usage].filter(Boolean), provider: "OpenAI", model: openAiModel, endpoint: openAiModel }, data, route);
-}
-
-+function skillDirectorSystemPrompt() {
-  return `You are NewtNode's Director: a professional director and cinematographer planning production-ready scenes for an AI video generator. Preserve connected @tags and the user's story intent. Return only the requested output contract without commentary.\n\n${directorReasoningSkill}`;
 }
 
 function skillDirectorSceneReferenceLines({ characterInputs = [], locationInputs = [], elementInputs = [] } = {}) {
