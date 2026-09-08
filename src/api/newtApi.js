@@ -275,7 +275,7 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
 
-  runSkillDirector(body, label = "Film Director") {
+  runSkillDirector(body, label = "Director") {
     return fetchJsonApi("/api/node/run-skill-director", jsonBody(body), label);
   },
 

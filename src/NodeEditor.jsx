@@ -549,7 +549,7 @@ const nodeHelpContent = {
     ]
   },
   skillDirector: {
-    title: "Film Director",
+    title: "Director",
     lines: [
       "Builds a cinematic video plan from characters, locations, props, style, and scene direction.",
       "Lock each section in order, build the scene, then connect the blue director output to a video model."
@@ -600,7 +600,7 @@ const nodeHelpContent = {
   storyboard: {
     title: "Storyboard",
     lines: [
-      "Plans and generates ordered storyboard frames from a scene description or Film Director input.",
+      "Plans and generates ordered storyboard frames from a scene description or Director input.",
       "Lock the board to create a compiled storyboard image and connect its blue output downstream."
     ]
   },
@@ -679,7 +679,7 @@ const nodeHelpContent = {
     title: "Video Model",
     lines: [
       "Generates videos from prompt text and supported image, video, audio, storyboard, or director inputs.",
-      "A text prompt or Film Director input is required before running."
+      "A text prompt or Director input is required before running."
     ]
   }
 };
@@ -988,7 +988,7 @@ const storyboardBoardOutputPortId = "storyboardOut";
 const storyboardBaseInstruction =
   "STORYBOARD STYLE LOCK: Create a single clean hand-drawn film storyboard frame. Use black ink linework, simple shapes, open white negative space, minimal grayscale blocking, readable silhouettes, and production-planning clarity. Keep drawings sparse, graphic, and easy to read. This is not a realistic black-and-white photograph, not photorealistic grayscale, not a 3D render, not photographic concept art, and not a fully rendered illustration. Avoid photographic skin texture, realistic camera lighting, glossy realism, heavy shadows, dense background detail, and fully rendered photo detail. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
 const storyboardReferenceStyleGuard =
-  "FINAL STYLE PRIORITY: The clean black-and-white storyboard line-art style overrides every uploaded image reference and every Film Director visual-style phrase. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Simplify all realistic references into sparse line drawing and simple gray fills. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, tonal realism, or polished photo detail from any reference image.";
+  "FINAL STYLE PRIORITY: The clean black-and-white storyboard line-art style overrides every uploaded image reference and every Director visual-style phrase. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Simplify all realistic references into sparse line drawing and simple gray fills. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, tonal realism, or polished photo detail from any reference image.";
 const storyboardMoodBoardStyleInstruction =
   "Use the connected visual style reference only to infer abstract storyboard line-art qualities such as clean ink outlines, simple value grouping, open negative space, and production-planning readability. Do not copy its subjects, locations, props, compositions, realistic shading, texture density, or tonal detail.";
 const storyboardFinalStyleClamp =
@@ -6568,7 +6568,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (currentNode.type === "videoModel" && incoming.directorIn?.length) {
       const source = incoming.directorIn[0].source;
       if (!source?.data?.skillDirectorBuilt || source.data.skillDirectorOutputStale) {
-        updateNode(currentNode.id, { status: "error", error: "Review and rebuild the connected Film Director scene before generating." });
+        updateNode(currentNode.id, { status: "error", error: "Review and rebuild the connected Director scene before generating." });
         return { status: "error" };
       }
       currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
@@ -11688,7 +11688,7 @@ function NodeBody({
       ? storyboardDirectorFramePlan(directorSource?.data?.shotList || directorSource?.data?.resultText || "", storyboardMaxFrameCount).frameCount
         || directorPackageShotCount(directorSource)
       : 0;
-    const directorDisabledReason = "Film Director is controlling this storyboard";
+    const directorDisabledReason = "Director is controlling this storyboard";
     const sceneDescriptionConnected = Boolean(connectedSceneDescription.trim());
     const sceneDescription = storyboardSceneDescriptionForNode(node, storyboardIncoming);
     const storyboardPlanCurrent = storyboardPlanIsCurrent(node, sceneDescription);
@@ -11713,7 +11713,7 @@ function NodeBody({
     const frameCountMode = directorControlsScene ? storyboardAutoFrameCount : frameCountValue !== storyboardAutoFrameCount ? "Custom" : storyboardAutoFrameCount;
     const customFrameCountValue = frameCountMode === "Custom" ? frameCountValue : "";
     const displayedSceneName = directorControlsScene
-      ? directorSource?.data?.sceneName || node.data.sceneName || "Film Director Scene"
+      ? directorSource?.data?.sceneName || node.data.sceneName || "Director Scene"
       : node.data.sceneName || "";
 
     function updateFrame(frameId, patch) {
@@ -11915,7 +11915,7 @@ function NodeBody({
                 <TaggedPromptTextarea
                   className="storyboard-tagged-editor"
                   value={sceneDescription}
-                  placeholder={directorConnected ? "Connected Film Director plan" : sceneDescriptionConnected ? "Connected scene description" : "Describe the scene, action, location, and story beat."}
+                  placeholder={directorConnected ? "Connected Director plan" : sceneDescriptionConnected ? "Connected scene description" : "Describe the scene, action, location, and story beat."}
                   tagMatches={sceneCharacterTagMatches}
                   readOnly={storyboardLocked || sceneDescriptionConnected || directorConnected}
                   onChange={(event) => onUpdate(node.id, {
@@ -11961,24 +11961,24 @@ function NodeBody({
                     />
                   </div>
                 </NodeRow>
-                <NodeRow label="Film Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <NodeRow label="Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={directorConnected ? "connected-field" : ""} disabled={storyboardLocked}>
-                    {connectedSummary(incoming.directorIn, "Optional Film Director")}
+                    {connectedSummary(incoming.directorIn, "Optional Director")}
                   </button>
                 </NodeRow>
                 <NodeRow label="Scene Text" inputPort={sceneDescriptionInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={sceneDescriptionConnected ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? "From Film Director" : sceneDescriptionConnected ? connectedSummary(incoming.sceneDescriptionIn, "Connected text") : "Optional Description"}
+                    {directorControlsScene ? "From Director" : sceneDescriptionConnected ? connectedSummary(incoming.sceneDescriptionIn, "Connected text") : "Optional Description"}
                   </button>
                 </NodeRow>
                 <NodeRow label="Location" inputPort={sceneReferenceInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={storyboardIncoming.sceneReferenceIn?.length ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? connectedSummary(storyboardIncoming.sceneReferenceIn, "From Film Director") : connectedSummary(incoming.sceneReferenceIn, "Optional location")}
+                    {directorControlsScene ? connectedSummary(storyboardIncoming.sceneReferenceIn, "From Director") : connectedSummary(incoming.sceneReferenceIn, "Optional location")}
                   </button>
                 </NodeRow>
                 <NodeRow label="Props" inputPort={propsInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={storyboardIncoming.propsIn?.length ? "connected-field" : ""} disabled={storyboardLocked || directorControlsScene}>
-                    {directorControlsScene ? connectedSummary(storyboardIncoming.propsIn, "From Film Director") : connectedSummary(incoming.propsIn, "Optional props")}
+                    {directorControlsScene ? connectedSummary(storyboardIncoming.propsIn, "From Director") : connectedSummary(incoming.propsIn, "Optional props")}
                   </button>
                 </NodeRow>
               </div>
@@ -12017,14 +12017,14 @@ function NodeBody({
                     <div className="storyboard-character-empty">Drag to upload a headshot of any character consistency needed in the scene</div>
                   )
                 ) : (
-                  <div className="storyboard-character-empty">{directorControlsScene ? connectedSummary(storyboardIncoming.characterIn, "Using Film Director character inputs") : "Internal characters disabled in Advanced"}</div>
+                  <div className="storyboard-character-empty">{directorControlsScene ? connectedSummary(storyboardIncoming.characterIn, "Using Director character inputs") : "Internal characters disabled in Advanced"}</div>
                 )}
               </div>
             </section>
             <div className="storyboard-mood-row compact">
               <label className="storyboard-notes-field">
                 <span>Planning Notes</span>
-                <textarea value={directorControlsScene ? "" : node.data.storyboardNotes || ""} placeholder={directorControlsScene ? "Using Film Director scene rules" : "Optional scene rules"} disabled={storyboardLocked || directorControlsScene} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
+                <textarea value={directorControlsScene ? "" : node.data.storyboardNotes || ""} placeholder={directorControlsScene ? "Using Director scene rules" : "Optional scene rules"} disabled={storyboardLocked || directorControlsScene} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
               </label>
             </div>
             {node.data.storyboardAnalysis && <p className="storyboard-analysis">{node.data.storyboardAnalysis}</p>}
@@ -15411,7 +15411,7 @@ function NodeBody({
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
         <NodeRow label="Model">
-          <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Film Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
+          <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
             {videoModelOptions.map((model) => (
               <option key={model}>{model}</option>
             ))}
@@ -15429,8 +15429,8 @@ function NodeBody({
           />
         </NodeRow>
         {supportsDirectorInput && (
-          <NodeRow label="Film Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add film director")}</button>
+          <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
           </NodeRow>
         )}
         {directorSettings && (
@@ -15815,7 +15815,7 @@ function NodeBody({
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
       {isMinimaxH3 && <small className="upload-status model-status-note">{activeMinimaxH3Route.replaceAll("-", " ")} · native audio</small>}
       {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings Â· preview</small>}
-      {isKlingO3 && <small className="upload-status model-status-note">Film Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
+      {isKlingO3 && <small className="upload-status model-status-note">Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
   );
@@ -17136,7 +17136,7 @@ function getNodeConfig(type) {
         { id: "referenceVideoIn", label: "Video", color: portColors.video },
         { id: "musicIn", label: "Music", color: portColors.audio }
       ],
-      output: [{ id: "directorOut", label: "Film Director", color: portColors.director }]
+      output: [{ id: "directorOut", label: "Director", color: portColors.director }]
     },
     image: {
       icon: FileImage,
@@ -17252,7 +17252,7 @@ function getNodeConfig(type) {
     storyboard: {
       icon: Clapperboard,
       input: [
-        { id: "directorIn", label: "Film Director", color: portColors.director },
+        { id: "directorIn", label: "Director", color: portColors.director },
         { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
         { id: "sceneReferenceIn", label: "Location", color: portColors.image },
         { id: "propsIn", label: "Props", color: portColors.image },
@@ -17283,7 +17283,7 @@ function getNodeConfig(type) {
       icon: Film,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
-        { id: "directorIn", label: "Film Director", color: portColors.director },
+        { id: "directorIn", label: "Director", color: portColors.director },
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
         { id: "endFrameIn", label: "End Frame", color: portColors.image },
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
@@ -18072,7 +18072,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
   if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
   if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
@@ -19327,7 +19327,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
   if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
-  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Film Director, Mood Board, or Character outputs";
+  if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Director, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -19340,7 +19340,7 @@ function humanPortKindLabel(kind) {
     style: "Style",
     transfer: "Mood Board",
     character: "Character",
-    director: "Film Director",
+    director: "Director",
     video: "Video",
     audio: "Audio",
     model3d: "3D",
@@ -20041,7 +20041,7 @@ function directorPackageStoryboardSceneDescription(source = null) {
     data.sceneOverview ? `Scene overview:\n${data.sceneOverview}` : "",
     data.motionDirection ? `Camera and blocking direction:\n${data.motionDirection}` : "",
     data.shotList ? `Shot list:\n${data.shotList}` : "",
-    !data.shotList && data.resultText ? `Film Director shot plan:\n${stripDirectorVisualStyleForStoryboard(data.resultText)}` : ""
+    !data.shotList && data.resultText ? `Director shot plan:\n${stripDirectorVisualStyleForStoryboard(data.resultText)}` : ""
   ].filter(Boolean).join("\n\n");
 }
 
@@ -22607,7 +22607,12 @@ function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "storyboard") return source.data.title || "Storyboard";
-  if (source.type === "skillDirector") return source.data.title === "Skill Director" ? "Film Director" : source.data.title || "Film Director";
+  if (source.type === "skillDirector") {
+    const title = String(source.data.title || "");
+    return /^(?:Skill Director|Film Director)(?: \d+)?$/.test(title)
+      ? title.replace(/^(?:Skill Director|Film Director)/, "Director")
+      : title || "Director";
+  }
   if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
   if (source.type === "coverage") return source.data.title || "Coverage";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
@@ -22864,14 +22869,17 @@ function normalizeCurrentNode(node) {
     const legacyShotCount = data.skillShotCount || data.skillSceneCount || data.shotCount || "3";
     const restoredShotList = splitSkillDirectorShotListForClient(data.shotList || "", data.shotListNotes || "");
     const skillDirectorData = { ...data };
-    const filmDirectorTitle = data.title && data.title !== "Skill Director" ? data.title : "Film Director";
+    const legacyDirectorTitle = String(data.title || "");
+    const directorTitle = /^(?:Skill Director|Film Director)(?: \d+)?$/.test(legacyDirectorTitle)
+      ? legacyDirectorTitle.replace(/^(?:Skill Director|Film Director)/, "Director")
+      : legacyDirectorTitle || "Director";
     ["skillCategory", "skillId", "skillEditorOpen", "skillDraft", "skillSceneCount", "shotCount"].forEach((field) => {
       delete skillDirectorData[field];
     });
     const normalizedDirectorData = {
-        ...createDefaultNodeData("skillDirector", filmDirectorTitle, 1),
+        ...createDefaultNodeData("skillDirector", directorTitle, 1),
         ...skillDirectorData,
-        title: filmDirectorTitle,
+        title: directorTitle,
         sceneName: data.sceneName || "",
         sceneOverview,
         text: sceneOverview,

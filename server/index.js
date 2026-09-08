@@ -7123,7 +7123,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
     modelName: selectedVideoModel.displayName,
     endpoint,
     mode: multiPrompt.length
-      ? `${is4k ? "Kling O3 4K" : "Kling O3 Pro"} Film Director multi-shot`
+      ? `${is4k ? "Kling O3 4K" : "Kling O3 Pro"} Director multi-shot`
       : `${is4k ? "Kling O3 4K" : "Kling O3 Pro"} ${routeKind}-to-video`,
     prompt,
     submittedPrompt: multiPrompt.length ? JSON.stringify(multiPrompt) : submittedPrompt,
@@ -7223,7 +7223,7 @@ async function runKreaKlingO3Video(
     modelName: selectedVideoModel.displayName,
     endpoint,
     mode: multiPrompt.length
-      ? `${selectedVideoModel.displayName} Film Director multi-shot`
+      ? `${selectedVideoModel.displayName} Director multi-shot`
       : `${selectedVideoModel.displayName} ${startFrameUrl ? "image" : "text"}-to-video`,
     prompt,
     submittedPrompt: multiPrompt.length ? JSON.stringify(input.multi_prompt) : input.prompt,
@@ -7369,7 +7369,7 @@ async function optimizeKlingFilmDirectorMultiPrompt(multiPrompt = []) {
     const optimized = optimizedMultiPrompt.some((item, index) => item.prompt !== multiPrompt[index].prompt);
     return { multiPrompt: optimizedMultiPrompt, optimized };
   } catch (error) {
-    console.warn("Kling Film Director prompt optimization failed; submitting a byte-safe compact prompt instead.", error);
+    console.warn("Kling Director prompt optimization failed; submitting a byte-safe compact prompt instead.", error);
     return {
       multiPrompt: multiPrompt.map((item) => ({ ...item, prompt: clipKlingDirectorPrompt(item.prompt) })),
       optimized: false
@@ -18500,7 +18500,7 @@ Return this exact JSON shape:
       "angle": "None, Macro, Low Angle, High Angle, Extreme High, Bird's Eye View, Extreme Low, Portrait, Profile, or Selfie",
       "beat": "story beat in one sentence",
       "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
-      "notes": "continuity note in one short phrase; for Film Director plans begin with CUT N and the keyframe phase"
+      "notes": "continuity note in one short phrase; for Director plans begin with CUT N and the keyframe phase"
     }
   ]
 }
