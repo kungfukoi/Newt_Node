@@ -40,6 +40,8 @@ The inserted graph is placed beyond the occupied canvas and receives fresh node,
 
 When a reusable input is bound, its saved input node is replaced by the chosen project node and outgoing connections are reattached. Matching `@tags` are updated and affected downstream generated results are cleared so stale media is not presented as belonging to the newly bound inputs. Insertion never runs or submits paid work automatically.
 
+The Presets sidebar can be hidden or restored with **Settings > User Preferences > Show Preset Panel**. Hiding the panel does not delete saved presets or disable preset creation from the selection action bar.
+
 ## Delete A Preset
 
 Choose the preset in the sidebar and select the trash button. Deleting the library entry does not remove copies already inserted into workflows. Copied dependency media is retained because those workflows may still reference it.

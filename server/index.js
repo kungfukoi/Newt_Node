@@ -100,6 +100,7 @@ import {
 import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
+import { normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
   normalizeComfyRootPath,
@@ -1035,6 +1036,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     branchStatus,
     comfyWanRootPath: settingsValues.comfyWanRootPath || process.env.COMFYUI_ROOT || "",
     modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
+    userPreferences: normalizeUserPreferences(settingsValues.userPreferences),
     updateInProgress: Boolean(updatePromise),
     restartRequested
   };
@@ -1076,6 +1078,7 @@ async function saveRuntimeSettings(body = {}) {
   if (repository) updates.repository = repository;
   if (body.comfyWanRootPath !== undefined) updates.comfyWanRootPath = normalizeComfyRootPath(body.comfyWanRootPath);
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
+  if (body.userPreferences !== undefined) updates.userPreferences = normalizeUserPreferences(body.userPreferences);
   if (body.modelProviderPreferences !== undefined || Object.keys(defaultModelProviderPreferences).some((key) => !settingsValues.modelProviderPreferences?.[key])) {
     const requestedProviderPreferences = body.modelProviderPreferences !== undefined
       ? body.modelProviderPreferences
@@ -1787,6 +1790,7 @@ async function readRuntimeSettingsStore() {
     repository: normalizeUpdateRepository(data?.repository),
     comfyWanRootPath: normalizeComfyRootPath(data?.comfyWanRootPath),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences),
+    userPreferences: normalizeUserPreferences(data?.userPreferences),
     providerPreferences: data?.providerPreferences && typeof data.providerPreferences === "object" ? data.providerPreferences : {},
     credentials: normalizeProviderCredentialStore(data?.credentials),
     activeCredentialIds: normalizeActiveCredentialIds(data?.activeCredentialIds, data?.credentials),
@@ -1810,6 +1814,7 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.comfyWanRootPath !== undefined) next.comfyWanRootPath = normalizeComfyRootPath(patch.comfyWanRootPath);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
+  if (patch.userPreferences !== undefined) next.userPreferences = normalizeUserPreferences(patch.userPreferences);
   if (patch.credentials !== undefined) {
     next.credentials = normalizeProviderCredentialStore(patch.credentials);
     delete next.falKey;

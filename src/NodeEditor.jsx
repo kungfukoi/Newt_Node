@@ -1218,7 +1218,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
@@ -7619,7 +7619,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               </div>
             )}
           </div>
-          <NewtPresetLibrary controller={newtPresets} />
+          {showPresetPanel && <NewtPresetLibrary controller={newtPresets} />}
         </div>
         {nodeCatalog.map((item) => {
           const Icon = item.icon;

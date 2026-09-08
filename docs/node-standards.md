@@ -819,6 +819,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Local MiniMax H3 readiness and local ComfyUI configuration/preflight status remain available alongside the remote-provider controls.
 - The Branch metric shows the current branch state and the loaded package version from `package.json`.
 - Enabled Models controls the model dropdown preferences stored in runtime settings. It should list every callable Image Model and Video Model option exposed by `src/modelOptions.js`.
+- User Preferences are normalized through `src/userPreferences.js` and stored in local runtime settings. `Show Preset Panel` defaults on for existing installations and controls only the left-sidebar Newt Presets library; hiding it must not delete presets or disable preset capture.
 - Repository update and restart actions belong in Settings and should call local server routes through `src/api/newtApi.js`.
 - Runtime settings should remain local app state. Do not treat `server/data/runtime-settings.json` or generated history files as source fixtures.
 

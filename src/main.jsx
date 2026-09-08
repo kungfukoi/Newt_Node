@@ -67,6 +67,7 @@ import {
   minimaxH3TextAspectRatioOptions
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { defaultUserPreferences, normalizeUserPreferences } from "./userPreferences.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -162,6 +163,7 @@ function App() {
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [modelProviderPreferences, setModelProviderPreferences] = React.useState(defaultModelProviderPreferences);
   const [modelProviderAvailability, setModelProviderAvailability] = React.useState({});
+  const [userPreferences, setUserPreferences] = React.useState(defaultUserPreferences);
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
@@ -213,6 +215,15 @@ function App() {
 
     window.addEventListener("newtnode:model-provider-settings-updated", handleModelProviderSettingsUpdated);
     return () => window.removeEventListener("newtnode:model-provider-settings-updated", handleModelProviderSettingsUpdated);
+  }, []);
+
+  React.useEffect(() => {
+    function handleUserPreferencesUpdated(event) {
+      setUserPreferences(normalizeUserPreferences(event.detail));
+    }
+
+    window.addEventListener("newtnode:user-preferences-updated", handleUserPreferencesUpdated);
+    return () => window.removeEventListener("newtnode:user-preferences-updated", handleUserPreferencesUpdated);
   }, []);
 
   React.useEffect(() => {
@@ -294,8 +305,10 @@ function App() {
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
       setModelProviderPreferences(normalizeModelProviderPreferences(data.modelProviderPreferences));
       setModelProviderAvailability(providerAvailabilityFromSettings(data));
+      setUserPreferences(normalizeUserPreferences(data.userPreferences));
     } catch {
       setModelPreferences(defaultModelPreferences);
+      setUserPreferences(defaultUserPreferences);
     } finally {
       setModelPreferencesLoaded(true);
     }
@@ -837,7 +850,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>

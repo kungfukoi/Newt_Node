@@ -4,6 +4,7 @@ export const defaultSettingsOpenSections = Object.freeze({
   credentials: true,
   providers: true,
   models: false,
+  userPreferences: false,
   repository: false,
   restart: false,
   status: true,

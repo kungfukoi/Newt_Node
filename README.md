@@ -43,7 +43,7 @@ Current release: `v3.0.0-beta.0`
 - **Generation progress**: Model nodes show real provider progress when available and a clearly marked estimate otherwise, including batch completion, queue position, elapsed time, and terminal success/failure states.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
-- **Settings**: Local API keys, provider routing, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page.
+- **Settings**: Local API keys, provider routing, user preferences, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page. **User Preferences > Show Preset Panel** controls whether the Presets library appears in the node sidebar.
 - **Cross-platform launchers**: Windows and macOS share supervised production startup, rotating logs, and bounded crash recovery. Development watch mode remains separate.
 - **Production reliability**: Recoverable history backups, bounded generation scheduling, inline uncertain-job recovery, and opt-in Settings diagnostics protect long-running work. See [Production Reliability](docs/production-reliability.md).
 

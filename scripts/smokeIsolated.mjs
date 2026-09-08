@@ -60,7 +60,14 @@ try {
   await rm(historyFile);
   await request("/api/history?summary=1");
   assert.equal(JSON.parse(await readFile(historyFile, "utf8"))[0].id, "smoke-generation");
-  assert.match((await (await request("/api/settings")).json()).historyRecoveryNotice, /restored/);
+  const initialSettings = await (await request("/api/settings")).json();
+  assert.match(initialSettings.historyRecoveryNotice, /restored/);
+  assert.equal(initialSettings.userPreferences.showPresetPanel, true);
+  const savedSettings = await (await request("/api/settings", {
+    userPreferences: { showPresetPanel: false }
+  })).json();
+  assert.equal(savedSettings.userPreferences.showPresetPanel, false);
+  assert.equal((await (await request("/api/settings")).json()).userPreferences.showPresetPanel, false);
   const catalog = await (await request("/api/project-outputs?projectId=smoke-project")).json();
   assert.equal(catalog.total, 1);
   const poster = await request("/api/video-poster?url=" + encodeURIComponent("/outputs/clip.mp4"));
@@ -93,7 +100,7 @@ try {
   }
   assert.equal(recovered.state, "completed", recovered.message);
   assert.equal((await (await request("/api/project-outputs?projectId=recovered-project")).json()).total, 1);
-  console.log("Isolated API passed: startup, history backup recovery, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import; no provider calls.");
+  console.log("Isolated API passed: startup, history backup recovery, user preferences, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");
   if (exited) await exited;
