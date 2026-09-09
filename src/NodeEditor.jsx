@@ -203,10 +203,13 @@ import { characterSheetModelOptions, mergeGeneratedCharacterSheetVariants, norma
 import {
   normalizeOpenAiImage2Background,
   normalizeOpenAiImage2Quality,
+  normalizeOpenAiImage2Variant,
   openAiImage2Background,
   openAiImage2BackgroundOptions,
   openAiImage2Quality,
-  openAiImage2QualityOptions
+  openAiImage2QualityOptions,
+  openAiImage2Variant,
+  openAiImage2VariantOptions
 } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -1042,6 +1045,7 @@ const initialNodes = [
       aspectRatio: "16:9",
       resolution: "2K",
       imageBackground: openAiImage2Background,
+      openAiImageVariant: openAiImage2Variant,
       kreaCreativity: "raw",
       batchCount: "1",
       settingsOpen: true
@@ -15293,6 +15297,18 @@ function NodeBody({
             </NodeRow>
           )}
           {isGptImage25Model(node.data.model) && (
+            <NodeRow label="Variant">
+              <select
+                value={normalizeOpenAiImage2Variant(node.data.openAiImageVariant)}
+                onChange={(event) => onUpdate(node.id, { openAiImageVariant: normalizeOpenAiImage2Variant(event.target.value) })}
+              >
+                {openAiImage2VariantOptions.map((option) => (
+                  <option key={option} value={option}>{formatOpenAiImage2Variant(option)}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
+          {isGptImage25Model(node.data.model) && (
             <NodeRow label="Background">
               <select
                 value={normalizeOpenAiImage2Background(node.data.imageBackground)}
@@ -17959,6 +17975,7 @@ function createDefaultNodeData(type, label, count) {
       resolution: "2K",
       quality: openAiImage2Quality,
       imageBackground: openAiImage2Background,
+      openAiImageVariant: openAiImage2Variant,
       kreaCreativity: "raw",
       seedreamLayers: false,
       batchCount: "1",
@@ -17992,6 +18009,7 @@ function imageModelSelectionPatch(data = {}, model) {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImageQualityForModel(data.quality, model),
     imageBackground: normalizeOpenAiImage2Background(data.imageBackground),
+    openAiImageVariant: normalizeOpenAiImage2Variant(data.openAiImageVariant),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
@@ -18054,6 +18072,10 @@ function formatOpenAiImage2Quality(value) {
 function formatOpenAiImage2Background(value) {
   const background = normalizeOpenAiImage2Background(value);
   return `${background.charAt(0).toUpperCase()}${background.slice(1)}`;
+}
+
+function formatOpenAiImage2Variant(value) {
+  return normalizeOpenAiImage2Variant(value) === "sunburst" ? "Sunburst (Precision)" : "Flare (Faster)";
 }
 
 function normalizeOpenAiImageQualityForModel(value, model) {

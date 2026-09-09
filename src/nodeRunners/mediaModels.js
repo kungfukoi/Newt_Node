@@ -22,6 +22,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     resolution: node.data.resolution,
     quality: node.data.quality,
     imageBackground: node.data.imageBackground,
+    openAiImageVariant: node.data.openAiImageVariant,
     kreaCreativity: node.data.kreaCreativity,
     seedreamLayers: Boolean(node.data.seedreamLayers),
     imagePromptUrls: imagePromptItems.map((item) => item.url),

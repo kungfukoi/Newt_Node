@@ -2,6 +2,8 @@ export const openAiImage2Quality = "high";
 export const openAiImage2QualityOptions = ["auto", "low", "medium", "high", "xhigh", "max"];
 export const openAiImage2Background = "auto";
 export const openAiImage2BackgroundOptions = ["auto", "transparent", "opaque"];
+export const openAiImage2Variant = "flare";
+export const openAiImage2VariantOptions = ["flare", "sunburst"];
 
 export const openAiImage2Costs = {
   low: {
@@ -115,6 +117,15 @@ export function normalizeOpenAiImage2Quality(value, fallback = openAiImage2Quali
 export function normalizeOpenAiImage2Background(value, fallback = openAiImage2Background) {
   const normalized = String(value || "").trim().toLowerCase();
   return openAiImage2BackgroundOptions.includes(normalized) ? normalized : fallback;
+}
+
+export function normalizeOpenAiImage2Variant(value, fallback = openAiImage2Variant) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return openAiImage2VariantOptions.includes(normalized) ? normalized : fallback;
+}
+
+export function openAiImage2FalEndpoint({ variant, edit = false } = {}) {
+  return `openai/gpt-image-2.5/${normalizeOpenAiImage2Variant(variant)}/${edit ? "edit" : "text-to-image"}`;
 }
 
 export function buildOpenAiImage2FalInput({ prompt, imageSize, quality, background }) {

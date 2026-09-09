@@ -9,7 +9,9 @@ import {
   estimateOpenAiImage2HighCost,
   normalizeOpenAiImage2Background,
   normalizeOpenAiImage2Quality,
+  normalizeOpenAiImage2Variant,
   openAiImage2Background,
+  openAiImage2FalEndpoint,
   openAiImage2Quality
 } from "../src/openAiImage2.js";
 
@@ -46,6 +48,16 @@ test("OpenAI Image 2.5 supports explicit transparent PNG output", () => {
     output_format: "png",
     sync_mode: false
   });
+});
+
+test("OpenAI Image 2.5 routes Flare and Sunburst generation and editing", () => {
+  assert.equal(normalizeOpenAiImage2Variant(), "flare");
+  assert.equal(normalizeOpenAiImage2Variant("SUNBURST"), "sunburst");
+  assert.equal(normalizeOpenAiImage2Variant("unsupported"), "flare");
+  assert.equal(openAiImage2FalEndpoint(), "openai/gpt-image-2.5/flare/text-to-image");
+  assert.equal(openAiImage2FalEndpoint({ variant: "flare", edit: true }), "openai/gpt-image-2.5/flare/edit");
+  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst" }), "openai/gpt-image-2.5/sunburst/text-to-image");
+  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst", edit: true }), "openai/gpt-image-2.5/sunburst/edit");
 });
 
 test("OpenAI Image 2.5 estimates use Fal's published Flare quality tiers", () => {
