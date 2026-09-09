@@ -56,14 +56,16 @@ export function normalizeMinimaxH3LocalUrl(value) {
 }
 
 export function minimaxH3LocalFileUri(filePath, config = minimaxH3LocalConfigFromEnv()) {
-  if (!String(filePath || "").trim()) throw new Error("MiniMax H3 Local input path is missing.");
-  const resolvedPath = path.resolve(String(filePath || ""));
-  if (!config.hostMediaRoot && !config.engineMediaRoot) return pathToFileURL(resolvedPath).href;
+  const inputPath = String(filePath || "").trim();
+  if (!inputPath) throw new Error("MiniMax H3 Local input path is missing.");
+  const pathApi = pathApiFor(inputPath, config.hostMediaRoot);
+  const resolvedPath = pathApi.resolve(inputPath);
+  if (!config.hostMediaRoot && !config.engineMediaRoot) return portableFileUri(resolvedPath, pathApi);
 
-  const hostRoot = path.resolve(config.hostMediaRoot);
-  const relativePath = path.relative(hostRoot, resolvedPath);
+  const hostRoot = pathApi.resolve(config.hostMediaRoot);
+  const relativePath = pathApi.relative(hostRoot, resolvedPath);
   if (!relativePath || relativePath === ".") throw new Error("MiniMax H3 Local input must be a file below the configured host media root.");
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+  if (relativePath.startsWith("..") || pathApi.isAbsolute(relativePath)) {
     throw new Error("MiniMax H3 Local input is outside MINIMAX_H3_LOCAL_HOST_MEDIA_ROOT.");
   }
   return mappedEngineFileUri(config.engineMediaRoot, relativePath);
@@ -350,9 +352,31 @@ function localTaskForRoute(route) {
 function mappedEngineFileUri(engineRoot, relativePath) {
   const suffix = relativePath.split(/[\\/]+/).filter(Boolean).map(encodeURIComponent).join("/");
   if (/^file:\/\//i.test(engineRoot)) return `${engineRoot.replace(/\/+$/, "")}/${suffix}`;
-  if (/^[A-Za-z]:[\\/]/.test(engineRoot)) return pathToFileURL(path.join(engineRoot, relativePath)).href;
+  if (isWindowsAbsolutePath(engineRoot)) {
+    return portableFileUri(path.win32.join(engineRoot, relativePath), path.win32);
+  }
   const normalizedRoot = String(engineRoot).replace(/\\/g, "/").replace(/\/+$/, "");
   return `file://${normalizedRoot.startsWith("/") ? "" : "/"}${normalizedRoot}/${suffix}`;
+}
+
+function pathApiFor(...values) {
+  return values.some(isWindowsAbsolutePath) ? path.win32 : path;
+}
+
+function isWindowsAbsolutePath(value) {
+  const candidate = String(value || "");
+  return /^[A-Za-z]:[\\/]/.test(candidate) || /^(?:\\\\|\/\/)[^\\/]/.test(candidate);
+}
+
+function portableFileUri(resolvedPath, pathApi) {
+  if (pathApi !== path.win32) return pathToFileURL(resolvedPath).href;
+  const normalized = String(resolvedPath).replace(/\\/g, "/");
+  if (normalized.startsWith("//")) {
+    const [host, ...segments] = normalized.slice(2).split("/").filter(Boolean);
+    return `file://${host}/${segments.map(encodeURIComponent).join("/")}`;
+  }
+  const [drive, ...segments] = normalized.split("/");
+  return `file:///${drive}/${segments.map(encodeURIComponent).join("/")}`;
 }
 
 async function fetchJson(url, options, fetchImpl) {

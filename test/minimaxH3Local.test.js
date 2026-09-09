@@ -36,6 +36,10 @@ test("local file URIs support native and shared-root mappings", () => {
     hostMediaRoot: "",
     engineMediaRoot: ""
   }), /^file:\/\/\/C:.*shot%20one\.png$/i);
+  assert.equal(minimaxH3LocalFileUri("C:\\media\\shot #1.png", {
+    hostMediaRoot: "",
+    engineMediaRoot: ""
+  }), "file:///C:/media/shot%20%231.png");
   assert.equal(minimaxH3LocalFileUri("C:\\Newt\\outputs\\shot one.png", {
     hostMediaRoot: "C:\\Newt\\outputs",
     engineMediaRoot: "/mnt/newt/outputs"
@@ -44,6 +48,10 @@ test("local file URIs support native and shared-root mappings", () => {
     hostMediaRoot: "C:\\Newt\\outputs",
     engineMediaRoot: "/mnt/newt/outputs"
   }), /outside/i);
+  assert.equal(minimaxH3LocalFileUri("C:\\Newt\\outputs\\shot one.png", {
+    hostMediaRoot: "C:\\Newt\\outputs",
+    engineMediaRoot: "D:\\MiniMax\\inputs"
+  }), "file:///D:/MiniMax/inputs/shot%20one.png");
 });
 
 test("local requests map Newt routes to SGLang H3 tasks", () => {
