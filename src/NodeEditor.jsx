@@ -200,7 +200,14 @@ import {
   normalizeCharacterCustomSheets
 } from "./characterSheetLibrary.js";
 import { characterSheetModelOptions, mergeGeneratedCharacterSheetVariants, normalizeCharacterSheetModel } from "./characterSheetModels.js";
-import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
+import {
+  normalizeOpenAiImage2Background,
+  normalizeOpenAiImage2Quality,
+  openAiImage2Background,
+  openAiImage2BackgroundOptions,
+  openAiImage2Quality,
+  openAiImage2QualityOptions
+} from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
   batchOptions,
@@ -1034,6 +1041,7 @@ const initialNodes = [
       prompt: "A serene landscape with mountains",
       aspectRatio: "16:9",
       resolution: "2K",
+      imageBackground: openAiImage2Background,
       kreaCreativity: "raw",
       batchCount: "1",
       settingsOpen: true
@@ -15284,6 +15292,18 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
+          {isGptImage25Model(node.data.model) && (
+            <NodeRow label="Background">
+              <select
+                value={normalizeOpenAiImage2Background(node.data.imageBackground)}
+                onChange={(event) => onUpdate(node.id, { imageBackground: normalizeOpenAiImage2Background(event.target.value) })}
+              >
+                {openAiImage2BackgroundOptions.map((option) => (
+                  <option key={option} value={option}>{formatOpenAiImage2Background(option)}</option>
+                ))}
+              </select>
+            </NodeRow>
+          )}
           {isKrea2Large && (
             <NodeRow label="Creativity">
               <select value={normalizeKrea2Creativity(node.data.kreaCreativity)} onChange={(event) => onUpdate(node.id, { kreaCreativity: event.target.value })}>
@@ -17938,6 +17958,7 @@ function createDefaultNodeData(type, label, count) {
       aspectRatio: "16:9",
       resolution: "2K",
       quality: openAiImage2Quality,
+      imageBackground: openAiImage2Background,
       kreaCreativity: "raw",
       seedreamLayers: false,
       batchCount: "1",
@@ -17970,6 +17991,7 @@ function imageModelSelectionPatch(data = {}, model) {
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImageQualityForModel(data.quality, model),
+    imageBackground: normalizeOpenAiImage2Background(data.imageBackground),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
@@ -18027,6 +18049,11 @@ function formatOpenAiImage2Quality(value) {
   if (quality === "xhigh") return "Extra High";
   if (quality === "max") return "Max";
   return "High";
+}
+
+function formatOpenAiImage2Background(value) {
+  const background = normalizeOpenAiImage2Background(value);
+  return `${background.charAt(0).toUpperCase()}${background.slice(1)}`;
 }
 
 function normalizeOpenAiImageQualityForModel(value, model) {

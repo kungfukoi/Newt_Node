@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { imageModelNames, imageModelOptions } from "../src/modelOptions.js";
-import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost, estimateOpenAiImage2HighCost, normalizeOpenAiImage2Quality, openAiImage2Quality } from "../src/openAiImage2.js";
+import {
+  buildOpenAiImage2FalInput,
+  estimateLegacyOpenAiImage2Cost,
+  estimateOpenAiImage2Cost,
+  estimateOpenAiImage2HighCost,
+  normalizeOpenAiImage2Background,
+  normalizeOpenAiImage2Quality,
+  openAiImage2Background,
+  openAiImage2Quality
+} from "../src/openAiImage2.js";
 
 test("Image Model catalog exposes OpenAI Image 2.5 and the explicit legacy Image 2 choice", () => {
   assert.ok(imageModelOptions.includes(imageModelNames.openAiImage2));
@@ -17,6 +26,26 @@ test("OpenAI Image 2.5 defaults to high quality and accepts every Fal quality ti
   assert.equal(normalizeOpenAiImage2Quality("xhigh"), "xhigh");
   assert.equal(normalizeOpenAiImage2Quality("max"), "max");
   assert.equal(normalizeOpenAiImage2Quality("unsupported"), "high");
+});
+
+test("OpenAI Image 2.5 supports explicit transparent PNG output", () => {
+  assert.equal(openAiImage2Background, "auto");
+  assert.equal(normalizeOpenAiImage2Background("TRANSPARENT"), "transparent");
+  assert.equal(normalizeOpenAiImage2Background("unsupported"), "auto");
+  assert.deepEqual(buildOpenAiImage2FalInput({
+    prompt: "An isolated product",
+    imageSize: { width: 1024, height: 1024 },
+    quality: "high",
+    background: "transparent"
+  }), {
+    prompt: "An isolated product",
+    image_size: { width: 1024, height: 1024 },
+    background: "transparent",
+    quality: "high",
+    num_images: 1,
+    output_format: "png",
+    sync_mode: false
+  });
 });
 
 test("OpenAI Image 2.5 estimates use Fal's published Flare quality tiers", () => {

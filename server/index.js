@@ -109,7 +109,7 @@ import {
 } from "./comfyWanPreflight.js";
 import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import { createWanBlendComfyResult } from "./wanblend/engine.js";
-import { estimateLegacyOpenAiImage2Cost as estimateLegacyOpenAiImage2OutputCost, estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
+import { buildOpenAiImage2FalInput, estimateLegacyOpenAiImage2Cost as estimateLegacyOpenAiImage2OutputCost, estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Background, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import {
   buildNanoBanana2FalInput,
@@ -3555,6 +3555,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         aspectRatio,
         resolution: req.body.resolution,
         quality: req.body.quality,
+        background: req.body.imageBackground,
         editMaskDataUrl: req.body.editMaskDataUrl
       });
       const output = await downloadImage(
@@ -3590,6 +3591,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           resolution: req.body.resolution || "2K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
+          background: openAiImage.background,
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels
         },
@@ -19977,7 +19979,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ modelName, prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
+async function generateFalOpenAiImage2({ modelName, prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, background, editMaskDataUrl }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -19990,7 +19992,7 @@ async function generateFalOpenAiImage2({ modelName, prompt, imagePromptUrls, ima
   }
 
   const editMaskInput = editMaskDataUrl ? imageDataUrlAsset(editMaskDataUrl, "character-wardrobe-mask.png") : null;
-  return generateFalOpenAiImage2FromInputs({ modelName, prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
+  return generateFalOpenAiImage2FromInputs({ modelName, prompt, imageInputs, aspectRatio, resolution, quality, background, editMaskInput });
 }
 
 async function generateOpenAiImage2FromInputs(options) {
@@ -20047,23 +20049,22 @@ async function generateKreaOpenAiImage2FromInputs({
   };
 }
 
-async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.openAiImage2, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
+async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.openAiImage2, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, background: requestedBackground, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
   const requestedQualityValue = normalizeOpenAiImage2Quality(requestedQuality);
   const quality = legacyModel && !["low", "medium", "high"].includes(requestedQualityValue) ? "high" : requestedQualityValue;
+  const background = normalizeOpenAiImage2Background(requestedBackground);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
   const endpoint = legacyModel
     ? imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2"
     : imageInputs.length ? "openai/gpt-image-2.5/flare/edit" : "openai/gpt-image-2.5/flare/text-to-image";
-  const input = {
+  const input = buildOpenAiImage2FalInput({
     prompt: submittedPrompt,
-    image_size: openAiSizeToFalImageSize(size),
+    imageSize: openAiSizeToFalImageSize(size),
     quality,
-    num_images: 1,
-    output_format: "png",
-    sync_mode: false
-  };
+    background
+  });
 
   if (imageInputs.length) {
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
@@ -20082,6 +20083,7 @@ async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.o
     remoteImage,
     size,
     quality,
+    background,
     submittedPrompt,
     resultText: result?.data?.revised_prompt || result?.data?.prompt || "",
     provider: "fal.ai"

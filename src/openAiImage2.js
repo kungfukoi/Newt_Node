@@ -1,5 +1,7 @@
 export const openAiImage2Quality = "high";
 export const openAiImage2QualityOptions = ["auto", "low", "medium", "high", "xhigh", "max"];
+export const openAiImage2Background = "auto";
+export const openAiImage2BackgroundOptions = ["auto", "transparent", "opaque"];
 
 export const openAiImage2Costs = {
   low: {
@@ -108,6 +110,23 @@ export const openAiImage2HighCosts = openAiImage2Costs.high;
 export function normalizeOpenAiImage2Quality(value, fallback = openAiImage2Quality) {
   const normalized = String(value || "").trim().toLowerCase();
   return openAiImage2QualityOptions.includes(normalized) ? normalized : fallback;
+}
+
+export function normalizeOpenAiImage2Background(value, fallback = openAiImage2Background) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return openAiImage2BackgroundOptions.includes(normalized) ? normalized : fallback;
+}
+
+export function buildOpenAiImage2FalInput({ prompt, imageSize, quality, background }) {
+  return {
+    prompt,
+    image_size: imageSize,
+    background: normalizeOpenAiImage2Background(background),
+    quality: normalizeOpenAiImage2Quality(quality),
+    num_images: 1,
+    output_format: "png",
+    sync_mode: false
+  };
 }
 
 export function estimateOpenAiImage2Cost({ resolution, size, quality = openAiImage2Quality, edit = false, pricing = openAiImage2Costs }) {
