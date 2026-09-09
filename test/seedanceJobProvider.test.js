@@ -63,6 +63,21 @@ test("Krea reads original jobs, processes completion, and recognizes cancellatio
   assert.equal(calls[0].headers.Authorization, `Bearer ${key}`);
 });
 
+test("Krea preserves structured provider failure details", async () => {
+  const client = await adapter([{
+    body: {
+      status: "failed",
+      error: { code: "internal", message: "Webhook timed out after 3600000ms" }
+    }
+  }])(spec("krea"));
+  await assert.rejects(client.poll({ requestId: "id" }), (error) => {
+    assert.equal(error.confirmedFailure, true);
+    assert.equal(error.providerStatus, "failed");
+    assert.match(error.message, /internal: Webhook timed out after 3600000ms/);
+    return true;
+  });
+});
+
 test("switching provider keys pauses recovery instead of silently using another account", async () => {
   let called = false;
   const factory = createSeedanceJobAdapter({ getKey: async () => "different-key", fetchImpl: async () => { called = true; } });

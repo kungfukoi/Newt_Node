@@ -91,6 +91,10 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
             await commit(runId, {
               state: error.confirmedFailure ? "failed" : "uncertain",
               health: error.confirmedFailure ? "failed" : "attention",
+              ...(error.confirmedFailure ? {
+                providerStatus: error.providerStatus || "failed",
+                lastContactAt: iso()
+              } : {}),
               lastError: jobErrorDiagnostic(error),
               message: error.confirmedFailure ? error.message : "Needs attention: submission acceptance is unknown. Check the provider before starting another generation; no automatic resubmission."
             });
@@ -128,12 +132,18 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       }
     } catch (error) {
       job = jobs.get(runId);
+      const confirmedFailure = Boolean(error.confirmedFailure);
       await commit(runId, {
-        state: error.confirmedFailure ? "failed" : "recovering",
-        health: "reconnecting", retryCount: (job.retryCount || 0) + 1,
+        state: confirmedFailure ? "failed" : "recovering",
+        health: confirmedFailure ? "failed" : "reconnecting",
+        retryCount: confirmedFailure ? (job.retryCount || 0) : (job.retryCount || 0) + 1,
         lastError: jobErrorDiagnostic(error),
+        ...(confirmedFailure ? {
+          providerStatus: error.providerStatus || "failed",
+          lastContactAt: iso()
+        } : {}),
         ...(error.refreshRemote ? { remote: null } : {}),
-        message: error.confirmedFailure ? error.message : error.waitingForCredential
+        message: confirmedFailure ? error.message : error.waitingForCredential
           ? "Waiting for the original provider key to be enabled and selected in Settings."
           : job.remote ? "Video generated; retrying local save. " + (error.safeMessage || "Check storage and network access.")
             : "Status temporarily unavailable; reconnecting to the original job."
@@ -165,6 +175,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       groupId: body.generationGroupId || job.runId,
       batchIndex: Number(body.generationBatchIndex) || 1, batchTotal: Number(body.generationBatchTotal) || 1,
       state: job.state, requestId: job.requestId || "", provider: job.spec.provider,
+      providerStatus: job.providerStatus || "",
       model: job.spec.modelName, createdAt: job.createdAt, updatedAt: job.updatedAt,
       message: job.message, health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
       providerAcceptedAt: job.providerAcceptedAt || job.submissionStartedAt || null,

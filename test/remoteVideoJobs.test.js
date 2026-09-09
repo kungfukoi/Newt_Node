@@ -216,6 +216,9 @@ test("confirmed rejection fails, but a missing original credential waits", async
   credentialReady = true;
   await service.step("one");
   assert.equal(service.get("one").state, "failed");
+  assert.equal(service.get("one").health, "failed");
+  assert.equal(service.get("one").providerStatus, "failed");
+  assert.equal(service.get("one").retryCount, 1);
   assert.equal(service.get("one").message, "Invalid input");
 });
 
