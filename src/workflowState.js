@@ -9,6 +9,41 @@ export function cloneGraphState(state) {
   };
 }
 
+export function restoreGraphHistorySnapshot(snapshot, currentState, { nodeDataIds = [], restoreStructure = true } = {}) {
+  const restored = cloneGraphState(snapshot || {});
+  const current = currentState || {};
+  const currentNodesById = new Map((current.nodes || []).map((node) => [node.id, node]));
+  const restoredNodeDataIds = new Set(nodeDataIds);
+
+  if (!restoreStructure) {
+    const snapshotNodesById = new Map(restored.nodes.map((node) => [node.id, node]));
+    return {
+      nodes: (current.nodes || []).map((node) => {
+        const snapshotNode = snapshotNodesById.get(node.id);
+        return snapshotNode && restoredNodeDataIds.has(node.id)
+          ? { ...node, data: snapshotNode.data }
+          : node;
+      }),
+      edges: current.edges || [],
+      groups: current.groups || [],
+      viewport: { ...(current.viewport || restored.viewport) },
+      selectedNodeIds: [...(current.selectedNodeIds || [])],
+      selectedEdgeId: current.selectedEdgeId || null
+    };
+  }
+
+  return {
+    ...restored,
+    nodes: restored.nodes.map((node) => {
+      const currentNode = currentNodesById.get(node.id);
+      if (!currentNode || restoredNodeDataIds.has(node.id)) return node;
+      return { ...node, data: currentNode.data };
+    }),
+    // Canvas navigation is view state, not an undoable workflow edit.
+    viewport: { ...(current.viewport || restored.viewport) }
+  };
+}
+
 export function createWorkflowFingerprint() {
   const nodeCache = new WeakMap();
   const edgeCache = new WeakMap();

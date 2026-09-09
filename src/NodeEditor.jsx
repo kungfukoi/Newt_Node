@@ -428,6 +428,7 @@ import {
   cloneNode,
   createNodeId,
   dedupeEdges,
+  restoreGraphHistorySnapshot,
   resetCopiedNodeRuntime,
   sameEdgeList,
   sameStringList
@@ -1276,6 +1277,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const selectedEdgeIdRef = React.useRef(null);
+  const selectedNodeIdsRef = React.useRef(selectedNodeIds);
+  const projectIdRef = React.useRef(projectId);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [comfyWanDialog, setComfyWanDialog] = React.useState(null);
 
@@ -1493,6 +1496,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [groups]);
 
   React.useLayoutEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds]);
+
+  React.useLayoutEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
+  React.useLayoutEffect(() => {
     if (!active) return undefined;
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
@@ -1705,6 +1716,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   React.useEffect(() => {
     function handleKeyDown(event) {
+      if (event.defaultPrevented) return;
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
 
@@ -1745,7 +1757,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
-      if (event.target.closest?.("input, textarea, select")) return;
+      if (event.target.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='textbox']")) return;
+
+      if (commandKey && (key === "z" || key === "y") && event.repeat) {
+        event.preventDefault();
+        return;
+      }
 
       if (commandKey && (key === "=" || key === "+")) {
         event.preventDefault();
@@ -2444,7 +2461,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function removeEdges(edgeIds) {
     if (!edgeIds.length) return;
-    pushUndoSnapshot();
     const ids = new Set(edgeIds);
     const autoAspectInputsRemoved = new Set(
       edgesRef.current
@@ -2458,6 +2474,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "coverage")
         .map((edge) => edge.to.nodeId)
     );
+    pushUndoSnapshot({ nodeDataIds: [...autoAspectInputsRemoved, ...coverageInputsRemoved], restoreStructure: true });
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
     autoAspectInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetAutoAspectOutputPatch()));
     coverageInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetCoverageOutputPatch()));
@@ -2713,7 +2730,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       fileName: file.name,
       status: "uploading",
@@ -2824,7 +2841,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function captureComposerFrame(node, imageDataUrl) {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       status: "uploading",
       error: ""
@@ -2873,7 +2890,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function captureFrameItFrame(node, imageDataUrl) {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -2919,7 +2936,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function generateFrameItMedia(node, imageDataUrl, mode = "image") {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -3052,7 +3069,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (!files.length) return;
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       status: "uploading",
       error: "",
@@ -3101,7 +3118,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         .slice(0, maxCharacterCustomSheets - existing.length);
       if (!files.length) return false;
 
-      pushUndoSnapshot();
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
       updateNode(node.id, { status: "uploading", error: "" });
       try {
         const uploaded = [];
@@ -3132,7 +3149,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (!file || !file.type.startsWith("image/")) return false;
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -3163,7 +3180,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .slice(0, maxCharacterWardrobes - existing.length);
     if (!files.length) return;
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -3191,7 +3208,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .slice(0, maxCharacterVoices - existing.length);
     if (!files.length) return;
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -3234,7 +3251,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
     const resultItems = appendResultItems(existingResultItemsForNode(node, item.type), [resultItem], item.type);
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       fileName,
       storedFileName: "",
@@ -3268,7 +3285,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       transferImages: [
         ...existingImages,
@@ -3295,7 +3312,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     if (target === "customSheet") {
       const existing = normalizeCharacterCustomSheets(node.data);
       if (existing.length >= maxCharacterCustomSheets) {
@@ -3341,7 +3358,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
     const nextWardrobes = [...existing, wardrobe].slice(0, maxCharacterWardrobes);
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
       characterWardrobes: nextWardrobes,
       activeWardrobeId: node.data.activeWardrobeId || wardrobe.id,
@@ -3360,7 +3377,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const nextData = { ...node.data, characterSheetVariants: variants, activeWardrobeId };
     const selectedVariant = activeCharacterSheetVariant(nextData);
     const selectedId = activeCharacterSheetId(nextData);
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     const patch = {
       characterWardrobes: wardrobes,
       activeWardrobeId,
@@ -3402,7 +3419,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
     const fallbackId = activeCharacterSheetId(nextData);
     const fallbackVariant = activeCharacterSheetVariant({ ...nextData, activeCharacterSheetId: fallbackId });
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     updateNode(nodeId, {
       characterCustomSheets: customSheets,
       customCharacterSheet: null,
@@ -3422,7 +3439,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return;
     const voices = (node.data.characterVoices || []).filter((item) => item.id !== voiceId);
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     updateNode(nodeId, {
       characterVoices: voices,
       activeVoiceId: node.data.activeVoiceId === voiceId ? voices[0]?.id || "" : node.data.activeVoiceId,
@@ -3489,7 +3506,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     try {
       const wardrobePlans = wardrobes.map((wardrobe) => {
         const existingVariant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
@@ -3615,7 +3632,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         failures.length ? `${failures.length} wardrobe sheet${failures.length === 1 ? "" : "s"} could not be generated.` : "",
         videoFailures.length ? `${videoFailures.length} CU video wardrobe sheet${videoFailures.length === 1 ? "" : "s"} could not be generated.` : ""
       ].filter(Boolean).join(" ");
-      pushUndoSnapshot();
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
       updateNode(node.id, {
         activated: true,
         locked: true,
@@ -3646,7 +3663,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function unlockCharacterNode(nodeId) {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     updateNode(nodeId, {
       activated: false,
       locked: false,
@@ -3728,7 +3745,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function removeTransferImage(nodeId, imageId) {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId], restoreStructure: true });
     updateNode(nodeId, {
       transferImages: nodes.find((node) => node.id === nodeId)?.data.transferImages?.filter((image) => image.id !== imageId) || [],
       activated: false,
@@ -3748,7 +3765,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     event.preventDefault();
     event.stopPropagation();
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = screenToScene(event.clientX, event.clientY);
     setDragState({
@@ -3780,7 +3797,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const { response, data } = await nodeApi.uploadTransferCollage(form);
       if (!response.ok) throw new Error(data.error || `Could not compile ${moodBoardOutputFileName}.`);
 
-      pushUndoSnapshot();
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
       updateNode(node.id, {
         activated: true,
         locked: true,
@@ -3800,7 +3817,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function unlockTransferNode(nodeId) {
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     updateNode(nodeId, {
       activated: false,
       locked: false,
@@ -3865,7 +3882,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
       if (!asset?.localUrl) return;
 
-      pushUndoSnapshot();
+      pushUndoSnapshot({ nodeDataIds: [currentNode.id] });
       updateStoryboardNodeFrames(currentNode.id, (currentFrames) => currentFrames.map((frame) => (
         frame.id === frameId
           ? {
@@ -3971,7 +3988,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, { status: "uploading", error: "" });
 
     try {
@@ -4000,7 +4017,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     const asset = assetFromOutputItem(outputItem);
     const character = createStoryboardCharacter({
       name: storyboardCharacterNameFromFile(outputItem.fileName || outputItem.label || asset.fileName, characters.length + 1),
@@ -4018,7 +4035,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function removeStoryboardCharacter(nodeId, characterId) {
     const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return;
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [nodeId] });
     updateNode(nodeId, {
       storyboardCharacters: normalizedStoryboardCharacters(node.data.storyboardCharacters).filter((character) => character.id !== characterId),
       error: ""
@@ -4134,7 +4151,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const plan = requireStoryboardPlanResponse(response, data);
       const plannedFrames = storyboardFramesFromPlan(plan.frames);
 
-      pushUndoSnapshot();
+      pushUndoSnapshot({ nodeDataIds: [currentNode.id] });
       updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(requestedFrameCount), {
         storyboardAnalysis: plan.analysis || "",
         storyboardPlanSceneDescription: sceneDescription,
@@ -4689,7 +4706,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       editContext
     };
 
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [currentNode.id] });
     if (editContext.type === "previewLayout") {
       const nextItems = currentItems.map((layoutItem) => (layoutItem.id === targetItem.id ? editedItem : layoutItem));
       updateNode(currentNode.id, {
@@ -4898,7 +4915,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function startNodeResize(event, node, resizeTarget = null) {
     event.preventDefault();
     event.stopPropagation();
-    pushUndoSnapshot();
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
     const pointer = screenToScene(event.clientX, event.clientY);
     const card = event.currentTarget.closest("[data-node-card-id]");
     const computedStyle = card ? window.getComputedStyle(card) : null;
@@ -5263,9 +5280,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function disconnectInputPort(event, nodeId, port) {
     event.preventDefault();
     event.stopPropagation();
-    pushUndoSnapshot();
-    setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
     const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+    const resetsNodeOutput = ["autoAspect", "coverage"].includes(targetNode?.type) && port === "imageIn";
+    pushUndoSnapshot({ nodeDataIds: resetsNodeOutput ? [nodeId] : [], restoreStructure: true });
+    setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
     if (targetNode?.type === "autoAspect" && port === "imageIn") {
       updateNode(nodeId, resetAutoAspectOutputPatch());
     }
@@ -5574,10 +5592,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return;
         }
 
-        pushUndoSnapshot();
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
         const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+        pushUndoSnapshot({
+          nodeDataIds: shouldResetAutoAspectOutput || shouldResetCoverageOutput ? [to.nodeId] : [],
+          restoreStructure: true
+        });
         setEdges((current) => appendInputConnection(current, {
           id: `edge-${Date.now()}`,
           from: draftEdge.from,
@@ -5623,10 +5644,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return false;
     }
 
-    pushUndoSnapshot();
     const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
     const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
     const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+    pushUndoSnapshot({
+      nodeDataIds: shouldResetAutoAspectOutput || shouldResetCoverageOutput ? [to.nodeId] : [],
+      restoreStructure: true
+    });
     setEdges((current) => appendInputConnection(current, { id: `edge-${Date.now()}`, from, to, color }));
     if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
     if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
@@ -6157,10 +6181,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
-  function pushUndoSnapshot() {
+  function currentGraphHistoryState() {
+    return cloneGraphState({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      groups: groupsRef.current,
+      viewport: viewportRef.current,
+      selectedNodeIds: selectedNodeIdsRef.current,
+      selectedEdgeId: selectedEdgeIdRef.current
+    });
+  }
+
+  function pushUndoSnapshot({ nodeDataIds = [], restoreStructure = nodeDataIds.length === 0 } = {}) {
     undoStackRef.current = [
       ...undoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      {
+        projectId: projectIdRef.current,
+        nodeDataIds: [...new Set(nodeDataIds)],
+        restoreStructure,
+        snapshot: currentGraphHistoryState()
+      }
     ];
     redoStackRef.current = [];
   }
@@ -6171,40 +6211,64 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function undoGraphChange() {
-    const previous = undoStackRef.current.pop();
-    if (!previous) {
+    const entry = undoStackRef.current.pop();
+    if (!entry) {
       setSaveStatus("Nothing to undo");
       return;
     }
 
+    if (entry.projectId !== projectIdRef.current) {
+      clearUndoStack();
+      setSaveStatus("Nothing to undo in this workflow");
+      return;
+    }
+
+    const current = currentGraphHistoryState();
+    const previous = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
     redoStackRef.current = [
       ...redoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      { ...entry, snapshot: current }
     ];
+    nodesRef.current = previous.nodes;
+    edgesRef.current = previous.edges;
+    groupsRef.current = previous.groups || [];
+    selectedNodeIdsRef.current = previous.selectedNodeIds;
+    selectedEdgeIdRef.current = previous.selectedEdgeId || null;
     setNodes(previous.nodes);
     setEdges(previous.edges);
     setGroups(previous.groups || []);
-    setViewport(previous.viewport);
     setSelectedNodeIds(previous.selectedNodeIds);
     setSelectedEdgeId(previous.selectedEdgeId || null);
     setSaveStatus("Undone");
   }
 
   function redoGraphChange() {
-    const next = redoStackRef.current.pop();
-    if (!next) {
+    const entry = redoStackRef.current.pop();
+    if (!entry) {
       setSaveStatus("Nothing to redo");
       return;
     }
 
+    if (entry.projectId !== projectIdRef.current) {
+      clearUndoStack();
+      setSaveStatus("Nothing to redo in this workflow");
+      return;
+    }
+
+    const current = currentGraphHistoryState();
+    const next = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
     undoStackRef.current = [
       ...undoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      { ...entry, snapshot: current }
     ];
+    nodesRef.current = next.nodes;
+    edgesRef.current = next.edges;
+    groupsRef.current = next.groups || [];
+    selectedNodeIdsRef.current = next.selectedNodeIds;
+    selectedEdgeIdRef.current = next.selectedEdgeId || null;
     setNodes(next.nodes);
     setEdges(next.edges);
     setGroups(next.groups || []);
-    setViewport(next.viewport);
     setSelectedNodeIds(next.selectedNodeIds);
     setSelectedEdgeId(next.selectedEdgeId || null);
     setSaveStatus("Redone");

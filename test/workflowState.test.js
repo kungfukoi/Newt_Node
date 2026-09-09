@@ -4,6 +4,7 @@ import {
   clearStaleRunningState,
   dedupeEdges,
   remapImportedGraph,
+  restoreGraphHistorySnapshot,
   workflowStateFingerprint
 } from "../src/workflowState.js";
 
@@ -67,4 +68,50 @@ test("dedupeEdges and clearStaleRunningState preserve load-safe graph state", ()
   assert.equal(dedupeEdges([edge, { ...edge, id: "b" }]).length, 1);
   assert.deepEqual(clearStaleRunningState({ id: "n", data: { status: "running", resultUrl: "" } }).data.status, "ready");
   assert.deepEqual(clearStaleRunningState({ id: "n", data: { status: "running", resultUrl: "/outputs/a.png" } }).data.status, "complete");
+});
+
+test("structural graph undo preserves newer node data and the current viewport", () => {
+  const snapshot = {
+    nodes: [{ id: "a", type: "image", x: 10, y: 20, data: { title: "Old", resultUrl: "" } }],
+    edges: [],
+    groups: [],
+    viewport: { x: 0, y: 0, scale: 1 }
+  };
+  const current = {
+    nodes: [{ id: "a", type: "image", x: 90, y: 100, data: { title: "Current", resultUrl: "/outputs/new.png" } }],
+    edges: [],
+    groups: [],
+    viewport: { x: -800, y: 450, scale: 0.4 }
+  };
+
+  const restored = restoreGraphHistorySnapshot(snapshot, current);
+  assert.equal(restored.nodes[0].x, 10);
+  assert.deepEqual(restored.nodes[0].data, current.nodes[0].data);
+  assert.deepEqual(restored.viewport, current.viewport);
+});
+
+test("node-scoped graph undo restores data only for the edited node", () => {
+  const snapshot = {
+    nodes: [
+      { id: "edited", type: "image", data: { title: "Before" } },
+      { id: "other", type: "image", data: { title: "Old unrelated value" } }
+    ]
+  };
+  const current = {
+    nodes: [
+      { id: "edited", type: "image", data: { title: "After" } },
+      { id: "other", type: "image", data: { title: "New unrelated value" } }
+    ],
+    viewport: { x: 20, y: 30, scale: 2 }
+  };
+
+  current.edges = [{ id: "new-edge" }];
+  current.groups = [{ id: "new-group", nodeIds: ["edited", "other"] }];
+  current.nodes[0].x = 50;
+  const restored = restoreGraphHistorySnapshot(snapshot, current, { nodeDataIds: ["edited"], restoreStructure: false });
+  assert.equal(restored.nodes[0].data.title, "Before");
+  assert.equal(restored.nodes[1].data.title, "New unrelated value");
+  assert.equal(restored.nodes[0].x, 50);
+  assert.deepEqual(restored.edges, current.edges);
+  assert.deepEqual(restored.groups, current.groups);
 });
