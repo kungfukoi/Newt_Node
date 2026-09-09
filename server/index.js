@@ -646,7 +646,7 @@ await refreshRuntimeConfigFromEnvFile();
 
 const remoteVideoJobs = await createRemoteVideoJobs({
   filePath: path.join(dataDir, "remote-video-jobs.json"),
-  providerLimits: { fal: concurrencyLimit(process.env.NEWTNODE_FAL_VIDEO_CONCURRENCY, 2), krea: concurrencyLimit(process.env.NEWTNODE_KREA_VIDEO_CONCURRENCY, 2) },
+  providerLimits: { fal: concurrencyLimit(process.env.NEWTNODE_FAL_VIDEO_CONCURRENCY, 2), krea: concurrencyLimit(process.env.NEWTNODE_KREA_VIDEO_CONCURRENCY, 8) },
   adapter: createSeedanceJobAdapter({
     getKey: async (provider) => {
       await refreshRuntimeConfigFromEnvFile();

@@ -14,12 +14,24 @@ export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
   const elapsed = formatGenerationElapsed(progress.elapsedMs);
   const percent = progress.determinate ? Math.round(progress.percent || 0) : null;
   const percentDetail = percent === null ? "" : `${progress.estimated ? "Est. " : ""}${percent}%`;
-  const detail = [percentDetail, batchDetail, queueDetail, elapsed].filter(Boolean).join("  ");
+  const providerDetail = progress.provider
+    ? `${providerName(progress.provider)} ${progress.providerStatus || (progress.phase === "queued" ? "waiting" : "live")}`
+    : "";
+  const heartbeatDetail = providerContactLabel(progress.lastContactAt);
+  const detail = [providerDetail, heartbeatDetail, percentDetail, batchDetail, queueDetail, elapsed].filter(Boolean).join("  ");
+  const healthLabel = progress.health === "stalled"
+    ? "Possibly stalled"
+    : progress.health === "delayed"
+      ? "Delayed"
+      : progress.health === "reconnecting"
+        ? "Reconnecting"
+        : phase;
+  const showHealthMessage = ["delayed", "stalled", "reconnecting"].includes(progress.health);
 
   return (
-    <div className={`generation-progress ${progress.status} ${progress.determinate ? "determinate" : "indeterminate"}`} title={progress.message || phase}>
+    <div className={`generation-progress ${progress.status} ${progress.health || "healthy"} ${progress.determinate ? "determinate" : "indeterminate"}`} title={progress.message || phase}>
       <div className="generation-progress-labels">
-        <span>{phase}</span>
+        <span>{healthLabel}</span>
         <span>{detail}</span>
       </div>
       <div
@@ -33,6 +45,20 @@ export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
       >
         <span className="generation-progress-fill" style={percent === null ? undefined : { width: `${percent}%` }} />
       </div>
+      {showHealthMessage && <small className="generation-progress-health">{progress.message}</small>}
     </div>
   );
+}
+
+function providerName(provider) {
+  return provider === "krea" ? "Krea" : provider === "fal" ? "Fal" : String(provider || "");
+}
+
+function providerContactLabel(lastContactAt, now = Date.now()) {
+  const contactAt = Date.parse(lastContactAt || "");
+  if (!Number.isFinite(contactAt)) return "";
+  const seconds = Math.max(0, Math.floor((now - contactAt) / 1000));
+  if (seconds < 10) return "checked now";
+  if (seconds < 60) return `checked ${seconds}s ago`;
+  return `checked ${Math.floor(seconds / 60)}m ago`;
 }

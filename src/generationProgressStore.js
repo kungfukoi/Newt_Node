@@ -188,7 +188,7 @@ function sameSnapshot(first, second) {
   if (!first || !second) return false;
   return [
     "groupId", "status", "phase", "percent", "determinate", "estimated", "batchTotal", "settledCount",
-    "completedCount", "failedCount", "queuePosition", "message", "updatedAt"
+    "completedCount", "failedCount", "queuePosition", "provider", "providerStatus", "health", "lastContactAt", "message", "updatedAt"
   ].every((key) => first[key] === second[key]) && Math.floor(first.elapsedMs / 1000) === Math.floor(second.elapsedMs / 1000);
 }
 

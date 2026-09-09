@@ -1,4 +1,12 @@
 export const remoteVideoWarningMs = 20 * 60 * 1000;
+export const kreaSeedance25WarningMs = 15 * 60 * 1000;
+export const remoteVideoStalledMs = 30 * 60 * 1000;
+
+export function remoteVideoWarningMsFor(provider, model) {
+  return provider === "krea" && /^seedance\s*2\.5$/i.test(String(model || "").trim())
+    ? kreaSeedance25WarningMs
+    : remoteVideoWarningMs;
+}
 
 export function supportsDurableVideo(model) {
   return /^seedance\s*2\.(0|5)$/i.test(String(model || "").trim());

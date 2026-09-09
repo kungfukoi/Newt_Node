@@ -75,7 +75,7 @@ Use the normal Windows/macOS launchers for user sessions. Both start the API and
 
 ### Work Budgets
 
-`.env.example` documents conservative defaults: selected-node global concurrency 4, provider concurrency 2, local GPU concurrency 1, and local media concurrency 2. `VITE_NEWTNODE_*_CONCURRENCY` values are build-time client settings, requiring a rebuild. `NEWTNODE_FAL_VIDEO_CONCURRENCY` and `NEWTNODE_KREA_VIDEO_CONCURRENCY` govern durable Seedance admission; `NEWTNODE_FFMPEG_CONCURRENCY` bounds the main server's FFmpeg work. These server values require restart. Existing image-generation/media-persistence limits remain in place. Do not raise GPU admission without measuring memory headroom.
+`.env.example` documents conservative defaults: selected-node global concurrency 4, Fal durable-video admission 2, Krea durable-video admission 8, local GPU concurrency 1, and local media concurrency 2. Krea accepts excess work into its own backlog, so the higher Krea admission limit prevents a pair of slow renders from blocking unrelated workflows while retaining a local safety bound. `VITE_NEWTNODE_*_CONCURRENCY` values are build-time client settings, requiring a rebuild. `NEWTNODE_FAL_VIDEO_CONCURRENCY` and `NEWTNODE_KREA_VIDEO_CONCURRENCY` govern durable Seedance admission; `NEWTNODE_FFMPEG_CONCURRENCY` bounds the main server's FFmpeg work. These server values require restart. Existing image-generation/media-persistence limits remain in place. Do not raise GPU admission without measuring memory headroom.
 
 ## Feature Implementation Loop
 

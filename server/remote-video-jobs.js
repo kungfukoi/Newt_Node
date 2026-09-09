@@ -2,7 +2,13 @@ import { openRemoteJobStore } from "./remote-job-store.js";
 import { randomUUID } from "node:crypto";
 import { appendJobEvent, jobErrorDiagnostic } from "./job-diagnostics.js";
 import { concurrencyLimit } from "../src/workScheduler.js";
-import { remoteVideoScope, remoteVideoTerminal, remoteVideoNeedsAttention, remoteVideoWarningMs } from "../src/remoteVideoJobs.js";
+import {
+  remoteVideoScope,
+  remoteVideoTerminal,
+  remoteVideoNeedsAttention,
+  remoteVideoStalledMs,
+  remoteVideoWarningMsFor
+} from "../src/remoteVideoJobs.js";
 
 // One worker per durable run. Provider submission is never retried after an
 // ambiguous response; every subsequent attempt addresses the original job ID.
@@ -94,11 +100,13 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
             await commit(runId, { state: "uncertain", health: "attention", message: "Needs attention: provider returned no job ID. Check the provider; no automatic resubmission." });
             return;
           }
-          job = await commit(runId, { requestId: accepted.requestId, state: "queued", message: "Queued with provider" });
+          job = await commit(runId, { requestId: accepted.requestId, providerAcceptedAt: iso(), state: "queued", message: "Queued with provider" });
         }
         const status = await client.poll(job);
-        const delayed = now() - Date.parse(job.createdAt) >= remoteVideoWarningMs;
-        const health = delayed ? "delayed" : "healthy";
+        const providerElapsedMs = now() - providerTrackingStartedAt(job);
+        const delayed = providerElapsedMs >= remoteVideoWarningMsFor(job.spec.provider, job.spec.modelName);
+        const stalled = providerElapsedMs >= remoteVideoStalledMs;
+        const health = stalled ? "stalled" : delayed ? "delayed" : "healthy";
         job = await commit(runId, {
           state: status.remote ? "downloading" : status.state || "running",
           remote: status.remote || null,
@@ -106,8 +114,10 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
           percent: status.percent ?? null,
           queuePosition: status.queuePosition ?? null,
           lastContactAt: iso(), retryCount: 0, health, lastError: null,
-          message: status.remote ? "Saving generated video" : delayed
-            ? "Taking longer than 20 minutes; provider still reports " + (status.providerStatus || "pending") + ". Tracking original job."
+          message: status.remote ? "Saving generated video" : stalled
+            ? "Provider is responding but still reports " + (status.providerStatus || "pending") + " after 30 minutes. This run may be stalled; tracking the original job to avoid a duplicate charge."
+            : delayed
+              ? "Taking longer than expected; provider still reports " + (status.providerStatus || "pending") + ". Tracking the original job."
             : status.message || "Generating with provider"
         }, { heartbeat: !status.remote });
       }
@@ -140,7 +150,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       const job = jobs.get(runId);
       if (!job || job.state === "uncertain") return;
       const retryMs = job.retryCount ? Math.min(60000, 2000 * 2 ** Math.min(job.retryCount, 5)) : 0;
-      const pollMs = now() - Date.parse(job.createdAt) >= remoteVideoWarningMs ? 15000 : 3000;
+      const pollMs = now() - providerTrackingStartedAt(job) >= remoteVideoWarningMsFor(job.spec.provider, job.spec.modelName) ? 15000 : 3000;
       schedule(runId, retryMs || pollMs);
     });
     workers.set(runId, work);
@@ -157,6 +167,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       state: job.state, requestId: job.requestId || "", provider: job.spec.provider,
       model: job.spec.modelName, createdAt: job.createdAt, updatedAt: job.updatedAt,
       message: job.message, health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
+      providerAcceptedAt: job.providerAcceptedAt || job.submissionStartedAt || null,
       needsAttention: remoteVideoNeedsAttention(job), retryCount: job.retryCount || 0,
       lastError: job.lastError || null, events: job.events || [],
       result: job.result || null, outputTargetNodeId: body.outputTargetNodeId || ""
@@ -237,10 +248,11 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       batchIndex: Number(job.spec.body.generationBatchIndex) || 1, batchTotal: Number(job.spec.body.generationBatchTotal) || 1,
       message: job.message, updatedAt: job.updatedAt, requestId: job.requestId || "",
       kind: "video", label: job.spec.modelName, nodeTitle: job.spec.body.nodeTitle,
-      status: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "completed" : remoteVideoTerminal(job) ? "failed" : job.state === "queued" ? "queued" : "running",
-      phase: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "complete" : remoteVideoTerminal(job) ? "failed" : job.remote ? "downloading" : job.state === "queued" ? "queued" : "generating",
+      status: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "completed" : remoteVideoTerminal(job) ? "failed" : remoteVideoQueued(job) ? "queued" : "running",
+      phase: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "complete" : remoteVideoTerminal(job) ? "failed" : job.remote ? "downloading" : remoteVideoQueued(job) ? "queued" : "generating",
       percent: job.state === "completed" ? 100 : job.remote ? 95 : job.percent == null ? null : 10 + Math.min(100, job.percent) * 0.8,
-      queuePosition: job.queuePosition ?? null, providerStatus: job.providerStatus || "",
+      queuePosition: job.queuePosition ?? null, providerStatus: job.providerStatus || "", provider: job.spec.provider,
+      health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
       startedAt: job.createdAt, phaseStartedAt: job.createdAt
       }));
     },
@@ -256,4 +268,12 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
   };
   for (const runId of jobs.keys()) schedule(runId);
   return api;
+}
+
+function providerTrackingStartedAt(job) {
+  return Date.parse(job?.providerAcceptedAt || job?.submissionStartedAt || job?.createdAt || "");
+}
+
+function remoteVideoQueued(job) {
+  return ["accepted", "submitting", "queued"].includes(job?.state);
 }

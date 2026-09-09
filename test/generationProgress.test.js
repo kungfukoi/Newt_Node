@@ -75,6 +75,26 @@ test("single-provider progress advances with a labeled estimate when no real per
   assert.equal(progress.elapsedMs, 5000);
 });
 
+test("provider health and heartbeat survive progress aggregation", () => {
+  const metadata = generationRequestMetadata({ nodeId: "video-health", groupId: "health-group", kind: "video" });
+  const entry = {
+    ...progressEntryFromRequestMetadata(metadata, "2026-08-16T12:00:00.000Z"),
+    status: "running",
+    phase: "generating",
+    provider: "krea",
+    providerStatus: "processing",
+    health: "stalled",
+    lastContactAt: "2026-08-16T12:30:00.000Z",
+    message: "Provider is responding."
+  };
+
+  const progress = aggregateGenerationProgressEntries([entry], Date.parse("2026-08-16T12:30:01.000Z"));
+  assert.equal(progress.provider, "krea");
+  assert.equal(progress.providerStatus, "processing");
+  assert.equal(progress.health, "stalled");
+  assert.equal(progress.lastContactAt, "2026-08-16T12:30:00.000Z");
+});
+
 test("batch progress combines completed, provider, and estimated request progress", () => {
   const base = {
     groupId: "batch-2",

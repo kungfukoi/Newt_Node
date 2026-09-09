@@ -9323,6 +9323,33 @@ video.newtnode-video-fallback {
   color: #d7a540;
 }
 
+.generation-progress.delayed .generation-progress-labels,
+.generation-progress.reconnecting .generation-progress-labels,
+.generation-progress-health {
+  color: #e2b85b;
+}
+
+.generation-progress.stalled .generation-progress-labels,
+.generation-progress.stalled .generation-progress-health {
+  color: #f08a6d;
+}
+
+.generation-progress.delayed .generation-progress-fill,
+.generation-progress.reconnecting .generation-progress-fill {
+  background: #d7a540;
+}
+
+.generation-progress.stalled .generation-progress-fill {
+  background: #e36f54;
+}
+
+.generation-progress-health {
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.35;
+  font-weight: 620;
+}
+
 
 .node-row {
   display: grid;

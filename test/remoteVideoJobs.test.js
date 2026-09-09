@@ -5,7 +5,12 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
 import { confirmedProviderFailure } from "../server/seedance-job-provider.js";
-import { remoteVideoScope, remoteVideoWarningMs } from "../src/remoteVideoJobs.js";
+import {
+  kreaSeedance25WarningMs,
+  remoteVideoScope,
+  remoteVideoStalledMs,
+  remoteVideoWarningMs
+} from "../src/remoteVideoJobs.js";
 
 const spec = {
   provider: "krea", modelName: "Seedance 2.5", endpoint: "/generate/video/example", input: { prompt: "private prompt" },
@@ -64,6 +69,7 @@ test("durable provider admission is bounded across simultaneous batches and surv
   await Promise.all([service.step("one"), service.step("two")]);
   assert.equal(f.counts().submits, 1);
   assert.equal(service.get("two").state, "accepted");
+  assert.equal(service.progress().find((entry) => entry.runId === "two").phase, "queued");
   await service.close();
   service = await f.open();
   await service.step("two");
@@ -90,21 +96,27 @@ async function fixture(t, overrides = {}) {
   return { filePath, open, advance: (ms) => { clock += ms; }, counts: () => ({ submits, polls, saves }) };
 }
 
-test("20 minutes is a per-job warning, not a timeout; restart reuses accepted ID", async (t) => {
+test("delayed and stalled health warnings keep tracking the accepted provider ID", async (t) => {
   const f = await fixture(t);
   let service = await f.open();
   await service.create("one", spec, "hash");
   await service.step("one");
   assert.equal(service.get("one").requestId, "provider-1");
-  f.advance(remoteVideoWarningMs + 1);
+  f.advance(kreaSeedance25WarningMs + 1);
   await service.step("one");
   assert.equal(service.get("one").state, "running");
-  assert.match(service.get("one").message, /longer than 20 minutes/);
+  assert.equal(service.get("one").health, "delayed");
+  assert.match(service.get("one").message, /longer than expected/);
+  f.advance(remoteVideoStalledMs - kreaSeedance25WarningMs);
+  await service.step("one");
+  assert.equal(service.get("one").state, "running");
+  assert.equal(service.get("one").health, "stalled");
+  assert.match(service.get("one").message, /may be stalled/);
   await service.close();
   service = await f.open();
   await service.step("one");
   assert.equal(f.counts().submits, 1);
-  assert.equal(f.counts().polls, 3);
+  assert.equal(f.counts().polls, 4);
   assert.equal(service.get("one").requestId, "provider-1");
 });
 
