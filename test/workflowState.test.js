@@ -2,11 +2,34 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   clearStaleRunningState,
+  cloneNode,
   dedupeEdges,
   remapImportedGraph,
   restoreGraphHistorySnapshot,
   workflowStateFingerprint
 } from "../src/workflowState.js";
+
+test("saving a Film Director preserves its built scene without persisting transient rebuild work", () => {
+  const saved = cloneNode({
+    id: "director-1",
+    type: "skillDirector",
+    data: {
+      resultText: "Finished scene package",
+      skillDirectorBuilt: true,
+      skillDirectorLocks: { setup: true, style: true, motion: true, scene: true, shotList: true },
+      skillDirectorAction: "build",
+      skillDirectorQueuedAction: "shotList",
+      skillDirectorQueueId: "shotList-runtime"
+    }
+  });
+
+  assert.equal(saved.data.resultText, "Finished scene package");
+  assert.equal(saved.data.skillDirectorBuilt, true);
+  assert.deepEqual(saved.data.skillDirectorLocks, { setup: true, style: true, motion: true, scene: true, shotList: true });
+  assert.equal(saved.data.skillDirectorAction, "");
+  assert.equal(saved.data.skillDirectorQueuedAction, "");
+  assert.equal(saved.data.skillDirectorQueueId, "");
+});
 
 test("workflowStateFingerprint ignores viewport changes", () => {
   const base = {

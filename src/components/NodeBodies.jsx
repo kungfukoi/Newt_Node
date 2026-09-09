@@ -15,6 +15,8 @@ import {
 } from "../filmDirectorVideoModels.js";
 import {
   filmDirectorInputRefreshPatch,
+  filmDirectorInputSignatureMigrationPatch,
+  filmDirectorInputSignatureVersion,
   filmDirectorShotListSourceSignature,
   clearFilmDirectorStageStale,
   applyFilmDirectorReferenceChanges,
@@ -654,6 +656,18 @@ export function SkillDirectorNodeBody({
 
   useEffect(() => {
     if (!locks.setup || running || !node.data.skillDirectorLockedInputManifestInitialized) return;
+    const migrationPatch = filmDirectorInputSignatureMigrationPatch(node.data, {
+      style: styleInputSourceSignature,
+      approach: approachValue,
+      music: musicSetupSignature,
+      assets: assetInputSourceSignature,
+      referenceVideo: referenceVideoSetupSignature,
+      manifest: assetInputManifest
+    });
+    if (migrationPatch) {
+      onUpdate(node.id, migrationPatch);
+      return;
+    }
     const setupChanges = filmDirectorSetupInputChanges(node.data, {
       style: styleInputSourceSignature,
       assets: assetInputSourceSignature,
@@ -733,6 +747,7 @@ export function SkillDirectorNodeBody({
       onUpdate(node.id, {
         skillDirectorLocks: updateFilmDirectorStageLock(locks, "setup", false),
         skillDirectorCollapsed: { ...collapsed, setup: false },
+        skillDirectorInputSignatureVersion: filmDirectorInputSignatureVersion,
         skillDirectorLockedStyleInputSignature: node.data.skillDirectorLockedStyleInputSignature || styleInputSourceSignature,
         skillDirectorLockedAssetInputSignature: node.data.skillDirectorLockedAssetInputSignature || assetInputSourceSignature,
         skillDirectorLockedInputManifest: node.data.skillDirectorLockedInputManifestInitialized && Array.isArray(node.data.skillDirectorLockedInputManifest)
@@ -798,6 +813,7 @@ export function SkillDirectorNodeBody({
     const resetPatch = {
       skillDirectorLocks: nextLocks,
       skillDirectorCollapsed: { ...collapsed, setup: false, ...(needsStyleDraft ? { style: false } : {}) },
+      skillDirectorInputSignatureVersion: filmDirectorInputSignatureVersion,
       skillDirectorLockedApproach: approachValue,
       skillDirectorLockedMusicSignature: musicSetupSignature,
       skillDirectorLockedStyleInputSignature: styleInputSourceSignature,

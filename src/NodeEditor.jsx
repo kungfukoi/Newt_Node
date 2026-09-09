@@ -17418,6 +17418,7 @@ function createDefaultNodeData(type, label, count) {
       shotList: "",
       shotListNotes: "",
       resultText: "",
+      skillDirectorInputSignatureVersion: 2,
       skillDirectorLocks: {
         setup: false,
         style: false,
@@ -22978,6 +22979,7 @@ function normalizeCurrentNode(node) {
         motionDirection: data.motionDirection || "",
         shotList: restoredShotList.shotList,
         shotListNotes: restoredShotList.shotListNotes,
+        skillDirectorInputSignatureVersion: Math.max(0, Number(data.skillDirectorInputSignatureVersion) || 0),
         resultText: formatSkillDirectorFinalPromptForClient(data.resultText || "", data.skillDirectorAudioMode, data.skillApproach),
         skillDirectorLocks:
           data.skillDirectorLocks && typeof data.skillDirectorLocks === "object"

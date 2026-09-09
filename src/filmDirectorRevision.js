@@ -48,6 +48,7 @@ const filmDirectorRevisionSnapshotKeys = [
   "shotList",
   "shotListNotes",
   "skillDirectorShotListSourceSignature",
+  "skillDirectorInputSignatureVersion",
   "skillDirectorLockedStyleInputSignature",
   "skillDirectorLockedAssetInputSignature",
   "skillDirectorLockedInputManifest",

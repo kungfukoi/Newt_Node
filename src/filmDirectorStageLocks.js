@@ -1,4 +1,5 @@
 export const filmDirectorStageKeys = ["setup", "style", "motion", "scene", "shotList"];
+export const filmDirectorInputSignatureVersion = 2;
 
 function stableFilmDirectorValue(value) {
   if (Array.isArray(value)) return value.map(stableFilmDirectorValue);
@@ -21,6 +22,52 @@ function compactFilmDirectorHash(value = "") {
   return (hash >>> 0).toString(36);
 }
 
+function decodedFilmDirectorAssetPath(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  let pathname = raw.split(/[?#]/, 1)[0];
+  try {
+    pathname = new URL(raw, "http://newtnode.local").pathname;
+  } catch {
+    // Keep non-URL asset references in their original form.
+  }
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // A malformed escape should not prevent a Director snapshot from saving.
+  }
+  return pathname.replace(/\\/g, "/");
+}
+
+function filmDirectorAssetFileName(value = "") {
+  const pathname = decodedFilmDirectorAssetPath(value).replace(/\/+$/, "");
+  return pathname.split("/").at(-1) || "";
+}
+
+function stableFilmDirectorAssetUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const pathname = decodedFilmDirectorAssetPath(raw);
+  if (/^\/(?:outputs|uploads|external-outputs|workflow-assets)\//i.test(pathname)) {
+    return filmDirectorAssetFileName(pathname);
+  }
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return pathname;
+  }
+}
+
+function stableFilmDirectorAssetIdentity(item = {}) {
+  const url = item?.fullResolutionUrl || item?.url || item?.localUrl || "";
+  return {
+    id: item?.id || "",
+    fileName: item?.fileName || filmDirectorAssetFileName(url),
+    url: stableFilmDirectorAssetUrl(url)
+  };
+}
+
 export function filmDirectorInputSourceSignature(items = [], scope = "setup") {
   const sources = (Array.isArray(items) ? items : [])
     .map((item) => {
@@ -34,21 +81,36 @@ export function filmDirectorInputSourceSignature(items = [], scope = "setup") {
       return stableFilmDirectorValue({
         sourceId: source.id || item?.sourceId || item?.id || "",
         outputPort: item?.edge?.from?.port || item?.outputPort || "",
-        resultUrl: item?.url || data.resultUrl || "",
-        fileName: data.fileName || item?.fileName || "",
+        result: stableFilmDirectorAssetIdentity({
+          id: data.resultItems?.[data.selectedResultIndex]?.id || "",
+          url: item?.url || data.resultUrl || "",
+          fileName: data.fileName || item?.fileName || ""
+        }),
         title: data.title || item?.label || "",
         characterName: data.characterName || "",
         activeResultIndex: data.activeResultIndex ?? data.resultIndex ?? item?.activeResultIndex ?? "",
         activeSheetId: data.activeCharacterSheetId || data.characterActiveSheetId || data.activeSheetId || item?.activeSheetId || "",
-        sourceItems: sourceItems.map((sourceItem) => ({
-          id: sourceItem?.id || "",
-          url: sourceItem?.fullResolutionUrl || sourceItem?.url || sourceItem?.localUrl || "",
-          fileName: sourceItem?.fileName || ""
-        }))
+        sourceItems: sourceItems.map(stableFilmDirectorAssetIdentity)
       });
     })
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  return `${String(scope || "setup")}-${compactFilmDirectorHash(JSON.stringify(sources))}`;
+  return `${String(scope || "setup")}-v${filmDirectorInputSignatureVersion}-${compactFilmDirectorHash(JSON.stringify(sources))}`;
+}
+
+export function filmDirectorInputSignatureMigrationPatch(data = {}, current = {}) {
+  if ((Number(data.skillDirectorInputSignatureVersion) || 0) >= filmDirectorInputSignatureVersion) return null;
+  return {
+    skillDirectorInputSignatureVersion: filmDirectorInputSignatureVersion,
+    skillDirectorLockedStyleInputSignature: current.style || "",
+    skillDirectorLockedApproach: current.approach || data.skillDirectorLockedApproach || "",
+    skillDirectorLockedMusicSignature: current.music || "",
+    skillDirectorLockedAssetInputSignature: current.assets || "",
+    skillDirectorLockedReferenceVideoSignature: current.referenceVideo || "",
+    skillDirectorLockedInputManifest: Array.isArray(current.manifest) ? current.manifest : [],
+    skillDirectorLockedInputManifestInitialized: true,
+    skillDirectorQueuedAction: "",
+    skillDirectorQueueId: ""
+  };
 }
 
 export function filmDirectorSetupInputChanges(data = {}, current = {}) {

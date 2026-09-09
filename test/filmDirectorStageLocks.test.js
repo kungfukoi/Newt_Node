@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyFilmDirectorReferenceChanges,
   clearFilmDirectorStageStale,
+  filmDirectorInputSignatureMigrationPatch,
   filmDirectorInputSourceSignature,
   filmDirectorSetupInputChanges,
   filmDirectorSetupManifestChanges,
@@ -157,6 +158,82 @@ test("Film Director setup fingerprints are stable when connection order changes"
     filmDirectorInputSourceSignature([first, second], "scene-assets"),
     filmDirectorInputSourceSignature([second, first], "scene-assets")
   );
+});
+
+test("Film Director setup fingerprints survive workflow package URL rewriting", () => {
+  const looseAsset = {
+    source: {
+      id: "image-model-1",
+      data: {
+        title: "Hero frame",
+        resultUrl: "/outputs/hero-frame.png",
+        resultItems: [{ url: "/outputs/hero-frame.png", fileName: "hero-frame.png" }],
+        selectedResultIndex: 0
+      }
+    },
+    edge: { from: { port: "imageOut" } }
+  };
+  const packagedAsset = {
+    source: {
+      id: "image-model-1",
+      data: {
+        title: "Hero frame",
+        resultUrl: "/workflow-assets/workflow-copy/outputs/hero-frame.png",
+        resultItems: [{ url: "/workflow-assets/workflow-copy/outputs/hero-frame.png", fileName: "hero-frame.png" }],
+        selectedResultIndex: 0
+      }
+    },
+    edge: { from: { port: "imageOut" } }
+  };
+
+  assert.equal(
+    filmDirectorInputSourceSignature([looseAsset], "scene-assets"),
+    filmDirectorInputSourceSignature([packagedAsset], "scene-assets")
+  );
+});
+
+test("Film Director setup fingerprints still detect a newly generated source result", () => {
+  const signatureFor = (fileName) => filmDirectorInputSourceSignature([{
+    source: {
+      id: "image-model-1",
+      data: {
+        title: "Hero frame",
+        resultUrl: `/outputs/${fileName}`,
+        resultItems: [{ url: `/outputs/${fileName}`, fileName }],
+        selectedResultIndex: 0
+      }
+    },
+    edge: { from: { port: "imageOut" } }
+  }], "scene-assets");
+
+  assert.notEqual(signatureFor("hero-frame-a.png"), signatureFor("hero-frame-b.png"));
+});
+
+test("legacy Director signatures rebase without rebuilding the saved scene", () => {
+  const saved = {
+    resultText: "Finished scene package",
+    skillDirectorBuilt: true,
+    skillDirectorLocks: allLocked,
+    skillDirectorInputSignatureVersion: 0,
+    skillDirectorQueuedAction: "build",
+    skillDirectorQueueId: "stale-runtime-job"
+  };
+  const patch = filmDirectorInputSignatureMigrationPatch(saved, {
+    style: "style-inputs-v2-current",
+    assets: "scene-assets-v2-current",
+    referenceVideo: "camera|reference-video-v2-current",
+    music: "music-v2-current",
+    approach: "cinematic",
+    manifest: [{ sourceId: "character-1", tag: "@Hero" }]
+  });
+  const migrated = { ...saved, ...patch };
+
+  assert.equal(migrated.resultText, "Finished scene package");
+  assert.equal(migrated.skillDirectorBuilt, true);
+  assert.deepEqual(migrated.skillDirectorLocks, allLocked);
+  assert.equal(migrated.skillDirectorQueuedAction, "");
+  assert.equal(migrated.skillDirectorQueueId, "");
+  assert.equal(filmDirectorInputSignatureMigrationPatch(migrated, {}), null);
 });
 
 test("an existing Film Director refreshes a connected Mood Board once when upgrading legacy scene data", () => {

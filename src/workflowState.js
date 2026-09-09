@@ -67,9 +67,16 @@ export const workflowStateFingerprint = createWorkflowFingerprint();
 
 function persistedNodeData(node) {
   const { remoteVideoAttention, ...data } = node?.data || {};
-  return node?.type === "assembly"
-    ? { ...data, assemblyFrameUrl: "", assemblyFrameTime: 0 }
-    : data;
+  if (node?.type === "assembly") return { ...data, assemblyFrameUrl: "", assemblyFrameTime: 0 };
+  if (node?.type === "skillDirector") {
+    return {
+      ...data,
+      skillDirectorAction: "",
+      skillDirectorQueuedAction: "",
+      skillDirectorQueueId: ""
+    };
+  }
+  return data;
 }
 
 export function cloneNode(node) {
