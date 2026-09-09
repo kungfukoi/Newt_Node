@@ -233,7 +233,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
     progress: () => {
       const activeGroups = new Set([...jobs.values()].filter((job) => !remoteVideoTerminal(job) && !remoteVideoNeedsAttention(job)).map((job) => job.spec.body.generationGroupId || job.runId));
       return [...jobs.values()].filter((job) => activeGroups.has(job.spec.body.generationGroupId || job.runId) || now() - Date.parse(job.updatedAt) < 5 * 60 * 1000).map((job) => ({
-      runId: job.runId, nodeId: job.spec.body.nodeId, groupId: job.spec.body.generationGroupId || job.runId,
+      runId: job.runId, scope: job.spec.body.generationScope || remoteVideoScope(job.spec.body), nodeId: job.spec.body.nodeId, groupId: job.spec.body.generationGroupId || job.runId,
       batchIndex: Number(job.spec.body.generationBatchIndex) || 1, batchTotal: Number(job.spec.body.generationBatchTotal) || 1,
       message: job.message, updatedAt: job.updatedAt, requestId: job.requestId || "",
       kind: "video", label: job.spec.modelName, nodeTitle: job.spec.body.nodeTitle,

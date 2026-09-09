@@ -11,6 +11,7 @@ export function generationProgressMiddleware(req, res, next) {
 
   beginGenerationProgress({
     runId,
+    scope: req.body?.generationScope,
     groupId: req.body?.generationGroupId,
     nodeId: req.body?.nodeId,
     nodeTitle: req.body?.nodeTitle,
@@ -45,6 +46,7 @@ export function beginGenerationProgress(input = {}) {
   const now = new Date().toISOString();
   const entry = {
     runId,
+    scope: cleanScope(input.scope),
     groupId: cleanId(input.groupId) || runId,
     nodeId: cleanId(input.nodeId),
     nodeTitle: cleanText(input.nodeTitle, 120),
@@ -187,6 +189,10 @@ function normalizedQueuePosition(value) {
 
 function cleanId(value) {
   return String(value || "").trim().replace(/[^a-z0-9._:-]+/gi, "-").slice(0, 180);
+}
+
+function cleanScope(value) {
+  return String(value || "").trim().slice(0, 1000);
 }
 
 function cleanText(value, limit) {

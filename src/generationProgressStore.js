@@ -2,6 +2,7 @@ import { generationProgressApi } from "./api/newtApi.js";
 import {
   aggregateGenerationProgressEntries,
   generationProgressTerminalDisplayMs,
+  generationProgressEntriesForNode,
   generationRequestMetadata,
   isTerminalProgressStatus,
   mergeGenerationProgressEntry,
@@ -10,29 +11,31 @@ import {
 } from "./generationProgress.js";
 
 const entriesByRunId = new Map();
-const snapshotsByNodeId = new Map();
-const listenersByNodeId = new Map();
+const snapshotsByNodeKey = new Map();
+const listenersByNodeKey = new Map();
 let pollTimer = null;
 let pollInFlight = false;
 
-export function subscribeGenerationProgress(nodeId, listener) {
-  const id = String(nodeId || "");
-  const listeners = listenersByNodeId.get(id) || new Set();
-  listeners.add(listener);
-  listenersByNodeId.set(id, listeners);
+export function subscribeGenerationProgress(scope, nodeId, listener) {
+  const normalizedScope = String(scope || "");
+  const normalizedNodeId = String(nodeId || "");
+  const key = progressNodeKey(normalizedScope, normalizedNodeId);
+  const record = listenersByNodeKey.get(key) || { scope: normalizedScope, nodeId: normalizedNodeId, listeners: new Set() };
+  record.listeners.add(listener);
+  listenersByNodeKey.set(key, record);
   scheduleProgressPoll(0);
   return () => {
-    listeners.delete(listener);
-    if (!listeners.size) listenersByNodeId.delete(id);
-    if (!listenersByNodeId.size && pollTimer) {
+    record.listeners.delete(listener);
+    if (!record.listeners.size) listenersByNodeKey.delete(key);
+    if (!listenersByNodeKey.size && pollTimer) {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
   };
 }
 
-export function generationProgressSnapshot(nodeId) {
-  return snapshotsByNodeId.get(String(nodeId || "")) || null;
+export function generationProgressSnapshot(scope, nodeId) {
+  return snapshotsByNodeKey.get(progressNodeKey(scope, nodeId)) || null;
 }
 
 export async function runTrackedGeneration(metadata, request) {
@@ -65,42 +68,51 @@ export async function runTrackedGeneration(metadata, request) {
 }
 
 async function refreshGenerationProgress() {
-  if (pollInFlight || !listenersByNodeId.size) return;
+  if (pollInFlight || !listenersByNodeKey.size) return;
   pollInFlight = true;
   let hasActive = false;
   try {
-    const data = await generationProgressApi.list();
-    const entries = Array.isArray(data?.entries) ? data.entries : [];
-    reconcileProgressEntries(entries);
-    hasActive = [...entriesByRunId.values()].some((entry) => !isTerminalProgressStatus(entry.status));
+    const scopes = [...new Set([...listenersByNodeKey.values()].map((record) => record.scope))];
+    const responses = await Promise.all(scopes.map(async (scope) => ({ scope, data: await generationProgressApi.list(scope) })));
+    responses.forEach(({ scope, data }) => {
+      const entries = Array.isArray(data?.entries) ? data.entries : [];
+      reconcileProgressEntries(entries, scope);
+    });
+    const subscribedScopes = new Set(scopes);
+    hasActive = [...entriesByRunId.values()].some((entry) => subscribedScopes.has(progressEntryScope(entry)) && !isTerminalProgressStatus(entry.status));
     refreshSubscribedSnapshots();
   } catch {
-    hasActive = [...entriesByRunId.values()].some((entry) => !isTerminalProgressStatus(entry.status));
+    const subscribedScopes = new Set([...listenersByNodeKey.values()].map((record) => record.scope));
+    hasActive = [...entriesByRunId.values()].some((entry) => subscribedScopes.has(progressEntryScope(entry)) && !isTerminalProgressStatus(entry.status));
   } finally {
     pollInFlight = false;
     scheduleProgressPoll(hasActive ? 650 : 2500);
   }
 }
 
-function reconcileProgressEntries(serverEntries) {
+function reconcileProgressEntries(serverEntries, scope) {
   const serverRunIds = new Set();
   serverEntries.forEach((entry) => {
     if (!entry?.runId || !entry?.nodeId) return;
     serverRunIds.add(entry.runId);
-    upsertProgressEntry(entry);
+    upsertProgressEntry({ ...entry, scope: progressEntryScope(entry) || scope });
   });
 
-  const affectedNodeIds = new Set();
+  const affectedNodeKeys = new Set();
   for (const [runId, entry] of entriesByRunId) {
+    if (progressEntryScope(entry) !== scope) continue;
     if (serverRunIds.has(runId) || !shouldDiscardProgressEntryMissingFromServer(entry)) continue;
     entriesByRunId.delete(runId);
-    affectedNodeIds.add(entry.nodeId);
+    affectedNodeKeys.add(progressNodeKey(scope, entry.nodeId));
   }
-  affectedNodeIds.forEach(refreshNodeSnapshot);
+  affectedNodeKeys.forEach((key) => {
+    const record = listenersByNodeKey.get(key);
+    if (record) refreshNodeSnapshot(record.scope, record.nodeId);
+  });
 }
 
 function scheduleProgressPoll(delay) {
-  if (typeof window === "undefined" || !listenersByNodeId.size) return;
+  if (typeof window === "undefined" || !listenersByNodeKey.size) return;
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = setTimeout(() => {
     pollTimer = null;
@@ -113,7 +125,7 @@ function upsertProgressEntry(entry) {
   const previous = entriesByRunId.get(entry.runId);
   const next = mergeGenerationProgressEntry(previous, entry);
   entriesByRunId.set(entry.runId, next);
-  refreshNodeSnapshot(next.nodeId);
+  refreshNodeSnapshot(progressEntryScope(next), next.nodeId);
   if (
     isTerminalProgressStatus(next.status) &&
     (!previous || previous.status !== next.status || previous.updatedAt !== next.updatedAt)
@@ -123,14 +135,16 @@ function upsertProgressEntry(entry) {
 }
 
 function refreshSubscribedSnapshots() {
-  for (const nodeId of listenersByNodeId.keys()) refreshNodeSnapshot(nodeId);
+  for (const record of listenersByNodeKey.values()) refreshNodeSnapshot(record.scope, record.nodeId);
 }
 
-function refreshNodeSnapshot(nodeId) {
-  const id = String(nodeId || "");
-  const entries = [...entriesByRunId.values()].filter((entry) => entry.nodeId === id && progressEntryVisible(entry));
+function refreshNodeSnapshot(scope, nodeId) {
+  const normalizedScope = String(scope || "");
+  const normalizedNodeId = String(nodeId || "");
+  const key = progressNodeKey(normalizedScope, normalizedNodeId);
+  const entries = generationProgressEntriesForNode([...entriesByRunId.values()], normalizedScope, normalizedNodeId).filter(progressEntryVisible);
   let next = aggregateGenerationProgressEntries(entries);
-  const previous = snapshotsByNodeId.get(id) || null;
+  const previous = snapshotsByNodeKey.get(key) || null;
   if (
     next &&
     previous?.groupId === next.groupId &&
@@ -141,14 +155,14 @@ function refreshNodeSnapshot(nodeId) {
     next = { ...next, percent: previous.percent, estimated: previous.estimated || next.estimated };
   }
   if (sameSnapshot(previous, next)) return;
-  if (next) snapshotsByNodeId.set(id, next);
-  else snapshotsByNodeId.delete(id);
-  for (const listener of listenersByNodeId.get(id) || []) listener();
+  if (next) snapshotsByNodeKey.set(key, next);
+  else snapshotsByNodeKey.delete(key);
+  for (const listener of listenersByNodeKey.get(key)?.listeners || []) listener();
 }
 
 function progressEntryVisible(entry, now = Date.now()) {
   if (!isTerminalProgressStatus(entry.status)) return true;
-  if ([...entriesByRunId.values()].some((other) => other.groupId === entry.groupId && !isTerminalProgressStatus(other.status))) return true;
+  if ([...entriesByRunId.values()].some((other) => progressEntryScope(other) === progressEntryScope(entry) && other.groupId === entry.groupId && !isTerminalProgressStatus(other.status))) return true;
   return now - Date.parse(entry.updatedAt || entry.startedAt || "") <= generationProgressTerminalDisplayMs;
 }
 
@@ -157,8 +171,16 @@ function scheduleTerminalCleanup(entry) {
   setTimeout(() => {
     const current = entriesByRunId.get(entry.runId);
     if (!current || current.updatedAt !== updatedAt || !isTerminalProgressStatus(current.status)) return;
-    refreshNodeSnapshot(entry.nodeId);
+    refreshNodeSnapshot(progressEntryScope(entry), entry.nodeId);
   }, generationProgressTerminalDisplayMs + 100);
+}
+
+function progressNodeKey(scope, nodeId) {
+  return JSON.stringify([String(scope || ""), String(nodeId || "")]);
+}
+
+function progressEntryScope(entry) {
+  return String(entry?.scope || "");
 }
 
 function sameSnapshot(first, second) {

@@ -1326,7 +1326,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     [nodes, selectedNodeSet, incomingByNode]
   );
   const currentVideoScopeRef = React.useRef("");
-  currentVideoScopeRef.current = remoteVideoScope({ projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath });
+  const generationScope = remoteVideoScope({ projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath });
+  currentVideoScopeRef.current = generationScope;
   useRemoteVideoRecovery({
     context: { projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath },
     nodesRef, edgesRef, updateNode, loadOutputHistory
@@ -7497,6 +7498,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       <NodeCard
         node={node}
         defaultOutputPath={defaultProjectOutputPath}
+        generationScope={generationScope}
         onDragStart={startNodeDrag}
         onNodeResizeStart={startNodeResize}
         onRemove={removeNode}
@@ -7794,6 +7796,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               <NodeCard
                 node={node}
                 defaultOutputPath={defaultProjectOutputPath}
+                generationScope={generationScope}
                 onDragStart={startNodeDrag}
                 onNodeResizeStart={startNodeResize}
                 onRemove={removeNode}
@@ -8264,6 +8267,7 @@ function mergeTextareaLayoutsFromCanvas(nodes = [], canvas) {
 function NodeCard({
   node,
   defaultOutputPath,
+  generationScope,
   onDragStart,
   onNodeResizeStart,
   onRemove,
@@ -8612,6 +8616,7 @@ function NodeCard({
       <NodeBody
         node={renderedNode}
         defaultOutputPath={defaultOutputPath}
+        generationScope={generationScope}
         onUpdate={handleNodeUpdate}
         incoming={incoming}
         incomingByNode={incomingByNode}
@@ -10998,6 +11003,7 @@ function OutputNodeBody({
 function NodeBody({
   node,
   defaultOutputPath,
+  generationScope,
   onUpdate,
   incoming,
   onRun,
@@ -11109,6 +11115,7 @@ function NodeBody({
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
+        generationScope={generationScope}
       />
     );
   }
@@ -11126,6 +11133,7 @@ function NodeBody({
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
+        generationScope={generationScope}
       />
     );
   }
@@ -15222,7 +15230,7 @@ function NodeBody({
             ))}
           </div>
         )}
-        <GenerationProgress nodeId={node.id} />
+        <GenerationProgress scope={generationScope} nodeId={node.id} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
@@ -15460,7 +15468,7 @@ function NodeBody({
         sourceNodeId={node.id}
         sourcePort={outputPort.id}
       />
-      <GenerationProgress nodeId={node.id} nodeStatus={node.data.status} />
+      <GenerationProgress scope={generationScope} nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running
@@ -21267,6 +21275,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
   ]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const { response, data } = await runTrackedGeneration({
+    scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title,
     kind: "video",

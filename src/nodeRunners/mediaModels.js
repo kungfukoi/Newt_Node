@@ -2,9 +2,11 @@ import { nodeApi } from "../api/newtApi.js";
 import { characterSheetGenerationSettings } from "../characterSheetModels.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
+import { remoteVideoScope } from "../remoteVideoJobs.js";
 
 export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index, generationGroupId, batchTotal = 1 }) {
   const { response, data } = await runTrackedGeneration({
+    scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title,
     kind: "image",

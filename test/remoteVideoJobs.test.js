@@ -213,6 +213,7 @@ test("public progress excludes private inputs; lookup is scoped to workflow", as
   await service.create("one", spec);
   assert.equal(service.list(remoteVideoScope(spec.body)).length, 1);
   assert.equal(service.list(remoteVideoScope({ projectId: "other" })).length, 0);
+  assert.equal(service.progress()[0].scope, remoteVideoScope(spec.body));
   assert.doesNotMatch(JSON.stringify(service.progress()), /private prompt|fingerprint/);
   assert.doesNotMatch(JSON.stringify(service.get("one")), /private prompt|fingerprint/);
 });

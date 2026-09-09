@@ -12,7 +12,7 @@ export async function openFixture(page, options = {}) {
   const png = await readFile(new URL("./.generated/landscape.png", import.meta.url));
   const video = await readFile(new URL("./.generated/motion.mp4", import.meta.url));
   await page.addInitScript((fixture) => {
-    if (!localStorage.getItem("seedance-node-editor-draft-v1")) localStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify(fixture));
+    if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify(fixture));
   }, fixture);
   await page.route("**/*", async (route) => {
     const request = route.request();

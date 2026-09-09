@@ -6,7 +6,7 @@ test.afterEach(async ({ page }, info) => {
   const state = await page.evaluate(() => ({
     media: [...document.querySelectorAll("video, [data-node-card-id='viewer'] img")].map((element) => ({ tag: element.tagName, src: element.src.slice(0, 100), time: element.currentTime, ready: element.readyState, duration: element.duration, error: element.error?.message, width: element.naturalWidth, seeking: element.seeking })),
     canvas: [...document.querySelectorAll("canvas")].map((element) => ({ width: element.width, height: element.height, center: [...element.getContext("2d").getImageData(element.width / 2, element.height / 2, 1, 1).data] })),
-    timeline: JSON.parse(localStorage.getItem("seedance-node-editor-draft-v1"))?.nodes?.find((node) => node.id === "timeline")?.data?.assembly,
+    timeline: JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes?.find((node) => node.id === "timeline")?.data?.assembly,
   }));
   console.log(JSON.stringify(state));
   await info.attach("failed-media-state", { body: JSON.stringify(state), contentType: "application/json" });
@@ -233,7 +233,7 @@ test("generated images propagate without a nudge, stay contained on resize, and 
   await page.getByTitle("File", { exact: true }).click();
   await page.getByRole("button", { name: "Save As", exact: true }).click();
   await expect.poll(() => requests.some((request) => request.path === "/api/saved-workflows" && request.method === "POST")).toBeTruthy();
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("seedance-node-editor-draft-v1"))?.projectId)).toBe("fixture-clone");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.projectId)).toBe("fixture-clone");
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(2);

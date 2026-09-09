@@ -739,11 +739,15 @@ app.use("/api", async (_req, _res, next) => {
   }
 });
 app.use("/api/node", generationProgressMiddleware);
-app.get("/api/generation-progress", (_req, res) => {
+app.get("/api/generation-progress", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const entries = new Map(listGenerationProgress().map((entry) => [entry.runId, entry]));
   remoteVideoJobs.progress().forEach((entry) => entries.set(entry.runId, entry));
-  res.json({ entries: [...entries.values()], serverTime: new Date().toISOString() });
+  const requestedScope = typeof req.query.scope === "string" ? req.query.scope : null;
+  const scopedEntries = requestedScope === null
+    ? [...entries.values()]
+    : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
+  res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {

@@ -2,6 +2,7 @@ import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
 import { textAgentRequestMessages } from "../textAgent.js";
+import { remoteVideoScope } from "../remoteVideoJobs.js";
 
 export async function runTextNodeProcessing({
   node,
@@ -17,6 +18,7 @@ export async function runTextNodeProcessing({
 }) {
   const agentMode = mode === "agent";
   const { response, data } = await runTrackedGeneration({
+    scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title,
     kind: "text",

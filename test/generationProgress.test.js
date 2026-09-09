@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   aggregateGenerationProgressEntries,
   generationEntryProgress,
+  generationProgressEntriesForNode,
   generationRequestMetadata,
   mergeGenerationProgressEntry,
   progressEntryFromRequestMetadata,
@@ -10,8 +11,26 @@ import {
   shouldDiscardProgressEntryMissingFromServer
 } from "../src/generationProgress.js";
 
+test("generation progress isolates identical node IDs in different workflows", () => {
+  const entries = [
+    { runId: "run-a", scope: "workflow-a", nodeId: "shared-node" },
+    { runId: "run-b", scope: "workflow-b", nodeId: "shared-node" },
+    { runId: "run-c", scope: "workflow-a", nodeId: "other-node" }
+  ];
+
+  assert.deepEqual(
+    generationProgressEntriesForNode(entries, "workflow-a", "shared-node").map((entry) => entry.runId),
+    ["run-a"]
+  );
+  assert.deepEqual(
+    generationProgressEntriesForNode(entries, "workflow-b", "shared-node").map((entry) => entry.runId),
+    ["run-b"]
+  );
+});
+
 test("generation request metadata keeps one group across a model batch", () => {
   const first = generationRequestMetadata({
+    scope: '["project-a","package-a","c:/projects/a"]',
     nodeId: "image-1",
     nodeTitle: "Image Model",
     kind: "image",
@@ -29,6 +48,8 @@ test("generation request metadata keeps one group across a model batch", () => {
   });
 
   assert.equal(first.generationGroupId, "batch-1");
+  assert.equal(first.generationScope, '["project-a","package-a","c:/projects/a"]');
+  assert.equal(progressEntryFromRequestMetadata(first).scope, first.generationScope);
   assert.equal(second.generationGroupId, "batch-1");
   assert.notEqual(first.generationRunId, second.generationRunId);
   assert.equal(second.generationBatchIndex, 2);

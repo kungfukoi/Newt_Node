@@ -7,6 +7,7 @@ export function createGenerationGroupId(prefix = "generation") {
 }
 
 export function generationRequestMetadata({
+  scope = "",
   nodeId,
   nodeTitle,
   kind = "generation",
@@ -20,6 +21,7 @@ export function generationRequestMetadata({
   const normalizedBatchTotal = Math.max(normalizedBatchIndex, positiveInteger(batchTotal, 1));
   const runId = `${normalizedGroupId}:${normalizedBatchIndex}:${createGenerationGroupId("run")}`;
   return {
+    generationScope: String(scope || ""),
     generationRunId: runId,
     generationGroupId: normalizedGroupId,
     generationKind: String(kind || "generation"),
@@ -33,6 +35,7 @@ export function generationRequestMetadata({
 
 export function progressEntryFromRequestMetadata(metadata, now = new Date().toISOString()) {
   return {
+    scope: metadata.generationScope || "",
     runId: metadata.generationRunId,
     groupId: metadata.generationGroupId,
     nodeId: metadata.nodeId,
@@ -160,6 +163,12 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
     updatedAt: Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : current.updatedAt,
     elapsedMs: Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : 0
   };
+}
+
+export function generationProgressEntriesForNode(entries = [], scope = "", nodeId = "") {
+  const normalizedScope = String(scope || "");
+  const normalizedNodeId = String(nodeId || "");
+  return entries.filter((entry) => String(entry?.scope || "") === normalizedScope && String(entry?.nodeId || "") === normalizedNodeId);
 }
 
 export function phaseLabel(phase) {

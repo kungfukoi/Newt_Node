@@ -13,8 +13,8 @@ import {
 
 test.beforeEach(() => clearGenerationProgressForTests());
 
-test("generation progress registry stores provider state without request payloads", () => {
-  beginGenerationProgress({ runId: "run-1", groupId: "group-1", nodeId: "node-1", nodeTitle: "Video Model", batchTotal: 2 });
+test("generation progress registry stores workflow scope and provider state without request payloads", () => {
+  beginGenerationProgress({ runId: "run-1", scope: '["project-a","package-a","c:/project a"]', groupId: "group-1", nodeId: "node-1", nodeTitle: "Video Model", batchTotal: 2 });
   updateGenerationProgress("run-1", {
     status: "running",
     phase: "generating",
@@ -25,6 +25,7 @@ test("generation progress registry stores provider state without request payload
 
   const [entry] = listGenerationProgress();
   assert.equal(entry.runId, "run-1");
+  assert.equal(entry.scope, '["project-a","package-a","c:/project a"]');
   assert.equal(entry.nodeId, "node-1");
   assert.equal(entry.status, "running");
   assert.equal(entry.queuePosition, 4);
@@ -36,6 +37,7 @@ test("generation progress middleware completes a successful model request", () =
   const request = {
     body: {
       generationRunId: "run-2",
+      generationScope: '["project-b","package-b","c:/project b"]',
       generationGroupId: "group-2",
       generationKind: "image",
       generationLabel: "Nano Banana Pro",
@@ -56,6 +58,7 @@ test("generation progress middleware completes a successful model request", () =
   response.emit("finish");
 
   const [entry] = listGenerationProgress();
+  assert.equal(entry.scope, '["project-b","package-b","c:/project b"]');
   assert.equal(entry.status, "completed");
   assert.equal(entry.phase, "complete");
   assert.equal(entry.percent, 100);

@@ -2,9 +2,9 @@ import { useCallback, useSyncExternalStore } from "react";
 import { formatGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
 import { generationProgressSnapshot, subscribeGenerationProgress } from "../generationProgressStore.js";
 
-export function GenerationProgress({ nodeId, nodeStatus = "" }) {
-  const subscribe = useCallback((listener) => subscribeGenerationProgress(nodeId, listener), [nodeId]);
-  const getSnapshot = useCallback(() => generationProgressSnapshot(nodeId), [nodeId]);
+export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
+  const subscribe = useCallback((listener) => subscribeGenerationProgress(scope, nodeId, listener), [scope, nodeId]);
+  const getSnapshot = useCallback(() => generationProgressSnapshot(scope, nodeId), [scope, nodeId]);
   const progress = useSyncExternalStore(subscribe, getSnapshot, () => null);
   if (!shouldRenderGenerationProgress(progress, nodeStatus)) return null;
 

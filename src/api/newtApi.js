@@ -229,8 +229,8 @@ export const statsApi = {
 };
 
 export const generationProgressApi = {
-  list() {
-    return getJson("/api/generation-progress", "Could not load generation progress.");
+  list(scope = "") {
+    return getJson(`/api/generation-progress?scope=${encodeURIComponent(scope)}`, "Could not load generation progress.");
   }
 };
 

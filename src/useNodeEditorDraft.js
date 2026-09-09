@@ -17,7 +17,7 @@ export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], init
   };
 
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+    const parsed = JSON.parse(readNodeEditorDraftValue(storageKey) || "null");
     if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return fallback;
     const graph = normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups);
     return {
@@ -79,7 +79,7 @@ export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraft
     if (!pendingSnapshot) return;
 
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(pendingSnapshot));
+      writeNodeEditorDraftValue(storageKey, JSON.stringify(pendingSnapshot));
       pendingDraftSnapshotRef.current = null;
     } catch {
       // Local persistence should never interrupt the node editor.
@@ -115,4 +115,38 @@ export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraft
       flushDraftSnapshot();
     };
   }, [flushDraftSnapshot]);
+}
+
+export function readNodeEditorDraftValue(storageKey = nodeDraftStorageKey, browserWindow = globalThis.window) {
+  try {
+    const sessionValue = browserWindow?.sessionStorage?.getItem(storageKey);
+    if (sessionValue) return sessionValue;
+  } catch {
+    // Fall through to the legacy draft when session storage is unavailable.
+  }
+
+  try {
+    const legacyValue = browserWindow?.localStorage?.getItem(storageKey);
+    if (!legacyValue) return "";
+    try {
+      browserWindow?.sessionStorage?.setItem(storageKey, legacyValue);
+      browserWindow?.localStorage?.removeItem(storageKey);
+    } catch {
+      // Keep the legacy value when it cannot be migrated safely.
+    }
+    return legacyValue;
+  } catch {
+    return "";
+  }
+}
+
+export function writeNodeEditorDraftValue(storageKey, value, browserWindow = globalThis.window) {
+  try {
+    browserWindow?.sessionStorage?.setItem(storageKey, value);
+    return;
+  } catch {
+    // Older embedded browsers may not expose session storage.
+  }
+
+  browserWindow?.localStorage?.setItem(storageKey, value);
 }

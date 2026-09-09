@@ -80,7 +80,7 @@ export function PlainTextNodeBody({ node, inputPort, outputPort, incoming, onUpd
   );
 }
 
-export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys, generationScope }) {
   const nodeText = String(node.data.text || "");
   const nodeResultText = String(node.data.resultText || "");
   const hasOutputPanel = Boolean(nodeResultText) || node.data.status === "running" || node.data.status === "complete";
@@ -131,7 +131,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
           </label>
         )}
       </div>
-      <GenerationProgress nodeId={node.id} />
+      <GenerationProgress scope={generationScope} nodeId={node.id} />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
         {running ? "Running..." : "Run Text Model"}
       </button>
@@ -141,7 +141,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
   );
 }
 
-export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys, generationScope }) {
   const draft = String(node.data.agentDraft || "");
   const response = String(node.data.resultText || "");
   const messages = normalizeTextAgentMessages(node.data.agentMessages);
@@ -258,7 +258,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
           </button>
         </div>
       </div>
-      <GenerationProgress nodeId={node.id} />
+      <GenerationProgress scope={generationScope} nodeId={node.id} />
       {node.data.lastRunModel && <small className="upload-status">Last response used {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>
