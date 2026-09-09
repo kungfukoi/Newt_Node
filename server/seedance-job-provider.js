@@ -13,10 +13,19 @@ export function confirmedProviderFailure(message) {
 function providerErrorText(value) {
   if (typeof value === "string") return value.trim();
   if (!value || typeof value !== "object") return "";
-  const message = [value.message, value.detail, value.error]
-    .find((item) => typeof item === "string" && item.trim());
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(providerErrorText).filter(Boolean))].slice(0, 4).join("; ");
+  }
+  const location = Array.isArray(value.loc)
+    ? value.loc.map(String).filter((part, index) => !(index === 0 && part === "body")).join(".")
+    : typeof value.loc === "string" ? value.loc.trim() : "";
+  const message = [value.msg, value.message]
+    .find((item) => typeof item === "string" && item.trim())
+    || providerErrorText(value.detail)
+    || providerErrorText(value.error);
   const code = typeof value.code === "string" ? value.code.trim() : "";
-  return code && message ? `${code}: ${message.trim()}` : message?.trim() || code;
+  const detail = code && message ? `${code}: ${message.trim()}` : message?.trim() || code;
+  return location && detail ? `${location}: ${detail}` : detail;
 }
 
 function providerFailureText(body, fallback) {

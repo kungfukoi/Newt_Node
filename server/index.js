@@ -182,7 +182,7 @@ import {
 } from "../src/klingDirectorPromptOptimization.js";
 import { llmProviderUnavailableMessage, resolveLlmProvider } from "../src/llmProviders.js";
 import {
-  compactKreaSeedancePrompt,
+  compactKreaSeedancePrompt as compactSeedancePrompt,
   estimateKreaSeedanceCost,
   kreaReferenceImageTarget,
   kreaSeedanceEndpoint,
@@ -5934,8 +5934,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
             videoNames: referenceVideoNames
           }, { bracketSyntax: seedance25 && runtimeProvider === "fal" })
         : prompt;
-    if (runtimeProvider === "krea") {
-      submittedPrompt = compactKreaSeedancePrompt(submittedPrompt);
+    if (seedance25) {
+      submittedPrompt = compactSeedancePrompt(submittedPrompt);
     }
     const referenceVideoDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
       ? await localVideoDurations(referenceVideoUrls)

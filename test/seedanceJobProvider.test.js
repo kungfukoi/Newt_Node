@@ -37,6 +37,25 @@ test("Fal COMPLETED can contain a failed result", async () => {
   await assert.rejects(client.poll({ requestId: "id" }), (error) => error.confirmedFailure && /Invalid reference/.test(error.message));
 });
 
+test("Fal submission validation identifies the rejected input field", async () => {
+  const client = await adapter([{
+    status: 422,
+    body: {
+      detail: [{
+        loc: ["body", "prompt"],
+        msg: "String should have at most 4000 characters",
+        type: "string_too_long"
+      }]
+    }
+  }])(spec("fal"));
+  await assert.rejects(client.submit(), (error) => {
+    assert.equal(error.confirmedFailure, true);
+    assert.equal(error.statusCode, 422);
+    assert.equal(error.message, "prompt: String should have at most 4000 characters");
+    return true;
+  });
+});
+
 test("network/5xx/404 status errors never prove provider failure or retry POST", async () => {
   for (const response of [new Error("fetch failed"), { status: 503, body: {} }]) {
     const calls = [];
