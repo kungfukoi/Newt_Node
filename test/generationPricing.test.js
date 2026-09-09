@@ -34,9 +34,34 @@ test("provider routing follows explicit model preferences and real fallback avai
     mediaType: "image",
     providerAvailability: { google: false, fal: true }
   }), "fal");
+  assert.equal(generationProviderForModel({
+    model: "OpenAI Image 2.5",
+    mediaType: "image",
+    providerAvailability: { fal: true, krea: true }
+  }), "fal");
+  assert.equal(generationProviderForModel({
+    model: "OpenAI Image 2",
+    mediaType: "image",
+    providerAvailability: { fal: false, krea: true }
+  }), "krea");
 });
 
 test("image estimates are provider and batch aware", () => {
+  assert.equal(estimateImageRunCost({
+    model: "OpenAI Image 2.5",
+    resolution: "4K",
+    aspectRatio: "16:9",
+    quality: "high",
+    referenceCount: 1,
+    batchCount: 4,
+    provider: "fal"
+  }), 0.40032);
+  assert.equal(estimateImageRunCost({
+    model: "Nano Banana Pro",
+    resolution: "4K",
+    batchCount: 2,
+    provider: "google"
+  }), 0.48);
   assert.equal(estimateImageRunCost({
     model: "OpenAI Image 2",
     resolution: "4K",
@@ -46,12 +71,6 @@ test("image estimates are provider and batch aware", () => {
     batchCount: 4,
     provider: "fal"
   }), 1.652);
-  assert.equal(estimateImageRunCost({
-    model: "Nano Banana Pro",
-    resolution: "4K",
-    batchCount: 2,
-    provider: "google"
-  }), 0.48);
   assert.equal(estimateImageRunCost({ model: "Unknown", provider: "fal" }), null);
 });
 

@@ -37,6 +37,10 @@ test("character sheets expose the mirrored choices and reject removed Seedream s
   });
 });
 
+test("legacy OpenAI Image 2 character sheets migrate to OpenAI Image 2.5", () => {
+  assert.equal(normalizeCharacterSheetModel("OpenAI Image 2"), imageModelNames.openAiImage2);
+});
+
 test("partial Character regeneration replaces successes and preserves prior failed wardrobe sheets", () => {
   const previousA = { wardrobeId: "wardrobe-a", generated: { url: "/outputs/a-old.png" } };
   const previousB = { wardrobeId: "wardrobe-b", generated: { url: "/outputs/b-old.png" } };

@@ -109,7 +109,7 @@ import {
 } from "./comfyWanPreflight.js";
 import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import { createWanBlendComfyResult } from "./wanblend/engine.js";
-import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
+import { estimateLegacyOpenAiImage2Cost as estimateLegacyOpenAiImage2OutputCost, estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import {
   buildNanoBanana2FalInput,
@@ -405,7 +405,8 @@ const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: "OpenAI Image 2",
+  openAiImage2: "OpenAI Image 2.5",
+  legacyOpenAiImage2: "OpenAI Image 2",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -415,6 +416,7 @@ const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.legacyOpenAiImage2,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -3540,12 +3542,13 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-openai-image-2") {
+    if (["fal-gpt-image-2-5", "fal-openai-image-2"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const openAiImage = await generateFalOpenAiImage2({
+        modelName: selectedModel.displayName,
         prompt,
         imagePromptUrls,
         imagePromptLabels,
@@ -3554,13 +3557,19 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         quality: req.body.quality,
         editMaskDataUrl: req.body.editMaskDataUrl
       });
-      const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+      const output = await downloadImage(
+        req,
+        openAiImage.remoteImage.url,
+        selectedModel.provider === "fal-gpt-image-2-5" ? "gpt-image-2-5" : "openai-image-2",
+        openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType
+      );
 
       const cost = estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
         size: openAiImage.size,
         quality: openAiImage.quality,
-        endpoint: openAiImage.endpoint
+        endpoint: openAiImage.endpoint,
+        modelName: selectedModel.displayName
       });
       await appendHistory({
         id: randomUUID(),
@@ -4595,7 +4604,7 @@ app.post("/api/node/utility-image", async (req, res) => {
       return runTopazImageUpscaler(req, res, { imageUrl, selectedModel });
     }
 
-    if (selectedModel.provider === "fal-openai-image-2-image-to-id") {
+    if (selectedModel.provider === "fal-gpt-image-2-5-image-to-id") {
       return runImageToIdUtilityImage(req, res, { imageUrl, selectedModel });
     }
 
@@ -4936,7 +4945,7 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
     size: openAiImage.size,
     quality: openAiImage.quality
   });
-  const text = "OpenAI Image 2 Cryptomatte-style ID matte.";
+  const text = "OpenAI Image 2.5 Cryptomatte-style ID matte.";
 
   await appendHistory({
     id: randomUUID(),
@@ -15437,9 +15446,12 @@ function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputIma
   };
 }
 
-function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint }) {
+function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelName = imageModelNames.openAiImage2 }) {
   const edit = String(endpoint || "").includes("/edit");
-  const amountUsd = estimateOpenAiImage2OutputCost({ resolution, size, quality, edit });
+  const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
+  const amountUsd = legacyModel
+    ? estimateLegacyOpenAiImage2OutputCost({ resolution, size, quality, edit })
+    : estimateOpenAiImage2OutputCost({ resolution, size, quality, edit });
   return {
     amountUsd: roundCurrency(amountUsd),
     currency: "USD",
@@ -15450,8 +15462,10 @@ function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint }) {
     resolution,
     size,
     quality,
-    pricingBasis: `OpenAI GPT Image 2 ${quality} image output estimate`,
-    pricingSource: "fal-model-page-2026-07-11"
+    pricingBasis: legacyModel
+      ? `OpenAI Image 2 ${quality} image output estimate`
+      : `OpenAI Image 2.5 Flare ${quality} image output estimate`,
+    pricingSource: legacyModel ? "fal-model-page-2026-08-18" : "fal-model-page-2026-09-09"
   };
 }
 
@@ -17782,11 +17796,19 @@ function resolveImageModel(model) {
     };
   }
 
-  if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
+  if (normalized === imageModelNames.legacyOpenAiImage2.toLowerCase() || normalized === "gpt image 2" || normalized === "gpt-image-2") {
     return {
       provider: "fal-openai-image-2",
-      displayName: "OpenAI Image 2",
+      displayName: imageModelNames.legacyOpenAiImage2,
       id: "openai/gpt-image-2"
+    };
+  }
+
+  if (normalized.includes("openai image 2.5") || normalized.includes("gpt image 2.5") || normalized.includes("gpt-image-2.5") || normalized.includes("image 2.5")) {
+    return {
+      provider: "fal-gpt-image-2-5",
+      displayName: imageModelNames.openAiImage2,
+      id: "openai/gpt-image-2.5/flare/text-to-image"
     };
   }
 
@@ -17834,9 +17856,9 @@ function resolveUtilityImageModel(model) {
 
   if (normalized.includes("cryptomatte") || (normalized.includes("image") && normalized.includes("id"))) {
     return {
-      provider: "fal-openai-image-2-image-to-id",
+      provider: "fal-gpt-image-2-5-image-to-id",
       displayName: "Image to Color ID",
-      id: "openai/gpt-image-2/edit"
+      id: "openai/gpt-image-2.5/flare/edit"
     };
   }
 
@@ -18268,7 +18290,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 function imageAspectRatiosForProvider(provider) {
   if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;
-  return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return ["fal-gpt-image-2-5", "fal-openai-image-2"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isAutoImageAspectRatio(value) {
@@ -19955,7 +19977,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
+async function generateFalOpenAiImage2({ modelName, prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -19968,17 +19990,12 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
   }
 
   const editMaskInput = editMaskDataUrl ? imageDataUrlAsset(editMaskDataUrl, "character-wardrobe-mask.png") : null;
-  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
+  return generateFalOpenAiImage2FromInputs({ modelName, prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
 }
 
 async function generateOpenAiImage2FromInputs(options) {
-  const provider = resolveFalKreaProvider({
-    falKey: process.env.FAL_KEY,
-    kreaKey: process.env.KREA_API_KEY
-  });
-  if (provider === "fal") return generateFalOpenAiImage2FromInputs(options);
-  if (provider === "krea") return generateKreaOpenAiImage2FromInputs(options);
-  throw httpError(400, "OpenAI Image 2 needs an enabled Fal or Krea API key in Settings.");
+  if (process.env.FAL_KEY) return generateFalOpenAiImage2FromInputs(options);
+  throw httpError(400, "OpenAI Image 2.5 needs an enabled Fal API key in Settings.");
 }
 
 async function generateKreaOpenAiImage2FromInputs({
@@ -20030,11 +20047,15 @@ async function generateKreaOpenAiImage2FromInputs({
   };
 }
 
-async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
+async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.openAiImage2, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
-  const quality = normalizeOpenAiImage2Quality(requestedQuality);
+  const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
+  const requestedQualityValue = normalizeOpenAiImage2Quality(requestedQuality);
+  const quality = legacyModel && !["low", "medium", "high"].includes(requestedQualityValue) ? "high" : requestedQualityValue;
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
-  const endpoint = imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2";
+  const endpoint = legacyModel
+    ? imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2"
+    : imageInputs.length ? "openai/gpt-image-2.5/flare/edit" : "openai/gpt-image-2.5/flare/text-to-image";
   const input = {
     prompt: submittedPrompt,
     image_size: openAiSizeToFalImageSize(size),
@@ -20053,7 +20074,7 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
   const remoteImage = firstFalImageResult(result?.data);
 
   if (!remoteImage?.url) {
-    throw new Error("Fal returned no OpenAI Image 2 image URL.");
+    throw new Error(`Fal returned no ${modelName} image URL.`);
   }
 
   return {

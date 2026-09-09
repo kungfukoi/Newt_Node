@@ -1088,7 +1088,7 @@ function isImageWorkspaceHistory(item) {
 function imageAspectRatiosForModel(model) {
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return model === imageModelNames.openAiImage2 || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isKrea2LargeImageModel(model) {

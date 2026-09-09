@@ -27,16 +27,35 @@ export const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: "OpenAI Image 2",
+  openAiImage2: "OpenAI Image 2.5",
+  legacyOpenAiImage2: "OpenAI Image 2",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
+export const legacyOpenAiImage2ModelName = imageModelNames.legacyOpenAiImage2;
+export const legacyGptImage25ModelName = "GPT Image 2.5";
+
+export function isGptImage25Model(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === imageModelNames.openAiImage2.toLowerCase()
+    || normalized === legacyGptImage25ModelName.toLowerCase()
+    || normalized.includes("gpt-image-2.5");
+}
+
+export function isLegacyOpenAiImage2Model(value) {
+  return String(value || "").trim().toLowerCase() === legacyOpenAiImage2ModelName.toLowerCase();
+}
+
+export function normalizeGptImage25Model(value, fallback = "") {
+  return isGptImage25Model(value) || isLegacyOpenAiImage2Model(value) ? imageModelNames.openAiImage2 : value || fallback;
+}
 export const imageModelOptions = [
   imageModelNames.zImage,
   imageModelNames.seedream5Pro,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.legacyOpenAiImage2,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -490,7 +509,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into selected delivery aspect ratios while preserving the subject and composition.",
   [utilityImageModelNames.coverage]: "Generates a standard nine-angle coverage set from one connected reference image.",
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white matte from a picked source-image Color ID.",
-  [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
+  [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2.5 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
   [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",

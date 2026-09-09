@@ -1,4 +1,4 @@
-import { imageModelNames } from "./modelOptions.js";
+import { imageModelNames, normalizeGptImage25Model } from "./modelOptions.js";
 import { openAiImage2Quality } from "./openAiImage2.js";
 
 export const characterSheetModelOptions = [
@@ -8,7 +8,8 @@ export const characterSheetModelOptions = [
 ];
 
 export function normalizeCharacterSheetModel(value) {
-  return characterSheetModelOptions.includes(value) ? value : imageModelNames.nanoBanana2;
+  const model = normalizeGptImage25Model(value);
+  return characterSheetModelOptions.includes(model) ? model : imageModelNames.nanoBanana2;
 }
 
 export function characterSheetGenerationSettings(value) {

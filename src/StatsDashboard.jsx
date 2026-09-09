@@ -10,7 +10,7 @@ import {
   TrendingUp
 } from "lucide-react";
 import { statsApi } from "./api/newtApi.js";
-import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
+import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
 import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { reve21CostPerImage } from "./reve21.js";
 import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
@@ -587,7 +587,18 @@ function estimateItemCost(item, mediaType, pricing) {
       return null;
     }
 
-    if (modelKey.includes("openai")) {
+    const isLegacyOpenAiImage2 = modelKey.includes("openai image 2")
+      || /(?:^|\s)openai\/gpt-image-2(?:\/|\s|$)/.test(modelKey);
+    if (isLegacyOpenAiImage2) {
+      return estimateLegacyOpenAiImage2Cost({
+        resolution: settings.resolution,
+        size: settings.imageSize,
+        quality: settings.quality || openAiImage2Quality,
+        edit: String(item.endpoint || "").includes("/edit")
+      });
+    }
+
+    if (modelKey.includes("gpt image") || modelKey.includes("gpt-image")) {
       return estimateOpenAiImage2Cost({
         resolution: settings.resolution,
         size: settings.imageSize,

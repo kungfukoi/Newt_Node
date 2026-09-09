@@ -2,10 +2,11 @@ import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMinimaxH3Cost, isMinimaxH3Model } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
-import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
+import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { reve21CostPerImage } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { isGptImage25Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
 
 const falImageRates = Object.freeze({
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
@@ -60,6 +61,7 @@ export function generationProviderForModel({
   }
 
   if (mediaType === "image") {
+    if (isGptImage25Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
     return ["REVE 2.1", "SAM 3 Image"].includes(model) ? "fal" : null;
@@ -80,10 +82,17 @@ export function estimateImageRunCost({
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
 
-  if (model === "OpenAI Image 2") {
+  if (isGptImage25Model(model)) {
+    unitCost = estimateOpenAiImage2Cost({
+      resolution,
+      size: orientationSize(aspectRatio),
+      quality,
+      edit: references > 0
+    });
+  } else if (isLegacyOpenAiImage2Model(model)) {
     unitCost = provider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
-      : estimateOpenAiImage2Cost({
+      : estimateLegacyOpenAiImage2Cost({
           resolution,
           size: orientationSize(aspectRatio),
           quality,

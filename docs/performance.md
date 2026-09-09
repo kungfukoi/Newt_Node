@@ -70,7 +70,7 @@ Recent production build summary:
 | `assets/vendor-*.css` | lazy shared/editor vendor style | 15.50 kB | 2.61 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 13.35 kB | 3.38 kB |
-| `assets/openAiImage2-*.js` | lazy OpenAI Image 2 helper | 4.23 kB | 1.63 kB |
+| `assets/openAiImage2-*.js` | lazy OpenAI Image 2.5 helper | 4.23 kB | 1.63 kB |
 | `assets/SettingsPage-*.js` | lazy Settings page | 23.27 kB | 7.13 kB |
 | `assets/StatsDashboard-*.js` | lazy Stats page | 25.56 kB | 7.98 kB |
 | `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |

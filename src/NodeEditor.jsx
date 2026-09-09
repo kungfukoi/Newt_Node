@@ -230,6 +230,8 @@ import {
   imageBatchOptions,
   imageModelNames,
   imageModelOptions,
+  isGptImage25Model,
+  normalizeGptImage25Model,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   geminiOmniAspectRatioOptions,
@@ -15153,7 +15155,10 @@ function NodeBody({
     const isZImage = isZImageImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
     const isSeedream5 = isSeedream5ImageModel(node.data.model);
-    const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2;
+    const isOpenAiImage2 = isOpenAiImageModel(node.data.model);
+    const openAiQualityOptions = isGptImage25Model(node.data.model)
+      ? openAiImage2QualityOptions
+      : openAiImage2QualityOptions.filter((option) => ["low", "medium", "high"].includes(option));
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
@@ -15272,8 +15277,8 @@ function NodeBody({
           </NodeRow>
           {isOpenAiImage2 && (
             <NodeRow label="Quality">
-              <select value={normalizeOpenAiImage2Quality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeOpenAiImage2Quality(event.target.value) })}>
-                {openAiImage2QualityOptions.map((option) => (
+              <select value={normalizeOpenAiImageQualityForModel(node.data.quality, node.data.model)} onChange={(event) => onUpdate(node.id, { quality: normalizeOpenAiImageQualityForModel(event.target.value, node.data.model) })}>
+                {openAiQualityOptions.map((option) => (
                   <option key={option} value={option}>{formatOpenAiImage2Quality(option)}</option>
                 ))}
               </select>
@@ -17964,7 +17969,7 @@ function imageModelSelectionPatch(data = {}, model) {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: normalizeOpenAiImage2Quality(data.quality),
+    quality: normalizeOpenAiImageQualityForModel(data.quality, model),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
@@ -18010,14 +18015,26 @@ function isAutoImageAspectRatio(value) {
 }
 
 function isOpenAiImageModel(model) {
-  return String(model || "").toLowerCase().includes("openai");
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("openai") || normalized.includes("gpt image") || normalized.includes("gpt-image");
 }
 
 function formatOpenAiImage2Quality(value) {
   const quality = normalizeOpenAiImage2Quality(value);
+  if (quality === "auto") return "Auto";
   if (quality === "low") return "Low (Economy)";
-  if (quality === "medium") return "Medium (Draft)";
-  return "High (Professional)";
+  if (quality === "medium") return "Medium";
+  if (quality === "xhigh") return "Extra High";
+  if (quality === "max") return "Max";
+  return "High";
+}
+
+function normalizeOpenAiImageQualityForModel(value, model) {
+  const quality = normalizeOpenAiImage2Quality(value);
+  if (isOpenAiImageModel(model) && !isGptImage25Model(model) && !["low", "medium", "high"].includes(quality)) {
+    return openAiImage2Quality;
+  }
+  return quality;
 }
 
 function isKrea2LargeImageModel(model) {
@@ -19605,7 +19622,7 @@ function resetCoverageOutputPatch() {
 }
 
 function coverageModelLabel(model) {
-  if (model === imageModelNames.openAiImage2) return "GPT Image 2";
+  if (model === imageModelNames.openAiImage2) return "OpenAI Image 2.5";
   if (model === imageModelNames.reve21) return "REVE 2.1";
   if (model === imageModelNames.seedream5Pro) return "Seedream";
   return model;
@@ -24154,7 +24171,8 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = data.model || imageModelNames.openAiImage2;
+  const selectedModel = data.model || imageModelNames.openAiImage2;
+  const model = imageModelOptions.includes(selectedModel) ? selectedModel : imageModelNames.openAiImage2;
   const isSeedream5 = isSeedream5ImageModel(model);
   return {
     ...data,
@@ -24163,7 +24181,7 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: normalizeOpenAiImage2Quality(data.quality),
+    quality: normalizeOpenAiImageQualityForModel(data.quality, model),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1",
@@ -24197,7 +24215,8 @@ function normalizeAutoAspectData(data = {}) {
 }
 
 function normalizeCoverageData(data = {}) {
-  const model = coverageModelOptions.includes(data.model) ? data.model : imageModelNames.openAiImage2;
+  const selectedModel = normalizeGptImage25Model(data.model);
+  const model = coverageModelOptions.includes(selectedModel) ? selectedModel : imageModelNames.openAiImage2;
   const resultItems = normalizedResultItems(data.resultItems, data.resultUrl, "image");
   const selectedResultIndex = Math.min(
     Math.max(0, Math.trunc(Number(data.selectedResultIndex) || 0)),
