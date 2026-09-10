@@ -1,7 +1,6 @@
 import { generationProgressApi } from "./api/newtApi.js";
 import {
   aggregateGenerationProgressEntries,
-  generationProgressTerminalDisplayMs,
   generationProgressEntriesForNode,
   generationRequestMetadata,
   isTerminalProgressStatus,
@@ -40,6 +39,7 @@ export function generationProgressSnapshot(scope, nodeId) {
 
 export async function runTrackedGeneration(metadata, request) {
   const requestMetadata = generationRequestMetadata(metadata);
+  discardSupersededNodeProgress(requestMetadata);
   upsertProgressEntry(progressEntryFromRequestMetadata(requestMetadata));
   scheduleProgressPoll(0);
   try {
@@ -126,12 +126,6 @@ function upsertProgressEntry(entry) {
   const next = mergeGenerationProgressEntry(previous, entry);
   entriesByRunId.set(entry.runId, next);
   refreshNodeSnapshot(progressEntryScope(next), next.nodeId);
-  if (
-    isTerminalProgressStatus(next.status) &&
-    (!previous || previous.status !== next.status || previous.updatedAt !== next.updatedAt)
-  ) {
-    scheduleTerminalCleanup(next);
-  }
 }
 
 function refreshSubscribedSnapshots() {
@@ -154,25 +148,27 @@ function refreshNodeSnapshot(scope, nodeId) {
   ) {
     next = { ...next, percent: previous.percent, estimated: previous.estimated || next.estimated };
   }
+  if (next && previous?.groupId === next.groupId && next.elapsedMs < previous.elapsedMs) {
+    next = { ...next, elapsedMs: previous.elapsedMs };
+  }
   if (sameSnapshot(previous, next)) return;
   if (next) snapshotsByNodeKey.set(key, next);
   else snapshotsByNodeKey.delete(key);
   for (const listener of listenersByNodeKey.get(key)?.listeners || []) listener();
 }
 
-function progressEntryVisible(entry, now = Date.now()) {
-  if (!isTerminalProgressStatus(entry.status)) return true;
-  if ([...entriesByRunId.values()].some((other) => progressEntryScope(other) === progressEntryScope(entry) && other.groupId === entry.groupId && !isTerminalProgressStatus(other.status))) return true;
-  return now - Date.parse(entry.updatedAt || entry.startedAt || "") <= generationProgressTerminalDisplayMs;
+function progressEntryVisible(entry) {
+  return Boolean(entry);
 }
 
-function scheduleTerminalCleanup(entry) {
-  const updatedAt = entry.updatedAt;
-  setTimeout(() => {
-    const current = entriesByRunId.get(entry.runId);
-    if (!current || current.updatedAt !== updatedAt || !isTerminalProgressStatus(current.status)) return;
-    refreshNodeSnapshot(progressEntryScope(entry), entry.nodeId);
-  }, generationProgressTerminalDisplayMs + 100);
+function discardSupersededNodeProgress(metadata) {
+  const scope = String(metadata.generationScope || "");
+  const nodeId = String(metadata.nodeId || "");
+  const groupId = String(metadata.generationGroupId || "");
+  for (const [runId, entry] of entriesByRunId) {
+    if (progressEntryScope(entry) !== scope || String(entry.nodeId || "") !== nodeId || String(entry.groupId || entry.runId) === groupId) continue;
+    entriesByRunId.delete(runId);
+  }
 }
 
 function progressNodeKey(scope, nodeId) {
@@ -188,7 +184,7 @@ function sameSnapshot(first, second) {
   if (!first || !second) return false;
   return [
     "groupId", "status", "phase", "percent", "determinate", "estimated", "batchTotal", "settledCount",
-    "completedCount", "failedCount", "queuePosition", "provider", "providerStatus", "health", "lastContactAt", "message", "updatedAt"
+    "completedCount", "failedCount", "queuePosition", "provider", "providerStatus", "health", "lastContactAt", "message", "updatedAt", "finishedAt"
   ].every((key) => first[key] === second[key]) && Math.floor(first.elapsedMs / 1000) === Math.floor(second.elapsedMs / 1000);
 }
 

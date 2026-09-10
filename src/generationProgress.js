@@ -1,4 +1,3 @@
-export const generationProgressTerminalDisplayMs = 5000;
 export const generationProgressServerRegistrationGraceMs = 10000;
 
 export function createGenerationGroupId(prefix = "generation") {
@@ -142,6 +141,7 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
 
   const startedAt = Math.min(...latestGroup.map((entry) => entryStartedAt(entry)).filter(Number.isFinite));
   const updatedAt = Math.max(...latestGroup.map((entry) => entryUpdatedAt(entry)).filter(Number.isFinite));
+  const elapsedAt = isTerminalProgressStatus(status) && Number.isFinite(updatedAt) ? updatedAt : now;
   return {
     nodeId: current.nodeId,
     groupId: current.groupId || current.runId,
@@ -165,7 +165,8 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
     message: current.message || phaseLabel(phase),
     startedAt: Number.isFinite(startedAt) ? new Date(startedAt).toISOString() : current.startedAt,
     updatedAt: Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : current.updatedAt,
-    elapsedMs: Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : 0
+    finishedAt: isTerminalProgressStatus(status) && Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : null,
+    elapsedMs: Number.isFinite(startedAt) ? Math.max(0, elapsedAt - startedAt) : 0
   };
 }
 
@@ -194,12 +195,19 @@ export function formatGenerationElapsed(milliseconds) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+export function liveGenerationElapsed(progress, now = Date.now()) {
+  const snapshotElapsed = Math.max(0, Number(progress?.elapsedMs) || 0);
+  if (!progress || isTerminalProgressStatus(progress.status)) return snapshotElapsed;
+  const startedAt = Date.parse(progress.startedAt || "");
+  return Number.isFinite(startedAt) ? Math.max(snapshotElapsed, now - startedAt) : snapshotElapsed;
+}
+
 export function isTerminalProgressStatus(status) {
   return status === "completed" || status === "failed" || status === "attention";
 }
 
 export function shouldRenderGenerationProgress(progress, nodeStatus = "") {
-  return Boolean(progress && progress.status !== "completed" && String(nodeStatus).toLowerCase() !== "complete");
+  return Boolean(progress);
 }
 
 export function mergeGenerationProgressEntry(previous, incoming) {
@@ -220,7 +228,7 @@ export function mergeGenerationProgressEntry(previous, incoming) {
 
 export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {
   if (!entry?.runId || !entry?.nodeId) return true;
-  if (isTerminalProgressStatus(entry.status)) return true;
+  if (isTerminalProgressStatus(entry.status)) return false;
   const startedAt = Date.parse(entry.startedAt || entry.updatedAt || "");
   if (!Number.isFinite(startedAt)) return true;
   return now - startedAt >= generationProgressServerRegistrationGraceMs;

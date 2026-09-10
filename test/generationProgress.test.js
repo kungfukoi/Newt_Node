@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   aggregateGenerationProgressEntries,
+  formatGenerationElapsed,
   generationEntryProgress,
   generationProgressEntriesForNode,
   generationRequestMetadata,
   mergeGenerationProgressEntry,
+  liveGenerationElapsed,
   progressEntryFromRequestMetadata,
   shouldRenderGenerationProgress,
   shouldDiscardProgressEntryMissingFromServer
@@ -134,6 +136,35 @@ test("a finished group reports failure when any batch request failed", () => {
   assert.equal(progress.status, "failed");
   assert.equal(progress.phase, "failed");
   assert.equal(progress.failedCount, 1);
+  assert.equal(progress.elapsedMs, 4000);
+});
+
+test("completed generation elapsed time freezes at the terminal update", () => {
+  const progress = aggregateGenerationProgressEntries([{
+    runId: "run-complete",
+    groupId: "group-complete",
+    nodeId: "video-complete",
+    kind: "video",
+    status: "completed",
+    phase: "complete",
+    percent: 100,
+    startedAt: "2026-08-16T12:00:00.000Z",
+    updatedAt: "2026-08-16T12:03:21.000Z"
+  }], Date.parse("2026-08-16T13:00:00.000Z"));
+
+  assert.equal(progress.elapsedMs, 201000);
+  assert.equal(progress.finishedAt, "2026-08-16T12:03:21.000Z");
+  assert.equal(liveGenerationElapsed(progress, Date.parse("2026-08-16T14:00:00.000Z")), 201000);
+});
+
+test("generation elapsed display continues beyond one minute", () => {
+  assert.equal(formatGenerationElapsed(61000), "1:01");
+  assert.equal(formatGenerationElapsed(3661000), "61:01");
+  assert.equal(liveGenerationElapsed({
+    status: "running",
+    startedAt: "2026-08-16T12:00:00.000Z",
+    elapsedMs: 59000
+  }, Date.parse("2026-08-16T12:01:05.000Z")), 65000);
 });
 test("sequential batches stay active between completed requests", () => {
   const progress = aggregateGenerationProgressEntries([{
@@ -216,20 +247,20 @@ test("active progress missing from the server is discarded after registration gr
   );
 });
 
-test("terminal local progress can be discarded when the server no longer retains it", () => {
+test("terminal local progress remains until the next node submission", () => {
   assert.equal(shouldDiscardProgressEntryMissingFromServer({
     runId: "complete-run",
     nodeId: "image-complete",
     status: "completed",
     startedAt: "2026-08-18T12:00:00.000Z"
-  }), true);
+  }), false);
 });
 
-test("completed progress disappears while failures and attention remain visible", () => {
+test("the latest completed, failed, or attention progress remains visible", () => {
   assert.equal(shouldRenderGenerationProgress(null), false);
   assert.equal(shouldRenderGenerationProgress({ status: "running" }), true);
-  assert.equal(shouldRenderGenerationProgress({ status: "running" }, "complete"), false);
-  assert.equal(shouldRenderGenerationProgress({ status: "completed" }), false);
+  assert.equal(shouldRenderGenerationProgress({ status: "running" }, "complete"), true);
+  assert.equal(shouldRenderGenerationProgress({ status: "completed" }), true);
   assert.equal(shouldRenderGenerationProgress({ status: "failed" }), true);
   assert.equal(shouldRenderGenerationProgress({ status: "attention" }), true);
 });

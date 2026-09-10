@@ -1,17 +1,27 @@
-import { useCallback, useSyncExternalStore } from "react";
-import { formatGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { formatGenerationElapsed, isTerminalProgressStatus, liveGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
 import { generationProgressSnapshot, subscribeGenerationProgress } from "../generationProgressStore.js";
 
 export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
   const subscribe = useCallback((listener) => subscribeGenerationProgress(scope, nodeId, listener), [scope, nodeId]);
   const getSnapshot = useCallback(() => generationProgressSnapshot(scope, nodeId), [scope, nodeId]);
   const progress = useSyncExternalStore(subscribe, getSnapshot, () => null);
+  const active = Boolean(progress && !isTerminalProgressStatus(progress.status));
+  const [clock, setClock] = useState(Date.now);
+
+  useEffect(() => {
+    setClock(Date.now());
+    if (!active) return undefined;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active, progress?.groupId]);
+
   if (!shouldRenderGenerationProgress(progress, nodeStatus)) return null;
 
   const phase = phaseLabel(progress.phase);
   const batchDetail = progress.batchTotal > 1 ? `${progress.settledCount}/${progress.batchTotal}` : "";
   const queueDetail = progress.queuePosition !== null ? `Queue ${progress.queuePosition}` : "";
-  const elapsed = formatGenerationElapsed(progress.elapsedMs);
+  const elapsed = formatGenerationElapsed(liveGenerationElapsed(progress, clock));
   const percent = progress.determinate ? Math.round(progress.percent || 0) : null;
   const percentDetail = percent === null ? "" : `${progress.estimated ? "Est. " : ""}${percent}%`;
   const providerDetail = progress.provider
