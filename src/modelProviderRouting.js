@@ -43,9 +43,9 @@ const providerModelSupport = Object.freeze({
     ])
   }),
   llm: Object.freeze({
-    fal: Object.freeze(["GPT-5.6 Terra"]),
-    openai: Object.freeze(["GPT-5.6 Luna"]),
-    atlas: Object.freeze(["GPT-5.6 Luna"])
+    fal: Object.freeze(["GPT-5.6 Terra", "GPT-6 Astra", "GPT-5.6 Sol"]),
+    openai: Object.freeze(["GPT-5.6 Luna", "GPT-6 Astra", "GPT-5.6 Sol"]),
+    atlas: Object.freeze(["GPT-5.6 Luna", "GPT-6 Astra", "GPT-5.6 Sol"])
   })
 });
 

@@ -29,7 +29,7 @@ import {
 } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
-import { defaultUserPreferences, normalizeUserPreferences } from "./userPreferences.js";
+import { defaultUserPreferences, directorProcessingModelOptions, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
 const providerDefinitions = Object.freeze([
@@ -473,7 +473,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <small className="settings-provider-models">{providerSupportedModelsLabel("imageGeneration", modelProviderPreferences.imageGeneration)}</small>
             </label>
             <label className="settings-field">
-              <span>Text / Agent LLM</span>
+              <span>Text / Agent / Director LLM</span>
               <select
                 value={modelProviderPreferences.llm}
                 onChange={(event) => setModelProviderPreferences((current) => ({ ...current, llm: event.target.value }))}
@@ -482,7 +482,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
                 <option value="openai">OpenAI</option>
                 <option value="atlas">Atlas Cloud</option>
               </select>
-              <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text features")}</small>
+              <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text and Director features")}</small>
               <small className="settings-provider-models">{providerSupportedModelsLabel("llm", modelProviderPreferences.llm)}</small>
             </label>
           </div>
@@ -542,7 +542,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
 
         <CollapsibleSettingsSection
           title="User Preferences"
-          aside="Canvas display"
+          aside="Canvas and processing"
           open={openSections.userPreferences}
           onToggle={() => toggleSection("userPreferences")}
         >
@@ -580,6 +580,23 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <span className="node-toggle compact" aria-hidden="true">
                 <span />
               </span>
+            </label>
+            <label className="settings-preference-model">
+              <span>
+                <strong>Director Processing Model</strong>
+                <small>Used for Director planning, revisions, visual analysis, and reference-video analysis.</small>
+              </span>
+              <select
+                value={userPreferences.directorProcessingModel}
+                onChange={(event) => setUserPreferences((current) => ({
+                  ...current,
+                  directorProcessingModel: event.target.value
+                }))}
+              >
+                {directorProcessingModelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="settings-actions">

@@ -1374,6 +1374,41 @@ textarea::placeholder {
   transform: translateX(17px);
 }
 
+.settings-preference-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
+  align-items: center;
+  gap: 16px;
+  min-height: 54px;
+}
+
+.settings-preference-model > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.settings-preference-model strong {
+  color: #f4f0e8;
+  font-size: 13px;
+}
+
+.settings-preference-model small {
+  color: rgba(244, 240, 232, 0.46);
+  font-size: 11px;
+}
+
+.settings-preference-model select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  color: #f4f0e8;
+  background: #151515;
+  font-size: 12px;
+  font-weight: 720;
+}
+
 .settings-field {
   display: grid;
   gap: 7px;
@@ -2103,6 +2138,10 @@ textarea::placeholder {
   .settings-hero-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .settings-preference-model {
+    grid-template-columns: 1fr;
   }
 
   .stats-panel.wide,

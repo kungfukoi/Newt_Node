@@ -65,7 +65,7 @@ test("model provider tiles list the models implemented by the selected route", (
     "Nano Banana Pro",
     "REVE 2.1"
   ]);
-  assert.equal(providerSupportedModelsLabel("llm", "fal"), "Models: GPT-5.6 Terra");
+  assert.equal(providerSupportedModelsLabel("llm", "fal"), "Models: GPT-5.6 Terra, GPT-6 Astra, GPT-5.6 Sol");
   assert.equal(providerSupportedModelsLabel("missing", "atlas"), "Models: None configured");
 });
 

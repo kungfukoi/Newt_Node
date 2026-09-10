@@ -103,7 +103,7 @@ import {
 import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
-import { normalizeUserPreferences } from "../src/userPreferences.js";
+import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
   normalizeComfyRootPath,
@@ -535,9 +535,14 @@ let openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
 const falTextModel = process.env.FAL_TEXT_MODEL || defaultFalTextModel;
 const skillDirectorLlmEndpoint = "openrouter/router";
-const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || creativeFalModel;
-const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
-const skillDirectorOpenAiModel = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || creativeOpenAiModel;
+const skillDirectorFalModelOverride = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "";
+const skillDirectorVisionFalModelOverride = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || "";
+const skillDirectorOpenAiModelOverride = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || "";
+const initialDirectorProcessingModels = directorProcessingModelIds(defaultUserPreferences.directorProcessingModel);
+let runtimeUserPreferences = defaultUserPreferences;
+let skillDirectorFalModel = skillDirectorFalModelOverride || initialDirectorProcessingModels.falModel || creativeFalModel;
+let skillDirectorVisionFalModel = skillDirectorVisionFalModelOverride || skillDirectorFalModel;
+let skillDirectorOpenAiModel = skillDirectorOpenAiModelOverride || initialDirectorProcessingModels.openAiModel || creativeOpenAiModel;
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
 const storyboardTextModel = process.env.STORYBOARD_TEXT_MODEL || falTextModel;
 const storyboardVisionTextModel = process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardTextModel;
@@ -909,6 +914,8 @@ function buildHealthPayload() {
     falTextModel,
     skillDirectorFalModel,
     skillDirectorVisionFalModel,
+    skillDirectorOpenAiModel,
+    directorProcessingModel: runtimeUserPreferences.directorProcessingModel,
     storyboardVisionTextModel,
     falVisionTextModel,
     falVideoTextModel,
@@ -1801,6 +1808,11 @@ async function refreshRuntimeConfigFromEnvFile() {
     krea: Boolean(selectedCredentials.krea?.key),
     atlas: Boolean(selectedCredentials.atlas?.key)
   });
+  runtimeUserPreferences = normalizeUserPreferences(settingsValues.userPreferences);
+  const directorModels = directorProcessingModelIds(runtimeUserPreferences.directorProcessingModel);
+  skillDirectorFalModel = skillDirectorFalModelOverride || directorModels.falModel;
+  skillDirectorVisionFalModel = skillDirectorVisionFalModelOverride || skillDirectorFalModel;
+  skillDirectorOpenAiModel = skillDirectorOpenAiModelOverride || directorModels.openAiModel;
 
   openAiTextApiKey = process.env.OPENAI_API_KEY || "";
 
