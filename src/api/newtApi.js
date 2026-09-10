@@ -255,6 +255,21 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  async editImage(form) {
+    // A paid edit must never be replayed through the generic fallback transport.
+    let response;
+    try {
+      response = await fetch(localApiFetchUrl("/api/node/edit-image"), {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.timeout(960000)
+      });
+    } catch {
+      throw new Error("The edit connection was interrupted. Check History and the selected provider before generating again; the request was not retried.");
+    }
+    return ensureOk(response, await readJsonResponse(response, "Image edit"), "Image edit failed.");
+  },
+
   uploadAsset(form, label = "Asset upload") {
     return fetchJsonApi("/api/node/upload-asset", { method: "POST", body: form }, label);
   },

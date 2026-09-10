@@ -50,9 +50,11 @@ export function buildAtlasImageRequest({
   const request = {
     model: `${config.id}/${route}`,
     prompt: String(prompt).trim(),
-    output_format: "png",
-    enable_sync_mode: false
+    output_format: "png"
   };
+  // GPT Image 2.5 has a strict per-model schema and rejects this legacy
+  // Atlas envelope option as an extra field, especially on masked edits.
+  if (config.family !== "openai25") request.enable_sync_mode = false;
   const normalizedResolution = config.family === "reve"
     ? "4K"
     : normalizedChoice(resolution, ["1K", "2K", "4K"], "2K");

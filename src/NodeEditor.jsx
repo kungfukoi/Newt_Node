@@ -88,6 +88,7 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { estimateImageRunCost, estimateVideoRunCost, formatPricedRunLabel, generationProviderForModel } from "./generationPricing.js";
+import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import { supportsAtlasImageModel } from "./atlasMedia.js";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
@@ -1305,6 +1306,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+  const imageEditProvider = React.useMemo(
+    () => resolveImageEditProvider(modelProviderPreferences, modelProviderAvailability),
+    [modelProviderAvailability, modelProviderPreferences]
+  );
   const enabledImageModels = React.useMemo(
     () => (modelPreferencesReady ? enabledImageModelOptions(modelPreferences) : imageModelOptions),
     [modelPreferences, modelPreferencesReady]
@@ -4625,6 +4630,68 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
+  async function acceptAiImageEdit(source, result, action) {
+    if (!result?.url) throw new Error("No edited image is available.");
+    const { before: _before, ...savedResult } = result;
+
+    if (action === "apply") {
+      const context = source.editContext;
+      const node = nodesRef.current.find((item) => item.id === context?.nodeId);
+      if (node?.data.status === "running" || node?.data.status === "generating") {
+        throw new Error("This node is generating. Add the edit as a new Image instead.");
+      }
+      const currentUrl = context?.type === "nodeResult"
+        ? normalizedResultItems(node?.data.resultItems, node?.data.resultUrl, "image")[context.itemIndex || 0]?.url
+        : context?.type === "previewLayout"
+          ? node?.data.previewLayoutItems?.find((item) => item.id === context.itemId)?.url
+          : node?.data.storyboardFrames?.find((item) => item.id === context?.itemId)?.exportUrl || node?.data.storyboardFrames?.find((item) => item.id === context?.itemId)?.resultUrl;
+      if (!currentUrl || currentUrl !== source.url) {
+        throw new Error("The source has changed since editing began. Add this edit as a new Image instead.");
+      }
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
+      await restorePreviewLayoutImageEdit({ ...source, ...savedResult, editContext: context });
+      return;
+    }
+
+    const count = nodesRef.current.filter((node) => node.type === "image").length + 1;
+    const anchor = nodesRef.current.find((node) => node.id === source.editContext?.nodeId);
+    let position = anchor
+      ? { x: anchor.x + estimatedNodeWidth(anchor.type) + 60, y: anchor.y }
+      : defaultNodePosition(count);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidate = { type: "image", x: position.x, y: position.y, data: {} };
+      if (!nodesRef.current.some((node) => rectsOverlap(estimatedNodeRect(candidate, 18), estimatedNodeRect(node, 18)))) break;
+      position = { x: position.x + 36, y: position.y + 54 };
+    }
+
+    const id = createNodeId("image");
+    const resultItem = { ...savedResult, type: "image", label: savedResult.label || "Image Edit", mimeType: "image/png" };
+    const nextNode = {
+      id,
+      type: "image",
+      ...position,
+      data: {
+        ...createDefaultNodeData("image", "Image", count),
+        title: "Image Edit",
+        resultUrl: resultItem.url,
+        thumbnailUrl: resultItem.thumbnailUrl || "",
+        resultItems: [resultItem],
+        selectedResultIndex: 0,
+        fileName: resultItem.fileName || fileNameFromLocalUrl(resultItem.url),
+        mimeType: "image/png",
+        mediaType: "image",
+        resultType: "image",
+        status: "ready",
+        error: ""
+      }
+    };
+    pushUndoSnapshot();
+    nodesRef.current = [...nodesRef.current, nextNode];
+    setNodes(nodesRef.current);
+    setSelectedNodeIds([id]);
+    setPreviewLightboxItem({ ...resultItem, editContext: { type: "nodeResult", nodeId: id, itemIndex: 0 } });
+  }
+
   async function applyPreviewLayoutImageEdit(item, edit = {}) {
     const editContext = item?.editContext || {};
     if (!["previewLayout", "storyboardFrame", "nodeResult"].includes(editContext.type) || !editContext.nodeId || (!editContext.itemId && editContext.type !== "nodeResult")) {
@@ -7621,6 +7688,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : undefined}
           onApplyImageEdit={applyPreviewLayoutImageEdit}
           onRestoreImageEdit={restorePreviewLayoutImageEdit}
+          onAcceptAiEdit={acceptAiImageEdit}
+          workflowContext={workflowRequestContext()}
+          imageEditProvider={imageEditProvider}
+          showApiCosts={showPriceSnapshot}
           onClose={closePreviewLightbox}
         />
       )}

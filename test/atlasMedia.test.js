@@ -39,6 +39,31 @@ test("OpenAI Image 2.5 preserves the selected Atlas variant and transparency", (
   assert.equal(input.background, "transparent");
 });
 
+test("OpenAI Image 2.5 masked edits match Atlas's strict field schema", () => {
+  const input = buildAtlasImageRequest({
+    model: "OpenAI Image 2.5",
+    variant: "sunburst",
+    prompt: "Replace only the selected object",
+    images: ["https://example.com/source.png"],
+    maskUrl: "https://example.com/mask.png",
+    size: "1536x864",
+    quality: "high"
+  });
+  assert.deepEqual(Object.keys(input).sort(), [
+    "background",
+    "images",
+    "mask",
+    "model",
+    "n",
+    "output_format",
+    "prompt",
+    "quality",
+    "size"
+  ]);
+  assert.equal(input.model, "openai/gpt-image-2.5-sunburst/edit");
+  assert.equal(Object.hasOwn(input, "enable_sync_mode"), false);
+});
+
 test("Atlas Seedance uses native request field names without dropping references", () => {
   const input = buildAtlasVideoRequest({
     model: "Seedance 2.5",

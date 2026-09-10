@@ -19,6 +19,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     resolution = "2K",
     quality = "high",
     background = "auto",
+    size: requestedSize = "",
     editMaskInput = null
   }, key) {
     const submittedPrompt = labelPrompt(prompt, imageInputs);
@@ -32,13 +33,13 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       resolution,
       quality,
       background,
-      size: model.startsWith("OpenAI Image") ? imageSize({ aspectRatio, resolution }) : undefined,
+      size: model.startsWith("OpenAI Image") ? requestedSize || imageSize({ aspectRatio, resolution }) : undefined,
       maskUrl: editMaskInput ? "https://reference.invalid/mask.png" : ""
     });
     const uploadedImages = [];
     for (const asset of imageInputs) uploadedImages.push(await client.upload(asset, key));
     const maskUrl = editMaskInput ? await client.upload(editMaskInput, key) : "";
-    const size = model.startsWith("OpenAI Image") ? imageSize({ aspectRatio, resolution }) : undefined;
+    const size = model.startsWith("OpenAI Image") ? requestedSize || imageSize({ aspectRatio, resolution }) : undefined;
     const input = buildAtlasImageRequest({
       model,
       variant,

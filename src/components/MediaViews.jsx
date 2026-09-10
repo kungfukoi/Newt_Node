@@ -1,10 +1,11 @@
 import React from "react";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
-import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
+const LazyImageEditStudio = React.lazy(() => import("./ImageEditStudio.jsx").then((module) => ({ default: module.ImageEditStudio })));
 const projectOutputDrawerDefaultWidth = 116;
 const projectOutputDrawerMinWidth = 116;
 const projectOutputDrawerMaxWidth = 560;
@@ -467,7 +468,8 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit }) {
+export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", showApiCosts = false }) {
+  const [aiMode, setAiMode] = React.useState(false);
   const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
@@ -580,7 +582,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
       observer?.disconnect();
       window.removeEventListener("resize", updateSize);
     };
-  }, [displayItem.type, imageNaturalSize.width, imageNaturalSize.height, cropMode, toneMode, curvesMode, textMode, paintMode]);
+  }, [displayItem.type, imageNaturalSize.width, imageNaturalSize.height, cropMode, toneMode, curvesMode, textMode, paintMode, aiMode]);
 
   function currentEditSnapshot() {
     return {
@@ -723,6 +725,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
   }
 
   React.useEffect(() => {
+    if (aiMode) return undefined;
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
@@ -771,9 +774,10 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode]);
+  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
 
   React.useEffect(() => {
+    setAiMode(false);
     setCropMode(false);
     setCropRect(defaultCropRect);
     setToneMode(false);
@@ -1390,6 +1394,24 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
     }
   }
 
+  if (aiMode) {
+    return (
+      <div className="output-lightbox-backdrop ies-backdrop" role="presentation" onPointerDown={(event) => event.stopPropagation()}>
+        <React.Suspense fallback={<div className="image-edit-loading" role="status">Loading image editor...</div>}>
+          <LazyImageEditStudio
+            item={displayItem}
+            workflowContext={workflowContext}
+            provider={imageEditProvider}
+            showApiCosts={showApiCosts}
+            canApply={canEditImage}
+            onAccept={onAcceptAiEdit}
+            onClose={() => setAiMode(false)}
+          />
+        </React.Suspense>
+      </div>
+    );
+  }
+
   return (
     <div className="output-lightbox-backdrop" role="presentation" onPointerDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -1401,6 +1423,11 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
             {label}
           </span>
           <div className="output-lightbox-header-actions">
+            {displayItem.type === "image" && typeof onAcceptAiEdit === "function" && (
+              <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title="Draw and edit with OpenAI Image 2.5" aria-label="Draw and edit with OpenAI Image 2.5">
+                <Pencil size={15} />
+              </button>
+            )}
             {canEditImage && (
               <div className="output-lightbox-tools" aria-label="Layout image editing tools">
                 <button type="button" className={cropMode ? "active" : ""} onClick={() => {

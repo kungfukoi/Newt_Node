@@ -76,6 +76,7 @@ import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-ana
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
   buildMinimaxH3LocalRequest,
@@ -800,6 +801,77 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
+registerImageEditRoutes(app, {
+  limiter: imageGenerationRequestLimiter,
+  getProvider: (_req, requestedProvider) => {
+    if (requestedProvider === "fal" && process.env.FAL_KEY) return "fal";
+    if (requestedProvider === "atlas" && process.env.ATLAS_API_KEY) return "atlas";
+    return "";
+  },
+  readSource: async (sourceUrl) => {
+    if (!isLocalAssetUrl(sourceUrl)) throw httpError(400, "Use an image uploaded or generated in NewtNode.");
+    const source = await readLocalAsset(sourceUrl);
+    if (!source.mimeType.startsWith("image/")) throw httpError(400, "Image Edit requires an image source.");
+    if (source.buffer.length > 32 * 1024 * 1024) throw httpError(413, "Image editing supports source files up to 32 MB.");
+    return source;
+  },
+  generate: async ({ provider, model, variant, prompt, quality, size, images, mask }) => {
+    if (provider === "atlas") {
+      return atlasMedia.image({
+        model,
+        variant,
+        prompt,
+        quality,
+        size,
+        imageInputs: images.map((buffer, index) => ({
+          buffer,
+          mimeType: "image/png",
+          fileName: `edit-reference-${index + 1}.png`
+        })),
+        editMaskInput: mask ? { buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" } : null
+      }, String(process.env.ATLAS_API_KEY || "").trim());
+    }
+
+    const imageUrls = await Promise.all(images.map((buffer, index) => uploadImageInputToFal({
+      buffer,
+      mimeType: "image/png",
+      fileName: `edit-reference-${index + 1}.png`
+    }, index)));
+    const maskUrl = mask ? await uploadImageInputToFal({ buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" }, images.length) : "";
+    const endpoint = openAiImage2FalEndpoint({ variant, edit: imageUrls.length > 0 });
+    const input = buildOpenAiImage2FalInput({
+      prompt,
+      imageSize: openAiSizeToFalImageSize(size),
+      quality,
+      background: "auto"
+    });
+    input.image_urls = imageUrls;
+    if (maskUrl) input.mask_url = maskUrl;
+    const result = await subscribeFal(endpoint, { input, logs: true }, { route: "edit-image", model });
+    const remoteImage = firstFalImageResult(result?.data);
+    if (!remoteImage?.url) throw httpError(502, "OpenAI Image 2.5 returned no edited image. Check Fal history before rerunning.");
+    return {
+      endpoint,
+      provider: "fal.ai",
+      remoteImage,
+      cost: estimateOpenAiImage2Cost({ size, quality, endpoint, modelName: model })
+    };
+  },
+  save: async (req, buffer) => {
+    const target = await createManagedAssetTarget(req, "image-edit", ".png", workflowPackageOutputDirName);
+    await writeFileWithRetry(target.filePath, buffer);
+    const thumbnail = await createImagePreview(req, target, "image-edit");
+    return {
+      url: target.publicPath,
+      thumbnailUrl: thumbnail?.publicPath || "",
+      fileName: target.fileName
+    };
+  },
+  recordHistory: appendHistory,
+  estimateCost: ({ size, quality, endpoint, model }) => estimateOpenAiImage2Cost({ size, quality, endpoint, modelName: model }),
+  sendError: sendApiError
+});
+
 app.post("/api/system/client-diagnostic", (req, res) => {
   queueClientDiagnostic(req.body);
   res.status(202).json({ ok: true });
@@ -856,6 +928,7 @@ function buildHealthPayload() {
       composerFrame: true,
       composerPoses: true,
       previewInpaint: true,
+      imageEdit: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -15715,6 +15788,7 @@ function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputIma
 function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelName = imageModelNames.openAiImage2 }) {
   const edit = String(endpoint || "").includes("/edit");
   const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
+  const variant = String(endpoint || "").includes("/sunburst/") ? "Sunburst" : "Flare";
   const amountUsd = legacyModel
     ? estimateLegacyOpenAiImage2OutputCost({ resolution, size, quality, edit })
     : estimateOpenAiImage2OutputCost({ resolution, size, quality, edit });
@@ -15730,7 +15804,7 @@ function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelNa
     quality,
     pricingBasis: legacyModel
       ? `OpenAI Image 2 ${quality} image output estimate`
-      : `OpenAI Image 2.5 Flare ${quality} image output estimate`,
+      : `OpenAI Image 2.5 ${variant} ${quality} image output estimate`,
     pricingSource: legacyModel ? "fal-model-page-2026-08-18" : "fal-model-page-2026-09-09"
   };
 }
