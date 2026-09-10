@@ -62,6 +62,14 @@ test("multi-key credentials keep only one active key per provider", () => {
   assert.equal(activeIds.google, "");
 });
 
+test("Atlas Cloud credentials use the same persistent profile model", () => {
+  const credentials = normalizeProviderCredentialStore({
+    atlas: [{ id: "studio", label: "Studio", key: "apikey-atlas" }]
+  });
+  const activeIds = normalizeActiveCredentialIds({ atlas: "studio" }, credentials);
+  assert.equal(activeProviderCredentials(credentials, activeIds).atlas.key, "apikey-atlas");
+});
+
 test("provider credentials reject non-byte characters before becoming headers", () => {
   const credentials = normalizeProviderCredentialStore({
     google: [

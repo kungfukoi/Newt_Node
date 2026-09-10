@@ -88,6 +88,7 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { estimateImageRunCost, estimateVideoRunCost, formatPricedRunLabel, generationProviderForModel } from "./generationPricing.js";
+import { supportsAtlasImageModel } from "./atlasMedia.js";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { runTrackedGeneration } from "./generationProgressStore.js";
@@ -1234,7 +1235,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
@@ -7498,6 +7499,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         krea: import.meta.env?.VITE_NEWTNODE_KREA_CONCURRENCY || 2,
         google: import.meta.env?.VITE_NEWTNODE_GOOGLE_CONCURRENCY || 2,
         openai: import.meta.env?.VITE_NEWTNODE_OPENAI_CONCURRENCY || 2,
+        atlas: import.meta.env?.VITE_NEWTNODE_ATLAS_CONCURRENCY || 2,
         localGpu: import.meta.env?.VITE_NEWTNODE_LOCAL_GPU_CONCURRENCY || 1,
         localMedia: import.meta.env?.VITE_NEWTNODE_LOCAL_MEDIA_CONCURRENCY || 2
       },
@@ -7573,6 +7575,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         utilityVideoModelOptions={enabledUtilityVideoModels}
         modelProviderPreferences={modelProviderPreferences}
         modelProviderAvailability={modelProviderAvailability}
+        showPriceSnapshot={showPriceSnapshot}
         flowManaged
       />
     </NodeCardBoundary>
@@ -7867,6 +7870,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 videoModelOptions={enabledVideoModels}
                 utilityImageModelOptions={enabledUtilityImageModels}
                 utilityVideoModelOptions={enabledUtilityVideoModels}
+                modelProviderPreferences={modelProviderPreferences}
+                modelProviderAvailability={modelProviderAvailability}
+                showPriceSnapshot={showPriceSnapshot}
               />
             </NodeCardBoundary>
           ))}
@@ -8342,6 +8348,7 @@ function NodeCard({
   utilityVideoModelOptions,
   modelProviderPreferences,
   modelProviderAvailability,
+  showPriceSnapshot = true,
   flowManaged = false
 }) {
   const config = getNodeConfig(node.type);
@@ -8684,6 +8691,7 @@ function NodeCard({
         utilityVideoModelOptions={utilityVideoModelOptions}
         modelProviderPreferences={modelProviderPreferences}
         modelProviderAvailability={modelProviderAvailability}
+        showPriceSnapshot={showPriceSnapshot}
       />
       <button
         type="button"
@@ -11070,7 +11078,8 @@ function NodeBody({
   utilityImageModelOptions = [],
   utilityVideoModelOptions = [],
   modelProviderPreferences = defaultModelProviderPreferences,
-  modelProviderAvailability = {}
+  modelProviderAvailability = {},
+  showPriceSnapshot = true
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
@@ -15207,6 +15216,7 @@ function NodeBody({
         providerAvailability: modelProviderAvailability
       })
     });
+    const atlasImageProvider = normalizeModelProviderPreferences(modelProviderPreferences).imageGeneration === "atlas";
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
       ? [promptPort, imagePromptPort]
@@ -15251,7 +15261,7 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
-            : formatPricedRunLabel("Run Image", imageRunCost)}
+            : formatPricedRunLabel("Run Image", showPriceSnapshot ? imageRunCost : null)}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -15281,7 +15291,7 @@ function NodeBody({
           <NodeRow label="Model">
             <select value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value))}>
               {imageModelOptions.map((model) => (
-                <option key={model}>{model}</option>
+                <option key={model} disabled={atlasImageProvider && !supportsAtlasImageModel(model)}>{model}</option>
               ))}
               {!imageModelOptions.includes(node.data.model) && !isSam3Image && <option hidden>{node.data.model}</option>}
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
@@ -15514,7 +15524,7 @@ function NodeBody({
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : formatPricedRunLabel("Run Video", videoRunCost)}
+          : formatPricedRunLabel("Run Video", showPriceSnapshot ? videoRunCost : null)}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />

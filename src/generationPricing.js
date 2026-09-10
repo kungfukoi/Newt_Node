@@ -1,5 +1,10 @@
 import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, supportsKreaModel } from "./kreaApi.js";
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
+import {
+  estimateAtlasImageCost,
+  estimateAtlasVideoCost,
+  supportsAtlasImageModel
+} from "./atlasMedia.js";
 import { estimateMinimaxH3Cost, isMinimaxH3Model } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost } from "./openAiImage2.js";
@@ -61,6 +66,7 @@ export function generationProviderForModel({
   }
 
   if (mediaType === "image") {
+    if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage25Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
@@ -82,7 +88,9 @@ export function estimateImageRunCost({
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
 
-  if (isGptImage25Model(model)) {
+  if (provider === "atlas" && supportsAtlasImageModel(model)) {
+    unitCost = estimateAtlasImageCost({ model, resolution, referenceCount: references }).amountUsd;
+  } else if (isGptImage25Model(model)) {
     unitCost = estimateOpenAiImage2Cost({
       resolution,
       size: orientationSize(aspectRatio),
@@ -137,7 +145,9 @@ export function estimateVideoRunCost({
   let unitCost = null;
 
   if (model === "Seedance 2.0" || isSeedance25Model(model)) {
-    if (provider === "krea") {
+    if (provider === "atlas") {
+      unitCost = estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount }).amountUsd;
+    } else if (provider === "krea") {
       unitCost = estimateKreaSeedanceCost({
         modelName: model,
         durationSeconds: seconds,
@@ -153,7 +163,9 @@ export function estimateVideoRunCost({
       ? estimateKreaKlingCost({ durationSeconds: seconds, generateAudio, mode }).amountUsd
       : provider === "fal" ? seconds * falKlingRates[mode][generateAudio ? "audio" : "silent"] : null;
   } else if (isMinimaxH3Model(model)) {
-    unitCost = provider === "local"
+    unitCost = provider === "atlas"
+      ? estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount }).amountUsd
+      : provider === "local"
       ? 0
       : provider === "krea"
         ? estimateKreaMiniMaxH3Cost({ durationSeconds: seconds, referenceImageCount }).amountUsd

@@ -21,7 +21,12 @@ import {
   utilityVideoModelOptions,
   videoModelOptions
 } from "./modelOptions.js";
-import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "./modelProviderRouting.js";
+import {
+  defaultModelProviderPreferences,
+  normalizeModelProviderPreferences,
+  providerPreferenceLabel,
+  providerSupportedModelsLabel
+} from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
 import { defaultUserPreferences, normalizeUserPreferences } from "./userPreferences.js";
@@ -31,13 +36,14 @@ const providerDefinitions = Object.freeze([
   Object.freeze({ id: "fal", label: "Fal" }),
   Object.freeze({ id: "google", label: "Google" }),
   Object.freeze({ id: "krea", label: "Krea" }),
-  Object.freeze({ id: "openAi", label: "OpenAI" })
+  Object.freeze({ id: "openAi", label: "OpenAI" }),
+  Object.freeze({ id: "atlas", label: "Atlas Cloud" })
 ]);
 
-const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [] });
-const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "" });
+const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [], atlas: [] });
+const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "", atlas: "" });
 
-export default function SettingsPage() {
+export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   const [settings, setSettings] = React.useState(null);
   const [credentials, setCredentials] = React.useState(emptyCredentialState);
   const [activeCredentialIds, setActiveCredentialIds] = React.useState(emptyActiveCredentialIds);
@@ -101,6 +107,16 @@ export default function SettingsPage() {
 
       const savedData = await settingsApi.save(payload);
       const loadedData = await settingsApi.load();
+      const lostCredentialProviders = providerDefinitions.filter((provider) => {
+        const submittedIds = new Set((credentialPayload.credentials[provider.id] || []).map((credential) => credential.id));
+        if (!submittedIds.size) return false;
+        const reloadedIds = new Set((loadedData?.secrets?.credentials?.[provider.id] || []).map((credential) => credential.id));
+        return [...submittedIds].some((id) => !reloadedIds.has(id));
+      });
+      if (lostCredentialProviders.length) {
+        const labels = lostCredentialProviders.map((provider) => provider.label).join(", ");
+        throw new Error(`The running Settings server did not preserve ${labels} credentials. Your entry is still shown here; restart NewtNode, then save again.`);
+      }
       const savedModelPreferences = hasModelPreferences(loadedData)
         ? normalizeModelPreferences(loadedData.modelPreferences)
         : hasModelPreferences(savedData)
@@ -117,6 +133,7 @@ export default function SettingsPage() {
       dispatchModelPreferences(savedModelPreferences);
       dispatchModelProviderPreferences(data);
       dispatchUserPreferences(data.userPreferences);
+      onUserPreferencesSaved?.(data.userPreferences);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
       await refreshKeyValidation();
@@ -411,9 +428,11 @@ export default function SettingsPage() {
               >
                 <option value="fal">Fal</option>
                 <option value="krea">Krea</option>
+                <option value="atlas">Atlas Cloud</option>
                 <option value="local">Local</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.minimaxH3, activeCredentialIds, "MiniMax H3", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("minimaxH3", modelProviderPreferences.minimaxH3)}</small>
             </label>
             <label className="settings-field">
               <span>Seedance 2.0 / 2.5</span>
@@ -423,8 +442,10 @@ export default function SettingsPage() {
               >
                 <option value="fal">Fal</option>
                 <option value="krea">Krea</option>
+                <option value="atlas">Atlas Cloud</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.seedance, activeCredentialIds, "Seedance")}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("seedance", modelProviderPreferences.seedance)}</small>
             </label>
             <label className="settings-field">
               <span>Veo / Google Video</span>
@@ -436,6 +457,7 @@ export default function SettingsPage() {
                 <option value="fal">Fal</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "Google video")}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
             </label>
             <label className="settings-field">
               <span>Image Generation</span>
@@ -445,8 +467,23 @@ export default function SettingsPage() {
               >
                 <option value="google">Google</option>
                 <option value="fal">Fal</option>
+                <option value="atlas">Atlas Cloud</option>
               </select>
-              <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "Nano Banana Pro")}</small>
+              <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "supported image models")}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("imageGeneration", modelProviderPreferences.imageGeneration)}</small>
+            </label>
+            <label className="settings-field">
+              <span>Text / Agent LLM</span>
+              <select
+                value={modelProviderPreferences.llm}
+                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, llm: event.target.value }))}
+              >
+                <option value="fal">Fal</option>
+                <option value="openai">OpenAI</option>
+                <option value="atlas">Atlas Cloud</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text features")}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("llm", modelProviderPreferences.llm)}</small>
             </label>
           </div>
           <div className="settings-actions">
@@ -505,7 +542,7 @@ export default function SettingsPage() {
 
         <CollapsibleSettingsSection
           title="User Preferences"
-          aside={userPreferences.showPresetPanel ? "Preset panel shown" : "Preset panel hidden"}
+          aside="Canvas display"
           open={openSections.userPreferences}
           onToggle={() => toggleSection("userPreferences")}
         >
@@ -521,6 +558,23 @@ export default function SettingsPage() {
                 onChange={(event) => setUserPreferences((current) => ({
                   ...current,
                   showPresetPanel: event.target.checked
+                }))}
+              />
+              <span className="node-toggle compact" aria-hidden="true">
+                <span />
+              </span>
+            </label>
+            <label className={`settings-preference-toggle ${userPreferences.showPriceSnapshot ? "enabled" : ""}`}>
+              <span>
+                <strong>Show Price Snapshot</strong>
+                <small>Display the estimated run price on Generate buttons.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={userPreferences.showPriceSnapshot}
+                onChange={(event) => setUserPreferences((current) => ({
+                  ...current,
+                  showPriceSnapshot: event.target.checked
                 }))}
               />
               <span className="node-toggle compact" aria-hidden="true">
@@ -817,7 +871,8 @@ function dispatchModelProviderPreferences(settings) {
         fal: Boolean(settings?.falKeyConfigured),
         google: Boolean(settings?.googleApiKeyConfigured),
         krea: Boolean(settings?.kreaApiKeyConfigured),
-        openai: Boolean(settings?.openAiApiKeyConfigured || settings?.openAiKeyConfigured)
+        openai: Boolean(settings?.openAiApiKeyConfigured || settings?.openAiKeyConfigured),
+        atlas: Boolean(settings?.atlasApiKeyConfigured)
       }
     }
   }));
@@ -916,6 +971,7 @@ function providerConfiguredField(provider) {
   if (provider === "fal") return "falKeyConfigured";
   if (provider === "google") return "googleApiKeyConfigured";
   if (provider === "krea") return "kreaApiKeyConfigured";
+  if (provider === "atlas") return "atlasApiKeyConfigured";
   return "openAiApiKeyConfigured";
 }
 

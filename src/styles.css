@@ -844,7 +844,24 @@ textarea::placeholder {
 }
 
 .settings-metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-metrics .metric-card {
+  gap: 4px;
+  min-height: 108px;
+  padding: 12px;
+}
+
+.settings-metrics .metric-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.settings-metrics .metric-card strong {
+  font-size: 21px;
 }
 
 .metric-card,
@@ -986,6 +1003,11 @@ textarea::placeholder {
 .settings-provider-routing small {
   color: rgba(244, 240, 232, 0.46);
   font-size: 11px;
+}
+
+.settings-provider-routing .settings-provider-models {
+  color: rgba(244, 240, 232, 0.72);
+  line-height: 1.45;
 }
 
 .settings-credential-provider > header button {

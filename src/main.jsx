@@ -838,7 +838,7 @@ function App() {
         </React.Suspense>
       ) : workspaceMode === "settings" ? (
         <React.Suspense fallback={<WorkspaceFallback label="Loading settings" />}>
-          <SettingsPage />
+          <SettingsPage onUserPreferencesSaved={(preferences) => setUserPreferences(normalizeUserPreferences(preferences))} />
         </React.Suspense>
       ) : null}
 
@@ -850,7 +850,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
@@ -1117,7 +1117,8 @@ function providerAvailabilityFromSettings(settings = {}) {
     fal: Boolean(settings.falKeyConfigured),
     google: Boolean(settings.googleApiKeyConfigured),
     krea: Boolean(settings.kreaApiKeyConfigured),
-    openai: Boolean(settings.openAiApiKeyConfigured || settings.openAiKeyConfigured)
+    openai: Boolean(settings.openAiApiKeyConfigured || settings.openAiKeyConfigured),
+    atlas: Boolean(settings.atlasApiKeyConfigured)
   };
 }
 

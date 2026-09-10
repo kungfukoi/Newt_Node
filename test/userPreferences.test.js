@@ -8,6 +8,11 @@ test("user preferences default to showing the Preset panel", () => {
 });
 
 test("user preferences preserve an explicit Preset panel choice", () => {
-  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: false }), { showPresetPanel: false });
-  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: true }), { showPresetPanel: true });
+  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: false }), { showPresetPanel: false, showPriceSnapshot: true });
+  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: true }), { showPresetPanel: true, showPriceSnapshot: true });
+});
+
+test("user preferences preserve the price snapshot choice", () => {
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: false }), { showPresetPanel: true, showPriceSnapshot: false });
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: true }), { showPresetPanel: true, showPriceSnapshot: true });
 });

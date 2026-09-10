@@ -29,7 +29,7 @@ Current release: `v3.0.0-beta.0`
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
 - **React Flow canvas**: Stable node identities, handles, selection, resizing, and non-scaling connection lines remain responsive across large graphs. Full node interfaces stay available at every zoom level; proxy/map modes are currently disabled.
-- **Provider routing**: Store multiple named Fal, Google, Krea, and OpenAI credentials, select one active key per service, and explicitly route Seedance, Google video/Veo, and Nano Banana Pro image generation to their supported provider.
+- **Provider routing**: Store multiple named Fal, Google, Krea, OpenAI, and Atlas Cloud credentials, select one active key per service, and explicitly route shared image, video, and text models to their supported provider.
 - **Director and Storyboard**: Build structured shot direction with Cinematic, Vintage, Animation, Stop-Motion, Commercial, Music Video, and Montage approaches. Optional music and reference-video inputs can drive timing, camera, performance, extension, or visual reference behavior. Storyboard planning validates every cut and required keyframe before replacing existing work, and visual QC reports unavailable review honestly instead of treating it as a pass. See [Creative Workflows](docs/creative-workflows.md).
 - **Character Sheet Library**: Build wardrobe-specific character sheets, add completed custom sheets without replacing generated variants, select the active identity reference, and preserve that selection for downstream image, video, Composer, and Storyboard work. Base and CU Video sheets checkpoint independently so a later failure does not discard a successful generation.
 - **Newt Presets**: Save selected nodes, internal connections, complete groups, media dependencies, and optional reusable input slots as a local preset. Insert the preset repeatedly with fresh graph IDs and optionally bind its Image, Video, Audio, Character, Mood Board, Location, or Prop slots to nodes in the current project. See [Newt Presets](docs/newt-presets.md).
@@ -43,7 +43,7 @@ Current release: `v3.0.0-beta.0`
 - **Generation progress**: Model nodes show real provider progress when available and a clearly marked estimate otherwise, including batch completion, queue position, elapsed time, and terminal success/failure states.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID to Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
-- **Settings**: Local API keys, provider routing, user preferences, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page. **User Preferences > Show Preset Panel** controls whether the Presets library appears in the node sidebar.
+- **Settings**: Local API keys, provider routing, user preferences, repository updates, restart, branch status, loaded version, and enabled-model preferences are managed in independently collapsible panels on the Settings page. User Preferences controls the Presets sidebar and whether Generate buttons show pre-run price snapshots.
 - **Cross-platform launchers**: Windows and macOS share supervised production startup, rotating logs, and bounded crash recovery. Development watch mode remains separate.
 - **Production reliability**: Recoverable history backups, bounded generation scheduling, inline uncertain-job recovery, and opt-in Settings diagnostics protect long-running work. See [Production Reliability](docs/production-reliability.md).
 
@@ -54,15 +54,15 @@ Current release: `v3.0.0-beta.0`
 - Application packages, including the `@xyflow/react` canvas runtime, are declared in `package.json` and pinned by `package-lock.json`.
 - At least one supported provider API key for remote generation.
 - Fal is required for Fal-hosted models and utilities.
-- Google, Krea, and OpenAI keys are optional and can be enabled independently.
+- Google, Krea, OpenAI, and Atlas Cloud keys are optional and can be enabled independently.
 
 The Windows and macOS launchers check these npm dependencies before startup and automatically install anything missing or changed after a pull. See [NewtNode Dependencies](docs/dependencies.md) for the maintained runtime list and bootstrap behavior.
 
 ## Setup
 
-Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, and OpenAI values into the local gitignored `.env` file automatically. Disabled keys remain saved as commented `.env` entries and are restored into Settings without being activated.
+Configure provider credentials inside **Settings > API Credentials**. Each service can keep multiple named keys, but only one key (or `None`) can be active at a time. Saving validates the keys and writes the active Fal, Google, Krea, OpenAI, and Atlas Cloud values into the local gitignored `.env` file automatically. Disabled keys remain saved as commented `.env` entries and are restored into Settings without being activated.
 
-Models available through multiple services use the separate **Model Providers** setting. MiniMax H3 can be routed through Fal, Krea, or a loopback SGLang service; Seedance 2.0 and Seedance 2.5 through Fal or Krea; and Google video/Veo and Nano Banana Pro image generation through Google or Fal without changing which credentials are saved. The selected route is authoritative and does not silently fall back.
+Models available through multiple services use the separate **Model Providers** setting. MiniMax H3 can route through Fal, Krea, Atlas Cloud, or a loopback SGLang service; Seedance 2.0 and Seedance 2.5 through Fal, Krea, or Atlas Cloud; Google video/Veo through Google or Fal; supported image models through Atlas Cloud; and Text Model/Text Agent processing through Fal, OpenAI, or Atlas Cloud. Media routes do not silently switch away from the selected provider.
 
 Seedance 2.0/2.5 Video Model generations now keep tracking accepted jobs beyond 20 minutes, recover after a restart, and show completed batch clips individually. Temporary network/download problems retry against the original job without submitting another paid generation. See [Seedance Generation Recovery](docs/remote-video-recovery.md) for behavior and limitations.
 

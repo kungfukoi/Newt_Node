@@ -23,6 +23,10 @@ test("provider key checks use authenticated no-generation endpoints", () => {
   const openAi = providerKeyValidationRequest("openAi", "openai-secret");
   assert.equal(openAi.url, "https://api.openai.com/v1/models?limit=1");
   assert.equal(openAi.options.headers.Authorization, "Bearer openai-secret");
+
+  const atlas = providerKeyValidationRequest("atlas", "atlas-secret");
+  assert.equal(atlas.url, "https://api.atlascloud.ai/v1/models");
+  assert.equal(atlas.options.headers.Authorization, "Bearer atlas-secret");
 });
 
 test("provider key response statuses distinguish valid, invalid, and unavailable checks", () => {
@@ -51,5 +55,6 @@ test("provider key validation does not send missing keys or return secret values
   assert.equal(validation.providers.google.status, "missing");
   assert.equal(validation.providers.krea.status, "missing");
   assert.equal(validation.providers.openAi.status, "invalid");
+  assert.equal(validation.providers.atlas.status, "missing");
   assert.equal(JSON.stringify(validation).includes("secret"), false);
 });

@@ -34,7 +34,8 @@ export function unverifiedKeyValidation(settings) {
     fal: settings?.falKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" },
     google: settings?.googleApiKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" },
     krea: settings?.kreaApiKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" },
-    openAi: settings?.openAiApiKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" }
+    openAi: settings?.openAiApiKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" },
+    atlas: settings?.atlasApiKeyConfigured ? { status: "unverified", reason: "validation-request-failed" } : { status: "missing" }
   };
 }
 

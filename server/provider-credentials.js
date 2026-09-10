@@ -1,10 +1,11 @@
-export const providerCredentialNames = Object.freeze(["fal", "google", "krea", "openAi"]);
+export const providerCredentialNames = Object.freeze(["fal", "google", "krea", "openAi", "atlas"]);
 
 const providerLabels = Object.freeze({
   fal: "Fal",
   google: "Google",
   krea: "Krea",
-  openAi: "OpenAI"
+  openAi: "OpenAI",
+  atlas: "Atlas Cloud"
 });
 
 export function normalizeProviderCredentialStore(value = {}) {
@@ -120,6 +121,7 @@ export function providerEnvironmentKey(provider) {
   if (provider === "google") return "GOOGLE_API_KEY";
   if (provider === "krea") return "KREA_API_KEY";
   if (provider === "openAi") return "OPENAI_API_KEY";
+  if (provider === "atlas") return "ATLAS_API_KEY";
   return "";
 }
 
@@ -177,6 +179,7 @@ function providerLegacySettingsKey(provider) {
   if (provider === "google") return "googleApiKey";
   if (provider === "krea") return "kreaApiKey";
   if (provider === "openAi") return "openAiApiKey";
+  if (provider === "atlas") return "atlasApiKey";
   return "";
 }
 

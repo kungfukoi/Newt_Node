@@ -1,5 +1,6 @@
 export const defaultUserPreferences = Object.freeze({
-  showPresetPanel: true
+  showPresetPanel: true,
+  showPriceSnapshot: true
 });
 
 export function normalizeUserPreferences(value) {
@@ -7,6 +8,9 @@ export function normalizeUserPreferences(value) {
   return {
     showPresetPanel: typeof source.showPresetPanel === "boolean"
       ? source.showPresetPanel
-      : defaultUserPreferences.showPresetPanel
+      : defaultUserPreferences.showPresetPanel,
+    showPriceSnapshot: typeof source.showPriceSnapshot === "boolean"
+      ? source.showPriceSnapshot
+      : defaultUserPreferences.showPriceSnapshot
   };
 }

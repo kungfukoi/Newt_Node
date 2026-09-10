@@ -23,14 +23,17 @@ const kreaSeedanceRates = Object.freeze({
   })
 });
 
-export function resolveSeedanceRuntimeProvider({ preferredProvider, falKey, kreaKey } = {}) {
+export function resolveSeedanceRuntimeProvider({ preferredProvider, falKey, kreaKey, atlasKey } = {}) {
   const preferred = String(preferredProvider || "").trim().toLowerCase();
   const hasFal = Boolean(String(falKey || "").trim());
   const hasKrea = Boolean(String(kreaKey || "").trim());
+  const hasAtlas = Boolean(String(atlasKey || "").trim());
   if (preferred === "fal") return hasFal ? "fal" : "";
   if (preferred === "krea") return hasKrea ? "krea" : "";
+  if (preferred === "atlas") return hasAtlas ? "atlas" : "";
   if (hasFal) return "fal";
   if (hasKrea) return "krea";
+  if (hasAtlas) return "atlas";
   return "";
 }
 

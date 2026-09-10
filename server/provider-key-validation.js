@@ -3,7 +3,7 @@ const providerKeyValidationTimeoutMs = 8000;
 export async function validateProviderKeys(keys = {}, { fetchImpl = fetch, timeoutMs = providerKeyValidationTimeoutMs } = {}) {
   const checkedAt = new Date().toISOString();
   const entries = await Promise.all(
-    ["fal", "google", "krea", "openAi"].map(async (provider) => [
+    ["fal", "google", "krea", "openAi", "atlas"].map(async (provider) => [
       provider,
       await validateProviderKey(provider, keys[provider], { fetchImpl, timeoutMs })
     ])
@@ -51,6 +51,12 @@ export function providerKeyValidationRequest(provider, key) {
   if (provider === "openAi") {
     return {
       url: "https://api.openai.com/v1/models?limit=1",
+      options: { method: "GET", headers: { Authorization: `Bearer ${key}` } }
+    };
+  }
+  if (provider === "atlas") {
+    return {
+      url: "https://api.atlascloud.ai/v1/models",
       options: { method: "GET", headers: { Authorization: `Bearer ${key}` } }
     };
   }

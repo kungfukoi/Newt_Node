@@ -1,4 +1,4 @@
-export const apiKeyProviderIds = Object.freeze(["fal", "google", "krea", "openAi"]);
+export const apiKeyProviderIds = Object.freeze(["fal", "google", "krea", "openAi", "atlas"]);
 export const maxApiKeyVersionsPerProvider = 9;
 
 export function normalizeApiKeyVersions(value = {}, { legacyValues = {}, providerPreferences = {} } = {}) {

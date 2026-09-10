@@ -16,6 +16,12 @@ test("provider routing follows explicit model preferences and real fallback avai
     providerAvailability: { fal: true, krea: true }
   }), "krea");
   assert.equal(generationProviderForModel({
+    model: "Seedance 2.5",
+    mediaType: "video",
+    providerPreferences: { seedance: "atlas" },
+    providerAvailability: { atlas: true }
+  }), "atlas");
+  assert.equal(generationProviderForModel({
     model: "MiniMax H3",
     mediaType: "video",
     providerPreferences: { minimaxH3: "local" }
@@ -39,6 +45,12 @@ test("provider routing follows explicit model preferences and real fallback avai
     mediaType: "image",
     providerAvailability: { fal: true, krea: true }
   }), "fal");
+  assert.equal(generationProviderForModel({
+    model: "OpenAI Image 2.5",
+    mediaType: "image",
+    providerPreferences: { imageGeneration: "atlas" },
+    providerAvailability: { atlas: true }
+  }), "atlas");
   assert.equal(generationProviderForModel({
     model: "OpenAI Image 2",
     mediaType: "image",
@@ -72,6 +84,12 @@ test("image estimates are provider and batch aware", () => {
     provider: "fal"
   }), 1.652);
   assert.equal(estimateImageRunCost({ model: "Unknown", provider: "fal" }), null);
+  assert.equal(estimateImageRunCost({
+    model: "Nano Banana 2",
+    resolution: "4K",
+    batchCount: 2,
+    provider: "atlas"
+  }), 0.32);
 });
 
 test("video estimates stay unknown when final billable duration is unknown", () => {
@@ -99,6 +117,14 @@ test("video estimates stay unknown when final billable duration is unknown", () 
     provider: "local",
     batchCount: 4
   }), 0);
+  assert.equal(estimateVideoRunCost({
+    model: "MiniMax H3",
+    duration: "10 seconds",
+    resolution: "2K",
+    referenceImageCount: 6,
+    provider: "atlas",
+    batchCount: 2
+  }), 2.68);
   assert.equal(formatPricedRunLabel("Run Video", 4.22), "Run Video ($4.22 est.)");
   assert.equal(formatPricedRunLabel("Run Video", null), "Run Video");
 });

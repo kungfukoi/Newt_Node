@@ -51,7 +51,10 @@ export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
 }
 
 function providerName(provider) {
-  return provider === "krea" ? "Krea" : provider === "fal" ? "Fal" : String(provider || "");
+  if (provider === "krea") return "Krea";
+  if (provider === "fal") return "Fal";
+  if (provider === "atlas") return "Atlas Cloud";
+  return String(provider || "");
 }
 
 function providerContactLabel(lastContactAt, now = Date.now()) {
