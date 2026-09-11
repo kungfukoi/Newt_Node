@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 internal sealed class WindowHandle : IWin32Window
@@ -67,8 +69,35 @@ internal static class Program
     private const uint FosPathMustExist = 0x800;
     private const uint SigdnFileSystemPath = 0x80058000;
     private const int ErrorCancelled = unchecked((int)0x800704C7);
+    private const int SwRestore = 9;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpShowWindow = 0x0040;
+    private static readonly Guid ShellWindowsClsid = new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr handle, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(
@@ -144,7 +173,115 @@ internal static class Program
         if (!Directory.Exists(folderPath)) throw new DirectoryNotFoundException("Folder is not accessible: " + folderPath);
         IntPtr result = ShellExecute(owner, "explore", folderPath, null, folderPath, 1);
         if (result.ToInt64() <= 32) throw new InvalidOperationException("Windows Explorer could not open that folder.");
+        BringExplorerFolderToFront(folderPath);
         return folderPath;
+    }
+
+    private static void BringExplorerFolderToFront(string folderPath)
+    {
+        string targetPath = NormalizedFolderPath(folderPath);
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            IntPtr handle = ExplorerWindowHandleForPath(targetPath);
+            if (handle != IntPtr.Zero)
+            {
+                ActivateWindow(handle);
+                return;
+            }
+            Thread.Sleep(50);
+        }
+    }
+
+    private static IntPtr ExplorerWindowHandleForPath(string targetPath)
+    {
+        Type shellWindowsType = Type.GetTypeFromCLSID(ShellWindowsClsid);
+        if (shellWindowsType == null) return IntPtr.Zero;
+
+        object shellWindows = null;
+        try
+        {
+            shellWindows = Activator.CreateInstance(shellWindowsType);
+            int count = Convert.ToInt32(GetComProperty(shellWindows, "Count"));
+            for (int index = 0; index < count; index++)
+            {
+                object explorerWindow = null;
+                object document = null;
+                object folder = null;
+                object self = null;
+                try
+                {
+                    explorerWindow = InvokeComMethod(shellWindows, "Item", index);
+                    document = GetComProperty(explorerWindow, "Document");
+                    folder = GetComProperty(document, "Folder");
+                    self = GetComProperty(folder, "Self");
+                    string explorerPath = NormalizedFolderPath(Convert.ToString(GetComProperty(self, "Path")));
+                    if (!String.Equals(targetPath, explorerPath, StringComparison.OrdinalIgnoreCase)) continue;
+                    return new IntPtr(Convert.ToInt32(GetComProperty(explorerWindow, "HWND")));
+                }
+                catch
+                {
+                    // ShellWindows also includes non-Explorer windows. Ignore entries that do not expose a folder path.
+                }
+                finally
+                {
+                    ReleaseComObject(self);
+                    ReleaseComObject(folder);
+                    ReleaseComObject(document);
+                    ReleaseComObject(explorerWindow);
+                }
+            }
+        }
+        finally
+        {
+            ReleaseComObject(shellWindows);
+        }
+        return IntPtr.Zero;
+    }
+
+    private static object GetComProperty(object target, string name)
+    {
+        return target.GetType().InvokeMember(name, BindingFlags.GetProperty, null, target, null);
+    }
+
+    private static object InvokeComMethod(object target, string name, params object[] arguments)
+    {
+        return target.GetType().InvokeMember(name, BindingFlags.InvokeMethod, null, target, arguments);
+    }
+
+    private static void ReleaseComObject(object value)
+    {
+        if (value != null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);
+    }
+
+    private static string NormalizedFolderPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value)) return "";
+        try { return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch { return value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+    }
+
+    private static void ActivateWindow(IntPtr handle)
+    {
+        uint currentThreadId = GetCurrentThreadId();
+        IntPtr foregroundHandle = GetForegroundWindow();
+        uint foregroundProcessId;
+        uint foregroundThreadId = foregroundHandle == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foregroundHandle, out foregroundProcessId);
+        uint explorerProcessId;
+        uint explorerThreadId = GetWindowThreadProcessId(handle, out explorerProcessId);
+        bool attachedToForeground = foregroundThreadId != 0 && foregroundThreadId != currentThreadId && AttachThreadInput(currentThreadId, foregroundThreadId, true);
+        bool attachedToExplorer = explorerThreadId != 0 && explorerThreadId != currentThreadId && explorerThreadId != foregroundThreadId && AttachThreadInput(currentThreadId, explorerThreadId, true);
+        try
+        {
+            ShowWindow(handle, SwRestore);
+            SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
+            BringWindowToTop(handle);
+            SetForegroundWindow(handle);
+        }
+        finally
+        {
+            if (attachedToExplorer) AttachThreadInput(currentThreadId, explorerThreadId, false);
+            if (attachedToForeground) AttachThreadInput(currentThreadId, foregroundThreadId, false);
+        }
     }
 
     private static string SelectSaveFile(string title, string defaultPath, string defaultName, string extension, string filter, IntPtr owner)
