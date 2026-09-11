@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
@@ -51,6 +51,7 @@ import { durableVideoRequestHandler, registerRemoteVideoJobRoutes } from "./rout
 import { workflowContextPayload } from "../src/workflowContext.js";
 import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "./sam3Outputs.js";
 import {
+  activateSoleProviderCredentials,
   activeProviderCredentials,
   legacyProviderCredentialStore,
   mergeProviderCredentialsWithEnv,
@@ -63,6 +64,13 @@ import {
 import { validateProviderKey } from "./provider-key-validation.js";
 import { createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
+import {
+  archiveInstallBranchStatus,
+  defaultUpdateBranch,
+  defaultUpdateRepository,
+  githubArchiveUrl,
+  maxUpdateArchiveBytes
+} from "./runtime-update.js";
 import { supportsAtlasImageModel, supportsAtlasVideoModel } from "../src/atlasMedia.js";
 import {
   copyFileWithRetry,
@@ -103,7 +111,7 @@ import {
 } from "./workflowPackageAssets.js";
 import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
-import { defaultModelProviderPreferences, normalizeModelProviderPreferences, providerPreferenceLabel } from "../src/modelProviderRouting.js";
+import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences } from "../src/modelProviderRouting.js";
 import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -1094,7 +1102,7 @@ function diagnosticNumber(value) {
 async function readRuntimeSettings({ includeSecrets = false } = {}) {
   const [repository, branch, settingsValues, envValues, disabledEnvValues] = await Promise.all([
     resolveUpdateRepository(),
-    currentGitBranch(),
+    resolveUpdateBranch(),
     readRuntimeSettingsStore(),
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"]),
     readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"])
@@ -1172,13 +1180,29 @@ async function saveRuntimeSettings(body = {}) {
   const credentials = body.credentials !== undefined
     ? normalizeProviderCredentialStore(body.credentials)
     : currentConfiguration.credentials;
-  const activeCredentialIds = body.activeCredentialIds !== undefined
+  const submittedActiveCredentialIds = body.activeCredentialIds !== undefined
     ? normalizeActiveCredentialIds(body.activeCredentialIds, credentials)
     : normalizeActiveCredentialIds(currentConfiguration.activeCredentialIds, credentials);
+  const requestedProviderPreferences = body.modelProviderPreferences !== undefined
+    ? normalizeModelProviderPreferences(body.modelProviderPreferences)
+    : null;
+  const routedCredentialProviders = requestedProviderPreferences
+    ? [...new Set(Object.values(requestedProviderPreferences)
+      .filter((provider) => provider !== "local")
+      .map((provider) => provider === "openai" ? "openAi" : provider))]
+    : [];
+  const activeCredentialIds = activateSoleProviderCredentials(
+    credentials,
+    submittedActiveCredentialIds,
+    routedCredentialProviders
+  );
   const selectedCredentials = activeProviderCredentials(credentials, activeCredentialIds);
   const updates = {};
+  const activatedSoleCredential = providerCredentialNames.some(
+    (provider) => activeCredentialIds[provider] !== submittedActiveCredentialIds[provider]
+  );
 
-  if (body.credentials !== undefined || body.activeCredentialIds !== undefined || !settingsValues.hasCredentialStore) {
+  if (body.credentials !== undefined || body.activeCredentialIds !== undefined || activatedSoleCredential || !settingsValues.hasCredentialStore) {
     updates.credentials = credentials;
     updates.activeCredentialIds = activeCredentialIds;
   }
@@ -1187,10 +1211,8 @@ async function saveRuntimeSettings(body = {}) {
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
   if (body.userPreferences !== undefined) updates.userPreferences = normalizeUserPreferences(body.userPreferences);
   if (body.modelProviderPreferences !== undefined || Object.keys(defaultModelProviderPreferences).some((key) => !settingsValues.modelProviderPreferences?.[key])) {
-    const requestedProviderPreferences = body.modelProviderPreferences !== undefined
-      ? body.modelProviderPreferences
-      : settingsValues.modelProviderPreferences;
-    updates.modelProviderPreferences = normalizeModelProviderPreferences(requestedProviderPreferences, {
+    const providerPreferences = requestedProviderPreferences || settingsValues.modelProviderPreferences;
+    updates.modelProviderPreferences = normalizeModelProviderPreferences(providerPreferences, {
       fal: Boolean(selectedCredentials.fal?.key),
       google: Boolean(selectedCredentials.google?.key),
       krea: Boolean(selectedCredentials.krea?.key),
@@ -1260,7 +1282,7 @@ async function pullRuntimeUpdate(body = {}) {
     await refreshRuntimeConfigFromEnvFile();
   }
 
-  const branch = await currentGitBranch() || "main";
+  const branch = await resolveUpdateBranch();
   const startedAt = new Date().toISOString();
   updatePromise = runRuntimeUpdate({
     repository,
@@ -1276,6 +1298,16 @@ async function pullRuntimeUpdate(body = {}) {
 }
 
 async function runRuntimeUpdate({ repository, branch, startedAt }) {
+  if (!hasLocalGitMetadata()) {
+    return stageReplacementRuntimeUpdate({
+      repository,
+      branch,
+      startedAt,
+      pullError: null,
+      zipInstall: true
+    });
+  }
+
   try {
     const pullResult = await pullFastForwardUpdate(repository, branch);
     return {
@@ -1314,9 +1346,11 @@ function fastForwardUpdateMessage(result, branch) {
   return `Updated ${branch || "current branch"} with fast-forward pull.`;
 }
 
-async function stageReplacementRuntimeUpdate({ repository, branch, startedAt, pullError }) {
+async function stageReplacementRuntimeUpdate({ repository, branch, startedAt, pullError = null, zipInstall = false }) {
   if (!["win32", "darwin"].includes(process.platform)) {
-    const error = new Error("Fast-forward git pull failed, and replacement updates currently support Windows and macOS launchers.");
+    const error = new Error(zipInstall
+      ? "ZIP-install updates currently support Windows and macOS launchers."
+      : "Fast-forward git pull failed, and replacement updates currently support Windows and macOS launchers.");
     error.status = 501;
     throw error;
   }
@@ -1343,13 +1377,14 @@ async function stageReplacementRuntimeUpdate({ repository, branch, startedAt, pu
       branchStatus: {
         state: "update-scheduled",
         label: "Update staged",
-        detail: branch,
+        detail: staged.sourceMethod === "github-archive" ? `${branch} · GitHub archive` : branch,
         remoteHead: shortCommit(staged.stagedHead)
       },
       restartRequested: true,
       relaunching: true,
       updateMethod: "replacement",
-      fallbackFrom: "git-pull",
+      replacementSource: staged.sourceMethod,
+      fallbackFrom: zipInstall ? "zip-install" : "git-pull",
       delayMs: staged.delayMs,
       preservedPaths: [
         ...updatePreservedDirectories,
@@ -1360,26 +1395,33 @@ async function stageReplacementRuntimeUpdate({ repository, branch, startedAt, pu
       finishedAt: new Date().toISOString(),
       stdout: staged.stdout,
       stderr: staged.stderr,
-      message: "Fast-forward pull failed. Replacement update staged; NewtNode will relaunch from the replacement install."
+      message: replacementUpdateMessage({ zipInstall, sourceMethod: staged.sourceMethod })
     };
   } catch (error) {
     error.status = error.status || 500;
     if (existsSync(stagingRoot)) {
       await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
     }
-    error.message = `Fast-forward git pull failed, then replacement update failed: ${error.message}`;
+    error.message = zipInstall
+      ? `ZIP-install update failed: ${error.message}`
+      : `Fast-forward git pull failed, then replacement update failed: ${error.message}`;
     throw error;
   }
 }
 
+function replacementUpdateMessage({ zipInstall, sourceMethod }) {
+  if (zipInstall && sourceMethod === "git-clone") {
+    return "ZIP installation converted to a Git-backed install; NewtNode will relaunch.";
+  }
+  if (zipInstall) {
+    return "ZIP installation updated from GitHub; future updates remain available and NewtNode will relaunch.";
+  }
+  return "Fast-forward pull failed. Replacement update staged; NewtNode will relaunch from the replacement install.";
+}
+
 async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDir, backupRoot, pullError = null }) {
   await mkdir(stagingRoot, { recursive: true });
-  const cloneResult = await execFile("git", ["clone", "--depth", "1", "--branch", branch, repository, cloneDir], {
-    cwd: path.dirname(rootDir),
-    timeout: 300000,
-    maxBuffer: 8 * 1024 * 1024,
-    windowsHide: true
-  });
+  const stagedSource = await stageReplacementSource({ repository, branch, stagingRoot, cloneDir });
   const installResult = await installStagedDependencies(cloneDir);
   const stagedHead = await gitHeadForDirectory(cloneDir);
   const delayMs = 2500;
@@ -1427,16 +1469,163 @@ async function stageReplacementUpdate({ repository, branch, stagingRoot, cloneDi
       pullError ? "git pull --ff-only failed; staging replacement update." : "",
       commandOutputSummary([
         ["git pull --ff-only", pullError],
-        ["git clone", cloneResult],
+        ["git clone", stagedSource.cloneResult],
+        ["GitHub archive", stagedSource.archiveResult],
         ["npm install", installResult]
       ])
     ].filter(Boolean).join("\n\n"),
     stderr: commandErrorSummary([
       ["git pull --ff-only", pullError],
-      ["git clone", cloneResult],
+      ["git clone", stagedSource.cloneResult],
+      ["GitHub archive", stagedSource.archiveResult],
       ["npm install", installResult]
-    ])
+    ]),
+    sourceMethod: stagedSource.sourceMethod
   };
+}
+
+async function stageReplacementSource({ repository, branch, stagingRoot, cloneDir }) {
+  try {
+    const cloneResult = await execFile("git", ["clone", "--depth", "1", "--branch", branch, repository, cloneDir], {
+      cwd: path.dirname(rootDir),
+      timeout: 300000,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true
+    });
+    return {
+      sourceMethod: "git-clone",
+      cloneResult,
+      archiveResult: null
+    };
+  } catch (cloneError) {
+    const cloneResult = updateCommandFailure(cloneError, "Git clone failed.", {
+      missingCommandMessage: "Git is not installed or is not available on PATH."
+    });
+    await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
+    try {
+      const archiveResult = await stageGitHubArchiveUpdate({ repository, branch, stagingRoot, cloneDir });
+      return {
+        sourceMethod: "github-archive",
+        cloneResult,
+        archiveResult
+      };
+    } catch (archiveError) {
+      const archiveFailure = updateCommandFailure(archiveError, "GitHub archive download failed.");
+      throw new Error(`${cloneResult.stderr} ${archiveFailure.stderr}`.trim());
+    }
+  }
+}
+
+async function stageGitHubArchiveUpdate({ repository, branch, stagingRoot, cloneDir }) {
+  const archiveUrl = githubArchiveUrl(repository, branch);
+  if (!archiveUrl) {
+    throw new Error("Archive fallback supports public HTTPS GitHub repository URLs only.");
+  }
+
+  const archivePath = path.join(stagingRoot, "newtnode-source.zip");
+  const extractionRoot = path.join(stagingRoot, "archive-source");
+  const response = await fetch(archiveUrl, {
+    headers: { "User-Agent": "NewtNode-Updater" },
+    signal: AbortSignal.timeout(300000)
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`GitHub returned HTTP ${response.status || "unknown"} for the source archive.`);
+  }
+
+  const declaredBytes = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxUpdateArchiveBytes) {
+    throw new Error("GitHub source archive is larger than the updater safety limit.");
+  }
+
+  let downloadedBytes = 0;
+  const sizeGuard = new Transform({
+    transform(chunk, _encoding, callback) {
+      downloadedBytes += Number(chunk?.byteLength || chunk?.length || 0);
+      if (downloadedBytes > maxUpdateArchiveBytes) {
+        callback(new Error("GitHub source archive exceeded the updater safety limit."));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+
+  await pipeline(
+    Readable.fromWeb(response.body),
+    sizeGuard,
+    createWriteStream(archivePath, { flags: "wx" })
+  );
+  await mkdir(extractionRoot, { recursive: true });
+  const extractionResult = await extractUpdateArchive(archivePath, extractionRoot);
+  const extractedRoot = await extractedUpdateRoot(extractionRoot);
+  await rename(extractedRoot, cloneDir);
+  await rm(archivePath, { force: true });
+  await rm(extractionRoot, { recursive: true, force: true });
+
+  return {
+    stdout: `Downloaded and extracted the ${branch} source archive from GitHub.`,
+    stderr: String(extractionResult?.stderr || "").trim()
+  };
+}
+
+async function extractUpdateArchive(archivePath, extractionRoot) {
+  if (process.platform === "win32") {
+    const scriptPath = path.join(path.dirname(archivePath), "Expand-NewtNodeUpdate.ps1");
+    const script = `param(
+  [Parameter(Mandatory = $true)][string]$ArchivePath,
+  [Parameter(Mandatory = $true)][string]$DestinationPath
+)
+$ErrorActionPreference = "Stop"
+Expand-Archive -LiteralPath $ArchivePath -DestinationPath $DestinationPath -Force
+`;
+    await writeFile(scriptPath, script, "utf8");
+    try {
+      return await execFile("powershell.exe", [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", scriptPath,
+        archivePath,
+        extractionRoot
+      ], {
+        cwd: path.dirname(rootDir),
+        timeout: 300000,
+        maxBuffer: 8 * 1024 * 1024,
+        windowsHide: true
+      });
+    } finally {
+      await rm(scriptPath, { force: true }).catch(() => {});
+    }
+  }
+  return await execFile("/usr/bin/ditto", ["-x", "-k", archivePath, extractionRoot], {
+    cwd: path.dirname(rootDir),
+    timeout: 300000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+}
+
+async function extractedUpdateRoot(extractionRoot) {
+  const candidates = [];
+  if (existsSync(path.join(extractionRoot, "package.json"))) candidates.push(extractionRoot);
+  const entries = await readdir(extractionRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory() && existsSync(path.join(extractionRoot, entry.name, "package.json"))) {
+      candidates.push(path.join(extractionRoot, entry.name));
+    }
+  }
+  if (candidates.length !== 1) {
+    throw new Error("GitHub archive did not contain exactly one NewtNode package root.");
+  }
+  return candidates[0];
+}
+
+function updateCommandFailure(error, fallbackMessage, { missingCommandMessage = "Required update command is unavailable." } = {}) {
+  const missingCommand = error?.code === "ENOENT";
+  const detail = missingCommand
+    ? missingCommandMessage
+    : String(error?.stderr || error?.message || fallbackMessage || "Update command failed.")
+      .replace(/[\r\n]+/g, " ")
+      .trim()
+      .slice(0, 1600);
+  return { stdout: "", stderr: detail || fallbackMessage };
 }
 
 async function installStagedDependencies(directory) {
@@ -2150,7 +2339,16 @@ function comfyWanUrlForWorkflow(workflow) {
 async function resolveUpdateRepository() {
   const envRepository = normalizeUpdateRepository(process.env[updateRepositoryEnvKey]);
   if (envRepository) return envRepository;
-  return gitRemoteOriginUrl();
+  return hasLocalGitMetadata() ? gitRemoteOriginUrl() : defaultUpdateRepository;
+}
+
+async function resolveUpdateBranch() {
+  if (!hasLocalGitMetadata()) return defaultUpdateBranch;
+  return await currentGitBranch() || defaultUpdateBranch;
+}
+
+function hasLocalGitMetadata() {
+  return existsSync(path.join(rootDir, ".git"));
 }
 
 async function resolveBranchStatus(repository, branch) {
@@ -2162,6 +2360,10 @@ async function resolveBranchStatus(repository, branch) {
       label: "Unknown",
       detail: "Repository or branch unavailable"
     };
+  }
+
+  if (!hasLocalGitMetadata()) {
+    return archiveInstallBranchStatus(cleanBranch);
   }
 
   try {
@@ -2247,6 +2449,7 @@ async function resolveBranchStatus(repository, branch) {
 }
 
 async function currentGitHead() {
+  if (!hasLocalGitMetadata()) return "";
   try {
     const { stdout = "" } = await execFile("git", ["rev-parse", "HEAD"], {
       cwd: rootDir,
@@ -2260,6 +2463,7 @@ async function currentGitHead() {
 }
 
 async function hasGitWorkingTreeChanges() {
+  if (!hasLocalGitMetadata()) return false;
   try {
     const { stdout = "" } = await execFile("git", ["status", "--porcelain"], {
       cwd: rootDir,
@@ -2352,6 +2556,7 @@ function shortCommit(value) {
 }
 
 async function currentGitBranch() {
+  if (!hasLocalGitMetadata()) return "";
   try {
     const { stdout = "" } = await execFile("git", ["branch", "--show-current"], {
       cwd: rootDir,
@@ -2365,6 +2570,7 @@ async function currentGitBranch() {
 }
 
 async function gitRemoteOriginUrl() {
+  if (!hasLocalGitMetadata()) return "";
   try {
     const { stdout = "" } = await execFile("git", ["remote", "get-url", "origin"], {
       cwd: rootDir,
@@ -3499,7 +3705,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         });
       }
       if (!process.env.ATLAS_API_KEY) {
-        return res.status(400).json({ error: "Image Generation is routed to Atlas Cloud, but no active Atlas Cloud API key is selected in Settings." });
+        return res.status(400).json({ error: missingModelProviderApiKeyMessage("Image Generation", "atlas") });
       }
       return runAtlasImageModel(req, res, {
         prompt,
@@ -5919,13 +6125,13 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     if (selectedVideoModel.provider === "fal-minimax-h3") {
       const runtimeProvider = runtimeModelProviderPreferences.minimaxH3;
       if (runtimeProvider === "fal" && !process.env.FAL_KEY) {
-        return res.status(400).json({ error: "MiniMax H3 is routed to Fal and needs an enabled Fal API key in Settings." });
+        return res.status(400).json({ error: missingModelProviderApiKeyMessage("MiniMax H3", "fal") });
       }
       if (runtimeProvider === "krea" && !process.env.KREA_API_KEY) {
-        return res.status(400).json({ error: "MiniMax H3 is routed to Krea and needs an enabled Krea API key in Settings." });
+        return res.status(400).json({ error: missingModelProviderApiKeyMessage("MiniMax H3", "krea") });
       }
       if (runtimeProvider === "atlas" && !process.env.ATLAS_API_KEY) {
-        return res.status(400).json({ error: "MiniMax H3 is routed to Atlas Cloud and needs an enabled Atlas Cloud API key in Settings." });
+        return res.status(400).json({ error: missingModelProviderApiKeyMessage("MiniMax H3", "atlas") });
       }
       return runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtimeProvider });
     }
@@ -6054,8 +6260,9 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       atlasKey: process.env.ATLAS_API_KEY
     });
     if (!runtimeProvider) {
-      const providerLabel = providerPreferenceLabel(runtimeModelProviderPreferences.seedance);
-      return res.status(400).json({ error: `Seedance is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
+      return res.status(400).json({
+        error: missingModelProviderApiKeyMessage("Seedance", runtimeModelProviderPreferences.seedance)
+      });
     }
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -9920,8 +10127,9 @@ app.post(
         atlasKey: process.env.ATLAS_API_KEY
       });
       if (!runtimeProvider) {
-        const providerLabel = providerPreferenceLabel(runtimeModelProviderPreferences.seedance);
-        return res.status(400).json({ error: `Seedance is set to ${providerLabel}, but no active ${providerLabel} API key is selected in Settings.` });
+        return res.status(400).json({
+          error: missingModelProviderApiKeyMessage("Seedance", runtimeModelProviderPreferences.seedance)
+        });
       }
 
       const startFrame = req.files?.startFrame?.[0];

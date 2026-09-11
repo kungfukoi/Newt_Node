@@ -486,24 +486,28 @@ async function exitFullscreenForSystemDialog() {
 }
 
 export const settingsApi = {
-  load() {
-    return getJson("/api/settings?includeSecrets=1", "Could not load settings.");
+  load({ includeSecrets = true } = {}) {
+    return controlRequestData(
+      `/api/settings?includeSecrets=${includeSecrets ? "1" : "0"}`,
+      { method: "GET" },
+      "Could not load settings."
+    );
   },
 
   save(body) {
-    return postJson("/api/settings", body, "Could not save settings.");
+    return controlRequestData("/api/settings", jsonBody(body), "Could not save settings.");
   },
 
   validateKeys() {
-    return postJson("/api/settings/validate-keys", {}, "Could not validate API keys.");
+    return controlRequestData("/api/settings/validate-keys", jsonBody({}), "Could not validate API keys.");
   },
 
   update(body) {
-    return postJson("/api/settings/update", body, "Could not update NewtNode.");
+    return controlRequestData("/api/settings/update", jsonBody(body), "Could not update NewtNode.");
   },
 
   restart() {
-    return postJson("/api/settings/restart", {}, "Could not restart NewtNode.");
+    return controlRequestData("/api/settings/restart", jsonBody({}), "Could not restart NewtNode.");
   }
 };
 

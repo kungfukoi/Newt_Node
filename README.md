@@ -51,12 +51,15 @@ Current release: `v3.0.0-beta.0`
 
 - Node.js 22.12 or newer on the 22 LTS line is recommended. The current Vite toolchain requires `^20.19.0 || >=22.12.0`.
 - npm.
+- Git is recommended but optional for public GitHub ZIP installations.
 - Application packages, including the `@xyflow/react` canvas runtime, are declared in `package.json` and pinned by `package-lock.json`.
 - At least one supported provider API key for remote generation.
 - Fal is required for Fal-hosted models and utilities.
 - Google, Krea, OpenAI, and Atlas Cloud keys are optional and can be enabled independently.
 
 The Windows and macOS launchers check these npm dependencies before startup and automatically install anything missing or changed after a pull. See [NewtNode Dependencies](docs/dependencies.md) for the maintained runtime list and bootstrap behavior.
+
+GitHub **Download ZIP** installations can update from Settings. Their first update uses the official repository and `main` branch automatically, preserves local settings and media, and converts to a normal Git-backed install when Git is available. Without Git, future updates continue through bounded GitHub source archives.
 
 ## Setup
 

@@ -83,6 +83,33 @@ export function providerSupportedModelsLabel(route, provider) {
   return models.length ? `Models: ${models.join(", ")}` : "Models: None configured";
 }
 
+export function missingModelProviderCredentials(value = {}, availability = {}) {
+  const preferences = normalizeModelProviderPreferences(value);
+  const requiredProviders = new Set(Object.values(preferences).filter((provider) => provider !== "local"));
+  return [...requiredProviders].filter((provider) => !availability[provider]);
+}
+
+export function missingModelProviderApiKeyMessage(feature, provider) {
+  const providerLabel = providerPreferenceLabel(provider);
+  return `${feature} is routed to ${providerLabel}, but the ${providerLabel} API key field is empty or no saved key is active. Open Settings > API Credentials > ${providerLabel}, paste or select a key, then choose Save & Validate before running again.`;
+}
+
+export function activateSoleModelProviderCredentials(value = {}, credentials = {}, activeCredentialIds = {}) {
+  const preferences = normalizeModelProviderPreferences(value);
+  const requiredProviders = new Set(Object.values(preferences).filter((provider) => provider !== "local"));
+  const next = { ...(activeCredentialIds && typeof activeCredentialIds === "object" ? activeCredentialIds : {}) };
+  for (const provider of requiredProviders) {
+    const credentialProvider = provider === "openai" ? "openAi" : provider;
+    const candidates = Array.isArray(credentials?.[credentialProvider])
+      ? credentials[credentialProvider].filter((credential) => String(credential?.key || "").trim())
+      : [];
+    const activeId = String(next[credentialProvider] || "");
+    if (candidates.some((credential) => credential.id === activeId)) continue;
+    if (candidates.length === 1) next[credentialProvider] = candidates[0].id;
+  }
+  return next;
+}
+
 function normalizedProvider(value, supported) {
   const provider = String(value || "").trim().toLowerCase();
   return supported.includes(provider) ? provider : "";

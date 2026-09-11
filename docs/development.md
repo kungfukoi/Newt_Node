@@ -29,6 +29,8 @@ The normal development URLs are:
 
 Windows users can launch through `Launch_NewtNode.bat` or `Launch_NewtNode.ps1`. macOS users can launch through `NewtNode.command`, `Versus_NewtNode.command`, or the app bundle when installed.
 
+GitHub **Download ZIP** installs are supported. Settings identifies the missing local Git metadata, supplies the official repository and `main` branch, and uses a staged replacement on the first update. When Git is available, that update converts the folder into a shallow Git checkout; otherwise the public GitHub source archive remains the update source.
+
 Provider credentials should be entered and selected in Settings. Do not put real credentials in `.env.example`, tests, screenshots, logs, or documentation.
 
 ## Common Commands

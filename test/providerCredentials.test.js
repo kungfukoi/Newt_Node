@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  activateSoleProviderCredentials,
   activeProviderCredentials,
   legacyProviderCredentialStore,
   mergeProviderCredentialsWithEnv,
@@ -68,6 +69,20 @@ test("Atlas Cloud credentials use the same persistent profile model", () => {
   });
   const activeIds = normalizeActiveCredentialIds({ atlas: "studio" }, credentials);
   assert.equal(activeProviderCredentials(credentials, activeIds).atlas.key, "apikey-atlas");
+});
+
+test("a routed provider activates its sole saved credential without guessing between profiles", () => {
+  const credentials = normalizeProviderCredentialStore({
+    atlas: [{ id: "atlas-only", label: "Atlas", key: "atlas-key" }],
+    openAi: [
+      { id: "openai-one", label: "One", key: "openai-one" },
+      { id: "openai-two", label: "Two", key: "openai-two" }
+    ]
+  });
+  assert.deepEqual(
+    activateSoleProviderCredentials(credentials, {}, ["atlas", "openAi"]),
+    { fal: "", google: "", krea: "", openAi: "", atlas: "atlas-only" }
+  );
 });
 
 test("provider credentials reject non-byte characters before becoming headers", () => {

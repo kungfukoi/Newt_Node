@@ -22,7 +22,10 @@ import {
   videoModelOptions
 } from "./modelOptions.js";
 import {
+  activateSoleModelProviderCredentials,
   defaultModelProviderPreferences,
+  missingModelProviderApiKeyMessage,
+  missingModelProviderCredentials,
   normalizeModelProviderPreferences,
   providerPreferenceLabel,
   providerSupportedModelsLabel
@@ -42,6 +45,7 @@ const providerDefinitions = Object.freeze([
 
 const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [], atlas: [] });
 const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "", atlas: "" });
+const modelProviderPreferenceKeys = Object.freeze(Object.keys(defaultModelProviderPreferences));
 
 export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   const [settings, setSettings] = React.useState(null);
@@ -107,16 +111,8 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
 
       const savedData = await settingsApi.save(payload);
       const loadedData = await settingsApi.load();
-      const lostCredentialProviders = providerDefinitions.filter((provider) => {
-        const submittedIds = new Set((credentialPayload.credentials[provider.id] || []).map((credential) => credential.id));
-        if (!submittedIds.size) return false;
-        const reloadedIds = new Set((loadedData?.secrets?.credentials?.[provider.id] || []).map((credential) => credential.id));
-        return [...submittedIds].some((id) => !reloadedIds.has(id));
-      });
-      if (lostCredentialProviders.length) {
-        const labels = lostCredentialProviders.map((provider) => provider.label).join(", ");
-        throw new Error(`The running Settings server did not preserve ${labels} credentials. Your entry is still shown here; restart NewtNode, then save again.`);
-      }
+      assertCredentialsSaved(loadedData, credentialPayload);
+      assertModelProviderPreferencesSaved(loadedData, payload.modelProviderPreferences);
       const savedModelPreferences = hasModelPreferences(loadedData)
         ? normalizeModelPreferences(loadedData.modelPreferences)
         : hasModelPreferences(savedData)
@@ -141,6 +137,50 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
       refreshMinimaxH3LocalStatus({ quiet: true });
     } catch (error) {
       setMessage(error.message || "Could not save settings.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveProviderRouting() {
+    setBusy("routing");
+    setMessage("");
+    setUpdateLog("");
+    const requested = normalizeModelProviderPreferences(modelProviderPreferences);
+    const draftCredentialPayload = normalizedCredentialPayload(credentials, activeCredentialIds);
+    const credentialPayload = {
+      ...draftCredentialPayload,
+      activeCredentialIds: activateSoleModelProviderCredentials(
+        requested,
+        draftCredentialPayload.credentials,
+        draftCredentialPayload.activeCredentialIds
+      )
+    };
+    try {
+      const missingProviders = missingModelProviderCredentials(requested, credentialAvailability(credentialPayload));
+      if (missingProviders.length) {
+        throw new Error(missingProviders
+          .map((provider) => missingModelProviderApiKeyMessage("This routing", provider))
+          .join(" "));
+      }
+      await settingsApi.save({
+        credentials: credentialPayload.credentials,
+        activeCredentialIds: credentialPayload.activeCredentialIds,
+        modelProviderPreferences: requested
+      });
+      const loadedData = await settingsApi.load();
+      assertCredentialsSaved(loadedData, credentialPayload);
+      assertModelProviderPreferencesSaved(loadedData, requested);
+      const saved = normalizeModelProviderPreferences(loadedData.modelProviderPreferences);
+      setSettings((current) => ({ ...(current || {}), ...loadedData, modelProviderPreferences: saved }));
+      setCredentials(normalizeCredentialsForUi(loadedData.secrets?.credentials));
+      setActiveCredentialIds(normalizeActiveCredentialIdsForUi(loadedData.activeCredentialIds));
+      setModelProviderPreferences(saved);
+      dispatchModelProviderPreferences({ ...loadedData, modelProviderPreferences: saved });
+      setMessage("Model provider routing saved.");
+      setLastUpdated(new Date());
+    } catch (error) {
+      setMessage(error.message || "Could not save model provider routing.");
     } finally {
       setBusy("");
     }
@@ -487,9 +527,9 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             </label>
           </div>
           <div className="settings-actions">
-            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+            <button type="button" onClick={saveProviderRouting} disabled={actionsDisabled}>
               <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save Routing"}</span>
+              <span>{busy === "routing" ? "Saving" : "Save Routing"}</span>
             </button>
           </div>
         </CollapsibleSettingsSection>
@@ -906,6 +946,41 @@ function hasModelPreferences(data) {
   return data?.modelPreferences && typeof data.modelPreferences === "object";
 }
 
+function assertModelProviderPreferencesSaved(data, requested) {
+  const stored = data?.modelProviderPreferences;
+  const normalizedRequested = normalizeModelProviderPreferences(requested);
+  const saved = stored && typeof stored === "object" ? normalizeModelProviderPreferences(stored) : null;
+  const complete = saved && modelProviderPreferenceKeys.every((key) => Object.prototype.hasOwnProperty.call(stored, key));
+  const matches = complete && modelProviderPreferenceKeys.every((key) => saved[key] === normalizedRequested[key]);
+  if (!matches) {
+    throw new Error("The running Settings server did not preserve model provider routing. Your selections are still shown here; restart NewtNode, then save again.");
+  }
+}
+
+function assertCredentialsSaved(data, credentialPayload) {
+  const lostCredentialProviders = providerDefinitions.filter((provider) => {
+    const submittedIds = new Set((credentialPayload.credentials[provider.id] || []).map((credential) => credential.id));
+    const reloadedIds = new Set((data?.secrets?.credentials?.[provider.id] || []).map((credential) => credential.id));
+    const lostCredential = [...submittedIds].some((id) => !reloadedIds.has(id));
+    const submittedActiveId = String(credentialPayload.activeCredentialIds?.[provider.id] || "");
+    const reloadedActiveId = String(data?.activeCredentialIds?.[provider.id] || "");
+    return lostCredential || submittedActiveId !== reloadedActiveId;
+  });
+  if (lostCredentialProviders.length) {
+    const labels = lostCredentialProviders.map((provider) => provider.label).join(", ");
+    throw new Error(`The running Settings server did not preserve ${labels} credentials. Your entry is still shown here; restart NewtNode, then save again.`);
+  }
+}
+
+function credentialAvailability({ credentials = {}, activeCredentialIds = {} } = {}) {
+  return Object.fromEntries(providerDefinitions.map((provider) => {
+    const activeId = activeCredentialIds[provider.id];
+    const active = (credentials[provider.id] || []).find((credential) => credential.id === activeId && credential.key);
+    const routingId = provider.id === "openAi" ? "openai" : provider.id;
+    return [routingId, Boolean(active)];
+  }));
+}
+
 function SettingsMetric({ icon, label, value, detail, tone = "" }) {
   return (
     <article className={`metric-card settings-metric ${tone ? `tone-${tone}` : ""}`}>
@@ -999,7 +1074,8 @@ function modelProviderDetail(provider, activeCredentialIds, modelLabel, localSta
     if (localStatus?.available) return `SGLang is ready at ${localStatus.url}`;
     return localStatus?.message || "Start the local SGLang MiniMax H3 service, then render at 576P";
   }
-  return activeCredentialIds?.[provider]
+  const credentialProvider = provider === "openai" ? "openAi" : provider;
+  return activeCredentialIds?.[credentialProvider]
     ? `${providerLabel} will render ${modelLabel}`
     : `Select an active ${providerLabel} key above`;
 }
@@ -1011,7 +1087,7 @@ function branchMetricValue(settings) {
 
 function branchMetricTone(state) {
   if (state === "up-to-date") return "good";
-  if (["update-available", "local-changes", "local-ahead", "different-history"].includes(state)) return "warn";
+  if (["archive-install", "update-available", "local-changes", "local-ahead", "different-history"].includes(state)) return "warn";
   return "";
 }
 

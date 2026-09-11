@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nodeApi, systemApi, workflowApi } from "../src/api/newtApi.js";
+import { nodeApi, settingsApi, systemApi, workflowApi } from "../src/api/newtApi.js";
 
 function jsonResponse(body = {}) {
   return new Response(JSON.stringify(body), {
@@ -35,6 +35,26 @@ test("canvas folder actions use the control server while generations stay on the
   } finally {
     globalThis.fetch = previousFetch;
     globalThis.window = previousWindow;
+  }
+});
+
+test("settings loads and saves use the dedicated control server", async () => {
+  const previousFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return jsonResponse({ modelProviderPreferences: { seedance: "krea" } });
+  };
+
+  try {
+    await settingsApi.load({ includeSecrets: false });
+    await settingsApi.save({ modelProviderPreferences: { seedance: "krea" } });
+    assert.deepEqual(urls, [
+      "http://127.0.0.1:3337/api/settings?includeSecrets=0",
+      "http://127.0.0.1:3337/api/settings"
+    ]);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
 

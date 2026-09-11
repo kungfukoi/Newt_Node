@@ -161,7 +161,7 @@ Windows launch is owned by `Launch_NewtNode.ps1` with `.bat` wrappers. macOS lau
 
 Both production launchers run `scripts/localServerSupervisor.mjs` for the API and with `--client` for Vite preview. Each service/port has a checkout-local PID lock, rotating `.newtnode_logs/` logs, bounded crash backoff, and explicit restart-marker handling. Production does not watch source edits. `npm run dev` and `npm run server` intentionally retain developer watch mode. Diagnostics reports whether the current API is supervised and its restart count; an already-running legacy session must be relaunched to adopt the supervisor.
 
-Settings update is constrained to the configured repository and current branch. It attempts a fast-forward update first, then uses a staged replacement only when necessary while preserving local credentials, runtime data, workflows, uploads, inputs, and outputs.
+Settings update is constrained to the configured repository and branch. Git checkouts attempt a fast-forward update first, then use a staged replacement when necessary. GitHub ZIP installs default to the official repository and `main`, enter the staged replacement path directly, and become a shallow Git checkout when Git is available. Without Git, the updater downloads a size-bounded public GitHub source archive and remains archive-updatable. Both replacement sources preserve local credentials, runtime data, workflows, uploads, inputs, and outputs.
 
 ## Diagnostics And Verification
 

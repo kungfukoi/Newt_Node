@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  activateSoleModelProviderCredentials,
   defaultModelProviderPreferences,
+  missingModelProviderApiKeyMessage,
+  missingModelProviderCredentials,
   normalizeModelProviderPreferences,
   providerPreferenceLabel,
   providerSupportedModels,
@@ -43,6 +46,40 @@ test("MiniMax H3 preserves explicit Fal, Krea, Atlas, and local routing", () => 
 test("Seedance and image generation preserve explicit Atlas routing", () => {
   assert.equal(normalizeModelProviderPreferences({ seedance: "atlas" }).seedance, "atlas");
   assert.equal(normalizeModelProviderPreferences({ imageGeneration: "atlas" }).imageGeneration, "atlas");
+});
+
+test("routing reports every selected provider without an active credential", () => {
+  assert.deepEqual(
+    missingModelProviderCredentials({
+      seedance: "atlas",
+      veo: "fal",
+      imageGeneration: "atlas",
+      minimaxH3: "local",
+      llm: "openai"
+    }, { atlas: false, fal: true, openai: false }),
+    ["atlas", "openai"]
+  );
+});
+
+test("routing activates a provider's sole saved credential and preserves ambiguous choices", () => {
+  assert.deepEqual(
+    activateSoleModelProviderCredentials(
+      { seedance: "atlas", llm: "openai" },
+      {
+        atlas: [{ id: "atlas-only", key: "atlas-key" }],
+        openAi: [{ id: "openai-one", key: "one" }, { id: "openai-two", key: "two" }]
+      },
+      { atlas: "", openAi: "" }
+    ),
+    { atlas: "atlas-only", openAi: "" }
+  );
+});
+
+test("missing provider errors point to the empty API key field", () => {
+  const message = missingModelProviderApiKeyMessage("Seedance", "atlas");
+  assert.match(message, /Atlas Cloud API key field is empty/);
+  assert.match(message, /Settings > API Credentials > Atlas Cloud/);
+  assert.match(message, /Save & Validate/);
 });
 
 test("model provider labels are human readable", () => {

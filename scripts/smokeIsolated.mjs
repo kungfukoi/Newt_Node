@@ -24,7 +24,7 @@ try {
   await symlink(path.join(root, "node_modules"), path.join(sandbox, "node_modules"), process.platform === "win32" ? "junction" : "dir");
   await mkdir(path.join(sandbox, "server", "data"), { recursive: true });
   await mkdir(path.join(sandbox, "outputs"), { recursive: true });
-  await writeFile(path.join(sandbox, ".env"), "");
+  await writeFile(path.join(sandbox, ".env"), "# ATLAS_API_KEY=atlas-smoke-key\n");
   await setupMedia();
   await cp(path.join(root, "e2e", ".generated", "motion.mp4"), path.join(sandbox, "outputs", "clip.mp4"));
   await writeFile(path.join(sandbox, "server", "data", "history.json"), JSON.stringify([
@@ -63,11 +63,34 @@ try {
   const initialSettings = await (await request("/api/settings")).json();
   assert.match(initialSettings.historyRecoveryNotice, /restored/);
   assert.equal(initialSettings.userPreferences.showPresetPanel, true);
+  assert.equal(initialSettings.repository, "https://github.com/kungfukoi/Newt_Node.git");
+  assert.equal(initialSettings.branch, "main");
+  assert.equal(initialSettings.branchStatus.state, "archive-install");
+  assert.equal(initialSettings.branchStatus.label, "ZIP install");
+  const expectedRouting = {
+    seedance: "krea",
+    veo: "fal",
+    imageGeneration: "atlas",
+    minimaxH3: "local",
+    llm: "openai"
+  };
   const savedSettings = await (await request("/api/settings", {
-    userPreferences: { showPresetPanel: false }
+    userPreferences: { showPresetPanel: false },
+    modelProviderPreferences: expectedRouting
   })).json();
   assert.equal(savedSettings.userPreferences.showPresetPanel, false);
-  assert.equal((await (await request("/api/settings")).json()).userPreferences.showPresetPanel, false);
+  assert.deepEqual(savedSettings.modelProviderPreferences, expectedRouting);
+  assert.equal(savedSettings.atlasApiKeyConfigured, true);
+  assert.ok(savedSettings.activeCredentialIds.atlas);
+  const reloadedSettings = await (await request("/api/settings")).json();
+  assert.equal(reloadedSettings.userPreferences.showPresetPanel, false);
+  assert.deepEqual(reloadedSettings.modelProviderPreferences, expectedRouting);
+  assert.equal(reloadedSettings.atlasApiKeyConfigured, true);
+  assert.equal(reloadedSettings.activeCredentialIds.atlas, savedSettings.activeCredentialIds.atlas);
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(sandbox, "server", "data", "runtime-settings.json"), "utf8")).modelProviderPreferences,
+    expectedRouting
+  );
   const catalog = await (await request("/api/project-outputs?projectId=smoke-project")).json();
   assert.equal(catalog.total, 1);
   const poster = await request("/api/video-poster?url=" + encodeURIComponent("/outputs/clip.mp4"));
@@ -100,7 +123,7 @@ try {
   }
   assert.equal(recovered.state, "completed", recovered.message);
   assert.equal((await (await request("/api/project-outputs?projectId=recovered-project")).json()).total, 1);
-  console.log("Isolated API passed: startup, history backup recovery, user preferences, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import; no provider calls.");
+  console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");
   if (exited) await exited;

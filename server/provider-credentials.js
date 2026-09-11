@@ -35,6 +35,19 @@ export function activeProviderCredentials(credentials = {}, activeCredentialIds 
   }));
 }
 
+export function activateSoleProviderCredentials(credentials = {}, activeCredentialIds = {}, providers = providerCredentialNames) {
+  const normalizedCredentials = normalizeProviderCredentialStore(credentials);
+  const normalizedIds = normalizeActiveCredentialIds(activeCredentialIds, normalizedCredentials);
+  const requestedProviders = new Set(Array.isArray(providers) ? providers : []);
+  for (const provider of providerCredentialNames) {
+    if (!requestedProviders.has(provider) || normalizedIds[provider]) continue;
+    if (normalizedCredentials[provider].length === 1) {
+      normalizedIds[provider] = normalizedCredentials[provider][0].id;
+    }
+  }
+  return normalizedIds;
+}
+
 export function providerCredentialSummaries(credentials = {}, activeCredentialIds = {}) {
   const normalizedCredentials = normalizeProviderCredentialStore(credentials);
   const normalizedIds = normalizeActiveCredentialIds(activeCredentialIds, normalizedCredentials);

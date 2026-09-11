@@ -8,6 +8,7 @@ For setup commands, validation tiers, environment overrides, and troubleshooting
 
 - Node.js 22.12 or newer on the 22 LTS line is recommended (CI uses Node 22). Current Vite requires Node `^20.19.0 || >=22.12.0`.
 - npm, distributed with Node.js.
+- Git is recommended but optional for public GitHub ZIP installs. The first Settings update adopts a shallow Git checkout when Git is available and otherwise uses GitHub source archives.
 - Network access to the npm registry when dependencies are missing or the lockfile changes.
 - FFmpeg and FFprobe are supplied by `ffmpeg-static` and `ffprobe-static`.
 
@@ -39,6 +40,8 @@ This ensures a normal git pull followed by launch installs additions such as `@x
 ```bash
 npm run deps:ensure
 ```
+
+Settings updates from a GitHub ZIP installation use the same dependency install and launcher handoff. The updater tries a shallow clone first; if the Git executable is unavailable, Windows uses PowerShell archive extraction and macOS uses the system `ditto` utility. Source downloads are limited to 256 MiB and supported only for public HTTPS GitHub repository URLs.
 
 ComfyUI custom nodes, Python packages, and Wan model files are separate machine-level dependencies documented in `comfyWan-requirements.yaml`.
 
