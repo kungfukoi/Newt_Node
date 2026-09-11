@@ -129,6 +129,50 @@ test("multi-file drops preserve the complete browser file list", async () => {
   assert.deepEqual(files, [first, second]);
 });
 
+test("Explorer file entries do not duplicate files already supplied directly", async () => {
+  const directFile = { name: "still.png", type: "image/png", size: 100, lastModified: 1 };
+  const entryCopy = { name: "still.png", type: "", size: 100, lastModified: 2 };
+  const files = await supportedFilesFromDataTransfer({
+    files: [directFile],
+    items: [{
+      kind: "file",
+      webkitGetAsEntry: () => ({
+        isFile: true,
+        file: (resolve) => resolve(entryCopy)
+      })
+    }]
+  });
+
+  assert.deepEqual(files, [directFile]);
+});
+
+test("folder entries supplement direct Explorer files", async () => {
+  const directFile = { name: "still.png", type: "image/png", size: 100, lastModified: 1 };
+  const nestedFile = { name: "clip.mp4", type: "video/mp4", size: 200, lastModified: 2 };
+  let readDirectory = false;
+  const files = await supportedFilesFromDataTransfer({
+    files: [directFile],
+    items: [{
+      kind: "file",
+      webkitGetAsEntry: () => ({
+        isDirectory: true,
+        createReader: () => ({
+          readEntries: (resolve) => {
+            if (readDirectory) return resolve([]);
+            readDirectory = true;
+            resolve([{
+              isFile: true,
+              file: (done) => done(nestedFile)
+            }]);
+          }
+        })
+      })
+    }]
+  });
+
+  assert.deepEqual(files, [directFile, nestedFile]);
+});
+
 test("thumbnail assets are display-only and cannot become draggable working media", () => {
   const localThumbnail = "/outputs/Test/thumbnails/image-preview.jpg";
   const packagedThumbnail = "/workflow-assets/project-1/thumbnails/image-preview.jpg";

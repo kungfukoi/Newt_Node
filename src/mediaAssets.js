@@ -441,6 +441,12 @@ export async function supportedFilesFromDataTransfer(dataTransfer, maxFiles = 32
   if (items.length) {
     for (const item of items) {
       if (itemFiles.length >= maxFiles) break;
+      // Explorer exposes ordinary files both through `files` and as dropped
+      // entries. Prefer the direct list so one source file cannot create two
+      // media nodes. Entries remain necessary for folder drops and browsers
+      // that do not populate the direct file list.
+      const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+      if (directFiles.length && !entry?.isDirectory) continue;
       await collectDataTransferItemFiles(item, itemFiles, maxFiles);
     }
   }
