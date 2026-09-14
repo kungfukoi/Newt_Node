@@ -33,6 +33,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
     const operation = writes.then(async () => {
       const previous = jobs.get(runId);
       const next = { ...previous, ...patch, runId, updatedAt: iso() };
+      if (remoteVideoTerminal(next) && !next.finishedAt) next.finishedAt = next.updatedAt;
       const transitioned = next.state !== previous?.state || next.providerStatus !== previous?.providerStatus;
       if (transitioned || patch.lastError) {
         next.events = appendJobEvent(previous?.events, { at: next.updatedAt, state: next.state, ...(patch.lastError ? { error: patch.lastError } : {}) });
@@ -177,6 +178,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       state: job.state, requestId: job.requestId || "", provider: job.spec.provider,
       providerStatus: job.providerStatus || "",
       model: job.spec.modelName, createdAt: job.createdAt, updatedAt: job.updatedAt,
+      submittedAt: job.spec.body.generationSubmittedAt || job.createdAt, finishedAt: job.finishedAt || null,
       message: job.message, health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
       providerAcceptedAt: job.providerAcceptedAt || job.submissionStartedAt || null,
       needsAttention: remoteVideoNeedsAttention(job), retryCount: job.retryCount || 0,
@@ -257,14 +259,14 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       return [...jobs.values()].filter((job) => activeGroups.has(job.spec.body.generationGroupId || job.runId) || now() - Date.parse(job.updatedAt) < 5 * 60 * 1000).map((job) => ({
       runId: job.runId, scope: job.spec.body.generationScope || remoteVideoScope(job.spec.body), nodeId: job.spec.body.nodeId, groupId: job.spec.body.generationGroupId || job.runId,
       batchIndex: Number(job.spec.body.generationBatchIndex) || 1, batchTotal: Number(job.spec.body.generationBatchTotal) || 1,
-      message: job.message, updatedAt: job.updatedAt, requestId: job.requestId || "",
+      message: job.message, updatedAt: job.updatedAt, finishedAt: job.finishedAt || null, requestId: job.requestId || "",
       kind: "video", label: job.spec.modelName, nodeTitle: job.spec.body.nodeTitle,
       status: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "completed" : remoteVideoTerminal(job) ? "failed" : remoteVideoQueued(job) ? "queued" : "running",
       phase: remoteVideoNeedsAttention(job) ? "attention" : job.state === "completed" ? "complete" : remoteVideoTerminal(job) ? "failed" : job.remote ? "downloading" : remoteVideoQueued(job) ? "queued" : "generating",
       percent: job.state === "completed" ? 100 : job.remote ? 95 : job.percent == null ? null : 10 + Math.min(100, job.percent) * 0.8,
       queuePosition: job.queuePosition ?? null, providerStatus: job.providerStatus || "", provider: job.spec.provider,
       health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
-      startedAt: job.spec.body.generationStartedAt || job.createdAt, phaseStartedAt: job.createdAt
+      startedAt: job.spec.body.generationSubmittedAt || job.spec.body.generationStartedAt || job.createdAt, phaseStartedAt: job.createdAt
       }));
     },
     step,

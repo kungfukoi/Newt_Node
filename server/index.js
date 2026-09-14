@@ -6339,7 +6339,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           outputFileNameBase: req.body.outputFileNameBase,
           generationGroupId: req.body.generationGroupId,
           generationStartedAt: listGenerationProgress().find((entry) => entry.runId === req.body.generationRunId)?.startedAt,
-          generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal
+          generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal,
+          generationSubmittedAt: req.body.generationSubmittedAt
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
