@@ -91,6 +91,8 @@ The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` 
 
 ## Character Identity Flow
 
+Character wardrobe edits request complete sheets without rectangular edit masks. `server/character-wardrobe.js` also removes obsolete masks from recognized requests made by older open tabs before Fal/Atlas routing. Base and CU panel crops, reference notes, managed outputs, and partial-success reconciliation remain owned by the existing Character helpers.
+
 Character nodes persist generated wardrobe variants in `characterSheetVariants`, uploaded completed sheets in `characterCustomSheets`, and the selected library entry in `activeCharacterSheetId`. `src/characterSheetLibrary.js` normalizes legacy single-sheet data, assigns namespaced generated/custom selection ids, builds the combined library, and resolves deterministic fallbacks without making filenames or display order authoritative.
 
 The active Character sheet is the full-resolution identity reference consumed by downstream image, video, Composer, Director, and Storyboard paths. `src/characterVideoSheets.js` resolves the selected image or matching CU Video sheet for video generation. Changing a node title updates the visible `@token`, while node ids and persisted reference bindings keep the relationship stable.

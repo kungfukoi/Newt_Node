@@ -253,7 +253,6 @@ export async function runCharacterWardrobeEdit({
   wardrobe,
   identityReference = null,
   consistencySheet = null,
-  editMaskDataUrl = "",
   workflowContext,
   characterTag,
   sheetKind = "image"
@@ -282,7 +281,7 @@ export async function runCharacterWardrobeEdit({
     aspectRatio: "16:9",
     imagePromptUrls: references.map((item) => item.url),
     imagePromptLabels: references.map((item) => item.label),
-    ...(editMaskDataUrl ? { editMaskDataUrl } : {}),
+    characterWardrobeEdit: true,
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Wardrobe Edit`

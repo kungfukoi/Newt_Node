@@ -1,6 +1,5 @@
-import { loadCanvasImage } from "./canvasMedia.js";
 import { runCharacterWardrobeEdit } from "./nodeRunners/mediaModels.js";
-import { characterWardrobeMaskRegions, characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt } from "./characterSheetWorkflow.js";
+import { characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt } from "./characterSheetWorkflow.js";
 
 export async function generateCharacterWardrobeVariant(node, wardrobe, {
     workflowContext,
@@ -16,13 +15,11 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
   } = {}) {
     let generated = regenerateImage ? null : existingVariant?.generated || null;
     if (!(generated?.url || generated?.localUrl)) {
-      const imageMask = await createCharacterWardrobeEditMaskDataUrl(baseSheet, "image");
       generated = await runCharacterWardrobeEdit({
         node,
         prompt: characterWardrobeEditPrompt,
         baseSheet,
         wardrobe,
-        editMaskDataUrl: imageMask,
         workflowContext: workflowContext,
         characterTag: characterTag
       });
@@ -37,13 +34,11 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
       && !(videoGenerated?.url || videoGenerated?.localUrl)
     ) {
       try {
-        const videoMask = await createCharacterWardrobeEditMaskDataUrl(baseVideoSheet, "video");
         videoGenerated = await runCharacterWardrobeEdit({
           node,
           prompt: characterVideoWardrobeEditPrompt,
           baseSheet: baseVideoSheet,
           wardrobe,
-          editMaskDataUrl: videoMask,
           workflowContext: workflowContext,
           characterTag: characterTag,
           sheetKind: "video"
@@ -69,28 +64,3 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
       videoError
     };
   }
-
-async function createCharacterWardrobeEditMaskDataUrl(baseSheet, sheetKind = "image") {
-  const sourceUrl = baseSheet?.localUrl || baseSheet?.url || "";
-  if (!sourceUrl || typeof document === "undefined") return "";
-  const image = await loadCanvasImage(sourceUrl);
-  const width = Math.max(1, Math.round(image.naturalWidth || image.width || 1));
-  const height = Math.max(1, Math.round(image.naturalHeight || image.height || 1));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) return "";
-  context.fillStyle = "#000";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "#fff";
-  characterWardrobeMaskRegions(sheetKind).forEach((region) => {
-    context.fillRect(
-      Math.round(region.x * width),
-      Math.round(region.y * height),
-      Math.ceil(region.width * width),
-      Math.ceil(region.height * height)
-    );
-  });
-  return canvas.toDataURL("image/png");
-}

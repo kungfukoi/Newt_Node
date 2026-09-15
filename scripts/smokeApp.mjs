@@ -11,6 +11,7 @@ const requiredHealthRoutes = [
   "generate3d",
   "remoteVideoJobs",
   "atlasDurableVideo",
+  "characterWardrobeFullSheet",
   "settingsKeyValidation",
   "minimaxH3LocalStatus",
   "utilityImage",

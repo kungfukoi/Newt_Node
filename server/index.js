@@ -64,6 +64,7 @@ import {
 import { validateProviderKey } from "./provider-key-validation.js";
 import { createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
+import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import {
   archiveInstallBranchStatus,
   defaultUpdateBranch,
@@ -956,6 +957,7 @@ function buildHealthPayload() {
       mediaThumbnail: true,
       generationProgress: true,
       atlasDurableVideo: true,
+      characterWardrobeFullSheet: true,
       remoteVideoJobs: true,
       remoteVideoRecovery: true,
       projectOutputs: true,
@@ -3669,6 +3671,7 @@ async function handleTransferCollageUpload(req, res) {
 
 app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
+    req.body = normalizeCharacterWardrobeRequest(req.body);
     updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing image generation" });
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
@@ -3938,7 +3941,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           background: openAiImage.background,
           variant: openAiImage.variant,
           imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
+          imagePromptLabels: cleanReferenceLabels,
+          ...(req.body.characterWardrobeEdit ? { wardrobeEditMode: "full-sheet" } : {})
         },
         cost,
         remoteImage: openAiImage.remoteImage,
@@ -20683,7 +20687,8 @@ async function runAtlasImageModel(req, res, {
       variant: atlasImage.variant,
       imagePromptCount: imageInputs.length,
       imagePromptLabels: cleanReferenceLabels,
-      runtimeProvider: "atlas"
+      runtimeProvider: "atlas",
+      ...(req.body.characterWardrobeEdit ? { wardrobeEditMode: "full-sheet" } : {})
     },
     cost: atlasImage.cost,
     remoteImage: atlasImage.remoteImage,

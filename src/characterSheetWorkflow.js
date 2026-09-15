@@ -17,7 +17,7 @@ export const characterWardrobeEditPrompt = `Edit the provided Base Identity Char
 
 Change only the character's clothing, footwear, and requested wearable accessories. Study the selected wardrobe reference and transfer only its garments, materials, colors, construction, fit, footwear, and styling onto the locked character. Ignore every person, face, body, pose, environment, background, text, label, and unrelated object in the wardrobe reference. The Base Identity Character Sheet remains the sole authority for identity, anatomy, composition, and rendering.
 
-Apply exactly one consistent wardrobe across all six views, including any clothing visible near the neckline in close-up panels. Replace the neutral charcoal reference bodysuit completely where clothing should appear. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
+Apply exactly one consistent wardrobe across all six views, including any clothing visible near the neckline in close-up panels. Replace the neutral charcoal reference bodysuit completely where clothing should appear. Return one complete, seamless sheet with naturally connected heads, necks, shoulders, and clothing, never an isolated edit patch or pasted face cutouts. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 
 export const characterVideoWardrobeEditPrompt = `Edit the provided Base Identity CU Video Sheet. Treat that first image as the pixel-locked master composition and preserve its exact canvas dimensions, three-panel layout, dividers, background, crop, camera views, body positions, portrait pose, eyeline, facial identity, hair, skin, anatomy, body proportions, expression, lighting, color treatment, texture, and image quality.
 
@@ -27,7 +27,7 @@ Hard crop lock: preserve the two left body panels exactly as they appear in the 
 
 Change only the character's clothing, footwear, and requested wearable accessories. Study the selected wardrobe reference and transfer only its garments, materials, colors, construction, fit, footwear, and styling onto the locked character. Ignore every person, face, body, pose, environment, background, text, label, and unrelated object in the wardrobe reference.
 
-Apply exactly one consistent wardrobe to both body panels and the visible neckline of the portrait. Replace the neutral charcoal reference bodysuit completely where clothing should appear. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
+Apply exactly one consistent wardrobe to both body panels and the visible neckline of the portrait. Replace the neutral charcoal reference bodysuit completely where clothing should appear. Return the complete, seamless CU Video Sheet with the original panel crops and natural transitions between skin and clothing, never an isolated edit patch or pasted face cutouts. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 
 export function characterBaseGenerationSignature(data = {}) {
   const portraitUrl = data.characterPortrait?.localUrl || data.characterPortrait?.url || "";
