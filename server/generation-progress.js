@@ -43,6 +43,9 @@ export function beginGenerationProgress(input = {}) {
   const runId = cleanId(input.runId);
   if (!runId) return null;
   pruneGenerationProgress();
+  // HTTP acceptance retries belong to the same run, not a new stopwatch.
+  const existing = progressEntries.get(runId);
+  if (existing) return { ...existing };
   const now = new Date().toISOString();
   const entry = {
     runId,

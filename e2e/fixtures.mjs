@@ -1,5 +1,5 @@
 export const fixtureProjectId = "browser-regression-project";
-export function canvasFixture({ count = 271, scale = 0.08, timeline = false, generation = false, attention = false, group = false } = {}) {
+export function canvasFixture({ count = 271, scale = 0.08, timeline = false, generation = false, attention = false, videoProgress = false, group = false } = {}) {
   const nodes = Array.from({ length: count }, (_, index) => {
     const type = ["plainText", index % 12 === 1 ? "video" : "image", "preview", "style"][index % 4];
     return { id: `fixture-${index}`, type, x: 30 + index % 16 * 480, y: 30 + Math.floor(index / 16) * 650,
@@ -25,7 +25,7 @@ export function canvasFixture({ count = 271, scale = 0.08, timeline = false, gen
       { id: "viewer", type: "preview", x: 550, y: 30, data: { title: "Connected viewer" } });
     edges.splice(0, edges.length, { id: "model-viewer", from: { nodeId: "model", port: "imageOut" }, to: { nodeId: "viewer", port: "sourceIn" } });
   }
-  if (attention) {
+  if (attention || videoProgress) {
     nodes.splice(0, nodes.length, { id: "model", type: "videoModel", x: 30, y: 30, data: { title: "Uncertain fixture", model: "Seedance 2.5", prompt: "Local fixture", status: "running" } });
     edges.splice(0, edges.length);
   }

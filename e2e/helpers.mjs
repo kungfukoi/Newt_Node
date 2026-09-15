@@ -33,7 +33,7 @@ export async function openFixture(page, options = {}) {
       requests.push({ path, method: request.method() });
       if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" } });
-      if (path === "/api/generation-progress") return json({ entries: [] });
+      if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });
       if (path === "/api/node/generate-image") return json({ images: [{ localUrl: "/outputs/e2e/generated.png", fileName: "generated.png", mimeType: "image/png" }] });
       if (path === "/api/remote-video-jobs") return json({ jobs: options.attention ? [{ runId: "uncertain-fixture", nodeId: "model", groupId: "group", batchIndex: 1, state: dismissed ? "dismissed" : "uncertain", provider: "fal", scope: JSON.stringify([fixtureProjectId, "", ""]), createdAt: "2026-09-04T00:00:00Z", message: "Needs attention: acceptance unknown" }] : [], cursor: "fixture:0", reset: true, pollAfterMs: 15000 });
       if (path === "/api/remote-video-jobs/uncertain-fixture/recover") { dismissed = true; return json({ job: { state: "dismissed" } }); }

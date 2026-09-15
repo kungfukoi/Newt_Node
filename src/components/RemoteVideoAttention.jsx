@@ -34,7 +34,7 @@ function RecoveryRow({ job, onRecovered }) {
   }
   return <details className="remote-video-attention nodrag nopan" onPointerDown={(event) => event.stopPropagation()}>
     <summary>Run {job.batchIndex}: Needs attention</summary>
-    <a href={job.provider === "fal" ? "https://fal.ai/dashboard/requests" : "https://www.krea.ai/"} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open {job.provider === "fal" ? "Fal" : "Krea"}</a>
+    <a href={job.provider === "fal" ? "https://fal.ai/dashboard/requests" : job.provider === "atlas" ? "https://www.atlascloud.ai/" : "https://www.krea.ai/"} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open {job.provider === "fal" ? "Fal" : job.provider === "atlas" ? "Atlas Cloud" : "Krea"}</a>
     <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I checked the original provider run.</label>
     <input aria-label="Original provider job ID" placeholder="Provider job ID" value={requestId} onChange={(event) => setRequestId(event.target.value)} />
     <div className="remote-video-recovery-actions">

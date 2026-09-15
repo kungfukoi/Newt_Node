@@ -223,7 +223,11 @@ export function mergeGenerationProgressEntry(previous, incoming) {
   if (previous.status === "completed" && !isTerminalProgressStatus(incoming.status)) {
     return { ...previous };
   }
-  return { ...previous, ...incoming };
+  const startedTimes = [previous.startedAt, incoming.startedAt].map((value) => Date.parse(value || "")).filter(Number.isFinite);
+  return {
+    ...previous, ...incoming,
+    ...(startedTimes.length ? { startedAt: new Date(Math.min(...startedTimes)).toISOString() } : {})
+  };
 }
 
 export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {

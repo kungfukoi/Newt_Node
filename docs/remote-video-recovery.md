@@ -2,7 +2,9 @@
 
 ## User Behavior
 
-Seedance 2.0 and 2.5 requests made through the node API now run as saved background jobs, for both Fal and Krea. No extra setting is required in the Video Model node.
+Seedance 2.0 and 2.5 requests made through the node API run as saved background jobs for Fal, Krea, and Atlas Cloud. No extra setting is required in the Video Model node. Atlas uploads references before acceptance, then records the job before making the paid submission; prediction polling, downloads, history, and restart recovery use the shared tracker.
+
+The elapsed timer retains the original run start across acceptance retries and the transition into background tracking. It continues beyond three minutes even when the provider status is unchanged, and freezes only at a terminal state. Atlas jobs started before this integration cannot be adopted automatically if their provider ID was never saved; check their original provider history before restarting or resubmitting.
 
 - Each generation in a batch has its own job ID and lifecycle. A 20-minute elapsed time is a warning per job, including queue time, not a batch deadline or a failure.
 - Queued or processing jobs remain pending. A responsive status endpoint does not prove that inference is advancing; the UI reports what the provider actually says, without claiming it can reliably detect an internal stall.
@@ -17,7 +19,7 @@ This cannot guarantee provider completion, and it cannot retrospectively recover
 
 ### Resolve An Uncertain Submission
 
-Expand the affected run's **Needs attention** row inside the Video Model node, open its Fal/Krea link, and confirm that you checked the original provider run. Then choose one of these actions:
+Expand the affected run's **Needs attention** row inside the Video Model node, open its provider link, and confirm that you checked the original provider run. Then choose one of these actions:
 
 - Attach the provider's original job ID. Newt validates it through the original provider/model endpoint and credential before resuming tracking. URLs and IDs already tracked by another run are rejected.
 - Import the completed video downloaded from that run. Newt validates the local video, copies it to managed output storage, and completes normal result/history/catalog reconciliation. This does not submit to the provider.
@@ -32,7 +34,7 @@ These are inline recovery controls, not a cross-project Jobs dashboard. Acknowle
 | `server/remote-video-jobs.js` | Durable registry, one worker per run, restart recovery, state transitions, retry scheduling, public job/progress views |
 | `server/remote-job-store.js` | Per-job specifications/checkpoints and version-1 migration backup |
 | `server/job-diagnostics.js` | Bounded, allowlisted state/error event trail |
-| `server/seedance-job-provider.js` | Fal/Krea submission and status/result adapters, bounded HTTP calls, original-key fingerprint checks |
+| `server/seedance-job-provider.js` | Fal/Krea/Atlas submission and status/result adapters, bounded HTTP calls, original-key fingerprint checks |
 | `server/routes/remote-video-jobs.js` | Idempotent acceptance, concurrent preparation deduplication, job lookup/list routes |
 | `server/index.js` | Existing Seedance validation/uploads/request construction, managed output reservation/download, metadata/cost/history finalization |
 | `src/remoteVideoJobClient.js` | Wait for accepted jobs across local connection interruptions without creating new run IDs |
@@ -55,7 +57,9 @@ State sequence: `accepted -> submitting -> queued/running -> downloading -> comp
 
 Persist `submitting` before the paid POST and the returned provider ID immediately afterward. The unavoidable crash window between provider acceptance and saving its ID must remain uncertain, not become a retry. Provider POSTs deliberately avoid SDK automatic retries. New model adapters must honor this contract.
 
-Polls normally run every 3 seconds, slow to 15 seconds after 20 minutes, and back off up to 60 seconds after errors. Provider HTTP requests have a 60-second connection/request bound; media downloads have a 5-minute bound per attempt. Neither bound cancels the provider job. Resumed local saves reuse the reserved path and checkpoint; history/Stats deduplicate by generation run ID. The registry assumes one Newt backend process owns this data directory.
+Polls normally run every 3 seconds, slow to 15 seconds after 20 minutes, and back off up to 60 seconds after errors. Provider HTTP requests have a 60-second connection/request bound (Atlas submission: 120 seconds); media downloads have a 5-minute bound per attempt. Neither bound cancels the provider job. Resumed local saves reuse the reserved path and checkpoint; history/Stats deduplicate by generation run ID. The registry assumes one Newt backend process owns this data directory.
+
+Atlas admits two active durable submissions by default, configurable with `NEWTNODE_ATLAS_VIDEO_CONCURRENCY`. Its original Atlas credential fingerprint is required for subsequent polling and recovery. Atlas cost metadata remains explicitly unpriced where no verified price is available.
 
 Unchanged successful heartbeats update memory but persist at most once per 30 seconds. State transitions, acceptance IDs, errors, and download/finalization checkpoints still flush immediately. Fal admits two active durable submissions by default. Krea admits eight because Krea documents provider-managed backlog queueing; this prevents two slow renders from blocking unrelated workflows while retaining a local safety bound. Both are configurable with `NEWTNODE_FAL_VIDEO_CONCURRENCY` and `NEWTNODE_KREA_VIDEO_CONCURRENCY`. Waiting for an admission slot is not provider failure. Existing accepted jobs continue to be tracked even if a limit is subsequently reduced.
 

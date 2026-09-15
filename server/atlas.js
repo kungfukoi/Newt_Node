@@ -145,5 +145,12 @@ export function createAtlasClient({
     throw fail(504, `Atlas Cloud image job ${requestId} is still pending. Check provider history before rerunning; no cancellation was sent.`);
   }
 
-  return { upload, generate };
+  // Single bounded calls for the durable tracker; it owns retries and checkpoints.
+  return {
+    upload, generate,
+    submitVideo: (input, key) => request("generateVideo", key, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input)
+    }),
+    pollVideo: (requestId, key) => request(`prediction/${encodeURIComponent(requestId)}`, key)
+  };
 }

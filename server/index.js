@@ -71,7 +71,7 @@ import {
   githubArchiveUrl,
   maxUpdateArchiveBytes
 } from "./runtime-update.js";
-import { supportsAtlasImageModel, supportsAtlasVideoModel } from "../src/atlasMedia.js";
+import { supportsAtlasImageModel, supportsAtlasVideoModel, estimateAtlasVideoCost } from "../src/atlasMedia.js";
 import {
   copyFileWithRetry,
   readFileWithRetry,
@@ -680,11 +680,11 @@ await refreshRuntimeConfigFromEnvFile();
 
 const remoteVideoJobs = await createRemoteVideoJobs({
   filePath: path.join(dataDir, "remote-video-jobs.json"),
-  providerLimits: { fal: concurrencyLimit(process.env.NEWTNODE_FAL_VIDEO_CONCURRENCY, 2), krea: concurrencyLimit(process.env.NEWTNODE_KREA_VIDEO_CONCURRENCY, 8) },
+  providerLimits: { fal: concurrencyLimit(process.env.NEWTNODE_FAL_VIDEO_CONCURRENCY, 2), krea: concurrencyLimit(process.env.NEWTNODE_KREA_VIDEO_CONCURRENCY, 8), atlas: concurrencyLimit(process.env.NEWTNODE_ATLAS_VIDEO_CONCURRENCY, 2) },
   adapter: createSeedanceJobAdapter({
     getKey: async (provider) => {
       await refreshRuntimeConfigFromEnvFile();
-      return provider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY;
+      return provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY;
     },
     extractKreaVideo: extractKreaJobResultUrl
   }),
@@ -955,6 +955,7 @@ function buildHealthPayload() {
       newtPresets: true,
       mediaThumbnail: true,
       generationProgress: true,
+      atlasDurableVideo: true,
       remoteVideoJobs: true,
       remoteVideoRecovery: true,
       projectOutputs: true,
@@ -6328,11 +6329,12 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     function seedanceJobSpec(input) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
-        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY),
+        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
         body: {
           ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
           outputFileNameBase: req.body.outputFileNameBase,
           generationGroupId: req.body.generationGroupId,
+          generationStartedAt: listGenerationProgress().find((entry) => entry.runId === req.body.generationRunId)?.startedAt,
           generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
@@ -6354,7 +6356,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       if (!supportsAtlasVideoModel(selectedVideoModel.displayName)) {
         return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by Atlas Cloud.` });
       }
-      const atlasResult = await atlasMedia.video({
+      const atlasOptions = {
         model: selectedVideoModel.displayName,
         prompt: submittedPrompt,
         startImage: startFrameUrl,
@@ -6367,7 +6369,14 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         aspectRatio,
         generateAudio,
         seed: requestedSeed
-      }, process.env.ATLAS_API_KEY);
+      };
+      if (req.durableRequestHash) {
+        const input = await atlasMedia.prepareVideo(atlasOptions, process.env.ATLAS_API_KEY);
+        endpoint = input.model;
+        cost = estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, endpoint });
+        return await acceptSeedanceJob(input);
+      }
+      const atlasResult = await atlasMedia.video(atlasOptions, process.env.ATLAS_API_KEY);
       const output = await downloadVideo(req, atlasResult.remoteVideo.url, `atlas-${routeKind}`, { stripAudio: !generateAudio });
       await appendHistory({
         id: atlasResult.requestId || randomUUID(),
@@ -6525,13 +6534,16 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
+    }) : spec.provider === "atlas" ? estimateAtlasVideoCost({
+      model: modelName, duration: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
+      resolution: settings.resolution, referenceImageCount: settings.referenceImageCount, endpoint
     }) : estimateKreaSeedanceCost({
       modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
     });
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
-  const provider = spec.provider === "fal" ? "fal.ai" : "Krea";
+  const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
     id: job.requestId || job.runId || randomUUID(), createdAt: job.createdAt || new Date().toISOString(),
     mediaType: "video", provider, modelName, endpoint, mode: routeKindLabel(routeKind),

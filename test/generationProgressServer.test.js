@@ -13,6 +13,14 @@ import {
 
 test.beforeEach(() => clearGenerationProgressForTests());
 
+test("acceptance retries preserve the original run clock and provider state", () => {
+  beginGenerationProgress({ runId: "retry", nodeId: "video" });
+  updateGenerationProgress("retry", { status: "running", phase: "generating", requestId: "paid-once" });
+  const before = listGenerationProgress()[0];
+  beginGenerationProgress({ runId: "retry", nodeId: "video" });
+  assert.deepEqual(listGenerationProgress()[0], before);
+});
+
 test("generation progress registry stores workflow scope and provider state without request payloads", () => {
   beginGenerationProgress({ runId: "run-1", scope: '["project-a","package-a","c:/project a"]', groupId: "group-1", nodeId: "node-1", nodeTitle: "Video Model", batchTotal: 2 });
   updateGenerationProgress("run-1", {

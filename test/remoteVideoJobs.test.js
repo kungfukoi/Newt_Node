@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
-import { confirmedProviderFailure } from "../server/seedance-job-provider.js";
+import { confirmedProviderFailure, createSeedanceJobAdapter, providerKeyFingerprint } from "../server/seedance-job-provider.js";
 import {
   kreaSeedance25WarningMs,
   remoteVideoScope,
@@ -17,6 +17,35 @@ const spec = {
   credentialFingerprint: "fingerprint", body: { projectId: "p", nodeId: "n", generationGroupId: "g", generationBatchTotal: 2, generationBatchIndex: 1 }
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
+
+test("Atlas jobs retain their original ID and elapsed origin across restart and finalize once", async (t) => {
+  let submits = 0, finishes = 0, complete = false;
+  const key = "test-atlas-key";
+  const f = await fixture(t, {
+    adapter: createSeedanceJobAdapter({ getKey: async () => key, fetchImpl: async (_url, options) => {
+      if (options.method === "POST") submits++;
+      return new Response(JSON.stringify({ data: { id: "atlas-original", status: complete ? "completed" : "processing", outputs: complete ? ["https://example.test/out.mp4"] : [] } }));
+    } }),
+    finalize: async (job) => { finishes++; assert.equal(job.spec.provider, "atlas"); return { provider: "Atlas Cloud", video: { localUrl: "/outputs/atlas.mp4" } }; }
+  });
+  const atlas = { ...spec, provider: "atlas", credentialFingerprint: providerKeyFingerprint(key), endpoint: "bytedance/seedance-2.5/text-to-video", body: { ...spec.body, generationStartedAt: "2026-09-01T00:00:00Z" } };
+  let service = await f.open();
+  await service.create("atlas-run", atlas, "request-hash");
+  await service.step("atlas-run");
+  assert.equal(service.get("atlas-run").requestId, "atlas-original");
+  await service.close();
+  service = await f.open();
+  f.advance(600000);
+  await service.step("atlas-run");
+  assert.equal(service.progress()[0].startedAt, atlas.body.generationStartedAt);
+  assert.equal(service.get("atlas-run").state, "running");
+  complete = true;
+  await service.step("atlas-run");
+  await service.step("atlas-run");
+  assert.equal(service.get("atlas-run").result.provider, "Atlas Cloud");
+  assert.equal(submits, 1);
+  assert.equal(finishes, 1);
+});
 
 test("uncertain runs support verified ID attachment, local import and dismissal without another paid submission", async (t) => {
   let submits = 0;

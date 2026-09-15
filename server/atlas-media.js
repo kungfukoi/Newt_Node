@@ -68,7 +68,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     };
   }
 
-  async function video({
+  async function prepareVideo({
     model,
     prompt,
     startImage = "",
@@ -101,6 +101,12 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       startImage: startImage ? await uploadSource(startImage, key) : "",
       endImage: endImage ? await uploadSource(endImage, key) : ""
     });
+    return input;
+  }
+
+  async function video(options, key) {
+    const input = await prepareVideo(options, key);
+    const { model, images = [] } = options;
     const result = await client.generate({ mediaType: "video", input, key });
     return {
       ...result,
@@ -118,5 +124,5 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     };
   }
 
-  return { image, video };
+  return { image, video, prepareVideo };
 }

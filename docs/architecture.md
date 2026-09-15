@@ -67,7 +67,9 @@ The normal remote-generation path is:
 7. The server returns a small typed result and records reproducible history/cost metadata.
 8. `src/mediaResults.js` updates result arrays; previews and downstream nodes receive the same playable local result.
 
-Generation progress is request-scoped in `server/generation-progress.js`, aggregated by client helpers, and rendered by `src/components/GenerationProgress.jsx`. Progress polling is shared and must not rebuild the graph on every tick.
+Generation progress is request-scoped in `server/generation-progress.js`, aggregated by client helpers, and rendered by `src/components/GenerationProgress.jsx`. Progress polling is shared and must not rebuild the graph on every tick. Repeated acceptance requests preserve the same run's original clock and progress; client merges also retain the earliest start timestamp.
+
+Atlas Seedance uses the same durable worker as Fal/Krea. `server/atlas-media.js` prepares uploaded references separately from submission; `server/seedance-job-provider.js` uses bounded Atlas submission/prediction calls, and the shared finalizer preserves Atlas provider and cost metadata.
 
 Seedance 2.0/2.5 node requests additionally use durable background jobs in `server/remote-video-jobs.js`, provider adapters in `server/seedance-job-provider.js`, and HTTP acceptance/lookup in `server/routes/remote-video-jobs.js`. A saved provider ID outlives its originating HTTP connection. The client waits through `src/remoteVideoJobClient.js`; `src/useRemoteVideoRecovery.js` reconciles original-workflow Video Model results after reload. Downloads reuse saved targets and history deduplicates by generation run ID. See [Seedance Generation Recovery](remote-video-recovery.md) for state transitions, limitations, and verification.
 

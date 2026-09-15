@@ -103,3 +103,50 @@ test("switching provider keys pauses recovery instead of silently using another 
   await assert.rejects(factory(spec("fal")), (error) => error.waitingForCredential);
   assert.equal(called, false);
 });
+
+const atlasSpec = () => ({ ...spec("atlas"), endpoint: "bytedance/seedance-2.5/text-to-video", input: { model: "bytedance/seedance-2.5/text-to-video", prompt: "test" } });
+
+test("Atlas submits once, tracks its original prediction, and retrieves completed video", async () => {
+  const calls = [];
+  const client = await adapter([
+    { body: { code: 200, data: { id: "atlas-original", status: "created" } } },
+    { body: { data: { id: "atlas-original", status: "pending" } } },
+    { body: { data: { id: "atlas-original", status: "processing", progress: 0.5 } } },
+    { body: { data: { id: "atlas-original", status: "succeeded", outputs: ["https://example.test/out.mp4"] } } }
+  ], calls)(atlasSpec());
+  const job = await client.submit();
+  assert.equal(job.requestId, "atlas-original");
+  assert.equal((await client.poll(job)).state, "queued");
+  assert.equal((await client.poll(job)).percent, 50);
+  assert.equal((await client.poll(job)).remote.video.url, "https://example.test/out.mp4");
+  assert.equal(calls.filter((call) => call.method === "POST").length, 1);
+  assert.equal(calls[0].url, "https://api.atlascloud.ai/api/v1/model/generateVideo");
+  assert.equal(calls[1].url, "https://api.atlascloud.ai/api/v1/model/prediction/atlas-original");
+  assert.equal(calls[0].headers.Authorization, `Bearer ${key}`);
+});
+
+test("Atlas distinguishes provider rejection from unknown acceptance without retrying POST", async () => {
+  for (const [response, confirmed] of [
+    [{ body: { code: 422, message: "Invalid input" } }, true],
+    [{ status: 503, body: {} }, false],
+    [new Error("connection lost"), false]
+  ]) {
+    const calls = [];
+    const client = await adapter([response], calls)(atlasSpec());
+    await assert.rejects(client.submit(), (error) => Boolean(error.confirmedFailure) === confirmed);
+    assert.equal(calls.length, 1);
+  }
+});
+
+test("Atlas polling rejects mismatched jobs, preserves temporary failures, and recognizes terminal failure", async () => {
+  const client = await adapter([
+    { status: 404, body: {} },
+    { body: { data: { id: "wrong-job", status: "processing" } } },
+    { body: { data: { id: "original", status: "failed", error: { message: "Input rejected" } } } }
+  ])(atlasSpec());
+  await assert.rejects(client.poll({ requestId: "original" }), (error) => !error.confirmedFailure);
+  await assert.rejects(client.poll({ requestId: "original" }), /mismatched/);
+  await assert.rejects(client.poll({ requestId: "original" }), (error) => error.confirmedFailure && /Input rejected/.test(error.message));
+  const wrongKey = createSeedanceJobAdapter({ getKey: async () => "other-key", fetchImpl: () => assert.fail("Must not access another account") });
+  await assert.rejects(wrongKey(atlasSpec()), (error) => error.waitingForCredential);
+});
