@@ -202,8 +202,10 @@ export const wan27ReferenceResolutionOptions = ["1080p", "720p"];
 export const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 
 export const model3DNames = {
-  hunyuanPro: "Hunyuan 3D 3.1 Pro"
+  hunyuanPro: "Hunyuan 3D 3.1 Pro",
+  rodin25: "Rodin 2.5"
 };
+export const model3DOptions = [model3DNames.hunyuanPro, model3DNames.rodin25];
 export const model3DViewInputs = [
   { id: "frontImageIn", view: "front", label: "Front" },
   { id: "backImageIn", view: "back", label: "Back" },

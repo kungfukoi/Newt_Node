@@ -67,6 +67,8 @@ The normal remote-generation path is:
 7. The server returns a small typed result and records reproducible history/cost metadata.
 8. `src/mediaResults.js` updates result arrays; previews and downstream nodes receive the same playable local result.
 
+The 3D path keeps shared model normalization and Rodin request construction in `src/model3D.js`. `/api/node/generate-3d` routes Hunyuan 3D 3.1 Pro through Fal or Krea and routes Rodin 2.5 through its Fal endpoint without provider fallback. Both paths download the returned model into managed storage and record the selected model, endpoint, settings, and cost in history.
+
 Generation progress is request-scoped in `server/generation-progress.js`, aggregated by client helpers, and rendered by `src/components/GenerationProgress.jsx`. Progress polling is shared and must not rebuild the graph on every tick. Repeated acceptance requests preserve the same run's original clock and progress; client merges also retain the earliest start timestamp.
 
 Atlas Seedance uses the same durable worker as Fal/Krea. `server/atlas-media.js` prepares uploaded references separately from submission; `server/seedance-job-provider.js` uses bounded Atlas submission/prediction calls, and the shared finalizer preserves Atlas provider and cost metadata.

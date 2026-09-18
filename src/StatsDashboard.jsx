@@ -17,6 +17,7 @@ import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
 import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
 import { estimateMinimaxH3Cost, minimaxH3CostPerSecond, minimaxH3ReferenceLimits } from "./minimaxH3.js";
 import { estimateKreaMiniMaxH3Cost } from "./kreaApi.js";
+import { model3DNames } from "./modelOptions.js";
 
 const defaultPricing = {
   seedance: {
@@ -73,6 +74,9 @@ const defaultPricing = {
   hunyuan3DPro: {
     baseCost: 0.375,
     addOnCost: 0.15
+  },
+  rodin25: {
+    baseCost: 0.4
   },
   textProcessing: {
     falRequestCost: 0.001,
@@ -646,6 +650,9 @@ function estimateItemCost(item, mediaType, pricing) {
   }
 
   if (mediaType === "model3d") {
+    if (modelKey.includes("rodin") || modelKey.includes("hyper3d")) {
+      return pricing.rodin25?.baseCost ?? defaultPricing.rodin25.baseCost;
+    }
     if (modelKey.includes("hunyuan") || modelKey.includes("3d")) {
       return estimateHunyuan3DStatsCost(settings, pricing);
     }
@@ -1066,7 +1073,10 @@ function estimateSam3VideoStatsCost(item, settings, pricing) {
 function inferModelName(item, mediaType) {
   if (mediaType === "image") return "Nano Banana Pro";
   if (mediaType === "text") return item.settings?.model || "Text processing";
-  if (mediaType === "model3d") return "Hunyuan 3D 3.1 Pro";
+  if (mediaType === "model3d") {
+    if (String(item.endpoint || "").includes("hyper3d/rodin")) return model3DNames.rodin25;
+    return item.settings?.model || model3DNames.hunyuanPro;
+  }
   if (String(item.endpoint || "").includes("minimax/h3")) return "MiniMax H3";
   if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
   return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";

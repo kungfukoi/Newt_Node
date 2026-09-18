@@ -272,6 +272,7 @@ import {
   lensPresetPrompts,
   model3DDescription,
   model3DNames,
+  model3DOptions,
   model3DViewInputs,
   nanoImageAspectRatios,
   openAiImageAspectRatios,
@@ -327,6 +328,15 @@ import {
   wanVaceSamplerOptions,
   wanVaceTransparencyOptions
 } from "./modelOptions.js";
+import {
+  isRodin25Model,
+  model3DFaceCount,
+  normalizeModel3DGenerateType,
+  normalizeModel3DModel,
+  rodin25MaxInputImages,
+  rodin25MeshOptions,
+  rodin25QualityMeshOption
+} from "./model3D.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import {
   isMinimaxH3Model,
@@ -7368,13 +7378,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "model3d") {
+        const model = normalizeModel3DModel(currentNode.data.model);
         const generated = await run3DModelGeneration({
           node: currentNode,
           imageViewUrls: connected3DViewUrls(incoming),
           workflowContext: requestContext,
-          model: currentNode.data.model || model3DNames.hunyuanPro,
+          model,
           generateType: normalizeModel3DGenerateType(currentNode.data.generateType),
-          faceCount: model3DFaceCount(currentNode.data.faceCount)
+          faceCount: model3DFaceCount(currentNode.data.faceCount, model)
         });
         const { resultItems, firstNewIndex } = appendedNodeResultState(previous3DResults, [generated], "model3d");
         updateNode(currentNode.id, {
@@ -15144,8 +15155,10 @@ function NodeBody({
     const settingsOpen = Boolean(node.data.settingsOpen);
     const frontInputs = [...(incoming.frontImageIn || []), ...(incoming.imageIn || [])];
     const frontConnected = Boolean(frontInputs.length);
+    const selectedModel = normalizeModel3DModel(node.data.model);
+    const rodinSelected = isRodin25Model(selectedModel);
     const generateType = normalizeModel3DGenerateType(node.data.generateType);
-    const faceCount = model3DFaceCount(node.data.faceCount);
+    const faceCount = model3DFaceCount(node.data.faceCount, selectedModel);
     const pbrEnabled = node.data.enablePbr !== false;
 
     return (
@@ -15215,8 +15228,14 @@ function NodeBody({
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Model">
-            <select value={node.data.model || model3DNames.hunyuanPro} onChange={(event) => onUpdate(node.id, { model: event.target.value })}>
-              <option>{model3DNames.hunyuanPro}</option>
+            <select
+              value={selectedModel}
+              onChange={(event) => {
+                const model = normalizeModel3DModel(event.target.value);
+                onUpdate(node.id, { model, faceCount: model3DFaceCount(faceCount, model) });
+              }}
+            >
+              {model3DOptions.map((model) => <option key={model}>{model}</option>)}
             </select>
           </NodeRow>
           {viewPorts.map((view) => {
@@ -15244,18 +15263,34 @@ function NodeBody({
               <span />
             </button>
           </NodeRow>
-          <NodeRow label="Faces">
-            <input
-              type="number"
-              min="40000"
-              max="1500000"
-              step="10000"
-              value={faceCount}
-              onChange={(event) => onUpdate(node.id, { faceCount: event.target.value })}
-            />
-          </NodeRow>
+          {rodinSelected ? (
+            <NodeRow label="Mesh">
+              <select
+                value={rodin25QualityMeshOption(faceCount)}
+                onChange={(event) => {
+                  const option = rodin25MeshOptions.find((item) => item.value === event.target.value);
+                  onUpdate(node.id, { faceCount: option?.faceCount || 500000 });
+                }}
+              >
+                {rodin25MeshOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </NodeRow>
+          ) : (
+            <NodeRow label="Faces">
+              <input
+                type="number"
+                min="40000"
+                max="1500000"
+                step="10000"
+                value={faceCount}
+                onChange={(event) => onUpdate(node.id, { faceCount: event.target.value })}
+              />
+            </NodeRow>
+          )}
         </details>
-        <p className="utility-model-description">{model3DDescription}</p>
+        <p className="utility-model-description">
+          {model3DDescription}{rodinSelected ? ` Rodin accepts up to ${rodin25MaxInputImages} connected views.` : ""}
+        </p>
       </div>
     );
   }
@@ -18116,16 +18151,6 @@ function imageModelSelectionPatch(data = {}, model) {
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
   };
-}
-
-function normalizeModel3DGenerateType(value) {
-  return value === "Geometry" ? "Geometry" : "Normal";
-}
-
-function model3DFaceCount(value) {
-  const number = Math.round(Number(value));
-  if (!Number.isFinite(number)) return 500000;
-  return Math.min(1500000, Math.max(40000, number));
 }
 
 function model3DInputPortIds() {
@@ -24315,13 +24340,14 @@ function storyboardFrameOutputItem(source, edge) {
 }
 
 function normalizeModel3DData(data = {}) {
+  const model = normalizeModel3DModel(data.model);
   return {
     ...data,
     title: data.title || "3D",
-    model: data.model || model3DNames.hunyuanPro,
+    model,
     generateType: normalizeModel3DGenerateType(data.generateType),
     enablePbr: data.enablePbr !== false,
-    faceCount: model3DFaceCount(data.faceCount),
+    faceCount: model3DFaceCount(data.faceCount, model),
     resultType: "model3d",
     batchCount: "1"
   };

@@ -915,9 +915,11 @@ The 3D node establishes the standard for model generation nodes.
 - Output port: `modelOut`.
 - Output media: GLB by default.
 - Preview: shared lazy `Model3DViewer` wrapper.
+- Model menu: `Hunyuan 3D 3.1 Pro` (Fal or Krea) and `Rodin 2.5` (Fal only). Saved unknown labels normalize to Hunyuan for backward compatibility.
 - Required input: `frontImageIn`.
 - Optional inputs: `backImageIn`, `leftImageIn`, `rightImageIn`, `topImageIn`, `bottomImageIn`, `leftFrontImageIn`, `rightFrontImageIn`.
 - Backend payload should preserve named view mapping instead of relying on connection order.
+- Rodin receives connected views in that canonical named-view order and accepts at most five images. Its mesh control maps to the supported triangle presets and always requests GLB output.
 - Generated model results should be downloadable from the result pane.
 - Stats should count 3D runs in media mix and estimated spend.
 

@@ -111,7 +111,18 @@ import {
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
-import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { compositeVideoBlendModeOptions, model3DNames, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import {
+  buildRodin25FalInput,
+  isRodin25Model,
+  model3DFaceCount,
+  model3DViewOrder,
+  normalizeModel3DGenerateType,
+  normalizeModel3DModel,
+  rodin25FalEndpoint,
+  rodin25MaxInputImages,
+  rodin25QualityMeshOption
+} from "../src/model3D.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences } from "../src/modelProviderRouting.js";
 import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
@@ -424,6 +435,7 @@ const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
 const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
+const rodin25BaseCost = Number(process.env.RODIN_2_5_BASE_COST || 0.4);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
 const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
@@ -2771,6 +2783,10 @@ app.get("/api/stats", async (_req, res) => {
       hunyuan3DPro: {
         baseCost: hunyuan3DProBaseCost,
         addOnCost: hunyuan3DProAddOnCost,
+        currency: "USD"
+      },
+      rodin25: {
+        baseCost: rodin25BaseCost,
         currency: "USD"
       },
       textProcessing: {
@@ -7983,45 +7999,62 @@ function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant
 
 app.post("/api/node/generate-3d", async (req, res) => {
   try {
-    const runtimeProvider = resolveFalKreaProvider({
-      falKey: process.env.FAL_KEY,
-      kreaKey: process.env.KREA_API_KEY
-    });
+    const modelName = normalizeModel3DModel(req.body.model);
+    const rodinSelected = isRodin25Model(modelName);
+    const runtimeProvider = rodinSelected
+      ? String(process.env.FAL_KEY || "").trim() ? "fal" : null
+      : resolveFalKreaProvider({
+          falKey: process.env.FAL_KEY,
+          kreaKey: process.env.KREA_API_KEY
+        });
     if (!runtimeProvider) {
-      return res.status(400).json({ error: "Hunyuan 3D needs an enabled Fal or Krea API key in Settings." });
+      return res.status(400).json({
+        error: rodinSelected
+          ? "Rodin 2.5 needs an enabled Fal API key in Settings."
+          : "Hunyuan 3D needs an enabled Fal or Krea API key in Settings."
+      });
     }
 
-    const imageViewUrls = normalizeHunyuan3DImageViewUrls(req.body);
+    const imageViewUrls = normalizeModel3DImageViewUrls(req.body);
     if (!imageViewUrls.front) {
       return res.status(400).json({ error: "Connect a front image to the 3D node." });
     }
+    const inputImageCount = Object.keys(imageViewUrls).length;
+    if (rodinSelected && inputImageCount > rodin25MaxInputImages) {
+      return res.status(400).json({ error: `Rodin 2.5 accepts up to ${rodin25MaxInputImages} connected view images.` });
+    }
 
-    const endpoint = runtimeProvider === "fal"
-      ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
-      : kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro");
-    const generateType = normalizeChoice(req.body.generateType, ["Normal", "Geometry"], "Normal");
+    const endpoint = rodinSelected
+      ? rodin25FalEndpoint
+      : runtimeProvider === "fal"
+        ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
+        : kreaEndpointForModel("model3d", model3DNames.hunyuanPro);
+    const generateType = normalizeModel3DGenerateType(req.body.generateType);
     const enablePbr = Boolean(req.body.enablePbr) && generateType !== "Geometry";
-    const faceCount = clampInteger(req.body.faceCount, 40000, 1500000, 500000);
+    const faceCount = model3DFaceCount(req.body.faceCount, modelName);
     const uploadedViewUrls = Object.fromEntries(
       await Promise.all(Object.entries(imageViewUrls).map(async ([view, url]) => [
         view,
         runtimeProvider === "fal" ? await localAssetToFalUrl(url) : await uploadLocalOutputToKrea(url)
       ]))
     );
-    const input = runtimeProvider === "fal"
-      ? {
-          input_image_url: uploadedViewUrls.front,
-          generate_type: generateType,
-          enable_pbr: enablePbr,
-          face_count: faceCount
-        }
-      : {
-          input_mode: "image",
-          image_urls: [uploadedViewUrls.front],
-          generate_texture: generateType !== "Geometry",
-          enable_pbr: enablePbr,
-          face_count: faceCount
-        };
+    const uploadedImageUrls = model3DViewOrder.map((view) => uploadedViewUrls[view]).filter(Boolean);
+    const input = rodinSelected
+      ? buildRodin25FalInput({ imageUrls: uploadedImageUrls, generateType, enablePbr, faceCount })
+      : runtimeProvider === "fal"
+        ? {
+            input_image_url: uploadedViewUrls.front,
+            generate_type: generateType,
+            enable_pbr: enablePbr,
+            face_count: faceCount
+          }
+        : {
+            input_mode: "image",
+            image_urls: [uploadedViewUrls.front],
+            generate_texture: generateType !== "Geometry",
+            enable_pbr: enablePbr,
+            face_count: faceCount
+          };
     const viewFields = {
       back: "back_image_url",
       left: "left_image_url",
@@ -8032,17 +8065,20 @@ app.post("/api/node/generate-3d", async (req, res) => {
       rightFront: "right_front_image_url"
     };
 
-    Object.entries(viewFields).forEach(([view, field]) => {
-      if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
-    });
+    if (!rodinSelected) {
+      Object.entries(viewFields).forEach(([view, field]) => {
+        if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
+      });
+    }
 
     const result = runtimeProvider === "fal"
       ? await subscribeFal(endpoint, { input, logs: true }, { route: "generate-3d", node: req.body.nodeId })
-      : await runKreaGeneration({ endpoint, input, label: "Hunyuan 3D 3.1 Pro" });
+      : await runKreaGeneration({ endpoint, input, label: modelName });
     const data = runtimeProvider === "fal" ? result?.data || {} : result.job || {};
     const kreaModelUrl = runtimeProvider === "krea" ? extractKreaJobResultUrl(result.job) : "";
     const remoteModel = runtimeProvider === "fal"
-      ? normalizeFalFile(data.model_glb) ||
+      ? (rodinSelected ? normalizeFalFile(data.model_mesh) || normalizeFalFile(data.model_meshes?.[0]) : null) ||
+        normalizeFalFile(data.model_glb) ||
         normalizeFalFile(data.model_urls?.glb) ||
         findFalMediaFile(data, "model/")
       : kreaModelUrl
@@ -8050,11 +8086,12 @@ app.post("/api/node/generate-3d", async (req, res) => {
         : null;
 
     if (!remoteModel?.url) {
-      return res.status(502).json({ error: "Hunyuan 3D returned no GLB model.", raw: data });
+      return res.status(502).json({ error: `${modelName} returned no GLB model.`, raw: data });
     }
 
-    const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
-    const remoteTexturedAssets = runtimeProvider === "fal"
+    const outputBaseName = rodinSelected ? "rodin-2-5" : "hunyuan-3d-pro";
+    const output = await downloadModelFile(req, remoteModel.url, outputBaseName, remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const remoteTexturedAssets = runtimeProvider === "fal" && !rodinSelected
       ? {
           glb: remoteModel,
           obj: normalizeFalFile(data.model_urls?.obj),
@@ -8064,40 +8101,41 @@ app.post("/api/node/generate-3d", async (req, res) => {
       : { glb: remoteModel };
     const texturedAssets = await downloadTexturedModelAssets(req, remoteTexturedAssets);
     const remoteThumbnail = runtimeProvider === "fal"
-      ? normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data)
+      ? normalizeFalFile(data.thumbnail) ||
+        normalizeFalFile(data.thumbnail_url) ||
+        normalizeFalFile(data.preview_image) ||
+        normalizeFalFile(data.rendered_image) ||
+        normalizeFalFile(data.rendered_images?.[0]) ||
+        firstFalImageResult(data)
       : null;
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
       try {
-        thumbnailOutput = await downloadImage(req, remoteThumbnail.url, "hunyuan-3d-thumbnail", remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
+        thumbnailOutput = await downloadImage(req, remoteThumbnail.url, `${outputBaseName}-thumbnail`, remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
       } catch (error) {
         console.warn("Could not download 3D thumbnail:", error.message);
       }
     }
 
-    const estimatedCost = estimateHunyuan3DProCost({
-      generateType,
-      enablePbr,
-      faceCount,
-      inputImageCount: Object.keys(imageViewUrls).length,
-      endpoint
-    });
-    const cost = runtimeProvider === "fal"
-      ? estimatedCost
-      : {
+    const estimatedCost = rodinSelected
+      ? estimateRodin25Cost({ generateType, enablePbr, faceCount, inputImageCount, endpoint })
+      : estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount, endpoint });
+    const cost = runtimeProvider === "krea"
+      ? {
           ...estimatedCost,
           amountUsd: null,
           unitRateUsd: null,
           pricingBasis: "Hunyuan 3D 3.1 Pro generation through Krea; current public API documentation does not list a fixed local estimate",
           pricingSource: "krea-api-docs-2026-07-30"
-        };
+        }
+      : estimatedCost;
 
     await appendHistory({
       id: result.requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "model3d",
       provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
-      modelName: "Hunyuan 3D 3.1 Pro",
+      modelName,
       endpoint,
       mode: "Image to 3D",
       prompt: "Image to 3D",
@@ -8105,17 +8143,24 @@ app.post("/api/node/generate-3d", async (req, res) => {
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
-        model: req.body.model || "Hunyuan 3D 3.1 Pro",
+        model: modelName,
         generateType,
         enablePbr,
         faceCount,
         imageViews: Object.keys(imageViewUrls),
-        inputImageCount: Object.keys(imageViewUrls).length
+        inputImageCount,
+        ...(rodinSelected
+          ? {
+              tier: input.tier,
+              material: input.material,
+              qualityMeshOption: rodin25QualityMeshOption(faceCount)
+            }
+          : {})
       },
       cost,
       remoteModel,
       remoteThumbnail,
-      modelUrls: data.model_urls || null,
+      modelUrls: data.model_urls || data.model_meshes || (data.model_mesh ? [data.model_mesh] : null),
       localModelAssets: texturedAssets,
       seed: data.seed ?? null,
       localModel: output.publicPath,
@@ -8127,13 +8172,13 @@ app.post("/api/node/generate-3d", async (req, res) => {
     res.json({
       requestId: result.requestId,
       endpoint,
-      modelName: "Hunyuan 3D 3.1 Pro",
+      modelName,
       seed: data.seed,
-      text: "Hunyuan 3D model generated.",
+      text: `${modelName} model generated.`,
       cost,
       model: {
         ...remoteModel,
-        label: "Hunyuan 3D model",
+        label: `${modelName} model`,
         localUrl: output.publicPath,
         fileName: output.fileName,
         mimeType: output.mimeType,
@@ -10401,19 +10446,18 @@ function normalizeKrea2Creativity(value) {
   return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
 }
 
-function normalizeHunyuan3DImageViewUrls(body = {}) {
-  const viewOrder = ["front", "back", "left", "right", "top", "bottom", "leftFront", "rightFront"];
+function normalizeModel3DImageViewUrls(body = {}) {
   const viewUrls = body.imageViewUrls && typeof body.imageViewUrls === "object" && !Array.isArray(body.imageViewUrls) ? body.imageViewUrls : {};
   const normalized = {};
 
-  viewOrder.forEach((view) => {
+  model3DViewOrder.forEach((view) => {
     const url = String(viewUrls[view] || "").trim();
     if (isLocalAssetUrl(url)) normalized[view] = url;
   });
 
-  const legacyUrls = Array.isArray(body.imageUrls) ? body.imageUrls.filter(isLocalAssetUrl).slice(0, viewOrder.length) : [];
+  const legacyUrls = Array.isArray(body.imageUrls) ? body.imageUrls.filter(isLocalAssetUrl).slice(0, model3DViewOrder.length) : [];
   legacyUrls.forEach((url, index) => {
-    const view = viewOrder[index];
+    const view = model3DViewOrder[index];
     if (!normalized[view]) normalized[view] = url;
   });
 
@@ -16007,6 +16051,24 @@ function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputIma
     inputImageCount,
     pricingBasis: "Hunyuan 3D Pro fal.ai estimate: base generation plus PBR, multi-view, and custom face-count add-ons",
     pricingSource: "fal-model-page-2026-05-23",
+    endpoint
+  };
+}
+
+function estimateRodin25Cost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
+  return {
+    amountUsd: roundCurrency(rodin25BaseCost),
+    currency: "USD",
+    unitRateUsd: rodin25BaseCost,
+    units: 1,
+    unit: "3D generation",
+    mediaType: "model3d",
+    generateType,
+    enablePbr,
+    faceCount,
+    inputImageCount,
+    pricingBasis: "Rodin 2.5 Gen-2.5-High fal.ai per-generation estimate",
+    pricingSource: "fal-model-page-2026-09-18",
     endpoint
   };
 }
