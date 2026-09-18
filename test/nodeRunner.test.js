@@ -9,9 +9,22 @@ import {
   nodeRunPriority,
   rejectedRunResults,
   runStageLabel,
-  runRunnableNodesByDependencyOrder
+  runRunnableNodesByDependencyOrder,
+  selectedRunnableNodesForRun
 } from "../src/nodeRunner.js";
 import { buildUtilityVideoRequest, buildVideoGenerationRequest, composeVideoPrompt, filmDirectorVideoSettings } from "../src/nodeRunners/videoModels.js";
+
+test("Run All keeps every selected runnable node without a selection limit", () => {
+  const nodes = Array.from({ length: 12 }, (_, id) => ({ id: `image-${id}`, type: "imageModel", data: {} }));
+  nodes.push({ id: "running", type: "videoModel", data: { status: "running" } });
+  nodes.push({ id: "plain", type: "plainText", data: {} });
+  const selectedIds = nodes.map((node) => node.id);
+
+  assert.deepEqual(
+    selectedRunnableNodesForRun(nodes, selectedIds).map((node) => node.id),
+    nodes.slice(0, 12).map((node) => node.id)
+  );
+});
 
 test("composeVideoPrompt appends connected text as Director supplemental direction", () => {
   assert.equal(

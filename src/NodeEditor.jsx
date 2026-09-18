@@ -402,6 +402,7 @@ import {
   rejectedRunResults,
   resultTextFromItems,
   runRunnableNodesByDependencyOrder,
+  selectedRunnableNodesForRun,
   settleSequential
 } from "./nodeRunner.js";
 import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runCoverageGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
@@ -1347,11 +1348,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, promptResolvedIncomingByNode, groups), [nodes, promptResolvedIncomingByNode, groups]);
   const selectedRunnableNodes = React.useMemo(
-    () => nodes.filter((node) => {
-      if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
-      if (node.type !== "output") return true;
-      return !(incomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedNodeSet.has(source.id) && isRunnableNode(source));
-    }),
+    () => selectedRunnableNodesForRun(nodes, selectedNodeSet, incomingByNode),
     [incomingByNode, nodes, selectedNodeSet]
   );
   const selectedPlayablePreviewNodes = React.useMemo(
@@ -6378,7 +6375,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function currentSelectedNodeIds() {
     // React Flow selection can lead the frame-coalesced persisted selection.
     const flowNodes = flowCanvasRef.current?.getNodes?.();
-    return flowNodes ? flowNodes.filter((node) => node.selected).map((node) => node.id) : selectedNodeIds;
+    if (!Array.isArray(flowNodes) || (!flowNodes.length && nodesRef.current.length)) return selectedNodeIds;
+    return flowNodes.filter((node) => node.selected).map((node) => node.id);
   }
 
   function copySelection() {
@@ -7538,13 +7536,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function runSelectedNodes() {
-    const selectedIds = new Set(selectedNodeIds);
+    const selectedIds = new Set(currentSelectedNodeIds());
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
-    const runnable = nodesRef.current.filter((node) => {
-      if (!selectedIds.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
-      if (node.type !== "output") return true;
-      return !(currentIncomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedIds.has(source.id) && isRunnableNode(source));
-    });
+    const runnable = selectedRunnableNodesForRun(nodesRef.current, selectedIds, currentIncomingByNode);
     const playablePreviewNodes = nodesRef.current.filter((node) => selectedIds.has(node.id) && previewVideoSourceForNode(node, currentIncomingByNode));
     const previewPlayback = playablePreviewNodes.length ? playSelectedPreviewVideos(playablePreviewNodes.map((node) => node.id)) : null;
 
