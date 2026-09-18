@@ -541,7 +541,7 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.bytedanceUpscaler]: "Upscales video with Bytedance's Fal upscaler using resolution, FPS, preset, tier, and fidelity controls.",
   [utilityVideoModelNames.fluxVideoUpscale]: "Upscales short video with Black Forest Labs FLUX 3 in source-faithful precise mode or prompt-guided creative mode.",
   [utilityVideoModelNames.topazSdrToHdr]: "Converts SDR video to 10-bit HDR with Topaz Hyperion 2.5 while preserving source resolution and frame rate.",
-  [utilityVideoModelNames.topazUpscaler]: "Upscales and enhances video with Topaz Video AI models, with optional interpolation and billing-tier tracking."
+  [utilityVideoModelNames.topazUpscaler]: "Very blocky / YouTube-like source: Compression 0.35, Noise 0.25.\nSoft but relatively clean source: Compression 0.10, Noise 0.10, Detail 0.40.\nWaxy or plastic result: lower Noise to 0.10; add Grain 0.01–0.02.\nVisible bright outlines: raise Halo gradually to 0.20–0.30.\nDo not raise Detail too high on tiny footage—it blends the original low-res artifacts back in."
 };
 
 export const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.

@@ -77,6 +77,8 @@ Visual QC reports reviewed results normally. If review cannot run, the board is 
 
 Character generation checkpoints its Base Identity and CU Video sheets independently. A successful sheet is retained immediately, so a later failure does not erase completed work. Wardrobe image and CU Video variants are also preserved independently and can be regenerated per wardrobe.
 
+Enable **Stylized Character** for a stylized, creature, mechanical, toy-like, illustrated, or otherwise non-standard character whose source design must remain authoritative. The alternate prompt path preserves the required Character and CU Video sheet layouts while locking the source feature inventory, silhouette, proportions, materials, textures, colors, construction, and rendering style. It preserves a feature when present and keeps it absent when absent rather than assuming any particular anatomy. Combine it with **Cinematic Sheet** to retain that strict design lock while using one consistent realistic neutral-gray studio cyclorama across Base Identity, CU Video, and wardrobe-derived sheets.
+
 The selected active Character sheet remains the full-resolution identity reference used by Image Model, Video Model, Composer, Director, and Storyboard. Uploaded custom sheets coexist with generated variants.
 
 ## Shared Image Adjustments

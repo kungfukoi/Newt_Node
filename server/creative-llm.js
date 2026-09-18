@@ -3,7 +3,6 @@ import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
 export const creativeFalModel = `openai/${creativeOpenAiModel}`;
-export const skillDirectorFinalPromptMaxChars = 7000;
 
 const text = { type: "string" };
 const nonempty = { type: "string", minLength: 1, pattern: "\\S" };
@@ -61,6 +60,11 @@ export function creativeOutputBudget(route = "") {
   return 8000;
 }
 
+export function atlasCreativeOutputBudget(route = "") {
+  const budget = creativeOutputBudget(route);
+  return route === "film-director-shotlist" ? Math.min(budget, 8000) : budget;
+}
+
 export function openAiLlmBody({ model, prompt, systemPrompt, input = prompt, reasoningEffort = "low", responseMimeType = "text/plain", route = "" }) {
   const schema = creativeSchemas[route];
   return {
@@ -88,6 +92,14 @@ export function creativeFinalOutputText(value) {
     text = text.slice(block[0].length).trim();
   }
   return text;
+}
+
+export function assembleSkillDirectorFinalPrompt(sections = []) {
+  return (Array.isArray(sections) ? sections : [sections])
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function validateCreativeResponse(data, { route, provider, text: outputText }) {

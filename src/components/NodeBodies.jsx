@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { concatenatePlainTextInputs } from "../plainText.js";
+import { stylizedCharacterDownstreamPrompt } from "../characterSheetWorkflow.js";
 import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHistory.js";
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
@@ -324,7 +325,9 @@ function skillDirectorCharacterDescription(source) {
       .filter(Boolean)
   ];
   return [
-    `The ${tag} character identity sheet. Use this character's face, body proportions, selected wardrobe, and recognizable details consistently.`,
+    source?.data?.stylizedCharacter
+      ? `The ${tag} character identity sheet is the sole authority for this character's identity and design. ${stylizedCharacterDownstreamPrompt}`
+      : `The ${tag} character identity sheet. Use this character's face, body proportions, selected wardrobe, and recognizable details consistently.`,
     details ? `The character has ${details.charAt(0).toLowerCase()}${details.slice(1)}.` : "",
     traits.length ? `Character traits: ${[...new Set(traits)].join(", ")}.` : ""
   ]

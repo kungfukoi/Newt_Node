@@ -3,6 +3,7 @@ import { filmDirectorReferenceVideoMode, filmDirectorUsesReference } from "../fi
 import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
 import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
+import { stylizedCharacterDownstreamPrompt } from "../characterSheetWorkflow.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runSkillDirectorNode({
@@ -159,7 +160,9 @@ function skillDirectorCharacterDescription(source) {
       .filter(Boolean)
   ];
   return [
-    `The ${tag} character identity sheet. Use this character's face, body proportions, selected wardrobe, and recognizable details consistently.`,
+    source?.data?.stylizedCharacter
+      ? `The ${tag} character identity sheet is the sole authority for this character's identity and design. ${stylizedCharacterDownstreamPrompt}`
+      : `The ${tag} character identity sheet. Use this character's face, body proportions, selected wardrobe, and recognizable details consistently.`,
     details ? `The character has ${details.charAt(0).toLowerCase()}${details.slice(1)}.` : "",
     traits.length ? `Character traits: ${[...new Set(traits)].join(", ")}.` : ""
   ]

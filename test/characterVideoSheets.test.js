@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  cinematicCharacterVideoSheetPrompt,
   characterVideoSheetPrompt,
+  characterVideoSheetPromptForData,
+  stylizedCinematicCharacterVideoSheetPrompt,
+  stylizedCharacterVideoSheetPrompt,
   preferredCharacterReferenceForVideo
 } from "../src/characterVideoSheets.js";
 
@@ -36,6 +40,23 @@ test("CU video sheet prompt fixes the requested three-panel layout and off-camer
   assert.match(characterVideoSheetPrompt, /approximately 15 degrees away/i);
   assert.match(characterVideoSheetPrompt, /must not look into the lens/i);
   assert.match(characterVideoSheetPrompt, /mouth slightly open/i);
+});
+
+test("Stylized Character is opt-in for CU prompts and preserves the same three-panel contract", () => {
+  assert.equal(characterVideoSheetPromptForData({}), characterVideoSheetPrompt);
+  assert.equal(characterVideoSheetPromptForData({ stylizedCharacter: false }), characterVideoSheetPrompt);
+  assert.equal(characterVideoSheetPromptForData({ stylizedCharacter: true }), stylizedCharacterVideoSheetPrompt);
+  assert.equal(characterVideoSheetPromptForData({ cinematicCharacterSheet: true }), cinematicCharacterVideoSheetPrompt);
+  assert.equal(
+    characterVideoSheetPromptForData({ stylizedCharacter: true, cinematicCharacterSheet: true }),
+    stylizedCinematicCharacterVideoSheetPrompt
+  );
+  assert.match(cinematicCharacterVideoSheetPrompt, /realistic neutral-gray seamless studio cyclorama/i);
+  assert.match(stylizedCinematicCharacterVideoSheetPrompt, /realistic neutral-gray seamless studio cyclorama/i);
+  assert.match(stylizedCharacterVideoSheetPrompt, /exactly three panels/i);
+  assert.match(stylizedCharacterVideoSheetPrompt, /presence or absence, count, shape, scale, placement/i);
+  assert.match(stylizedCharacterVideoSheetPrompt, /if the character has no conventional head, neck, torso, legs, or feet/i);
+  assert.match(stylizedCharacterVideoSheetPrompt, /if there is no mouth or speech mechanism, do not invent one/i);
 });
 
 test("video generation prefers the active wardrobe CU sheet when enabled", () => {

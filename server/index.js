@@ -65,6 +65,7 @@ import { validateProviderKey } from "./provider-key-validation.js";
 import { createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
+import { prepareAtlasVideoReferenceAsset } from "./atlas-video-input.js";
 import {
   archiveInstallBranchStatus,
   defaultUpdateBranch,
@@ -80,7 +81,7 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
-import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorFinalPromptMaxChars, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
@@ -164,7 +165,6 @@ import { normalizeFilmDirectorVideoModel } from "../src/filmDirectorVideoModels.
 import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
-  filmDirectorShotMaxCharsPerCut,
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
 import { compactFilmDirectorStyleDirection, filmDirectorStyleDirectionDirective } from "../src/filmDirectorStyle.js";
@@ -379,7 +379,8 @@ const atlasMedia = createAtlasMedia({
   }),
   readLocalAsset,
   imageSize: normalizeOpenAiImageSize,
-  labelPrompt: promptWithReferenceLabels
+  labelPrompt: promptWithReferenceLabels,
+  prepareVideoSource: prepareAtlasVideoReference
 });
 const reuseDirectorVisualAnalysis = createCreativeAnalysisCache();
 const creativeUsageContext = new AsyncLocalStorage();
@@ -16373,6 +16374,11 @@ async function runTextLlm({
     const model = `openai/${String(openAiModel || "").replace(/^openai\//, "")}`;
     const body = openAiLlmBody({ model, prompt, systemPrompt, reasoningEffort, responseMimeType, route });
     delete body.store;
+    // Director shot lists are normally a few hundred tokens, but the shared schema
+    // budget reserves 24k. Atlas returns an empty 504 for those oversized requests.
+    if (body.max_output_tokens) {
+      body.max_output_tokens = atlasCreativeOutputBudget(route);
+    }
     const response = await fetch("https://api.atlascloud.ai/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
@@ -16584,10 +16590,8 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
   const cleanOverview = cleanSkillDirectorMoodBoardReferences(sceneOverview).trim();
-  const finalShotCount = largestSkillDirectorCutNumber(shotList);
-  const maxCharsPerCut = filmDirectorShotMaxCharsPerCut(finalShotCount || "Auto");
-  const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
-  let finalPrompt = [
+  const cleanShotList = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(shotList));
+  return assembleSkillDirectorFinalPrompt([
     dedupeSkillDirectorLines(referenceLines).join("\n"),
     visualSceneRules,
     audioPolicy,
@@ -16597,27 +16601,7 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
     cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
     cleanContinuity ? `Scene Continuity:\n${cleanContinuity}` : "",
     cleanShotList ? `Shot List:\n${cleanShotList}` : ""
-  ]
-    .filter(Boolean)
-    .join("\n\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
-    finalPrompt = [
-      clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
-      visualSceneRules,
-      audioPolicy,
-      referenceVideoInstruction,
-      cleanOverview ? `Scene Overview:\n${clipSkillDirectorText(cleanOverview, 1200)}` : "",
-      cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
-      cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
-      cleanContinuity ? `Scene Continuity:\n${clipSkillDirectorText(cleanContinuity, 500)}` : "",
-      cleanShotList ? `Shot List:\n${compactSkillDirectorShotList(cleanShotList, 280)}` : ""
-    ].filter(Boolean).join("\n\n");
-  }
-
-  return clipSkillDirectorText(finalPrompt, skillDirectorFinalPromptMaxChars);
+  ]);
 }
 
 function dedupeSkillDirectorLines(lines = []) {
@@ -16659,16 +16643,6 @@ function clipSkillDirectorText(text = "", maxChars = 7000) {
   const clipped = source.slice(0, Math.max(0, maxChars - 1));
   const boundary = Math.max(clipped.lastIndexOf(". "), clipped.lastIndexOf("\n"), clipped.lastIndexOf(" "));
   return `${clipped.slice(0, boundary > maxChars * 0.72 ? boundary + 1 : clipped.length).trim()}`;
-}
-
-function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
-  const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
-  if (!source) return "";
-  return source
-    .split(/(?=\bCUT\s+\d{1,2}\s+—)/gi)
-    .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
-    .filter(Boolean)
-    .join("\n\n");
 }
 
 function sanitizeSkillDirectorShotListFormatting(text = "") {
@@ -21350,6 +21324,19 @@ async function readLocalAsset(publicPath) {
     buffer,
     mimeType: mimeForExtension(path.extname(fileName).toLowerCase())
   };
+}
+
+async function prepareAtlasVideoReference(publicPath) {
+  return prepareAtlasVideoReferenceAsset(publicPath, {
+    resolveLocalAssetPath: resolveLocalAssetPathFromUrl,
+    readLocalAsset,
+    probeVideoFile,
+    runFfmpeg,
+    readFile,
+    removeFile: rm,
+    temporaryDirectory: tmpdir(),
+    randomId: randomUUID
+  });
 }
 
 async function resolveLocalAssetPathFromUrl(value) {

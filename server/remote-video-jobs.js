@@ -266,7 +266,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       percent: job.state === "completed" ? 100 : job.remote ? 95 : job.percent == null ? null : 10 + Math.min(100, job.percent) * 0.8,
       queuePosition: job.queuePosition ?? null, providerStatus: job.providerStatus || "", provider: job.spec.provider,
       health: job.health || "healthy", lastContactAt: job.lastContactAt || null,
-      startedAt: job.spec.body.generationSubmittedAt || job.spec.body.generationStartedAt || job.createdAt, phaseStartedAt: job.createdAt
+      startedAt: job.spec.body.generationStartedAt || job.spec.body.generationSubmittedAt || job.createdAt, phaseStartedAt: job.createdAt
       }));
     },
     step,

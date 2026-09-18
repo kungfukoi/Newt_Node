@@ -1,7 +1,20 @@
 import React from "react";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas } from "./imageAdjustments.js";
 import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
-import { characterBaseGenerationSignature, characterBaseVideoGenerationSignature, characterBaseVariant, characterNeutralBaseWardrobePrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, characterWardrobeVariantIsCurrent, generateCharacterBaseSheets, upsertCharacterWardrobeVariant } from "./characterSheetWorkflow.js";
+import {
+  characterBaseAppearancePromptForData,
+  characterBaseGenerationSignature,
+  characterBaseSheetPromptForData,
+  characterBaseVideoGenerationSignature,
+  characterBaseVariant,
+  characterSheetPrompt,
+  characterVideoBaseAppearancePromptForData,
+  characterVideoIdentityContinuityPromptForData,
+  characterWardrobeVariantIsCurrent,
+  generateCharacterBaseSheets,
+  stylizedCharacterDownstreamPrompt,
+  upsertCharacterWardrobeVariant
+} from "./characterSheetWorkflow.js";
 import { filmDirectorVideoSettings } from "./nodeRunners/videoModels.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeLabel, normalizeFilmDirectorAudioMode } from "./filmDirectorAudio.js";
 import { filmDirectorApproachOptions, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
@@ -186,9 +199,7 @@ import {
 } from "./previewLayout.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
-  characterVideoBasicWardrobePrompt,
-  characterVideoSheetPrompt,
-  characterVideoWardrobePrompt,
+  characterVideoSheetPromptForData,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import {
@@ -766,14 +777,6 @@ const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
 const maxCharacterCustomSheets = 16;
-const characterSheetPrompt =
-  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const cinematicCharacterSheetPrompt =
-  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid gray background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const characterBasicWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently worn in every panel. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
-const characterWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Study the selected wardrobe sheet reference and apply only the clothing design, garments, materials, colors, and styling from that reference consistently to the character in every panel. If any person, model, face, body, skin, hair, pose, environment, background, text, or unrelated subject appears in the wardrobe reference, ignore it completely. Do not transfer the wardrobe reference person's identity, anatomy, facial features, pose, body shape, or composition. The character portrait reference is the only source for character identity. Do not show the basic black outfit, the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 const characterVoicePrompt =
   "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
 const composerReferencePrompt = (writtenPrompt = "") => {
@@ -3487,7 +3490,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
-    const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
+    const baseCharacterSheetPrompt = characterBaseSheetPromptForData(node.data);
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
     const baseSignature = characterBaseGenerationSignature(node.data);
     const storedBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
@@ -3573,7 +3576,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         includeVideo: generateCuVideoSheet,
         generateBase: () => runCharacterSheetGeneration({
           node,
-          prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [baseCharacterSheetPrompt, characterBaseAppearancePromptForData(node.data), physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -3581,7 +3584,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }),
         generateVideo: () => runCharacterSheetGeneration({
           node,
-          prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [
+            characterVideoSheetPromptForData(node.data),
+            characterVideoBaseAppearancePromptForData(node.data),
+            characterVideoIdentityContinuityPromptForData(node.data),
+            physicalDetailsPrompt
+          ].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -11618,6 +11626,18 @@ function NodeBody({
                     <small>Creates a simplified close-up video sheet for every wardrobe</small>
                   </span>
                 </label>
+                <label className="character-section character-option-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(node.data.stylizedCharacter)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { stylizedCharacter: event.target.checked })}
+                  />
+                  <span>
+                    <strong>Stylized Character</strong>
+                    <small>Strictly preserves the reference design, proportions, materials, colors, and features; combine with Cinematic for a realistic gray cyc</small>
+                  </span>
+                </label>
                 <section
                   className="character-section character-sheet-library drop-enabled"
                   onDragOver={allowFileDrop}
@@ -17777,6 +17797,7 @@ function createDefaultNodeData(type, label, count) {
       characterSheetModel: imageModelNames.openAiImage2,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
+      stylizedCharacter: false,
       useCustomCharacterSheet: false,
       customCharacterSheet: null,
       characterCustomSheets: [],
@@ -22670,8 +22691,11 @@ function storyboardVideoReferencePromptPiece(items = []) {
 
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
+  const identityPrompt = source.data.stylizedCharacter
+    ? `STYLIZED CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory and is the sole authority for this character's identity and design. Render this same character in the requested scene without replacing or redesigning it. ${stylizedCharacterDownstreamPrompt}`
+    : `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`;
   return [
-    `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
+    identityPrompt,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -22680,7 +22704,9 @@ function characterImagePromptPieces(source, namedCharacterReferences = false) {
 function characterVideoPromptPieces(source, audioIndex) {
   if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return [];
   return [
-    "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
+    source.data.stylizedCharacter
+      ? `The connected character sheet is the sole authority for the character's identity and design. Keep that exact character consistent throughout the shot. ${stylizedCharacterDownstreamPrompt}`
+      : "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data),
     audioIndex && activeCharacterVoice(source)
@@ -23297,6 +23323,7 @@ function normalizeCurrentNode(node) {
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
+      stylizedCharacter: data.stylizedCharacter === true,
       characterSheetVariants,
       characterCustomSheets,
       customCharacterSheet: null,

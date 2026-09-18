@@ -4,6 +4,7 @@ import {
   compositeVideoBlendModeOptions,
   utilityImageModelNames,
   utilityImageModelOptions,
+  utilityModelDescriptions,
   utilityVideoModelNames,
   utilityVideoModelOptions
 } from "../src/modelOptions.js";
@@ -15,6 +16,8 @@ test("Topaz utilities are exposed in their Utility model tabs", () => {
   assert.ok(utilityImageModelOptions.includes(utilityImageModelNames.topazUpscaler));
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazUpscaler));
   assert.ok(utilityVideoModelOptions.includes(utilityVideoModelNames.topazSdrToHdr));
+  assert.match(utilityModelDescriptions[utilityVideoModelNames.topazUpscaler], /Very blocky \/ YouTube-like source: Compression 0\.35, Noise 0\.25\./);
+  assert.match(utilityModelDescriptions[utilityVideoModelNames.topazUpscaler], /Do not raise Detail too high on tiny footage/);
 });
 
 test("Flux Video Upscale is exposed in Utility video models", () => {
