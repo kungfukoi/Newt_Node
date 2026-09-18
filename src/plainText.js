@@ -23,6 +23,49 @@ export function concatenatePlainTextInputs(items = [], ownText = "") {
     .join("\n");
 }
 
+export function resolvePlainTextGraphNodes(nodes = [], edges = []) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const incomingTextSourceIds = new Map();
+  const resolvedTextById = new Map();
+  const resolving = new Set();
+
+  edges.forEach((edge) => {
+    if (edge.to?.port !== "textIn" || !nodeById.has(edge.from?.nodeId) || nodeById.get(edge.to?.nodeId)?.type !== "plainText") return;
+    if (!incomingTextSourceIds.has(edge.to.nodeId)) incomingTextSourceIds.set(edge.to.nodeId, []);
+    incomingTextSourceIds.get(edge.to.nodeId).push(edge.from.nodeId);
+  });
+
+  function resolveNodeText(node) {
+    if (!node) return "";
+    if (node.type !== "plainText") return textOutputForNode(node);
+    if (resolvedTextById.has(node.id)) return resolvedTextById.get(node.id);
+    if (resolving.has(node.id)) return "";
+
+    resolving.add(node.id);
+    const resultText = [
+      ...(incomingTextSourceIds.get(node.id) || []).map((sourceId) => resolveNodeText(nodeById.get(sourceId))),
+      node.data?.text || ""
+    ]
+      .map(normalizedTextPart)
+      .filter(Boolean)
+      .join("\n");
+    resolving.delete(node.id);
+    resolvedTextById.set(node.id, resultText);
+    return resultText;
+  }
+
+  nodes.forEach((node) => {
+    if (node.type === "plainText") resolveNodeText(node);
+  });
+
+  return nodes.map((node) => {
+    if (node.type !== "plainText") return node;
+    const resultText = resolvedTextById.get(node.id) || "";
+    if (String(node.data?.resultText || "") === resultText) return node;
+    return { ...node, data: { ...node.data, resultText } };
+  });
+}
+
 export function wouldCreatePlainTextCycle({ edges = [], nodes = [], sourceNodeId = "", targetNodeId = "" } = {}) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   if (nodeById.get(sourceNodeId)?.type !== "plainText" || nodeById.get(targetNodeId)?.type !== "plainText") return false;

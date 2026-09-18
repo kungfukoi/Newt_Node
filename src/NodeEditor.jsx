@@ -384,7 +384,7 @@ import {
   resizeGroupFromCorner
 } from "./nodeGeometry.js";
 import { catalogNodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
-import { textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
+import { resolvePlainTextGraphNodes, textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -6728,7 +6728,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, { nodeReferenceBindings });
     }
 
-    const referenceNodes = nodesRef.current.map((item) => item.id === currentNode.id ? currentNode : item);
+    const referenceNodes = resolvePlainTextGraphNodes(nodesRef.current, edgesRef.current)
+      .map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
     if (currentNode.type === "videoModel" && incoming.directorIn?.length) {
@@ -19855,7 +19856,7 @@ function nodeResultMediaType(node) {
 }
 
 function buildIncomingByNode(nodes, edges) {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const nodeMap = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
   return edges.reduce((incoming, edge) => {
     const source = nodeMap.get(edge.from.nodeId);
     if (!source) return incoming;
