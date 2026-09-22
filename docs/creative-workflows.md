@@ -4,7 +4,7 @@ This guide covers the current Director, Storyboard, Character, and shared image-
 
 ## Director
 
-Director builds a reusable scene package containing setup references, style direction, camera direction, scene overview, and an ordered shot list. Its blue output can drive a supported Video Model or Storyboard node.
+Director builds a reusable scene package containing setup references, style direction, camera direction, scene overview, and an ordered shot list. Its blue output can drive an Image Model, a supported Video Model, or Storyboard.
 
 Director is the visible name used in the interface. Older saved default titles such as `Film Director` load as `Director`; custom node titles are preserved.
 
@@ -16,7 +16,7 @@ Director is the visible name used in the interface. Older saved default titles s
 4. Optionally connect a reference Video or Music source and configure how it should be used.
 5. Review and lock Setup, Style Direction, Camera Direction, Scene Overview, and Shot List in order.
 6. Build the scene.
-7. Connect the Director output to a compatible Video Model or to Storyboard.
+7. Connect the Director output to an Image Model, a compatible Video Model, or Storyboard.
 
 Changing an earlier dependency marks only the affected later stages stale. Existing text remains visible for review. Lock accepts the current draft; regeneration is always an explicit action.
 
@@ -42,10 +42,17 @@ Connected assets receive stable reference tags. The final scene uses only refere
 | Animation | Coherent cel, CGI, digital-animation, or motion-graphics treatment. |
 | Stop-Motion | Tactile miniature, puppet, or clay treatment with deliberate stepped posing. |
 | Commercial | Polished premium advertising, beauty, product, or editorial presentation. |
+| Photography | Professional still-image composition, lens perspective, pose, lighting, and visual hierarchy. |
 | Music Video | Stylized performance and music-driven pacing using the connected audio as timing authority. |
 | Montage | Distinct economical vignettes joined through deliberate visual and movement matches. |
 
 Music Video requires connected audio and a supported downstream route. Director currently validates music use for Seedance 2.0, Seedance 2.5, and MiniMax H3. Montage can use music when supplied but does not require it.
+
+### Still Duration
+
+Choose **Still** when the final output is one generated image. Director immediately sets Shots to `1`, keeps that control locked at `1`, and persists the invariant through scene switching and workflow reload. Style Direction, Camera Direction, Scene Overview, and Shot List remain available; the Shot List describes one static drawable instant rather than temporal action or coverage.
+
+When a built Director is connected to an Image Model, its final prompt becomes the primary image prompt. A directly connected Text prompt remains supplemental direction. Active Director Location and Props references flow to Image Prompt, active Characters flow to Character, and direct Image Model references are preserved and deduplicated.
 
 ### Reference Video Modes
 
@@ -87,7 +94,7 @@ Preview/Layout and Edit share the same curve, brightness, contrast, and saturati
 
 ## Troubleshooting
 
-- If a Video Model rejects a Director connection, select a model that supports Director input.
+- If a Video Model rejects a Director connection, select a model that supports Director input. Image Models accept the Director input directly.
 - If Music Video cannot run, connect an Audio node to Music and confirm the chosen downstream model supports reference audio.
 - If a stage becomes stale, review the changed dependency and rebuild from that stage rather than recreating the node.
 - If Storyboard planning fails validation, the previous frames are intentionally preserved; revise the Director shot list or scene request and run planning again.

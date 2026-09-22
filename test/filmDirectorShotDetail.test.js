@@ -7,6 +7,14 @@ import {
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
 
+test("Still shot detail describes one static drawable instant", () => {
+  const directive = filmDirectorShotDetailDirective("Auto", "still");
+  assert.match(directive, /exactly one CUT/i);
+  assert.match(directive, /one drawable instant/i);
+  assert.match(directive, /camera movement: Static/i);
+  assert.match(directive, /Do not describe temporal progression/i);
+});
+
 test("single-shot Film Director plans receive a sustained-take detail contract", () => {
   const directive = filmDirectorShotDetailDirective(1, 15);
   assert.match(directive, /sustained master take/i);

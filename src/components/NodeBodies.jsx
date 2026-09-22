@@ -7,7 +7,13 @@ import { normalizeTextPromptHistory, recallTextPrompt } from "../textPromptHisto
 import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorAspectRatioOptions, normalizeFilmDirectorAspectRatio } from "../filmDirectorAspectRatios.js";
-import { filmDirectorDurationOptions } from "../filmDirectorDurations.js";
+import {
+  filmDirectorDurationOptionLabel,
+  filmDirectorDurationOptions,
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
+  normalizeFilmDirectorDuration
+} from "../filmDirectorDurations.js";
 import { filmDirectorApproachChanged, filmDirectorApproachOptions, filmDirectorDefaultCameraDirection, filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
 import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "../filmDirectorResolutions.js";
 import {
@@ -501,9 +507,10 @@ export function SkillDirectorNodeBody({
   }));
   const styleConnected = Boolean(incoming.styleIn?.length);
   const finalPromptOpen = node.data.skillPreviewOpen !== false;
-  const shotValue = node.data.skillShotCount || node.data.shotCount || "3";
   const autoPlannedShotCount = Number.parseInt(node.data.lastRunActualShotCount || node.data.lastRunShotCount || "", 10);
-  const durationValue = node.data.skillDurationSeconds || node.data.durationSeconds || "15";
+  const durationValue = normalizeFilmDirectorDuration(node.data.skillDurationSeconds || node.data.durationSeconds || "15");
+  const stillDuration = filmDirectorIsStillDuration(durationValue);
+  const shotValue = filmDirectorShotCountForDuration(node.data.skillShotCount || node.data.shotCount || "3", durationValue);
   const videoModelValue = normalizeFilmDirectorVideoModel(node.data.skillVideoModel);
   const resolutionValue = normalizeFilmDirectorResolution(node.data.skillResolution);
   const aspectRatioValue = normalizeFilmDirectorAspectRatio(node.data.skillAspectRatio);
@@ -1071,10 +1078,21 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row">
                 <span>Duration</span>
-                <select value={durationValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillDurationSeconds: event.target.value, durationSeconds: event.target.value })}>
+                <select
+                  value={durationValue}
+                  disabled={running || locks.setup}
+                  onChange={(event) => {
+                    const duration = normalizeFilmDirectorDuration(event.target.value);
+                    updateUnlocked({
+                      skillDurationSeconds: duration,
+                      durationSeconds: duration,
+                      skillShotCount: filmDirectorShotCountForDuration(shotValue, duration)
+                    }, ["shotList"]);
+                  }}
+                >
                   {filmDirectorDurationOptions.map((duration) => (
                     <option key={duration} value={duration}>
-                      {duration}s
+                      {filmDirectorDurationOptionLabel(duration)}
                     </option>
                   ))}
                 </select>
@@ -1112,8 +1130,10 @@ export function SkillDirectorNodeBody({
                 <span>Shots</span>
                 <select
                   value={shotValue}
-                  disabled={running || locks.setup}
-                  onChange={(event) => updateUnlocked({ skillShotCount: event.target.value }, ["shotList"])}
+                  disabled={running || locks.setup || stillDuration}
+                  onChange={(event) => updateUnlocked({
+                    skillShotCount: filmDirectorShotCountForDuration(event.target.value, durationValue)
+                  }, ["shotList"])}
                 >
                   <option value="Auto">
                     {shotValue === "Auto" && autoPlannedShotCount > 0 ? `Auto (${autoPlannedShotCount} planned)` : "Auto"}

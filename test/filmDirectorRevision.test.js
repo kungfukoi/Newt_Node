@@ -163,6 +163,18 @@ test("Film Director revisions preserve newly supported intermediate durations", 
   assert.equal(patch.durationSeconds, "7");
 });
 
+test("Film Director revisions keep Still scenes at one shot", () => {
+  const patch = filmDirectorRevisionStatePatch(
+    { skillDurationSeconds: "15", skillShotCount: "6" },
+    { durationSeconds: "still", shotCount: "8", resolvedShotCount: 8 }
+  );
+
+  assert.equal(patch.skillDurationSeconds, "still");
+  assert.equal(patch.durationSeconds, "still");
+  assert.equal(patch.skillShotCount, "1");
+  assert.equal(patch.shotCount, "1");
+});
+
 test("Film Director version history preserves the original and complete revision snapshots", () => {
   const original = {
     sceneName: "Original Scene",

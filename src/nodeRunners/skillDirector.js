@@ -3,6 +3,7 @@ import { filmDirectorReferenceVideoMode, filmDirectorUsesReference } from "../fi
 import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
 import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
+import { filmDirectorShotCountForDuration, normalizeFilmDirectorDuration } from "../filmDirectorDurations.js";
 import { stylizedCharacterDownstreamPrompt } from "../characterSheetWorkflow.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
@@ -27,6 +28,11 @@ export async function runSkillDirectorNode({
   const activeLocationInputs = activeSceneReferenceItems(locationInputs, node.data, action, "location");
   const activeElementInputs = activeSceneReferenceItems(elementInputs, node.data, action, "element");
   const requestDrafts = filmDirectorShotListDraftsForRequest(action, node.data);
+  const durationSeconds = normalizeFilmDirectorDuration(node.data.skillDurationSeconds || node.data.durationSeconds || "15");
+  const shotCount = filmDirectorShotCountForDuration(
+    node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
+    durationSeconds
+  );
   const { response, data } = await nodeApi.runSkillDirector({
     action,
     sceneName: node.data.sceneName,
@@ -50,8 +56,8 @@ export async function runSkillDirectorNode({
     referenceVideoAnalysis: node.data.skillDirectorReferenceVideoAnalysis || "",
     referenceVideoAnalysisSource: node.data.skillDirectorReferenceVideoAnalysisSource || "",
     referenceVideoBlueprint: node.data.skillDirectorReferenceVideoBlueprint || {},
-    shotCount: node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
-    durationSeconds: node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    shotCount,
+    durationSeconds,
     videoModel: node.data.skillVideoModel || "",
     resolution: node.data.skillResolution || "720p",
     aspectRatio: node.data.skillAspectRatio || "16:9",
@@ -76,7 +82,7 @@ export async function runSkillDirectorNode({
     skill: data.skill || skill || null,
     shotCount: data.shotCount || "",
     resolvedShotCount: data.resolvedShotCount || data.actualShotCount || 0,
-    durationSeconds: data.durationSeconds || node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    durationSeconds: normalizeFilmDirectorDuration(data.durationSeconds || durationSeconds),
     videoModel: Object.prototype.hasOwnProperty.call(data, "videoModel") ? data.videoModel : node.data.skillVideoModel || "",
     resolution: data.resolution || node.data.skillResolution || "720p",
     aspectRatio: data.aspectRatio || node.data.skillAspectRatio || "16:9",

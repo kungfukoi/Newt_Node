@@ -422,6 +422,18 @@ import {
   normalizeFilmDirectorScenes
 } from "./filmDirectorScenes.js";
 import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
+import {
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
+  normalizeFilmDirectorDuration
+} from "./filmDirectorDurations.js";
+import {
+  composeFilmDirectorPrompt,
+  filmDirectorInputPort,
+  filmDirectorInputPortForNodeType,
+  isFilmDirectorConnection,
+  mergeFilmDirectorVisualIncoming
+} from "./filmDirectorModelRouting.js";
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
@@ -429,7 +441,6 @@ import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessa
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
-  composeVideoPrompt,
   normalizeUtilityVideoGenerationResult,
   normalizeVideoGenerationResult,
   videoModelSupportsFilmDirector
@@ -5816,6 +5827,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         textAgent: ["textIn"]
       },
       director: {
+        imageModel: [filmDirectorInputPortForNodeType("imageModel")],
         videoModel: ["directorIn"],
         storyboard: ["directorIn"]
       },
@@ -5924,6 +5936,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (isFilmDirectorConnection({
+      sourceType: source.type,
+      sourcePort: from.port,
+      targetType: target.type,
+      targetPort: to.port
+    })) return "";
     if (isOutputSinkConnection(target.type, to.port, portKindForNodePort(source, from.port, "output"))) return "";
     if (target.type === "assembly") return "";
 
@@ -6730,24 +6748,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    if (currentNode.type === "videoModel" && incoming.directorIn?.length) {
+    if (["imageModel", "videoModel"].includes(currentNode.type) && incoming.directorIn?.length) {
       const source = incoming.directorIn[0].source;
       if (!source?.data?.skillDirectorBuilt || source.data.skillDirectorOutputStale) {
         updateNode(currentNode.id, { status: "error", error: "Review and rebuild the connected Director scene before generating." });
         return { status: "error" };
       }
-      currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
+      if (currentNode.type === "videoModel") {
+        currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
+      }
     }
     const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
-      currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model)
+      currentNode.type === "imageModel"
+        || (currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model))
         ? connectedDirectorPackageText(incoming.directorIn, currentIncomingByNode)
         : "";
     const fallbackPrompt = resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
     const basePrompt =
-      currentNode.type === "videoModel"
-        ? composeVideoPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
+      ["imageModel", "videoModel"].includes(currentNode.type)
+        ? composeFilmDirectorPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
         : connectedPrompt || fallbackPrompt;
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
@@ -7019,7 +7040,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "revise") {
           const revisionState = filmDirectorRevisionStatePatch(currentNode.data, {
             ...processed,
-            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach),
+            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach, processed.durationSeconds),
             shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || "")
           });
           const revisionVersion = appendFilmDirectorRevisionVersionHistory(currentNode.data.skillDirectorRevisionHistory, {
@@ -7043,7 +7064,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
         updateNode(currentNode.id, {
           ...nextSkillPatch,
-          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach) : processed.text,
+          resultText: action === "build"
+            ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach, processed.durationSeconds)
+            : processed.text,
           styleDirection: processed.styleDirection || currentNode.data.styleDirection || "",
           motionDirection: processed.motionDirection || currentNode.data.motionDirection || "",
           shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || ""),
@@ -7331,7 +7354,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
-        const imageIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current);
+        const imageIncoming = expandImageDirectorPackageIncoming(
+          promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current),
+          currentIncomingByNode
+        );
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, imageIncoming);
         const imagePromptItems = connectedImagePromptItems(
@@ -15291,8 +15317,15 @@ function NodeBody({
   }
 
   if (node.type === "imageModel") {
-    const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
-    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
+    const directorPromptValue = connectedDirectorPackageText(incoming.directorIn, incomingByNode);
+    const promptValue = composeFilmDirectorPrompt({
+      directorPrompt: directorPromptValue,
+      connectedPrompt: resolvedPromptText(incoming.promptIn),
+      fallbackPrompt: node.data.prompt
+    });
+    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    const directorConnected = Boolean(incoming.directorIn?.length);
+    const displayIncoming = expandImageDirectorPackageIncoming(incoming, incomingByNode);
     const isSam3Image = isSam3ImageModel(node.data.model);
     const isZImage = isZImageImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
@@ -15301,18 +15334,19 @@ function NodeBody({
     const openAiQualityOptions = isGptImage25Model(node.data.model)
       ? openAiImage2QualityOptions
       : openAiImage2QualityOptions.filter((option) => ["low", "medium", "high"].includes(option));
-    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
+    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, displayIncoming);
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const referenceTagMatches = isSam3Image ? [] : imageModelReferenceTagMatches(promptValue, node, incoming, incomingByNode);
-    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
+    const referenceTagMatches = isSam3Image ? [] : imageModelReferenceTagMatches(promptValue, node, displayIncoming, incomingByNode);
+    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, displayIncoming);
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
-    const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
-    const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
-    const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
-    const characterPromptLabel = connectedSummary(incoming.characterIn, "Add character");
+    const cameraPromptLabel = connectedSummary(displayIncoming.cameraIn, "Add camera");
+    const stylePromptLabel = connectedSummary(displayIncoming.styleIn, "Add style");
+    const transferPromptLabel = connectedSummary(displayIncoming.transferIn, "Add mood board");
+    const characterPromptLabel = connectedSummary(displayIncoming.characterIn, "Add character");
     const promptPort = config.input.find((port) => port.id === "promptIn");
+    const directorPort = config.input.find((port) => port.id === "directorIn");
     const imagePromptPort = config.input.find((port) => port.id === "imagePromptIn");
     const cameraPort = config.input.find((port) => port.id === "cameraIn");
     const stylePort = config.input.find((port) => port.id === "styleIn");
@@ -15322,7 +15356,7 @@ function NodeBody({
     const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
     const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
     const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
-    const imageReferenceCount = imagePromptConnections.length + (characterInputUnsupported ? 0 : incoming.characterIn?.length || 0);
+    const imageReferenceCount = imagePromptConnections.length + (characterInputUnsupported ? 0 : displayIncoming.characterIn?.length || 0);
     const imageRunCost = estimateImageRunCost({
       model: node.data.model,
       resolution: node.data.resolution,
@@ -15340,9 +15374,10 @@ function NodeBody({
     const atlasImageProvider = normalizeModelProviderPreferences(modelProviderPreferences).imageGeneration === "atlas";
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
-      ? [promptPort, imagePromptPort]
+      ? [promptPort, directorPort, imagePromptPort]
       : [
           promptPort,
+          directorPort,
           imagePromptPort,
           cameraInputUnsupported ? null : cameraPort,
           styleInputUnsupported ? null : stylePort,
@@ -15386,6 +15421,9 @@ function NodeBody({
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
+          <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Connect Director")}</button>
+          </NodeRow>
           <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <TaggedPromptTextarea
               className={promptConnected ? "connected-field" : ""}
@@ -17508,7 +17546,7 @@ function getNodeConfig(type) {
     storyboard: {
       icon: Clapperboard,
       input: [
-        { id: "directorIn", label: "Director", color: portColors.director },
+        filmDirectorInputPort(portColors.director),
         { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
         { id: "sceneReferenceIn", label: "Location", color: portColors.image },
         { id: "propsIn", label: "Props", color: portColors.image },
@@ -17527,6 +17565,7 @@ function getNodeConfig(type) {
       icon: ImagePlus,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
+        filmDirectorInputPort(portColors.director),
         { id: "imagePromptIn", label: "Image Prompt", color: portColors.image },
         { id: "cameraIn", label: "Camera", color: portColors.camera },
         { id: "styleIn", label: "Style", color: portColors.style },
@@ -17539,7 +17578,7 @@ function getNodeConfig(type) {
       icon: Film,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
-        { id: "directorIn", label: "Director", color: portColors.director },
+        filmDirectorInputPort(portColors.director),
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
         { id: "endFrameIn", label: "End Frame", color: portColors.image },
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
@@ -20217,12 +20256,14 @@ function directorPackageConnections(items = []) {
 
 function connectedDirectorPackageText(items = [], incomingByNode = {}) {
   return directorPackageConnections(items)
-    .map(({ source }) => applyFilmDirectorAudioPolicyToPrompt(
-      source.data.resultText,
-      source.data.skillDirectorAudioMode,
-      source.data.skillApproach,
-      filmDirectorUsesMusic(source.data.skillApproach, connectedAssetItems(incomingByNode[source.id]?.musicIn).slice(-1))
-    ))
+    .map(({ source }) => filmDirectorIsStillDuration(source.data.skillDurationSeconds || source.data.durationSeconds)
+      ? source.data.resultText
+      : applyFilmDirectorAudioPolicyToPrompt(
+          source.data.resultText,
+          source.data.skillDirectorAudioMode,
+          source.data.skillApproach,
+          filmDirectorUsesMusic(source.data.skillApproach, connectedAssetItems(incomingByNode[source.id]?.musicIn).slice(-1))
+        ))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -20346,30 +20387,48 @@ function uniqueConnectionItems(items = []) {
   });
 }
 
-function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, options = {}) {
-  const directorItems = directorPackageConnections(incoming.directorIn || []);
-  if (!directorItems.length) return incoming;
-
-  const referenceImageIn = [...(incoming.referenceImageIn || [])];
-  const characterIn = [...(incoming.characterIn || [])];
-  let referenceVideoIn = [...(incoming.referenceVideoIn || [])];
-  let referenceAudioIn = [...(incoming.referenceAudioIn || [])];
-  let directorUsesMusic = false;
-  const includeCharacters = options.includeCharacters !== false;
-
-  directorItems.forEach(({ source }) => {
+function directorVisualPackages(directorItems = [], incomingByNode = {}) {
+  return directorItems.map(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
     const locationItems = directorIncoming.locationIn || [];
     const propItems = directorIncoming.imageIn || [];
     const characterItems = directorIncoming.characterIn || [];
+    return {
+      imageItems: [
+        ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
+        ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
+      ],
+      characterItems: characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length))
+    };
+  });
+}
+
+function expandImageDirectorPackageIncoming(incoming = {}, incomingByNode = {}) {
+  const directorItems = directorPackageConnections(incoming.directorIn || []);
+  if (!directorItems.length) return incoming;
+  return mergeFilmDirectorVisualIncoming(incoming, directorVisualPackages(directorItems, incomingByNode), {
+    imagePort: "imagePromptIn",
+    characterPort: "characterIn"
+  });
+}
+
+function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, options = {}) {
+  const directorItems = directorPackageConnections(incoming.directorIn || []);
+  if (!directorItems.length) return incoming;
+
+  const includeCharacters = options.includeCharacters !== false;
+  const visualIncoming = mergeFilmDirectorVisualIncoming(
+    incoming,
+    directorVisualPackages(directorItems, incomingByNode),
+    { imagePort: "referenceImageIn", characterPort: "characterIn", includeCharacters }
+  );
+  let referenceVideoIn = [...(visualIncoming.referenceVideoIn || [])];
+  let referenceAudioIn = [...(visualIncoming.referenceAudioIn || [])];
+  let directorUsesMusic = false;
+
+  directorItems.forEach(({ source }) => {
+    const directorIncoming = incomingByNode?.[source.id] || {};
     const directorReferenceVideoMode = filmDirectorReferenceVideoMode(source.data.skillDirectorReferenceVideoOptions);
-    referenceImageIn.push(
-      ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
-      ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
-    );
-    if (includeCharacters) {
-      characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
-    }
     if (["extend", "camera", "reference"].includes(directorReferenceVideoMode) && directorIncoming.referenceVideoIn?.length) {
       referenceVideoIn = [directorIncoming.referenceVideoIn.at(-1)];
     }
@@ -20380,9 +20439,7 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
   });
 
   return {
-    ...incoming,
-    referenceImageIn: uniqueConnectionItems(referenceImageIn),
-    characterIn: includeCharacters ? uniqueConnectionItems(characterIn) : incoming.characterIn || [],
+    ...visualIncoming,
     referenceVideoIn: uniqueConnectionItems(referenceVideoIn),
     referenceAudioIn: uniqueConnectionItems(referenceAudioIn),
     directorUsesMusic
@@ -20492,7 +20549,7 @@ function promptReferenceIncomingForNode(incoming = {}, targetNode = null, nodes 
         targetNode
       );
 
-  if (targetNode?.type === "videoModel") {
+  if (["imageModel", "videoModel"].includes(targetNode?.type)) {
     resolved = (incoming.directorIn || []).reduce((current, { source }) => (
       mergePromptNodeReferencesIntoIncoming(
         current,
@@ -23065,8 +23122,11 @@ function formatSkillDirectorShotListForClient(text = "") {
     .trim();
 }
 
-function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production", approach = "cinematic") {
-  return applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode, approach)
+function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production", approach = "cinematic", durationSeconds = "15") {
+  const prompt = filmDirectorIsStillDuration(durationSeconds)
+    ? String(text || "")
+    : applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode, approach);
+  return prompt
     .replace(/(Shot List:\s*)([\s\S]*)$/i, (_match, label, body) => `${label.trim()}\n${formatSkillDirectorShotListForClient(body)}`)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -23146,6 +23206,8 @@ function normalizeCurrentNode(node) {
   if (nextNode.type === "skillDirector") {
     const sceneOverview = data.sceneOverview ?? data.text ?? "";
     const legacyShotCount = data.skillShotCount || data.skillSceneCount || data.shotCount || "3";
+    const normalizedDuration = normalizeFilmDirectorDuration(data.skillDurationSeconds || data.durationSeconds || "15");
+    const normalizedShotCount = filmDirectorShotCountForDuration(legacyShotCount, normalizedDuration);
     const restoredShotList = splitSkillDirectorShotListForClient(data.shotList || "", data.shotListNotes || "");
     const skillDirectorData = { ...data };
     const legacyDirectorTitle = String(data.title || "");
@@ -23162,8 +23224,9 @@ function normalizeCurrentNode(node) {
         sceneName: data.sceneName || "",
         sceneOverview,
         text: sceneOverview,
-        skillShotCount: legacyShotCount,
-        skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillShotCount: normalizedShotCount,
+        skillDurationSeconds: normalizedDuration,
+        durationSeconds: normalizedDuration,
         skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
@@ -23182,7 +23245,12 @@ function normalizeCurrentNode(node) {
         shotList: restoredShotList.shotList,
         shotListNotes: restoredShotList.shotListNotes,
         skillDirectorInputSignatureVersion: Math.max(0, Number(data.skillDirectorInputSignatureVersion) || 0),
-        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || "", data.skillDirectorAudioMode, data.skillApproach),
+        resultText: formatSkillDirectorFinalPromptForClient(
+          data.resultText || "",
+          data.skillDirectorAudioMode,
+          data.skillApproach,
+          normalizedDuration
+        ),
         skillDirectorLocks:
           data.skillDirectorLocks && typeof data.skillDirectorLocks === "object"
             ? {
@@ -24885,6 +24953,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (source.type === "skillDirector") {
     nextEdge.from.port = "directorOut";
+    if (target?.type === "imageModel" && nextEdge.to.port === "promptIn") nextEdge.to.port = "directorIn";
     if (target?.type === "videoModel" && nextEdge.to.port === "promptIn") nextEdge.to.port = "directorIn";
     if (target?.type === "storyboard" && nextEdge.to.port === "sceneDescriptionIn") nextEdge.to.port = "directorIn";
     nextEdge.color = portColors.director;

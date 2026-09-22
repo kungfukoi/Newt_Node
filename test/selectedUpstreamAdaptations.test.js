@@ -8,6 +8,7 @@ import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOp
 import { directorMusicLevelContext } from "../server/director-music.js";
 import { NewtPresetStore } from "../server/newt-presets.js";
 import {
+  filmDirectorApproachOptions,
   filmDirectorApproachDirective,
   filmDirectorMusicVideoError,
   filmDirectorSupportsMusic,
@@ -69,6 +70,9 @@ test("Director final prompt assembly preserves complete long output", () => {
 });
 
 test("Director approaches validate music and expose distinct creative direction", () => {
+  assert.ok(filmDirectorApproachOptions.some((option) => option.value === "photography" && option.label === "Photography"));
+  assert.equal(normalizeFilmDirectorApproach("Photography"), "photography");
+  assert.match(filmDirectorApproachDirective("photography"), /still photograph/i);
   assert.equal(normalizeFilmDirectorApproach("MUSIC-VIDEO"), "music-video");
   assert.equal(filmDirectorSupportsMusic("montage"), true);
   assert.match(filmDirectorApproachDirective("vintage"), /8mm/i);

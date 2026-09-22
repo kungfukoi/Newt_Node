@@ -155,7 +155,11 @@ import {
 } from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
-import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
+import {
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
+  normalizeFilmDirectorDuration
+} from "../src/filmDirectorDurations.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt, filmDirectorRevisionActiveReferenceTags } from "../src/filmDirectorRevision.js";
 import {
@@ -3516,8 +3520,11 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const referenceVideoAnalysis = String(req.body.referenceVideoAnalysis || "").trim();
     const referenceVideoAnalysisSource = String(req.body.referenceVideoAnalysisSource || "").trim();
     const referenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(req.body.referenceVideoBlueprint);
-    const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const shotCount = filmDirectorShotCountForDuration(
+      normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3"),
+      durationSeconds
+    );
     const videoModel = normalizeFilmDirectorVideoModel(req.body.videoModel);
     const resolution = normalizeFilmDirectorResolution(req.body.resolution);
     const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
@@ -3530,7 +3537,9 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (!["camera", "reference"].includes(referenceVideoMode) && ["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
       return res.status(400).json({
-        error: `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Director. Reduce the shot count or increase the scene duration.`
+        error: filmDirectorIsStillDuration(durationSeconds)
+          ? "Still supports exactly one shot in Director."
+          : `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Director. Reduce the shot count or increase the scene duration.`
       });
     }
     if (action === "revise" && !revisionNotes) {
@@ -16344,7 +16353,8 @@ function normalizeSkillDirectorDurationSeconds(value) {
 }
 
 function skillDirectorDurationLabel(durationSeconds = "15") {
-  return `${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second`;
+  const duration = normalizeSkillDirectorDurationSeconds(durationSeconds);
+  return filmDirectorIsStillDuration(duration) ? "single still image" : `${duration}-second`;
 }
 
 function textInputContext(textInputs) {
@@ -16555,6 +16565,9 @@ function skillDirectorReferenceSetupFromLines(referenceLines = []) {
 
 function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "15") {
   const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  if (filmDirectorIsStillDuration(durationSeconds)) {
+    return "Shot count: exactly 1 still-image shot. Return recommendedShotCount as 1 and exactly one CUT object describing one static drawable instant.";
+  }
   if (shotCount === "Auto") {
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     return [
@@ -16568,6 +16581,9 @@ function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "
 }
 
 function skillDirectorContinuityMapDirective(durationLabel = "15 seconds", approach = "cinematic") {
+  if (durationLabel === "single still image") {
+    return "Before writing SHOT_LIST, reconcile identity, wardrobe, location geography, eyelines, prop ownership and state, lighting, pose and action state into one internally consistent captured instant. Print one compact Continuity ledger line; do not imply events before or after the frame.";
+  }
   if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
     return `Before writing SHOT_LIST, plan a compact continuity ledger for the ${durationLabel} sequence. Keep character identity, wardrobe and prop identity coherent throughout. Preserve geography, eyelines, movement and physical state inside each continuous vignette, but explicitly identify intentional location/time jumps and matched transitions between separate vignettes. Do not force every vignette into one continuous room or action. Establish only locations, subjects and actions supplied by the brief. Each clip needs a readable editorial purpose, not filler.`;
   }
@@ -16580,6 +16596,9 @@ function skillDirectorContinuityMapDirective(durationLabel = "15 seconds", appro
 }
 
 function skillDirectorShotLogicDirective(durationLabel = "15 seconds", characterCount = 0, approach = "cinematic") {
+  if (durationLabel === "single still image") {
+    return "Run a Still Composition Pass. CUT 1 must be a single static frame with a clear subject, visual hierarchy, readable pose and gesture, coherent eyelines and prop states, intentional lens perspective, depth and lighting. Do not add neighboring coverage, edits or temporal camera movement.";
+  }
   if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
     return `Check every CUT for a clear editorial purpose and playable timing within the ${durationLabel} total. Use varied scales and angles while allowing deliberately matched compositions across different vignettes. Maintain the 180-degree line and action continuity inside each continuous vignette, not across intentional location jumps. Respect the explicit shot count; Auto should choose enough clips to communicate the brief without rushed unreadable filler. For Music Video, align candidate accents with the connected audio context and leave visible vocal performances readable for synchronization.`;
   }
@@ -16630,8 +16649,10 @@ function stripSkillDirectorFences(text) {
     .trim();
 }
 
-function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production", approach = "cinematic", referenceVideoMode = "", connectedMusic = false } = {}) {
-  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode, approach, connectedMusic);
+function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production", approach = "cinematic", durationSeconds = "15", referenceVideoMode = "", connectedMusic = false } = {}) {
+  const audioPolicy = filmDirectorIsStillDuration(durationSeconds)
+    ? ""
+    : filmDirectorAudioPolicyPrompt(audioMode, approach, connectedMusic);
   const visualSceneRules = filmDirectorSceneRules(approach);
   const referenceVideoInstruction = referenceVideoMode === "extend"
     ? filmDirectorExtendInstructionForApproach(approach)
@@ -16898,7 +16919,9 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
     issues.push(`Return exactly ${requestedCount} CUT sections; the draft contains ${actualCount || "none"}.`);
   }
   if (actualCount > cutLimit) {
-    issues.push(`Use no more than ${cutLimit} cuts at a one-second minimum for a ${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second scene.`);
+    issues.push(filmDirectorIsStillDuration(durationSeconds)
+      ? "Still requires exactly one CUT describing one static image."
+      : `Use no more than ${cutLimit} cuts at a one-second minimum for a ${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second scene.`);
   }
   if (!requestedCount && (actualCount < 1 || actualCount > cutLimit)) {
     issues.push(`Auto shot planning must choose between 1 and ${cutLimit} cuts for this scene; the draft contains ${actualCount || "none"}.`);
@@ -17043,6 +17066,7 @@ function buildSkillDirectorPrompt({
   imageDescriptions = []
 }) {
   const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  const stillImage = filmDirectorIsStillDuration(durationSeconds);
   const sceneTreatment = filmDirectorSceneTreatment(approach);
   const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
   const promptImageDescriptions = imageDescriptions.map(cleanSkillDirectorMoodBoardReferences).filter(Boolean);
@@ -17090,9 +17114,13 @@ function buildSkillDirectorPrompt({
 
   if (action === "motion") {
     return [
-      `Generate the Camera Direction for one ${sceneTreatment} ${durationLabel} video scene.`,
+      stillImage
+        ? `Generate the Camera Direction for one ${sceneTreatment} still image.`
+        : `Generate the Camera Direction for one ${sceneTreatment} ${durationLabel} video scene.`,
       'Return strict JSON only: {"cameraDirection":"one production-ready paragraph"}',
-      "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
+      stillImage
+        ? "Translate the user's camera intent into a precise static capture setup: composition, framing, camera height and angle, lens perspective, depth of field, subject pose, visual hierarchy and lighting. Do not describe camera movement over time."
+        : "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
       referenceVideoMode === "extend"
         ? "Begin from the reference video's exact ending camera position, movement, lens behavior, screen direction, blocking, and subject momentum. Describe a seamless handoff before introducing any new camera move."
         : referenceVideoMode === "camera"
@@ -17112,7 +17140,9 @@ function buildSkillDirectorPrompt({
 
   if (action === "shotList") {
     return [
-      `Create the Shot List for one ${sceneTreatment} ${durationLabel} AI video scene.`,
+      stillImage
+        ? `Create the single-shot Shot List for one ${sceneTreatment} AI image.`
+        : `Create the Shot List for one ${sceneTreatment} ${durationLabel} AI video scene.`,
       "The current Scene Overview is the sole story authority for this pass and fully replaces every earlier version. Do not carry forward any prior event, action, prop, dialogue, evidence detail, or story beat that is absent from the current Scene Overview and connected asset descriptions. Do not turn an abstract beat into a newly invented concrete prop.",
       referenceVideoMode === "extend"
         ? "This is a continuation, not a remake. CUT 1 must begin at the exact final state of the attached reference video, carry forward ongoing motion and performance naturally, and introduce only the requested additional action. Do not spend any cut recreating or summarizing earlier footage."
@@ -17139,7 +17169,9 @@ function buildSkillDirectorPrompt({
   }
 
   return [
-    `NewtNode Director task: create ${sceneTreatment} video planning blocks for a ${durationLabel} AI video generation prompt.`,
+    stillImage
+      ? `NewtNode Director task: create ${sceneTreatment} planning blocks for one AI image generation prompt.`
+      : `NewtNode Director task: create ${sceneTreatment} video planning blocks for a ${durationLabel} AI video generation prompt.`,
     filmDirectorApproachDirective(approach),
     musicContext ? `Connected music timing context:\n${musicContext}` : "",
     referenceVideoMode === "extend"
@@ -17158,7 +17190,9 @@ function buildSkillDirectorPrompt({
     "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
     "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
     "Keep Continuity ledger and Must-have shots to one compact line each.",
-    "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
+    stillImage
+      ? "Keep a great focus on one coherent drawable instant, professional composition, pose, visual hierarchy and continuity."
+      : "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
     skillDirectorContinuityMapDirective(durationLabel, approach),
     skillDirectorShotLogicDirective(durationLabel, characterInputs.length, approach),
     filmDirectorShotDetailDirective(shotCount, durationSeconds),
@@ -17179,7 +17213,9 @@ function buildSkillDirectorPrompt({
     sceneOverview ? `Scene Overview:\n${sceneOverview}` : "",
     shotList ? `Existing editable Shot List. Improve only if needed and preserve useful user edits:\n${shotList}` : "",
     promptImageDescriptions.length ? `Connected visual analysis:\n${promptImageDescriptions.join("\n\n")}` : "",
-    `Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize continuity, blocking, eyeline, screen direction, motivated lighting, and usable ${durationLabel} pacing.`
+    stillImage
+      ? "Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize identity, composition, pose, eyeline, prop state, motivated lighting and a single drawable instant."
+      : `Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize continuity, blocking, eyeline, screen direction, motivated lighting, and usable ${durationLabel} pacing.`
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -17231,6 +17267,8 @@ async function runFilmDirectorDraft({
   approach = "cinematic"
 }) {
   const model = skillDirectorFalModel;
+  durationSeconds = normalizeFilmDirectorDuration(durationSeconds);
+  shotCount = filmDirectorShotCountForDuration(shotCount, durationSeconds);
   audioInputs = filmDirectorSupportsMusic(approach) ? audioInputs : [];
   const musicError = filmDirectorMusicVideoError({ approach, audioInputs, videoModel });
   if (musicError) throw new Error(musicError);
@@ -17257,7 +17295,8 @@ async function runFilmDirectorDraft({
     ? normalizeFilmDirectorReferenceVideoBlueprint(referenceVideoBlueprint)
     : normalizeFilmDirectorReferenceVideoBlueprint();
   let referenceVideoContext = { usages: [] };
-  const timedBlueprintMode = ["camera", "reference"].includes(referenceVideoMode);
+  const timedBlueprintMode = !filmDirectorIsStillDuration(durationSeconds)
+    && ["camera", "reference"].includes(referenceVideoMode);
   const timedBlueprintMissing = timedBlueprintMode && resolvedReferenceVideoBlueprint.mode !== referenceVideoMode;
   if (["extend", "camera", "reference"].includes(referenceVideoMode) && referenceVideoUrl && action !== "build" && (!resolvedReferenceVideoAnalysis || timedBlueprintMissing)) {
     referenceVideoContext = await describeFilmDirectorReferenceVideo(videoInputs.at(-1), referenceVideoMode);
@@ -17269,7 +17308,7 @@ async function runFilmDirectorDraft({
     : durationSeconds;
   const effectiveShotCount = timedBlueprintMode && resolvedReferenceVideoBlueprint.shotCount > 0
     ? String(resolvedReferenceVideoBlueprint.shotCount)
-    : shotCount;
+    : filmDirectorShotCountForDuration(shotCount, effectiveDurationSeconds);
   const musicContext = usesMusic && audioInputs.length && action !== "build"
     ? await analyzeDirectorMusic(audioInputs.at(-1), action === "revise" ? 30 : effectiveDurationSeconds)
     : "";
@@ -17284,6 +17323,7 @@ async function runFilmDirectorDraft({
       shotListNotes,
       audioMode,
       approach,
+      durationSeconds: effectiveDurationSeconds,
       referenceVideoMode,
       connectedMusic: usesMusic
     });
@@ -17385,9 +17425,10 @@ async function runFilmDirectorDraft({
       structuredOutput,
       ["sceneName", "scene_name", "title"]
     ) || sceneName;
-    const requestedRevisedDuration = String(
-      skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
-    );
+    const requestedRevisedDuration = skillDirectorStructuredValue(
+      structuredOutput,
+      ["durationSeconds", "duration_seconds", "duration"]
+    ) || String(skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"]));
     const requestedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, effectiveDurationSeconds);
     const revisedDurationSeconds = timedBlueprintMode && !referenceStructureRevisionRequested
       ? effectiveDurationSeconds
@@ -17451,7 +17492,9 @@ async function runFilmDirectorDraft({
     });
     const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
       outputText,
-      shotCount: timedBlueprintMode && !referenceStructureRevisionRequested ? effectiveShotCount : "Auto",
+      shotCount: timedBlueprintMode && !referenceStructureRevisionRequested
+        ? effectiveShotCount
+        : filmDirectorShotCountForDuration("Auto", revisedDurationSeconds),
       durationSeconds: revisedDurationSeconds,
       prompt: revisionPrompt,
       model,
@@ -17470,6 +17513,7 @@ async function runFilmDirectorDraft({
       shotListNotes: revisedShotListNotes,
       audioMode: revisedAudioMode,
       approach: revisedApproach,
+      durationSeconds: revisedDurationSeconds,
       referenceVideoMode,
       connectedMusic: revisedUsesMusic
     });
