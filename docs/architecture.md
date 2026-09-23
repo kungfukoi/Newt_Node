@@ -89,6 +89,8 @@ Preview/Layout state is normalized by `src/previewLayout.js`. It stores a mixed,
 
 Every general preview uses contain/letterbox behavior. Cropping is valid only inside an explicit editing operation such as Edit Crop.
 
+The preview lightbox's yellow crop box uses `src/cropGeometry.js` for freeform side/corner resizing and bounded movement. Its independent percentage width/height survive edit undo/redo and feed the existing PNG crop/export path.
+
 The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` for cursor pagination and refresh merging. Passive videos use cached `/api/video-poster` stills, not one decoder per rail item; the original video remains the drag/open source. The rail remains one proportional column. Canvas node mounting and full-detail visibility are unchanged.
 
 ## Character Identity Flow

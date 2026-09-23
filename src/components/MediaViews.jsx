@@ -1,4 +1,5 @@
 import React from "react";
+import { clampCropRect, dragCropRect } from "../cropGeometry.js";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
@@ -902,26 +903,8 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
     };
   }
 
-  function clampCropRect(rect) {
-    const rawWidth = Number(rect.width);
-    const rawHeight = Number(rect.height);
-    const rawSize = Number.isFinite(rawWidth) && Number.isFinite(rawHeight)
-      ? Math.min(rawWidth, rawHeight)
-      : Number.isFinite(rawWidth)
-      ? rawWidth
-      : Number.isFinite(rawHeight)
-      ? rawHeight
-      : 100;
-    let x = Math.min(Math.max(0, Number(rect.x) || 0), 92);
-    let y = Math.min(Math.max(0, Number(rect.y) || 0), 92);
-    const maxSize = Math.max(8, Math.min(100 - x, 100 - y));
-    const size = Math.min(maxSize, Math.max(8, rawSize));
-    x = Math.min(Math.max(0, x), 100 - size);
-    y = Math.min(Math.max(0, y), 100 - size);
-    return { x, y, width: size, height: size };
-  }
-
   function startCropDrag(event, mode) {
+    if (event.button !== 0 || cropDragRef.current) return;
     event.preventDefault();
     event.stopPropagation();
     const point = cropPointerPoint(event);
@@ -938,7 +921,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 
   function handleCropPointerMove(event) {
     const drag = cropDragRef.current;
-    if (!drag) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
     const point = cropPointerPoint(event);
@@ -946,32 +929,17 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
     const deltaX = point.x - drag.startPoint.x;
     const deltaY = point.y - drag.startPoint.y;
 
-    if (drag.mode === "resize") {
-      const dominantDelta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
-      const startSize = Math.min(drag.startRect.width, drag.startRect.height);
-      setCropRect(clampCropRect({
-        ...drag.startRect,
-        width: startSize + dominantDelta,
-        height: startSize + dominantDelta
-      }));
-      return;
-    }
-
-    setCropRect(clampCropRect({
-      ...drag.startRect,
-      x: drag.startRect.x + deltaX,
-      y: drag.startRect.y + deltaY
-    }));
+    setCropRect(dragCropRect(drag.startRect, drag.mode, deltaX, deltaY));
   }
 
   function stopCropDrag(event) {
     const drag = cropDragRef.current;
-    if (!drag) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
     cropDragRef.current = null;
-    if (event.currentTarget.hasPointerCapture?.(drag.pointerId)) {
-      event.currentTarget.releasePointerCapture(drag.pointerId);
+    if (event.target.hasPointerCapture?.(drag.pointerId)) {
+      event.target.releasePointerCapture(drag.pointerId);
     }
   }
 
@@ -1804,11 +1772,15 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
                   onPointerUp={stopCropDrag}
                   onPointerCancel={stopCropDrag}
                 >
-                  <span
-                    className="output-crop-handle"
-                    onPointerDown={(event) => startCropDrag(event, "resize")}
-                    aria-hidden="true"
-                  />
+                  {[["n", "top"], ["ne", "top right"], ["e", "right"], ["se", "bottom right"], ["s", "bottom"], ["sw", "bottom left"], ["w", "left"], ["nw", "top left"]].map(([handle, label]) => (
+                    <span
+                      key={handle}
+                      className={`output-crop-handle output-crop-handle-${handle}`}
+                      title={`Resize crop ${label}`}
+                      onPointerDown={(event) => startCropDrag(event, handle)}
+                      aria-hidden="true"
+                    />
+                  ))}
                 </div>
               )}
             </div>

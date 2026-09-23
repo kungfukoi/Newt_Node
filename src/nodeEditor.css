@@ -1294,8 +1294,6 @@
 .output-crop-box {
   position: absolute;
   z-index: 2;
-  min-width: 30px;
-  min-height: 30px;
   border: 2px solid #ddc631;
   border-radius: 4px;
   cursor: move;
@@ -1320,8 +1318,7 @@
 
 .output-crop-handle {
   position: absolute;
-  right: -7px;
-  bottom: -7px;
+  z-index: 1;
   width: 15px;
   height: 15px;
   border: 2px solid #101010;
@@ -1329,6 +1326,15 @@
   background: #ddc631;
   cursor: nwse-resize;
 }
+
+.output-crop-handle-n { left: 50%; top: 0; transform: translate(-50%, -50%); cursor: ns-resize; }
+.output-crop-handle-s { left: 50%; top: 100%; transform: translate(-50%, -50%); cursor: ns-resize; }
+.output-crop-handle-e { left: 100%; top: 50%; transform: translate(-50%, -50%); cursor: ew-resize; }
+.output-crop-handle-w { left: 0; top: 50%; transform: translate(-50%, -50%); cursor: ew-resize; }
+.output-crop-handle-nw { left: 0; top: 0; transform: translate(-50%, -50%); }
+.output-crop-handle-ne { left: 100%; top: 0; transform: translate(-50%, -50%); cursor: nesw-resize; }
+.output-crop-handle-sw { left: 0; top: 100%; transform: translate(-50%, -50%); cursor: nesw-resize; }
+.output-crop-handle-se { left: 100%; top: 100%; transform: translate(-50%, -50%); }
 
 .output-lightbox-error {
   position: absolute;
