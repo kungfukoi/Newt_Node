@@ -249,19 +249,23 @@ export const utilityImageToIdPrompt = `Create a professional Cryptomatte-style I
 
 Analyze the entire image and separate every distinct object, character, prop, material group, clothing element, foreground object, background object, and environmental region into individual flat-color masks.
 
-CRITICAL REQUIREMENT:
-No two segmented objects with different IDs are allowed to share the exact same edge boundary color contact in an ambiguous way. Adjacent object regions must remain visually and mathematically separable for clean matte extraction.
+CRITICAL REQUIREMENT — GLOBALLY UNIQUE OBJECT COLORS:
+Each distinct object instance or independently selectable region must receive its own unique solid RGB color across the ENTIRE image. NEVER reuse an ID color for another object anywhere in the image, even when the objects are far apart, do not touch, look identical, or share a material or category. This is instance segmentation, not category-based coloring. Global color uniqueness is the highest-priority requirement.
+
+Selecting any ID color must isolate exactly one intended object or region and nothing else. If a color selects multiple unrelated objects, the matte is contaminated and the result is invalid. For example, each chair, window, leaf, person, and clothing element needs a separate ID; do not assign all chairs or all windows the same color. Background regions must not reuse any foreground object's color.
+
+Assign a fresh color to every new ID; never cycle through a small repeating palette. Keep all ID colors widely separated in RGB space, including nonadjacent objects, so color-picker tolerance does not select another ID. A barely different RGB value is not sufficient separation. Disconnected visible parts of the SAME object or region may retain that object's ID color; disconnected parts of DIFFERENT objects must never share it.
 
 IMPORTANT EDGE SEPARATION RULES:
 
 * Every object must have its own completely unique solid RGB color.
-* Adjacent objects must NEVER use similar hues or values.
+* Different objects anywhere in the image must NEVER use identical or near-identical colors; maximize hue and value separation across the entire palette.
 * Neighboring segmentation regions must maintain crisp separation.
 * Prevent color bleeding between objects.
 * Preserve ultra-clean object boundaries.
 * Prioritize matte extraction usability over artistic appearance.
 * Do not merge touching objects into one region unless they are truly the same object.
-* Create slight separation logic between tightly packed objects so masks remain individually selectable.
+* Separate tightly packed objects using distinct fill colors without adding gaps, outlines, or altering their silhouettes.
 * Ensure thin objects, overlapping objects, and touching surfaces remain independently isolated.
 * Preserve internal negative space and holes accurately.
 * Complex intersections like hair, fingers, cables, reflections, transparent objects, paint splashes, smoke, cloth folds, and layered surfaces should still produce readable isolated IDs.
@@ -277,12 +281,12 @@ STYLE RULES:
 * No transparency.
 * No glow.
 * No antialiasing blur.
-* No outlines unless necessary for separation clarity.
+* No outlines or artificial separator colors.
 * No labels, text, numbers, symbols, or UI.
 * No artistic stylization.
 
 TECHNICAL GOAL:
-The result should function like a real VFX Cryptomatte or segmentation EXR utility pass intended for compositing software such as Nuke, Fusion, or After Effects.
+The result is a flat RGB object-ID image for color-based matte extraction in compositing software such as Nuke, Fusion, or After Effects, not an EXR with Cryptomatte metadata.
 
 The output should:
 
@@ -290,13 +294,15 @@ The output should:
 * isolate objects cleanly with magic wand or color picker tools
 * maximize clean keyability
 * maintain stable object regions
-* avoid adjacent same-color contamination
+* prevent same-color and near-color contamination between different objects anywhere in the image
 * preserve original object silhouettes precisely
 
 VISUAL STYLE:
 flat segmentation map, cryptomatte preview, object ID matte, VFX utility render pass, machine vision segmentation map, semantic segmentation visualization, clean RGB object isolation pass.
 
-The final output should resemble a professionally rendered Cryptomatte pass generated from a high-end CG renderer.`;
+Before producing the final image, check the complete object-to-color assignment across the whole frame. Replace every reused or near-duplicate color assigned to different objects with a fresh, clearly separated color. Verify that selecting each color isolates only its assigned object or region, including small details and distant background objects.
+
+The final output should resemble a professionally rendered object-ID pass with one globally unique color per independently selectable object or region.`;
 export const colorIdToMatteImageEditPrompt = `Use the connected image labeled "Original RGB source image" as the original image when it is available. Otherwise, use the user's other connected RGB/source image reference as the original image. Use the connected black-and-white image labeled "Color ID to Matte edit mask" as the edit mask for this Image Model run.
 
 The user's prompt describes the desired change. Apply that change only inside the white matte region. Treat black regions as locked original-image content. Treat gray or softened edge pixels, if present, as feathered transition pixels.
