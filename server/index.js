@@ -125,6 +125,7 @@ import {
 } from "../src/model3D.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences } from "../src/modelProviderRouting.js";
+import { imageReferenceLimitError } from "../src/imageReferenceLimits.js";
 import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -3505,14 +3506,14 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const shotListNotes = String(req.body.shotListNotes || "").trim();
     const revisionNotes = String(req.body.revisionNotes || "").trim();
     const currentFinalPrompt = String(req.body.currentFinalPrompt || req.body.resultText || "").trim();
-    const characterInputs = normalizedMediaInputs(req.body.characterInputs, "character");
-    const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location");
-    const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element");
-    const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
-    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video").slice(-1);
+    const characterInputs = normalizedMediaInputs(req.body.characterInputs, "character", Infinity);
+    const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location", Infinity);
+    const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element", Infinity);
+    const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style", Infinity);
+    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video", Infinity).slice(-1);
     const approach = normalizeFilmDirectorApproach(req.body.approach);
     const audioInputs = filmDirectorSupportsMusic(approach)
-      ? normalizedMediaInputs(req.body.audioInputs, "audio").slice(-1)
+      ? normalizedMediaInputs(req.body.audioInputs, "audio", Infinity).slice(-1)
       : [];
     const referenceVideoMode = filmDirectorReferenceVideoMode(
       req.body.referenceVideoOptions || { [String(req.body.referenceVideoMode || "")]: true }
@@ -3721,6 +3722,27 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
+    const usesKreaImageFallback =
+      !process.env.FAL_KEY &&
+      Boolean(process.env.KREA_API_KEY) &&
+      selectedModel.provider.startsWith("fal-") &&
+      supportsKreaModel("image", selectedModel.displayName);
+    const imageReferenceProvider = runtimeModelProviderPreferences.imageGeneration === "atlas"
+      ? "atlas"
+      : usesKreaImageFallback
+        ? "krea"
+        : selectedModel.provider === "google"
+          ? "google"
+          : "fal";
+    const referenceLimitError = imageReferenceLimitError({
+      model: selectedModel.displayName,
+      provider: imageReferenceProvider,
+      count: imagePromptUrls.length
+    });
+    if (referenceLimitError) {
+      return res.status(400).json({ error: referenceLimitError });
+    }
+
     const requestedAspectRatio = req.body.requestedAspectRatio || req.body.aspectRatio;
     const aspectRatio = await resolveImageGenerationAspectRatio({
       value: req.body.aspectRatio,
@@ -3748,12 +3770,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (
-      !process.env.FAL_KEY &&
-      process.env.KREA_API_KEY &&
-      selectedModel.provider.startsWith("fal-") &&
-      supportsKreaModel("image", selectedModel.displayName)
-    ) {
+    if (usesKreaImageFallback) {
       return runKreaImageModel(req, res, {
         prompt,
         selectedModel,
@@ -16314,7 +16331,7 @@ function normalizedTextInputs(items) {
     .slice(0, 8);
 }
 
-function normalizedMediaInputs(items, mediaType) {
+function normalizedMediaInputs(items, mediaType, maxItems = 6) {
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => ({
@@ -16325,7 +16342,7 @@ function normalizedMediaInputs(items, mediaType) {
       type: mediaType
     }))
     .filter((item) => isLocalAssetUrl(item.url))
-    .slice(0, 6);
+    .slice(0, maxItems);
 }
 
 function normalizeSkillDirectorReferenceTag(value) {
@@ -17353,6 +17370,7 @@ async function runFilmDirectorDraft({
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(effectiveShotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      referenceTags: [...characterInputs, ...locationInputs, ...elementInputs].map((item) => item.tag).filter(Boolean),
       styleDirection,
       motionDirection,
       shotList,

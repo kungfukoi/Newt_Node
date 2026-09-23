@@ -351,6 +351,7 @@ import {
   normalizeMinimaxH3Resolution
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -413,10 +414,8 @@ import {
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
 import {
-  filmDirectorOutputUsesReferenceTag,
   filmDirectorReferenceVideoMode,
   filmDirectorSetupInputIsLocked,
-  filmDirectorUsesReference,
   normalizeFilmDirectorReferenceVideoBlueprint,
   normalizeFilmDirectorReferenceVideoOptions,
   normalizeFilmDirectorScenes
@@ -428,9 +427,12 @@ import {
   normalizeFilmDirectorDuration
 } from "./filmDirectorDurations.js";
 import {
+  applyFilmDirectorImageOverrides,
   composeFilmDirectorPrompt,
+  explicitFilmDirectorImageIncoming,
   filmDirectorInputPort,
   filmDirectorInputPortForNodeType,
+  filmDirectorReferenceIsActive,
   isFilmDirectorConnection,
   mergeFilmDirectorVisualIncoming
 } from "./filmDirectorModelRouting.js";
@@ -15356,7 +15358,25 @@ function NodeBody({
     const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
     const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
     const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
-    const imageReferenceCount = imagePromptConnections.length + (characterInputUnsupported ? 0 : displayIncoming.characterIn?.length || 0);
+    const imageReferenceItems = connectedImagePromptItems(
+      isSam3Image
+        ? zImageSupportedReferenceConnections(displayIncoming.imagePromptIn || [])
+        : imageReferenceConnectionsForModel(node.data.model, displayIncoming),
+      incomingByNode,
+      { includeComposerCharacterBindings: !isZImage }
+    );
+    const imageReferenceCount = imageReferenceItems.length;
+    const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
+    const kreaReferenceLimit = imageModelReferenceLimit(node.data.model, "krea");
+    const imageReferenceProvider = imageProviderPreference === "atlas"
+      ? "atlas"
+      : imageProviderPreference === "google" && node.data.model === imageModelNames.nanoBananaPro
+        ? "google"
+        : !modelProviderAvailability.fal && modelProviderAvailability.krea && kreaReferenceLimit
+          ? "krea"
+          : "fal";
+    const imageReferenceLimit = imageModelReferenceLimit(node.data.model, imageReferenceProvider);
+    const imageReferenceOverLimit = Boolean(imageReferenceLimit && imageReferenceCount > imageReferenceLimit);
     const imageRunCost = estimateImageRunCost({
       model: node.data.model,
       resolution: node.data.resolution,
@@ -15414,7 +15434,7 @@ function NodeBody({
           </div>
         )}
         <GenerationProgress scope={generationScope} nodeId={node.id} />
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || imageReferenceOverLimit}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
             : formatPricedRunLabel("Run Image", showPriceSnapshot ? imageRunCost : null)}
@@ -15517,6 +15537,13 @@ function NodeBody({
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
+          {!isSam3Image && imageReferenceLimit && (
+            <small className={`model-status-note image-reference-count ${imageReferenceOverLimit ? "error" : ""}`}>
+              {imageReferenceOverLimit
+                ? `References sent: ${imageReferenceCount}/${imageReferenceLimit}. Disconnect ${imageReferenceCount - imageReferenceLimit}; Newt will not drop the extras.`
+                : `References sent: ${imageReferenceCount}/${imageReferenceLimit} via ${imageReferenceProviderLabel(imageReferenceProvider)}.`}
+            </small>
+          )}
           {!isSam3Image && (
             <>
               {!cameraInputUnsupported && (
@@ -20277,7 +20304,10 @@ function directorSceneUsesConnection(directorSource, itemSource, type = "image",
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
+  const label = type === "character"
+    ? itemSource.data?.characterName || itemSource.data?.title || sourceLabel(itemSource)
+    : itemSource.data?.title || sourceLabel(itemSource);
+  return filmDirectorReferenceIsActive(directorSource.data, { tag, label, type, categoryCount });
 }
 
 function directorReferenceBindingText(references = []) {
@@ -20406,7 +20436,7 @@ function directorVisualPackages(directorItems = [], incomingByNode = {}) {
 function expandImageDirectorPackageIncoming(incoming = {}, incomingByNode = {}) {
   const directorItems = directorPackageConnections(incoming.directorIn || []);
   if (!directorItems.length) return incoming;
-  return mergeFilmDirectorVisualIncoming(incoming, directorVisualPackages(directorItems, incomingByNode), {
+  return mergeFilmDirectorVisualIncoming(explicitFilmDirectorImageIncoming(incoming), directorVisualPackages(directorItems, incomingByNode), {
     imagePort: "imagePromptIn",
     characterPort: "characterIn"
   });
@@ -22445,7 +22475,11 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
   const namedCharacterReferences = characterSources.length > 1;
   const resolvedPrompt = resolveImageCharacterMentions(prompt, characterSources, namedCharacterReferences);
   const supportingInstructions = items
-    .filter(({ source }) => source.type !== "camera" && !isActiveComposerSource(source))
+    .filter(({ source }) => !["camera", "style"].includes(source.type) && !isActiveComposerSource(source))
+    .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
+    .filter(Boolean);
+  const styleInstructions = items
+    .filter(({ source }) => source.type === "style")
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
   const composerCharacterInstructions = composerCharacterMappingPromptPieces(items, incomingByNode, namedCharacterReferences);
@@ -22454,7 +22488,7 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
 
-  if (!hasComposerGuide && !supportingInstructions.length && !cameraInstructions.length) return resolvedPrompt;
+  if (!hasComposerGuide && !supportingInstructions.length && !styleInstructions.length && !cameraInstructions.length) return resolvedPrompt;
 
   const ratio = extractAspectRatio(aspectRatio);
   const aspectInstruction = hasTransferReference && ratio
@@ -22463,7 +22497,11 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
   const writtenPrompt = [resolvedPrompt, ...supportingInstructions, ...composerCharacterInstructions].filter(Boolean).join("\n\n");
   const finalPrompt = hasComposerGuide ? composerReferencePrompt(writtenPrompt) : writtenPrompt;
 
-  return [finalPrompt, aspectInstruction, ...cameraInstructions].filter(Boolean).join("\n\n");
+  return applyFilmDirectorImageOverrides({
+    prompt: [finalPrompt, aspectInstruction].filter(Boolean).join("\n\n"),
+    styleInstructions,
+    cameraInstructions
+  });
 }
 
 function isActiveComposerSource(source) {

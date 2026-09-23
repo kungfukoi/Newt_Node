@@ -112,12 +112,13 @@ export async function runSkillDirectorNode({
 
 function activeSceneReferenceItems(items = [], data = {}, action = "build", type = "image") {
   if (action === "style") return [];
+  if (action !== "revise") return items;
   return items.filter((item) => filmDirectorUsesReference(data, {
     tag: item.tag,
     label: item.label,
     type,
     categoryCount: items.length,
-    useSavedTags: ["build", "revise"].includes(action)
+    useSavedTags: true
   }));
 }
 

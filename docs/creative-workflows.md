@@ -31,7 +31,8 @@ Changing an earlier dependency marks only the affected later stages stale. Exist
 | Video | Optional temporal, camera, performance, or continuation reference. |
 | Music | Timing and vocal authority for Music Video, or optional pacing input for Montage. |
 
-Connected assets receive stable reference tags. The final scene uses only references selected by or named in the active scene rather than forcing every connected asset into every shot.
+Connected assets receive stable reference tags. A fresh build includes every connected Character, Location, and Prop from Reference Setup as a tagged definition in the final prompt, without forcing every asset into every shot. A revision may intentionally remove a connected asset from the active scene.
+Director does not silently cut off a reference when there are more than six in one input category. Downstream models apply their own explicit input limits.
 
 ### Approaches
 
@@ -52,7 +53,9 @@ Music Video requires connected audio and a supported downstream route. Director 
 
 Choose **Still** when the final output is one generated image. Director immediately sets Shots to `1`, keeps that control locked at `1`, and persists the invariant through scene switching and workflow reload. Style Direction, Camera Direction, Scene Overview, and Shot List remain available; the Shot List describes one static drawable instant rather than temporal action or coverage.
 
-When a built Director is connected to an Image Model, its final prompt becomes the primary image prompt. A directly connected Text prompt remains supplemental direction. Active Director Location and Props references flow to Image Prompt, active Characters flow to Character, and direct Image Model references are preserved and deduplicated.
+When a built Director is connected to an Image Model, its final prompt becomes the primary image prompt. A directly connected Text prompt remains supplemental direction. Active Director Location and Props references flow to Image Prompt, active Characters flow to Character, and direct Image Model references are preserved and deduplicated. Repeated `@tags` in the Director prompt name those references; they do not add another image input. A Mood Board explicitly connected to the Image Model remains an additional reference. The Director itself does not impose a small image-count cap: the selected image model/provider sets the final ceiling. OpenAI Image 2.5 accepts 16 references through Fal or Atlas. The Image Model shows the fully expanded number that will be sent and refuses an over-limit run instead of dropping the last image.
+
+A Style node connected directly to the Image Model overrides conflicting style, palette, lighting-treatment, texture, medium, and grade direction from Director. A Camera node connected directly to the Image Model overrides conflicting framing, lens, angle, composition, depth of field, and camera movement from both Director and Style.
 
 ### Reference Video Modes
 
