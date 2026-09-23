@@ -65,6 +65,7 @@ import { validateProviderKey } from "./provider-key-validation.js";
 import { createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
+import { prepareAtlasVideoReferenceAsset } from "./atlas-video-input.js";
 import {
   archiveInstallBranchStatus,
   defaultUpdateBranch,
@@ -80,7 +81,7 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
-import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorFinalPromptMaxChars, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
@@ -110,9 +111,21 @@ import {
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
-import { compositeVideoBlendModeOptions, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { compositeVideoBlendModeOptions, model3DNames, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import {
+  buildRodin25FalInput,
+  isRodin25Model,
+  model3DFaceCount,
+  model3DViewOrder,
+  normalizeModel3DGenerateType,
+  normalizeModel3DModel,
+  rodin25FalEndpoint,
+  rodin25MaxInputImages,
+  rodin25QualityMeshOption
+} from "../src/model3D.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences } from "../src/modelProviderRouting.js";
+import { imageReferenceLimitError } from "../src/imageReferenceLimits.js";
 import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
@@ -143,7 +156,11 @@ import {
 } from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
-import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
+import {
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
+  normalizeFilmDirectorDuration
+} from "../src/filmDirectorDurations.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt, filmDirectorRevisionActiveReferenceTags } from "../src/filmDirectorRevision.js";
 import {
@@ -164,7 +181,6 @@ import { normalizeFilmDirectorVideoModel } from "../src/filmDirectorVideoModels.
 import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
-  filmDirectorShotMaxCharsPerCut,
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
 import { compactFilmDirectorStyleDirection, filmDirectorStyleDirectionDirective } from "../src/filmDirectorStyle.js";
@@ -379,7 +395,8 @@ const atlasMedia = createAtlasMedia({
   }),
   readLocalAsset,
   imageSize: normalizeOpenAiImageSize,
-  labelPrompt: promptWithReferenceLabels
+  labelPrompt: promptWithReferenceLabels,
+  prepareVideoSource: prepareAtlasVideoReference
 });
 const reuseDirectorVisualAnalysis = createCreativeAnalysisCache();
 const creativeUsageContext = new AsyncLocalStorage();
@@ -423,6 +440,7 @@ const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
 const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
+const rodin25BaseCost = Number(process.env.RODIN_2_5_BASE_COST || 0.4);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
 const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
@@ -2772,6 +2790,10 @@ app.get("/api/stats", async (_req, res) => {
         addOnCost: hunyuan3DProAddOnCost,
         currency: "USD"
       },
+      rodin25: {
+        baseCost: rodin25BaseCost,
+        currency: "USD"
+      },
       textProcessing: {
         falRequestCost: falTextRequestCost,
         falVisionUnitCost: falVisionTextUnitCost,
@@ -3484,14 +3506,14 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const shotListNotes = String(req.body.shotListNotes || "").trim();
     const revisionNotes = String(req.body.revisionNotes || "").trim();
     const currentFinalPrompt = String(req.body.currentFinalPrompt || req.body.resultText || "").trim();
-    const characterInputs = normalizedMediaInputs(req.body.characterInputs, "character");
-    const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location");
-    const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element");
-    const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
-    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video").slice(-1);
+    const characterInputs = normalizedMediaInputs(req.body.characterInputs, "character", Infinity);
+    const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location", Infinity);
+    const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element", Infinity);
+    const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style", Infinity);
+    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video", Infinity).slice(-1);
     const approach = normalizeFilmDirectorApproach(req.body.approach);
     const audioInputs = filmDirectorSupportsMusic(approach)
-      ? normalizedMediaInputs(req.body.audioInputs, "audio").slice(-1)
+      ? normalizedMediaInputs(req.body.audioInputs, "audio", Infinity).slice(-1)
       : [];
     const referenceVideoMode = filmDirectorReferenceVideoMode(
       req.body.referenceVideoOptions || { [String(req.body.referenceVideoMode || "")]: true }
@@ -3499,8 +3521,11 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const referenceVideoAnalysis = String(req.body.referenceVideoAnalysis || "").trim();
     const referenceVideoAnalysisSource = String(req.body.referenceVideoAnalysisSource || "").trim();
     const referenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(req.body.referenceVideoBlueprint);
-    const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const shotCount = filmDirectorShotCountForDuration(
+      normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3"),
+      durationSeconds
+    );
     const videoModel = normalizeFilmDirectorVideoModel(req.body.videoModel);
     const resolution = normalizeFilmDirectorResolution(req.body.resolution);
     const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
@@ -3513,7 +3538,9 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (!["camera", "reference"].includes(referenceVideoMode) && ["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
       return res.status(400).json({
-        error: `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Director. Reduce the shot count or increase the scene duration.`
+        error: filmDirectorIsStillDuration(durationSeconds)
+          ? "Still supports exactly one shot in Director."
+          : `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Director. Reduce the shot count or increase the scene duration.`
       });
     }
     if (action === "revise" && !revisionNotes) {
@@ -3695,6 +3722,27 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
+    const usesKreaImageFallback =
+      !process.env.FAL_KEY &&
+      Boolean(process.env.KREA_API_KEY) &&
+      selectedModel.provider.startsWith("fal-") &&
+      supportsKreaModel("image", selectedModel.displayName);
+    const imageReferenceProvider = runtimeModelProviderPreferences.imageGeneration === "atlas"
+      ? "atlas"
+      : usesKreaImageFallback
+        ? "krea"
+        : selectedModel.provider === "google"
+          ? "google"
+          : "fal";
+    const referenceLimitError = imageReferenceLimitError({
+      model: selectedModel.displayName,
+      provider: imageReferenceProvider,
+      count: imagePromptUrls.length
+    });
+    if (referenceLimitError) {
+      return res.status(400).json({ error: referenceLimitError });
+    }
+
     const requestedAspectRatio = req.body.requestedAspectRatio || req.body.aspectRatio;
     const aspectRatio = await resolveImageGenerationAspectRatio({
       value: req.body.aspectRatio,
@@ -3722,12 +3770,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (
-      !process.env.FAL_KEY &&
-      process.env.KREA_API_KEY &&
-      selectedModel.provider.startsWith("fal-") &&
-      supportsKreaModel("image", selectedModel.displayName)
-    ) {
+    if (usesKreaImageFallback) {
       return runKreaImageModel(req, res, {
         prompt,
         selectedModel,
@@ -6339,7 +6382,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           outputFileNameBase: req.body.outputFileNameBase,
           generationGroupId: req.body.generationGroupId,
           generationStartedAt: listGenerationProgress().find((entry) => entry.runId === req.body.generationRunId)?.startedAt,
-          generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal
+          generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal,
+          generationSubmittedAt: req.body.generationSubmittedAt
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
@@ -7981,45 +8025,62 @@ function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant
 
 app.post("/api/node/generate-3d", async (req, res) => {
   try {
-    const runtimeProvider = resolveFalKreaProvider({
-      falKey: process.env.FAL_KEY,
-      kreaKey: process.env.KREA_API_KEY
-    });
+    const modelName = normalizeModel3DModel(req.body.model);
+    const rodinSelected = isRodin25Model(modelName);
+    const runtimeProvider = rodinSelected
+      ? String(process.env.FAL_KEY || "").trim() ? "fal" : null
+      : resolveFalKreaProvider({
+          falKey: process.env.FAL_KEY,
+          kreaKey: process.env.KREA_API_KEY
+        });
     if (!runtimeProvider) {
-      return res.status(400).json({ error: "Hunyuan 3D needs an enabled Fal or Krea API key in Settings." });
+      return res.status(400).json({
+        error: rodinSelected
+          ? "Rodin 2.5 needs an enabled Fal API key in Settings."
+          : "Hunyuan 3D needs an enabled Fal or Krea API key in Settings."
+      });
     }
 
-    const imageViewUrls = normalizeHunyuan3DImageViewUrls(req.body);
+    const imageViewUrls = normalizeModel3DImageViewUrls(req.body);
     if (!imageViewUrls.front) {
       return res.status(400).json({ error: "Connect a front image to the 3D node." });
     }
+    const inputImageCount = Object.keys(imageViewUrls).length;
+    if (rodinSelected && inputImageCount > rodin25MaxInputImages) {
+      return res.status(400).json({ error: `Rodin 2.5 accepts up to ${rodin25MaxInputImages} connected view images.` });
+    }
 
-    const endpoint = runtimeProvider === "fal"
-      ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
-      : kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro");
-    const generateType = normalizeChoice(req.body.generateType, ["Normal", "Geometry"], "Normal");
+    const endpoint = rodinSelected
+      ? rodin25FalEndpoint
+      : runtimeProvider === "fal"
+        ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
+        : kreaEndpointForModel("model3d", model3DNames.hunyuanPro);
+    const generateType = normalizeModel3DGenerateType(req.body.generateType);
     const enablePbr = Boolean(req.body.enablePbr) && generateType !== "Geometry";
-    const faceCount = clampInteger(req.body.faceCount, 40000, 1500000, 500000);
+    const faceCount = model3DFaceCount(req.body.faceCount, modelName);
     const uploadedViewUrls = Object.fromEntries(
       await Promise.all(Object.entries(imageViewUrls).map(async ([view, url]) => [
         view,
         runtimeProvider === "fal" ? await localAssetToFalUrl(url) : await uploadLocalOutputToKrea(url)
       ]))
     );
-    const input = runtimeProvider === "fal"
-      ? {
-          input_image_url: uploadedViewUrls.front,
-          generate_type: generateType,
-          enable_pbr: enablePbr,
-          face_count: faceCount
-        }
-      : {
-          input_mode: "image",
-          image_urls: [uploadedViewUrls.front],
-          generate_texture: generateType !== "Geometry",
-          enable_pbr: enablePbr,
-          face_count: faceCount
-        };
+    const uploadedImageUrls = model3DViewOrder.map((view) => uploadedViewUrls[view]).filter(Boolean);
+    const input = rodinSelected
+      ? buildRodin25FalInput({ imageUrls: uploadedImageUrls, generateType, enablePbr, faceCount })
+      : runtimeProvider === "fal"
+        ? {
+            input_image_url: uploadedViewUrls.front,
+            generate_type: generateType,
+            enable_pbr: enablePbr,
+            face_count: faceCount
+          }
+        : {
+            input_mode: "image",
+            image_urls: [uploadedViewUrls.front],
+            generate_texture: generateType !== "Geometry",
+            enable_pbr: enablePbr,
+            face_count: faceCount
+          };
     const viewFields = {
       back: "back_image_url",
       left: "left_image_url",
@@ -8030,17 +8091,20 @@ app.post("/api/node/generate-3d", async (req, res) => {
       rightFront: "right_front_image_url"
     };
 
-    Object.entries(viewFields).forEach(([view, field]) => {
-      if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
-    });
+    if (!rodinSelected) {
+      Object.entries(viewFields).forEach(([view, field]) => {
+        if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
+      });
+    }
 
     const result = runtimeProvider === "fal"
       ? await subscribeFal(endpoint, { input, logs: true }, { route: "generate-3d", node: req.body.nodeId })
-      : await runKreaGeneration({ endpoint, input, label: "Hunyuan 3D 3.1 Pro" });
+      : await runKreaGeneration({ endpoint, input, label: modelName });
     const data = runtimeProvider === "fal" ? result?.data || {} : result.job || {};
     const kreaModelUrl = runtimeProvider === "krea" ? extractKreaJobResultUrl(result.job) : "";
     const remoteModel = runtimeProvider === "fal"
-      ? normalizeFalFile(data.model_glb) ||
+      ? (rodinSelected ? normalizeFalFile(data.model_mesh) || normalizeFalFile(data.model_meshes?.[0]) : null) ||
+        normalizeFalFile(data.model_glb) ||
         normalizeFalFile(data.model_urls?.glb) ||
         findFalMediaFile(data, "model/")
       : kreaModelUrl
@@ -8048,11 +8112,12 @@ app.post("/api/node/generate-3d", async (req, res) => {
         : null;
 
     if (!remoteModel?.url) {
-      return res.status(502).json({ error: "Hunyuan 3D returned no GLB model.", raw: data });
+      return res.status(502).json({ error: `${modelName} returned no GLB model.`, raw: data });
     }
 
-    const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
-    const remoteTexturedAssets = runtimeProvider === "fal"
+    const outputBaseName = rodinSelected ? "rodin-2-5" : "hunyuan-3d-pro";
+    const output = await downloadModelFile(req, remoteModel.url, outputBaseName, remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const remoteTexturedAssets = runtimeProvider === "fal" && !rodinSelected
       ? {
           glb: remoteModel,
           obj: normalizeFalFile(data.model_urls?.obj),
@@ -8062,40 +8127,41 @@ app.post("/api/node/generate-3d", async (req, res) => {
       : { glb: remoteModel };
     const texturedAssets = await downloadTexturedModelAssets(req, remoteTexturedAssets);
     const remoteThumbnail = runtimeProvider === "fal"
-      ? normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data)
+      ? normalizeFalFile(data.thumbnail) ||
+        normalizeFalFile(data.thumbnail_url) ||
+        normalizeFalFile(data.preview_image) ||
+        normalizeFalFile(data.rendered_image) ||
+        normalizeFalFile(data.rendered_images?.[0]) ||
+        firstFalImageResult(data)
       : null;
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
       try {
-        thumbnailOutput = await downloadImage(req, remoteThumbnail.url, "hunyuan-3d-thumbnail", remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
+        thumbnailOutput = await downloadImage(req, remoteThumbnail.url, `${outputBaseName}-thumbnail`, remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
       } catch (error) {
         console.warn("Could not download 3D thumbnail:", error.message);
       }
     }
 
-    const estimatedCost = estimateHunyuan3DProCost({
-      generateType,
-      enablePbr,
-      faceCount,
-      inputImageCount: Object.keys(imageViewUrls).length,
-      endpoint
-    });
-    const cost = runtimeProvider === "fal"
-      ? estimatedCost
-      : {
+    const estimatedCost = rodinSelected
+      ? estimateRodin25Cost({ generateType, enablePbr, faceCount, inputImageCount, endpoint })
+      : estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount, endpoint });
+    const cost = runtimeProvider === "krea"
+      ? {
           ...estimatedCost,
           amountUsd: null,
           unitRateUsd: null,
           pricingBasis: "Hunyuan 3D 3.1 Pro generation through Krea; current public API documentation does not list a fixed local estimate",
           pricingSource: "krea-api-docs-2026-07-30"
-        };
+        }
+      : estimatedCost;
 
     await appendHistory({
       id: result.requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "model3d",
       provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
-      modelName: "Hunyuan 3D 3.1 Pro",
+      modelName,
       endpoint,
       mode: "Image to 3D",
       prompt: "Image to 3D",
@@ -8103,17 +8169,24 @@ app.post("/api/node/generate-3d", async (req, res) => {
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
-        model: req.body.model || "Hunyuan 3D 3.1 Pro",
+        model: modelName,
         generateType,
         enablePbr,
         faceCount,
         imageViews: Object.keys(imageViewUrls),
-        inputImageCount: Object.keys(imageViewUrls).length
+        inputImageCount,
+        ...(rodinSelected
+          ? {
+              tier: input.tier,
+              material: input.material,
+              qualityMeshOption: rodin25QualityMeshOption(faceCount)
+            }
+          : {})
       },
       cost,
       remoteModel,
       remoteThumbnail,
-      modelUrls: data.model_urls || null,
+      modelUrls: data.model_urls || data.model_meshes || (data.model_mesh ? [data.model_mesh] : null),
       localModelAssets: texturedAssets,
       seed: data.seed ?? null,
       localModel: output.publicPath,
@@ -8125,13 +8198,13 @@ app.post("/api/node/generate-3d", async (req, res) => {
     res.json({
       requestId: result.requestId,
       endpoint,
-      modelName: "Hunyuan 3D 3.1 Pro",
+      modelName,
       seed: data.seed,
-      text: "Hunyuan 3D model generated.",
+      text: `${modelName} model generated.`,
       cost,
       model: {
         ...remoteModel,
-        label: "Hunyuan 3D model",
+        label: `${modelName} model`,
         localUrl: output.publicPath,
         fileName: output.fileName,
         mimeType: output.mimeType,
@@ -10399,19 +10472,18 @@ function normalizeKrea2Creativity(value) {
   return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
 }
 
-function normalizeHunyuan3DImageViewUrls(body = {}) {
-  const viewOrder = ["front", "back", "left", "right", "top", "bottom", "leftFront", "rightFront"];
+function normalizeModel3DImageViewUrls(body = {}) {
   const viewUrls = body.imageViewUrls && typeof body.imageViewUrls === "object" && !Array.isArray(body.imageViewUrls) ? body.imageViewUrls : {};
   const normalized = {};
 
-  viewOrder.forEach((view) => {
+  model3DViewOrder.forEach((view) => {
     const url = String(viewUrls[view] || "").trim();
     if (isLocalAssetUrl(url)) normalized[view] = url;
   });
 
-  const legacyUrls = Array.isArray(body.imageUrls) ? body.imageUrls.filter(isLocalAssetUrl).slice(0, viewOrder.length) : [];
+  const legacyUrls = Array.isArray(body.imageUrls) ? body.imageUrls.filter(isLocalAssetUrl).slice(0, model3DViewOrder.length) : [];
   legacyUrls.forEach((url, index) => {
-    const view = viewOrder[index];
+    const view = model3DViewOrder[index];
     if (!normalized[view]) normalized[view] = url;
   });
 
@@ -16009,6 +16081,24 @@ function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputIma
   };
 }
 
+function estimateRodin25Cost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
+  return {
+    amountUsd: roundCurrency(rodin25BaseCost),
+    currency: "USD",
+    unitRateUsd: rodin25BaseCost,
+    units: 1,
+    unit: "3D generation",
+    mediaType: "model3d",
+    generateType,
+    enablePbr,
+    faceCount,
+    inputImageCount,
+    pricingBasis: "Rodin 2.5 Gen-2.5-High fal.ai per-generation estimate",
+    pricingSource: "fal-model-page-2026-09-18",
+    endpoint
+  };
+}
+
 function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelName = imageModelNames.openAiImage2 }) {
   const edit = String(endpoint || "").includes("/edit");
   const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
@@ -16241,7 +16331,7 @@ function normalizedTextInputs(items) {
     .slice(0, 8);
 }
 
-function normalizedMediaInputs(items, mediaType) {
+function normalizedMediaInputs(items, mediaType, maxItems = 6) {
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => ({
@@ -16252,7 +16342,7 @@ function normalizedMediaInputs(items, mediaType) {
       type: mediaType
     }))
     .filter((item) => isLocalAssetUrl(item.url))
-    .slice(0, 6);
+    .slice(0, maxItems);
 }
 
 function normalizeSkillDirectorReferenceTag(value) {
@@ -16280,7 +16370,8 @@ function normalizeSkillDirectorDurationSeconds(value) {
 }
 
 function skillDirectorDurationLabel(durationSeconds = "15") {
-  return `${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second`;
+  const duration = normalizeSkillDirectorDurationSeconds(durationSeconds);
+  return filmDirectorIsStillDuration(duration) ? "single still image" : `${duration}-second`;
 }
 
 function textInputContext(textInputs) {
@@ -16372,6 +16463,11 @@ async function runTextLlm({
     const model = `openai/${String(openAiModel || "").replace(/^openai\//, "")}`;
     const body = openAiLlmBody({ model, prompt, systemPrompt, reasoningEffort, responseMimeType, route });
     delete body.store;
+    // Director shot lists are normally a few hundred tokens, but the shared schema
+    // budget reserves 24k. Atlas returns an empty 504 for those oversized requests.
+    if (body.max_output_tokens) {
+      body.max_output_tokens = atlasCreativeOutputBudget(route);
+    }
     const response = await fetch("https://api.atlascloud.ai/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
@@ -16486,6 +16582,9 @@ function skillDirectorReferenceSetupFromLines(referenceLines = []) {
 
 function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "15") {
   const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  if (filmDirectorIsStillDuration(durationSeconds)) {
+    return "Shot count: exactly 1 still-image shot. Return recommendedShotCount as 1 and exactly one CUT object describing one static drawable instant.";
+  }
   if (shotCount === "Auto") {
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     return [
@@ -16499,6 +16598,9 @@ function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "
 }
 
 function skillDirectorContinuityMapDirective(durationLabel = "15 seconds", approach = "cinematic") {
+  if (durationLabel === "single still image") {
+    return "Before writing SHOT_LIST, reconcile identity, wardrobe, location geography, eyelines, prop ownership and state, lighting, pose and action state into one internally consistent captured instant. Print one compact Continuity ledger line; do not imply events before or after the frame.";
+  }
   if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
     return `Before writing SHOT_LIST, plan a compact continuity ledger for the ${durationLabel} sequence. Keep character identity, wardrobe and prop identity coherent throughout. Preserve geography, eyelines, movement and physical state inside each continuous vignette, but explicitly identify intentional location/time jumps and matched transitions between separate vignettes. Do not force every vignette into one continuous room or action. Establish only locations, subjects and actions supplied by the brief. Each clip needs a readable editorial purpose, not filler.`;
   }
@@ -16511,6 +16613,9 @@ function skillDirectorContinuityMapDirective(durationLabel = "15 seconds", appro
 }
 
 function skillDirectorShotLogicDirective(durationLabel = "15 seconds", characterCount = 0, approach = "cinematic") {
+  if (durationLabel === "single still image") {
+    return "Run a Still Composition Pass. CUT 1 must be a single static frame with a clear subject, visual hierarchy, readable pose and gesture, coherent eyelines and prop states, intentional lens perspective, depth and lighting. Do not add neighboring coverage, edits or temporal camera movement.";
+  }
   if (["montage", "music-video"].includes(normalizeFilmDirectorApproach(approach))) {
     return `Check every CUT for a clear editorial purpose and playable timing within the ${durationLabel} total. Use varied scales and angles while allowing deliberately matched compositions across different vignettes. Maintain the 180-degree line and action continuity inside each continuous vignette, not across intentional location jumps. Respect the explicit shot count; Auto should choose enough clips to communicate the brief without rushed unreadable filler. For Music Video, align candidate accents with the connected audio context and leave visible vocal performances readable for synchronization.`;
   }
@@ -16561,8 +16666,10 @@ function stripSkillDirectorFences(text) {
     .trim();
 }
 
-function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production", approach = "cinematic", referenceVideoMode = "", connectedMusic = false } = {}) {
-  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode, approach, connectedMusic);
+function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production", approach = "cinematic", durationSeconds = "15", referenceVideoMode = "", connectedMusic = false } = {}) {
+  const audioPolicy = filmDirectorIsStillDuration(durationSeconds)
+    ? ""
+    : filmDirectorAudioPolicyPrompt(audioMode, approach, connectedMusic);
   const visualSceneRules = filmDirectorSceneRules(approach);
   const referenceVideoInstruction = referenceVideoMode === "extend"
     ? filmDirectorExtendInstructionForApproach(approach)
@@ -16583,10 +16690,8 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
   const cleanOverview = cleanSkillDirectorMoodBoardReferences(sceneOverview).trim();
-  const finalShotCount = largestSkillDirectorCutNumber(shotList);
-  const maxCharsPerCut = filmDirectorShotMaxCharsPerCut(finalShotCount || "Auto");
-  const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
-  let finalPrompt = [
+  const cleanShotList = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(shotList));
+  return assembleSkillDirectorFinalPrompt([
     dedupeSkillDirectorLines(referenceLines).join("\n"),
     visualSceneRules,
     audioPolicy,
@@ -16596,27 +16701,7 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = 
     cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
     cleanContinuity ? `Scene Continuity:\n${cleanContinuity}` : "",
     cleanShotList ? `Shot List:\n${cleanShotList}` : ""
-  ]
-    .filter(Boolean)
-    .join("\n\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
-    finalPrompt = [
-      clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
-      visualSceneRules,
-      audioPolicy,
-      referenceVideoInstruction,
-      cleanOverview ? `Scene Overview:\n${clipSkillDirectorText(cleanOverview, 1200)}` : "",
-      cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
-      cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
-      cleanContinuity ? `Scene Continuity:\n${clipSkillDirectorText(cleanContinuity, 500)}` : "",
-      cleanShotList ? `Shot List:\n${compactSkillDirectorShotList(cleanShotList, 280)}` : ""
-    ].filter(Boolean).join("\n\n");
-  }
-
-  return clipSkillDirectorText(finalPrompt, skillDirectorFinalPromptMaxChars);
+  ]);
 }
 
 function dedupeSkillDirectorLines(lines = []) {
@@ -16658,16 +16743,6 @@ function clipSkillDirectorText(text = "", maxChars = 7000) {
   const clipped = source.slice(0, Math.max(0, maxChars - 1));
   const boundary = Math.max(clipped.lastIndexOf(". "), clipped.lastIndexOf("\n"), clipped.lastIndexOf(" "));
   return `${clipped.slice(0, boundary > maxChars * 0.72 ? boundary + 1 : clipped.length).trim()}`;
-}
-
-function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
-  const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
-  if (!source) return "";
-  return source
-    .split(/(?=\bCUT\s+\d{1,2}\s+—)/gi)
-    .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
-    .filter(Boolean)
-    .join("\n\n");
 }
 
 function sanitizeSkillDirectorShotListFormatting(text = "") {
@@ -16861,7 +16936,9 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
     issues.push(`Return exactly ${requestedCount} CUT sections; the draft contains ${actualCount || "none"}.`);
   }
   if (actualCount > cutLimit) {
-    issues.push(`Use no more than ${cutLimit} cuts at a one-second minimum for a ${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second scene.`);
+    issues.push(filmDirectorIsStillDuration(durationSeconds)
+      ? "Still requires exactly one CUT describing one static image."
+      : `Use no more than ${cutLimit} cuts at a one-second minimum for a ${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second scene.`);
   }
   if (!requestedCount && (actualCount < 1 || actualCount > cutLimit)) {
     issues.push(`Auto shot planning must choose between 1 and ${cutLimit} cuts for this scene; the draft contains ${actualCount || "none"}.`);
@@ -17006,6 +17083,7 @@ function buildSkillDirectorPrompt({
   imageDescriptions = []
 }) {
   const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  const stillImage = filmDirectorIsStillDuration(durationSeconds);
   const sceneTreatment = filmDirectorSceneTreatment(approach);
   const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
   const promptImageDescriptions = imageDescriptions.map(cleanSkillDirectorMoodBoardReferences).filter(Boolean);
@@ -17053,9 +17131,13 @@ function buildSkillDirectorPrompt({
 
   if (action === "motion") {
     return [
-      `Generate the Camera Direction for one ${sceneTreatment} ${durationLabel} video scene.`,
+      stillImage
+        ? `Generate the Camera Direction for one ${sceneTreatment} still image.`
+        : `Generate the Camera Direction for one ${sceneTreatment} ${durationLabel} video scene.`,
       'Return strict JSON only: {"cameraDirection":"one production-ready paragraph"}',
-      "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
+      stillImage
+        ? "Translate the user's camera intent into a precise static capture setup: composition, framing, camera height and angle, lens perspective, depth of field, subject pose, visual hierarchy and lighting. Do not describe camera movement over time."
+        : "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
       referenceVideoMode === "extend"
         ? "Begin from the reference video's exact ending camera position, movement, lens behavior, screen direction, blocking, and subject momentum. Describe a seamless handoff before introducing any new camera move."
         : referenceVideoMode === "camera"
@@ -17075,7 +17157,9 @@ function buildSkillDirectorPrompt({
 
   if (action === "shotList") {
     return [
-      `Create the Shot List for one ${sceneTreatment} ${durationLabel} AI video scene.`,
+      stillImage
+        ? `Create the single-shot Shot List for one ${sceneTreatment} AI image.`
+        : `Create the Shot List for one ${sceneTreatment} ${durationLabel} AI video scene.`,
       "The current Scene Overview is the sole story authority for this pass and fully replaces every earlier version. Do not carry forward any prior event, action, prop, dialogue, evidence detail, or story beat that is absent from the current Scene Overview and connected asset descriptions. Do not turn an abstract beat into a newly invented concrete prop.",
       referenceVideoMode === "extend"
         ? "This is a continuation, not a remake. CUT 1 must begin at the exact final state of the attached reference video, carry forward ongoing motion and performance naturally, and introduce only the requested additional action. Do not spend any cut recreating or summarizing earlier footage."
@@ -17102,7 +17186,9 @@ function buildSkillDirectorPrompt({
   }
 
   return [
-    `NewtNode Director task: create ${sceneTreatment} video planning blocks for a ${durationLabel} AI video generation prompt.`,
+    stillImage
+      ? `NewtNode Director task: create ${sceneTreatment} planning blocks for one AI image generation prompt.`
+      : `NewtNode Director task: create ${sceneTreatment} video planning blocks for a ${durationLabel} AI video generation prompt.`,
     filmDirectorApproachDirective(approach),
     musicContext ? `Connected music timing context:\n${musicContext}` : "",
     referenceVideoMode === "extend"
@@ -17121,7 +17207,9 @@ function buildSkillDirectorPrompt({
     "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
     "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
     "Keep Continuity ledger and Must-have shots to one compact line each.",
-    "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
+    stillImage
+      ? "Keep a great focus on one coherent drawable instant, professional composition, pose, visual hierarchy and continuity."
+      : "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
     skillDirectorContinuityMapDirective(durationLabel, approach),
     skillDirectorShotLogicDirective(durationLabel, characterInputs.length, approach),
     filmDirectorShotDetailDirective(shotCount, durationSeconds),
@@ -17142,7 +17230,9 @@ function buildSkillDirectorPrompt({
     sceneOverview ? `Scene Overview:\n${sceneOverview}` : "",
     shotList ? `Existing editable Shot List. Improve only if needed and preserve useful user edits:\n${shotList}` : "",
     promptImageDescriptions.length ? `Connected visual analysis:\n${promptImageDescriptions.join("\n\n")}` : "",
-    `Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize continuity, blocking, eyeline, screen direction, motivated lighting, and usable ${durationLabel} pacing.`
+    stillImage
+      ? "Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize identity, composition, pose, eyeline, prop state, motivated lighting and a single drawable instant."
+      : `Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize continuity, blocking, eyeline, screen direction, motivated lighting, and usable ${durationLabel} pacing.`
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -17194,6 +17284,8 @@ async function runFilmDirectorDraft({
   approach = "cinematic"
 }) {
   const model = skillDirectorFalModel;
+  durationSeconds = normalizeFilmDirectorDuration(durationSeconds);
+  shotCount = filmDirectorShotCountForDuration(shotCount, durationSeconds);
   audioInputs = filmDirectorSupportsMusic(approach) ? audioInputs : [];
   const musicError = filmDirectorMusicVideoError({ approach, audioInputs, videoModel });
   if (musicError) throw new Error(musicError);
@@ -17220,7 +17312,8 @@ async function runFilmDirectorDraft({
     ? normalizeFilmDirectorReferenceVideoBlueprint(referenceVideoBlueprint)
     : normalizeFilmDirectorReferenceVideoBlueprint();
   let referenceVideoContext = { usages: [] };
-  const timedBlueprintMode = ["camera", "reference"].includes(referenceVideoMode);
+  const timedBlueprintMode = !filmDirectorIsStillDuration(durationSeconds)
+    && ["camera", "reference"].includes(referenceVideoMode);
   const timedBlueprintMissing = timedBlueprintMode && resolvedReferenceVideoBlueprint.mode !== referenceVideoMode;
   if (["extend", "camera", "reference"].includes(referenceVideoMode) && referenceVideoUrl && action !== "build" && (!resolvedReferenceVideoAnalysis || timedBlueprintMissing)) {
     referenceVideoContext = await describeFilmDirectorReferenceVideo(videoInputs.at(-1), referenceVideoMode);
@@ -17232,7 +17325,7 @@ async function runFilmDirectorDraft({
     : durationSeconds;
   const effectiveShotCount = timedBlueprintMode && resolvedReferenceVideoBlueprint.shotCount > 0
     ? String(resolvedReferenceVideoBlueprint.shotCount)
-    : shotCount;
+    : filmDirectorShotCountForDuration(shotCount, effectiveDurationSeconds);
   const musicContext = usesMusic && audioInputs.length && action !== "build"
     ? await analyzeDirectorMusic(audioInputs.at(-1), action === "revise" ? 30 : effectiveDurationSeconds)
     : "";
@@ -17247,6 +17340,7 @@ async function runFilmDirectorDraft({
       shotListNotes,
       audioMode,
       approach,
+      durationSeconds: effectiveDurationSeconds,
       referenceVideoMode,
       connectedMusic: usesMusic
     });
@@ -17276,6 +17370,7 @@ async function runFilmDirectorDraft({
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(effectiveShotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      referenceTags: [...characterInputs, ...locationInputs, ...elementInputs].map((item) => item.tag).filter(Boolean),
       styleDirection,
       motionDirection,
       shotList,
@@ -17348,9 +17443,10 @@ async function runFilmDirectorDraft({
       structuredOutput,
       ["sceneName", "scene_name", "title"]
     ) || sceneName;
-    const requestedRevisedDuration = String(
-      skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
-    );
+    const requestedRevisedDuration = skillDirectorStructuredValue(
+      structuredOutput,
+      ["durationSeconds", "duration_seconds", "duration"]
+    ) || String(skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"]));
     const requestedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, effectiveDurationSeconds);
     const revisedDurationSeconds = timedBlueprintMode && !referenceStructureRevisionRequested
       ? effectiveDurationSeconds
@@ -17414,7 +17510,9 @@ async function runFilmDirectorDraft({
     });
     const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
       outputText,
-      shotCount: timedBlueprintMode && !referenceStructureRevisionRequested ? effectiveShotCount : "Auto",
+      shotCount: timedBlueprintMode && !referenceStructureRevisionRequested
+        ? effectiveShotCount
+        : filmDirectorShotCountForDuration("Auto", revisedDurationSeconds),
       durationSeconds: revisedDurationSeconds,
       prompt: revisionPrompt,
       model,
@@ -17433,6 +17531,7 @@ async function runFilmDirectorDraft({
       shotListNotes: revisedShotListNotes,
       audioMode: revisedAudioMode,
       approach: revisedApproach,
+      durationSeconds: revisedDurationSeconds,
       referenceVideoMode,
       connectedMusic: revisedUsesMusic
     });
@@ -21349,6 +21448,19 @@ async function readLocalAsset(publicPath) {
     buffer,
     mimeType: mimeForExtension(path.extname(fileName).toLowerCase())
   };
+}
+
+async function prepareAtlasVideoReference(publicPath) {
+  return prepareAtlasVideoReferenceAsset(publicPath, {
+    resolveLocalAssetPath: resolveLocalAssetPathFromUrl,
+    readLocalAsset,
+    probeVideoFile,
+    runFfmpeg,
+    readFile,
+    removeFile: rm,
+    temporaryDirectory: tmpdir(),
+    randomId: randomUUID
+  });
 }
 
 async function resolveLocalAssetPathFromUrl(value) {

@@ -123,7 +123,22 @@ try {
   }
   assert.equal(recovered.state, "completed", recovered.message);
   assert.equal((await (await request("/api/project-outputs?projectId=recovered-project")).json()).total, 1);
-  console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import; no provider calls.");
+  const directorProps = ["Can", "Frap", "Sign", "Book", "Koozie", "HatCopy", "Goblet", ...Array.from({ length: 10 }, (_, index) => `Extra${index + 1}`)];
+  const director = await (await request("/api/node/run-skill-director", {
+    action: "build",
+    durationSeconds: "still",
+    sceneOverview: "A still scene with @Witch holding @Goblet.",
+    characterInputs: [{ tag: "@Witch", label: "Witch", url: "/outputs/witch.png" }],
+    locationInputs: [{ tag: "@NoiseRedux1", label: "NoiseRedux1", url: "/outputs/location.png" }],
+    elementInputs: directorProps.map((name) => ({ tag: `@${name}`, label: name, url: `/outputs/${name}.png` }))
+  })).json();
+  for (const tag of ["Witch", "NoiseRedux1", ...directorProps]) {
+    assert.match(director.referenceSetup, new RegExp(`^@${tag} = `, "m"));
+    assert.match(director.text, new RegExp(`^@${tag} = `, "m"));
+  }
+  assert.equal(director.referenceTags.length, 19);
+  assert.equal(director.referenceTags.at(-1), "@Extra10");
+  console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");
   if (exited) await exited;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  atlasVideoInputDimensions,
+  atlasVideoInputPixelLimits,
   buildAtlasImageRequest,
   buildAtlasVideoRequest,
   estimateAtlasImageCost,
@@ -8,6 +10,22 @@ import {
   supportsAtlasImageModel,
   supportsAtlasVideoModel
 } from "../src/atlasMedia.js";
+
+test("Atlas video input dimensions preserve compliant media and scale undersized references without cropping", () => {
+  assert.deepEqual(atlasVideoInputDimensions(3840, 2160), {
+    width: 3840,
+    height: 2160,
+    pixelCount: 8294400,
+    needsNormalization: false
+  });
+  assert.deepEqual(atlasVideoInputDimensions(740, 400), {
+    width: 870,
+    height: 470,
+    pixelCount: 408900,
+    needsNormalization: true
+  });
+  assert.ok(atlasVideoInputDimensions(740, 400).pixelCount >= atlasVideoInputPixelLimits.minimum);
+});
 
 test("Atlas media support is limited to verified Newt models", () => {
   assert.equal(supportsAtlasImageModel("OpenAI Image 2.5"), true);

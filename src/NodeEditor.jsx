@@ -1,7 +1,20 @@
 import React from "react";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas } from "./imageAdjustments.js";
 import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
-import { characterBaseGenerationSignature, characterBaseVideoGenerationSignature, characterBaseVariant, characterNeutralBaseWardrobePrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, characterWardrobeVariantIsCurrent, generateCharacterBaseSheets, upsertCharacterWardrobeVariant } from "./characterSheetWorkflow.js";
+import {
+  characterBaseAppearancePromptForData,
+  characterBaseGenerationSignature,
+  characterBaseSheetPromptForData,
+  characterBaseVideoGenerationSignature,
+  characterBaseVariant,
+  characterSheetPrompt,
+  characterVideoBaseAppearancePromptForData,
+  characterVideoIdentityContinuityPromptForData,
+  characterWardrobeVariantIsCurrent,
+  generateCharacterBaseSheets,
+  stylizedCharacterDownstreamPrompt,
+  upsertCharacterWardrobeVariant
+} from "./characterSheetWorkflow.js";
 import { filmDirectorVideoSettings } from "./nodeRunners/videoModels.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeLabel, normalizeFilmDirectorAudioMode } from "./filmDirectorAudio.js";
 import { filmDirectorApproachOptions, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
@@ -186,9 +199,7 @@ import {
 } from "./previewLayout.js";
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
-  characterVideoBasicWardrobePrompt,
-  characterVideoSheetPrompt,
-  characterVideoWardrobePrompt,
+  characterVideoSheetPromptForData,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import {
@@ -261,6 +272,7 @@ import {
   lensPresetPrompts,
   model3DDescription,
   model3DNames,
+  model3DOptions,
   model3DViewInputs,
   nanoImageAspectRatios,
   openAiImageAspectRatios,
@@ -316,6 +328,15 @@ import {
   wanVaceSamplerOptions,
   wanVaceTransparencyOptions
 } from "./modelOptions.js";
+import {
+  isRodin25Model,
+  model3DFaceCount,
+  normalizeModel3DGenerateType,
+  normalizeModel3DModel,
+  rodin25MaxInputImages,
+  rodin25MeshOptions,
+  rodin25QualityMeshOption
+} from "./model3D.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import {
   isMinimaxH3Model,
@@ -330,6 +351,7 @@ import {
   normalizeMinimaxH3Resolution
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
@@ -363,7 +385,7 @@ import {
   resizeGroupFromCorner
 } from "./nodeGeometry.js";
 import { catalogNodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel, timelineNodeTitle } from "./nodeRegistry.js";
-import { textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
+import { resolvePlainTextGraphNodes, textOutputForNode, wouldCreatePlainTextCycle } from "./plainText.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -381,6 +403,7 @@ import {
   rejectedRunResults,
   resultTextFromItems,
   runRunnableNodesByDependencyOrder,
+  selectedRunnableNodesForRun,
   settleSequential
 } from "./nodeRunner.js";
 import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runCoverageGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
@@ -391,15 +414,28 @@ import {
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
 import {
-  filmDirectorOutputUsesReferenceTag,
   filmDirectorReferenceVideoMode,
   filmDirectorSetupInputIsLocked,
-  filmDirectorUsesReference,
   normalizeFilmDirectorReferenceVideoBlueprint,
   normalizeFilmDirectorReferenceVideoOptions,
   normalizeFilmDirectorScenes
 } from "./filmDirectorScenes.js";
 import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
+import {
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
+  normalizeFilmDirectorDuration
+} from "./filmDirectorDurations.js";
+import {
+  applyFilmDirectorImageOverrides,
+  composeFilmDirectorPrompt,
+  explicitFilmDirectorImageIncoming,
+  filmDirectorInputPort,
+  filmDirectorInputPortForNodeType,
+  filmDirectorReferenceIsActive,
+  isFilmDirectorConnection,
+  mergeFilmDirectorVisualIncoming
+} from "./filmDirectorModelRouting.js";
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
@@ -407,7 +443,6 @@ import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessa
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
-  composeVideoPrompt,
   normalizeUtilityVideoGenerationResult,
   normalizeVideoGenerationResult,
   videoModelSupportsFilmDirector
@@ -766,14 +801,6 @@ const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
 const maxCharacterCustomSheets = 16;
-const characterSheetPrompt =
-  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const cinematicCharacterSheetPrompt =
-  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid gray background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const characterBasicWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently worn in every panel. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
-const characterWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Study the selected wardrobe sheet reference and apply only the clothing design, garments, materials, colors, and styling from that reference consistently to the character in every panel. If any person, model, face, body, skin, hair, pose, environment, background, text, or unrelated subject appears in the wardrobe reference, ignore it completely. Do not transfer the wardrobe reference person's identity, anatomy, facial features, pose, body shape, or composition. The character portrait reference is the only source for character identity. Do not show the basic black outfit, the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 const characterVoicePrompt =
   "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
 const composerReferencePrompt = (writtenPrompt = "") => {
@@ -1334,11 +1361,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, promptResolvedIncomingByNode, groups), [nodes, promptResolvedIncomingByNode, groups]);
   const selectedRunnableNodes = React.useMemo(
-    () => nodes.filter((node) => {
-      if (!selectedNodeSet.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
-      if (node.type !== "output") return true;
-      return !(incomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedNodeSet.has(source.id) && isRunnableNode(source));
-    }),
+    () => selectedRunnableNodesForRun(nodes, selectedNodeSet, incomingByNode),
     [incomingByNode, nodes, selectedNodeSet]
   );
   const selectedPlayablePreviewNodes = React.useMemo(
@@ -3487,7 +3510,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
-    const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
+    const baseCharacterSheetPrompt = characterBaseSheetPromptForData(node.data);
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
     const baseSignature = characterBaseGenerationSignature(node.data);
     const storedBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
@@ -3573,7 +3596,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         includeVideo: generateCuVideoSheet,
         generateBase: () => runCharacterSheetGeneration({
           node,
-          prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [baseCharacterSheetPrompt, characterBaseAppearancePromptForData(node.data), physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -3581,7 +3604,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }),
         generateVideo: () => runCharacterSheetGeneration({
           node,
-          prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [
+            characterVideoSheetPromptForData(node.data),
+            characterVideoBaseAppearancePromptForData(node.data),
+            characterVideoIdentityContinuityPromptForData(node.data),
+            physicalDetailsPrompt
+          ].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -5801,6 +5829,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         textAgent: ["textIn"]
       },
       director: {
+        imageModel: [filmDirectorInputPortForNodeType("imageModel")],
         videoModel: ["directorIn"],
         storyboard: ["directorIn"]
       },
@@ -5909,6 +5938,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (isFilmDirectorConnection({
+      sourceType: source.type,
+      sourcePort: from.port,
+      targetType: target.type,
+      targetPort: to.port
+    })) return "";
     if (isOutputSinkConnection(target.type, to.port, portKindForNodePort(source, from.port, "output"))) return "";
     if (target.type === "assembly") return "";
 
@@ -6360,7 +6395,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function currentSelectedNodeIds() {
     // React Flow selection can lead the frame-coalesced persisted selection.
     const flowNodes = flowCanvasRef.current?.getNodes?.();
-    return flowNodes ? flowNodes.filter((node) => node.selected).map((node) => node.id) : selectedNodeIds;
+    if (!Array.isArray(flowNodes) || (!flowNodes.length && nodesRef.current.length)) return selectedNodeIds;
+    return flowNodes.filter((node) => node.selected).map((node) => node.id);
   }
 
   function copySelection() {
@@ -6710,27 +6746,31 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, { nodeReferenceBindings });
     }
 
-    const referenceNodes = nodesRef.current.map((item) => item.id === currentNode.id ? currentNode : item);
+    const referenceNodes = resolvePlainTextGraphNodes(nodesRef.current, edgesRef.current)
+      .map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    if (currentNode.type === "videoModel" && incoming.directorIn?.length) {
+    if (["imageModel", "videoModel"].includes(currentNode.type) && incoming.directorIn?.length) {
       const source = incoming.directorIn[0].source;
       if (!source?.data?.skillDirectorBuilt || source.data.skillDirectorOutputStale) {
         updateNode(currentNode.id, { status: "error", error: "Review and rebuild the connected Director scene before generating." });
         return { status: "error" };
       }
-      currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
+      if (currentNode.type === "videoModel") {
+        currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
+      }
     }
     const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
-      currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model)
+      currentNode.type === "imageModel"
+        || (currentNode.type === "videoModel" && videoModelSupportsFilmDirector(currentNode.data.model))
         ? connectedDirectorPackageText(incoming.directorIn, currentIncomingByNode)
         : "";
     const fallbackPrompt = resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
     const basePrompt =
-      currentNode.type === "videoModel"
-        ? composeVideoPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
+      ["imageModel", "videoModel"].includes(currentNode.type)
+        ? composeFilmDirectorPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
         : connectedPrompt || fallbackPrompt;
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
@@ -7002,7 +7042,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "revise") {
           const revisionState = filmDirectorRevisionStatePatch(currentNode.data, {
             ...processed,
-            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach),
+            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach, processed.durationSeconds),
             shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || "")
           });
           const revisionVersion = appendFilmDirectorRevisionVersionHistory(currentNode.data.skillDirectorRevisionHistory, {
@@ -7026,7 +7066,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
         updateNode(currentNode.id, {
           ...nextSkillPatch,
-          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach) : processed.text,
+          resultText: action === "build"
+            ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode, processed.approach, processed.durationSeconds)
+            : processed.text,
           styleDirection: processed.styleDirection || currentNode.data.styleDirection || "",
           motionDirection: processed.motionDirection || currentNode.data.motionDirection || "",
           shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || ""),
@@ -7314,7 +7356,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
-        const imageIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current);
+        const imageIncoming = expandImageDirectorPackageIncoming(
+          promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current),
+          currentIncomingByNode
+        );
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, imageIncoming);
         const imagePromptItems = connectedImagePromptItems(
@@ -7360,13 +7405,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "model3d") {
+        const model = normalizeModel3DModel(currentNode.data.model);
         const generated = await run3DModelGeneration({
           node: currentNode,
           imageViewUrls: connected3DViewUrls(incoming),
           workflowContext: requestContext,
-          model: currentNode.data.model || model3DNames.hunyuanPro,
+          model,
           generateType: normalizeModel3DGenerateType(currentNode.data.generateType),
-          faceCount: model3DFaceCount(currentNode.data.faceCount)
+          faceCount: model3DFaceCount(currentNode.data.faceCount, model)
         });
         const { resultItems, firstNewIndex } = appendedNodeResultState(previous3DResults, [generated], "model3d");
         updateNode(currentNode.id, {
@@ -7518,13 +7564,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function runSelectedNodes() {
-    const selectedIds = new Set(selectedNodeIds);
+    const selectedIds = new Set(currentSelectedNodeIds());
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
-    const runnable = nodesRef.current.filter((node) => {
-      if (!selectedIds.has(node.id) || !isRunnableNode(node) || node.data.status === "running") return false;
-      if (node.type !== "output") return true;
-      return !(currentIncomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedIds.has(source.id) && isRunnableNode(source));
-    });
+    const runnable = selectedRunnableNodesForRun(nodesRef.current, selectedIds, currentIncomingByNode);
     const playablePreviewNodes = nodesRef.current.filter((node) => selectedIds.has(node.id) && previewVideoSourceForNode(node, currentIncomingByNode));
     const previewPlayback = playablePreviewNodes.length ? playSelectedPreviewVideos(playablePreviewNodes.map((node) => node.id)) : null;
 
@@ -11618,6 +11660,18 @@ function NodeBody({
                     <small>Creates a simplified close-up video sheet for every wardrobe</small>
                   </span>
                 </label>
+                <label className="character-section character-option-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(node.data.stylizedCharacter)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { stylizedCharacter: event.target.checked })}
+                  />
+                  <span>
+                    <strong>Stylized Character</strong>
+                    <small>Strictly preserves the reference design, proportions, materials, colors, and features; combine with Cinematic for a realistic gray cyc</small>
+                  </span>
+                </label>
                 <section
                   className="character-section character-sheet-library drop-enabled"
                   onDragOver={allowFileDrop}
@@ -15124,8 +15178,10 @@ function NodeBody({
     const settingsOpen = Boolean(node.data.settingsOpen);
     const frontInputs = [...(incoming.frontImageIn || []), ...(incoming.imageIn || [])];
     const frontConnected = Boolean(frontInputs.length);
+    const selectedModel = normalizeModel3DModel(node.data.model);
+    const rodinSelected = isRodin25Model(selectedModel);
     const generateType = normalizeModel3DGenerateType(node.data.generateType);
-    const faceCount = model3DFaceCount(node.data.faceCount);
+    const faceCount = model3DFaceCount(node.data.faceCount, selectedModel);
     const pbrEnabled = node.data.enablePbr !== false;
 
     return (
@@ -15195,8 +15251,14 @@ function NodeBody({
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Model">
-            <select value={node.data.model || model3DNames.hunyuanPro} onChange={(event) => onUpdate(node.id, { model: event.target.value })}>
-              <option>{model3DNames.hunyuanPro}</option>
+            <select
+              value={selectedModel}
+              onChange={(event) => {
+                const model = normalizeModel3DModel(event.target.value);
+                onUpdate(node.id, { model, faceCount: model3DFaceCount(faceCount, model) });
+              }}
+            >
+              {model3DOptions.map((model) => <option key={model}>{model}</option>)}
             </select>
           </NodeRow>
           {viewPorts.map((view) => {
@@ -15224,25 +15286,48 @@ function NodeBody({
               <span />
             </button>
           </NodeRow>
-          <NodeRow label="Faces">
-            <input
-              type="number"
-              min="40000"
-              max="1500000"
-              step="10000"
-              value={faceCount}
-              onChange={(event) => onUpdate(node.id, { faceCount: event.target.value })}
-            />
-          </NodeRow>
+          {rodinSelected ? (
+            <NodeRow label="Mesh">
+              <select
+                value={rodin25QualityMeshOption(faceCount)}
+                onChange={(event) => {
+                  const option = rodin25MeshOptions.find((item) => item.value === event.target.value);
+                  onUpdate(node.id, { faceCount: option?.faceCount || 500000 });
+                }}
+              >
+                {rodin25MeshOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </NodeRow>
+          ) : (
+            <NodeRow label="Faces">
+              <input
+                type="number"
+                min="40000"
+                max="1500000"
+                step="10000"
+                value={faceCount}
+                onChange={(event) => onUpdate(node.id, { faceCount: event.target.value })}
+              />
+            </NodeRow>
+          )}
         </details>
-        <p className="utility-model-description">{model3DDescription}</p>
+        <p className="utility-model-description">
+          {model3DDescription}{rodinSelected ? ` Rodin accepts up to ${rodin25MaxInputImages} connected views.` : ""}
+        </p>
       </div>
     );
   }
 
   if (node.type === "imageModel") {
-    const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
-    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
+    const directorPromptValue = connectedDirectorPackageText(incoming.directorIn, incomingByNode);
+    const promptValue = composeFilmDirectorPrompt({
+      directorPrompt: directorPromptValue,
+      connectedPrompt: resolvedPromptText(incoming.promptIn),
+      fallbackPrompt: node.data.prompt
+    });
+    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    const directorConnected = Boolean(incoming.directorIn?.length);
+    const displayIncoming = expandImageDirectorPackageIncoming(incoming, incomingByNode);
     const isSam3Image = isSam3ImageModel(node.data.model);
     const isZImage = isZImageImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
@@ -15251,18 +15336,19 @@ function NodeBody({
     const openAiQualityOptions = isGptImage25Model(node.data.model)
       ? openAiImage2QualityOptions
       : openAiImage2QualityOptions.filter((option) => ["low", "medium", "high"].includes(option));
-    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
+    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, displayIncoming);
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const referenceTagMatches = isSam3Image ? [] : imageModelReferenceTagMatches(promptValue, node, incoming, incomingByNode);
-    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
+    const referenceTagMatches = isSam3Image ? [] : imageModelReferenceTagMatches(promptValue, node, displayIncoming, incomingByNode);
+    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, displayIncoming);
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
-    const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
-    const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
-    const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
-    const characterPromptLabel = connectedSummary(incoming.characterIn, "Add character");
+    const cameraPromptLabel = connectedSummary(displayIncoming.cameraIn, "Add camera");
+    const stylePromptLabel = connectedSummary(displayIncoming.styleIn, "Add style");
+    const transferPromptLabel = connectedSummary(displayIncoming.transferIn, "Add mood board");
+    const characterPromptLabel = connectedSummary(displayIncoming.characterIn, "Add character");
     const promptPort = config.input.find((port) => port.id === "promptIn");
+    const directorPort = config.input.find((port) => port.id === "directorIn");
     const imagePromptPort = config.input.find((port) => port.id === "imagePromptIn");
     const cameraPort = config.input.find((port) => port.id === "cameraIn");
     const stylePort = config.input.find((port) => port.id === "styleIn");
@@ -15272,7 +15358,25 @@ function NodeBody({
     const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
     const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
     const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
-    const imageReferenceCount = imagePromptConnections.length + (characterInputUnsupported ? 0 : incoming.characterIn?.length || 0);
+    const imageReferenceItems = connectedImagePromptItems(
+      isSam3Image
+        ? zImageSupportedReferenceConnections(displayIncoming.imagePromptIn || [])
+        : imageReferenceConnectionsForModel(node.data.model, displayIncoming),
+      incomingByNode,
+      { includeComposerCharacterBindings: !isZImage }
+    );
+    const imageReferenceCount = imageReferenceItems.length;
+    const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
+    const kreaReferenceLimit = imageModelReferenceLimit(node.data.model, "krea");
+    const imageReferenceProvider = imageProviderPreference === "atlas"
+      ? "atlas"
+      : imageProviderPreference === "google" && node.data.model === imageModelNames.nanoBananaPro
+        ? "google"
+        : !modelProviderAvailability.fal && modelProviderAvailability.krea && kreaReferenceLimit
+          ? "krea"
+          : "fal";
+    const imageReferenceLimit = imageModelReferenceLimit(node.data.model, imageReferenceProvider);
+    const imageReferenceOverLimit = Boolean(imageReferenceLimit && imageReferenceCount > imageReferenceLimit);
     const imageRunCost = estimateImageRunCost({
       model: node.data.model,
       resolution: node.data.resolution,
@@ -15290,9 +15394,10 @@ function NodeBody({
     const atlasImageProvider = normalizeModelProviderPreferences(modelProviderPreferences).imageGeneration === "atlas";
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
-      ? [promptPort, imagePromptPort]
+      ? [promptPort, directorPort, imagePromptPort]
       : [
           promptPort,
+          directorPort,
           imagePromptPort,
           cameraInputUnsupported ? null : cameraPort,
           styleInputUnsupported ? null : stylePort,
@@ -15329,13 +15434,16 @@ function NodeBody({
           </div>
         )}
         <GenerationProgress scope={generationScope} nodeId={node.id} />
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || imageReferenceOverLimit}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
             : formatPricedRunLabel("Run Image", showPriceSnapshot ? imageRunCost : null)}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
+          <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Connect Director")}</button>
+          </NodeRow>
           <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <TaggedPromptTextarea
               className={promptConnected ? "connected-field" : ""}
@@ -15429,6 +15537,13 @@ function NodeBody({
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
+          {!isSam3Image && imageReferenceLimit && (
+            <small className={`model-status-note image-reference-count ${imageReferenceOverLimit ? "error" : ""}`}>
+              {imageReferenceOverLimit
+                ? `References sent: ${imageReferenceCount}/${imageReferenceLimit}. Disconnect ${imageReferenceCount - imageReferenceLimit}; Newt will not drop the extras.`
+                : `References sent: ${imageReferenceCount}/${imageReferenceLimit} via ${imageReferenceProviderLabel(imageReferenceProvider)}.`}
+            </small>
+          )}
           {!isSam3Image && (
             <>
               {!cameraInputUnsupported && (
@@ -17458,7 +17573,7 @@ function getNodeConfig(type) {
     storyboard: {
       icon: Clapperboard,
       input: [
-        { id: "directorIn", label: "Director", color: portColors.director },
+        filmDirectorInputPort(portColors.director),
         { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
         { id: "sceneReferenceIn", label: "Location", color: portColors.image },
         { id: "propsIn", label: "Props", color: portColors.image },
@@ -17477,6 +17592,7 @@ function getNodeConfig(type) {
       icon: ImagePlus,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
+        filmDirectorInputPort(portColors.director),
         { id: "imagePromptIn", label: "Image Prompt", color: portColors.image },
         { id: "cameraIn", label: "Camera", color: portColors.camera },
         { id: "styleIn", label: "Style", color: portColors.style },
@@ -17489,7 +17605,7 @@ function getNodeConfig(type) {
       icon: Film,
       input: [
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
-        { id: "directorIn", label: "Director", color: portColors.director },
+        filmDirectorInputPort(portColors.director),
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
         { id: "endFrameIn", label: "End Frame", color: portColors.image },
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
@@ -17777,6 +17893,7 @@ function createDefaultNodeData(type, label, count) {
       characterSheetModel: imageModelNames.openAiImage2,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
+      stylizedCharacter: false,
       useCustomCharacterSheet: false,
       customCharacterSheet: null,
       characterCustomSheets: [],
@@ -18095,16 +18212,6 @@ function imageModelSelectionPatch(data = {}, model) {
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
   };
-}
-
-function normalizeModel3DGenerateType(value) {
-  return value === "Geometry" ? "Geometry" : "Normal";
-}
-
-function model3DFaceCount(value) {
-  const number = Math.round(Number(value));
-  if (!Number.isFinite(number)) return 500000;
-  return Math.min(1500000, Math.max(40000, number));
 }
 
 function model3DInputPortIds() {
@@ -19809,7 +19916,7 @@ function nodeResultMediaType(node) {
 }
 
 function buildIncomingByNode(nodes, edges) {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const nodeMap = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
   return edges.reduce((incoming, edge) => {
     const source = nodeMap.get(edge.from.nodeId);
     if (!source) return incoming;
@@ -20176,12 +20283,14 @@ function directorPackageConnections(items = []) {
 
 function connectedDirectorPackageText(items = [], incomingByNode = {}) {
   return directorPackageConnections(items)
-    .map(({ source }) => applyFilmDirectorAudioPolicyToPrompt(
-      source.data.resultText,
-      source.data.skillDirectorAudioMode,
-      source.data.skillApproach,
-      filmDirectorUsesMusic(source.data.skillApproach, connectedAssetItems(incomingByNode[source.id]?.musicIn).slice(-1))
-    ))
+    .map(({ source }) => filmDirectorIsStillDuration(source.data.skillDurationSeconds || source.data.durationSeconds)
+      ? source.data.resultText
+      : applyFilmDirectorAudioPolicyToPrompt(
+          source.data.resultText,
+          source.data.skillDirectorAudioMode,
+          source.data.skillApproach,
+          filmDirectorUsesMusic(source.data.skillApproach, connectedAssetItems(incomingByNode[source.id]?.musicIn).slice(-1))
+        ))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -20195,7 +20304,10 @@ function directorSceneUsesConnection(directorSource, itemSource, type = "image",
   const tag = type === "character"
     ? characterTag(itemSource)
     : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
-  return filmDirectorOutputUsesReferenceTag(directorSource.data, tag);
+  const label = type === "character"
+    ? itemSource.data?.characterName || itemSource.data?.title || sourceLabel(itemSource)
+    : itemSource.data?.title || sourceLabel(itemSource);
+  return filmDirectorReferenceIsActive(directorSource.data, { tag, label, type, categoryCount });
 }
 
 function directorReferenceBindingText(references = []) {
@@ -20305,30 +20417,48 @@ function uniqueConnectionItems(items = []) {
   });
 }
 
-function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, options = {}) {
-  const directorItems = directorPackageConnections(incoming.directorIn || []);
-  if (!directorItems.length) return incoming;
-
-  const referenceImageIn = [...(incoming.referenceImageIn || [])];
-  const characterIn = [...(incoming.characterIn || [])];
-  let referenceVideoIn = [...(incoming.referenceVideoIn || [])];
-  let referenceAudioIn = [...(incoming.referenceAudioIn || [])];
-  let directorUsesMusic = false;
-  const includeCharacters = options.includeCharacters !== false;
-
-  directorItems.forEach(({ source }) => {
+function directorVisualPackages(directorItems = [], incomingByNode = {}) {
+  return directorItems.map(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
     const locationItems = directorIncoming.locationIn || [];
     const propItems = directorIncoming.imageIn || [];
     const characterItems = directorIncoming.characterIn || [];
+    return {
+      imageItems: [
+        ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
+        ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
+      ],
+      characterItems: characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length))
+    };
+  });
+}
+
+function expandImageDirectorPackageIncoming(incoming = {}, incomingByNode = {}) {
+  const directorItems = directorPackageConnections(incoming.directorIn || []);
+  if (!directorItems.length) return incoming;
+  return mergeFilmDirectorVisualIncoming(explicitFilmDirectorImageIncoming(incoming), directorVisualPackages(directorItems, incomingByNode), {
+    imagePort: "imagePromptIn",
+    characterPort: "characterIn"
+  });
+}
+
+function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, options = {}) {
+  const directorItems = directorPackageConnections(incoming.directorIn || []);
+  if (!directorItems.length) return incoming;
+
+  const includeCharacters = options.includeCharacters !== false;
+  const visualIncoming = mergeFilmDirectorVisualIncoming(
+    incoming,
+    directorVisualPackages(directorItems, incomingByNode),
+    { imagePort: "referenceImageIn", characterPort: "characterIn", includeCharacters }
+  );
+  let referenceVideoIn = [...(visualIncoming.referenceVideoIn || [])];
+  let referenceAudioIn = [...(visualIncoming.referenceAudioIn || [])];
+  let directorUsesMusic = false;
+
+  directorItems.forEach(({ source }) => {
+    const directorIncoming = incomingByNode?.[source.id] || {};
     const directorReferenceVideoMode = filmDirectorReferenceVideoMode(source.data.skillDirectorReferenceVideoOptions);
-    referenceImageIn.push(
-      ...locationItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location", locationItems.length)),
-      ...propItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "element", propItems.length))
-    );
-    if (includeCharacters) {
-      characterIn.push(...characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)));
-    }
     if (["extend", "camera", "reference"].includes(directorReferenceVideoMode) && directorIncoming.referenceVideoIn?.length) {
       referenceVideoIn = [directorIncoming.referenceVideoIn.at(-1)];
     }
@@ -20339,9 +20469,7 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
   });
 
   return {
-    ...incoming,
-    referenceImageIn: uniqueConnectionItems(referenceImageIn),
-    characterIn: includeCharacters ? uniqueConnectionItems(characterIn) : incoming.characterIn || [],
+    ...visualIncoming,
     referenceVideoIn: uniqueConnectionItems(referenceVideoIn),
     referenceAudioIn: uniqueConnectionItems(referenceAudioIn),
     directorUsesMusic
@@ -20451,7 +20579,7 @@ function promptReferenceIncomingForNode(incoming = {}, targetNode = null, nodes 
         targetNode
       );
 
-  if (targetNode?.type === "videoModel") {
+  if (["imageModel", "videoModel"].includes(targetNode?.type)) {
     resolved = (incoming.directorIn || []).reduce((current, { source }) => (
       mergePromptNodeReferencesIntoIncoming(
         current,
@@ -22347,7 +22475,11 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
   const namedCharacterReferences = characterSources.length > 1;
   const resolvedPrompt = resolveImageCharacterMentions(prompt, characterSources, namedCharacterReferences);
   const supportingInstructions = items
-    .filter(({ source }) => source.type !== "camera" && !isActiveComposerSource(source))
+    .filter(({ source }) => !["camera", "style"].includes(source.type) && !isActiveComposerSource(source))
+    .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
+    .filter(Boolean);
+  const styleInstructions = items
+    .filter(({ source }) => source.type === "style")
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
   const composerCharacterInstructions = composerCharacterMappingPromptPieces(items, incomingByNode, namedCharacterReferences);
@@ -22356,7 +22488,7 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
 
-  if (!hasComposerGuide && !supportingInstructions.length && !cameraInstructions.length) return resolvedPrompt;
+  if (!hasComposerGuide && !supportingInstructions.length && !styleInstructions.length && !cameraInstructions.length) return resolvedPrompt;
 
   const ratio = extractAspectRatio(aspectRatio);
   const aspectInstruction = hasTransferReference && ratio
@@ -22365,7 +22497,11 @@ function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNo
   const writtenPrompt = [resolvedPrompt, ...supportingInstructions, ...composerCharacterInstructions].filter(Boolean).join("\n\n");
   const finalPrompt = hasComposerGuide ? composerReferencePrompt(writtenPrompt) : writtenPrompt;
 
-  return [finalPrompt, aspectInstruction, ...cameraInstructions].filter(Boolean).join("\n\n");
+  return applyFilmDirectorImageOverrides({
+    prompt: [finalPrompt, aspectInstruction].filter(Boolean).join("\n\n"),
+    styleInstructions,
+    cameraInstructions
+  });
 }
 
 function isActiveComposerSource(source) {
@@ -22670,8 +22806,11 @@ function storyboardVideoReferencePromptPiece(items = []) {
 
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
+  const identityPrompt = source.data.stylizedCharacter
+    ? `STYLIZED CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory and is the sole authority for this character's identity and design. Render this same character in the requested scene without replacing or redesigning it. ${stylizedCharacterDownstreamPrompt}`
+    : `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`;
   return [
-    `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
+    identityPrompt,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -22680,7 +22819,9 @@ function characterImagePromptPieces(source, namedCharacterReferences = false) {
 function characterVideoPromptPieces(source, audioIndex) {
   if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return [];
   return [
-    "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
+    source.data.stylizedCharacter
+      ? `The connected character sheet is the sole authority for the character's identity and design. Keep that exact character consistent throughout the shot. ${stylizedCharacterDownstreamPrompt}`
+      : "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data),
     audioIndex && activeCharacterVoice(source)
@@ -23019,8 +23160,11 @@ function formatSkillDirectorShotListForClient(text = "") {
     .trim();
 }
 
-function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production", approach = "cinematic") {
-  return applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode, approach)
+function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production", approach = "cinematic", durationSeconds = "15") {
+  const prompt = filmDirectorIsStillDuration(durationSeconds)
+    ? String(text || "")
+    : applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode, approach);
+  return prompt
     .replace(/(Shot List:\s*)([\s\S]*)$/i, (_match, label, body) => `${label.trim()}\n${formatSkillDirectorShotListForClient(body)}`)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -23100,6 +23244,8 @@ function normalizeCurrentNode(node) {
   if (nextNode.type === "skillDirector") {
     const sceneOverview = data.sceneOverview ?? data.text ?? "";
     const legacyShotCount = data.skillShotCount || data.skillSceneCount || data.shotCount || "3";
+    const normalizedDuration = normalizeFilmDirectorDuration(data.skillDurationSeconds || data.durationSeconds || "15");
+    const normalizedShotCount = filmDirectorShotCountForDuration(legacyShotCount, normalizedDuration);
     const restoredShotList = splitSkillDirectorShotListForClient(data.shotList || "", data.shotListNotes || "");
     const skillDirectorData = { ...data };
     const legacyDirectorTitle = String(data.title || "");
@@ -23116,8 +23262,9 @@ function normalizeCurrentNode(node) {
         sceneName: data.sceneName || "",
         sceneOverview,
         text: sceneOverview,
-        skillShotCount: legacyShotCount,
-        skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillShotCount: normalizedShotCount,
+        skillDurationSeconds: normalizedDuration,
+        durationSeconds: normalizedDuration,
         skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
@@ -23136,7 +23283,12 @@ function normalizeCurrentNode(node) {
         shotList: restoredShotList.shotList,
         shotListNotes: restoredShotList.shotListNotes,
         skillDirectorInputSignatureVersion: Math.max(0, Number(data.skillDirectorInputSignatureVersion) || 0),
-        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || "", data.skillDirectorAudioMode, data.skillApproach),
+        resultText: formatSkillDirectorFinalPromptForClient(
+          data.resultText || "",
+          data.skillDirectorAudioMode,
+          data.skillApproach,
+          normalizedDuration
+        ),
         skillDirectorLocks:
           data.skillDirectorLocks && typeof data.skillDirectorLocks === "object"
             ? {
@@ -23297,6 +23449,7 @@ function normalizeCurrentNode(node) {
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
+      stylizedCharacter: data.stylizedCharacter === true,
       characterSheetVariants,
       characterCustomSheets,
       customCharacterSheet: null,
@@ -24288,13 +24441,14 @@ function storyboardFrameOutputItem(source, edge) {
 }
 
 function normalizeModel3DData(data = {}) {
+  const model = normalizeModel3DModel(data.model);
   return {
     ...data,
     title: data.title || "3D",
-    model: data.model || model3DNames.hunyuanPro,
+    model,
     generateType: normalizeModel3DGenerateType(data.generateType),
     enablePbr: data.enablePbr !== false,
-    faceCount: model3DFaceCount(data.faceCount),
+    faceCount: model3DFaceCount(data.faceCount, model),
     resultType: "model3d",
     batchCount: "1"
   };
@@ -24837,6 +24991,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (source.type === "skillDirector") {
     nextEdge.from.port = "directorOut";
+    if (target?.type === "imageModel" && nextEdge.to.port === "promptIn") nextEdge.to.port = "directorIn";
     if (target?.type === "videoModel" && nextEdge.to.port === "promptIn") nextEdge.to.port = "directorIn";
     if (target?.type === "storyboard" && nextEdge.to.port === "sceneDescriptionIn") nextEdge.to.port = "directorIn";
     nextEdge.color = portColors.director;

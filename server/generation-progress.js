@@ -18,7 +18,8 @@ export function generationProgressMiddleware(req, res, next) {
     kind: req.body?.generationKind,
     label: req.body?.generationLabel,
     batchIndex: req.body?.generationBatchIndex,
-    batchTotal: req.body?.generationBatchTotal
+    batchTotal: req.body?.generationBatchTotal,
+    submittedAt: req.body?.generationSubmittedAt
   });
 
   let responseFinished = false;
@@ -47,6 +48,7 @@ export function beginGenerationProgress(input = {}) {
   const existing = progressEntries.get(runId);
   if (existing) return { ...existing };
   const now = new Date().toISOString();
+  const startedAt = normalizedTimestamp(input.submittedAt) || now;
   const entry = {
     runId,
     scope: cleanScope(input.scope),
@@ -64,8 +66,8 @@ export function beginGenerationProgress(input = {}) {
     providerStatus: "",
     requestId: "",
     message: "Queued",
-    startedAt: now,
-    phaseStartedAt: now,
+    startedAt,
+    phaseStartedAt: startedAt,
     updatedAt: now
   };
   progressEntries.set(runId, entry);
@@ -79,11 +81,15 @@ export function updateGenerationProgress(runId, patch = {}) {
   if (!current) return null;
   const normalizedPatch = normalizedProgressPatch(patch);
   const now = new Date().toISOString();
+  const finishedAt = ["completed", "failed"].includes(normalizedPatch.status)
+    ? current.finishedAt || now
+    : current.finishedAt;
   const next = {
     ...current,
     ...normalizedPatch,
     runId: id,
     phaseStartedAt: normalizedPatch.phase && normalizedPatch.phase !== current.phase ? now : current.phaseStartedAt,
+    ...(finishedAt ? { finishedAt } : {}),
     updatedAt: now
   };
   progressEntries.set(id, next);
@@ -200,6 +206,11 @@ function cleanScope(value) {
 
 function cleanText(value, limit) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function normalizedTimestamp(value) {
+  const milliseconds = Date.parse(value || "");
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : "";
 }
 
 function positiveInteger(value, fallback) {

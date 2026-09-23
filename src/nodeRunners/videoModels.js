@@ -18,6 +18,7 @@ import {
   seedanceVideoResolutionOptions
 } from "../modelOptions.js";
 import { isSeedance25Model } from "../seedance25.js";
+import { composeFilmDirectorPrompt } from "../filmDirectorModelRouting.js";
 import {
   isMinimaxH3Model,
   minimaxH3DurationOptions,
@@ -113,11 +114,7 @@ export function filmDirectorVideoAspectRatio(model, aspectRatio, fallback = "") 
 }
 
 export function composeVideoPrompt({ directorPrompt, connectedPrompt, fallbackPrompt } = {}) {
-  const director = String(directorPrompt || "").trim();
-  const supplemental = String(connectedPrompt || fallbackPrompt || "").trim();
-  if (!director) return supplemental;
-  if (!supplemental || supplemental === director || director.includes(supplemental)) return director;
-  return `${director}\n\nAdditional direction:\n${supplemental}`;
+  return composeFilmDirectorPrompt({ directorPrompt, connectedPrompt, fallbackPrompt });
 }
 
 function defaultedField(value, fallback) {

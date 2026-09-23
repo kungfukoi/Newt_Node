@@ -5,9 +5,12 @@ import {
   estimateAtlasVideoCost
 } from "../src/atlasMedia.js";
 
-export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt }) {
-  async function uploadSource(source, key) {
-    return client.upload(typeof source === "string" ? await readLocalAsset(source) : source, key);
+export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null }) {
+  async function uploadSource(source, key, kind = "") {
+    const asset = kind === "videos" && typeof prepareVideoSource === "function"
+      ? await prepareVideoSource(source)
+      : typeof source === "string" ? await readLocalAsset(source) : source;
+    return client.upload(asset, key);
   }
 
   async function image({
@@ -91,7 +94,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     });
     const uploaded = { images: [], videos: [], audios: [] };
     for (const [kind, sources] of Object.entries({ images, videos, audios })) {
-      for (const source of sources) uploaded[kind].push(await uploadSource(source, key));
+      for (const source of sources) uploaded[kind].push(await uploadSource(source, key, kind));
     }
     const input = buildAtlasVideoRequest({
       model,

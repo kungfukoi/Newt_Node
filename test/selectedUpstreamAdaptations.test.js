@@ -4,10 +4,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createCreativeAnalysisCache } from "../server/creative-analysis-cache.js";
-import { creativeOpenAiModel, openAiLlmBody, skillDirectorFinalPromptMaxChars, skillDirectorSystemPrompt, validateCreativeResponse } from "../server/creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOpenAiModel, openAiLlmBody, skillDirectorSystemPrompt, validateCreativeResponse } from "../server/creative-llm.js";
 import { directorMusicLevelContext } from "../server/director-music.js";
 import { NewtPresetStore } from "../server/newt-presets.js";
 import {
+  filmDirectorApproachOptions,
   filmDirectorApproachDirective,
   filmDirectorMusicVideoError,
   filmDirectorSupportsMusic,
@@ -33,6 +34,8 @@ test("creative Director responses use strict structured output and cache success
   });
   assert.equal(body.store, false);
   assert.equal(body.text.format.type, "json_schema");
+  assert.equal(atlasCreativeOutputBudget("film-director-shotlist"), 8000);
+  assert.equal(atlasCreativeOutputBudget("film-director-revision"), 24000);
   assert.deepEqual(validateCreativeResponse({}, {
     route: "film-director-style",
     provider: "OpenAI",
@@ -52,13 +55,24 @@ test("creative Director responses use strict structured output and cache success
 
 test("Director requests always receive the shared reasoning system prompt", () => {
   const prompt = skillDirectorSystemPrompt();
-  assert.equal(skillDirectorFinalPromptMaxChars, 7000);
   assert.match(prompt, /NewtNode's Director/);
   assert.match(prompt, /reconcile the newest user instructions/i);
   assert.match(prompt, /Return only the requested output contract/);
 });
 
+test("Director final prompt assembly preserves complete long output", () => {
+  const longSceneOverview = `Scene Overview:\n${"Detailed scene direction. ".repeat(400)}`;
+  const finalCut = "Shot List:\nCUT 25 — final action and ending state remain present.";
+  const prompt = assembleSkillDirectorFinalPrompt([longSceneOverview, finalCut]);
+
+  assert.ok(prompt.length > 7000);
+  assert.ok(prompt.endsWith(finalCut));
+});
+
 test("Director approaches validate music and expose distinct creative direction", () => {
+  assert.ok(filmDirectorApproachOptions.some((option) => option.value === "photography" && option.label === "Photography"));
+  assert.equal(normalizeFilmDirectorApproach("Photography"), "photography");
+  assert.match(filmDirectorApproachDirective("photography"), /still photograph/i);
   assert.equal(normalizeFilmDirectorApproach("MUSIC-VIDEO"), "music-video");
   assert.equal(filmDirectorSupportsMusic("montage"), true);
   assert.match(filmDirectorApproachDirective("vintage"), /8mm/i);

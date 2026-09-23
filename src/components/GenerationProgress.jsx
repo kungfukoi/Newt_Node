@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { formatGenerationElapsed, isTerminalProgressStatus, liveGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
+import { formatGenerationElapsed, isFinishedProgressStatus, liveGenerationElapsed, phaseLabel, shouldRenderGenerationProgress } from "../generationProgress.js";
 import { generationProgressSnapshot, subscribeGenerationProgress } from "../generationProgressStore.js";
 
 export function GenerationProgress({ scope = "", nodeId, nodeStatus = "" }) {
   const subscribe = useCallback((listener) => subscribeGenerationProgress(scope, nodeId, listener), [scope, nodeId]);
   const getSnapshot = useCallback(() => generationProgressSnapshot(scope, nodeId), [scope, nodeId]);
   const progress = useSyncExternalStore(subscribe, getSnapshot, () => null);
-  const active = Boolean(progress && !isTerminalProgressStatus(progress.status));
+  const active = Boolean(progress && !isFinishedProgressStatus(progress.status));
   const [clock, setClock] = useState(Date.now);
 
   useEffect(() => {

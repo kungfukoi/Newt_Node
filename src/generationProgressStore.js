@@ -3,6 +3,7 @@ import {
   aggregateGenerationProgressEntries,
   generationProgressEntriesForNode,
   generationRequestMetadata,
+  isFinishedProgressStatus,
   isTerminalProgressStatus,
   mergeGenerationProgressEntry,
   progressEntryFromRequestMetadata,
@@ -45,23 +46,28 @@ export async function runTrackedGeneration(metadata, request) {
   try {
     const result = await request(requestMetadata);
     const succeeded = result?.response?.ok !== false;
+    const status = result?.data?.needsAttention ? "attention" : succeeded ? "completed" : "failed";
+    const finishedAt = isFinishedProgressStatus(status) ? new Date().toISOString() : null;
     upsertProgressEntry({
       ...entriesByRunId.get(requestMetadata.generationRunId),
-      status: result?.data?.needsAttention ? "attention" : succeeded ? "completed" : "failed",
+      status,
       phase: result?.data?.needsAttention ? "attention" : succeeded ? "complete" : "failed",
       percent: succeeded ? 100 : null,
       message: succeeded ? "Complete" : progressErrorMessage(result?.data),
+      ...(finishedAt ? { finishedAt } : {}),
       updatedAt: new Date().toISOString()
     });
     return result;
   } catch (error) {
+    const finishedAt = new Date().toISOString();
     upsertProgressEntry({
       ...entriesByRunId.get(requestMetadata.generationRunId),
       status: "failed",
       phase: "failed",
       percent: null,
       message: error?.message || "Generation failed.",
-      updatedAt: new Date().toISOString()
+      finishedAt,
+      updatedAt: finishedAt
     });
     throw error;
   }

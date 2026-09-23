@@ -1,4 +1,5 @@
 import { normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+import { filmDirectorShotCountForDuration, normalizeFilmDirectorDuration } from "./filmDirectorDurations.js";
 
 export const filmDirectorSceneLimit = 24;
 
@@ -262,6 +263,15 @@ export function filmDirectorSceneSnapshot(data = {}, fallbackName = "") {
     snapshot[key] = cloneValue(Object.prototype.hasOwnProperty.call(data, key) ? data[key] : defaults[key]);
   });
   snapshot.sceneName = String(snapshot.sceneName || fallbackName || "");
+  const duration = normalizeFilmDirectorDuration(data.skillDurationSeconds || data.durationSeconds || snapshot.skillDurationSeconds);
+  const shotCount = filmDirectorShotCountForDuration(
+    data.skillShotCount || data.shotCount || snapshot.skillShotCount,
+    duration
+  );
+  snapshot.skillDurationSeconds = duration;
+  snapshot.durationSeconds = duration;
+  snapshot.skillShotCount = shotCount;
+  snapshot.shotCount = shotCount;
   snapshot.skillApproach = normalizeFilmDirectorApproach(snapshot.skillApproach);
   snapshot.skillDirectorLockedApproach = normalizeFilmDirectorApproach(snapshot.skillDirectorLockedApproach);
   snapshot.skillDirectorLocks = { ...defaultLocks, ...(snapshot.skillDirectorLocks || {}) };

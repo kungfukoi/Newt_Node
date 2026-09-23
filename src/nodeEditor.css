@@ -1948,9 +1948,11 @@
 .node-card.custom-node-height > .preview-node-body > .preview-stage video,
 .node-card.custom-node-height .result-item img,
 .node-card.custom-node-height .result-item video,
-.node-card.custom-node-height .result-item .model-3d-viewer {
+.node-card.custom-node-height .result-item .model-3d-viewer,
+.node-card.custom-node-height > .preview-node-body > .preview-stage .model-3d-viewer {
   width: 100%;
   height: 100%;
+  min-height: 0;
   max-height: none;
   object-fit: contain;
 }
@@ -9226,6 +9228,7 @@ video.newtnode-video-fallback {
   background: rgba(0, 0, 0, 0.24);
   font-size: 12px;
   line-height: 1.35;
+  white-space: pre-line;
 }
 
 .run-node-button {
@@ -9618,6 +9621,16 @@ video.newtnode-video-fallback {
   color: #ddc631;
   font-size: 12px;
   font-weight: 700;
+}
+
+.model-status-note.image-reference-count {
+  margin: -2px 0 10px 146px;
+  color: rgba(244, 240, 232, 0.55);
+  line-height: 1.35;
+}
+
+.model-status-note.error {
+  color: #ff7474;
 }
 
 .model-limitation-note {

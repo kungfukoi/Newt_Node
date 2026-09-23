@@ -4,17 +4,16 @@ import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
 import { remoteVideoScope } from "../remoteVideoJobs.js";
 
-export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index, generationGroupId, batchTotal = 1 }) {
-  const { response, data } = await runTrackedGeneration({
-    scope: remoteVideoScope(workflowContext),
-    nodeId: node.id,
-    nodeTitle: node.data.title,
-    kind: "image",
-    label: node.data.model || "Image generation",
-    groupId: generationGroupId,
-    batchIndex: index + 1,
-    batchTotal
-  }, (progress) => nodeApi.generateImage({
+export function buildImageGenerationRequest({
+  node,
+  prompt,
+  aspectRatio,
+  imagePromptItems = [],
+  workflowContext,
+  index = 0,
+  progress = {}
+}) {
+  return {
     prompt,
     model: node.data.model,
     aspectRatio: aspectRatio || node.data.aspectRatio,
@@ -32,7 +31,28 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     nodeId: node.id,
     nodeTitle: node.data.title,
     ...progress
-  }));
+  };
+}
+
+export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index, generationGroupId, batchTotal = 1 }) {
+  const { response, data } = await runTrackedGeneration({
+    scope: remoteVideoScope(workflowContext),
+    nodeId: node.id,
+    nodeTitle: node.data.title,
+    kind: "image",
+    label: node.data.model || "Image generation",
+    groupId: generationGroupId,
+    batchIndex: index + 1,
+    batchTotal
+  }, (progress) => nodeApi.generateImage(buildImageGenerationRequest({
+    node,
+    prompt,
+    aspectRatio,
+    imagePromptItems,
+    workflowContext,
+    index,
+    progress
+  })));
   if (!response.ok) {
     throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
   }

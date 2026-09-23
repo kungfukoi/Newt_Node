@@ -1,3 +1,5 @@
+import { filmDirectorIsStillDuration } from "./filmDirectorDurations.js";
+
 function normalizeShotCount(value) {
   const count = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(count) && count > 0 ? count : 0;
@@ -23,6 +25,19 @@ function scaledWordRange(shotCount, durationSeconds) {
 }
 
 export function filmDirectorShotDetailProfile(shotCount = "Auto", durationSeconds = "15") {
+  if (filmDirectorIsStillDuration(durationSeconds)) {
+    return {
+      mode: "still",
+      exampleDescription: "one drawable instant with exact composition, subject pose, lens perspective, lighting, environment, and visible prop state",
+      minimumWords: 24,
+      maxCharsPerCut: 700,
+      directive: [
+        "Because Still is selected, return exactly one CUT describing one drawable instant for a single generated image.",
+        "Specify the final composition, framing, camera height and angle, lens perspective, subject pose and expression, visible action state, prop placement, environment, lighting, depth, and visual hierarchy.",
+        "Use camera movement: Static. Do not describe temporal progression, an opening-to-ending action, edits, alternate coverage, hidden cuts, or motion that requires multiple frames."
+      ].join(" ")
+    };
+  }
   const count = normalizeShotCount(shotCount);
 
   if (!count) {

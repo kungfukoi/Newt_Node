@@ -3,6 +3,7 @@ import test from "node:test";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 
 test("Film Director permits one cut per second", () => {
+  assert.equal(filmDirectorCutLimit("still"), 1);
   assert.equal(filmDirectorCutLimit("5"), 5);
   assert.equal(filmDirectorCutLimit("10"), 10);
   assert.equal(filmDirectorCutLimit("15"), 15);

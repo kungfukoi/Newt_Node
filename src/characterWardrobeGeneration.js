@@ -1,5 +1,8 @@
 import { runCharacterWardrobeEdit } from "./nodeRunners/mediaModels.js";
-import { characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt } from "./characterSheetWorkflow.js";
+import {
+  characterWardrobeEditPromptForData,
+  characterWardrobeEditVersion
+} from "./characterSheetWorkflow.js";
 
 export async function generateCharacterWardrobeVariant(node, wardrobe, {
     workflowContext,
@@ -11,13 +14,14 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
     existingVariant = null,
     regenerateImage = false,
     regenerateVideo = false,
+    runWardrobeEdit = runCharacterWardrobeEdit,
     onGenerationComplete = () => {}
   } = {}) {
     let generated = regenerateImage ? null : existingVariant?.generated || null;
     if (!(generated?.url || generated?.localUrl)) {
-      generated = await runCharacterWardrobeEdit({
+      generated = await runWardrobeEdit({
         node,
-        prompt: characterWardrobeEditPrompt,
+        prompt: characterWardrobeEditPromptForData(node.data),
         baseSheet,
         wardrobe,
         workflowContext: workflowContext,
@@ -34,9 +38,9 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
       && !(videoGenerated?.url || videoGenerated?.localUrl)
     ) {
       try {
-        videoGenerated = await runCharacterWardrobeEdit({
+        videoGenerated = await runWardrobeEdit({
           node,
-          prompt: characterVideoWardrobeEditPrompt,
+          prompt: characterWardrobeEditPromptForData(node.data, "video"),
           baseSheet: baseVideoSheet,
           wardrobe,
           workflowContext: workflowContext,
@@ -57,6 +61,7 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
         wardrobeFileName: wardrobe.fileName || "Wardrobe",
         baseSheetUrl: baseSheet.url || baseSheet.localUrl || "",
         baseSignature,
+        wardrobeEditVersion: characterWardrobeEditVersion,
         ...(videoGenerated && baseVideoSignature ? { baseVideoSignature } : {}),
         generated,
         ...(videoGenerated ? { videoGenerated } : {})

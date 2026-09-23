@@ -1,4 +1,5 @@
 import { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
+import { cinematicCharacterSheetBackgroundPrompt } from "./characterSheetWorkflow.js";
 
 export const characterVideoSheetPrompt = `Edit the provided Portrait image into one CU video reference sheet:
 
@@ -22,6 +23,36 @@ Follow this layout precisely:
 
 Each panel must contain exactly one view. Keep the layout clean, evenly spaced, and separated by very narrow white dividers. Do not generate additional views, duplicate characters, merged panels, comparison sheets, alternate wardrobes, text, labels, props, decorative frames, or borders.`;
 
+export const stylizedCharacterVideoSheetPrompt = `Edit the provided Original Character Portrait into one CU video reference sheet.
+
+STRICT CHARACTER DESIGN LOCK: Treat the Original Character Portrait as the sole authority for the character's design. Reproduce that same character; do not reinterpret it as a human or as a more realistic, conventional, mature, idealized, or anatomically normalized version.
+
+Preserve the exact silhouette and the relative proportions of every visible form. Preserve the presence or absence, count, shape, scale, placement, spacing, and relationships of every identity-defining feature. Preserve the source character's surface materials, textures, colors, patterns, translucency, reflectivity, wear, construction, and rendering style. A feature that exists in the reference must remain; a feature that is absent must not be invented. Do not add, remove, replace, resize, reposition, or redesign features merely to make the character look more human, realistic, attractive, or anatomically familiar. Do not invent human skin, musculature, bone structure, facial anatomy, or human proportions that are not present in the reference.
+
+Create one clean character reference sheet containing exactly three panels and exactly three depictions of the same character on a consistent neutral studio background.
+
+Follow this layout precisely:
+
+- On the left, place two tall vertical full-character wardrobe-reference panels side by side.
+- The first panel shows the character from the front, framed from the base of the primary head or identity region through the character's lowest extent.
+- The second panel shows the same character from the back with the identical crop and scale.
+- In both left panels, keep the primary head or identity region entirely outside the frame. If the character has no conventional head, neck, torso, legs, or feet, preserve its real design and use the equivalent crop boundary without inventing those structures.
+- Preserve the exact clothing or integrated coverings, form, materials, proportions, and design details across both views.
+
+- On the right, place one large 1:1 square close-up of the character's primary head or identity region.
+- Use a subtle three-quarter orientation, approximately 15 degrees away from the camera, only to the extent that the character's actual design supports that orientation.
+- Preserve the existing gaze or attention mechanism. Keep it slightly off camera when applicable; do not add eyes or other gaze features when they are absent.
+- Use a natural alternate or speaking state only when the existing design supports it. If there is no mouth or speech mechanism, do not invent one; use only existing expressive features, or keep the established neutral state.
+- Preserve the exact identity design, feature geometry, materials, colors, textures, and construction.
+
+Each panel must contain exactly one view. Keep the layout clean, evenly spaced, and separated by very narrow white dividers. Do not generate additional views, duplicate characters, merged panels, comparison sheets, alternate character designs, alternate wardrobes, text, labels, props, decorative frames, or borders. The required panel layout may change view and orientation only; it must not change the character design.`;
+
+export const cinematicCharacterVideoSheetPrompt =
+  `${characterVideoSheetPrompt}\n\n${cinematicCharacterSheetBackgroundPrompt}`;
+
+export const stylizedCinematicCharacterVideoSheetPrompt =
+  `${stylizedCharacterVideoSheetPrompt}\n\n${cinematicCharacterSheetBackgroundPrompt}`;
+
 export const characterVideoBasicWardrobePrompt =
   "Wardrobe rule: use exactly one outfit across all three panels. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently represented in both body views and the visible neckline of the portrait. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 
@@ -30,6 +61,15 @@ export const characterVideoWardrobePrompt =
 
 export const characterVideoCustomSheetWardrobePrompt =
   "Wardrobe rule: preserve exactly the one selected outfit visible in the supplied completed character sheet. Reconstruct its clothing, footwear, fit, materials, colors, and styling consistently in both body panels and the visible neckline of the portrait. Do not introduce alternate clothing or a wardrobe comparison.";
+
+export function characterVideoSheetPromptForData(data = {}) {
+  if (data.stylizedCharacter) {
+    return data.cinematicCharacterSheet
+      ? stylizedCinematicCharacterVideoSheetPrompt
+      : stylizedCharacterVideoSheetPrompt;
+  }
+  return data.cinematicCharacterSheet ? cinematicCharacterVideoSheetPrompt : characterVideoSheetPrompt;
+}
 
 export { activeCharacterSheetVariant };
 

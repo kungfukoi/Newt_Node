@@ -10,6 +10,7 @@ import {
   filmDirectorUsesReference,
   filmDirectorUsesReferenceTag,
   isFilmDirectorSceneTransitionPatch,
+  normalizeFilmDirectorScenes,
   removeFilmDirectorScene,
   switchFilmDirectorScene
 } from "../src/filmDirectorScenes.js";
@@ -73,6 +74,30 @@ test("Film Director scene tabs preserve independent scene packages", () => {
   );
   assert.equal(restoredSecondScene.sceneName, "Hallway");
   assert.equal(restoredSecondScene.resultText, "Hallway final prompt");
+});
+
+test("Film Director persistence normalizes Still scenes to one shot", () => {
+  const normalized = normalizeFilmDirectorScenes({
+    sceneName: "Portrait",
+    skillDurationSeconds: "still",
+    durationSeconds: "still",
+    skillShotCount: "8",
+    shotCount: "8",
+    skillDirectorScenes: [{
+      id: "scene-1",
+      state: {
+        sceneName: "Portrait",
+        skillDurationSeconds: "still",
+        skillShotCount: "8"
+      }
+    }],
+    skillDirectorActiveSceneId: "scene-1"
+  });
+
+  assert.equal(normalized.scenes[0].state.skillDurationSeconds, "still");
+  assert.equal(normalized.scenes[0].state.durationSeconds, "still");
+  assert.equal(normalized.scenes[0].state.skillShotCount, "1");
+  assert.equal(normalized.scenes[0].state.shotCount, "1");
 });
 
 test("Film Director recognizes plain asset names and a lone role-based character", () => {

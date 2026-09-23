@@ -51,6 +51,7 @@ test("generation progress middleware completes a successful model request", () =
       generationLabel: "Nano Banana Pro",
       generationBatchIndex: 1,
       generationBatchTotal: 1,
+      generationSubmittedAt: "2026-08-16T12:00:00.000Z",
       nodeId: "image-1",
       nodeTitle: "Image Model"
     }
@@ -70,6 +71,11 @@ test("generation progress middleware completes a successful model request", () =
   assert.equal(entry.status, "completed");
   assert.equal(entry.phase, "complete");
   assert.equal(entry.percent, 100);
+  assert.equal(entry.startedAt, "2026-08-16T12:00:00.000Z");
+  assert.ok(entry.finishedAt);
+  const finishedAt = entry.finishedAt;
+  updateGenerationProgress("run-2", { status: "completed", message: "Still complete" });
+  assert.equal(listGenerationProgress()[0].finishedAt, finishedAt);
 });
 
 test("generation progress middleware records failed HTTP responses", () => {

@@ -4,6 +4,7 @@ export const filmDirectorApproachOptions = Object.freeze([
   { value: "animation", label: "Animation" },
   { value: "stop-motion", label: "Stop-Motion" },
   { value: "commercial", label: "Commercial" },
+  { value: "photography", label: "Photography" },
   { value: "music-video", label: "Music Video" },
   { value: "montage", label: "Montage" }
 ]);
@@ -19,6 +20,7 @@ export function filmDirectorApproachChanged(data = {}) {
 
 export function filmDirectorDefaultCameraDirection(approach = "cinematic") {
   const additionalDirections = {
+    photography: "Compose a decisive still frame with intentional camera position, lens perspective, depth of field, subject pose, clean silhouettes, balanced visual hierarchy and precise control of light. Treat camera direction as framing and capture decisions rather than temporal movement.",
     "stop-motion": "Use readable miniature-set staging and deliberate locked-off compositions or small frame-by-frame camera increments. Preserve handmade pose changes, clean silhouettes and consistent spatial direction within each action.",
     commercial: "Use precise premium cinema coverage, controlled dolly and tracking moves, polished macro and hero details, sculpted beauty lighting and deliberate editorial framing appropriate to the advertised subject.",
     "music-video": "Use highly stylized angles, expressive performance coverage and dynamic controlled camera movement. Motivate cuts and movement accents from the connected music track, leaving readable on-camera vocal coverage for synchronized singing.",
@@ -39,6 +41,8 @@ export const filmDirectorVisualSceneRules =
 
 export function filmDirectorSceneRules(approach = "cinematic") {
   switch (normalizeFilmDirectorApproach(approach)) {
+    case "photography":
+      return "Scene rules: Professional still photography, one decisive drawable instant, intentional composition and visual hierarchy, precise camera position and lens perspective, controlled depth of field, natural subject pose and expression, motivated photographic lighting, coherent production design, recognizable asset identity, physically plausible detail, no implied edit sequence, no unrequested text or subtitles.";
     case "stop-motion":
       return "Scene rules: Handcrafted stop-motion or claymation, tangible miniature sets and tactile materials, frame-by-frame pose changes, deliberately stepped low-frame-rate motion, slight handmade irregularity, expressive readable silhouettes, consistent character design and scale, coherent physical staging, no interpolated CGI smoothness, no subtitles.";
     case "commercial":
@@ -58,6 +62,8 @@ export function filmDirectorSceneRules(approach = "cinematic") {
 
 export function filmDirectorApproachDirective(approach = "cinematic") {
   switch (normalizeFilmDirectorApproach(approach)) {
+    case "photography":
+      return "Selected approach: Photography. Plan a production-ready still photograph rather than a moving scene. Use professional photographic composition, camera placement, lens and depth-of-field choices, subject pose, expression, gesture, prop placement, environment, lighting, color and texture to communicate the complete story in one decisive frame. Camera Direction should describe the framing and capture setup, not a move over time. When Still duration is selected, the Shot List must contain exactly one static CUT describing one drawable instant with no temporal progression, edits, montage, before-and-after states or audio direction. Preserve connected asset identity and use the selected audio policy only for non-still variants.";
     case "stop-motion":
       return "Selected approach: Stop-Motion. Keep Animation's cinematic storytelling, expressive character design, readable staging and coherent medium, but use handcrafted stop-motion or claymation rather than smoothly interpolated digital animation. Choose one physical material treatment from the brief, such as sculpted clay, puppets or model miniatures. Describe tactile handmade surfaces, practical miniature lighting, frame-by-frame incremental posing, slight non-precise registration, held poses, stepped timing and expressive handmade motion. Favor an apparent 8-12 distinct poses per second, or the user's requested low-frame-rate cadence, not continuous CGI tweening. This is a visible animation cadence, not a provider frame-rate or duration setting. Keep anatomy and material identity stable; avoid unintended melting, morphing or jittering camera noise. Do not import clean vector graphics, glossy CGI or live-action skin by default. Obey the selected audio policy.";
     case "commercial":
@@ -77,7 +83,7 @@ export function filmDirectorApproachDirective(approach = "cinematic") {
 
 export function filmDirectorSceneTreatment(approach = "cinematic") {
   const value = normalizeFilmDirectorApproach(approach);
-  return ({ cinematic: "cinematic", vintage: "vintage 8mm", animation: "animated" })[value]
+  return ({ cinematic: "cinematic", vintage: "vintage 8mm", animation: "animated", photography: "photographic" })[value]
     || filmDirectorApproachOptions.find((option) => option.value === value).label.toLowerCase();
 }
 

@@ -14,7 +14,10 @@ import {
 
 const spec = {
   provider: "krea", modelName: "Seedance 2.5", endpoint: "/generate/video/example", input: { prompt: "private prompt" },
-  credentialFingerprint: "fingerprint", body: { projectId: "p", nodeId: "n", generationGroupId: "g", generationBatchTotal: 2, generationBatchIndex: 1 }
+  credentialFingerprint: "fingerprint", body: {
+    projectId: "p", nodeId: "n", generationGroupId: "g", generationBatchTotal: 2, generationBatchIndex: 1,
+    generationSubmittedAt: "2026-09-02T23:59:58.000Z"
+  }
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
 
@@ -162,6 +165,8 @@ test("each batch job can finish independently and old completed peers remain in 
   assert.equal(service.get("two").state, "running");
   assert.equal(service.progress().length, 2);
   assert.equal(service.progress()[0].percent, 100);
+  assert.equal(service.progress()[0].startedAt, spec.body.generationSubmittedAt);
+  assert.equal(service.progress()[0].finishedAt, "2026-09-03T00:00:00.000Z");
   assert.equal(f.counts().saves, 1);
 });
 

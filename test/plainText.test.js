@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { concatenatePlainTextInputs, textOutputForNode, wouldCreatePlainTextCycle } from "../src/plainText.js";
+import { concatenatePlainTextInputs, resolvePlainTextGraphNodes, textOutputForNode, wouldCreatePlainTextCycle } from "../src/plainText.js";
 
 test("Text inputs concatenate in connection order before the node's own text", () => {
   const inputs = [
@@ -16,6 +16,25 @@ test("Text output prefers a concatenated result while preserving an unconnected 
   assert.equal(textOutputForNode({ type: "plainText", data: { text: "Local", resultText: "Combined" } }), "Combined");
   assert.equal(textOutputForNode({ type: "plainText", data: { text: "Local" } }), "Local");
   assert.equal(concatenatePlainTextInputs([{ source: { type: "plainText", data: { text: "" } } }], "Local"), "Local");
+});
+
+test("chained Text nodes recompute every upstream field for downstream consumers", () => {
+  const nodes = [
+    { id: "a", type: "plainText", data: { text: "First", resultText: "Stale first" } },
+    { id: "b", type: "plainText", data: { text: "Second", resultText: "Stale second" } },
+    { id: "c", type: "plainText", data: { text: "Third", resultText: "Stale third" } },
+    { id: "image", type: "imageModel", data: { prompt: "" } }
+  ];
+  const edges = [
+    { from: { nodeId: "a", port: "promptOut" }, to: { nodeId: "b", port: "textIn" } },
+    { from: { nodeId: "b", port: "promptOut" }, to: { nodeId: "c", port: "textIn" } },
+    { from: { nodeId: "c", port: "promptOut" }, to: { nodeId: "image", port: "promptIn" } }
+  ];
+  const resolved = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
+
+  assert.equal(resolved.get("a").data.resultText, "First");
+  assert.equal(resolved.get("b").data.resultText, "First\nSecond");
+  assert.equal(resolved.get("c").data.resultText, "First\nSecond\nThird");
 });
 
 test("Text input chains reject only connections that would create a cycle", () => {

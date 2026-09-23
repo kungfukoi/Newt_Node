@@ -38,7 +38,8 @@ test("generation request metadata keeps one group across a model batch", () => {
     kind: "image",
     groupId: "batch-1",
     batchIndex: 1,
-    batchTotal: 3
+    batchTotal: 3,
+    submittedAt: "2026-08-16T11:59:59.000Z"
   });
   const second = generationRequestMetadata({
     nodeId: "image-1",
@@ -51,7 +52,10 @@ test("generation request metadata keeps one group across a model batch", () => {
 
   assert.equal(first.generationGroupId, "batch-1");
   assert.equal(first.generationScope, '["project-a","package-a","c:/projects/a"]');
-  assert.equal(progressEntryFromRequestMetadata(first).scope, first.generationScope);
+  const firstProgress = progressEntryFromRequestMetadata(first);
+  assert.equal(firstProgress.scope, first.generationScope);
+  assert.equal(firstProgress.startedAt, "2026-08-16T11:59:59.000Z");
+  assert.equal(first.generationSubmittedAt, firstProgress.startedAt);
   assert.equal(second.generationGroupId, "batch-1");
   assert.notEqual(first.generationRunId, second.generationRunId);
   assert.equal(second.generationBatchIndex, 2);
@@ -149,12 +153,30 @@ test("completed generation elapsed time freezes at the terminal update", () => {
     phase: "complete",
     percent: 100,
     startedAt: "2026-08-16T12:00:00.000Z",
-    updatedAt: "2026-08-16T12:03:21.000Z"
+    finishedAt: "2026-08-16T12:03:21.000Z",
+    updatedAt: "2026-08-16T12:05:00.000Z"
   }], Date.parse("2026-08-16T13:00:00.000Z"));
 
   assert.equal(progress.elapsedMs, 201000);
   assert.equal(progress.finishedAt, "2026-08-16T12:03:21.000Z");
   assert.equal(liveGenerationElapsed(progress, Date.parse("2026-08-16T14:00:00.000Z")), 201000);
+});
+
+test("needs-attention progress keeps elapsed time live until the run finishes", () => {
+  const progress = aggregateGenerationProgressEntries([{
+    runId: "run-attention",
+    groupId: "group-attention",
+    nodeId: "video-attention",
+    kind: "video",
+    status: "attention",
+    phase: "attention",
+    startedAt: "2026-08-16T12:00:00.000Z",
+    updatedAt: "2026-08-16T12:02:59.000Z"
+  }], Date.parse("2026-08-16T12:04:00.000Z"));
+
+  assert.equal(progress.finishedAt, null);
+  assert.equal(progress.elapsedMs, 240000);
+  assert.equal(liveGenerationElapsed(progress, Date.parse("2026-08-16T12:05:00.000Z")), 300000);
 });
 
 test("generation elapsed display continues beyond one minute", () => {
@@ -283,4 +305,30 @@ test("completed progress cannot be resurrected by an older active server snapsho
   };
 
   assert.deepEqual(mergeGenerationProgressEntry(completed, staleDownload), completed);
+});
+
+test("progress reconciliation preserves submission time and the first completion time", () => {
+  const local = {
+    runId: "run-timestamps",
+    nodeId: "video-timestamps",
+    status: "running",
+    startedAt: "2026-09-07T01:40:00.000Z",
+    updatedAt: "2026-09-07T01:40:00.000Z"
+  };
+  const completed = mergeGenerationProgressEntry(local, {
+    ...local,
+    status: "completed",
+    phase: "complete",
+    startedAt: "2026-09-07T01:40:01.000Z",
+    finishedAt: "2026-09-07T01:43:00.000Z",
+    updatedAt: "2026-09-07T01:43:00.000Z"
+  });
+  const reconciled = mergeGenerationProgressEntry(completed, {
+    ...completed,
+    finishedAt: "2026-09-07T01:43:01.000Z",
+    updatedAt: "2026-09-07T01:43:10.000Z"
+  });
+
+  assert.equal(reconciled.startedAt, "2026-09-07T01:40:00.000Z");
+  assert.equal(reconciled.finishedAt, "2026-09-07T01:43:00.000Z");
 });

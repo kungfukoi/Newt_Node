@@ -4,6 +4,8 @@ import {
 } from "./filmDirectorShotDetail.js";
 import {
   filmDirectorDurationPromptList,
+  filmDirectorIsStillDuration,
+  filmDirectorShotCountForDuration,
   normalizeFilmDirectorDuration
 } from "./filmDirectorDurations.js";
 import {
@@ -92,9 +94,12 @@ export function buildFilmDirectorRevisionPrompt({
 } = {}) {
   const notes = String(revisionNotes || "").trim();
   if (!notes) return "";
+  const stillImage = filmDirectorIsStillDuration(durationSeconds);
 
   return [
-    `Revise this completed Director package for one ${durationLabel} AI video scene.`,
+    stillImage
+      ? "Revise this completed Director package for one AI still image."
+      : `Revise this completed Director package for one ${durationLabel} AI video scene.`,
     "The user's revision notes are the authority for this pass. Apply them precisely, including removals, wording changes, shot adjustments, dialogue changes, or continuity corrections.",
     "Apply every requested change in one pass. Update every dependent field needed to keep the package internally consistent, while preserving unaffected material verbatim whenever practical.",
     "Examples: removing or adding a shot must update recommendedShotCount, renumber every CUT, and revise continuity; tighter framing or camera movement must update both cameraDirection and the affected CUT fields; a style note must update only the visual appearance in styleDirection and any directly dependent visual language.",
@@ -102,7 +107,9 @@ export function buildFilmDirectorRevisionPrompt({
     filmDirectorStyleDirectionDirective(approach),
     `The approach is ${normalizeFilmDirectorApproach(approach)}. Preserve it unless the user explicitly requests a different approach. approach must be one of ${filmDirectorApproachOptions.map((option) => option.value).join(", ")}. If explicitly changed, update dependent style, camera and CUT language to match the new approach, replacing the previous approach's conflicting guidance while preserving story and assets.`,
     `Alternative approach guidance, only when explicitly requested:\n${filmDirectorApproachOptions.filter((option) => option.value !== normalizeFilmDirectorApproach(approach)).map((option) => option.value === "cinematic" ? filmDirectorStyleDirectionDirective() : filmDirectorApproachDirective(option.value)).join("\n")}`,
-    "Music Video requires an available connected music file and an audio-reference-capable video model (Seedance 2.0, Seedance 2.5 or MiniMax H3). Montage may optionally use a connected music file with the same supported models. Never claim to hear a track from its name or invent lyrics. When Music Video is explicitly requested or Montage has an active connected track, set audioMode to full; the connected soundtrack supersedes Production Sound and Silent. For other approaches ignore connected music. Otherwise preserve the selected audio policy.",
+    stillImage
+      ? "This is a still image. Keep exactly one static CUT, ignore audio and music direction, and do not introduce temporal progression, edits, alternate coverage, or camera movement over time."
+      : "Music Video requires an available connected music file and an audio-reference-capable video model (Seedance 2.0, Seedance 2.5 or MiniMax H3). Montage may optionally use a connected music file with the same supported models. Never claim to hear a track from its name or invent lyrics. When Music Video is explicitly requested or Montage has an active connected track, set audioMode to full; the connected soundtrack supersedes Production Sound and Silent. For other approaches ignore connected music. Otherwise preserve the selected audio policy.",
     "Scene name, video model, duration, resolution, aspect ratio, and audio mode may change only when the user explicitly requests them. If duration changes, rebalance pacing and CUT count for the new duration.",
     `videoModel must be one of ${filmDirectorVideoModelOptions.join(", ")}. Otherwise preserve the current video model.`,
     `durationSeconds must be one of ${filmDirectorDurationPromptList()}. Otherwise preserve the current duration.`,
@@ -116,7 +123,7 @@ export function buildFilmDirectorRevisionPrompt({
       ? `Preserve the current ${currentCutCount} CUT sections unless the user explicitly asks to add, remove, combine, or restructure shots.`
       : "Preserve the current shot structure unless the user explicitly asks to change it.",
     "Return strict JSON only with this exact shape:",
-    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","videoModel":"Seedance 2.5","durationSeconds":"15","resolution":"720p","aspectRatio":"16:9","audioMode":"production","approach":"${normalizeFilmDirectorApproach(approach)}","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
+    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","videoModel":"Seedance 2.5","durationSeconds":"${normalizeFilmDirectorDuration(durationSeconds)}","resolution":"720p","aspectRatio":"16:9","audioMode":"production","approach":"${normalizeFilmDirectorApproach(approach)}","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":${stillImage ? 1 : 3},"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
     shotLogic,
     filmDirectorShotDetailDirective(currentCutCount || "Auto", durationSeconds),
     "Do not return a partial patch. Return the complete revised values so NewtNode can replace the finished package safely. Do not use markdown or add keys outside the schema.",
@@ -180,11 +187,12 @@ export function filmDirectorRevisionStatePatch(current = {}, result = {}) {
     10
   );
   const currentShotCount = String(current.skillShotCount || current.shotCount || "Auto");
-  const nextShotCount = Number.isInteger(resolvedShotCount) && resolvedShotCount > 0
+  const resolvedNextShotCount = Number.isInteger(resolvedShotCount) && resolvedShotCount > 0
     ? String(resolvedShotCount)
     : currentShotCount;
   const currentDuration = current.skillDurationSeconds || current.durationSeconds || "15";
   const nextDuration = normalizeFilmDirectorDuration(result.durationSeconds, currentDuration);
+  const nextShotCount = filmDirectorShotCountForDuration(resolvedNextShotCount, nextDuration);
   const nextVideoModel = normalizeFilmDirectorVideoModel(result.videoModel, current.skillVideoModel || "");
   const nextResolution = normalizeFilmDirectorResolution(result.resolution, current.skillResolution || "720p");
   const nextAspectRatio = normalizeFilmDirectorAspectRatio(result.aspectRatio, current.skillAspectRatio || "16:9");

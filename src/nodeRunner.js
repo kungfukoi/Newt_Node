@@ -65,6 +65,15 @@ export function isRunnableNode(node) {
   return ["text", "textAgent", "skillDirector", "imageModel", "videoModel", "utility", "edit", "assembly", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
 }
 
+export function selectedRunnableNodesForRun(nodes, selectedNodeIds, incomingByNode = {}) {
+  const selectedIds = selectedNodeIds instanceof Set ? selectedNodeIds : new Set(selectedNodeIds || []);
+  return (nodes || []).filter((node) => {
+    if (!selectedIds.has(node.id) || !isRunnableNode(node) || node.data?.status === "running") return false;
+    if (node.type !== "output") return true;
+    return !(incomingByNode[node.id]?.sourceIn || []).some(({ source }) => selectedIds.has(source.id) && isRunnableNode(source));
+  });
+}
+
 export function buildSelectedRunnableDependencies(nodes, edges) {
   const runnableIds = new Set(nodes.map((node) => node.id));
   const dependencies = new Map(nodes.map((node) => [node.id, []]));
@@ -159,7 +168,13 @@ export async function runRunnableNodesByDependencyOrder(
     const nextPriority = Math.min(...ready.map((nodeId) => nodeRunPriority(nodeMap.get(nodeId))));
     const batchIds = ready.filter((nodeId) => nodeRunPriority(nodeMap.get(nodeId)) === nextPriority);
     const batchNodes = batchIds.map((nodeId) => nodeMap.get(nodeId));
-    onStatus?.(`Running ${batchNodes.length} ${runStageLabel(batchNodes[0]?.type)} node${batchNodes.length === 1 ? "" : "s"}...`);
+    const concurrency = scheduler.snapshot().maxConcurrent;
+    const stage = `${runStageLabel(batchNodes[0]?.type)} node${batchNodes.length === 1 ? "" : "s"}`;
+    onStatus?.(
+      batchNodes.length > concurrency
+        ? `Queued ${batchNodes.length} ${stage}; running up to ${concurrency} at a time...`
+        : `Running ${batchNodes.length} ${stage}...`
+    );
 
     const results = await Promise.all(batchNodes.map((node) => scheduler.run(() => runNode(node), { key: resourceKey(node), signal })
       .catch((error) => ({ status: "error", error }))));

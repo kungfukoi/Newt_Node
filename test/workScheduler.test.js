@@ -44,6 +44,34 @@ test("selected runs bound provider concurrency and retain partial failures/depen
   assert.equal(nodeSchedulingKey({ data: { model: "MiniMax H3" } }, { minimaxH3: "local" }), "localGpu");
 });
 
+test("selected run queue executes every node beyond a six-node concurrency boundary", async () => {
+  const nodes = Array.from({ length: 24 }, (_, id) => ({ id: String(id), type: "imageModel", data: {} }));
+  const started = [];
+  const statuses = [];
+  let active = 0;
+  let peak = 0;
+  const result = await runRunnableNodesByDependencyOrder(nodes, [], {
+    maxConcurrent: 6,
+    providerLimits: { fal: 6 },
+    resourceKey: () => "fal",
+    onStatus: (message) => statuses.push(message),
+    runNode: async (node) => {
+      started.push(node.id);
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return { status: "complete" };
+    }
+  });
+
+  assert.equal(peak, 6);
+  assert.equal(started.length, nodes.length);
+  assert.equal(new Set(started).size, nodes.length);
+  assert.deepEqual(result, { completed: nodes.length, failed: 0, skipped: 0 });
+  assert.equal(statuses[0], "Queued 24 image nodes; running up to 6 at a time...");
+});
+
 test("recovery list and foreground waiters share current snapshots without duplicate requests", async () => {
   let calls = 0; let clock = 0;
   const response = { ok: true, status: 200 };

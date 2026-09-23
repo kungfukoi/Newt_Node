@@ -1,5 +1,38 @@
 import { imageModelNames } from "./modelOptions.js";
 
+export const atlasVideoInputPixelLimits = Object.freeze({
+  minimum: 407696,
+  maximum: 8295044
+});
+
+export function atlasVideoInputDimensions(width, height) {
+  const sourceWidth = Math.trunc(Number(width));
+  const sourceHeight = Math.trunc(Number(height));
+  if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
+    return { width: 0, height: 0, pixelCount: 0, needsNormalization: false };
+  }
+
+  const pixelCount = sourceWidth * sourceHeight;
+  const { minimum, maximum } = atlasVideoInputPixelLimits;
+  if (pixelCount >= minimum && pixelCount <= maximum) {
+    return { width: sourceWidth, height: sourceHeight, pixelCount, needsNormalization: false };
+  }
+
+  const targetPixels = pixelCount < minimum ? minimum : maximum;
+  const scale = Math.sqrt(targetPixels / pixelCount);
+  const roundEven = pixelCount < minimum
+    ? (value) => Math.max(2, Math.ceil(value / 2) * 2)
+    : (value) => Math.max(2, Math.floor(value / 2) * 2);
+  const targetWidth = roundEven(sourceWidth * scale);
+  const targetHeight = roundEven(sourceHeight * scale);
+  return {
+    width: targetWidth,
+    height: targetHeight,
+    pixelCount: targetWidth * targetHeight,
+    needsNormalization: true
+  };
+}
+
 const imageModels = Object.freeze({
   [imageModelNames.legacyOpenAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
   [imageModelNames.nanoBanana2]: { id: "google/nano-banana-2", family: "nano", maxReferences: 14 },

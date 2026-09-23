@@ -13,7 +13,8 @@ export function generationRequestMetadata({
   label = "Generation",
   groupId,
   batchIndex = 1,
-  batchTotal = 1
+  batchTotal = 1,
+  submittedAt = new Date().toISOString()
 } = {}) {
   const normalizedGroupId = cleanProgressId(groupId) || createGenerationGroupId(kind);
   const normalizedBatchIndex = positiveInteger(batchIndex, 1);
@@ -27,12 +28,13 @@ export function generationRequestMetadata({
     generationLabel: String(label || "Generation"),
     generationBatchIndex: normalizedBatchIndex,
     generationBatchTotal: normalizedBatchTotal,
+    generationSubmittedAt: normalizedTimestamp(submittedAt) || new Date().toISOString(),
     nodeId: String(nodeId || ""),
     nodeTitle: String(nodeTitle || "")
   };
 }
 
-export function progressEntryFromRequestMetadata(metadata, now = new Date().toISOString()) {
+export function progressEntryFromRequestMetadata(metadata, now = metadata?.generationSubmittedAt || new Date().toISOString()) {
   return {
     scope: metadata.generationScope || "",
     runId: metadata.generationRunId,
@@ -141,7 +143,8 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
 
   const startedAt = Math.min(...latestGroup.map((entry) => entryStartedAt(entry)).filter(Number.isFinite));
   const updatedAt = Math.max(...latestGroup.map((entry) => entryUpdatedAt(entry)).filter(Number.isFinite));
-  const elapsedAt = isTerminalProgressStatus(status) && Number.isFinite(updatedAt) ? updatedAt : now;
+  const finishedAt = Math.max(...latestGroup.map((entry) => entryFinishedAt(entry)).filter(Number.isFinite));
+  const elapsedAt = isFinishedProgressStatus(status) && Number.isFinite(finishedAt) ? finishedAt : now;
   return {
     nodeId: current.nodeId,
     groupId: current.groupId || current.runId,
@@ -165,7 +168,7 @@ export function aggregateGenerationProgressEntries(entries = [], now = Date.now(
     message: current.message || phaseLabel(phase),
     startedAt: Number.isFinite(startedAt) ? new Date(startedAt).toISOString() : current.startedAt,
     updatedAt: Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : current.updatedAt,
-    finishedAt: isTerminalProgressStatus(status) && Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : null,
+    finishedAt: isFinishedProgressStatus(status) && Number.isFinite(finishedAt) ? new Date(finishedAt).toISOString() : null,
     elapsedMs: Number.isFinite(startedAt) ? Math.max(0, elapsedAt - startedAt) : 0
   };
 }
@@ -197,13 +200,17 @@ export function formatGenerationElapsed(milliseconds) {
 
 export function liveGenerationElapsed(progress, now = Date.now()) {
   const snapshotElapsed = Math.max(0, Number(progress?.elapsedMs) || 0);
-  if (!progress || isTerminalProgressStatus(progress.status)) return snapshotElapsed;
+  if (!progress || isFinishedProgressStatus(progress.status)) return snapshotElapsed;
   const startedAt = Date.parse(progress.startedAt || "");
   return Number.isFinite(startedAt) ? Math.max(snapshotElapsed, now - startedAt) : snapshotElapsed;
 }
 
+export function isFinishedProgressStatus(status) {
+  return status === "completed" || status === "failed";
+}
+
 export function isTerminalProgressStatus(status) {
-  return status === "completed" || status === "failed" || status === "attention";
+  return isFinishedProgressStatus(status) || status === "attention";
 }
 
 export function shouldRenderGenerationProgress(progress, nodeStatus = "") {
@@ -223,11 +230,12 @@ export function mergeGenerationProgressEntry(previous, incoming) {
   if (previous.status === "completed" && !isTerminalProgressStatus(incoming.status)) {
     return { ...previous };
   }
-  const startedTimes = [previous.startedAt, incoming.startedAt].map((value) => Date.parse(value || "")).filter(Number.isFinite);
-  return {
-    ...previous, ...incoming,
-    ...(startedTimes.length ? { startedAt: new Date(Math.min(...startedTimes)).toISOString() } : {})
-  };
+  const next = { ...previous, ...incoming };
+  const startedAt = minimumFinite(entryStartedAt(previous), entryStartedAt(incoming));
+  if (Number.isFinite(startedAt)) next.startedAt = new Date(startedAt).toISOString();
+  const finishedAt = minimumFinite(entryFinishedAt(previous), entryFinishedAt(incoming));
+  if (isFinishedProgressStatus(next.status) && Number.isFinite(finishedAt)) next.finishedAt = new Date(finishedAt).toISOString();
+  return next;
 }
 
 export function shouldDiscardProgressEntryMissingFromServer(entry, now = Date.now()) {
@@ -259,6 +267,11 @@ function entryUpdatedAt(entry) {
   return Date.parse(entry?.updatedAt || entry?.startedAt || "");
 }
 
+function entryFinishedAt(entry) {
+  if (!isFinishedProgressStatus(entry?.status)) return NaN;
+  return Date.parse(entry?.finishedAt || entry?.updatedAt || entry?.startedAt || "");
+}
+
 function normalizedPercent(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
@@ -272,4 +285,14 @@ function positiveInteger(value, fallback) {
 
 function cleanProgressId(value) {
   return String(value || "").trim().replace(/[^a-z0-9._:-]+/gi, "-").slice(0, 180);
+}
+
+function normalizedTimestamp(value) {
+  const milliseconds = Date.parse(value || "");
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : "";
+}
+
+function minimumFinite(...values) {
+  const finite = values.filter(Number.isFinite);
+  return finite.length ? Math.min(...finite) : NaN;
 }
