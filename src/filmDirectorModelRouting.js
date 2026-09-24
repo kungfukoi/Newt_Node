@@ -77,7 +77,9 @@ export function explicitFilmDirectorImageIncoming(incoming = {}) {
 function uniqueConnectionItems(items = []) {
   const seen = new Set();
   return items.filter(({ source, edge }) => {
-    const key = `${source?.id || ""}:${edge?.from?.port || ""}:${edge?.to?.port || ""}`;
+    // A reference may arrive directly, through a prompt tag, and through a
+    // Director. Its original output owns the identity, not the receiving port.
+    const key = `${source?.id || ""}:${edge?.from?.port || ""}`;
     if (!source || seen.has(key)) return false;
     seen.add(key);
     return true;

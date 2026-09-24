@@ -97,6 +97,35 @@ test("Director prompt tags do not add images beyond Reference Setup inputs", () 
   assert.deepEqual(merged.transferIn, [directMoodBoard]);
 });
 
+test("Video references reuse original outputs across direct, tag, and Director paths", () => {
+  const original = connection("guy1", "characterOut", "characterIn", "/guy1.png");
+  const tagged = { ...original, edge: { ...original.edge, to: { nodeId: "node-reference", port: "nodeReferenceIn" } } };
+  const location = connection("room", "imageOut", "referenceImageIn", "/room.png");
+  const directorLocation = { ...location, edge: { ...location.edge, to: { nodeId: "director", port: "locationIn" } } };
+  const otherCharacter = connection("guy2", "characterOut", "characterIn", "/guy2.png");
+  const merged = mergeFilmDirectorVisualIncoming(
+    { characterIn: [original, tagged], referenceImageIn: [location] },
+    [{ characterItems: [original, tagged, otherCharacter], imageItems: [directorLocation] }]
+  );
+  assert.deepEqual(merged.characterIn, [original, otherCharacter]);
+  assert.deepEqual(merged.referenceImageIn, [location]);
+  assert.equal(merged.characterIn[0].source, original.source);
+  assert.deepEqual(mergeFilmDirectorVisualIncoming(merged, [{ characterItems: [tagged] }]), merged);
+});
+
+test("Director merge preserves distinct original outputs and disabled Character inputs", () => {
+  const image = connection("source", "imageOut", "referenceImageIn", "/image.png");
+  const frame = connection("source", "frameOut", "imageIn", "/frame.png");
+  const character = connection("guy1", "characterOut", "characterIn", "/guy1.png");
+  const merged = mergeFilmDirectorVisualIncoming(
+    { referenceImageIn: [image], characterIn: [] },
+    [{ imageItems: [frame], characterItems: [character] }],
+    { includeCharacters: false }
+  );
+  assert.deepEqual(merged.referenceImageIn, [image, frame]);
+  assert.deepEqual(merged.characterIn, []);
+});
+
 test("Director forwarding honors saved active tags when final prose omits the last tag", () => {
   const directorData = {
     resultText: "Frame @Lead inside the control room.",

@@ -119,6 +119,8 @@ The server executes Director and Storyboard creative reasoning with strict AJV-b
 
 A built Director package can control supported Video Model settings, drive an Image Model prompt, and provide scene/reference context to Storyboard. `src/filmDirectorModelRouting.js` owns the shared Director input contract, prompt composition, saved-active-reference resolution, and visual-reference merge used by Image and Video routes. The Image route sends active Director location/prop references as image prompts and active character references as character inputs while preserving direct downstream inputs. Direct Image Model Style and Camera inputs append explicit authoritative override blocks after Director direction, with Camera last. `src/imageReferenceLimits.js` provides the provider/model reference ceilings used by the Image Model counter and server-side preflight so request builders cannot silently drop tail references. Storyboard validates cut order, required continuous-shot keyframes, frame numbering, and nonempty prompts before replacing visible work. Failed planning leaves the existing board intact. Visual QC distinguishes a reviewed result from `unreviewed` when the review service is unavailable.
 
+Director visual-reference merging identifies each reference by its original source node and output port. Direct connections, implicit prompt tags, and Director forwarding reuse that reference, so downstream tag chips and generation inputs do not duplicate it. Distinct source outputs remain separate.
+
 ## Persistence And Storage
 
 Workflow persistence is coordinated by `src/useWorkflowPersistence.js`, with draft state in `src/useNodeEditorDraft.js` and file/session/context helpers under `src/workflow*.js`.
