@@ -1,5 +1,5 @@
 import React from "react";
-import { applyCurveToImageData, applyImageAdjustmentsToCanvas } from "./imageAdjustments.js";
+import { applyCurveToImageData, applyImageAdjustmentsToCanvas, curveLookup } from "./imageAdjustments.js";
 import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
 import {
   characterBaseAppearancePromptForData,
@@ -520,9 +520,9 @@ class NodeCardBoundary extends React.Component {
 
     return (
       <article
-        className="node-card node-card-error"
+        className={`node-card node-card-error ${this.props.flowManaged ? "flow-managed" : ""}`}
         style={{
-          transform: `translate(${x}px, ${y}px)`
+          transform: this.props.flowManaged ? undefined : `translate(${x}px, ${y}px)`
         }}
         data-node-card-id={node.id}
       >
@@ -7619,7 +7619,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   flowNodeRenderRef.current = (node, selected) => (
-    <NodeCardBoundary node={node} onRemove={removeNode}>
+    <NodeCardBoundary node={node} onRemove={removeNode} flowManaged>
       <NodeCard
         node={node}
         defaultOutputPath={defaultProjectOutputPath}

@@ -273,6 +273,8 @@ Every new node type should touch the same core surfaces unless there is a clear 
 
 ## Node UI Standards
 
+Node render-error fallback cards must follow the same positioning owner as normal cards. Inside React Flow, use the flow-managed card layout without applying the node's world translation again, so errors remain visible at the node's location.
+
 The yellow crop box in the image preview supports freeform rectangular crops. Side handles adjust one axis; corner handles adjust both independently, with no aspect lock. Moving a crop preserves its dimensions at image boundaries. Undo and Apply retain the chosen width and height. Geometry is owned by `src/cropGeometry.js`.
 
 Nodes should feel like they belong to the same editor.
