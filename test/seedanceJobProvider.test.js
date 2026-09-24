@@ -128,6 +128,8 @@ test("Atlas submits once, tracks its original prediction, and retrieves complete
 test("Atlas distinguishes provider rejection from unknown acceptance without retrying POST", async () => {
   for (const [response, confirmed] of [
     [{ body: { code: 422, message: "Invalid input" } }, true],
+    [{ status: 402, body: { message: "Insufficient balance" } }, true],
+    [{ body: { code: 402, message: "Insufficient balance" } }, true],
     [{ status: 503, body: {} }, false],
     [new Error("connection lost"), false]
   ]) {

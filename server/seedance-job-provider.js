@@ -116,7 +116,7 @@ function atlasJobAdapter(spec, key, fetchImpl) {
         return { requestId: typeof job?.id === "string" ? job.id : "" };
       } catch (error) {
         error.message = safeMessage(error.message);
-        if ([400, 401, 403, 404, 422].includes(error.status)) error.confirmedFailure = true;
+        if ([400, 401, 402, 403, 404, 422].includes(error.status)) error.confirmedFailure = true;
         throw error;
       }
     },

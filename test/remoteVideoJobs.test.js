@@ -21,6 +21,28 @@ const spec = {
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
 
+test("Atlas HTTP 402 is a failed billing rejection, not uncertain acceptance, across restart", async (t) => {
+  let submits = 0;
+  const key = "test-atlas-key";
+  const f = await fixture(t, {
+    adapter: createSeedanceJobAdapter({ getKey: async () => key, fetchImpl: async () => {
+      submits++;
+      return new Response(JSON.stringify({ message: "Insufficient balance" }), { status: 402 });
+    } })
+  });
+  const atlas = { ...spec, provider: "atlas", credentialFingerprint: providerKeyFingerprint(key) };
+  let service = await f.open();
+  await service.create("atlas-billing", atlas, "billing-hash");
+  await service.step("atlas-billing");
+  assert.equal(service.get("atlas-billing").state, "failed");
+  assert.match(service.get("atlas-billing").message, /HTTP 402.*insufficient balance/);
+  await service.close();
+  service = await f.open();
+  await service.step("atlas-billing");
+  assert.equal(service.get("atlas-billing").state, "failed");
+  assert.equal(submits, 1);
+});
+
 test("Atlas jobs retain their original ID and elapsed origin across restart and finalize once", async (t) => {
   let submits = 0, finishes = 0, complete = false;
   const key = "test-atlas-key";

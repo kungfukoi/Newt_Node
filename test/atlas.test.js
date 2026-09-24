@@ -9,6 +9,24 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+test("Atlas payment rejections explain the billing issue even without a JSON body", async () => {
+  for (const response of [
+    jsonResponse({ message: "Insufficient balance" }, 402),
+    jsonResponse({ code: 402, message: "Insufficient balance" }),
+    new Response("Payment required", { status: 402 })
+  ]) {
+    let calls = 0;
+    const client = createAtlasClient({ fetchImpl: async () => { calls++; return response; } });
+    await assert.rejects(client.submitVideo({ model: "test" }, "test-key"), (error) => {
+      assert.equal(error.status, 402);
+      assert.equal(error.retryable, false);
+      assert.match(error.message, /insufficient balance or exhausted allowance/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
 test("Atlas submits a generation once and polls the returned job", async () => {
   const calls = [];
   const client = createAtlasClient({
