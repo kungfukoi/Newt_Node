@@ -62,8 +62,9 @@ import {
   providerEnvironmentKey
 } from "./provider-credentials.js";
 import { validateProviderKey } from "./provider-key-validation.js";
-import { createAtlasClient } from "./atlas.js";
+import { atlasError, createAtlasClient } from "./atlas.js";
 import { createAtlasMedia } from "./atlas-media.js";
+import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { prepareAtlasVideoReferenceAsset } from "./atlas-video-input.js";
 import {
@@ -16531,14 +16532,14 @@ async function runMediaDescriptionLlm({
     }, { route, model: falModel });
     return checkedCreativeLlmResult({ text: extractFalText(data).trim(), usages: [falResultUsage(data)].filter(Boolean), provider: "fal", model: falModel, endpoint }, data, route);
   }
-  const content = [{ type: "input_text", text: prompt }];
-  for (const item of inputs) {
-    if (mediaType !== "image") { content.push({ type: "input_text", text: `${item.label || "Video reference"}: ${item.url}` }); continue; }
-    const asset = await readLocalAsset(item.url);
-    if (item.label) content.push({ type: "input_text", text: item.label });
-    content.push({ type: "input_image", image_url: `data:${asset.mimeType || "image/png"};base64,${asset.buffer.toString("base64")}` });
-  }
   const atlas = provider === "atlas";
+  const content = await buildMediaAnalysisContent({
+    inputs,
+    mediaType,
+    prompt,
+    readLocalAsset,
+    optimizeImages: atlas
+  });
   const model = atlas ? `openai/${String(openAiModel || "").replace(/^openai\//, "")}` : openAiModel;
   const body = openAiLlmBody({ model, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route });
   if (atlas) delete body.store;
@@ -16549,7 +16550,13 @@ async function runMediaDescriptionLlm({
     signal: AbortSignal.timeout(300000)
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw httpError(response.status, data?.error?.message || `${atlas ? "Atlas Cloud" : "OpenAI"} media analysis failed.`, { raw: data });
+  if (!response.ok) {
+    throw httpError(
+      response.status,
+      atlas ? atlasError(data, response.status) : data?.error?.message || "OpenAI media analysis failed.",
+      { raw: data }
+    );
+  }
   return checkedCreativeLlmResult({
     text: extractOpenAiResponseText(data).trim(),
     usages: [data.usage].filter(Boolean),
