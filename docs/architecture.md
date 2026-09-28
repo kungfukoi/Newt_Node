@@ -147,7 +147,7 @@ Recent history seeds older catalogs where records still exist. Already-evicted h
 
 ## Output And Professional Media
 
-The Output node redirects storage while the producing node remains the result owner. Output token expansion, path safety, collision handling, external URL encoding, and copying live in `server/outputTargets.js` and the output export helpers.
+The Output node redirects storage while the producing node remains the result owner. Output token expansion, including `$filename` from the connected source's original basename or its single upstream video input, path safety, collision handling, external URL encoding, and copying live in `server/outputTargets.js` and the output export helpers.
 
 Current explicit export choices are PNG/JPEG for stills and H.264 MP4/ProRes 422 HQ MOV for video. The local ProRes path uses FFmpeg `prores_ks`, profile 3, `yuv422p10le`, and PCM 24-bit audio. This is a professional 10-bit mezzanine encode, but it does not create source precision or HDR information that was not present upstream.
 

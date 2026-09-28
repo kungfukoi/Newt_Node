@@ -59,6 +59,26 @@ test("legacy $node_name resolves to the input node name", async () => {
   });
 });
 
+test("Output $filename preserves the source filename without its extension", async () => {
+  await withTempOutputDir(async (directory) => {
+    const target = await previewOutputTargetAsset(
+      {
+        outputTargetPath: path.join(directory, "$filename"),
+        outputTargetFileName: "$filename_$index",
+        outputTargetSourceNodeTitle: "Video",
+        outputTargetSourceFileName: "Original Plate.v2.mov"
+      },
+      "video",
+      ".mp4",
+      "",
+      { rootDir: directory, now: new Date(2026, 7, 5, 14, 3, 9) }
+    );
+
+    assert.equal(target.fileName, "Original Plate.v2_01.mp4");
+    assert.equal(path.basename(path.dirname(target.filePath)), "Original Plate.v2");
+  });
+});
+
 test("Output node name remains available through explicit output tokens", async () => {
   await withTempOutputDir(async (directory) => {
     const target = await createOutputTargetAsset(

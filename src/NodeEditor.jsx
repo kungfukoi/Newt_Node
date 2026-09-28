@@ -450,7 +450,7 @@ import {
 import { adjacentProjectOutputImage, buildProjectOutputItems } from "./projectOutputs.js";
 import { isOutputSinkConnection, outputAcceptedSourceKinds } from "./outputConnections.js";
 import { rebaseOutputPathToProjectOutputs } from "./outputPaths.js";
-import { insertOutputToken, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
+import { insertOutputToken, outputSourceFileName, outputSourceNodeTitle, outputTokenOptions } from "./outputTokens.js";
 import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { requireStoryboardPlanResponse, storyboardQcUnavailable } from "./storyboardPlanValidation.js";
@@ -6596,13 +6596,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .filter((node) => node?.type === "output");
   }
 
-  function outputTargetContextFromOutputNode(outputNode, sourceNode, outputIndex = "") {
+  function outputTargetContextFromOutputNode(outputNode, sourceNode, outputIndex = "", incomingByNode = {}) {
     const outputPath = String(outputNode?.data?.outputPath || "").trim();
     if (!outputPath) {
       const error = new Error(`Set a Path on ${outputNode?.data?.title || "Output"} before running.`);
       error.outputTargetNodeId = outputNode?.id || "";
       throw error;
     }
+
+    const sourceEdge = edgesRef.current.find((edge) =>
+      edge.from.nodeId === sourceNode?.id
+      && edge.to.nodeId === outputNode?.id
+      && edge.to.port === "sourceIn"
+    );
+    const sourceFileName = outputSourceFileName(sourceNode, connectedOutputItem(sourceNode, sourceEdge), incomingByNode);
 
     return {
       outputTargetPath: outputPath,
@@ -6611,17 +6618,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       outputTargetNodeTitle: outputNode.data?.title || "Output",
       outputTargetSourceNodeId: sourceNode?.id || "",
       outputTargetSourceNodeTitle: outputSourceNodeTitle(sourceNode, nodeTypeLabel(sourceNode?.type) || "output"),
+      outputTargetSourceFileName: sourceFileName,
       outputTargetIndex: outputIndex ? String(outputIndex) : ""
     };
   }
 
-  function outputTargetForSourceNode(sourceNode) {
+  function outputTargetForSourceNode(sourceNode, incomingByNode = {}) {
     if (!sourceNode || sourceNode.type === "output") return null;
     const outputNode = connectedOutputNodesForSource(sourceNode.id).at(0);
     if (!outputNode) return null;
     return {
       node: outputNode,
-      context: outputTargetContextFromOutputNode(outputNode, sourceNode)
+      context: outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode)
     };
   }
 
@@ -6653,7 +6661,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function runOutputNodeSave(outputNode, incoming, requestContext) {
+  async function runOutputNodeSave(outputNode, incoming, requestContext, incomingByNode = {}) {
     const connection = (incoming.sourceIn || []).at(-1);
     if (!connection?.source) throw new Error("Connect a source to Output.");
     const sourceNode = connection.source;
@@ -6662,11 +6670,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
     const sourceMediaType = outputItem?.type || (sourceText ? "text" : "");
     const outputFormat = outputExportFormatForNode(outputNode.data, sourceMediaType);
-    const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode);
+    const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
     const { response, data } = await nodeApi.saveOutput({
       sourceUrl: outputItem?.url || "",
       sourceText,
-      sourceFileName: outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || ""),
+      sourceFileName: outputSourceFileName(sourceNode, outputItem, incomingByNode),
       mediaType: sourceMediaType,
       outputFormat,
       ...workflowContextPayload({ ...requestContext, ...outputContext }),
@@ -6803,7 +6811,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
-      outputTarget = outputTargetForSourceNode(currentNode);
+      outputTarget = outputTargetForSourceNode(currentNode, currentIncomingByNode);
       requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
       updateNode(currentNode.id, {
@@ -6835,7 +6843,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "output") {
-        const saved = await runOutputNodeSave(currentNode, incoming, requestContext);
+        const saved = await runOutputNodeSave(currentNode, incoming, requestContext, currentIncomingByNode);
         const resultItems = saved.url ? [saved] : [];
         updateNode(currentNode.id, {
           status: "complete",
@@ -10905,6 +10913,7 @@ function OutputNodeBody({
   defaultOutputPath,
   config,
   incoming,
+  incomingByNode,
   onUpdate,
   onRun,
   running,
@@ -10914,7 +10923,7 @@ function OutputNodeBody({
 }) {
   const sourcePort = config.input.find((port) => port.id === "sourceIn");
   const sourceSummary = outputSourceSummary(incoming.sourceIn);
-  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn);
+  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn, incomingByNode);
   const formatOptions = outputExportFormatOptions(sourceInfo.mediaType);
   const outputFormat = outputExportFormatForNode(node.data, sourceInfo.mediaType);
   const outputFormatDataKey = sourceInfo.mediaType === "video" ? "outputVideoFormat" : "outputImageFormat";
@@ -10960,6 +10969,7 @@ function OutputNodeBody({
       outputTargetNodeId: node.id,
       outputTargetNodeTitle: node.data.title || "Output",
       outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
+      outputTargetSourceFileName: sourceInfo.sourceFileName || "",
       sourceFileName: sourceInfo.sourceFileName || "",
       mediaType: sourceInfo.mediaType || "",
       outputFormat
@@ -11386,6 +11396,7 @@ function NodeBody({
         defaultOutputPath={defaultOutputPath}
         config={config}
         incoming={incoming}
+        incomingByNode={incomingByNode}
         onUpdate={onUpdate}
         onRun={onRun}
         running={running}
@@ -20685,14 +20696,14 @@ function outputExportFormatForNode(data = {}, mediaType = "") {
   return "";
 }
 
-function outputPreviewSourceInfo(items = []) {
+function outputPreviewSourceInfo(items = [], incomingByNode = {}) {
   const connection = items.at(-1);
   const source = connection?.source;
   if (!source) return { sourceTitle: "", sourceFileName: "", mediaType: "" };
   const outputItem = connectedOutputItem(source, connection.edge);
   const isTextSource = ["plainText", "text", "textAgent", "skillDirector"].includes(source.type);
   const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
-  const outputFileName = outputItem?.fileName || fileNameFromLocalUrl(outputItem?.url || "");
+  const outputFileName = outputSourceFileName(source, outputItem, incomingByNode);
   const sourceTitle = outputSourceNodeTitle(source, sourceLabel(source) || nodeTypeLabel(source.type) || "source");
   return {
     sourceTitle,

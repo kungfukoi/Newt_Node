@@ -130,7 +130,8 @@ test("video generation requests carry Output node target fields", () => {
       outputTargetNodeId: "output-1",
       outputTargetNodeTitle: "Output",
       outputTargetSourceNodeId: "video",
-      outputTargetSourceNodeTitle: "Video Model"
+      outputTargetSourceNodeTitle: "Video Model",
+      outputTargetSourceFileName: "original-input.mov"
     },
     outputTargetIndex: "2"
   });
@@ -139,6 +140,7 @@ test("video generation requests carry Output node target fields", () => {
   assert.equal(request.outputTargetFileName, "$node_name_$index");
   assert.equal(request.outputTargetNodeId, "output-1");
   assert.equal(request.outputTargetSourceNodeTitle, "Video Model");
+  assert.equal(request.outputTargetSourceFileName, "original-input.mov");
   assert.equal(request.outputTargetIndex, "2");
 });
 

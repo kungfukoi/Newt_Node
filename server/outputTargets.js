@@ -113,10 +113,15 @@ function outputTargetAssetFromPath(filePath, outputPrefix) {
 function outputTokenContext(body = {}, now = new Date(), outputIndex = 1) {
   const outputNodeName = safeOutputTokenValue(body.outputTargetNodeTitle || body.nodeTitle || "Output");
   const sourceNodeName = safeOutputTokenValue(body.outputTargetSourceNodeTitle || body.sourceTitle || "source");
+  const sourceFileName = outputSourceFileBaseName(
+    body.outputTargetSourceFileName || body.sourceFileName,
+    sourceNodeName
+  );
   return {
     node: sourceNodeName,
     node_name: sourceNodeName,
     source_node_name: sourceNodeName,
+    filename: sourceFileName,
     date: formatOutputDate(now),
     time: formatOutputTime(now),
     index: String(Math.max(1, Number(outputIndex) || 1)).padStart(2, "0"),
@@ -128,9 +133,20 @@ function outputTokenContext(body = {}, now = new Date(), outputIndex = 1) {
 
 function expandOutputTokens(value, tokenContext = {}) {
   return String(value || "").replace(
-    /\$(source_node_name|output_node_name|output_node|workflow_name|node_name|node|date|time|index)(?=$|[^A-Za-z0-9])/g,
+    /\$(source_node_name|output_node_name|output_node|workflow_name|node_name|filename|node|date|time|index)(?=$|[^A-Za-z0-9])/g,
     (_match, token) => tokenContext[token] || ""
   );
+}
+
+function outputSourceFileBaseName(value, fallback = "source") {
+  const fileName = String(value || "")
+    .trim()
+    .split(/[\\/]/)
+    .at(-1)
+    ?.replace(/[?#].*$/, "") || "";
+  const extension = path.extname(fileName);
+  const baseName = extension ? fileName.slice(0, -extension.length) : fileName;
+  return safeOutputTokenValue(baseName || fallback);
 }
 
 function formatOutputDate(date = new Date()) {
@@ -163,15 +179,21 @@ function resolveOutputDirectory(value, rootDir) {
 }
 
 function outputTargetFileName(template, extension, tokenContext = {}, forceExtension = false) {
-  const expanded = expandOutputTokens(template || "$node_$date_$time", tokenContext);
+  const rawBaseName = path.basename(String(template || "$node_$date_$time"));
+  const parsedTemplate = path.parse(rawBaseName);
+  const templateExtension = parsedTemplate.ext && !parsedTemplate.ext.includes("$")
+    ? normalizedOutputExtension(parsedTemplate.ext)
+    : "";
+  const baseNameTemplate = templateExtension
+    ? rawBaseName.slice(0, -parsedTemplate.ext.length)
+    : rawBaseName;
+  const expanded = expandOutputTokens(baseNameTemplate, tokenContext);
   const cleanBaseName = path.basename(expanded).replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_").replace(/[. ]+$/g, "").trim() || "output";
-  const parsed = path.parse(cleanBaseName);
-  const explicitExtension = parsed.ext ? normalizedOutputExtension(parsed.ext) : "";
-  const safeBase = (parsed.name || cleanBaseName)
+  const safeBase = cleanBaseName
     .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_")
     .replace(/[. ]+$/g, "")
     .slice(0, 160) || "output";
-  return `${safeBase}${forceExtension ? extension : explicitExtension || extension}`;
+  return `${safeBase}${forceExtension ? extension : templateExtension || extension}`;
 }
 
 function normalizedOutputExtension(extension) {

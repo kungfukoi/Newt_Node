@@ -11,6 +11,7 @@ export function workflowContextPayload(workflowContext = {}, projectId = "", pro
     outputTargetNodeTitle: workflowContext.outputTargetNodeTitle || "",
     outputTargetSourceNodeId: workflowContext.outputTargetSourceNodeId || "",
     outputTargetSourceNodeTitle: workflowContext.outputTargetSourceNodeTitle || "",
+    outputTargetSourceFileName: workflowContext.outputTargetSourceFileName || "",
     outputTargetIndex: workflowContext.outputTargetIndex || ""
   };
 }
