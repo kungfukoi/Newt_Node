@@ -3,6 +3,7 @@ import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
 export const creativeFalModel = `openai/${creativeOpenAiModel}`;
+export const defaultAtlasTextFallbackModel = "deepseek-ai/deepseek-v3.2";
 
 const text = { type: "string" };
 const nonempty = { type: "string", minLength: 1, pattern: "\\S" };
@@ -75,6 +76,68 @@ export function openAiLlmBody({ model, prompt, systemPrompt, input = prompt, rea
       ? { type: "json_schema", name: route.replaceAll("-", "_"), strict: true, schema }
       : { type: "json_object" } } } : {})
   };
+}
+
+export function atlasChatLlmBody({ model, prompt, systemPrompt, route = "" }) {
+  return {
+    model,
+    messages: [
+      ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+      { role: "user", content: prompt }
+    ],
+    max_tokens: atlasCreativeOutputBudget(route)
+  };
+}
+
+export function atlasUsesChatCompletions({ route = "", responseMimeType = "text/plain" } = {}) {
+  return responseMimeType === "text/plain" && !/^(film-director|storyboard)-/.test(route);
+}
+
+export function atlasTextModelCandidates(primaryModel, fallbackModel = defaultAtlasTextFallbackModel) {
+  return [...new Set([primaryModel, fallbackModel].map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+export function atlasTextCanFallback({ status = 0, hasText = false, hasProviderError = false } = {}) {
+  return [400, 404, 422, 429].includes(Number(status)) || (!status && !hasProviderError && !hasText);
+}
+
+function responseContentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (typeof item?.text === "string") return item.text;
+      if (typeof item?.text?.value === "string") return item.text.value;
+      if (typeof item?.content === "string") return item.content;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function extractOpenAiResponseText(response) {
+  const envelopes = [response, response?.data, response?.response, response?.result]
+    .filter((value, index, values) => value && typeof value === "object" && values.indexOf(value) === index);
+
+  for (const envelope of envelopes) {
+    if (typeof envelope.output_text === "string") return envelope.output_text;
+
+    const outputText = (Array.isArray(envelope.output) ? envelope.output : [])
+      .flatMap((item) => Array.isArray(item?.content) ? item.content : item?.content ? [item.content] : [])
+      .map((content) => responseContentText([content]))
+      .filter(Boolean)
+      .join("\n");
+    if (outputText) return outputText;
+
+    const choiceText = (Array.isArray(envelope.choices) ? envelope.choices : [])
+      .map((choice) => responseContentText(choice?.message?.content) || responseContentText(choice?.text))
+      .filter(Boolean)
+      .join("\n");
+    if (choiceText) return choiceText;
+  }
+
+  return "";
 }
 
 export function falLlmInput({ model, prompt, systemPrompt, route = "" }) {

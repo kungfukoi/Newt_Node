@@ -86,7 +86,7 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
-import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasChatLlmBody, atlasCreativeOutputBudget, atlasTextCanFallback, atlasTextModelCandidates, atlasUsesChatCompletions, creativeOpenAiModel, creativeFalModel, extractOpenAiResponseText, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
@@ -16484,24 +16484,54 @@ async function runTextLlm({
     return checkedCreativeLlmResult({ text, model: openAiModel, provider: "OpenAI", endpoint: openAiModel, usage: data.usage || null }, data, route);
   }
   if (provider === "atlas") {
-    const model = `openai/${String(openAiModel || "").replace(/^openai\//, "")}`;
-    const body = openAiLlmBody({ model, prompt, systemPrompt, reasoningEffort, responseMimeType, route });
-    delete body.store;
-    // Director shot lists are normally a few hundred tokens, but the shared schema
-    // budget reserves 24k. Atlas returns an empty 504 for those oversized requests.
-    if (body.max_output_tokens) {
-      body.max_output_tokens = atlasCreativeOutputBudget(route);
+    const primaryModel = `openai/${String(openAiModel || "").replace(/^openai\//, "")}`;
+    const useChatCompletions = atlasUsesChatCompletions({ route, responseMimeType });
+    const endpoint = useChatCompletions
+      ? "https://api.atlascloud.ai/v1/chat/completions"
+      : "https://api.atlascloud.ai/v1/responses";
+    const models = useChatCompletions
+      ? atlasTextModelCandidates(primaryModel)
+      : [primaryModel];
+
+    for (const [index, model] of models.entries()) {
+      const body = useChatCompletions
+        ? atlasChatLlmBody({ model, prompt, systemPrompt, route })
+        : openAiLlmBody({ model, prompt, systemPrompt, reasoningEffort, responseMimeType, route });
+      if (!useChatCompletions) {
+        delete body.store;
+        // Director shot lists are normally a few hundred tokens, but the shared schema
+        // budget reserves 24k. Atlas returns an empty 504 for those oversized requests.
+        if (body.max_output_tokens) {
+          body.max_output_tokens = atlasCreativeOutputBudget(route);
+        }
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(300000)
+      });
+      const data = await response.json().catch(() => ({}));
+      const providerCode = Number(data?.code);
+      const errorStatus = !response.ok
+        ? response.status
+        : Number.isFinite(providerCode) && providerCode >= 400
+          ? providerCode
+          : data?.error
+            ? 502
+            : 0;
+      const text = extractOpenAiResponseText(data).trim();
+      const hasFallback = index < models.length - 1;
+      if (hasFallback && atlasTextCanFallback({ status: errorStatus, hasText: Boolean(text), hasProviderError: Boolean(data?.error) })) {
+        continue;
+      }
+      if (errorStatus) {
+        throw httpError(errorStatus, atlasError(data, errorStatus), { raw: data });
+      }
+      return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint, usage: data.usage || null }, data, route);
     }
-    const response = await fetch("https://api.atlascloud.ai/v1/responses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw httpError(response.status, data?.error?.message || "Atlas Cloud text generation failed.", { raw: data });
-    const text = extractOpenAiResponseText(data).trim();
-    return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint: "https://api.atlascloud.ai/v1/responses", usage: data.usage || null }, data, route);
+    throw httpError(502, "Atlas Cloud text generation failed.");
   }
   throw httpError(500, `Unsupported LLM provider: ${provider}`);
 }
@@ -18321,16 +18351,6 @@ async function localAssetToFalUrl(publicPath) {
       type: asset.mimeType || "application/octet-stream"
     })
   );
-}
-
-function extractOpenAiResponseText(response) {
-  if (typeof response?.output_text === "string") return response.output_text;
-
-  return (response?.output || [])
-    .flatMap((item) => item?.content || [])
-    .map((content) => content?.text || "")
-    .filter(Boolean)
-    .join("\n");
 }
 
 function extractFalText(data) {

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createCreativeAnalysisCache } from "../server/creative-analysis-cache.js";
-import { assembleSkillDirectorFinalPrompt, atlasCreativeOutputBudget, creativeOpenAiModel, openAiLlmBody, skillDirectorSystemPrompt, validateCreativeResponse } from "../server/creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasChatLlmBody, atlasCreativeOutputBudget, atlasTextCanFallback, atlasTextModelCandidates, atlasUsesChatCompletions, creativeOpenAiModel, extractOpenAiResponseText, openAiLlmBody, skillDirectorSystemPrompt, validateCreativeResponse } from "../server/creative-llm.js";
 import { directorMusicLevelContext } from "../server/director-music.js";
 import { NewtPresetStore } from "../server/newt-presets.js";
 import {
@@ -51,6 +51,44 @@ test("creative Director responses use strict structured output and cache success
   assert.equal(first.analysis, second.analysis);
   assert.deepEqual(second.usages, []);
   assert.equal(second.cacheHit, true);
+});
+
+test("Atlas text requests use Chat Completions and accept compatible response envelopes", () => {
+  assert.equal(atlasUsesChatCompletions({ route: "text-agent" }), true);
+  assert.equal(atlasUsesChatCompletions({ route: "film-director-shotlist" }), false);
+  assert.equal(atlasUsesChatCompletions({ route: "text-agent", responseMimeType: "application/json" }), false);
+  assert.deepEqual(atlasTextModelCandidates("openai/gpt-5.6-luna"), [
+    "openai/gpt-5.6-luna",
+    "deepseek-ai/deepseek-v3.2"
+  ]);
+  assert.deepEqual(atlasTextModelCandidates("deepseek-ai/deepseek-v3.2"), ["deepseek-ai/deepseek-v3.2"]);
+  assert.equal(atlasTextCanFallback({ status: 400 }), true);
+  assert.equal(atlasTextCanFallback({ status: 429 }), true);
+  assert.equal(atlasTextCanFallback({ status: 500 }), false);
+  assert.equal(atlasTextCanFallback({ hasText: false, hasProviderError: false }), true);
+  assert.equal(atlasTextCanFallback({ hasText: false, hasProviderError: true }), false);
+  assert.deepEqual(atlasChatLlmBody({
+    model: "openai/gpt-5.6-luna",
+    prompt: "Rewrite this prompt",
+    systemPrompt: "Return only the rewritten prompt",
+    route: "text-agent"
+  }), {
+    model: "openai/gpt-5.6-luna",
+    messages: [
+      { role: "system", content: "Return only the rewritten prompt" },
+      { role: "user", content: "Rewrite this prompt" }
+    ],
+    max_tokens: 8000
+  });
+  assert.equal(extractOpenAiResponseText({
+    choices: [{ message: { content: "Chat completion text" } }]
+  }), "Chat completion text");
+  assert.equal(extractOpenAiResponseText({
+    data: { output: [{ content: [{ type: "output_text", text: "Wrapped response text" }] }] }
+  }), "Wrapped response text");
+  assert.equal(extractOpenAiResponseText({
+    choices: [{ message: { content: [{ type: "text", text: { value: "Block response text" } }] } }]
+  }), "Block response text");
 });
 
 test("Director requests always receive the shared reasoning system prompt", () => {
