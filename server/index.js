@@ -68,6 +68,10 @@ import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { prepareAtlasVideoReferenceAsset } from "./atlas-video-input.js";
 import {
+  falSinglePartUploadMaximumBytes,
+  prepareBirefnetVideoInputAsset
+} from "./birefnet-video-input.js";
+import {
   archiveInstallBranchStatus,
   defaultUpdateBranch,
   defaultUpdateRepository,
@@ -9382,8 +9386,24 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
 
   const endpoint = selectedVideoModel.id;
   const options = req.body.birefnet || {};
+  const preparedVideo = await prepareBirefnetVideoInputAsset(videoUrl, {
+    resolveLocalAssetPath,
+    probeVideoFile,
+    createTarget: ({ sourceBaseName }) => createManagedAssetTarget(
+      req,
+      "birefnet-source",
+      ".mp4",
+      workflowPackageDependencyDirName,
+      { fileNameBase: `${sourceBaseName}-birefnet-source` }
+    ),
+    runFfmpeg,
+    statFile: stat
+  });
+  if (preparedVideo.uploadBytes > falSinglePartUploadMaximumBytes) {
+    throw httpError(400, "BiRefNet could not compress this video below Fal's reliable upload limit. Trim or compress the source video and try again.");
+  }
   const input = {
-    video_url: await uploadLocalOutputToFal(videoUrl),
+    video_url: await uploadLocalOutputToFal(preparedVideo.publicPath),
     model: normalizeChoice(options.model, birefnetModelOptions, "General Use (Light)"),
     operating_resolution: normalizeChoice(options.operatingResolution, birefnetResolutionOptions, "1024x1024"),
     output_mask: Boolean(options.outputMask),
@@ -9452,6 +9472,9 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
       videoOutputType: input.video_output_type,
       videoQuality: input.video_quality,
       videoWriteMode: input.video_write_mode,
+      sourceVideoPrepared: preparedVideo.prepared,
+      sourceVideoBytes: preparedVideo.sourceBytes,
+      uploadedVideoBytes: preparedVideo.uploadBytes,
       sourceVideoCount: 1
     },
     cost,
@@ -16526,8 +16549,11 @@ async function runMediaDescriptionLlm({
     const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
     const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
     const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
+    const input = mediaType === "video"
+      ? nativeVideoAnalysisInput({ videoUrls: mediaUrls, videoInputs: inputs, model: falModel, prompt, systemPrompt })
+      : { [inputKey]: mediaUrls, ...falLlmInput({ model: falModel, prompt, systemPrompt, route }) };
     const data = await subscribeFal(endpoint, {
-      input: { [inputKey]: mediaUrls, ...falLlmInput({ model: falModel, prompt, systemPrompt, route }) },
+      input,
       logs: true
     }, { route, model: falModel });
     return checkedCreativeLlmResult({ text: extractFalText(data).trim(), usages: [falResultUsage(data)].filter(Boolean), provider: "fal", model: falModel, endpoint }, data, route);
