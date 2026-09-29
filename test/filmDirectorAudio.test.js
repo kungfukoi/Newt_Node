@@ -36,6 +36,11 @@ test("Silent disables native audio while Production Sound and Full Audio retain 
   assert.equal(filmDirectorGenerateAudio("silent"), false);
 });
 
+test("silent audio remains authoritative for music-video direction", () => {
+  assert.match(filmDirectorAudioPolicyPrompt("silent", "music-video", true), /Silent output/);
+  assert.doesNotMatch(filmDirectorAudioPolicyPrompt("silent", "music-video", true), /connected music reference/i);
+});
+
 test("Film Director upgrades legacy scene rules without moving asset tags", () => {
   const legacy = [
     "@Emma = Character reference.",

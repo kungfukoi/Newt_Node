@@ -100,6 +100,48 @@ test("Film Director settings control the effective video request without droppin
   assert.match(request.prompt, /Silent output/);
 });
 
+test("Video Model audio off overrides an attached Director audio and music policy", () => {
+  const director = {
+    videoModel: "Seedance 2.5",
+    durationSeconds: "12",
+    resolution: "1080p",
+    aspectRatio: "9:16",
+    audioMode: "full",
+    approach: "music-video",
+    finalPrompt: "Scene rules: Music-driven scene.\n\nAudio policy: Use the connected music reference as the soundtrack.",
+    musicReference: { url: "/uploads/song.wav" }
+  };
+  const baseData = {
+    model: "Seedance 2.5",
+    duration: "10 seconds",
+    resolution: "720p",
+    aspectRatio: "16:9",
+    generateAudio: false
+  };
+
+  assert.equal(filmDirectorVideoSettings(baseData, director).generateAudio, false);
+
+  const request = buildVideoGenerationRequest({
+    node: { id: "video", data: { title: "Video", ...baseData } },
+    prompt: director.finalPrompt,
+    workflowContext: {},
+    projectId: "project",
+    projectName: "Project",
+    referenceAudioUrls: ["/uploads/song.wav"],
+    referenceAudioLabels: ["Song"],
+    filmDirector: director
+  });
+
+  assert.equal(request.generateAudio, false);
+  assert.deepEqual(request.referenceAudioUrls, []);
+  assert.deepEqual(request.referenceAudioLabels, []);
+  assert.equal(request.filmDirector.audioMode, "silent");
+  assert.equal(request.filmDirector.musicReference, null);
+  assert.match(request.filmDirector.finalPrompt, /Silent output/);
+  assert.match(request.prompt, /Silent output/);
+  assert.doesNotMatch(request.prompt, /connected music reference/i);
+});
+
 test("Coverage participates in batch graph runs as an image-stage node", () => {
   const node = { id: "coverage", type: "coverage", data: {} };
   assert.equal(isRunnableNode(node), true);

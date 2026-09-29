@@ -131,7 +131,26 @@ export function filmDirectorVideoSettings(data, director) {
     duration: filmDirectorVideoDuration(model, director.durationSeconds, data.duration),
     resolution: filmDirectorVideoResolution(model, director.resolution, data.resolution),
     aspectRatio: filmDirectorVideoAspectRatio(model, director.aspectRatio, data.aspectRatio),
-    generateAudio: director.audioMode ? filmDirectorGenerateAudio(director.audioMode) : data.generateAudio
+    generateAudio: data.generateAudio === false
+      ? false
+      : director.audioMode
+        ? filmDirectorGenerateAudio(director.audioMode)
+        : data.generateAudio
+  };
+}
+
+function filmDirectorForVideoRequest(director, generateAudio) {
+  if (!director || generateAudio) return director;
+  return {
+    ...director,
+    audioMode: "silent",
+    finalPrompt: applyFilmDirectorAudioPolicyToPrompt(
+      director.finalPrompt || "",
+      "silent",
+      director.approach,
+      false
+    ),
+    musicReference: null
   };
 }
 
@@ -157,8 +176,16 @@ export function buildVideoGenerationRequest({
   node = { ...node, data: filmDirectorVideoSettings(node.data, filmDirector) };
   const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
   const generateAudio = node.data.generateAudio !== false;
+  const effectiveFilmDirector = filmDirectorForVideoRequest(activeFilmDirector, generateAudio);
   return {
-    prompt: activeFilmDirector?.audioMode ? applyFilmDirectorAudioPolicyToPrompt(prompt, activeFilmDirector.audioMode) : prompt,
+    prompt: effectiveFilmDirector?.audioMode
+      ? applyFilmDirectorAudioPolicyToPrompt(
+          prompt,
+          effectiveFilmDirector.audioMode,
+          effectiveFilmDirector.approach,
+          Boolean(effectiveFilmDirector.musicReference)
+        )
+      : prompt,
     model: node.data.model,
     duration: activeFilmDirector
       ? filmDirectorVideoDuration(node.data.model, activeFilmDirector.durationSeconds, node.data.duration)
@@ -184,7 +211,7 @@ export function buildVideoGenerationRequest({
     referenceVideoLabels,
     referenceAudioUrls: generateAudio ? referenceAudioUrls : [],
     referenceAudioLabels: generateAudio ? referenceAudioLabels : [],
-    filmDirector: activeFilmDirector,
+    filmDirector: effectiveFilmDirector,
     minimaxH3: {
       enablePromptExpansion: node.data.minimaxH3EnablePromptExpansion !== false
     },

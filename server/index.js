@@ -6141,7 +6141,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
 
-    if (filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
+    if (req.body.generateAudio !== false && filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
       const audioInputs = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : [])
         .filter(isLocalAssetUrl)
         .map((url) => ({ url }));

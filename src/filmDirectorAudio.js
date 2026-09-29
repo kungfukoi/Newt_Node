@@ -31,15 +31,15 @@ export function filmDirectorAudioModeLabel(value = "") {
 }
 
 export function filmDirectorAudioPolicyPrompt(value = "", approach = "cinematic", connectedMusic = false) {
+  const mode = normalizeFilmDirectorAudioMode(value);
+  if (mode === filmDirectorAudioModeValues.silent) {
+    return "Audio policy: Silent output. Generate no dialogue, voices, ambience, room tone, sound effects, music, or soundtrack.";
+  }
   if (normalizeFilmDirectorApproach(approach) === "music-video") {
     return "Audio policy: Use the connected music reference as the soundtrack and timing authority from the opening through the final frame. Preserve its vocals, words, phrasing and musical timing. Synchronize visible singing precisely to the supplied vocal phonemes; keep instrumental passages instrumental. Do not invent lyrics, spoken dialogue, replacement music, intro or outro cues. Prioritize the supplied track over sound from any video reference.";
   }
   if (normalizeFilmDirectorApproach(approach) === "montage" && connectedMusic) {
     return "Audio policy: Use the connected music reference as the montage soundtrack and timing authority from the opening through the final frame. Pace the vignettes around the supplied track's energy and phrasing. Preserve its music, vocals and timing without inventing lyrics, replacement music, intro or outro cues. Do not add singing performances unless requested. Prioritize the supplied track over sound from any video reference.";
-  }
-  const mode = normalizeFilmDirectorAudioMode(value);
-  if (mode === filmDirectorAudioModeValues.silent) {
-    return "Audio policy: Silent output. Generate no dialogue, voices, ambience, room tone, sound effects, music, or soundtrack.";
   }
   if (mode === filmDirectorAudioModeValues.full) {
     return "Audio policy: Full native synchronized audio. Dialogue, diegetic sound, ambience, sound effects, and music are allowed when motivated by the scene.";

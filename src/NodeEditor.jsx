@@ -15768,7 +15768,7 @@ function NodeBody({
         {directorSettings && (
           <div className="effective-prompt-preview">
             <span>
-              {`Director controls: ${directorSettings.videoModel || "Connected model"}, ${node.data.duration}, ${node.data.resolution}, ${node.data.aspectRatio}, ${filmDirectorAudioModeLabel(directorSettings.audioMode)}`}
+              {`Director controls: ${directorSettings.videoModel || "Connected model"}, ${node.data.duration}, ${node.data.resolution}, ${node.data.aspectRatio}, ${node.data.generateAudio === false && normalizeFilmDirectorAudioMode(directorSettings.audioMode) !== "silent" ? "Silent (Video Model override)" : filmDirectorAudioModeLabel(directorSettings.audioMode)}`}
             </span>
           </div>
         )}
