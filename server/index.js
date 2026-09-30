@@ -3495,7 +3495,7 @@ app.post("/api/node/process-text", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || "Text processing failed." });
+    sendApiError(res, httpError(errorStatusCode(error), publicErrorDetail(error?.body?.detail) || error.message), "Text processing failed.");
   }
 });
 
