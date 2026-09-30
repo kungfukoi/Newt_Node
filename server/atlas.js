@@ -12,6 +12,9 @@ function providerDetail(value, depth = 0) {
 }
 
 export function atlasError(data, status) {
+  if (status === 429) {
+    return "Atlas Cloud is rate limiting requests (HTTP 429). Wait a moment and retry. If this persists, check the account/model limits with Atlas Cloud.";
+  }
   if (status === 402) {
     return "Atlas Cloud rejected the request (HTTP 402): insufficient balance or exhausted allowance. Check billing for the account associated with the active Atlas Cloud key before starting another generation.";
   }

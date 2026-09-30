@@ -155,6 +155,8 @@ Current explicit export choices are PNG/JPEG for stills and H.264 MP4/ProRes 422
 
 Remote model calls remain server-side. Fal, Google, Krea, and OpenAI credentials are selected in Settings and materialized locally into `.env`; provider routing is explicit and recorded in history. MiniMax H3 supports authoritative Fal, Krea, and Local routes. The Krea route uses the same validated multimodal reference contract as the H3 node and never falls back to Fal or Local after submission failure.
 
+`server/atlas-llm-request.js` shares admission and bounded 429 backoff between Atlas text and image-analysis requests. It checks both HTTP and provider-envelope status before creative-output validation, preserves the selected request across retries, and reports queue/retry progress through the existing generation context.
+
 Local ComfyUI integrations live in focused server engines such as `server/wanwarp/` and `server/wanblend/`. Browser code sends normalized settings and managed asset URLs, while server engines own template patching, queueing, polling, output recovery, and diagnostics.
 Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed Newt assets to server-visible `file://` URIs, submits asynchronous video jobs to loopback SGLang, polls completion, and copies content back into managed outputs. FL2VA/T2VA use the primary URL; Ref2VA may use a separately configured service because it is a distinct deployment variant.
 

@@ -63,6 +63,7 @@ import {
 } from "./provider-credentials.js";
 import { validateProviderKey } from "./provider-key-validation.js";
 import { atlasError, createAtlasClient } from "./atlas.js";
+import { createAtlasLlmRequest } from "./atlas-llm-request.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
@@ -354,6 +355,7 @@ let registeredWorkflowPackageCacheGeneration = 0;
 const registeredWorkflowPackageCandidateCache = new Map();
 const execFileUnscheduled = promisify(execFileCallback);
 const localMediaScheduler = createWorkScheduler({ maxConcurrent: concurrencyLimit(process.env.NEWTNODE_FFMPEG_CONCURRENCY, 2), defaultLimit: 32 });
+const requestAtlasLlm = createAtlasLlmRequest();
 const execFile = (file, args, options) => file === ffmpegBinaryPath
   ? localMediaScheduler.run(() => execFileUnscheduled(file, args, options), { signal: options?.signal })
   : execFileUnscheduled(file, args, options);
@@ -16506,24 +16508,15 @@ async function runTextLlm({
         }
       }
 
-      const response = await fetch(endpoint, {
+      const { data, errorStatus } = await requestAtlasLlm(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(300000)
-      });
-      const data = await response.json().catch(() => ({}));
-      const providerCode = Number(data?.code);
-      const errorStatus = !response.ok
-        ? response.status
-        : Number.isFinite(providerCode) && providerCode >= 400
-          ? providerCode
-          : data?.error
-            ? 502
-            : 0;
+      }, updateCurrentGenerationProgress);
       const text = extractOpenAiResponseText(data).trim();
       const hasFallback = index < models.length - 1;
-      if (hasFallback && atlasTextCanFallback({ status: errorStatus, hasText: Boolean(text), hasProviderError: Boolean(data?.error) })) {
+      if (errorStatus !== 429 && hasFallback && atlasTextCanFallback({ status: errorStatus, hasText: Boolean(text), hasProviderError: Boolean(data?.error) })) {
         continue;
       }
       if (errorStatus) {
@@ -16599,17 +16592,23 @@ async function runMediaDescriptionLlm({
   const model = atlas ? `openai/${String(openAiModel || "").replace(/^openai\//, "")}` : openAiModel;
   const body = openAiLlmBody({ model, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route });
   if (atlas) delete body.store;
-  const response = await fetch(atlas ? "https://api.atlascloud.ai/v1/responses" : "https://api.openai.com/v1/responses", {
+  const options = {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${atlas ? process.env.ATLAS_API_KEY : openAiTextApiKey}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(300000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
+  };
+  const result = atlas
+    ? await requestAtlasLlm("https://api.atlascloud.ai/v1/responses", options, updateCurrentGenerationProgress)
+    : await (async () => {
+        const response = await fetch("https://api.openai.com/v1/responses", options);
+        return { data: await response.json().catch(() => ({})), errorStatus: response.ok ? 0 : response.status };
+      })();
+  const { data, errorStatus } = result;
+  if (errorStatus) {
     throw httpError(
-      response.status,
-      atlas ? atlasError(data, response.status) : data?.error?.message || "OpenAI media analysis failed.",
+      errorStatus,
+      atlas ? atlasError(data, errorStatus) : data?.error?.message || "OpenAI media analysis failed.",
       { raw: data }
     );
   }
@@ -18271,7 +18270,7 @@ async function describeFilmDirectorImageInputs(imageInputs) {
 
   const referenceLabels = imageInputs.map((item, index) => `Image ${index + 1}: ${item.tag || item.label || `@Reference${index + 1}`} | type: ${item.type || "image"}`).join("\n");
   const typeInstructions = [...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean)), 'Return strict JSON only: {"assets":[{"tag":"@ExactTag","description":"concise production-useful visual description"}]}.', "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."].join("\n");
-  const result = await runMediaDescriptionLlm({ inputs: imageInputs, mediaType: "image", prompt: `${referenceLabels}\n\n${typeInstructions}`, falModel: skillDirectorVisionFalModel, openAiModel: skillDirectorOpenAiModel, reasoningEffort: "high", route: "film-director-visual-analysis" });
+  const result = await runMediaDescriptionLlm({ inputs: imageInputs, mediaType: "image", prompt: `${referenceLabels}\n\n${typeInstructions}`, falModel: skillDirectorVisionFalModel, openAiModel: skillDirectorOpenAiModel, responseMimeType: "application/json", reasoningEffort: "high", route: "film-director-visual-analysis" });
   const rawText = result.text;
   const parsed = skillDirectorStructuredObject(rawText);
   const parsedAssets = Array.isArray(parsed?.assets) ? parsed.assets : [];
