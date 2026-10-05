@@ -61,6 +61,9 @@ test("regular and CU variants generate whole sheets without creating canvas mask
     baseSheet: { url: "/outputs/base.png" }, baseVideoSheet: { url: "/outputs/cu.png" }, baseSignature: "base", baseVideoSignature: "cu", characterTag: "Hero"
   });
   assert.equal(generate.mock.callCount(), 2);
+  const cuRequest = generate.mock.calls[1].arguments[0];
+  assert.deepEqual(cuRequest.imagePromptUrls, ["/outputs/cu.png", "/uploads/outfit.png", "/outputs/dressed.png"]);
+  assert.match(cuRequest.imagePromptLabels[2], /Matching Full Character Sheet/);
   for (const call of generate.mock.calls) {
     assert.equal(call.arguments[0].characterWardrobeEdit, true);
     assert.equal(call.arguments[0].editMaskDataUrl, undefined);

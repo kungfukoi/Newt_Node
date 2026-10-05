@@ -43,6 +43,8 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
           prompt: characterWardrobeEditPromptForData(node.data, "video"),
           baseSheet: baseVideoSheet,
           wardrobe,
+          identityReference: node.data.characterPortrait,
+          consistencySheet: generated,
           workflowContext: workflowContext,
           characterTag: characterTag,
           sheetKind: "video"

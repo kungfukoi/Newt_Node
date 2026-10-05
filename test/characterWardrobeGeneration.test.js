@@ -10,6 +10,7 @@ test("character wardrobe edits never submit a provider mask", async () => {
     data: {
       stylizedCharacter: true,
       cinematicCharacterSheet: true,
+      characterPortrait: { localUrl: "/uploads/portrait.png" },
       cuVideoGeneration: true
     }
   };
@@ -38,4 +39,25 @@ test("character wardrobe edits never submit a provider mask", async () => {
   assert.equal(variant.wardrobeEditVersion, characterWardrobeEditVersion);
   assert.equal(variant.generated.url, "/outputs/workwear.png");
   assert.equal(variant.videoGenerated.url, "/outputs/workwear-video.png");
+  assert.strictEqual(requests[1].consistencySheet, variant.generated);
+  assert.strictEqual(requests[1].identityReference, node.data.characterPortrait);
+  assert.match(requests[1].prompt, /authority for the finished wardrobe/i);
+});
+
+test("CU-only retries carry the existing completed wardrobe sheet", async () => {
+  const generated = { localUrl: "/outputs/cinematic-wardrobe.png" };
+  const requests = [];
+  await generateCharacterWardrobeVariant({ data: { cuVideoGeneration: true, cinematicCharacterSheet: true } }, { id: "outfit", url: "/uploads/outfit.png" }, {
+    baseSheet: { url: "/outputs/base.png" },
+    baseVideoSheet: { url: "/outputs/cu-base.png" },
+    existingVariant: { generated },
+    regenerateVideo: true,
+    runWardrobeEdit: async (request) => {
+      requests.push(request);
+      return { url: "/outputs/cu-wardrobe.png" };
+    }
+  });
+  assert.equal(requests.length, 1);
+  assert.strictEqual(requests[0].consistencySheet, generated);
+  assert.match(requests[0].prompt, /authority for the finished wardrobe/i);
 });
