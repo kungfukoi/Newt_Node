@@ -609,23 +609,6 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
                 <span />
               </span>
             </label>
-            <label className={`settings-preference-toggle ${userPreferences.showPriceSnapshot ? "enabled" : ""}`}>
-              <span>
-                <strong>Show Price Snapshot</strong>
-                <small>Display the estimated run price on Generate buttons.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={userPreferences.showPriceSnapshot}
-                onChange={(event) => setUserPreferences((current) => ({
-                  ...current,
-                  showPriceSnapshot: event.target.checked
-                }))}
-              />
-              <span className="node-toggle compact" aria-hidden="true">
-                <span />
-              </span>
-            </label>
             <label className="settings-preference-model">
               <span>
                 <strong>Image Editor Model</strong>

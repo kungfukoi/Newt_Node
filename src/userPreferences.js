@@ -2,7 +2,6 @@ import { normalizeImageEditModel } from "./imageEdit.js";
 
 export const defaultUserPreferences = Object.freeze({
   showPresetPanel: true,
-  showPriceSnapshot: true,
   imageEditorModel: normalizeImageEditModel(),
   directorProcessingModel: "astra"
 });
@@ -18,9 +17,6 @@ export function normalizeUserPreferences(value) {
     showPresetPanel: typeof source.showPresetPanel === "boolean"
       ? source.showPresetPanel
       : defaultUserPreferences.showPresetPanel,
-    showPriceSnapshot: typeof source.showPriceSnapshot === "boolean"
-      ? source.showPriceSnapshot
-      : defaultUserPreferences.showPriceSnapshot,
     imageEditorModel: normalizeImageEditModel(source.imageEditorModel),
     directorProcessingModel: normalizeDirectorProcessingModel(source.directorProcessingModel)
   };

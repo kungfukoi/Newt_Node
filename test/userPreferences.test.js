@@ -17,9 +17,9 @@ test("user preferences preserve an explicit Preset panel choice", () => {
   assert.deepEqual(normalizeUserPreferences({ showPresetPanel: true }), { ...defaultUserPreferences, showPresetPanel: true });
 });
 
-test("user preferences preserve the price snapshot choice", () => {
-  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: false }), { ...defaultUserPreferences, showPriceSnapshot: false });
-  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: true }), { ...defaultUserPreferences, showPriceSnapshot: true });
+test("user preferences discard the retired price snapshot choice", () => {
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: false }), defaultUserPreferences);
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: true }), defaultUserPreferences);
 });
 
 test("image editor preference preserves Ideogram and migrates old settings", () => {
