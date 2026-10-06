@@ -1,4 +1,6 @@
 import { generateFlux3 } from "./flux3.js";
+import { generateNanoBanana21 } from "./nano-banana-21.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint } from "../src/nanoBanana21.js";
 import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { PricingRefresh } from "./pricing-refresh.js";
@@ -485,6 +487,7 @@ const imageModelNames = {
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
   flux3: "Flux 3",
+  nanoBanana21: "Nano Banana 2.1",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -498,6 +501,7 @@ const imageModelOptions = [
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
+  imageModelNames.nanoBanana21,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -903,6 +907,11 @@ registerImageEditRoutes(app, {
     return source;
   },
   generate: async ({ provider, model, variant, prompt, quality, size, images, mask, resolution }) => {
+    if (isNanoBanana21Model(model)) {
+      return generateNanoBanana21({ prompt, images, mask, aspectRatio: "auto", resolution }, {
+        upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
+      });
+    }
     if (isFlux3Model(model)) {
       return generateFlux3({ prompt, images, mask, aspectRatio: "auto", resolution }, {
         upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
@@ -1048,6 +1057,7 @@ function buildHealthPayload() {
       imageEdit: true,
       ideogram45: true,
       flux3: true,
+      nanoBanana21: true,
       explore: true,
       storyboardRevisions: true,
       apiJsonErrors: true,
@@ -4118,21 +4128,22 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (["fal-ideogram-4-5", "fal-flux-3"].includes(selectedModel.provider)) {
+    if (["fal-ideogram-4-5", "fal-flux-3", "fal-nano-banana-2-1"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
       const flux = isFlux3Model(selectedModel.displayName);
-      const resolution = flux ? (req.body.resolution || "2K") : req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K";
-      const modelImage = await (flux ? generateFlux3 : generateIdeogram45)({
+      const nano21 = isNanoBanana21Model(selectedModel.displayName);
+      const resolution = flux || nano21 ? (req.body.resolution || "2K") : req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K";
+      const modelImage = await (nano21 ? generateNanoBanana21 : flux ? generateFlux3 : generateIdeogram45)({
         prompt,
         images: await Promise.all(imagePromptUrls.map((url) => readLocalAsset(url))),
         imageLabels: imagePromptLabels,
         aspectRatio, resolution,
         quality: "high"
       }, { upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult });
-      const output = await downloadImage(req, modelImage.remoteImage.url, flux ? "flux-3" : "ideogram-4-5", modelImage.remoteImage.content_type || modelImage.remoteImage.mimeType);
+      const output = await downloadImage(req, modelImage.remoteImage.url, nano21 ? "nano-banana-2-1" : flux ? "flux-3" : "ideogram-4-5", modelImage.remoteImage.content_type || modelImage.remoteImage.mimeType);
       const cost = modelImage.cost;
 
       await appendHistory({
@@ -4155,6 +4166,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           quality: modelImage.input.quality,
           imageSize: modelImage.input.image_size,
           editPrecision: modelImage.input.edit_precision,
+          thinkingLevel: modelImage.input.thinking_level,
+          enableWebSearch: modelImage.input.enable_web_search,
           imagePromptCount: modelImage.referenceCount,
           imagePromptLabels: modelImage.referenceLabels
         },
@@ -18739,6 +18752,7 @@ function resolveImageModel(model) {
     };
   }
 
+  if (isNanoBanana21Model(model)) return { provider: "fal-nano-banana-2-1", displayName: imageModelNames.nanoBanana21, id: nanoBanana21TextEndpoint };
   if (isNanoBanana2Model(model)) {
     return {
       provider: "fal-nano-banana-2",
@@ -19247,6 +19261,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-nano-banana-2-1") return nanoBanana21AspectRatios;
   if (provider === "fal-flux-3") return flux3AspectRatios;
   if (provider === "fal-ideogram-4-5") return ideogram45AspectRatios;
   if (provider === "fal-reve-2-1") return reve21AspectRatios;

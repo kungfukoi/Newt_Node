@@ -33,6 +33,8 @@ function imageReferenceModelKey(model = "") {
   const normalized = String(model || "").trim().toLowerCase();
   if (normalized.includes("openai image 2.5") || normalized.includes("gpt image 2.5")) return "openai-image-2-5";
   if (normalized.includes("openai image 2") || normalized.includes("gpt image 2")) return "openai-image-2";
+  // Fal's 2.1 schema declares no maximum reference count; do not inherit 2.0's limit.
+  if (normalized === "nano banana 2.1") return "nano-banana-2-1";
   if (normalized.includes("nano banana 2")) return "nano-banana-2";
   if (normalized.includes("nano banana pro")) return "nano-banana-pro";
   if (normalized.includes("seedream 5")) return "seedream-5-pro";

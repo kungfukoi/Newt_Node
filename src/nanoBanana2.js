@@ -12,7 +12,7 @@ export const nanoBanana2Costs = Object.freeze({
 
 export function isNanoBanana2Model(model) {
   const normalized = String(model || "").trim().toLowerCase().replace(/[-_]+/g, " ");
-  return normalized.includes("nano banana 2") || normalized.includes("gemini 3.1 flash image");
+  return /nano banana 2(?![.\d])/.test(normalized) || normalized.includes("gemini 3.1 flash image");
 }
 
 export function normalizeNanoBanana2Resolution(value) {

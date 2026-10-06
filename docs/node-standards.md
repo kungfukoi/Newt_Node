@@ -937,6 +937,8 @@ The 3D node establishes the standard for model generation nodes.
 
 ## Verification Checklist
 
+Nano Banana 2.1 is a separate Fal-only image model in the image catalog, Explore, Character, Coverage, Auto Aspect, Storyboard, and preview editor preference. Preserve Nano Banana 2 compatibility without matching the 2.1 label as 2.0. Use the published 2.1 schema (1K/2K/4K, supported aspect ratios, high thinking, web search off); do not expose the 0.5K option mentioned in pricing copy but absent from that schema. Preserve all references because the schema specifies no count maximum. Record the 2.1 endpoint, resolution, thinking setting, model identity, and estimated cost in History. Selection edits use a final guide reference and local preservation of unselected pixels, with no native mask field. Fal's integration-only availability notice must remain documented until verified live.
+
 - Changes to shared persistence, scheduling, runtime launch, or canvas behavior require the full Node suite, production build, isolated API smoke, fixed-fixture performance check, and relevant checked-in Playwright tests. Keep Windows/macOS CI current. Tests must not call paid providers or mutate real project data. Native dialogs/GPU checks require the corresponding platform and must be reported separately.
 - Performance diagnostics remain opt-in, expire automatically, and export allowlisted counters/events rather than raw logs or workflow content. Never expose provider credentials, signed URLs, prompts, or local asset paths in the support snapshot.
 

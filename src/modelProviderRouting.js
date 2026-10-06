@@ -38,6 +38,7 @@ const providerModelSupport = Object.freeze({
       "OpenAI Image 2",
       "Ideogram 4.5",
       "Flux 3",
+      "Nano Banana 2.1",
       "REVE 2.1",
       "Krea 2 Large"
     ]),

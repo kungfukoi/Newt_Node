@@ -1,4 +1,5 @@
 import { isFlux3Model, estimateFlux3Cost } from "./flux3.js";
+import { isNanoBanana21Model, estimateNanoBanana21Cost } from "./nanoBanana21.js";
 import { getGenerationQuote, getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
 import { generationQuoteSettings } from "./pricingTrust.js";
 import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, supportsKreaModel } from "./kreaApi.js";
@@ -70,6 +71,7 @@ export function generationProviderForModel({
   }
 
   if (mediaType === "image") {
+    if (isNanoBanana21Model(model)) return ["atlas", "krea"].includes(preferences.imageGeneration) ? null : "fal";
     if (preferences.imageGeneration === "krea") return supportsKreaModel("image", model) ? "krea" : null;
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage25Model(model)) return "fal";
@@ -95,7 +97,9 @@ export function estimateImageRunCost({
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
 
-  if (provider === "fal" && isFlux3Model(model)) {
+  if (provider === "fal" && isNanoBanana21Model(model)) {
+    unitCost = estimateNanoBanana21Cost({ resolution }).amountUsd;
+  } else if (provider === "fal" && isFlux3Model(model)) {
     unitCost = estimateFlux3Cost({ resolution }).amountUsd;
   } else if (provider === "atlas" && supportsAtlasImageModel(model)) {
     unitCost = estimateAtlasImageCost({ model, resolution, referenceCount: references }).amountUsd;

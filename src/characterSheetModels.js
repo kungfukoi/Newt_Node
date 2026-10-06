@@ -7,7 +7,8 @@ export const characterSheetModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.ideogram45,
-  imageModelNames.flux3
+  imageModelNames.flux3,
+  imageModelNames.nanoBanana21
 ];
 
 export function normalizeCharacterSheetModel(value) {

@@ -1,4 +1,5 @@
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions } from "./nanoBanana21.js";
 import { usePricingSync } from "./usePricing.js";
 import { isOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
@@ -1091,6 +1092,7 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isNanoBanana21Model(model)) return nanoBanana21AspectRatios;
   if (isFlux3Model(model)) return flux3AspectRatios;
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
@@ -1109,6 +1111,7 @@ function isSeedream5ImageModel(model) {
 }
 
 function imageResolutionOptionsForModel(model) {
+  if (isNanoBanana21Model(model)) return nanoBanana21ResolutionOptions;
   if (isFlux3Model(model)) return flux3ResolutionOptions;
   if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;

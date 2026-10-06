@@ -1,4 +1,4 @@
-import { isFlux3Model } from "../src/flux3.js";
+import { imageEditUsesSelectionGuide } from "../src/imageEdit.js";
 import sharp from "sharp";
 import { isIdeogram45Model } from "../src/ideogram45.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
@@ -28,7 +28,7 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   let mask = null;
   if (selection) {
     const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
-    if (isFlux3Model(model)) {
+    if (imageEditUsesSelectionGuide(model)) {
       mask = await decode(selection).extractChannel(3).png().toBuffer();
     } else if (isIdeogram45Model(model)) {
       const pixels = await decode(selection).extractChannel(3).raw().toBuffer();

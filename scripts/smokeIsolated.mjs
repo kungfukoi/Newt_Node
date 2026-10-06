@@ -57,6 +57,7 @@ try {
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
+  assert.equal((await (await request("/api/health")).json()).routes.nanoBanana21, true);
   assert.equal((await (await request("/api/health")).json()).routes.explore, true);
   const builtIns = await (await request("/api/newt-presets")).json();
   assert.equal(builtIns.filter(item => item.isSystem).length, 6);
@@ -123,6 +124,7 @@ try {
   assert.equal(kreaSettings.modelProviderPreferences.veo, "krea");
   for (const [route, model, message] of [
     ["generate-image", "Ideogram 4.5", /not supported/],
+    ["generate-image", "Nano Banana 2.1", /Nano Banana 2.1.*not supported/],
     ["generate-image", "Nano Banana 2", /Krea API key/],
     ["generate-video", "Wan 2.7 Reference-to-Video", /not supported/],
     ["generate-video", "Kling O3 Pro", /Krea API key/],
@@ -133,6 +135,9 @@ try {
     assert.match((await rejected.json()).error, message);
   }
   await request("/api/settings", { modelProviderPreferences: expectedRouting });
+  const nano21Atlas = await fetch(`${api}/api/node/generate-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Nano Banana 2.1", prompt: "Routing validation only" }) });
+  assert.equal(nano21Atlas.status, 400);
+  assert.match((await nano21Atlas.json()).error, /Nano Banana 2.1.*not supported by Atlas/);
   assert.deepEqual(
     JSON.parse(await readFile(path.join(sandbox, "server", "data", "runtime-settings.json"), "utf8")).modelProviderPreferences,
     expectedRouting

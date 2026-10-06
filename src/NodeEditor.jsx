@@ -1,4 +1,5 @@
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions } from "./nanoBanana21.js";
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
 import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
@@ -793,7 +794,7 @@ const moodBoardOutputFileName = "MOOD_BOARD.png";
 const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
 const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45, imageModelNames.flux3];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
 const editVideoOutputOptions = [
   ["mp4", "MP4"],
   ["webm", "WebM"],
@@ -823,6 +824,7 @@ const coverageModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
+  imageModelNames.nanoBanana21,
   imageModelNames.reve21,
   imageModelNames.seedream5Pro
 ];
@@ -1054,7 +1056,7 @@ const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardFixedModel = imageModelNames.openAiImage2;
-const storyboardImageModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.flux3];
+const storyboardImageModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.flux3, imageModelNames.nanoBanana21];
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
 const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBoardOutputPortId = "storyboardOut";
@@ -18467,6 +18469,7 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isNanoBanana21Model(model)) return nanoBanana21AspectRatios;
   if (isFlux3Model(model)) return flux3AspectRatios;
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
@@ -18749,6 +18752,7 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model) {
+  if (isNanoBanana21Model(model)) return nanoBanana21ResolutionOptions;
   if (isFlux3Model(model)) return flux3ResolutionOptions;
   if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;

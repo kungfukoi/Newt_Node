@@ -1,4 +1,6 @@
 import { isFlux3Model, flux3ResolutionOptions } from "../../src/flux3.js";
+import { isNanoBanana21Model, nanoBanana21ResolutionOptions } from "../../src/nanoBanana21.js";
+import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../../src/imageEdit.js";
 import { openAiImage25Variant } from "../../src/openAiImageModels.js";
 import multer from "multer";
 import { createHash, randomUUID } from "node:crypto";
@@ -15,13 +17,14 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     try {
       const model = !req.body.model || ["OpenAI Image 2.5", "GPT Image 2.5"].includes(req.body.model) ? normalizeImageEditModel(req.body.model) : req.body.model;
       if (!imageEditModelOptions.includes(model)) throw Object.assign(new Error("Choose a supported image editor model."), { status: 400 });
-      if ((isIdeogram45Model(model) || isFlux3Model(model)) && req.body.provider !== "fal") throw Object.assign(new Error(`${model} edits require Fal. Enable a Fal key in Settings.`), { status: 400 });
+      if (imageEditRequiresFal(model) && req.body.provider !== "fal") throw Object.assign(new Error(`${model} edits require Fal. Enable a Fal key in Settings.`), { status: 400 });
       const provider = getProvider?.(req, String(req.body.provider || "").trim().toLowerCase()) || "";
       if (!["fal", "atlas"].includes(provider)) throw Object.assign(new Error("Enable an active key for the selected image editor provider in Settings."), { status: 400 });
       const { sourceUrl, requestId, prompt = "", mode = "edit", quality = "high" } = req.body;
       if (!/^[a-z0-9-]{16,80}$/i.test(requestId || "")) throw Object.assign(new Error("An edit request ID is required."), { status: 400 });
       if (!(isIdeogram45Model(model) ? ideogram45QualityOptions : openAiImage2QualityOptions).includes(quality)) throw Object.assign(new Error("Choose a valid image quality."), { status: 400 });
       if (isFlux3Model(model) && !flux3ResolutionOptions.includes(req.body.resolution || "2K")) throw Object.assign(new Error("Choose 1K, 2K, or 4K for Flux 3."), { status: 400 });
+      if (isNanoBanana21Model(model) && !nanoBanana21ResolutionOptions.includes(req.body.resolution || "2K")) throw Object.assign(new Error("Choose 1K, 2K, or 4K for Nano Banana 2.1."), { status: 400 });
       const key = `${req.body.projectId || ""}:${requestId}`;
       const hash = createHash("sha256").update(JSON.stringify(Object.entries(req.body).sort(([a], [b]) => a.localeCompare(b))));
       for (const name of ["drawing", "selection"]) hash.update(name).update(req.files?.[name]?.[0]?.buffer || "");
@@ -43,7 +46,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
       selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
-    const variant = isIdeogram45Model(model) || isFlux3Model(model) ? undefined : openAiImage25Variant(model);
+    const variant = imageEditRequiresFal(model) ? undefined : openAiImage25Variant(model);
     let generation;
     let generationProvider = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
     try {
@@ -61,7 +64,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
           endpoint: generation.endpoint, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
-          settings: { quality: isFlux3Model(model) ? undefined : quality, variant, ...(isFlux3Model(model) ? { resolution: req.body.resolution || "2K", selectionGuide: Boolean(prepared.mask) } : {}), ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), sourceUrl, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
+          settings: { quality: imageEditUsesSelectionGuide(model) ? undefined : quality, variant, ...(imageEditUsesSelectionGuide(model) ? { resolution: req.body.resolution || "2K", selectionGuide: Boolean(prepared.mask) } : {}), ...(isNanoBanana21Model(model) ? { thinkingLevel: "high", enableWebSearch: false } : {}), ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), sourceUrl, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
           localImage: item.url, localThumbnail: item.thumbnailUrl, outputFileName: item.fileName, cost });
       } catch { warning = "Image saved, but this run could not be added to History."; }
       return { item, warning };

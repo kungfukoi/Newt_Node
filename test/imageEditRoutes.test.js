@@ -148,3 +148,21 @@ test("Flux editor uses saved model and resolution, rejects unsupported providers
     assert.equal(calls[0].variant, undefined); assert.equal(histories[0].settings.resolution, "4K");
   });
 });
+
+test("Nano Banana 2.1 editor preserves routing, resolution and history", () => withEditor(async ({ post, calls, histories }) => {
+  const model = "Nano Banana 2.1";
+  for (const changes of [{ provider: "atlas" }, { resolution: "0.5K" }, { resolution: "8K" }]) {
+    assert.equal((await post({ model, ...changes })).status, 400);
+  }
+  assert.equal(calls.length, 0);
+  const requestId = randomUUID();
+  assert.equal((await post({ model, resolution: "4K", requestId })).status, 200);
+  assert.equal((await post({ model, resolution: "4K", requestId })).status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].model, model);
+  assert.equal(calls[0].variant, undefined);
+  assert.equal(calls[0].resolution, "4K");
+  assert.equal(histories[0].modelName, model);
+  assert.equal(histories[0].settings.thinkingLevel, "high");
+  assert.equal(histories[0].settings.enableWebSearch, false);
+}));
