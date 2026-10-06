@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import ModelProviderOption from "./ModelProviderOption.jsx";
 import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { concatenatePlainTextInputs } from "../plainText.js";
@@ -414,6 +415,7 @@ function SkillDirectorCollapsedPortRail({ node, ports = [], onConnectStart, onDi
 }
 
 export function SkillDirectorNodeBody({
+  providerOptionProps,
   node,
   config,
   outputPort,
@@ -1102,7 +1104,7 @@ export function SkillDirectorNodeBody({
                 <select value={videoModelValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillVideoModel: normalizeFilmDirectorVideoModel(event.target.value) })}>
                   <option value="">Connected Model</option>
                   {filmDirectorVideoModelOptions.map((model) => (
-                    <option key={model} value={model} disabled={musicVideo && Boolean(filmDirectorMusicVideoError({ approach: approachValue, audioInputs: [{ url: "connected" }], videoModel: model }))}>{model}</option>
+                    <ModelProviderOption key={model} model={model} mediaType="video" {...providerOptionProps} disabled={musicVideo && Boolean(filmDirectorMusicVideoError({ approach: approachValue, audioInputs: [{ url: "connected" }], videoModel: model }))} />
                   ))}
                 </select>
               </label>

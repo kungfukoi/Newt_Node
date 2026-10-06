@@ -87,6 +87,25 @@ export function providerSupportedModels(route, provider) {
   return [...(providerModelSupport[route]?.[provider] || [])];
 }
 
+// Match the generation routes, including Google's Nano Banana-only override
+// and the dedicated Seedance and MiniMax provider preferences.
+export function modelProviderOptionState(model, mediaType, preferences = {}, availability = {}) {
+  const normalized = normalizeModelProviderPreferences(preferences, availability);
+  let route = "imageGeneration";
+  if (mediaType === "video") {
+    route = /^Seedance /.test(model) ? "seedance" : /^MiniMax H3/.test(model) ? "minimaxH3" : "veo";
+  }
+  let provider = normalized[route];
+  if (route === "imageGeneration" && provider === "google" && model !== "Nano Banana Pro") provider = "fal";
+  const supported = providerSupportedModels(route, provider).some((candidate) =>
+    candidate === model || (route === "minimaxH3" && provider === "local" && model === "MiniMax H3")
+  );
+  return {
+    disabled: !supported,
+    reason: supported ? "" : `Unavailable with ${providerPreferenceLabel(provider)}. Change the provider in Settings > Model Providers.`
+  };
+}
+
 export function providerSupportedModelsLabel(route, provider) {
   const models = providerSupportedModels(route, provider);
   return models.length ? `Models: ${models.join(", ")}` : "Models: None configured";

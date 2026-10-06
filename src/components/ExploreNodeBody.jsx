@@ -1,4 +1,5 @@
 import React from "react";
+import ModelProviderOption from "./ModelProviderOption.jsx";
 import { Compass, GitBranch, Sparkles, Pencil, Combine, Pause, Play, Star, Trash2, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { NodeRow, OutputPortRow } from "./NodePorts.jsx";
 import { exploreTasks, exploreInfluences, exploreModels, exploreGrades, exploreMaxDirections, normalizeExploreData, exploreSelectionPatch, exploreReferenceDescription } from "../explore.js";
@@ -16,7 +17,7 @@ export function handleExploreGalleryWheel(event, gallery) {
   gallery.scrollLeft = Math.max(0, Math.min(gallery.scrollWidth - gallery.clientWidth, gallery.scrollLeft + delta * unit));
 }
 
-export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRun, onPreviewOpen,
+export function ExploreNodeBody({ providerOptionProps, node, config, incoming, prompt, onUpdate, onRun, onPreviewOpen,
   onConnectStart, onDisconnectInput, connectedPortKeys, imageModels, ratios, resolutions, qualities, modelPatch,
   provider, showApiCosts = false }) {
   const data = normalizeExploreData(node.data);
@@ -157,7 +158,7 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
         {row("Reference Influence", select("referenceInfluence", exploreInfluences))}
         {row("Directions", <input aria-label="Directions" type="number" min="1" max={exploreMaxDirections} value={data.directionCount} onChange={event => update({ directionCount: Number(event.target.value) })} />)}
         {row("Grade", select("gradePreset", exploreGrades))}
-        {row("Image Model", <select aria-label="Explore image model" value={data.model} onChange={event => update(modelPatch(event.target.value))}>{!enabledModels.includes(data.model) && <option disabled>{data.model}</option>}{enabledModels.map(model => <option key={model}>{model}</option>)}</select>)}
+        {row("Image Model", <select aria-label="Explore image model" value={data.model} onChange={event => update(modelPatch(event.target.value))}>{!enabledModels.includes(data.model) && <option disabled>{data.model}</option>}{enabledModels.map(model => <ModelProviderOption key={model} model={model} {...providerOptionProps} />)}</select>)}
         {row("Aspect Ratio", <select aria-label="Aspect ratio" value={data.aspectRatio} onChange={event => update({ aspectRatio: event.target.value })}>{!ratios.includes(data.aspectRatio) && <option disabled>{data.aspectRatio}</option>}{ratios.map(ratio => <option key={ratio}>{ratio}</option>)}</select>)}
         {row("Resolution", <select aria-label="Resolution" value={data.resolution} onChange={event => update({ resolution: event.target.value })}>{!resolutions.includes(data.resolution) && <option disabled>{data.resolution}</option>}{resolutions.map(value => <option key={value}>{value}</option>)}</select>)}
         {qualities?.length > 0 && row("Quality", <select aria-label="Quality" value={data.quality} onChange={event => update({ quality: event.target.value })}>{qualities.map(value => <option key={value}>{value}</option>)}</select>)}

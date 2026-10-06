@@ -122,7 +122,7 @@ import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
-import { supportsAtlasImageModel } from "./atlasMedia.js";
+import ModelProviderOption from "./components/ModelProviderOption.jsx";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { runTrackedGeneration } from "./generationProgressStore.js";
@@ -11414,6 +11414,7 @@ function NodeBody({
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
+  const providerOptionProps = { preferences: modelProviderPreferences, availability: modelProviderAvailability };
   const resolvedPromptText = (items = []) => connectedText(items);
   const controllingDirector = node.type === "videoModel" ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const directorSettings = controllingDirector ? directorPackageForVideo(controllingDirector, incomingByNode) : null;
@@ -11444,7 +11445,7 @@ function NodeBody({
     return <React.Suspense fallback={<div className="node-body">Loading Explore...</div>}><ExploreNodeBody node={node} config={config} incoming={incoming}
       prompt={connectedText(incoming.promptIn) || node.data.prompt} onUpdate={onUpdate} onRun={onRun} onPreviewOpen={onPreviewOpen}
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
-      imageModels={imageModelOptions} showApiCosts={showPriceSnapshot}
+      imageModels={imageModelOptions} showApiCosts={showPriceSnapshot} providerOptionProps={providerOptionProps}
       provider={generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability })}
       ratios={imageModelSupportedAspectRatios(node.data.model)} resolutions={imageModelResolutionOptions(node.data.model)}
       qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
@@ -11512,6 +11513,7 @@ function NodeBody({
   if (node.type === "skillDirector") {
     return (
       <SkillDirectorNodeBody
+        providerOptionProps={providerOptionProps}
         node={node}
         config={config}
         outputPort={outputPort}
@@ -11868,7 +11870,7 @@ function NodeBody({
                     onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
                   >
                     {characterSheetModelOptions.map((model) => (
-                      <option key={model} value={model}>{model}</option>
+                      <ModelProviderOption key={model} model={model} {...providerOptionProps} />
                     ))}
                   </select>
                 </label>
@@ -12499,7 +12501,7 @@ function NodeBody({
           <section className="storyboard-advanced storyboard-scroll-surface">
             <div className="storyboard-advanced-panel">
               <div className="storyboard-advanced-controls">
-                <NodeRow label="Image Model"><select aria-label="Storyboard image model" value={node.data.model || storyboardFixedModel} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { model: event.target.value })}>{storyboardImageModelOptions.map(model => <option key={model} disabled={!imageModelOptions.includes(model)}>{model}</option>)}</select></NodeRow>
+                <NodeRow label="Image Model"><select aria-label="Storyboard image model" value={node.data.model || storyboardFixedModel} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { model: event.target.value })}>{storyboardImageModelOptions.map(model => <ModelProviderOption key={model} model={model} disabled={!imageModelOptions.includes(model)} {...providerOptionProps} />)}</select></NodeRow>
                 <div className="storyboard-style-master-row">
                   <span>Storyboard Style</span>
                   <button
@@ -13559,7 +13561,7 @@ function NodeBody({
               <NodeRow label="Model">
                 <select value={model} disabled={running} onChange={(event) => updateModel(event.target.value)}>
                   {autoAspectModelOptions.map((option) => (
-                    <option key={option} value={option}>{option}</option>
+                    <ModelProviderOption key={option} model={option} {...providerOptionProps} />
                   ))}
                 </select>
               </NodeRow>
@@ -14298,7 +14300,7 @@ function NodeBody({
               }}
             >
               {modelChoices.map((option) => (
-                <option key={option} value={option}>{coverageModelLabel(option)}</option>
+                <ModelProviderOption key={option} model={option} {...providerOptionProps}>{coverageModelLabel(option)}</ModelProviderOption>
               ))}
             </select>
           </NodeRow>
@@ -15626,7 +15628,7 @@ function NodeBody({
         providerAvailability: modelProviderAvailability
       })
     };
-    const atlasImageProvider = normalizeModelProviderPreferences(modelProviderPreferences).imageGeneration === "atlas";
+
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
       ? [promptPort, directorPort, imagePromptPort]
@@ -15705,7 +15707,7 @@ function NodeBody({
           <NodeRow label="Model">
             <select value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value))}>
               {imageModelOptions.map((model) => (
-                <option key={model} disabled={atlasImageProvider && !supportsAtlasImageModel(model)}>{model}</option>
+                <ModelProviderOption key={model} model={model} {...providerOptionProps} />
               ))}
               {!imageModelOptions.includes(node.data.model) && !isSam3Image && <option hidden>{node.data.model}</option>}
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
@@ -15960,7 +15962,7 @@ function NodeBody({
         <NodeRow label="Model">
           <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
             {videoModelOptions.map((model) => (
-              <option key={model}>{model}</option>
+              <ModelProviderOption key={model} model={model} mediaType="video" {...providerOptionProps} />
             ))}
             {!videoModelOptions.includes(node.data.model) && !isSam3Video && <option hidden>{node.data.model}</option>}
             {sam3SegmentationModelsEnabled && <option>{videoModelNames.sam3Video}</option>}
