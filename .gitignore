@@ -16,6 +16,7 @@ server/data/history.json.bak
 server/data/history.json.corrupt-*
 server/data/node-projects.json
 server/data/recent-workflows.json
+server/data/pricing-catalog.json
 server/data/runtime-settings.json
 server/data/remote-video-jobs.json
 server/data/remote-video-jobs.json.d/
