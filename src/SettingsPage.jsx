@@ -1,3 +1,4 @@
+import { PricingSettings } from "./components/PricingSettings.jsx";
 import React from "react";
 import {
   ChevronDown,
@@ -417,6 +418,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
       </div>
 
       <div className="settings-grid">
+        <PricingSettings />
         <CollapsibleSettingsSection
           title="API Credentials"
           aside="One active key per service"

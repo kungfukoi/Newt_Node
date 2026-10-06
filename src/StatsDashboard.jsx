@@ -1,3 +1,4 @@
+import { recordedCostAmount } from "./pricingCatalog.js";
 import React from "react";
 import {
   Activity,
@@ -520,7 +521,7 @@ function normalizeUsageItem(item, pricing) {
   const modelName = item.modelName || inferModelName(item, mediaType);
   const projectId = item.project?.id || (mediaType === "image" ? "image" : mediaType === "text" ? "text" : mediaType === "model3d" ? "model3d" : "video");
   const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
-  const cost = resolvedItemCost(item, mediaType, pricing);
+  const cost = recordedCostAmount(item.cost);
   const hasCostEstimate = Number.isFinite(cost);
   const durationSeconds = mediaType === "video" ? durationToSeconds(item.remoteVideo?.duration ?? settings.duration) : 0;
   const cutoff = startOfDay(new Date());

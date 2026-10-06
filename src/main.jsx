@@ -1,3 +1,4 @@
+import { usePricingSync } from "./usePricing.js";
 import { isOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -151,6 +152,7 @@ function normalizeNodeStatus(status) {
 }
 
 function App() {
+  usePricingSync();
   const promptRef = React.useRef(null);
   const [prompt, setPrompt] = React.useState("");
   const [startFrame, setStartFrame] = React.useState(null);

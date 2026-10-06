@@ -2159,3 +2159,35 @@ textarea::placeholder {
     align-items: start;
   }
 }
+
+.pricing-settings-heading,
+.pricing-settings-actions,
+.pricing-settings-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.pricing-settings-heading { justify-content: space-between; }
+.pricing-settings-heading h2 { margin: 0; font-size: 16px; }
+.pricing-settings-meta { color: #aaa; font-size: 12px; column-gap: 24px; }
+.pricing-settings-status:empty { display: none; }
+.pricing-settings-status { font-size: 13px; color: #e1c938; overflow-wrap: anywhere; }
+.pricing-provider { border-top: 1px solid #343434; }
+.pricing-provider-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; font-size: 13px; }
+.pricing-provider-row > span:nth-child(2) { color: #aaa; }
+.pricing-provider summary { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; cursor: pointer; font-size: 13px; }
+.pricing-provider summary > span:nth-child(2) { color: #aaa; }
+.pricing-current { color: #78c98a; }
+.pricing-review { color: #d4b86a; }
+.pricing-provider-details { padding: 0 0 12px; color: #aaa; font-size: 12px; overflow-wrap: anywhere; }
+.pricing-provider-details p { margin: 8px 0; }
+.pricing-provider-details a { color: #94bce7; }
+.pricing-change-log { font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
+.pricing-change-log summary { cursor: pointer; color: #ddd; }
+@media (max-width: 600px) {
+  .pricing-provider summary, .pricing-provider-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .pricing-provider summary > span:nth-child(2), .pricing-provider-row > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .pricing-settings-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+}

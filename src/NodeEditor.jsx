@@ -1,3 +1,4 @@
+import { RunPriceLabel } from "./components/RunPriceLabel.jsx";
 import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { storyboardReviewSignature } from "./storyboardSequenceReview.js";
 import { storyboardQcMode, storyboardQcModes } from "./storyboardQc.js";
@@ -112,7 +113,7 @@ import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBehavior.js";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { createGenerationGroupId } from "./generationProgress.js";
-import { estimateImageRunCost, estimateVideoRunCost, formatPricedRunLabel, generationProviderForModel } from "./generationPricing.js";
+import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import { supportsAtlasImageModel } from "./atlasMedia.js";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
@@ -15548,7 +15549,7 @@ function NodeBody({
           : "fal";
     const imageReferenceLimit = imageModelReferenceLimit(node.data.model, imageReferenceProvider);
     const imageReferenceOverLimit = Boolean(imageReferenceLimit && imageReferenceCount > imageReferenceLimit);
-    const imageRunCost = estimateImageRunCost({
+    const imageRunOptions = {
       model: node.data.model,
       resolution: node.data.resolution,
       aspectRatio: node.data.aspectRatio,
@@ -15561,7 +15562,7 @@ function NodeBody({
         providerPreferences: modelProviderPreferences,
         providerAvailability: modelProviderAvailability
       })
-    });
+    };
     const atlasImageProvider = normalizeModelProviderPreferences(modelProviderPreferences).imageGeneration === "atlas";
     const settingsOpen = node.data.settingsOpen !== false;
     const collapsedPorts = isSam3Image
@@ -15608,7 +15609,7 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || imageReferenceOverLimit}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
-            : formatPricedRunLabel("Run Image", showPriceSnapshot ? imageRunCost : null)}
+            : <RunPriceLabel label="Run Image" options={{ ...imageRunOptions, kind: "image" }} visible={showPriceSnapshot} />}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -15816,14 +15817,17 @@ function NodeBody({
   const hasVideoPrompt = Boolean(String(promptValue || "").trim());
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
   const characterConnected = supportsCharacterInput && Boolean(displayIncoming.characterIn?.length);
-  const videoRunCost = estimateVideoRunCost({
+  const videoRunOptions = {
     model: node.data.model,
     duration: node.data.duration,
     resolution: node.data.resolution,
     aspectRatio: node.data.aspectRatio,
     generateAudio: node.data.generateAudio !== false,
     hasVideoReference: Boolean(displayIncoming.referenceVideoIn?.length),
-    referenceImageCount: minimaxH3ImageCount,
+    referenceImageCount: Math.max(minimaxH3ImageCount, connectedAssetItems(displayIncoming.referenceImageIn || []).length + connectedAssetItems(displayIncoming.characterIn || []).length),
+    startFrameCount: displayIncoming.startFrameIn?.length || 0,
+    endFrameCount: displayIncoming.endFrameIn?.length || 0,
+    audioReferenceCount: displayIncoming.referenceAudioIn?.length || 0,
     batchCount: isSam3Video ? 1 : node.data.batchCount,
     provider: generationProviderForModel({
       model: node.data.model,
@@ -15831,7 +15835,7 @@ function NodeBody({
       providerPreferences: modelProviderPreferences,
       providerAvailability: modelProviderAvailability
     })
-  });
+  };
   const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
@@ -15869,7 +15873,7 @@ function NodeBody({
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : formatPricedRunLabel("Run Video", showPriceSnapshot ? videoRunCost : null)}
+          : <RunPriceLabel label="Run Video" options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />

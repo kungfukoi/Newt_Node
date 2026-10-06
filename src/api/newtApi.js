@@ -579,3 +579,26 @@ function jsonBody(body) {
     body: JSON.stringify(body)
   };
 }
+
+export const pricingApi = {
+  load() { return getJson("/api/pricing", "Could not load pricing status."); },
+  async quote(settings) {
+    const { response, data } = await fetchJsonApi("/api/pricing/quote", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" },
+      body: JSON.stringify(settings), signal: AbortSignal.timeout(12000)
+    }, "Price estimate");
+    return ensureOk(response, data, "Price estimate unavailable.");
+  },
+  async refresh() {
+    const { response, data } = await fetchJsonApi("/api/pricing/refresh", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: "{}"
+    }, "Pricing refresh");
+    return ensureOk(response, data, "Could not refresh pricing.");
+  },
+  async setEnabled(enabled) {
+    const { response, data } = await fetchJsonApi("/api/pricing/settings", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: JSON.stringify({ enabled })
+    }, "Pricing settings");
+    return ensureOk(response, data, "Could not save pricing settings.");
+  }
+};

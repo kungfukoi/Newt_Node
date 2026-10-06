@@ -1,3 +1,5 @@
+import { getPricingCatalog } from "./pricingCatalog.js";
+import { estimateAtlasImageCost as catalogImageCost, estimateAtlasVideoCost as catalogVideoCost } from "./atlasPricing.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 
@@ -192,6 +194,8 @@ export function buildAtlasVideoRequest({
 }
 
 export function estimateAtlasImageCost({ model, resolution, referenceCount = 0, endpoint = "" } = {}) {
+  const pricingEndpoint = endpoint || (imageModels[model] ? imageModels[model].id + (referenceCount ? "/edit" : "/text-to-image") : "");
+  if(getPricingCatalog().entries?.["atlas:"+pricingEndpoint]) return catalogImageCost({model:pricingEndpoint,resolution,referenceCount});
   const rates = model === imageModelNames.nanoBanana2
     ? { "1K": 0.08, "2K": 0.12, "4K": 0.16 }
     : model === imageModelNames.nanoBananaPro
@@ -213,11 +217,13 @@ export function estimateAtlasImageCost({ model, resolution, referenceCount = 0, 
   };
 }
 
-export function estimateAtlasVideoCost({ model, duration, resolution, referenceImageCount = 0, endpoint = "" } = {}) {
+export function estimateAtlasVideoCost({ model, duration, resolution, referenceImageCount = 0, hasVideoReference = false, endpoint = "" } = {}) {
+  const pricingEndpoint = endpoint || (videoModels.get(String(model).toLowerCase())?.id + (referenceImageCount ? "/reference-to-video" : "/text-to-video"));
+  if(getPricingCatalog().entries?.["atlas:"+pricingEndpoint]) return catalogVideoCost({model:pricingEndpoint,duration,resolution,referenceImageCount,hasVideoReference});
   const seconds = normalizedDuration(duration, 4, 30, 5, true);
   const normalizedResolution = String(resolution || "").toUpperCase();
   let amountUsd = null;
-  if (model === "MiniMax H3" && seconds > 0 && ["768P", "2K"].includes(normalizedResolution)) {
+  if (!hasVideoReference && model === "MiniMax H3" && seconds > 0 && ["768P", "2K"].includes(normalizedResolution)) {
     const rate = normalizedResolution === "2K" ? 0.13 : 0.08;
     amountUsd = seconds * rate + Math.max(0, referenceImageCount - 5) * 0.04;
   }

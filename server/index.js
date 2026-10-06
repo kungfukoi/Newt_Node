@@ -1,3 +1,7 @@
+import { PricingRefresh } from "./pricing-refresh.js";
+import { ProviderPricing } from "./provider-pricing.js";
+import { registerPricingRoutes } from "./routes/pricing.js";
+import { configurePricingReader, catalogTokenCost } from "../src/pricingCatalog.js";
 import { registerStoryboardReviewRoutes } from "./routes/storyboardReview.js";
 import { runStoryboardQc } from "./storyboard-qc.js";
 import { storyboardQcPolicy } from "../src/storyboardQc.js";
@@ -402,6 +406,7 @@ const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg"
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const analyzeDirectorMusic = createDirectorMusicAnalyzer({ resolveAsset: resolveLocalAssetPathFromUrl, ffmpegPath: ffmpegBinaryPath, ffprobePath: ffprobeBinaryPath });
 const atlasMedia = createAtlasMedia({
+  quoteInput: (input,key) => providerPricing.atlasInput(input,key),
   client: createAtlasClient({
     onProgress: ({ status }) => updateCurrentGenerationProgress({
       status: "running",
@@ -716,6 +721,14 @@ await Promise.all([
 ]);
 
 await refreshRuntimeConfigFromEnvFile();
+const pricingRefresh = new PricingRefresh({filePath:path.join(dataDir,"pricing-catalog.json"),enableAtlasPricing:true,
+ getFalKey:()=>process.env.FAL_KEY || "", getProviderKey:p=>p==="atlas"?process.env.ATLAS_API_KEY || "":p==="fal"?process.env.FAL_KEY || "":"",
+ getEnabledProviders:()=>({fal:Boolean(process.env.FAL_KEY),atlas:Boolean(process.env.ATLAS_API_KEY),krea:Boolean(process.env.KREA_API_KEY),openai:Boolean(openAiTextApiKey),google:Boolean(process.env.GOOGLE_API_KEY)}),refreshKeys:refreshRuntimeConfigFromEnvFile});
+await pricingRefresh.ready;
+const generationPricingScope = new AsyncLocalStorage();
+const generationBillingScope = new AsyncLocalStorage();
+configurePricingReader(()=>generationPricingScope.getStore() || pricingRefresh.catalog());
+const providerPricing = new ProviderPricing({pricing:pricingRefresh,getKey:p=>pricingRefresh.getProviderKey(p)});
 
 const remoteVideoJobs = await createRemoteVideoJobs({
   filePath: path.join(dataDir, "remote-video-jobs.json"),
@@ -848,6 +861,8 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
+registerPricingRoutes(app, pricingRefresh, providerPricing);
+app.use(["/api/node", "/api/generate"], (_req, _res, next) => generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next)));
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 
@@ -1004,6 +1019,7 @@ function buildHealthPayload() {
       projectOutputPath: true,
       skillDirector: true,
       storyboardQc: true,
+      providerPricing: true,
       storyboardSequenceReview: true,
       newtPresets: true,
       mediaThumbnail: true,
@@ -3487,7 +3503,7 @@ app.post("/api/node/process-text", async (req, res) => {
       : activeProvider === "atlas"
         ? await processTextWithAtlas({ mode, messages, text, textInputs, imageInputs, videoInputs })
         : await processTextWithFal({ mode, messages, text, textInputs, imageInputs, videoInputs });
-    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
+    const cost = estimateTextProcessingCost({ provider: result.provider, model: result.model, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
     await appendHistory({
@@ -3619,7 +3635,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
-    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs: billedImageInputs, videoInputs });
+    const cost = estimateTextProcessingCost({ provider: result.provider, model: result.model, usage: result.usage, helperUsages: result.helperUsages, imageInputs: billedImageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
     await appendHistory({
@@ -6497,6 +6513,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           generationSubmittedAt: req.body.generationSubmittedAt
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
+        pricingSnapshot: generationPricingScope.getStore() || pricingRefresh.snapshot(),
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
         settings: {
           resolution, duration, aspectRatio, generateAudio, seed: requestedSeed ?? null, runtimeProvider,
@@ -6532,7 +6549,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       if (req.durableRequestHash) {
         const input = await atlasMedia.prepareVideo(atlasOptions, process.env.ATLAS_API_KEY);
         endpoint = input.model;
-        cost = estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, endpoint });
+        cost = { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
         return await acceptSeedanceJob(input);
       }
       const atlasResult = await atlasMedia.video(atlasOptions, process.env.ATLAS_API_KEY);
@@ -6689,17 +6706,17 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   }
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-    cost = spec.provider === "fal" ? estimateSeedanceCost({
+    cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
-    }) : spec.provider === "atlas" ? estimateAtlasVideoCost({
+    }) : spec.provider === "atlas" ? spec.cost || estimateAtlasVideoCost({
       model: modelName, duration: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, referenceImageCount: settings.referenceImageCount, endpoint
     }) : estimateKreaSeedanceCost({
       modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
-    });
+    }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
@@ -10558,6 +10575,7 @@ app.use("/api", (error, _req, res, _next) => {
 });
 
 const httpServer = app.listen(port, "127.0.0.1", () => {
+  pricingRefresh.start();
   console.log(`NewtNode server running on http://127.0.0.1:${port}`);
 });
 
@@ -10565,6 +10583,7 @@ const controlHttpServer = controlPort === port ? null : app.listen(controlPort, 
   console.log(`NewtNode control server running on http://127.0.0.1:${controlPort}`);
 });
 
+httpServer.on("close", () => pricingRefresh.stop());
 httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
 });
@@ -15294,6 +15313,7 @@ function pageHistorySummaries(items, req) {
 }
 
 async function subscribeFal(endpoint, options = {}, context = {}) {
+  const billingKey = process.env.FAL_KEY;
   const startedAt = Date.now();
   const inputSummary = summarizeFalValue(options.input, "input");
   const originalOnEnqueue = options.onEnqueue;
@@ -15402,6 +15422,12 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
       output: summarizeFalValue(result?.data, "output"),
       context
     });
+    const billing = generationBillingScope.getStore();
+    if (billing && billingKey && billingKey === process.env.FAL_KEY) {
+      const id = result?.requestId || result?.request_id || requestId;
+      const charge = await providerPricing.falCharge(id, endpoint, billingKey);
+      if(charge) billing.push({id,endpoint,charge});
+    }
     return result;
   } catch (error) {
     writeFalDebugLog({
@@ -15535,6 +15561,11 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item, { deduplicate = false } = {}) {
+  if(item.provider === "fal.ai" && ["image","video"].includes(item.mediaType) && item.cost) {
+    const matches = (generationBillingScope.getStore() || []).filter(row=>!row.used && row.endpoint===item.endpoint);
+    const settled = matches.find(row=>row.id===item.id) || (matches.length===1 ? matches[0] : null);
+    if(settled) { item = {...item,cost:{...item.cost,...settled.charge}}; settled.used=true; }
+  }
   const history = await historyStore.append(item, { deduplicate });
   if (item?.generationRunId) {
     updateGenerationProgress(item.generationRunId, {
@@ -16277,7 +16308,7 @@ function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount
   };
 }
 
-function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [] }) {
+function estimateTextProcessingCost({ provider, model, usage = null, helperUsages = [], imageInputs = [], videoInputs = [] }) {
   const normalizedProvider = String(provider || "").toLowerCase();
   const requestUsageCost = usageCost(usage);
   const helperUsageCosts = (Array.isArray(helperUsages) ? helperUsages : []).map(usageCost).filter((amount) => amount !== null);
@@ -16299,6 +16330,8 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
   }
 
   if (normalizedProvider !== "fal") {
+    const measured = [usage, ...helperUsages].filter(Boolean).map(item => catalogTokenCost(provider, model, item));
+    if (measured.length && measured.every(Boolean)) return { ...measured[0], amountUsd: measured.reduce((sum,item)=>sum+item.amountUsd,0), units: measured.length };
     return {
       amountUsd: null,
       currency: "USD",
@@ -19406,7 +19439,7 @@ ${directorExpansionInstruction
     reasoningEffort: "high",
     route: "storyboard-plan"
   });
-  const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage });
+  const cost = estimateTextProcessingCost({ provider: result.provider, model: result.model, usage: result.usage });
   try {
     const plan = parseStoryboardPlanJson(result.text);
     const issues = storyboardPlanIssues(plan, directorShotList);
@@ -19647,7 +19680,7 @@ async function reviewStoryboardFrameWithOpenAi({
     reasoningEffort,
     route: "storyboard-qc"
   });
-  const cost = estimateTextProcessingCost({ provider: result.provider, helperUsages: result.usages, hasMainRequest: false });
+  const cost = estimateTextProcessingCost({ provider: result.provider, model: result.model, helperUsages: result.usages, hasMainRequest: false });
   try {
     return { qc: parseStoryboardPlanJson(result.text), cost, result };
   } catch (error) {

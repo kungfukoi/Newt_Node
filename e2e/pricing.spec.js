@@ -1,0 +1,22 @@
+import {test,expect} from "@playwright/test";
+import {openFixture} from "./helpers.mjs";
+test("pricing refresh is opt-in and provider quotes update Run without generating",async({page},testInfo)=>{
+ const {errors,requests}=await openFixture(page,{generation:true,scale:0.8,settings:{falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal"}}});
+ let enabled=false,revision=1,refreshes=0;
+ const status=()=>({enabled,running:false,lastCheckAt:null,sources:{fal:{status:"bundled"},krea:{status:"disabled"},atlas:{status:"disabled"},openai:{status:"disabled"},google:{status:"disabled"}},catalog:{version:1,revision:"pricing-"+revision,accountRevision:"test-account",entries:{}}});
+ await page.route("**/api/pricing",r=>r.fulfill({json:status()}));
+ await page.route("**/api/pricing/settings",r=>{enabled=r.request().postDataJSON().enabled;return r.fulfill({json:status()});});
+ await page.route("**/api/pricing/refresh",r=>{refreshes++;revision++;return r.fulfill({json:status()});});
+ const quotes=[];
+ await page.route("**/api/pricing/quote",r=>{const body=r.request().postDataJSON();quotes.push(body);return r.fulfill({json:{amountUsd:0.42,pricingStatus:"estimated",pricingBasis:"Mock account estimate",accountRevision:"test-account",checkedAt:new Date().toISOString()}});});
+ await page.getByRole("button",{name:"Settings",exact:true}).click();
+ const auto=page.getByRole("switch",{name:"Automatic pricing refresh"});await expect(auto).toHaveAttribute("aria-checked","false");expect(refreshes).toBe(0);
+ await auto.click();await expect(auto).toHaveAttribute("aria-checked","true");await auto.click();await expect(auto).toHaveAttribute("aria-checked","false");
+ await page.getByRole("button",{name:"Check prices now"}).click();await expect.poll(()=>refreshes).toBe(1);
+ await page.screenshot({path:testInfo.outputPath("pricing-settings.png")});
+ await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ await expect(page.locator('[data-node-card-id="model"]').getByRole("button",{name:/Run Image/})).toContainText("Est. $0.42");
+ expect(quotes.length).toBeGreaterThan(0);expect(quotes.every(q=>!Object.hasOwn(q,"prompt")&&!Object.hasOwn(q,"references"))).toBe(true);
+ expect(requests.filter(r=>r.path==="/api/node/generate-image")).toHaveLength(0);expect(errors).toEqual([]);
+ await page.screenshot({path:testInfo.outputPath("run-price.png")});
+});

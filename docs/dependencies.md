@@ -52,3 +52,5 @@ ComfyUI custom nodes, Python packages, and Wan model files are separate machine-
 The 2026-09-04 reliability pass updated compatible lockfile resolutions without changing runtime dependency ranges. Re-run `npm audit` for current advisory status rather than treating a historical clean result as permanent.
 
 SGLang, its Python/CUDA environment, and MiniMax H3 weights are optional machine-level dependencies for the Local MiniMax H3 provider. They are intentionally not npm dependencies; setup and shared-path mapping are documented in `minimaxH3-local.md`.
+
+Pricing catalog parsing uses `marked` for official Markdown token tables and `parse5` for inert HTML table parsing. Provider page scripts and formulas are never evaluated.

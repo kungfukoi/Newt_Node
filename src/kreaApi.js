@@ -1,3 +1,4 @@
+import { applyPricingQuote } from "./pricingCatalog.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
@@ -179,7 +180,7 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
     amountUsd = 0.065;
   }
 
-  return {
+  const cost = {
     amountUsd: amountUsd == null ? null : roundCurrency(amountUsd),
     currency: "USD",
     unit: "image",
@@ -191,6 +192,7 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
       : `${modelName} Krea API fixed-price estimate`,
     pricingSource: "krea-api-docs-2026-07-30"
   };
+  return applyPricingQuote(cost, "krea", kreaEndpointForModel("image", modelName), modelName === "Seedream 5.0 Pro" ? {resolutionTier: normalizedResolution, referenceImageCount: referenceCount} : {resolution: normalizedResolution});
 }
 
 export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) {
@@ -202,7 +204,7 @@ export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) 
         ? generateAudio ? 0.3528 : 0.2352
         : generateAudio ? 0.2646 : 0.1764;
   const seconds = Math.max(3, Math.min(15, Number(durationSeconds) || 5));
-  return {
+  const cost = {
     amountUsd: roundCurrency(rate * seconds),
     currency: "USD",
     unitRateUsd: rate,
@@ -213,6 +215,7 @@ export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) 
     pricingBasis: `Krea Kling 3.0 ${normalizedMode} per-second estimate${generateAudio ? " with audio" : ""}`,
     pricingSource: "krea-api-docs-2026-07-30"
   };
+  return applyPricingQuote(cost, "krea", "/generate/video/kling/kling-3.0", {mode:normalizedMode,generateAudio:Boolean(generateAudio),duration:seconds});
 }
 
 export function buildKreaMiniMaxH3Input({
@@ -250,7 +253,7 @@ export function estimateKreaMiniMaxH3Cost({ durationSeconds, referenceImageCount
   const additionalReferenceImages = Math.max(0, Math.min(9, Number(referenceImageCount) || 0) - 5);
   const unitRateUsd = 0.1365;
   const referenceImageCostUsd = additionalReferenceImages * 0.042;
-  return {
+  const cost = {
     amountUsd: roundCurrency(seconds * unitRateUsd + referenceImageCostUsd),
     currency: "USD",
     unitRateUsd,
@@ -263,6 +266,7 @@ export function estimateKreaMiniMaxH3Cost({ durationSeconds, referenceImageCount
     pricingBasis: "Krea MiniMax H3 output seconds plus reference images beyond the first five",
     pricingSource: "krea-openapi-2026-08-30"
   };
+  return applyPricingQuote(cost, "krea", "/generate/video/minimax/hailuo-3", {billableSeconds:seconds,referenceImageCount:Math.max(0,Math.min(9,Number(referenceImageCount)||0))});
 }
 
 export function extractKreaJobResultUrls(job) {

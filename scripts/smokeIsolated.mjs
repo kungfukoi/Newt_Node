@@ -58,6 +58,12 @@ try {
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
   assert.equal((await (await request("/api/health")).json()).routes.explore, true);
+  const priceStatus = await (await request("/api/pricing")).json();
+  assert.equal(priceStatus.enabled, false);
+  assert.equal(priceStatus.running, false);
+  assert.equal(priceStatus.catalog.version, 1);
+  const pricingWrite = await fetch(api + "/api/pricing/settings", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:true})});
+  assert.equal(pricingWrite.status, 403);
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);

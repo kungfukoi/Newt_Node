@@ -5,7 +5,7 @@ import {
   estimateAtlasVideoCost
 } from "../src/atlasMedia.js";
 
-export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null }) {
+export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null, quoteInput = async () => null }) {
   async function uploadSource(source, key, kind = "") {
     const asset = kind === "videos" && typeof prepareVideoSource === "function"
       ? await prepareVideoSource(source)
@@ -55,12 +55,13 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       size,
       maskUrl
     });
+    const quote = await quoteInput(input, key).catch(() => null);
     const result = await client.generate({ mediaType: "image", input, key });
     return {
       ...result,
       endpoint: input.model,
       provider: "Atlas Cloud",
-      cost: estimateAtlasImageCost({ model, resolution, referenceCount: imageInputs.length, endpoint: input.model }),
+      cost: { ...estimateAtlasImageCost({ model, resolution, referenceCount: imageInputs.length, endpoint: input.model }), ...quote },
       remoteImage: { url: result.url, content_type: "image/png" },
       size,
       quality: input.quality || quality,
@@ -110,18 +111,20 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
   async function video(options, key) {
     const input = await prepareVideo(options, key);
     const { model, images = [] } = options;
+    const quote = await quoteInput(input, key).catch(() => null);
     const result = await client.generate({ mediaType: "video", input, key });
     return {
       ...result,
       endpoint: input.model,
       provider: "Atlas Cloud",
-      cost: estimateAtlasVideoCost({
+      cost: { ...estimateAtlasVideoCost({
         model,
         duration: options.duration,
         resolution: options.resolution,
         referenceImageCount: images.length,
+        hasVideoReference: Boolean(options.videos?.length),
         endpoint: input.model
-      }),
+      }), ...quote },
       input,
       remoteVideo: { url: result.url, content_type: "video/mp4" }
     };

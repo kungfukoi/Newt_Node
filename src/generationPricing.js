@@ -1,3 +1,5 @@
+import { getGenerationQuote, getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
+import { generationQuoteSettings } from "./pricingTrust.js";
 import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, supportsKreaModel } from "./kreaApi.js";
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import {
@@ -87,6 +89,8 @@ export function estimateImageRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  const cached = getGenerationQuote({kind:"image",model,resolution,aspectRatio,quality,referenceCount,batchCount,provider});
+  if(cached) return cached.amountUsd;
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
 
@@ -140,9 +144,12 @@ export function estimateVideoRunCost({
   generateAudio = true,
   hasVideoReference = false,
   referenceImageCount = 0,
+  startFrameCount = 0, endFrameCount = 0, audioReferenceCount = 0,
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  const cached = getGenerationQuote({kind:"video",model,duration,resolution,aspectRatio,generateAudio,hasVideoReference,referenceImageCount,startFrameCount,endFrameCount,audioReferenceCount,batchCount,provider});
+  if(cached) return cached.amountUsd;
   if (String(duration || "").trim().toLowerCase() === "auto") return null;
   const seconds = durationSeconds(duration);
   if (seconds === null) return null;
@@ -150,7 +157,7 @@ export function estimateVideoRunCost({
 
   if (model === "Seedance 2.0" || isSeedance25Model(model)) {
     if (provider === "atlas") {
-      unitCost = estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount }).amountUsd;
+      unitCost = estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount, hasVideoReference }).amountUsd;
     } else if (provider === "krea") {
       unitCost = estimateKreaSeedanceCost({
         modelName: model,
@@ -168,13 +175,13 @@ export function estimateVideoRunCost({
       : provider === "fal" ? seconds * falKlingRates[mode][generateAudio ? "audio" : "silent"] : null;
   } else if (isMinimaxH3Model(model)) {
     unitCost = provider === "atlas"
-      ? estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount }).amountUsd
+      ? estimateAtlasVideoCost({ model, duration: seconds, resolution, referenceImageCount, hasVideoReference }).amountUsd
       : provider === "local"
       ? 0
       : provider === "krea"
         ? estimateKreaMiniMaxH3Cost({ durationSeconds: seconds, referenceImageCount }).amountUsd
         : provider === "fal"
-          ? estimateMinimaxH3Cost({ duration: seconds, resolution, referenceImageCount }).amountUsd
+          ? estimateMinimaxH3Cost({ duration: seconds, resolution, referenceImageCount, hasVideoReference }).amountUsd
           : null;
   } else if (model === "Gemini Omni Flash") {
     unitCost = provider === "google" ? seconds * 0.1 : provider === "fal" ? seconds * 0.13 : null;
@@ -245,4 +252,30 @@ function orientationSize(aspectRatio) {
 
 function roundCurrency(value) {
   return Math.round((Number(value) + Number.EPSILON) * 1000000) / 1000000;
+}
+
+export function generationEstimate(raw) {
+  const options = generationQuoteSettings(raw);
+  if (!raw.provider) return { amountUsd: null, pricingStatus: "unavailable", pricingBasis: "No supported provider selected." };
+  const cached = getGenerationQuote(options);
+  if (cached) return cached;
+  const amountUsd = options.kind === "video" ? estimateVideoRunCost(options) : estimateImageRunCost(options);
+  if(options.provider === "atlas") {
+    const cost = options.kind === "video" ? estimateAtlasVideoCost(options) : estimateAtlasImageCost(options);
+    return {...cost,amountUsd,pricingStatus:cost.pricingStatus || (amountUsd==null ? "unavailable" : "bundled")};
+  }
+  const contract = livePricingContract(options);
+  const entry = contract && getPricingCatalog().entries?.[options.provider + ":" + contract.endpoint];
+  const quote = entry && pricingQuote(options.provider, contract.endpoint, contract.dimensions, options.batchCount);
+  return { amountUsd: entry ? quote?.amountUsd ?? null : amountUsd, pricingStatus: entry ? quote?.pricingStatus || "unavailable" : amountUsd == null ? "unavailable" : "bundled",
+    pricingCheckedAt: quote?.pricingCheckedAt, pricingBasis: entry ? "Published price for the selected settings; not a settled charge." : "Bundled estimate; final charge may differ." };
+}
+export function livePricingContract(o) {
+ if(o.provider !== "krea") return null;
+ const duration = Number(String(o.duration || "").match(/\d+/)?.[0]);
+ if(o.kind === "video" && /Seedance/.test(o.model)) return { endpoint:"/generate/video/bytedance/seedance-" + (isSeedance25Model(o.model)?"2-5":"2"), dimensions:{resolution:String(o.resolution).toLowerCase(),hasVideoReference:Boolean(o.hasVideoReference),duration} };
+ if(o.kind === "video" && /Kling O3/.test(o.model)) return {endpoint:"/generate/video/kling/kling-3.0",dimensions:{mode:o.model.includes("4K")?"4k":"pro",generateAudio:o.generateAudio!==false,duration}};
+ if(o.kind === "video" && isMinimaxH3Model(o.model)) return {endpoint:"/generate/video/minimax/hailuo-3",dimensions:{billableSeconds:duration,referenceImageCount:o.referenceImageCount||0}};
+ if(o.kind === "image" && ["Nano Banana 2","Nano Banana Pro"].includes(o.model)) return {endpoint:"/generate/image/google/nano-banana-"+(o.model==="Nano Banana Pro"?"pro":"2"),dimensions:{resolution:String(o.resolution).toUpperCase()}};
+ return null;
 }

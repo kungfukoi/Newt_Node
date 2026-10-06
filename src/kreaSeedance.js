@@ -1,3 +1,4 @@
+import { applyPricingQuote } from "./pricingCatalog.js";
 import {
   extractKreaJobResultUrl,
   kreaApiBaseUrl
@@ -148,7 +149,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, du
     const rate = normalizedResolution === "480p"
       ? hasVideoReference ? 0.0645 : 0.1078
       : hasVideoReference ? 0.1452 : 0.2427;
-    return {
+    return applyPricingQuote({
       amountUsd: roundCurrency(seconds * rate),
       currency: "USD",
       unitRateUsd: rate,
@@ -159,7 +160,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, du
       durationSeconds: seconds,
       pricingBasis: `Krea Seedance 2.5 per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
       pricingSource: "krea-openapi-2026-08-08"
-    };
+    }, "krea", kreaSeedanceEndpoint(speed, modelName), {resolution:normalizedResolution,hasVideoReference:Boolean(hasVideoReference),duration:seconds});
   }
   const tier = speed === "fast" ? "fast" : "standard";
   const fallbackResolution = "720p";
@@ -169,7 +170,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, du
   ];
   const seconds = Math.max(1, Number(durationSeconds) || 5);
 
-  return {
+  return applyPricingQuote({
     amountUsd: roundCurrency(seconds * rate),
     currency: "USD",
     unitRateUsd: rate,
@@ -180,7 +181,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, du
     durationSeconds: seconds,
     pricingBasis: `Krea Seedance 2 standard per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
     pricingSource: "krea-api-pricing-2026-07-12"
-  };
+  }, "krea", kreaSeedanceEndpoint(speed, modelName), {resolution:normalizedResolution,hasVideoReference:Boolean(hasVideoReference),duration:seconds});
 }
 
 function roundCurrency(value) {
