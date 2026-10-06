@@ -9401,6 +9401,7 @@ video.newtnode-video-fallback {
 }
 
 .node-row > select,
+.audio-voice-controls select,
 .node-row > button {
   width: 100%;
   min-width: 0;
@@ -10477,7 +10478,9 @@ video.newtnode-video-fallback {
 .audio-model-body .audio-number-control { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 6px; align-items: center; }
 .audio-number-control output { font-size: 11px; text-align: right; }
 .audio-model-body .audio-voice-controls, .audio-model-body .audio-source-controls { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.audio-voice-controls select { flex: 1; min-width: 0; min-height: 34px; padding: 6px; border: 0; border-radius: 7px; background: #151515; color: #f6f1e8; font: inherit; }
+.audio-voice-controls select { flex: 1; padding: 6px; font: inherit; color-scheme: light; }
+.audio-voice-controls option,
+.audio-voice-controls optgroup { color: #141414; background: #fff; }
 .audio-voice-controls button, .audio-source-controls button { display: grid; place-items: center; width: 28px; min-width: 28px; height: 30px; padding: 4px; border: 0; border-radius: 6px; background: #303030; color: #ddd; }
 .audio-model-body input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; padding: 0; accent-color: #ddc631; }
 .audio-model-body audio { color-scheme: dark; }
