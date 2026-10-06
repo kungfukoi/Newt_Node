@@ -1,7 +1,7 @@
 export const storyboardRevisionLimit = 8;
-export const storyboardDirectionFields = ["id", "number", "shot", "lens", "angle", "beat", "prompt", "notes"];
+export const storyboardDirectionFields = ["id", "number", "shot", "lens", "angle", "beat", "prompt", "notes", "cast", "spatial"];
 export function storyboardFrameDirection(frame) {
-  return Object.fromEntries(storyboardDirectionFields.map(key => [key, frame[key] ?? (key === "number" ? 1 : "")]));
+  return Object.fromEntries(storyboardDirectionFields.map(key => [key, frame[key] ?? (key === "spatial" ? null : key === "cast" ? [] : key === "number" ? 1 : "")]));
 }
 export function storyboardRevisionTargets(frames, ids) {
   if (!Array.isArray(frames) || !frames.length || frames.length > 35 || new Set(frames.map(f => f?.id)).size !== frames.length) throw new Error("Storyboard needs uniquely identified panels.");

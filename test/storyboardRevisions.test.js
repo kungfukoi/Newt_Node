@@ -30,7 +30,7 @@ test("selected revision preserves exact IDs, numbers and unselected panels", () 
 });
 test("revision route uses originals as visual context and records planning cost", async () => {
   const h=harness(), r=res(); await h.handler({body},r);
-  assert.equal(r.code,200); assert.deepEqual(r.data.revision,revision);
+  assert.equal(r.code,200); assert.deepEqual(r.data.revision,{...revision,frames:revision.frames.map(f=>({...f,cast:[],spatial:null}))});
   assert.deepEqual(h.calls[0].inputs,[{url: "/outputs/old.png",label: "Existing panel 2"}]);
   assert.equal(JSON.parse(h.calls[0].prompt).panels.length,3);
   assert.equal(h.records.length,1); assert.equal(h.records[0][0].cost.amountUsd,0.01);

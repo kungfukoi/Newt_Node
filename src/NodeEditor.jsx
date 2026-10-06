@@ -1,3 +1,4 @@
+import { storyboardSpatialPrompt, invalidateStoryboardStaging } from "./storyboardSpatial.js";
 import { normalizeStoryboardVersions, versionStoryboardReplacement, restoreStoryboardVersion, canMoveStoryboardFrame } from "./storyboardVersions.js";
 import { StoryboardPanelHistory } from "./components/StoryboardPanelHistory.jsx";
 import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
@@ -4333,7 +4334,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const allCharacterSources = storyboardCharacterSourcesForNode(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, { includeInternal: !directorControlsScene });
         const activeCharacterSources = requiredCharacterSources.length
           ? requiredCharacterSources
-          : allCharacterSources.length === 1 ? allCharacterSources : [];
+          : !frame.spatial && allCharacterSources.length === 1 ? allCharacterSources : [];
         const allLocationSources = storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], currentIncomingByNode);
         const activeLocationSources = storyboardRequiredLocationSourcesForFrame(frame, sceneDescription, allLocationSources);
         const allPropSources = storyboardPropReferenceSources(incoming.propsIn || [], currentIncomingByNode);
@@ -12091,7 +12092,7 @@ function NodeBody({
 
     function updateFrame(frameId, patch) {
       if (storyboardLocked || frames.find(frame => frame.id === frameId)?.protected) return;
-      const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame));
+      const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...invalidateStoryboardStaging(frame, patch) } : frame));
       onUpdate(node.id, {
         ...clearStoryboardBoardPatch(),
         storyboardFrames: nextFrames,
@@ -24067,7 +24068,9 @@ function storyboardFramesFromPlan(frames = []) {
       angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
       beat: frame.beat || "",
       prompt: frame.prompt || "",
-      notes: frame.notes || ""
+      notes: frame.notes || "",
+      spatial: frame.spatial || null,
+      cast: frame.cast || []
     })
   );
 }
@@ -24424,6 +24427,7 @@ function storyboardCharacterSourcesTaggedInText(characterSources = [], text = ""
 function storyboardRequiredCharacterSourcesForFrame(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
   const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
   const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal: options.includeInternal ?? !directorControlsScene });
+  if (frame.spatial && Array.isArray(frame.cast)) return characterSources.filter(source => frame.cast.some(member => member.visibility === "visible" && String(member.tag).replace(/^@/, "").toLowerCase() === characterTag(source).replace(/^@/, "").toLowerCase()));
   const framePrompt = frame.prompt || frame.beat || "";
   const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
   const frameTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, frameTagText);
@@ -24539,6 +24543,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
   return [
     frameHeader,
     resolvedPrompt,
+    storyboardSpatialPrompt(frame.spatial),
     ...cameraPieces,
     storyboardContinuityInstruction,
     characterReferenceMap,

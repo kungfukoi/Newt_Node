@@ -67,3 +67,27 @@ test("panel protection blocks editing, replanning and generation; restoring a ve
  await expect(panel.getByRole("button",{name:"Unprotect panel",exact:true})).toBeVisible();
  expect((await savedFrames(page))[1].versions).toHaveLength(1);expect(errors).toEqual([]);
 });
+
+test("spatial plans reach generation and review, survive reload, and clear after manual camera edits",async({page})=>{
+ await page.addInitScript(()=>{if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return; sessionStorage.setItem("seedance-node-editor-draft-v1",JSON.stringify({nodes:[{id:"board",type:"storyboard",x:10,y:10,data:{title:"Board",sceneDescription:"Two people talk across a table",useInternalStoryboardCharacters:false,storyboardAutoQc:true,storyboardTab:"setup"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:0.7}}));});
+ const {card,errors}=await setup(page);let imageRequest,reviewRequest;
+ const spatial={spaceId:"cafe",cameraSetupId:"master",view:"Both seats and table",visiblePlaces:["west-seat","east-seat"],present:[{tag:"Alice",place:"west-seat"},{tag:"Bob",place:"east-seat"}],hidden:[],blockingChange:""};
+ const cast=spatial.present.map(p=>({tag:p.tag,visibility:"visible",position:p.place,action:"Talking",eyeline:"Across table"}));
+ await page.route("**/api/node/storyboard-plan",r=>r.fulfill({json:{plan:{sceneTitle:"Cafe",analysis:"Both seats stay visible",frames:[{number:1,shot:"MS",lens:"35mm",angle:"None",prompt:"Two people seated across a table",beat:"They talk",notes:"",spatial,cast}]}}}));
+ await page.route("**/api/node/generate-image",r=>{imageRequest=r.request().postDataJSON();return r.fulfill({json:{images:[{localUrl:"/outputs/e2e/spatial.png",mimeType:"image/png"}]}});});
+ await page.route("**/api/node/storyboard-qc",r=>{reviewRequest=r.request().postDataJSON();return r.fulfill({json:{qc:{pass:true,severity:"ok",summary:"Both seated",issues:[],shouldRetry:false,correctionPrompt:""}}});});
+ await page.route("**/api/node/storyboard-export-frame",r=>r.fulfill({json:{frame:{localUrl:"/outputs/e2e/spatial.png",fileName:"spatial.png"}}}));
+ await card.getByRole("button",{name:"Plan",exact:true}).click();
+ await expect(card.locator(".storyboard-frame-card")).toHaveCount(1);
+ await card.getByRole("button",{name:"Generate",exact:true}).click();
+ await expect.poll(()=>reviewRequest?.framePrompt || "").toContain("Bob at east-seat");
+ expect(imageRequest.prompt).toContain("PHYSICAL STAGING");
+ await expect.poll(async()=>(await savedFrames(page))?.[0]?.resultUrl).toBe("/outputs/e2e/spatial.png");
+ expect((await savedFrames(page))[0].spatial).toEqual(spatial);
+ await page.reload();await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ expect((await savedFrames(page))[0].spatial).toEqual(spatial);
+ await card.locator(".storyboard-frame-controls select").first().selectOption("CU");
+ await expect.poll(async()=>(await savedFrames(page))[0].spatial).toBeNull();
+ expect((await savedFrames(page))[0].generatedDirection.spatial).toEqual(spatial);
+ expect(errors).toEqual([]);
+});

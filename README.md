@@ -163,3 +163,5 @@ A feature change is not complete until old workflows, ports, results, previews, 
 In Storyboard View, check up to eight panels, enter an instruction, and choose **Revise Selected**. Successful panels receive new directions and images; failed panels keep their originals. Planning and image generation use the configured providers and are billed normally.
 
 Storyboard panels also offer **Protect panel** and **Previous versions**. Keep up to eight prior images with their directions; restoring a version retains the image it replaces.
+
+New Storyboard plans track character positions and camera visibility across panels. Continuity checks catch unexplained disappearing occupants and position changes, with one bounded text correction before image generation. Existing saved boards remain usable.

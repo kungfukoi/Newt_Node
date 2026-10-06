@@ -32,7 +32,7 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
-  if (path === "/api/node/storyboard-revise" || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
+  if (path === "/api/node/storyboard-plan" || path === "/api/node/storyboard-revise" || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
     try {
       response = await fetchWithTimeout(requestUrl, options, timeoutMs);
       return { response, data: await readJsonResponse(response, label) };

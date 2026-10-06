@@ -1,3 +1,4 @@
+import { storyboardSpatialRules, storyboardSpatialSchema, storyboardCastSchema, reconcileStoryboardSpatial } from "../src/storyboardSpatial.js";
 import { registerStoryboardRevisionRoutes } from "./routes/storyboardRevisions.js";
 import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
 import "dotenv/config";
@@ -4610,7 +4611,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
         : Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
       props: Array.isArray(req.body.props) ? req.body.props : [],
       notes: String(req.body.notes || "").trim(),
-      directorShotList
+      directorShotList,
+      recordSpatialUsage: generated => recordStoryboardLlmUsage(generated, req.body, "Storyboard spatial correction")
     });
     await recordStoryboardLlmUsage(generated, req.body, "Storyboard planning");
     res.json({
@@ -19307,7 +19309,7 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
+async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "", recordSpatialUsage = async () => {} }) {
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -19392,7 +19394,7 @@ ${directorExpansionInstruction
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
   const result = await runTextLlm({
-    prompt,
+    prompt: prompt + "\n\n" + storyboardSpatialRules + "\nWhen no named references are supplied, assign stable tags only to people actually described in the scene. Every frame must also include spatial and cast matching these schemas: " + JSON.stringify({ spatial: storyboardSpatialSchema, cast: storyboardCastSchema }),
     systemPrompt: `You are NewtNode's senior storyboard director. Return only valid JSON.\n\n${storyboardReasoningSkill}`,
     falModel: storyboardFalModel,
     openAiModel: storyboardOpenAiModel,
@@ -19407,6 +19409,20 @@ ${directorExpansionInstruction
     if (issues.length) {
       throw new Error(`Storyboard plan needs correction: ${issues.join(" ")} Existing frames have been preserved.`);
     }
+    plan.frames = await reconcileStoryboardSpatial(plan.frames, characters, async correction => {
+      let repaired;
+      try {
+        repaired = await runTextLlm({ prompt: JSON.stringify({ sceneDescription, correction }) + "\nReturn ONLY the listed panel numbers. Correct occupancy, visibility and synchronized prompts. Preserve camera, view, visiblePlaces, blockingChange and space IDs; do not invent exits or reframing to conceal an omission.", systemPrompt: storyboardSpatialRules, falModel: storyboardFalModel, openAiModel: storyboardOpenAiModel, responseMimeType: "application/json", reasoningEffort: "high", route: "storyboard-spatial-repair" });
+        return parseStoryboardPlanJson(repaired.text);
+      } catch (error) {
+        repaired ||= error.llmResult;
+        throw error;
+      } finally {
+        if (repaired) await recordSpatialUsage({ result: repaired, cost: estimateTextProcessingCost({ provider: repaired.provider, usage: repaired.usage }) });
+      }
+    });
+    const correctedIssues = storyboardPlanIssues(plan, directorShotList);
+    if (correctedIssues.length) throw new Error("Spatial correction changed the shot plan: " + correctedIssues.join(" "));
     return { plan, cost, result };
   } catch (error) {
     error.cost = cost;
@@ -19491,7 +19507,8 @@ function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
     angle: normalizeChoice(String(frame.angle || "None"), ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"], "None"),
     beat: String(frame.beat || "").trim().slice(0, 240),
     prompt: String(frame.prompt || "").trim().slice(0, 1400),
-    notes: String(frame.notes || "").trim().slice(0, 240)
+    notes: String(frame.notes || "").trim().slice(0, 240),
+    spatial: frame.spatial || null, cast: frame.cast || []
   };
 }
 
@@ -19568,7 +19585,7 @@ Check for these problems:
 3. Spatial consistency: kitchen drawers, counters, doors, props, walls, and other environment details should belong to the room and not float or jump to impossible places.
 4. Shot progression: judge the requested frame, not an invented camera move. Within a continuous CUT, the same scale/composition is valid when the action state changes or the camera remains locked. Between cuts, check a requested scale change is visible; matching close-ups of different speakers are valid. Do not force a tighter frame or new angle that contradicts the current prompt.
 5. Background variety with continuity: different shots may share the same environment, but should not keep showing the exact same background from the exact same camera unless the prompt calls for a locked-off repeat.
-6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
+6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props. Inspect actual occupied space against previous and anchor images. A listening character cannot disappear while their established seat stays visible. Do not accept an offscreen label that contradicts the camera view. Partial bodies count as visible; deliberate singles, inserts, reverses and real occlusion remain valid.
 7. Storyboard style: when STORYBOARD STYLE LOCK is present, the frame should read as clean minimal line-art production boards, not realistic grayscale photography.
 
 Return this exact JSON shape:

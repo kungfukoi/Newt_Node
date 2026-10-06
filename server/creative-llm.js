@@ -1,3 +1,4 @@
+import { storyboardSpatialSchema, storyboardCastSchema } from "../src/storyboardSpatial.js";
 import Ajv from "ajv";
 import { explorePlanSchema } from "../src/explore.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
@@ -45,6 +46,7 @@ export const creativeSchemas = {
       shot: { type: "string", enum: ["None", "CU", "MS", "WS", "ECU", "EWS"] },
       lens: { type: "string", enum: ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"] },
       angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
+      spatial: storyboardSpatialSchema, cast: storyboardCastSchema,
       beat: nonempty, prompt: { ...nonempty, maxLength: 1400 }, notes: { ...text, maxLength: 240 }
     }), 1, 35)
   }),
@@ -55,11 +57,13 @@ export const creativeSchemas = {
 
 creativeSchemas["storyboard-revision"] = object({ frames: list(object({ id: nonempty, ...creativeSchemas["storyboard-plan"].properties.frames.items.properties }), 1, 8), warnings: list(text, 0, 20) });
 
+creativeSchemas["storyboard-spatial-repair"] = object({ frames: list(object({ number, prompt: { ...nonempty, maxLength: 1400 }, beat: nonempty, notes: { ...text, maxLength: 240 }, spatial: storyboardSpatialSchema, cast: storyboardCastSchema }), 1, 35) });
+
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
-  if (/shotlist|revision|shot-repair|storyboard-plan|explore-plan/.test(route)) return 24000;
+  if (/shotlist|revision|shot-repair|spatial-repair|storyboard-plan|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;
   return 8000;
