@@ -55,8 +55,9 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
       size,
       maskUrl
     });
-    const quote = await quoteInput(input, key).catch(() => null);
+    let quote = await quoteInput(input, key).catch(() => null);
     const result = await client.generate({ mediaType: "image", input, key });
+    if (!quote) quote = await quoteInput(input, key).catch(() => null);
     return {
       ...result,
       endpoint: input.model,
@@ -111,8 +112,9 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
   async function video(options, key) {
     const input = await prepareVideo(options, key);
     const { model, images = [] } = options;
-    const quote = await quoteInput(input, key).catch(() => null);
+    let quote = await quoteInput(input, key).catch(() => null);
     const result = await client.generate({ mediaType: "video", input, key });
+    if (!quote) quote = await quoteInput(input, key).catch(() => null);
     return {
       ...result,
       endpoint: input.model,

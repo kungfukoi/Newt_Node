@@ -1,5 +1,7 @@
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { PricingRefresh } from "./pricing-refresh.js";
+import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
+import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { ProviderPricing } from "./provider-pricing.js";
 import { registerPricingRoutes } from "./routes/pricing.js";
 import { configurePricingReader, catalogTokenCost } from "../src/pricingCatalog.js";
@@ -865,7 +867,17 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
-registerPricingRoutes(app, pricingRefresh, providerPricing);
+registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing({
+  store: historyStore, snapshot: () => pricingRefresh.snapshot(),
+  quoteAtlas: async (item) => {
+    if (!item.generationRunId || !process.env.ATLAS_API_KEY) return null;
+    const name = createHash("sha256").update(item.generationRunId).digest("hex");
+    const spec = JSON.parse(await readFile(path.join(dataDir, "remote-video-jobs.json.d", name + ".spec.json"), "utf8"));
+    if (spec.provider !== "atlas" || spec.input?.model !== item.endpoint) return null;
+    // Explicit historical reconciliation quotes saved inputs at current account rates.
+    return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
+  }
+}));
 app.use(["/api/node", "/api/generate"], (_req, _res, next) => generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next)));
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
@@ -6740,14 +6752,20 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
-    }) : spec.provider === "atlas" ? spec.cost || estimateAtlasVideoCost({
-      model: modelName, duration: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
-      resolution: settings.resolution, referenceImageCount: settings.referenceImageCount, endpoint
-    }) : estimateKreaSeedanceCost({
+    }) : spec.provider === "atlas" ? (recordedCostAmount(spec.cost) !== null ? spec.cost : estimateAtlasVideoCost({
+      model: modelName, endpoint, duration: settings.duration || spec.runtimeDurationSeconds,
+      resolution: settings.resolution, referenceImageCount: settings.referenceImageCount,
+      startFrameCount: settings.startFrameCount, hasVideoReference: settings.referenceVideoCount > 0
+    })) : estimateKreaSeedanceCost({
       modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
     }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
+  }
+  if (spec.provider === "atlas" && recordedCostAmount(cost) === null &&
+      spec.credentialFingerprint === providerKeyFingerprint(process.env.ATLAS_API_KEY)) {
+    const quote = await providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
+    if (quote) cost = { ...cost, ...quote };
   }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
@@ -15591,11 +15609,12 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item, { deduplicate = false } = {}) {
-  if(item.provider === "fal.ai" && ["image","video"].includes(item.mediaType) && item.cost) {
+  if(item.provider === "fal.ai") {
     const matches = (generationBillingScope.getStore() || []).filter(row=>!row.used && row.endpoint===item.endpoint);
     const settled = matches.find(row=>row.id===item.id) || (matches.length===1 ? matches[0] : null);
     if(settled) { item = {...item,cost:{...item.cost,...settled.charge}}; settled.used=true; }
   }
+  item = { ...item, cost: completeGenerationCost(item) };
   const history = await historyStore.append(item, { deduplicate });
   if (item?.generationRunId) {
     updateGenerationProgress(item.generationRunId, {
@@ -16340,6 +16359,10 @@ function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount
 
 function estimateTextProcessingCost({ provider, model, usage = null, helperUsages = [], imageInputs = [], videoInputs = [] }) {
   const normalizedProvider = String(provider || "").toLowerCase();
+  if (normalizedProvider === "local" && !usage && !helperUsages.length) return {
+    amountUsd: 0, currency: "USD", estimated: false, pricingStatus: "local",
+    pricingBasis: "Local processing; no paid provider request.", pricingSource: "local"
+  };
   const requestUsageCost = usageCost(usage);
   const helperUsageCosts = (Array.isArray(helperUsages) ? helperUsages : []).map(usageCost).filter((amount) => amount !== null);
 
@@ -16369,7 +16392,7 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
       units: 1,
       unit: "request",
       mediaType: "text",
-      pricingBasis: "OpenAI text usage recorded, but local token-to-price estimate is not configured",
+      pricingBasis: "Token usage or verified rates are unavailable for this provider/model",
       pricingSource: "usage-no-local-pricing"
     };
   }

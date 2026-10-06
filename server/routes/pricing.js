@@ -1,4 +1,4 @@
-export function registerPricingRoutes(app, pricing, quotes) {
+export function registerPricingRoutes(app, pricing, quotes, historyPricing) {
   app.get("/api/pricing", async (_req, res) => {
     await pricing.ready;
     res.setHeader("Cache-Control", "no-store");
@@ -16,6 +16,7 @@ export function registerPricingRoutes(app, pricing, quotes) {
         res.setHeader("Cache-Control", "no-store");
         return res.json(await quotes.quote(req.body));
       }
+      if (req.params.action === "reconcile" && historyPricing) return res.json(await historyPricing.reconcile());
       if (req.params.action === "settings") return res.json(await pricing.setEnabled(req.body.enabled));
       res.status(404).json({ error: "Unknown pricing action." });
     } catch (error) { res.status(400).json({ error: error.message || "Pricing update failed." }); }

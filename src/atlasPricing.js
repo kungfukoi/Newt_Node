@@ -19,6 +19,9 @@ const routeAliases = { t2i: "text-to-image", i2i: "edit", t2v: "text-to-video", 
 // Published standard-column estimates, not fixed quotes or final token charges.
 // Only these native-resolution tiers without reference video were verified.
 export const atlasSeedanceEstimateRates = Object.freeze({ "480p": 0.17464005, "720p": 0.37557, "1080p": 0.739205699895 });
+// Seedance 2.0 native-resolution reference route, verified 2026-10-06.
+export const atlasSeedance20EstimateEndpoint = "bytedance/seedance-2.0/reference-to-video";
+export const atlasSeedance20EstimateRates = Object.freeze({ "480p": 0.1124928, "720p": 0.24192, "1080p": 0.54432 });
 export const atlasSeedanceEstimateEndpoints = ["text-to-video", "image-to-video", "reference-to-video"].map(route => `bytedance/seedance-2.5/${route}`);
 export function atlasSeedanceEstimateEntry(rates = atlasSeedanceEstimateRates) {
   return { currency: "USD", unit: "request", source: ATLAS_PRICING_URL, priceKind: "standard-estimate", rulesVersion: 1,
@@ -154,7 +157,7 @@ export function estimateAtlasVideoCost(options = {}) {
   const hasVideo = flag(options.hasVideoReference ?? false);
   const endpoint = endpointFor(options, videoModels, startFrames === 1 ? "image-to-video"
     : hasVideo || references > 1 ? "reference-to-video" : references === 1 ? "image-to-video" : "text-to-video");
-  if (atlasSeedanceEstimateEndpoints.includes(endpoint)) return seedanceEstimate(endpoint, options, references, startFrames, hasVideo);
+  if (atlasSeedanceEstimateEndpoints.includes(endpoint) || endpoint === atlasSeedance20EstimateEndpoint) return seedanceEstimate(endpoint, options, references, startFrames, hasVideo);
   const spec = atlasPricingSpecs[endpoint];
   if (spec?.kind !== "video") return result(endpoint, "Atlas video tokens and runtime billing are not a verified fixed request price; cost is unknown.");
   const text = String(options.durationSeconds ?? options.duration ?? "");
@@ -184,7 +187,11 @@ function seedanceEstimate(endpoint, options, references, startFrames, hasVideo) 
   const current = options.snapshot ?? getPricingCatalog();
   const entry = current?.entries?.[`atlas:${endpoint}`];
   if (entry && (entry.priceKind !== "standard-estimate" || entry.rulesVersion !== 1 || entry.unit !== "request" || entry.source !== ATLAS_PRICING_URL)) return unknown();
-  const quote = pricingQuote("atlas", endpoint, { resolution, duration, hasVideoReference: false }, 1, entry ? current : bundledSeedanceEstimates);
+  const bundled = endpoint === atlasSeedance20EstimateEndpoint
+    ? { version: 1, revision: "atlas-seedance20-2026-10-06", entries: {
+      [`atlas:${endpoint}`]: { ...atlasSeedanceEstimateEntry(atlasSeedance20EstimateRates), checkedAt: "2026-10-06" }
+    } } : bundledSeedanceEstimates;
+  const quote = pricingQuote("atlas", endpoint, { resolution, duration, hasVideoReference: false }, 1, entry ? current : bundled);
   if (!quote) return unknown();
   return { ...result(endpoint, "Atlas Cloud published standard per-second estimate without reference video. Final billing uses actual video tokens and may differ; this is not a guaranteed quote.", quote),
     billingMode: "token_postpaid", unit: "second", units: duration };

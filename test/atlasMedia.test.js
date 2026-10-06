@@ -115,5 +115,8 @@ test("Atlas fixed-price estimates are emitted only for verified price shapes", (
   assert.equal(estimateAtlasImageCost({ model: "Nano Banana 2", resolution: "4K" }).amountUsd, 0.16);
   assert.equal(estimateAtlasImageCost({ model: "OpenAI Image 2.5", resolution: "2K" }).amountUsd, null);
   assert.equal(estimateAtlasVideoCost({ model: "MiniMax H3", duration: 5, resolution: "2K" }).amountUsd, 0.65);
-  assert.equal(estimateAtlasVideoCost({ model: "Seedance 2.5", duration: 5, resolution: "720p" }).amountUsd, null);
+  const seedance = estimateAtlasVideoCost({ model: "Seedance 2.5", duration: 5, resolution: "720p" });
+  assert.equal(seedance.amountUsd, 1.87785);
+  assert.equal(seedance.estimated, true);
+  assert.equal(estimateAtlasVideoCost({ model: "Seedance 2.5", duration: 5, resolution: "720p", hasVideoReference: true }).amountUsd, null);
 });

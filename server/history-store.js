@@ -1,3 +1,4 @@
+import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { randomUUID } from "node:crypto";
 import { readFileWithRetry, writeFileWithRetry } from "./file-write.js";
 import { writeJsonAtomic } from "./json-store.js";
@@ -68,6 +69,16 @@ export function createHistoryStore({ filePath, limit = 500, onWrite = async () =
       await onAppend(item, items);
       if (deduplicate && item.generationRunId && items.some((entry) => entry.generationRunId === item.generationRunId)) return items;
       return [item, ...items].slice(0, limit);
+    }),
+    updateCosts: (updates) => mutate((items) => {
+      let changed = false;
+      const next = items.map(item => {
+        const cost = updates.get(item.id);
+        if (recordedCostAmount(item.cost) !== null || recordedCostAmount(cost) === null) return item;
+        changed = true;
+        return { ...item, cost };
+      });
+      return changed ? next : items;
     }),
     remove: (id) => mutate((items) => {
       const next = items.filter((item) => item.id !== id);

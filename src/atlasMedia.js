@@ -219,7 +219,7 @@ export function estimateAtlasImageCost({ model, resolution, referenceCount = 0, 
 
 export function estimateAtlasVideoCost({ model, duration, resolution, referenceImageCount = 0, hasVideoReference = false, endpoint = "" } = {}) {
   const pricingEndpoint = endpoint || (videoModels.get(String(model).toLowerCase())?.id + (referenceImageCount ? "/reference-to-video" : "/text-to-video"));
-  if(getPricingCatalog().entries?.["atlas:"+pricingEndpoint]) return catalogVideoCost({model:pricingEndpoint,duration,resolution,referenceImageCount,hasVideoReference});
+  if(pricingEndpoint === "bytedance/seedance-2.0/reference-to-video" || pricingEndpoint?.startsWith("bytedance/seedance-2.5/") || getPricingCatalog().entries?.["atlas:"+pricingEndpoint]) return catalogVideoCost({model:pricingEndpoint,duration,resolution,referenceImageCount,hasVideoReference});
   const seconds = normalizedDuration(duration, 4, 30, 5, true);
   const normalizedResolution = String(resolution || "").toUpperCase();
   let amountUsd = null;

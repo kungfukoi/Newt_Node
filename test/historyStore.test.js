@@ -98,3 +98,16 @@ test("concurrent JSON writes use unique temporaries and leave valid output", asy
   assert.deepEqual(JSON.parse(await readFile(filePath, "utf8")), { version: 11 });
   assert.deepEqual(await readdir(directory), ["history.json"]);
 });
+
+test("cost reconciliation preserves concurrent appends and existing recorded money", async t => {
+  const { filePath } = await fixture(t);
+  const store = createHistoryStore({ filePath });
+  await store.append({ id: "unknown", cost: { amountUsd: null } });
+  await store.append({ id: "free", cost: { amountUsd: 0 } });
+  const updates = new Map([["unknown", { amountUsd: 2 }], ["free", { amountUsd: 9 }]]);
+  await Promise.all([store.append({ id: "new" }), store.updateCosts(updates)]);
+  const rows = await store.read();
+  assert.equal(rows.length, 3); assert.equal(rows.find(i => i.id === "free").cost.amountUsd, 0);
+  assert.equal(rows.find(i => i.id === "unknown").cost.amountUsd, 2);
+  assert.equal(JSON.parse(await readFile(filePath + ".bak", "utf8")).find(i => i.id === "unknown").cost.amountUsd, null);
+});

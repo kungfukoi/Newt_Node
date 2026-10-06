@@ -273,7 +273,7 @@ export default function StatsDashboard() {
       </div>
 
       <p className="cost-note">
-        Costs use each run's recorded cost when available, with fal model-page estimates for older runs. Unpriced means the app does not have enough billing detail yet; confirm final charges in fal.ai, Google Cloud, and OpenAI dashboards.
+        Costs use each run's recorded charge or estimate. Reconciled historical estimates use rates checked at reconciliation, not original charges. Unpriced means billing details are still missing; confirm final charges in your provider dashboards.
       </p>
     </section>
   );

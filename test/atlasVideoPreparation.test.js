@@ -16,3 +16,11 @@ test("durable Atlas preparation uploads references without submitting a paid job
   assert.equal(input.model, "bytedance/seedance-2.5/reference-to-video");
   assert.deepEqual(input.reference_images, ["https://example.test/1.png"]);
 });
+
+test("Atlas retries a failed price lookup after completion without replaying generation", async () => {
+  let quotes = 0, generations = 0;
+  const media = createAtlasMedia({ client: { generate: async () => { generations++; return { url: "https://example.test/video.mp4" }; } },
+    quoteInput: async () => { if (++quotes === 1) throw Error("temporarily unavailable"); return { amountUsd: 1.5, estimated: true }; } });
+  const result = await media.video({ model: "Seedance 2.5", prompt: "test", duration: 5, resolution: "720p", aspectRatio: "16:9" }, "test-key");
+  assert.equal(quotes, 2); assert.equal(generations, 1); assert.equal(result.cost.amountUsd, 1.5);
+});

@@ -86,14 +86,14 @@ export function currentOpenAiRates(bundled, snapshot = reader()) {
   }));
 }
 
-export function catalogTokenCost(provider, model, usage) {
+export function catalogTokenCost(provider, model, usage, snapshot = reader()) {
   const normalized = String(provider || "").toLowerCase().replace(" cloud", "");
   if (!["openai", "atlas"].includes(normalized) || !model || !usage) return null;
   const input = usage.input_tokens ?? usage.prompt_tokens, output = usage.output_tokens ?? usage.completion_tokens;
   if (![input,output].every(value=>typeof value === "number" && Number.isFinite(value) && value >= 0)) return null;
   const endpoint = (normalized === "atlas" ? "openai/" : "") + String(model).replace(/^openai\//, "");
-  const context = input > 272000 ? "long" : "short";
-  const rates = Object.fromEntries(["input","cached","writes","output"].map(metric=>[metric,pricingQuote(normalized,endpoint,{context,metric})]));
+  const context = (normalized === "atlas" ? input >= 272000 : input > 272000) ? "long" : "short";
+  const rates = Object.fromEntries(["input","cached","writes","output"].map(metric=>[metric,pricingQuote(normalized,endpoint,{context,metric},1,snapshot)]));
   if (Object.values(rates).some(rate=>!rate)) return null;
   const details = usage.input_tokens_details || usage.prompt_tokens_details || {};
   const cached = Math.min(input, Math.max(0, Number(details.cached_tokens)||0));

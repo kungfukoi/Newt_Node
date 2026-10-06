@@ -279,7 +279,8 @@ test("captured request prices remain stable while future requests use new prices
 
 test("local pricing routes reject foreign origins and require explicit local writes", async (t) => {
   const { service } = await fixture(t);
-  const app = express(); app.use(express.json()); registerPricingRoutes(app, service);
+  let reconciliations = 0;
+  const app = express(); app.use(express.json()); registerPricingRoutes(app, service, null, { reconcile: async () => ({ updated: ++reconciliations }) });
   const server = await new Promise((resolve) => { const running = app.listen(0, "127.0.0.1", () => resolve(running)); });
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const root = `http://127.0.0.1:${server.address().port}`;
@@ -287,6 +288,10 @@ test("local pricing routes reject foreign origins and require explicit local wri
   assert.equal((await fetch(`${root}/api/pricing/refresh`, { method: "POST", headers: { "X-Newt-Local": "1", Origin: "https://evil.example" } })).status, 403);
   const response = await fetch(`${root}/api/pricing/settings`, { method: "POST", headers: { "X-Newt-Local": "1", "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) });
   assert.equal(response.status, 200); assert.equal((await response.json()).enabled, false);
+  assert.equal((await fetch(`${root}/api/pricing/reconcile`, { method: "POST" })).status, 403);
+  assert.equal(reconciliations, 0);
+  const reconciled = await fetch(`${root}/api/pricing/reconcile`, { method: "POST", headers: { "X-Newt-Local": "1" } });
+  assert.equal(reconciled.status, 200); assert.equal((await reconciled.json()).updated, 1);
   assert.equal((await fetch(`${root}/api/pricing`)).headers.get("cache-control"), "no-store");
 });
 

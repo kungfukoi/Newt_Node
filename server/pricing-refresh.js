@@ -1,8 +1,9 @@
+import { atlasLlmRates } from "../src/atlasLlmPricing.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "./json-store.js";
 import { ATLAS_PRICING_URL, parseAtlasPricing } from "./atlas-pricing.js";
-import { atlasPricingSpecs, atlasSeedanceEstimateEndpoints, atlasPricingEndpoints } from "../src/atlasPricing.js";
+import { atlasPricingSpecs, atlasSeedanceEstimateEndpoints, atlasSeedance20EstimateEndpoint, atlasPricingEndpoints } from "../src/atlasPricing.js";
 import { priceState, PRICE_REFRESH_MS } from "../src/pricingTrust.js";
 import {
   KREA_PRICING_URL, OPENAI_PRICING_URL,
@@ -18,7 +19,7 @@ const blank = () => ({ version: 1, enabled: false, autoRefreshPreferenceVersion,
 
 const supportedPricingEntry = (id) => id.startsWith("openai:")
   || kreaPricingModels.some(([endpoint]) => id === `krea:${endpoint}`)
-  || [...atlasPricingEndpoints, "openai/gpt-6-astra", "openai/gpt-5.6-luna"].some(endpoint => id === `atlas:${endpoint}`);
+  || [...atlasPricingEndpoints, ...Object.keys(atlasLlmRates).map(model => `openai/${model}`)].some(endpoint => id === `atlas:${endpoint}`);
 
 export class PricingRefresh {
   constructor({ filePath, getFalKey = () => "", getProviderKey = () => "", getEnabledProviders, refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic, enableAtlasPricing = false }) {
@@ -174,7 +175,7 @@ export class PricingRefresh {
     const tasks = [
       ...(this.enableAtlasPricing ? [["atlas", async () => parseAtlasPricing(JSON.parse(await this.read(ATLAS_PRICING_URL))).filter(result => {
         const endpoint = result.id.slice(6);
-        return atlasPricingSpecs[endpoint] || atlasSeedanceEstimateEndpoints.includes(endpoint) || ["openai/gpt-6-astra", "openai/gpt-5.6-luna"].includes(endpoint);
+        return atlasPricingSpecs[endpoint] || atlasSeedanceEstimateEndpoints.includes(endpoint) || endpoint === atlasSeedance20EstimateEndpoint || Object.keys(atlasLlmRates).some(model => endpoint === `openai/${model}`);
       })]] : []),
       ["krea", async () => parseKreaPricing(JSON.parse(await this.read(KREA_PRICING_URL))).filter(result => kreaPricingModels.find(([endpoint]) => `krea:${endpoint}` === result.id)?.[1])],
       ["openai", async () => parseOpenAiPricing(await this.read(OPENAI_PRICING_URL))]
