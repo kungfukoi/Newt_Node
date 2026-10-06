@@ -1,7 +1,7 @@
 import {test,expect} from "@playwright/test";
 import {openFixture} from "./helpers.mjs";
 test("pricing refresh is opt-in and provider quotes update Run without generating",async({page},testInfo)=>{
- const {errors,requests}=await openFixture(page,{generation:true,scale:0.8,settings:{userPreferences:{showPriceSnapshot:false},falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal"}}});
+ const {errors,requests}=await openFixture(page,{generation:true,scale:0.8,settings:{falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal"}}});
  let enabled=false,revision=1,refreshes=0;
  const status=()=>({enabled,running:false,lastCheckAt:null,sources:{fal:{status:"bundled"},krea:{status:"disabled"},atlas:{status:"disabled"},openai:{status:"disabled"},google:{status:"disabled"}},catalog:{version:1,revision:"pricing-"+revision,accountRevision:"test-account",entries:{}}});
  await page.route("**/api/pricing",r=>r.fulfill({json:status()}));
@@ -10,8 +10,6 @@ test("pricing refresh is opt-in and provider quotes update Run without generatin
  const quotes=[];
  await page.route("**/api/pricing/quote",r=>{const body=r.request().postDataJSON();quotes.push(body);return r.fulfill({json:{amountUsd:0.42,pricingStatus:"estimated",pricingBasis:"Mock account estimate",accountRevision:"test-account",checkedAt:new Date().toISOString()}});});
  await page.getByRole("button",{name:"Settings",exact:true}).click();
- await page.getByRole("button",{name:/User Preferences/}).click();
- await expect(page.getByText("Show Price Snapshot",{exact:true})).toHaveCount(0);
  const auto=page.getByRole("switch",{name:"Automatic pricing refresh"});await expect(auto).toHaveAttribute("aria-checked","false");expect(refreshes).toBe(0);
  await auto.click();await expect(auto).toHaveAttribute("aria-checked","true");await auto.click();await expect(auto).toHaveAttribute("aria-checked","false");
  await page.getByRole("button",{name:"Check prices now"}).click();await expect.poll(()=>refreshes).toBe(1);

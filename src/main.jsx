@@ -854,7 +854,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} imageEditorModel={userPreferences.imageEditorModel} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} imageEditorModel={userPreferences.imageEditorModel} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
