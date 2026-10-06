@@ -205,3 +205,7 @@ Settings update is constrained to the configured repository and branch. Git chec
 `src/openAiImageModels.js` normalizes saved Image 2.5 variant fields into separate Flare and Sunburst model names, including queued Explore settings. Historical result and cost records are preserved. Shared catalogs expose both names in nodes and Settings; Fal, Atlas and Krea route each to its own endpoint. The image editor uses only the model saved in User Preferences.
 
 Explore is registered as a runnable image producer. `src/explore.js` owns planning contracts and persisted data; `src/nodeRunners/explore.js` owns the sequential batch; `server/routes/explore.js` handles structured creative planning and planning history. Its lazy body and CSS are separate from the initial shell. Shared image generation owns image history and storage. Interrupted requests remain uncertain after reload/copy and require inspection before another submission. See [Explore](explore-node.md).
+
+## Storyboard selected revisions
+
+`src/storyboardRevisions.js` owns selection validation, direction projection and stale-source checks. `src/components/StoryboardRevisionControls.jsx` owns the batch instruction UI. `server/routes/storyboardRevisions.js` registers `/api/node/storyboard-revise`, using the existing structured creative LLM routing and Storyboard usage recorder. NodeEditor orchestrates planning then the existing image/QC/export pipeline, staging new directions until the image succeeds. `workflowState.js` recovers interrupted revision state without discarding originals or resubmitting work.

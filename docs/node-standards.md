@@ -988,3 +988,7 @@ This document is not law carved in stone. If a future feature needs a different 
 ### Explore
 
 Explore owns its planning, sequential image queue, selected output and direction metadata. Keep the body lazy-loaded and use the shared image runner, provider routing, managed media and History. Stop leaves submitted work running; Resume never repeats completed or uncertain requests and preserves original settings. Its typed input handles remain mounted when References is collapsed. Preview receives the full image collection; other image consumers receive the selection. See [Explore](explore-node.md).
+
+### Storyboard selected revisions
+
+Storyboard View provides independent panel checkboxes and a revision instruction for one to eight panels. Planning reads all panel directions and selected images for context, preserving exact panel IDs and ordering. Only selected panels generate replacements; revised shot, lens, angle, beat, prompt and notes commit with each successful image. Planning failures leave all originals intact; individual image failures preserve that panel’s original image and directions. Selection and instructions survive save/reopen for explicit retry. Scene changes do not require replacing the entire board before a selected revision. Revision planning and image requests are never automatically replayed after an interrupted response. Reload/copy clears the active revision state and retains completed work with an inspection notice. Existing generation, QC, export, History and provider routing remain authoritative.

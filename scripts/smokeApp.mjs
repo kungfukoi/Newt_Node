@@ -11,6 +11,7 @@ const requiredHealthRoutes = [
   "generate3d",
   "ideogram45",
   "explore",
+  "storyboardRevisions",
   "remoteVideoJobs",
   "atlasDurableVideo",
   "characterWardrobeFullSheet",

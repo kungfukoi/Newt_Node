@@ -53,6 +53,8 @@ export const creativeSchemas = {
   "storyboard-export-visual-captions": captions
 };
 
+creativeSchemas["storyboard-revision"] = object({ frames: list(object({ id: nonempty, ...creativeSchemas["storyboard-plan"].properties.frames.items.properties }), 1, 8), warnings: list(text, 0, 20) });
+
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 

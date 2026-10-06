@@ -159,3 +159,5 @@ A feature change is not complete until old workflows, ports, results, previews, 
 ### Explore and Image 2.5
 
 [Explore](docs/explore-node.md) develops up to 25 art directions from a brief, with reference inputs, favorites, refinement and resumable image batches. OpenAI Image 2.5 Flare and Sunburst appear as separate image model choices throughout nodes and Settings. Saved variant selections migrate automatically; the image editor model is selected in Settings → User Preferences.
+
+In Storyboard View, check up to eight panels, enter an instruction, and choose **Revise Selected**. Successful panels receive new directions and images; failed panels keep their originals. Planning and image generation use the configured providers and are billed normally.

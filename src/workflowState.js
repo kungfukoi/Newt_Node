@@ -92,6 +92,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (data.storyboardRevisionActive) return clearStaleRunningState({ type: "storyboard", data }).data;
   if (Array.isArray(data.exploreQueue)) return clearStaleRunningState({ type: "explore", data }).data;
   if (!["running", "uploading"].includes(data.status)) return data;
 
@@ -137,6 +138,7 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
+  if (node.type === "storyboard" && node.data?.storyboardRevisionActive) return { ...node, data: { ...node.data, storyboardRevisionActive: false, status: "error", error: "Storyboard revision interrupted. Existing panels were preserved; check History before submitting again.", storyboardFrames: (node.data.storyboardFrames || []).map(frame => ["running", "queued", "reviewing"].includes(frame.status) ? { ...frame, status: "error", error: "Revision interrupted; check History before retrying." } : frame) } };
   if (node.type === "explore") {
     return { ...node, data: { ...node.data, exploreAction: "", exploreStopRequested: false,
       status: node.data?.status === "running" ? "paused" : node.data?.status,

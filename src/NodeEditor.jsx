@@ -1,3 +1,5 @@
+import { storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
+import { StoryboardRevisionControls } from "./components/StoryboardRevisionControls.jsx";
 import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
@@ -1296,6 +1298,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const distantZoomRef = React.useRef(shouldUseDistantCanvasVisuals(savedDraft.viewport.scale));
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
+  const storyboardRevisionRunsRef = React.useRef(new Set());
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
   const groupsRef = React.useRef(savedDraft.groups);
@@ -4183,6 +4186,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function planStoryboardNode(node) {
+    if (storyboardRevisionRunsRef.current.has(node.id)) return null;
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = expandStoryboardDirectorIncoming(currentIncomingByNode[currentNode.id] || {}, currentIncomingByNode);
@@ -4231,18 +4235,51 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
+  async function reviseStoryboardPanels(node, frameIds, instruction) {
+    const currentNode = nodesRef.current.find(item => item.id === node.id);
+    if (!currentNode || storyboardRevisionRunsRef.current.has(node.id) || ["running", "planning", "revising", "compiling"].includes(currentNode.data.status)) return;
+    storyboardRevisionRunsRef.current.add(node.id);
+    try {
+      const frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
+      storyboardRevisionTargets(frames, frameIds);
+      const incomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+      const incoming = expandStoryboardDirectorIncoming(incomingByNode[node.id] || {}, incomingByNode);
+      const sceneDescription = storyboardSceneDescriptionForNode(currentNode, incoming);
+      if (!instruction.trim() || !sceneDescription.trim()) throw new Error("Add a scene description and revision instruction.");
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
+      updateNode(node.id, { status: "revising", storyboardRevisionActive: true, error: "", storyboardRevisionWarning: "" });
+      const { response, data } = await nodeApi.reviseStoryboard({ ...workflowRequestContext(), nodeId: node.id, nodeTitle: currentNode.data.title,
+        frames, frameIds, instruction, sceneDescription, notes: currentNode.data.storyboardNotes || "",
+        characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }),
+        locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], incomingByNode), props: storyboardPropReferenceSummaries(incoming.propsIn || [], incomingByNode) });
+      if (!response.ok) throw new Error(data.error || "Storyboard revision failed.");
+      const revisions = validateStoryboardRevision(data.revision, frames, frameIds);
+      const live = nodesRef.current.find(item => item.id === node.id);
+      if (!live || frameIds.some(id => !storyboardRevisionSourceMatches(live.data.storyboardFrames.find(f => f.id === id), frames.find(f => f.id === id)))) throw new Error("Selected panels changed while revising. Their current work was preserved.");
+      updateNode(node.id, { storyboardRevisionWarning: [data.warning, ...(data.revision.warnings || [])].filter(Boolean).join(" ") });
+      await generateStoryboardNode(live, frameIds, { revisions, originals: frames });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message || "Revision failed. Existing panels preserved." });
+    } finally {
+      updateNode(node.id, { storyboardRevisionActive: false });
+      storyboardRevisionRunsRef.current.delete(node.id);
+      loadOutputHistory();
+    }
+  }
+
   async function generateStoryboardFrame(node, frameId) {
     return generateStoryboardNode(node, [frameId]);
   }
 
-  async function generateStoryboardNode(node, frameIds = null) {
+  async function generateStoryboardNode(node, frameIds = null, revisionOptions = {}) {
+    if (storyboardRevisionRunsRef.current.has(node.id) && !revisionOptions.revisions) return;
     let currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     let currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     let incoming = expandStoryboardDirectorIncoming(currentIncomingByNode[currentNode.id] || {}, currentIncomingByNode);
     let frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
     const sceneDescription = storyboardSceneDescriptionForNode(currentNode, incoming);
 
-    if (!storyboardPlanIsCurrent(currentNode, sceneDescription)) {
+    if (!revisionOptions.revisions && !storyboardPlanIsCurrent(currentNode, sceneDescription)) {
       updateNode(currentNode.id, {
         status: "ready",
         error: "Plan the storyboard again after changing the scene description."
@@ -4251,7 +4288,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const targetIds = new Set(frameIds?.length ? frameIds : frames.map((frame) => frame.id));
-    const targetFrames = frames.filter((frame) => targetIds.has(frame.id));
+    const targetFrames = frames.filter((frame) => targetIds.has(frame.id)).map(frame => ({ ...frame, ...(revisionOptions.revisions?.find(item => item.id === frame.id) || {}) }));
     if (!targetFrames.length) {
       updateNode(currentNode.id, { error: "No storyboard frames selected to generate." });
       return { status: "error", error: new Error("No storyboard frames selected to generate.") };
@@ -4282,6 +4319,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     for (const frame of targetFrames) {
       try {
+        if (revisionOptions.revisions) {
+          const liveFrame = nodesRef.current.find(n => n.id === node.id)?.data.storyboardFrames.find(f => f.id === frame.id);
+          if (!storyboardRevisionSourceMatches(liveFrame, revisionOptions.originals.find(f => f.id === frame.id))) throw new Error("Panel changed during revision; current work preserved.");
+        }
         patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
         const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
         const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
@@ -4300,6 +4341,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           propSources: activePropSources
         });
         const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, continuityReferenceItems);
+        const originalFrame = revisionOptions.originals?.find(item => item.id === frame.id);
+        if (originalFrame?.resultUrl) imagePromptItems.push({ url: originalFrame.resultUrl, label: "Original panel being revised; follow revised directions and preserve unaffected details" });
         const missingCharacterTags = storyboardMissingRequiredCharacterTags(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, [
           frame.prompt,
           frame.beat,
@@ -4331,6 +4374,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               data: {
                 ...currentNode.data,
                 title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
+                storyboardRevision: Boolean(revisionOptions.revisions),
                 model: currentNode.data.model || storyboardFixedModel,
                 aspectRatio,
                 resolution
@@ -4390,7 +4434,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           qcIssues: qcResult?.issues || [],
           qcRetryCount
         };
-        patchStoryboardFrame(currentNode.id, frame.id, nextFrame);
+        if (revisionOptions.revisions) {
+          const liveFrame = nodesRef.current.find(n => n.id === node.id)?.data.storyboardFrames.find(f => f.id === frame.id);
+          if (!storyboardRevisionSourceMatches(liveFrame, originalFrame)) throw new Error("Panel changed during revision; generated image is available in History.");
+        }
+        patchStoryboardFrame(currentNode.id, frame.id, { ...(revisionOptions.revisions?.find(item => item.id === frame.id) || {}), ...nextFrame });
         successes.push({ ...generated, url: exported.url, label: `Frame ${String(frame.number).padStart(3, "0")}` });
       } catch (error) {
         patchStoryboardFrame(currentNode.id, frame.id, { status: "error", error: error.message || "Frame generation failed." });
@@ -7723,6 +7771,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onCharacterActivate={activateCharacterNode}
         onCharacterUnlock={unlockCharacterNode}
         onStoryboardPlan={planStoryboardNode}
+        onStoryboardRevise={reviseStoryboardPanels}
         onStoryboardGenerateAll={generateStoryboardNode}
         onStoryboardGenerateFrame={generateStoryboardFrame}
         onStoryboardExport={exportStoryboardBoard}
@@ -8028,7 +8077,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onCharacterActivate={activateCharacterNode}
                 onCharacterUnlock={unlockCharacterNode}
                 onStoryboardPlan={planStoryboardNode}
-                onStoryboardGenerateAll={generateStoryboardNode}
+                onStoryboardRevise={reviseStoryboardPanels}
+        onStoryboardGenerateAll={generateStoryboardNode}
                 onStoryboardGenerateFrame={generateStoryboardFrame}
                 onStoryboardExport={exportStoryboardBoard}
                 onStoryboardLock={lockStoryboardBoard}
@@ -8502,6 +8552,7 @@ function NodeCard({
   onCharacterActivate,
   onCharacterUnlock,
   onStoryboardPlan,
+  onStoryboardRevise,
   onStoryboardGenerateAll,
   onStoryboardGenerateFrame,
   onStoryboardExport,
@@ -8849,6 +8900,7 @@ function NodeCard({
         onCharacterActivate={onCharacterActivate}
         onCharacterUnlock={onCharacterUnlock}
         onStoryboardPlan={onStoryboardPlan}
+        onStoryboardRevise={onStoryboardRevise}
         onStoryboardGenerateAll={onStoryboardGenerateAll}
         onStoryboardGenerateFrame={onStoryboardGenerateFrame}
         onStoryboardExport={onStoryboardExport}
@@ -11238,6 +11290,7 @@ function NodeBody({
   onCharacterActivate,
   onCharacterUnlock,
   onStoryboardPlan,
+  onStoryboardRevise,
   onStoryboardGenerateAll,
   onStoryboardGenerateFrame,
   onStoryboardExport,
@@ -11977,7 +12030,7 @@ function NodeBody({
     const selectedFrame = frames.find((frame) => frame.id === node.data.selectedFrameId) || frames[0];
     const preparingCharacters = node.data.status === "compiling-characters";
     const compilingStoryboardBoard = node.data.status === "compiling-board";
-    const runningStoryboard = node.data.status === "running" || preparingCharacters;
+    const runningStoryboard = node.data.status === "running" || node.data.status === "revising" || preparingCharacters;
     const planningStoryboard = node.data.status === "planning";
     const exportingStoryboard = node.data.status === "exporting";
     const exportingStoryboardFrames = exportingStoryboard && node.data.storyboardExportMode === "frames";
@@ -12420,6 +12473,7 @@ function NodeBody({
           </section>
         ) : (
           <section className="storyboard-view storyboard-scroll-surface" style={storyboardFrameAspectStyle}>
+            <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} onUpdate={onUpdate} onRevise={onStoryboardRevise} />
             <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
               {frames.map((frame) => {
                 const selected = frame.id === selectedFrame?.id;
@@ -12489,6 +12543,9 @@ function NodeBody({
                           <span>{frame.status === "queued" ? "Queued" : frame.status === "reviewing" ? "Reviewing" : "Rendering"}</span>
                         </div>
                       )}
+                      <label className="storyboard-revision-select nodrag" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} title="Select panel for revision">
+                        <input type="checkbox" aria-label={"Select panel " + frame.number + " for revision"} disabled={storyboardLocked} checked={(node.data.storyboardSelectedFrameIds || []).includes(frame.id)} onChange={event => onUpdate(node.id, { storyboardSelectedFrameIds: event.target.checked ? [...new Set([...(node.data.storyboardSelectedFrameIds || []), frame.id])] : (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) })} />
+                      </label>
                       <div className="storyboard-frame-number">
                         <GripVertical size={12} />
                         <span>{String(frame.number).padStart(2, "0")}</span>
@@ -23655,6 +23712,8 @@ function normalizeStoryboardData(data = {}) {
     storyboardMoodBoardFileName: data.storyboardMoodBoardFileName || storyboardMoodBoardLabel,
     storyboardCharacters: normalizedStoryboardCharacters(data.storyboardCharacters),
     storyboardPlanSceneDescription: inferredPlanSceneDescription,
+    storyboardSelectedFrameIds: Array.isArray(data.storyboardSelectedFrameIds) ? [...new Set(data.storyboardSelectedFrameIds)].filter(id => frames.some(frame => frame.id === id)) : [],
+    storyboardRevisionInstruction: String(data.storyboardRevisionInstruction || "").slice(0, 8000),
     storyboardScale: Math.max(1, finiteNumber(data.storyboardScale, 1)),
     storyboardFrames: frames,
     selectedFrameId,

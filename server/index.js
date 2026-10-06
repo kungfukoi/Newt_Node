@@ -1,3 +1,4 @@
+import { registerStoryboardRevisionRoutes } from "./routes/storyboardRevisions.js";
 import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
 import "dotenv/config";
 
@@ -843,6 +844,8 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
+registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
+
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
 
 registerImageEditRoutes(app, {
@@ -980,6 +983,7 @@ function buildHealthPayload() {
       imageEdit: true,
       ideogram45: true,
       explore: true,
+      storyboardRevisions: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,

@@ -16,6 +16,7 @@ export function buildImageGenerationRequest({
   return {
     prompt,
     ...(node.type === "explore" ? { exploreGeneration: true } : {}),
+    ...(node.data.storyboardRevision ? { storyboardRevision: true } : {}),
     model: node.data.model,
     aspectRatio: aspectRatio || node.data.aspectRatio,
     requestedAspectRatio: node.data.aspectRatio,

@@ -10441,3 +10441,13 @@ video.newtnode-video-fallback {
 .remote-video-recovery-actions { display: flex; gap: 8px; }
 .remote-video-recovery-actions button { width: 28px; height: 28px; display: grid; place-items: center; }
 .remote-video-attention small { display: block; overflow-wrap: anywhere; }
+
+.storyboard-revision-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; margin-bottom: 10px; border: 1px solid #484848; border-radius: 8px; }
+.storyboard-revision-controls textarea { flex: 1 0 100%; min-height: 64px; resize: vertical; }
+.storyboard-revision-controls small { flex-basis: 100%; }
+.storyboard-revision-hint { display: block; padding: 8px 0; }
+.storyboard-revision-select { position: absolute; top: 8px; right: 8px; z-index: 3; padding: 5px; border-radius: 5px; background: #171717; }
+
+.storyboard-revision-controls button { border: 1px solid #484848; border-radius: 6px; background: #303030; color: #ededed; padding: 7px 10px; font: inherit; cursor: pointer; }
+.storyboard-revision-controls button:last-of-type { background: #e4c625; color: #171717; border-color: #e4c625; }
+.storyboard-revision-controls button:disabled { opacity: .45; cursor: default; }
