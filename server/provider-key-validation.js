@@ -21,7 +21,14 @@ export async function validateProviderKey(provider, key, { fetchImpl = fetch, ti
   timeout.unref?.();
   try {
     const response = await fetchImpl(request.url, { ...request.options, signal: controller.signal });
-    if (provider === "elevenLabs" && response.status === 403) return { status: "unverified", reason: "restricted-key" };
+    if (provider === "elevenLabs" && [400, 401, 403].includes(response.status)) {
+      const body = await response.json?.().catch(() => null);
+      const code = body?.detail?.status;
+      if (["missing_permissions", "insufficient_permissions"].includes(code)) {
+        return { status: "unverified", reason: "missing-user-read" };
+      }
+      if (response.status === 403) return { status: "unverified", reason: "restricted-key" };
+    }
     return providerKeyValidationResult(response.status);
   } catch (error) {
     return { status: "unverified", reason: error?.name === "AbortError" ? "timeout" : "unavailable" };

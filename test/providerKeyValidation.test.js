@@ -65,3 +65,12 @@ test("ElevenLabs uses a read-only authenticated check and restricted keys stay u
  assert.equal((await validateProviderKey("elevenLabs","fixture",{fetchImpl:async()=>({status:403})})).status,"unverified");
  assert.equal((await validateProviderKey("elevenLabs","fixture",{fetchImpl:async()=>({status:200})})).status,"valid");
 });
+
+test("ElevenLabs 401 permission denial is not an invalid key", async () => {
+  for (const status of [400, 401, 403]) {
+    const result = await validateProviderKey("elevenLabs", "fixture", { fetchImpl: async () => Response.json({detail:{status:"missing_permissions",message:"user_read permission required"}}, {status}) });
+    assert.deepEqual(result, {status:"unverified",reason:"missing-user-read"});
+  }
+  const invalid = await validateProviderKey("elevenLabs", "fixture", { fetchImpl: async () => Response.json({detail:{status:"invalid_api_key"}}, {status:401}) });
+  assert.equal(invalid.status,"invalid");
+});

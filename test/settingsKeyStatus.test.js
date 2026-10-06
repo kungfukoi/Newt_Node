@@ -15,3 +15,9 @@ test("configured keys are not green until validation succeeds", () => {
   assert.equal(providerMetricTone(true, { status: "invalid" }), "bad");
   assert.equal(providerMetricTone(true, { status: "unverified" }), "warn");
 });
+
+test("restricted ElevenLabs keys explain the missing read permission", () => {
+  const validation={status:"unverified",reason:"missing-user-read"};
+  assert.equal(providerMetricValue(true,validation),"Restricted");
+  assert.match(keyDetail("Studio","ready",validation),/User Read/);
+});

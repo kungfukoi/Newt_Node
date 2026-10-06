@@ -848,7 +848,9 @@ function CredentialProviderCard({
 
 function CredentialValidationBadge({ validation, hasKey }) {
   const status = hasKey ? validation?.status || "pending" : "missing";
-  const label = status === "valid"
+  const label = validation?.reason === "missing-user-read"
+    ? "User Read needed"
+    : status === "valid"
     ? "Valid"
     : status === "invalid"
       ? "Invalid"

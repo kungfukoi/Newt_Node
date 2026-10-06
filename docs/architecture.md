@@ -225,3 +225,5 @@ Built-in workflow presets are shipped in `server/system-newt-presets`: Standard 
 Canvas snap-to-grid is an opt-in local preference beside the unchanged zoom minus, percentage/reset, and plus controls. React Flow snaps node drags to the existing 28-unit canvas grid; Alt temporarily bypasses snapping. Group and selection-handle movement uses the same grid and translates contents together. Toggling the preference does not reposition existing nodes.
 
 Settings API Credentials includes ElevenLabs profiles, active-key selection, `.env` import via `ELEVENLABS_API_KEY`, and a read-only `/v1/user` credential check using `xi-api-key`. Restricted checks remain unverified. This stores credentials only; audio generation is not yet wired.
+
+ElevenLabs may return HTTP 401 with `detail.status: missing_permissions` for a valid restricted key. Credential validation treats this as unverified and Settings explains that User Read is required for the account check; explicit invalid-key responses remain invalid.

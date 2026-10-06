@@ -3,6 +3,7 @@ export function providerMetricValue(configured, validation, checking = false) {
   if (checking && !validation) return "Checking";
   if (validation?.status === "valid") return "Valid";
   if (validation?.status === "invalid") return "Invalid";
+  if (validation?.reason === "missing-user-read") return "Restricted";
   if (validation?.status === "unverified") return "Unverified";
   return checking ? "Checking" : "Configured";
 }
@@ -16,7 +17,9 @@ export function providerMetricTone(configured, validation) {
 }
 
 export function keyDetail(activeLabel, status, validation) {
-  const validationLabel = validation?.status === "valid"
+  const validationLabel = validation?.reason === "missing-user-read"
+    ? "Enable User Read in ElevenLabs to verify this key"
+    : validation?.status === "valid"
     ? "Verified"
     : validation?.status === "invalid"
       ? "Rejected"
