@@ -2,6 +2,7 @@ import { normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 
 // Scheduling hints only. Provider selection still belongs to the existing runners.
 export function nodeSchedulingKey(node, preferences) {
+  if (node?.type === "audioModel") return "elevenLabs";
   const routes = normalizeModelProviderPreferences(preferences);
   const model = String(node?.data?.model || "").toLowerCase();
   if (model.includes("seedance")) return routes.seedance;

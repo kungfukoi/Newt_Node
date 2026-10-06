@@ -1806,7 +1806,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
   const items = normalizedResultItems(resultItems, resultUrl, type);
   const activeIndex = Math.min(Math.max(Number(selectedIndex) || 0, 0), Math.max(items.length - 1, 0));
   const activeItem = items[activeIndex];
-  const canDragActiveItem = activeItem?.type === "image" || activeItem?.type === "video";
+  const canDragActiveItem = activeItem?.type === "image" || activeItem?.type === "video" || activeItem?.type === "audio";
   const activeDragTitle = activeItem?.type === "video"
     ? "Drag video to the canvas to create another Video node, or add it to Timeline."
     : canDragActiveItem ? "Drag result into another node" : undefined;
@@ -1895,6 +1895,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
                 <GripVertical size={14} />
               </button>
             )}
+            {activeItem.type === "audio" && <div className="result-audio"><FileAudio size={30} /><audio src={displayMediaUrl(activeItem.url)} controls preload="metadata" /></div>}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} assets={activeItem.assets} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
             {activeItem.type === "wanSegment" && (
               <div className="wansegment-result">

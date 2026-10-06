@@ -202,7 +202,21 @@ try {
   assert.match(await readFile(path.join(sandbox, ".env"), "utf8"), /^ELEVENLABS_API_KEY=eleven-fixture-key$/m);
   const elevenDisabled = await (await request("/api/settings", { activeCredentialIds: { elevenLabs: "" } })).json();
   assert.equal(elevenDisabled.elevenLabsApiKeyConfigured, false);
+  assert.equal((await (await request("/api/health")).json()).routes.generateAudio, true);
+  assert.equal((await fetch(api + "/api/elevenlabs/voices")).status, 400);
+  assert.equal((await fetch(api + "/api/node/generate-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioMode: "sfx", prompt: "Rain" }) })).status, 400);
   assert.equal(elevenDisabled.credentialProfiles.elevenLabs.length, 1);
+  const audioBytes = Buffer.alloc(44 + 16000);
+  audioBytes.write("RIFF"); audioBytes.writeUInt32LE(audioBytes.length - 8, 4); audioBytes.write("WAVEfmt ", 8); audioBytes.writeUInt32LE(16, 16); audioBytes.writeUInt16LE(1, 20); audioBytes.writeUInt16LE(1, 22); audioBytes.writeUInt32LE(8000, 24); audioBytes.writeUInt32LE(16000, 28); audioBytes.writeUInt16LE(2, 32); audioBytes.writeUInt16LE(16, 34); audioBytes.write("data", 36); audioBytes.writeUInt32LE(16000, 40);
+  await writeFile(path.join(sandbox, "outputs", "speech.wav"), audioBytes);
+  const audioSaved = await (await request("/api/saved-workflows", { id: "audio-smoke", name: "Audio Smoke", nodes: [{ id: "audio", type: "audioModel", data: { audioMode: "sts", voiceId: "fixture", sourceAudioUrl: "/outputs/speech.wav", resultUrl: "/outputs/speech.wav", resultItems: [{ type: "audio", url: "/outputs/speech.wav" }] } }], edges: [], packageParentPath: path.join(sandbox, "packages") })).json();
+  const audioCopy = await (await request("/api/saved-workflows", { id: "audio-copy", sourceWorkflowId: audioSaved.id, name: "Audio Copy", nodes: audioSaved.graph.nodes, edges: [], packageParentPath: path.join(sandbox, "copies") })).json();
+  const audioReopened = await (await request("/api/saved-workflows/" + encodeURIComponent(audioCopy.fileName))).json();
+  const audioData = audioReopened.graph.nodes[0].data;
+  assert.equal(audioData.audioMode, "sts");
+  assert.ok(audioData.sourceAudioUrl.includes(audioCopy.id));
+  assert.ok(audioData.resultItems[0].url.includes(audioCopy.id));
+  assert.equal((await request(audioData.sourceAudioUrl)).status, 200);
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");

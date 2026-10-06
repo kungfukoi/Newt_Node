@@ -602,3 +602,19 @@ export const pricingApi = {
     return ensureOk(response, data, "Could not save pricing settings.");
   }
 };
+
+export const audioModelApi = {
+  voices: (refresh = false) => getJson(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`, "Could not load ElevenLabs voices."),
+  async generate(body) {
+    // A paid audio POST must never be replayed by the generic localhost fallback.
+    let response;
+    try {
+      response = await fetch(localApiFetchUrl("/api/node/generate-audio"), {
+        ...jsonBody(body), signal: AbortSignal.timeout(960000)
+      });
+    } catch {
+      throw new Error("The audio generation connection was interrupted. Check ElevenLabs history before rerunning; the request was not retried.");
+    }
+    return ensureOk(response, await readJsonResponse(response, "Audio generation"), "Audio generation failed.");
+  }
+};

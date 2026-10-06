@@ -165,3 +165,7 @@ In Storyboard View, check up to eight panels, enter an instruction, and choose *
 Storyboard panels also offer **Protect panel** and **Previous versions**. Keep up to eight prior images with their directions; restoring a version retains the image it replaces.
 
 New Storyboard plans track character positions and camera visibility across panels. Continuity checks catch unexplained disappearing occupants and position changes, with one bounded text correction before image generation. Existing saved boards remain usable.
+
+### Audio Model
+
+Add **Audio Model** from the node palette to generate Text to Speech, Speech to Speech, Sound Effects, or Music using ElevenLabs. Configure the active ElevenLabs key in Settings; voice modes need Voices Read and the corresponding generation permission. Select a Default or Mine voice, model, duration and advanced controls in the node. Results support playback, download, Preview, Output, compatible video/Director audio inputs, and workflow packages. Batches retain successful outputs if another generation fails. Cost labels are estimates; custom voice charges and unknown durations remain unpriced.

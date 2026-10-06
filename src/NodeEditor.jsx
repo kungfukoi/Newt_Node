@@ -1,3 +1,6 @@
+import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
+import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
+import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
 import { Grid3X3 } from "lucide-react";
 import { canvasDragAnchor, canvasDragDelta } from "./canvasGrid.js";
 import { canvasSnapToGridEnabled, rememberCanvasSnapToGrid } from "./workflowPreferences.js";
@@ -583,6 +586,7 @@ const nodeIcons = {
   coverage: Aperture,
   imageModel: ImagePlus,
   videoModel: Film,
+  audioModel: Volume2,
   storyboard: Clapperboard,
   skillDirector: Megaphone,
   text: Type,
@@ -643,6 +647,10 @@ const nodeHelpContent = {
       "Holds an uploaded audio file.",
       "Use the orange output when a video model supports dialogue or audio reference."
     ]
+  },
+  audioModel: {
+    title: "Audio Model",
+    lines: ["Generates speech, voice conversions, sound effects, and music with ElevenLabs.", "Connect the orange audio output to Preview, Output, or a compatible Director or Video Model input."]
   },
   preview: {
     title: "Preview",
@@ -2791,6 +2799,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function uploadMediaAsset(node, file) {
     if (!file) return;
+    if (node.type === "audioModel") {
+      if (["running", "uploading"].includes(node.data.status)) return;
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
+      updateNode(node.id, { status: "uploading", error: "" });
+      try {
+        if (!/\.(mp3|wav|m4a)$/i.test(file.name)) throw new Error("Upload an MP3, WAV, or M4A speech recording.");
+        if (file.size > 50 * 1024 * 1024) throw new Error("Speech recordings must be 50 MB or smaller.");
+        const asset = await uploadNodeAsset(file, "audio");
+        updateNode(node.id, { sourceAudioUrl: asset.localUrl, sourceAudioName: asset.fileName, status: "idle", error: "" });
+      } catch (error) { updateNode(node.id, { status: "error", error: error.message }); }
+      return;
+    }
     const isModel3DUpload = node.type === "model3d";
 
     if (isModel3DUpload && !/\.glb$/i.test(file.name || "")) {
@@ -5858,7 +5878,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       nodeDataIds: shouldResetAutoAspectOutput || shouldResetCoverageOutput ? [to.nodeId] : [],
       restoreStructure: true
     });
-    setEdges((current) => appendInputConnection(current, { id: `edge-${Date.now()}`, from, to, color }));
+    setEdges((current) => appendInputConnection(targetNodeForConnection?.type === "audioModel" && to.port === "audioIn" ? current.filter(edge => edge.to.nodeId !== to.nodeId || edge.to.port !== to.port) : current, { id: `edge-${Date.now()}`, from, to, color }));
     if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
     if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
     setSaveStatus("Connected nodes");
@@ -5917,6 +5937,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     const inputs = {
       prompt: {
+        audioModel: ["promptIn"],
         imageModel: ["promptIn"],
         videoModel: ["promptIn"],
         utility: ["promptIn"],
@@ -5960,6 +5981,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         skillDirector: ["referenceVideoIn"]
       },
       audio: {
+        audioModel: ["audioIn"],
+        preview: ["sourceIn"],
         videoModel: ["referenceAudioIn"],
         assembly: ["audioIn"],
         skillDirector: ["musicIn"]
@@ -6013,7 +6036,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
     if (source.type === "model3d") return "model3d";
     if (source.type === "video" || source.type === "videoModel") return videoNodeOutputKind(source, from.port);
-    if (source.type === "audio") return "audio";
+    if (source.type === "audio" || source.type === "audioModel") return "audio";
     if (source.type === "skillDirector") return "director";
     if (["plainText", "text", "textAgent"].includes(source.type)) return "prompt";
     if (source.type === "image" || source.type === "imageModel") return "image";
@@ -6035,6 +6058,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "audioModel") return audioInputEnabled(target.data.audioMode, to.port) ? "" : "Select Speech to Speech for an audio input, or a text-driven mode for a prompt input";
     if (target.type === "explore") {
       if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
       if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Explore";
@@ -6367,8 +6391,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "edit", "assembly", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
-      return "Preview accepts image, video, and 3D sources";
+      if (["image", "video", "audio", "audioModel", "imageModel", "videoModel", "utility", "edit", "assembly", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
+      return "Preview accepts image, video, audio, and 3D sources";
     }
 
     return "";
@@ -6900,7 +6924,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = ["text", "textAgent", "imageModel", "explore", "videoModel"].includes(currentNode.type)
+    const generationGroupId = ["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type)
       ? createGenerationGroupId(currentNode.type)
       : "";
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
@@ -7503,6 +7527,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
+      if (currentNode.type === "audioModel") {
+        const sourceAudioUrl = incoming.audioIn?.length ? connectedAudioUrls(incoming.audioIn)[0] || "" : currentNode.data.sourceAudioUrl;
+        const settled = await settleSequential(nodeRunIndexes(batchCount), async (index) => {
+          try {
+            return await runAudioModelGeneration({ node: currentNode, prompt: basePrompt, sourceAudioUrl, workflowContext: requestContext, index, generationGroupId, batchTotal: batchCount });
+          } catch (error) { throw new Error(`Run ${index + 1}: ${error.message}`); }
+        });
+        const successes = fulfilledRunValues(settled);
+        const failures = rejectedRunResults(settled);
+        ensureRunSuccesses(successes, failures, "Audio generation failed.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState(existingResultItemsForNode(currentNode, "audio"), successes, "audio");
+        updateNode(currentNode.id, {
+          status: "complete", resultUrl: successes[0].url, resultItems, selectedResultIndex: firstNewIndex, resultType: "audio",
+          error: [batchRunError("audio", batchCount, successes, failures), ...successes.map((item) => item.warning)].filter(Boolean).join(" ")
+        });
+        markOutputTargetSaved(outputTarget, successes, "audio");
+        loadOutputHistory();
+        return failures.length ? { status: "error", error: new Error(batchRunError("audio", batchCount, successes, failures)) } : { status: "complete" };
+      }
+
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
@@ -7761,6 +7805,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         google: import.meta.env?.VITE_NEWTNODE_GOOGLE_CONCURRENCY || 2,
         openai: import.meta.env?.VITE_NEWTNODE_OPENAI_CONCURRENCY || 2,
         atlas: import.meta.env?.VITE_NEWTNODE_ATLAS_CONCURRENCY || 2,
+        elevenLabs: 2,
         localGpu: import.meta.env?.VITE_NEWTNODE_LOCAL_GPU_CONCURRENCY || 1,
         localMedia: import.meta.env?.VITE_NEWTNODE_LOCAL_MEDIA_CONCURRENCY || 2
       },
@@ -11402,6 +11447,13 @@ function NodeBody({
       qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
   }
+  if (node.type === "audioModel") {
+    return <AudioModelNodeBody node={node} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
+      showApiCosts={showPriceSnapshot} generationScope={generationScope}
+      promptConnected={Boolean(connectedText(incoming.promptIn))} sourceAudio={connectedAssetItems(incoming.audioIn)[0]}
+      audioConnected={Boolean(incoming.audioIn?.length)} onUpdate={onUpdate} onRun={onRun} onUpload={onUpload} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />;
+  }
   if (node.type === "plainText") {
     return (
       <PlainTextNodeBody
@@ -13238,6 +13290,7 @@ function NodeBody({
                 ? <TimelineLivePreviewImage item={previewItem} sourceLabel={previewSource.label} />
                 : <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={displayMediaUrl(fullResolutionImageUrl(previewItem))} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />)}
               {previewItem?.type === "video" && <video key={displayMediaUrl(previewItem.url)} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "audio" && <audio key={previewItem.url} src={displayMediaUrl(previewItem.url)} controls preload="metadata" />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} assets={previewItem.assets} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
@@ -13272,6 +13325,7 @@ function NodeBody({
                     >
                       {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
                       {item.type === "video" && <video src={displayMediaUrl(item.url)} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
                           <Box size={18} />
@@ -17724,6 +17778,11 @@ function getNodeConfig(type) {
       input: [],
       output: [{ id: "audioOut", label: "Audio", color: portColors.audio }]
     },
+    audioModel: {
+      icon: Volume2,
+      input: [{ id: "promptIn", label: "Prompt", color: portColors.prompt }, { id: "audioIn", label: "Audio", color: portColors.audio }],
+      output: [{ id: "audioOut", label: "Audio", color: portColors.audio }]
+    },
     preview: {
       icon: MonitorPlay,
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
@@ -17807,6 +17866,7 @@ function unsupportedNodeConfig(type) {
 function createDefaultNodeData(type, label, count) {
   if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
+  if (type === "audioModel") return { title, ...audioModelDefaults };
 
   if (type === "plainText") return { title, text: "", resultText: "" };
   if (type === "text") return { title, text: "" };
@@ -19765,6 +19825,7 @@ function inputPortIdsForNode(node) {
 }
 
 function activeInputPortIdsForNode(node) {
+  if (node?.type === "audioModel") return inputPortIdsForNode(node).filter(port => audioInputEnabled(node.data.audioMode, port));
   if (node?.type === "utility") {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data);
   }
@@ -19823,7 +19884,7 @@ function portKindForNodePort(node, portId, role) {
 
 function acceptedInputPortKinds(node, portId) {
   const inputKind = portKindForNodePort(node, portId, "input");
-  if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  if (inputKind === "preview") return ["image", "video", "audio", "model3d", "transfer", "character"];
   if (inputKind === "output") return outputAcceptedSourceKinds;
   return inputKind ? [inputKind] : [];
 }
@@ -19838,7 +19899,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   if (portsAreCompatible(source, fromPort, target, toPort)) return "";
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
-  if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (inputKind === "preview") return "Preview accepts image, video, audio, 3D, Mood Board, or Character outputs";
   if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Director, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
@@ -20077,6 +20138,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (node.type === "audioModel") return "audio";
   if (node.type === "explore") return "image";
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
@@ -20197,6 +20259,7 @@ function buildInactiveEdgeIds(nodes, edges) {
         if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
         if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedInput(target, edge.to.port)) return true;
+        if (target?.type === "audioModel" && !audioInputEnabled(target.data.audioMode, edge.to.port)) return true;
         if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
         if (source?.type === "frameIt" && !source.data?.resultUrl) return true;
         if (source?.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return true;
@@ -20702,7 +20765,7 @@ function nodeReferenceOutputPort(node) {
   if (["plainText", "text", "textAgent"].includes(node.type)) return "promptOut";
   if (node.type === "image") return "imageOut";
   if (node.type === "video") return "videoOut";
-  if (node.type === "audio") return "audioOut";
+  if (node.type === "audio" || node.type === "audioModel") return "audioOut";
   if (node.type === "imageModel") return "imageOut";
   if (node.type === "videoModel") return "videoOut";
   if (node.type === "camera") return "cameraOut";
@@ -20804,7 +20867,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 
   if (targetNode.type === "videoModel") {
     if (source.type === "character") return "characterIn";
-    if (source.type === "audio") return "referenceAudioIn";
+    if (outputType === "audio") return "referenceAudioIn";
     if (outputType === "image") return "referenceImageIn";
     if (outputType === "video") return "referenceVideoIn";
   }
@@ -22407,6 +22470,7 @@ function previewVideoSourceForNode(node, incomingByNode) {
 }
 
 function previewMediaType(source, edge) {
+  if (source.type === "audio" || source.type === "audioModel" || (source.type === "character" && edge?.from?.port === "voiceOut")) return "audio";
   if (!source) return "";
   if (source.type === "assembly") return edge?.from?.port === "frameOut" ? "image" : "video";
   if (source.type === "storyboard" && storyboardOutputItem(source, edge)) return "image";
@@ -23155,6 +23219,7 @@ function autoAspectSourceSummary(items = [], fallback) {
 }
 
 function sourceLabel(source) {
+  if (source.type === "audioModel") return source.data.title || "Audio Model";
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "storyboard") return source.data.title || "Storyboard";
@@ -23576,6 +23641,8 @@ function normalizeCurrentNode(node) {
       data: normalizeAutoAspectData(data)
     };
   }
+
+  if (nextNode.type === "audioModel") return { ...nextNode, data: normalizeAudioModelData(data) };
 
   if (nextNode.type === "coverage") {
     return {

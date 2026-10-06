@@ -1,6 +1,7 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 
 export function estimatedNodeWidth(type) {
+  if (type === "audioModel") return 370;
   if (type === "explore") return 650;
   if (type === "assembly") return 1080;
   if (type === "frameIt") return 980;
@@ -66,6 +67,7 @@ export function minimumResizableNodeHeight(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "audioModel") return 750;
   if (type === "explore") return 680;
   if (type === "assembly") return 520;
   if (type === "frameIt") return 700;

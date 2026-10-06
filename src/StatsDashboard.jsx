@@ -182,6 +182,7 @@ const mediaColors = {
   text: "#f0c83b",
   image: "#3d85ff",
   video: "#58ce63",
+  audio: "#ff8b35",
   model3d: "#14d8c8"
 };
 
@@ -234,7 +235,7 @@ export default function StatsDashboard() {
 
       <div className="stats-metrics">
         <MetricCard icon={<DollarSign size={20} />} label="Estimated spend" value={formatCurrency(stats.totalCost)} detail={`${formatCurrency(stats.averageCost)} avg / priced run${unpricedSuffix(stats.unpricedCount)}`} />
-        <MetricCard icon={<Activity size={20} />} label="Generations" value={stats.totalCount} detail={`${stats.videoCount} video, ${stats.imageCount} image, ${stats.textCount} text, ${stats.model3dCount} 3D`} />
+        <MetricCard icon={<Activity size={20} />} label="Generations" value={stats.totalCount} detail={`${stats.videoCount} video, ${stats.imageCount} image, ${stats.textCount} text, ${stats.audioCount} audio, ${stats.model3dCount} 3D`} />
         <MetricCard icon={<Film size={20} />} label="Video seconds" value={`${stats.videoSeconds}s`} detail={`${stats.fastCount} fast runs`} />
         <MetricCard icon={<Layers3 size={20} />} label="Top project" value={stats.topProject?.name || "None yet"} detail={stats.topProject ? `${formatCostLabel(stats.topProject)} tracked${unpricedSuffix(stats.topProject.unpricedCount)}` : "Waiting for runs"} />
       </div>
@@ -252,7 +253,7 @@ export default function StatsDashboard() {
 
         <section className="stats-panel">
           <PanelTitle icon={<Image size={17} />} title="Media mix" aside={`${stats.totalCount} total`} />
-          <MediaSplit imageCount={stats.imageCount} videoCount={stats.videoCount} textCount={stats.textCount} model3dCount={stats.model3dCount} />
+          <MediaSplit imageCount={stats.imageCount} videoCount={stats.videoCount} textCount={stats.textCount} model3dCount={stats.model3dCount} audioCount={stats.audioCount} />
         </section>
 
         <section className="stats-panel">
@@ -356,8 +357,8 @@ function VolumeBars({ days }) {
   );
 }
 
-function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
-  const totalCount = imageCount + videoCount + textCount + model3dCount;
+function MediaSplit({ imageCount, videoCount, textCount, model3dCount, audioCount }) {
+  const totalCount = imageCount + videoCount + textCount + model3dCount + audioCount;
   const total = Math.max(1, totalCount);
   const imagePercent = Math.round((imageCount / total) * 100);
   const videoPercent = Math.round((videoCount / total) * 100);
@@ -365,14 +366,16 @@ function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
   const imageStop = imagePercent;
   const videoStop = imagePercent + videoPercent;
   const textStop = videoStop + textPercent;
+  const audioStop = textStop + Math.round((audioCount / total) * 100);
   const dominant = [
     { label: "image", count: imageCount },
     { label: "video", count: videoCount },
     { label: "text", count: textCount },
+    { label: "audio", count: audioCount },
     { label: "3D", count: model3dCount }
   ].sort((a, b) => b.count - a.count)[0];
   const donutBackground = totalCount
-    ? `conic-gradient(${mediaColors.image} 0 ${imageStop}%, ${mediaColors.video} ${imageStop}% ${videoStop}%, ${mediaColors.text} ${videoStop}% ${textStop}%, ${mediaColors.model3d} ${textStop}% 100%)`
+    ? `conic-gradient(${mediaColors.image} 0 ${imageStop}%, ${mediaColors.video} ${imageStop}% ${videoStop}%, ${mediaColors.text} ${videoStop}% ${textStop}%, ${mediaColors.audio} ${textStop}% ${audioStop}%, ${mediaColors.model3d} ${audioStop}% 100%)`
     : "rgba(255, 255, 255, 0.08)";
 
   return (
@@ -401,6 +404,7 @@ function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
           3D
           <strong>{model3dCount}</strong>
         </span>
+        <span><i style={{ background: mediaColors.audio }} />Audio<strong>{audioCount}</strong></span>
         <small>{dominant.count ? `${dominant.label} leads by count` : "No runs yet"}</small>
       </div>
     </div>
@@ -491,6 +495,7 @@ function buildUsageStats(history, pricing) {
   const videoCount = normalized.filter((item) => item.mediaType === "video").length;
   const imageCount = normalized.filter((item) => item.mediaType === "image").length;
   const textCount = normalized.filter((item) => item.mediaType === "text").length;
+  const audioCount = normalized.filter((item) => item.mediaType === "audio").length;
   const model3dCount = normalized.filter((item) => item.mediaType === "model3d").length;
   const videoSeconds = normalized.reduce((sum, item) => sum + (item.mediaType === "video" ? item.durationSeconds : 0), 0);
 
@@ -502,6 +507,7 @@ function buildUsageStats(history, pricing) {
     videoCount,
     textCount,
     model3dCount,
+    audioCount,
     pricedCount,
     unpricedCount,
     videoSeconds,
@@ -523,7 +529,7 @@ function normalizeUsageItem(item, pricing) {
   const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
   const cost = recordedCostAmount(item.cost);
   const hasCostEstimate = Number.isFinite(cost);
-  const durationSeconds = mediaType === "video" ? durationToSeconds(item.remoteVideo?.duration ?? settings.duration) : 0;
+  const durationSeconds = mediaType === "audio" ? Number(settings.durationSeconds) || 0 : mediaType === "video" ? durationToSeconds(item.remoteVideo?.duration ?? settings.duration) : 0;
   const cutoff = startOfDay(new Date());
   cutoff.setDate(cutoff.getDate() - 29);
 

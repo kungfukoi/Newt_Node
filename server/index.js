@@ -1,3 +1,4 @@
+import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { ProviderPricing } from "./provider-pricing.js";
 import { registerPricingRoutes } from "./routes/pricing.js";
@@ -960,6 +961,25 @@ app.post("/api/system/performance-diagnostics", async (req, res) => {
   res.json(await runtimeDiagnostics.snapshot());
 });
 
+registerAudioModelRoutes(app, {
+  getKey: () => process.env.ELEVENLABS_API_KEY,
+  readAudio: async (url) => {
+    if (!isLocalAssetUrl(url)) throw new Error("Upload the speech recording into NewtNode first.");
+    const { filePath } = await resolveLocalAssetPathFromUrl(url);
+    const metadata = await stat(filePath);
+    if (metadata.size > 50 * 1024 * 1024) throw new Error("Speech-to-speech accepts an audio file up to 50 MB.");
+    const audio = await readLocalAsset(url);
+    if (!audio.mimeType.startsWith("audio/")) throw new Error("Speech-to-speech requires an audio file.");
+    return { ...audio, durationSeconds: (await probeVideoFile(filePath)).duration };
+  },
+  saveAudio: async (req, buffer) => {
+    const target = await createManagedAssetTarget(req, "elevenlabs-audio", ".mp3");
+    await writeFile(target.filePath, buffer);
+    return { url: target.publicPath, fileName: target.fileName, durationSeconds: (await probeVideoFile(target.filePath)).duration };
+  },
+  recordHistory: appendHistory
+});
+
 registerComposerPoseRoutes(app, {
   composerPosesDir,
   readComposerPoses,
@@ -1028,6 +1048,7 @@ function buildHealthPayload() {
       newtPresets: true,
       mediaThumbnail: true,
       generationProgress: true,
+      generateAudio: true,
       atlasDurableVideo: true,
       characterWardrobeFullSheet: true,
       remoteVideoJobs: true,
