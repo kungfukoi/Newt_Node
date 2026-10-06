@@ -62,7 +62,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
-  return ["text", "textAgent", "skillDirector", "imageModel", "videoModel", "utility", "edit", "assembly", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
+  return ["text", "textAgent", "skillDirector", "imageModel", "explore", "videoModel", "utility", "edit", "assembly", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
 }
 
 export function selectedRunnableNodesForRun(nodes, selectedNodeIds, incomingByNode = {}) {
@@ -89,7 +89,7 @@ export function buildSelectedRunnableDependencies(nodes, edges) {
 export function nodeRunPriority(node) {
   if (node?.type === "text" || node?.type === "textAgent") return 0;
   if (node?.type === "skillDirector") return 0;
-  if (node?.type === "imageModel") return 2;
+  if (node?.type === "imageModel" || node?.type === "explore") return 2;
   if (node?.type === "autoAspect") return 2;
   if (node?.type === "coverage") return 2;
   if (node?.type === "storyboard") return 2;
@@ -106,6 +106,7 @@ export function runStageLabel(type) {
   if (type === "text") return "text model";
   if (type === "textAgent") return "text agent";
   if (type === "skillDirector") return "film director";
+  if (type === "explore") return "explore";
   if (type === "imageModel") return "image";
   if (type === "autoAspect") return "auto aspect";
   if (type === "coverage") return "coverage";

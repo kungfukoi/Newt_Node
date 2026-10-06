@@ -33,14 +33,16 @@ const providerModelSupport = Object.freeze({
       "Seedream 5.0 Pro",
       "Nano Banana 2",
       "Nano Banana Pro",
-      "OpenAI Image 2.5",
+      "OpenAI Image 2.5 Flare",
+      "OpenAI Image 2.5 Sunburst",
       "OpenAI Image 2",
       "Ideogram 4.5",
       "REVE 2.1",
       "Krea 2 Large"
     ]),
     atlas: Object.freeze([
-      "OpenAI Image 2.5",
+      "OpenAI Image 2.5 Flare",
+      "OpenAI Image 2.5 Sunburst",
       "OpenAI Image 2",
       "Nano Banana 2",
       "Nano Banana Pro",

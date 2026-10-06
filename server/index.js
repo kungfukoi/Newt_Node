@@ -1,3 +1,4 @@
+import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
 import "dotenv/config";
 
 import cors from "cors";
@@ -94,6 +95,7 @@ import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { generateIdeogram45 } from "./ideogram45.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
+import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
@@ -460,7 +462,8 @@ const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: "OpenAI Image 2.5",
+  openAiImage2: openAiImage25Models.flare,
+  openAiImage25Sunburst: openAiImage25Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
   reve21: "REVE 2.1",
@@ -472,6 +475,7 @@ const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
   imageModelNames.reve21,
@@ -839,6 +843,8 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
+registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
+
 registerImageEditRoutes(app, {
   limiter: imageGenerationRequestLimiter,
   getProvider: (_req, requestedProvider) => {
@@ -973,6 +979,7 @@ function buildHealthPayload() {
       previewInpaint: true,
       imageEdit: true,
       ideogram45: true,
+      explore: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -3722,7 +3729,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       return res.status(400).json({ error: "Prompt is required." });
     }
 
-    const selectedModel = resolveImageModel(req.body.model);
+    const selectedModel = resolveImageModel(normalizeOpenAiImage25Model(req.body.model, req.body.openAiImageVariant));
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
     const cleanReferenceLabels = imagePromptUrls.map((_, index) => cleanImagePromptLabel(imagePromptLabels[index])).filter(Boolean);
@@ -4497,6 +4504,7 @@ async function runKreaImageModel(
     aspectRatio,
     resolution,
     quality: req.body.quality,
+    background: req.body.imageBackground || "auto",
     creativity: req.body.kreaCreativity
   });
   const result = await runKreaGeneration({
@@ -4546,7 +4554,7 @@ async function runKreaImageModel(
       aspectRatio,
       requestedAspectRatio: requestedAspectRatio || aspectRatio,
       resolution,
-      quality: selectedModel.displayName === imageModelNames.openAiImage2
+      quality: isOpenAiImage25Model(selectedModel.displayName)
         ? normalizeOpenAiImage2Quality(req.body.quality)
         : undefined,
       creativity: selectedModel.displayName === imageModelNames.krea2Large
@@ -16620,7 +16628,7 @@ async function runTextLlm({
 }
 
 function checkedCreativeLlmResult(result, data, route) {
-  if (/^(film-director|storyboard)-/.test(route) && result.provider === "fal") {
+  if (/^(film-director|storyboard|explore)-/.test(route) && result.provider === "fal") {
     result = { ...result, text: creativeFinalOutputText(result.text) };
   }
   creativeUsageContext.getStore()?.push(result);
@@ -18642,8 +18650,8 @@ function resolveImageModel(model) {
   if (normalized.includes("openai image 2.5") || normalized.includes("gpt image 2.5") || normalized.includes("gpt-image-2.5") || normalized.includes("image 2.5")) {
     return {
       provider: "fal-gpt-image-2-5",
-      displayName: imageModelNames.openAiImage2,
-      id: "openai/gpt-image-2.5/flare/text-to-image"
+      displayName: normalizeOpenAiImage25Model(model),
+      id: openAiImage2FalEndpoint({ variant: openAiImage25Variant(model) })
     };
   }
 
@@ -20898,7 +20906,7 @@ async function runAtlasImageModel(req, res, {
     : null;
   const atlasImage = await atlasMedia.image({
     model: selectedModel.displayName,
-    variant: normalizeOpenAiImage2Variant(req.body.openAiImageVariant),
+    variant: openAiImage25Variant(req.body.model, req.body.openAiImageVariant),
     prompt,
     imageInputs,
     aspectRatio,
@@ -21020,7 +21028,7 @@ async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.o
   const requestedQualityValue = normalizeOpenAiImage2Quality(requestedQuality);
   const quality = legacyModel && !["low", "medium", "high"].includes(requestedQualityValue) ? "high" : requestedQualityValue;
   const background = normalizeOpenAiImage2Background(requestedBackground);
-  const variant = normalizeOpenAiImage2Variant(requestedVariant);
+  const variant = openAiImage25Variant(modelName, requestedVariant);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
   const endpoint = legacyModel
     ? imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2"

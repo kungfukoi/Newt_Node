@@ -92,6 +92,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (Array.isArray(data.exploreQueue)) return clearStaleRunningState({ type: "explore", data }).data;
   if (!["running", "uploading"].includes(data.status)) return data;
 
   return {
@@ -136,6 +137,12 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
+  if (node.type === "explore") {
+    return { ...node, data: { ...node.data, exploreAction: "", exploreStopRequested: false,
+      status: node.data?.status === "running" ? "paused" : node.data?.status,
+      exploreQueue: (node.data?.exploreQueue || []).map(item => item.status === "running"
+        ? { ...item, status: "uncertain", error: "Request interrupted. Check History and the provider before regenerating." } : item) } };
+  }
   if (node.data?.status !== "running") return node;
 
   return {

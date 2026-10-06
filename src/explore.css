@@ -1,0 +1,64 @@
+.node-card.explore { width: 650px; }
+.explore-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
+.explore-body * { box-sizing: border-box; letter-spacing: 0; }
+.explore-gallery-browser { min-width: 0; }
+.explore-gallery { display: grid; grid-auto-flow: column; grid-auto-columns: 168px; gap: 10px; overflow-x: auto; padding: 3px; overscroll-behavior: contain; scrollbar-width: none; }
+.explore-gallery::-webkit-scrollbar { display: none; }
+.explore-gallery-navigation { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 10px; align-items: center; margin-top: 6px; }
+.explore-body .explore-gallery-arrow { width: 34px; height: 34px; padding: 0; }
+.explore-body .explore-gallery-scroll { appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; height: 34px; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: ew-resize; touch-action: none; }
+.explore-gallery-scroll::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #454545; }
+.explore-gallery-scroll::-moz-range-track { height: 6px; border-radius: 3px; background: #454545; }
+.explore-gallery-scroll::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 36px; height: 18px; margin-top: -6px; border: 1px solid #c0ad35; border-radius: 4px; background: #e2ca29; }
+.explore-gallery-scroll::-moz-range-thumb { width: 36px; height: 18px; border: 1px solid #c0ad35; border-radius: 4px; background: #e2ca29; }
+.explore-gallery-scroll:focus-visible { outline: 2px solid #e2ca29; outline-offset: 2px; }
+.explore-result { min-width: 0; border: 1px solid #414141; border-radius: 6px; overflow: hidden; background: #171717; }
+.explore-result.selected { border-color: #e2ca29; outline: 1px solid #e2ca29; }
+.explore-body .explore-image { width: 100%; height: 104px; border: 0; padding: 0; border-radius: 0; background: #090909; display: block; }
+.explore-image img { width: 100%; height: 100%; object-fit: contain; }
+.explore-result-label { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 2px 7px; padding: 6px 8px; }
+.explore-result-label > span { grid-column: 1 / -1; height: 34px; min-width: 0; font-size: 12px; line-height: 17px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.explore-result-label input { width: 15px; height: 15px; accent-color: #e2ca29; flex-shrink: 0; }
+.explore-body button:where(:not(.inline-port)) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 12px; min-height: 32px; white-space: normal; border: 1px solid #3c3c3c; border-radius: 4px; background: #2a2a2a; color: #eee; padding: 6px 9px; }
+.explore-body button:not(.inline-port):not(:disabled):hover { border-color: #777; }
+.explore-body .explore-image { padding: 0; border: 0; border-radius: 0; background: #090909; }
+.explore-body button:disabled { opacity: .45; cursor: default; }
+.explore-body button[aria-pressed=true] { color: #e2ca29; }
+.explore-body .explore-icon { width: 30px; height: 30px; min-height: 30px; flex-shrink: 0; padding: 4px; }
+.explore-tools, .explore-run-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.explore-details { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.explore-details p { white-space: pre-wrap; margin: 7px 0; }
+.explore-image-output .output-row { margin: 0; padding: 0; }
+.explore-image-output { font-size: 13px; }
+.explore-body textarea { width: 100%; min-height: 72px; resize: vertical; font-size: 14px; }
+.explore-body .node-row { min-width: 0; grid-template-columns: 125px minmax(0, 1fr); }
+.explore-body .node-row-label span:last-child { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.explore-inputs { display: grid; gap: 12px; }
+.explore-references { display: grid; gap: 12px; }
+.explore-body .explore-inputs textarea { min-height: 50px; height: 50px; padding: 9px 12px; resize: vertical; font-size: 13px; line-height: 1.4; border: 1px solid #3b3b3b; border-radius: 4px; background: #171717; color: #ddd; }
+.explore-body .explore-inputs textarea:disabled { opacity: .6; }
+.explore-body .node-row > span:last-child { overflow-wrap: anywhere; font-size: 13px; color: #aaa; }
+.explore-body .explore-run { flex: 1; min-height: 42px; background: #e2ca29; color: #121212; font-weight: 700; }
+.explore-progress { font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
+.explore-error { font-size: 13px; color: #f3a08b; overflow-wrap: anywhere; }
+.explore-settings-heading { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #333; padding-top: 8px; }
+.explore-settings-heading button[aria-expanded=false] svg { transform: rotate(-90deg); }
+.explore-settings-heading.explore-reference-heading { justify-content: flex-start; gap: 10px; }
+.collapsed-input-ports { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
+.collapsed-input-ports > [data-port-key] { position: absolute; inset: 0; pointer-events: none; }
+.collapsed-input-ports .inline-port { margin: 0; }
+.explore-settings { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.explore-setting { display: flex; flex-direction: column; min-width: 0; gap: 6px; color: #aaa; font-size: 12px; }
+.explore-setting select, .explore-setting input[type=number] { width: 100%; min-width: 0; height: 36px; font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #3c3c3c; border-radius: 4px; background: #171717; color: #eee; }
+.explore-range { display: flex; height: 36px; align-items: center; gap: 10px; }
+.explore-range input { min-width: 0; width: 100%; accent-color: #e2ca29; }
+.explore-range output { width: 32px; flex-shrink: 0; }
+.explore-branch { display: flex; flex-wrap: wrap; gap: 8px; }
+.explore-branch textarea { flex-basis: 100%; }
+@media (max-width: 680px) {
+  .node-card.explore { width: 530px; }
+}
+@container (max-width: 400px) {
+  .explore-settings { grid-template-columns: minmax(0, 1fr); }
+  .explore-body .node-row { grid-template-columns: 105px minmax(0, 1fr); }
+}

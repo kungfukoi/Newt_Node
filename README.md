@@ -155,3 +155,7 @@ Agents and developers must begin with [`AGENTS.md`](AGENTS.md), then read the ca
 - [`docs/README.md`](docs/README.md): complete documentation map, including operational and historical files.
 
 A feature change is not complete until old workflows, ports, results, previews, Output routing, persistence, history/Stats, progress, error states, cross-platform behavior, tests, and affected documentation have been considered at the feature's actual blast radius.
+
+### Explore and Image 2.5
+
+[Explore](docs/explore-node.md) develops up to 25 art directions from a brief, with reference inputs, favorites, refinement and resumable image batches. OpenAI Image 2.5 Flare and Sunburst appear as separate image model choices throughout nodes and Settings. Saved variant selections migrate automatically; the image editor model is selected in Settings → User Preferences.

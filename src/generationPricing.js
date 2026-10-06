@@ -92,6 +92,8 @@ export function estimateImageRunCost({
 
   if (provider === "atlas" && supportsAtlasImageModel(model)) {
     unitCost = estimateAtlasImageCost({ model, resolution, referenceCount: references }).amountUsd;
+  } else if (provider === "krea" && isGptImage25Model(model)) {
+    unitCost = estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd;
   } else if (isGptImage25Model(model)) {
     unitCost = estimateOpenAiImage2Cost({
       resolution,

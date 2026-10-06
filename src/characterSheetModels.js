@@ -1,10 +1,11 @@
-import { imageModelNames, normalizeGptImage25Model } from "./modelOptions.js";
+import { imageModelNames, normalizeGptImage25Model, isGptImage25Model } from "./modelOptions.js";
 import { openAiImage2Quality } from "./openAiImage2.js";
 
 export const characterSheetModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
   imageModelNames.ideogram45
 ];
 
@@ -18,7 +19,7 @@ export function characterSheetGenerationSettings(value) {
   return {
     model,
     resolution: model === imageModelNames.ideogram45 ? "2K" : "4K",
-    ...(model === imageModelNames.openAiImage2 ? { quality: openAiImage2Quality } : {})
+    ...(isGptImage25Model(model) ? { quality: openAiImage2Quality } : {})
   };
 }
 

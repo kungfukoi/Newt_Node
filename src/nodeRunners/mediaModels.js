@@ -15,6 +15,7 @@ export function buildImageGenerationRequest({
 }) {
   return {
     prompt,
+    ...(node.type === "explore" ? { exploreGeneration: true } : {}),
     model: node.data.model,
     aspectRatio: aspectRatio || node.data.aspectRatio,
     requestedAspectRatio: node.data.aspectRatio,
@@ -138,7 +139,7 @@ export async function runAutoAspectGeneration({
 
   const { response, data } = await nodeApi.generateImage({
     prompt,
-    model: node.data.model || "OpenAI Image 2.5",
+    model: node.data.model || "OpenAI Image 2.5 Flare",
     aspectRatio,
     requestedAspectRatio: aspectRatio,
     resolution: node.data.resolution || "2K",
@@ -229,7 +230,7 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
 
 export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, additionalReferences = [], workflowContext, characterTag, sheetKind = "image" }) {
   const isVideoSheet = sheetKind === "video";
-  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
+  const generationSettings = characterSheetGenerationSettings(node.type === "storyboard" ? node.data.model : node.data.characterSheetModel);
   const referenceNotes = node.type === "character" && typeof node.data.characterReferenceNotes === "string"
     ? node.data.characterReferenceNotes.trim()
     : "";

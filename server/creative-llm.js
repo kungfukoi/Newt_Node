@@ -1,4 +1,5 @@
 import Ajv from "ajv";
+import { explorePlanSchema } from "../src/explore.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
@@ -19,6 +20,7 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "explore-plan": explorePlanSchema,
   "film-director-style": object({ styleDirection: nonempty }),
   "film-director-motion": object({ cameraDirection: nonempty }),
   "film-director-shotlist": object(shotPlan),
@@ -55,7 +57,7 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
-  if (/shotlist|revision|shot-repair|storyboard-plan/.test(route)) return 24000;
+  if (/shotlist|revision|shot-repair|storyboard-plan|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;
   return 8000;
@@ -169,7 +171,7 @@ export function validateCreativeResponse(data, { route, provider, text: outputTe
   const validator = validators.get(route);
   if (!validator) return null;
   data = data?.data || data;
-  const label = route.startsWith("storyboard") ? "Storyboard" : "Director";
+  const label = route === "explore-plan" ? "Explore" : route.startsWith("storyboard") ? "Storyboard" : "Director";
   const contents = (Array.isArray(data?.output) ? data.output : []).flatMap((item) => item.content || []);
   if (data?.error || data?.status === "failed") throw new Error(`${label}: ${provider} could not complete this response.`);
   if (data?.partial || data?.status === "incomplete" || ["length", "content_filter"].includes(data?.choices?.[0]?.finish_reason)

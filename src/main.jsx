@@ -1,3 +1,4 @@
+import { isOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -1090,7 +1091,7 @@ function imageAspectRatiosForModel(model) {
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  return model === imageModelNames.openAiImage2 || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return isOpenAiImage25Model(model) || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isKrea2LargeImageModel(model) {

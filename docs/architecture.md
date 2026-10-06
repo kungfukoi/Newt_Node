@@ -56,7 +56,7 @@ Static callable labels, durations, aspect ratios, utility descriptions, and mode
 
 ## Generation Flow
 
-Ideogram 4.5 is available in image generation, Character, Coverage, and Auto Aspect selectors. `src/ideogram45.js` owns Fal request schemas, supported sizes, reference limits, and explicit unpriced cost metadata; `server/ideogram45.js` shares upload/submission/result handling between normal generation and the image editor. Requests without references use `ideogram/v4.5`; up to five ordered images use `ideogram/v4.5/edit`. The preview editor uses precise editing with source geometry, converts selections to black-edit/white-preserve masks, and keeps local unselected pixels intact. Its model is selected only through `userPreferences.imageEditorModel` in Settings, with OpenAI Image 2.5 retained for old settings.
+Ideogram 4.5 is available in image generation, Character, Coverage, and Auto Aspect selectors. `src/ideogram45.js` owns Fal request schemas, supported sizes, reference limits, and explicit unpriced cost metadata; `server/ideogram45.js` shares upload/submission/result handling between normal generation and the image editor. Requests without references use `ideogram/v4.5`; up to five ordered images use `ideogram/v4.5/edit`. The preview editor uses precise editing with source geometry, converts selections to black-edit/white-preserve masks, and keeps local unselected pixels intact. Its model is selected only through `userPreferences.imageEditorModel` in Settings, with old editor settings migrated to OpenAI Image 2.5 Sunburst.
 
 Image Generation can explicitly select Krea using the existing `src/kreaApi.js` endpoint catalog. Supported models use Krea even when Fal keys are present; missing Krea keys and unsupported models fail before submission. The Image Editor preference remains independent: Ideogram edits require Fal.
 
@@ -199,3 +199,9 @@ Settings update is constrained to the configured repository and branch. Git chec
 - Add focused backend route groups and engines with explicit dependencies.
 - Treat compatibility normalization and migration as part of feature design, not cleanup after release.
 - Measure canvas interaction, media decode, bundle size, and generation latency separately.
+
+## Explore and Image 2.5 selections
+
+`src/openAiImageModels.js` normalizes saved Image 2.5 variant fields into separate Flare and Sunburst model names, including queued Explore settings. Historical result and cost records are preserved. Shared catalogs expose both names in nodes and Settings; Fal, Atlas and Krea route each to its own endpoint. The image editor uses only the model saved in User Preferences.
+
+Explore is registered as a runnable image producer. `src/explore.js` owns planning contracts and persisted data; `src/nodeRunners/explore.js` owns the sequential batch; `server/routes/explore.js` handles structured creative planning and planning history. Its lazy body and CSS are separate from the initial shell. Shared image generation owns image history and storage. Interrupted requests remain uncertain after reload/copy and require inspection before another submission. See [Explore](explore-node.md).

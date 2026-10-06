@@ -5,6 +5,7 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
+  { type: "explore", label: "Explore" },
   { type: "output", label: "Output" },
   { type: "autoAspect", label: "Auto Aspect", catalog: false },
   { type: "skillDirector", label: "Director" },

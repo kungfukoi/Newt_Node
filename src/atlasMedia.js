@@ -1,3 +1,4 @@
+import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 
 export const atlasVideoInputPixelLimits = Object.freeze({
@@ -47,7 +48,7 @@ const videoModels = new Map([
 ]);
 
 export function supportsAtlasImageModel(model) {
-  return model === imageModelNames.openAiImage2 || Object.hasOwn(imageModels, model);
+  return isOpenAiImage25Model(model) || Object.hasOwn(imageModels, model);
 }
 
 export function supportsAtlasVideoModel(model) {
@@ -66,9 +67,9 @@ export function buildAtlasImageRequest({
   size,
   maskUrl = ""
 } = {}) {
-  const isImage25 = model === imageModelNames.openAiImage2;
+  const isImage25 = isOpenAiImage25Model(model);
   const config = isImage25
-    ? { id: `openai/gpt-image-2.5-${normalizedChoice(variant, ["flare", "sunburst"], "flare")}`, family: "openai25", maxReferences: 16 }
+    ? { id: `openai/gpt-image-2.5-${openAiImage25Variant(model, variant)}`, family: "openai25", maxReferences: 16 }
     : imageModels[model];
   if (!config) fail(`Atlas Cloud does not support ${model || "this image model"}.`);
   if (!String(prompt || "").trim()) fail(`Atlas Cloud ${model} needs a prompt.`);

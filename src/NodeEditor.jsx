@@ -1,4 +1,8 @@
+import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
+import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
+import { runExploreGeneration } from "./nodeRunners/explore.js";
+const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, curveLookup } from "./imageAdjustments.js";
 import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
 import {
@@ -221,8 +225,7 @@ import {
   openAiImage2BackgroundOptions,
   openAiImage2Quality,
   openAiImage2QualityOptions,
-  openAiImage2Variant,
-  openAiImage2VariantOptions
+  openAiImage2Variant
 } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -558,6 +561,7 @@ const nodeIcons = {
   frameIt: PersonStanding,
   style: Palette,
   transfer: Compass,
+  explore: Compass,
   utility: Wrench,
   edit: SlidersHorizontal,
   assembly: Clapperboard,
@@ -768,7 +772,7 @@ const moodBoardOutputFileName = "MOOD_BOARD.png";
 const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
 const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro, imageModelNames.ideogram45];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45];
 const editVideoOutputOptions = [
   ["mp4", "MP4"],
   ["webm", "WebM"],
@@ -794,6 +798,7 @@ const editDefaultBrushSize = 42;
 const editLocalImageEffectIds = new Set(["imageCrop", "tone", "curves", "textOverlay", "brushInpaint"]);
 const coverageModelOptions = [
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
   imageModelNames.nanoBananaPro,
   imageModelNames.ideogram45,
   imageModelNames.reve21,
@@ -1290,6 +1295,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const viewportRef = React.useRef(savedDraft.viewport);
   const distantZoomRef = React.useRef(shouldUseDistantCanvasVisuals(savedDraft.viewport.scale));
   const nodesRef = React.useRef(savedDraft.nodes);
+  const exploreRunsRef = React.useRef(new Set());
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
   const groupsRef = React.useRef(savedDraft.groups);
@@ -2232,6 +2238,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function createNodeData(type, label, count) {
     const data = createDefaultNodeData(type, label, count);
+    if (type === "explore") {
+      const model = enabledImageModels.includes(data.model) ? data.model : enabledImageModels.find(item => exploreModels.includes(item)) || data.model;
+      return { ...data, ...imageModelSelectionPatch(data, model) };
+    }
     if (type === "imageModel") {
       const model = enabledImageModels.includes(imageModelNames.openAiImage2)
         ? imageModelNames.openAiImage2
@@ -4321,7 +4331,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               data: {
                 ...currentNode.data,
                 title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
-                model: storyboardFixedModel,
+                model: currentNode.data.model || storyboardFixedModel,
                 aspectRatio,
                 resolution
               }
@@ -5817,6 +5827,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (target.type === "explore") return ({ prompt: ["promptIn"], image: ["imageIn"], character: ["characterIn"], transfer: ["transferIn"], style: ["styleIn"], camera: ["cameraIn"] })[outputKind] || [];
     if (isOutputSinkConnection(target.type, "sourceIn", outputKind)) {
       return ["sourceIn"];
     }
@@ -5940,6 +5951,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "explore") {
+      if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
+      if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Explore";
+      if (source.type === "style" && !styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
+      if (source.type === "camera" && !hasCameraPreset(source)) return "Choose a Camera preset before connecting";
+      return "";
+    }
+    if (source.type === "explore") return "";
     if (isFilmDirectorConnection({
       sourceType: source.type,
       sourcePort: from.port,
@@ -6746,6 +6765,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         : storedNode || node;
     if (!isRunnableNode(currentNode)) return { status: "skipped" };
     if (currentNode.data.status === "running") return { status: "skipped" };
+    if (currentNode.type === "explore") {
+      if (exploreRunsRef.current.has(currentNode.id)) return { status: "skipped" };
+      exploreRunsRef.current.add(currentNode.id);
+    }
 
     const nodeReferenceBindings = updatedNodeReferenceBindings(currentNode, nodesRef.current, groupsRef.current);
     if (!nodeReferenceBindingsEqual(nodeReferenceBindings, currentNode.data?.nodeReferenceBindings)) {
@@ -6793,7 +6816,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = ["text", "textAgent", "imageModel", "videoModel"].includes(currentNode.type)
+    const generationGroupId = ["text", "textAgent", "imageModel", "explore", "videoModel"].includes(currentNode.type)
       ? createGenerationGroupId(currentNode.type)
       : "";
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
@@ -6826,6 +6849,39 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         } : {})
       });
       markOutputTargetRunning(outputTarget);
+
+      if (currentNode.type === "explore") {
+        const resuming = currentNode.data.exploreAction === "retry";
+        const settingsToValidate = resuming
+          ? (currentNode.data.exploreQueue || []).filter(item => ["pending", "failed"].includes(item.status)).map(item => item.settings || {})
+          : [currentNode.data];
+        for (const settings of settingsToValidate) {
+          const provider = generationProviderForModel({ model: settings.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
+          if (!provider) throw new Error("The selected provider does not support this Explore image model.");
+          if (modelProviderAvailability[provider] === false) throw new Error(`Configure the ${provider} API key in Settings before running Explore.`);
+          if (resuming && settings.provider && settings.provider !== provider) throw new Error("Restore the original image provider before resuming this Explore batch.");
+          if (!enabledImageModels.includes(settings.model) || !exploreModels.includes(settings.model)) throw new Error("Enable the saved Explore image model in Settings before running.");
+          if (!imageModelResolutionOptions(settings.model).includes(settings.resolution) || !imageModelSupportedAspectRatios(settings.model).includes(settings.aspectRatio)) throw new Error("Choose a supported Explore image format before running.");
+        }
+        const references = (resuming ? [] : ["imageIn", "characterIn", "transferIn"]).flatMap(port => {
+          const connections = incoming[port] || [];
+          const assets = connectedAssetItems(connections);
+          if (assets.length !== connections.length || assets.some(item => item.type !== "image")) throw new Error("An Explore reference is not ready. Complete it before running.");
+          return assets.map(item => ({ ...item, role: { imageIn: "product", characterIn: "character", transferIn: "mood" }[port] }));
+        });
+        currentNode = { ...currentNode, data: { ...currentNode.data, exploreProvider: generationProviderForModel({ model: currentNode.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability }) } };
+        const newResults = [];
+        const outcome = await runExploreGeneration({ node: currentNode, prompt: basePrompt, references,
+          style: (incoming.styleIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
+          camera: (incoming.cameraIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
+          workflowContext: requestContext, generationGroupId,
+          update: patch => { if (patch.resultItems) newResults.splice(0, newResults.length, ...patch.resultItems.slice(previousImageResults.length)); updateNode(currentNode.id, patch); },
+          shouldStop: () => { const live = nodesRef.current.find(item => item.id === currentNode.id); return !live || Boolean(live.data.exploreStopRequested); } });
+        if (newResults.length) markOutputTargetSaved(outputTarget, newResults, "image");
+        else markOutputTargetFailed(outputTarget, outcome.error?.message || "No new Explore images were saved.");
+        loadOutputHistory();
+        return outcome;
+      }
 
       if (currentNode.type === "camera") {
         const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
@@ -7507,6 +7563,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, { status: "error", error: message, ...(error?.nodePatch || {}) });
       markOutputTargetFailed(outputTarget || (error?.outputTargetNodeId ? { node: { id: error.outputTargetNodeId } } : null), message);
       return { status: "error", error: error instanceof Error ? error : new Error(message) };
+    } finally {
+      exploreRunsRef.current.delete(currentNode.id);
     }
   }
 
@@ -11236,6 +11294,16 @@ function NodeBody({
     );
   }
 
+  if (node.type === "explore") {
+    return <React.Suspense fallback={<div className="node-body">Loading Explore...</div>}><ExploreNodeBody node={node} config={config} incoming={incoming}
+      prompt={connectedText(incoming.promptIn) || node.data.prompt} onUpdate={onUpdate} onRun={onRun} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
+      imageModels={imageModelOptions} showApiCosts={showPriceSnapshot}
+      provider={generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability })}
+      ratios={imageModelSupportedAspectRatios(node.data.model)} resolutions={imageModelResolutionOptions(node.data.model)}
+      qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
+      modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
+  }
   if (node.type === "plainText") {
     return (
       <PlainTextNodeBody
@@ -12280,6 +12348,7 @@ function NodeBody({
           <section className="storyboard-advanced storyboard-scroll-surface">
             <div className="storyboard-advanced-panel">
               <div className="storyboard-advanced-controls">
+                <NodeRow label="Image Model"><select aria-label="Storyboard image model" value={node.data.model || storyboardFixedModel} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { model: event.target.value })}>{[imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst].map(model => <option key={model} disabled={!imageModelOptions.includes(model)}>{model}</option>)}</select></NodeRow>
                 <div className="storyboard-style-master-row">
                   <span>Storyboard Style</span>
                   <button
@@ -15501,18 +15570,6 @@ function NodeBody({
             </NodeRow>
           )}
           {isGptImage25Model(node.data.model) && (
-            <NodeRow label="Variant">
-              <select
-                value={normalizeOpenAiImage2Variant(node.data.openAiImageVariant)}
-                onChange={(event) => onUpdate(node.id, { openAiImageVariant: normalizeOpenAiImage2Variant(event.target.value) })}
-              >
-                {openAiImage2VariantOptions.map((option) => (
-                  <option key={option} value={option}>{formatOpenAiImage2Variant(option)}</option>
-                ))}
-              </select>
-            </NodeRow>
-          )}
-          {isGptImage25Model(node.data.model) && (
             <NodeRow label="Background">
               <select
                 value={normalizeOpenAiImage2Background(node.data.imageBackground)}
@@ -17436,6 +17493,11 @@ function formatFrameTimeDisplay(value) {
 }
 
 function getNodeConfig(type) {
+  if (type === "explore") return { icon: Compass, input: [
+    { id: "promptIn", label: "Brief", color: portColors.prompt }, { id: "imageIn", label: "Image / Product", color: portColors.image },
+    { id: "characterIn", label: "Character", color: portColors.character }, { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+    { id: "styleIn", label: "Style", color: portColors.style }, { id: "cameraIn", label: "Camera", color: portColors.camera }
+  ], output: [{ id: "imageOut", label: "Images output", color: portColors.image }] };
   const configs = {
     plainText: {
       icon: Type,
@@ -17646,6 +17708,7 @@ function unsupportedNodeConfig(type) {
 }
 
 function createDefaultNodeData(type, label, count) {
+  if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
 
   if (type === "plainText") return { title, text: "", resultText: "" };
@@ -18222,7 +18285,7 @@ function imageModelSelectionPatch(data = {}, model) {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImageQualityForModel(data.quality, model),
     imageBackground: normalizeOpenAiImage2Background(data.imageBackground),
-    openAiImageVariant: normalizeOpenAiImage2Variant(data.openAiImageVariant),
+    openAiImageVariant: openAiImage25Variant(model, data.openAiImageVariant),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
@@ -18276,10 +18339,6 @@ function formatOpenAiImage2Quality(value) {
 function formatOpenAiImage2Background(value) {
   const background = normalizeOpenAiImage2Background(value);
   return `${background.charAt(0).toUpperCase()}${background.slice(1)}`;
-}
-
-function formatOpenAiImage2Variant(value) {
-  return normalizeOpenAiImage2Variant(value) === "sunburst" ? "Sunburst (Precision)" : "Flare (Faster)";
 }
 
 function normalizeOpenAiImageQualityForModel(value, model) {
@@ -19876,7 +19935,7 @@ function resetCoverageOutputPatch() {
 }
 
 function coverageModelLabel(model) {
-  if (model === imageModelNames.openAiImage2) return "OpenAI Image 2.5";
+  if (isGptImage25Model(model)) return model;
   if (model === imageModelNames.reve21) return "REVE 2.1";
   if (model === imageModelNames.seedream5Pro) return "Seedream";
   return model;
@@ -19921,6 +19980,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (node.type === "explore") return "image";
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "edit") return editOutputType(node);
@@ -20656,6 +20716,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "storyboard") return storyboardFrameOutputItem(source, edge);
   if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
@@ -21939,7 +22000,7 @@ function connectedPreviewSources(items = []) {
           sourceResultIndex: index,
           sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
           type: item.type || sourceType,
-          label: source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
+          label: source.type === "explore" ? item.label : source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
             ? item.label || sourceName
             : allItems.length > 1
               ? `${sourceName} ${index + 1}`
@@ -21951,6 +22012,7 @@ function connectedPreviewSources(items = []) {
 }
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
+  if (source?.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (!source) return [];
   if (source.type === "assembly") {
     return sourceResultItemsForPort(source, edge?.from?.port, sourceType);
@@ -22526,6 +22588,7 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
+  if (source.type === "explore") return [];
   if (source.type === "camera") {
     return cameraPromptPieces(source);
   }
@@ -23188,7 +23251,9 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 }
 
 function normalizeCurrentNode(node) {
+  node = { ...node, data: migrateImageModelSelections(node.data) };
   const nextNode = clearStaleRunningState(node);
+  if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(nextNode.data) };
   const data = nextNode.data || {};
 
   if (nextNode.type === "videoModel" && isWanFunControlModel(data.model)) {
@@ -23577,7 +23642,7 @@ function normalizeStoryboardData(data = {}) {
     storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
     sceneName: data.sceneName || "Scene 1",
     frameCount: normalizeStoryboardFrameCountValue(data.frameCount),
-    model: storyboardFixedModel,
+    model: [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst].includes(data.model) ? data.model : storyboardFixedModel,
     aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
     resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
     storyboardAutoQc: data.storyboardAutoQc !== false,
@@ -24472,7 +24537,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const selectedModel = data.model || imageModelNames.openAiImage2;
+  const selectedModel = normalizeOpenAiImage25Model(data.model, data.openAiImageVariant) || imageModelNames.openAiImage2;
   const model = imageModelOptions.includes(selectedModel) ? selectedModel : imageModelNames.openAiImage2;
   const isSeedream5 = isSeedream5ImageModel(model);
   return {

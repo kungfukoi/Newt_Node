@@ -231,7 +231,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>
         </fieldset>}
         <div className="ies-run-section">
-          <small>{isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : "Image 2.5 Sunburst"} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
+          <small>{isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
           {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
           {!providerAvailable && <p role="status" className="ies-warning">{isIdeogram45Model(model) ? "Enable a Fal key in Settings to use Ideogram 4.5." : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}

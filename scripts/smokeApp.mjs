@@ -10,6 +10,7 @@ const requiredHealthRoutes = [
   "extractVideoFrame",
   "generate3d",
   "ideogram45",
+  "explore",
   "remoteVideoJobs",
   "atlasDurableVideo",
   "characterWardrobeFullSheet",

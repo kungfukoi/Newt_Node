@@ -1,8 +1,12 @@
+import { openAiImage25Models, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 import { isIdeogram45Model } from "./ideogram45.js";
 
-export const imageEditModelOptions = [imageModelNames.openAiImage2, imageModelNames.ideogram45];
-export const normalizeImageEditModel = (model) => imageEditModelOptions.includes(model) ? model : imageModelNames.openAiImage2;
+export const imageEditModelOptions = [openAiImage25Models.sunburst, openAiImage25Models.flare, imageModelNames.ideogram45];
+export const normalizeImageEditModel = (model) => {
+  const normalized = normalizeOpenAiImage25Model(model, "sunburst");
+  return imageEditModelOptions.includes(normalized) ? normalized : openAiImage25Models.sunburst;
+};
 
 export const imageEditColors = ["#f4f4f4", "#191919", "#ed5959", "#f4a340", "#e4cf37", "#57bd83", "#42b9d0", "#648cf5"];
 export const imageEditModes = ["edit", "sketch", "remove"];

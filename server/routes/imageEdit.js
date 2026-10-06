@@ -1,9 +1,10 @@
+import { openAiImage25Variant } from "../../src/openAiImageModels.js";
 import multer from "multer";
 import { createHash, randomUUID } from "node:crypto";
 import { prepareImageEdit, finishImageEdit } from "../image-edit.js";
 import { openAiImage2QualityOptions } from "../../src/openAiImage2.js";
 import { imageModelNames } from "../../src/modelOptions.js";
-import { imageEditModelOptions } from "../../src/imageEdit.js";
+import { imageEditModelOptions, normalizeImageEditModel } from "../../src/imageEdit.js";
 import { isIdeogram45Model, ideogram45QualityOptions } from "../../src/ideogram45.js";
 
 export function registerImageEditRoutes(app, { limiter, getProvider, readSource, generate, readGenerated = readImageEditResult, save, recordHistory, estimateCost, sendError }) {
@@ -11,7 +12,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
   const jobs = new Map();
   app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }]), async (req, res) => {
     try {
-      const model = req.body.model || imageModelNames.openAiImage2;
+      const model = !req.body.model || ["OpenAI Image 2.5", "GPT Image 2.5"].includes(req.body.model) ? normalizeImageEditModel(req.body.model) : req.body.model;
       if (!imageEditModelOptions.includes(model)) throw Object.assign(new Error("Choose a supported image editor model."), { status: 400 });
       if (isIdeogram45Model(model) && req.body.provider !== "fal") throw Object.assign(new Error("Ideogram 4.5 edits require Fal. Enable a Fal key in Settings."), { status: 400 });
       const provider = getProvider?.(req, String(req.body.provider || "").trim().toLowerCase()) || "";
@@ -40,7 +41,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
       selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
-    const variant = isIdeogram45Model(model) ? undefined : "sunburst";
+    const variant = isIdeogram45Model(model) ? undefined : openAiImage25Variant(model);
     let generation;
     let generationProvider = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
     try {

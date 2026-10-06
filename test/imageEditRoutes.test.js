@@ -75,7 +75,7 @@ test("image edits use OpenAI Image 2.5 Sunburst and retain workflow context", ()
   const { item } = await response.json();
   assert.equal(item.width, 64);
   assert.equal(item.height, 96);
-  assert.equal(calls[0].model, "OpenAI Image 2.5");
+  assert.equal(calls[0].model, "OpenAI Image 2.5 Sunburst");
   assert.equal(calls[0].variant, "sunburst");
   assert.equal(saves[0].body.workflowPackagePath, "/fixture/project");
   assert.equal(histories[0].localImage, item.url);

@@ -32,6 +32,14 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
+  if (path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && JSON.parse(options.body).exploreGeneration)) {
+    try {
+      response = await fetchWithTimeout(requestUrl, options, timeoutMs);
+      return { response, data: await readJsonResponse(response, label) };
+    } catch {
+      throw new Error(`${label}: response interrupted. The request may still be running. Check History and the provider before retrying; no request was resubmitted.`);
+    }
+  }
   try {
     response = await fetchWithTimeout(requestUrl, options, timeoutMs);
   } catch (error) {
@@ -255,6 +263,7 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  planExplore: body => postJson("/api/node/explore-plan", body, "Explore planning"),
   async editImage(form) {
     // A paid edit must never be replayed through the generic fallback transport.
     let response;

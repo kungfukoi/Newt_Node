@@ -1,3 +1,4 @@
+import { openAiImage25Models, isOpenAiImage25Model, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -27,7 +28,9 @@ export const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: "OpenAI Image 2.5",
+  openAiImage2: openAiImage25Models.flare,
+  openAiImage25Flare: openAiImage25Models.flare,
+  openAiImage25Sunburst: openAiImage25Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
   reve21: "REVE 2.1",
@@ -36,19 +39,14 @@ export const imageModelNames = {
 export const legacyOpenAiImage2ModelName = imageModelNames.legacyOpenAiImage2;
 export const legacyGptImage25ModelName = "GPT Image 2.5";
 
-export function isGptImage25Model(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  return normalized === imageModelNames.openAiImage2.toLowerCase()
-    || normalized === legacyGptImage25ModelName.toLowerCase()
-    || normalized.includes("gpt-image-2.5");
-}
+export const isGptImage25Model = isOpenAiImage25Model;
 
 export function isLegacyOpenAiImage2Model(value) {
   return String(value || "").trim().toLowerCase() === legacyOpenAiImage2ModelName.toLowerCase();
 }
 
-export function normalizeGptImage25Model(value, fallback = "") {
-  return isGptImage25Model(value) || isLegacyOpenAiImage2Model(value) ? imageModelNames.openAiImage2 : value || fallback;
+export function normalizeGptImage25Model(value, fallback = "", variant = "flare") {
+  return isLegacyOpenAiImage2Model(value) ? imageModelNames.openAiImage2 : normalizeOpenAiImage25Model(value, variant) || fallback;
 }
 export const imageModelOptions = [
   imageModelNames.zImage,
@@ -56,6 +54,7 @@ export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
   imageModelNames.reve21,
@@ -388,7 +387,7 @@ export function normalizeModelPreferences(value = {}) {
 
   Object.entries(modelPreferenceGroups).forEach(([kind, options]) => {
     const incoming = value?.[kind] && typeof value[kind] === "object" ? value[kind] : {};
-    normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? defaultModelPreferences[kind]?.[model])]));
+    normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? (isGptImage25Model(model) ? incoming["OpenAI Image 2.5"] ?? incoming["GPT Image 2.5"] : undefined) ?? defaultModelPreferences[kind]?.[model])]));
     if (!Object.values(normalized[kind]).some(Boolean) && options[0]) normalized[kind][options[0]] = true;
   });
 

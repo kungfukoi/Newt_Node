@@ -56,6 +56,9 @@ try {
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
+  assert.equal((await (await request("/api/health")).json()).routes.explore, true);
+  const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
+  assert.equal(invalidExplore.status, 400);
   if (process.env.NEWT_SMOKE_CLIENT_URL) {
     const smoke = spawn(process.execPath, [path.join(root, "scripts", "smokeApp.mjs"), process.env.NEWT_SMOKE_CLIENT_URL, `${api}/api/health`], { cwd: root, windowsHide: true, stdio: "inherit" });
     assert.equal((await once(smoke, "exit"))[0], 0, "Client/API smoke failed");
