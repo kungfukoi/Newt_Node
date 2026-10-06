@@ -87,6 +87,10 @@ Seedance 2.0/2.5 node requests additionally use durable background jobs in `serv
 
 ## Media And Preview Flow
 
+Media-node replacement uploads preserve the previous asset while uploading and on failure, clear stale thumbnails on successful replacement, and reset the file input so choosing the same file again works. The existing node identity, ports, result collection, and undo path remain authoritative.
+
+Object Selection exposes SAM 2 sampling density, confidence, stability, and minimum region area only while its tool is active. Shared defaults/validation live in `src/objectSelection.js`; the route validates before upload, sends these parameters to Fal, and records them in History. Changing controls does not submit work; Rescan explicitly requests a fresh map and retains the current selection. Automatic-map cache keys include the settings.
+
 The preview image editor's Object Selection uses `src/objectSelection.js` for compact mask geometry and selection composition. `server/routes/objectSelection.js` owns the Fal-only `/api/node/image-objects` route with request deduplication, bounded result caching, and History recording; `server/object-selection.js` handles oriented 1024-pixel analysis copies and bounded mask downloads/encoding. SAM 2 automatic masks support local hover previews; SAM 3 provides point selection for missed regions and text-prompt selection. The editor caches masks for the current base image, composes them into the existing selection layer, and exports the normal full-size edit mask. No Scumble source or local model runtime is included.
 
 `src/mediaAssets.js` owns accepted media and drag/drop/import shapes. `src/mediaResults.js` owns normalized result items. `src/components/MediaViews.jsx` owns shared image/video/3D preview surfaces, result navigation, output rail, and lightbox behavior.

@@ -1,9 +1,23 @@
 // Independent selection geometry; masks are compact row-major [start, length] runs.
 export const objectSelectionEndpoints = { auto: "fal-ai/sam2/auto-segment", point: "fal-ai/sam-3/image" };
 
-export function objectSelectionInput({ imageUrl, point, prompt, width, height }) {
+export const sam2Defaults = Object.freeze({ pointsPerSide: 32, confidence: 0.88, stability: 0.95, minRegionArea: 100 });
+export function validateSam2Settings(settings = {}) {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Invalid SAM 2 settings.");
+  const result = { ...sam2Defaults, ...settings };
+  for (const [key, min, max, integer] of [["pointsPerSide", 8, 64, true], ["confidence", 0, 1], ["stability", 0, 1], ["minRegionArea", 0, 10000, true]]) {
+    const value = result[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) throw new Error(`SAM 2 ${key} must be ${integer ? "an integer" : "a number"} between ${min} and ${max}.`);
+  }
+  return Object.fromEntries(Object.keys(sam2Defaults).map(key => [key, result[key]]));
+}
+
+export function objectSelectionInput({ imageUrl, point, prompt, width, height, sam2 }) {
   if (prompt) return { image_url: imageUrl, prompt, apply_mask: false, output_format: "png", return_multiple_masks: true, max_masks: 64, include_scores: true };
-  if (!point) return { image_url: imageUrl, output_format: "png", points_per_side: 32, min_mask_region_area: 100 };
+  if (!point) {
+    const settings = validateSam2Settings(sam2);
+    return { image_url: imageUrl, output_format: "png", points_per_side: settings.pointsPerSide, pred_iou_thresh: settings.confidence, stability_score_thresh: settings.stability, min_mask_region_area: settings.minRegionArea };
+  }
   return { image_url: imageUrl, prompt: "", point_prompts: [{
     x: Math.min(width - 1, Math.floor(point.x * width)), y: Math.min(height - 1, Math.floor(point.y * height)), label: 1
   }], apply_mask: false, output_format: "png", return_multiple_masks: true, max_masks: 3, include_scores: true };

@@ -37,8 +37,10 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
     editForm = await new Response(req.postDataBuffer(), { headers: { "content-type": req.headers()["content-type"] } }).formData();
     await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", fileName: "edited.png", type: "image", provider: "fal.ai" } } });
   });
+  await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
+  await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toBeVisible();
   const selection = editor.getByLabel("Selection canvas"), hover = editor.getByLabel("Object hover preview");
   await move(page, editor, .2, .3);
   await expect.poll(() => alpha(hover, .2, .3)).toBe(255);
@@ -87,4 +89,25 @@ test("selection failure is visible, preserves draft, and never automatically ret
   await move(page, editor, .2, .3);
   await move(page, editor, .7, .3);
   expect(calls).toBe(1);
+});
+
+test("SAM 2 controls only appear in object mode and apply on explicit rescan", async ({ page }) => {
+  const { editor } = await openEditor(page);
+  const calls = [];
+  await page.route("**/api/node/image-objects", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { masks } }); });
+  await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
+  for (const [label, value] of [["Sampling density", "64"], ["Confidence threshold", "0.70"], ["Stability threshold", "0.80"], ["Minimum region area", "20"]]) {
+    await editor.getByLabel(label, { exact: true }).evaluate((element, next) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(element, next);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    }, value);
+  }
+  expect(calls).toHaveLength(1);
+  await editor.getByRole("button", { name: "Rescan objects", exact: true }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  expect(calls[1].sam2).toEqual({ pointsPerSide: 64, confidence: .7, stability: .8, minRegionArea: 20 });
+  await expect(editor.getByRole("button", { name: "Rescan objects", exact: true })).toBeEnabled();
+  await editor.getByRole("button", { name: "Draw", exact: true }).click();
+  await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
 });

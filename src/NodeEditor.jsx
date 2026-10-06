@@ -2804,6 +2804,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function uploadMediaAsset(node, file) {
     if (!file) return;
+    if (nodesRef.current.find(current => current.id === node.id)?.data.status === "uploading") return;
     if (node.type === "audioModel") {
       if (["running", "uploading"].includes(node.data.status)) return;
       pushUndoSnapshot({ nodeDataIds: [node.id] });
@@ -2828,10 +2829,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     pushUndoSnapshot({ nodeDataIds: [node.id] });
     updateNode(node.id, {
-      fileName: file.name,
       status: "uploading",
-      error: "",
-      resultUrl: ""
+      error: ""
     });
 
     const form = new FormData();
@@ -2845,6 +2844,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         : await nodeApi.uploadAsset(form);
       if (!response.ok) throw new Error(data.error || "Upload failed.");
       const asset = data.asset || {};
+      if (!asset.localUrl) throw new Error("Upload returned no image or media file. The previous upload was kept.");
 
       if (isModel3DUpload) {
         const nextItems = appendResultItems(
@@ -2876,6 +2876,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       const resultItems = replacementResultItems(asset, asset.mediaType);
       updateNode(node.id, {
+        thumbnailUrl: asset.thumbnailUrl || "",
         fileName: asset.fileName,
         storedFileName: asset.storedFileName,
         mimeType: asset.mimeType,

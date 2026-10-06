@@ -1516,7 +1516,11 @@ export function MediaAssetNodeBody({ node, outputPort, onUpload, onOutputImport,
       <label className="media-upload-card">
         <UploadIcon type={node.type} />
         <span>{node.data.resultUrl ? "Replace upload" : "Upload"}</span>
-        <input type="file" accept={mediaAccept(node.type)} onChange={(event) => onUpload(node, event.target.files?.[0])} />
+        <input type="file" accept={mediaAccept(node.type)} disabled={node.data.status === "uploading"} onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) onUpload(node, file);
+        }} />
       </label>
       {node.data.fileName && <small>{node.data.fileName}</small>}
       {node.data.status === "uploading" && <small className="upload-status">Uploading...</small>}

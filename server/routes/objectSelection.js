@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { objectSelectionEndpoints, objectSelectionInput } from "../../src/objectSelection.js";
+import { objectSelectionEndpoints, objectSelectionInput, validateSam2Settings } from "../../src/objectSelection.js";
 import { prepareObjectSource, encodeObjectMask, readObjectMask } from "../object-selection.js";
 
 export function registerObjectSelectionRoutes(app, { limiter, available, readSource, upload, subscribe, recordHistory, sendError, readMask = readObjectMask }) {
@@ -8,6 +8,10 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
     try {
       if (!available()) throw Object.assign(new Error("Enable a Fal key in Settings to use Object Selection."), { status: 400 });
       const { sourceUrl, requestId, point, prompt } = req.body;
+      if (!point && !prompt) {
+        try { req.body.sam2 = validateSam2Settings(req.body.sam2); }
+        catch (error) { throw Object.assign(error, { status: 400 }); }
+      }
       if (typeof sourceUrl !== "string" || !/^[a-z0-9-]{16,80}$/i.test(requestId || "")) throw Object.assign(new Error("An image source and request ID are required."), { status: 400 });
       if (point !== undefined && (!point || ![point.x, point.y].every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1))) throw Object.assign(new Error("Choose a point inside the image."), { status: 400 });
       if (prompt !== undefined && (typeof prompt !== "string" || !prompt.trim() || prompt.length > 300 || point !== undefined)) throw Object.assign(new Error("Describe the selection in 1–300 characters, or choose a point."), { status: 400 });
@@ -34,14 +38,14 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
   });
 
   async function run(req) {
-    const { sourceUrl, point, prompt } = req.body;
+    const { sourceUrl, point, prompt, sam2 } = req.body;
     const source = await readSource(sourceUrl);
     const { data, info } = await prepareObjectSource(source.buffer).catch(() => { throw Object.assign(new Error("Use an image up to 24 megapixels."), { status: 400 }); });
     const sam3 = Boolean(point || prompt);
     const endpoint = objectSelectionEndpoints[sam3 ? "point" : "auto"];
     const model = sam3 ? "SAM 3" : "SAM 2";
     const imageUrl = await upload({ buffer: data, mimeType: "image/png", fileName: "object-selection.png" });
-    const result = await subscribe(endpoint, { input: objectSelectionInput({ imageUrl, point, prompt, width: info.width, height: info.height }), logs: true }, { route: "image-objects", model });
+    const result = await subscribe(endpoint, { input: objectSelectionInput({ imageUrl, point, prompt, sam2, width: info.width, height: info.height }), logs: true }, { route: "image-objects", model });
     const remote = (sam3 ? result?.data?.masks : result?.data?.individual_masks) || [];
     // Record completed paid inference even if its masks are empty or cannot be downloaded.
     const cost = { amountUsd: sam3 ? 0.005 : null, currency: "USD", units: 1, unit: "request", mediaType: "image", endpoint,
@@ -51,7 +55,7 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
       await recordHistory({ id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: "fal.ai", modelName: model,
         endpoint, mode: "Image Edit: Object Selection", prompt: prompt || "", project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
         node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" }, localImage: sourceUrl,
-        settings: { sourceUrl, point, imageSize: `${info.width}x${info.height}`, maskCount: remote.length }, cost });
+        settings: { sourceUrl, point, ...(!sam3 ? { sam2 } : {}), imageSize: `${info.width}x${info.height}`, maskCount: remote.length }, cost });
     } catch { warning = "Selection completed, but its usage could not be added to History."; }
     try {
       if (!Array.isArray(remote)) throw new Error("Invalid mask response.");

@@ -28,6 +28,8 @@
 .ies-surface .ies-object-hover { opacity: .5; }
 .ies-object-controls { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #393939; }
 .ies-object-controls small, .ies-object-controls p { color: #bbb; font-size: 11px; margin: 0; }
+.ies-sam2-controls { display: flex; flex-direction: column; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #393939; }
+.ies-sam2-controls .ies-slider small { grid-column: 1 / -1; font-weight: 400; }
 .ies-split-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
 .ies-viewbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; min-height: 50px; color: #aaa; border-top: 1px solid #343434; font-size: 11px; }
 .ies-zoom, .ies-review-controls { display: flex; align-items: center; gap: 5px; }

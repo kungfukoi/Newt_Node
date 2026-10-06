@@ -30,6 +30,18 @@ test("object map and prompt/point selection use explicit Fal endpoints and recor
   assert.equal(histories[1].cost.amountUsd, .005);
   assert.equal(histories[0].localImage, "/uploads/test.png");
 }));
+
+test("custom SAM 2 controls reach Fal and History; invalid values fail before submission", () => fixture(async ({ post, calls, histories }) => {
+  const sam2 = { pointsPerSide: 64, confidence: .7, stability: .8, minRegionArea: 20 };
+  assert.equal((await post({ sam2 })).status, 200);
+  assert.equal(calls[0].input.points_per_side, 64);
+  assert.equal(calls[0].input.pred_iou_thresh, .7);
+  assert.equal(calls[0].input.stability_score_thresh, .8);
+  assert.equal(calls[0].input.min_mask_region_area, 20);
+  assert.deepEqual(histories[0].settings.sam2, sam2);
+  for (const invalid of [{ pointsPerSide: 1000 }, { confidence: -1 }, { stability: "0.8" }, { minRegionArea: .5 }, null]) assert.equal((await post({ sam2: invalid })).status, 400);
+  assert.equal(calls.length, 1);
+}));
 test("concurrent duplicate selections share inference and reject conflicting payloads", () => fixture(async ({ post, calls }) => {
   const requestId = randomUUID();
   const responses = await Promise.all([post({ requestId }), post({ requestId })]);

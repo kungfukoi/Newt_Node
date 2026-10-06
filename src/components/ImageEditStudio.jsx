@@ -2,8 +2,8 @@ import { isFlux3Model, flux3ResolutionOptions } from "../flux3.js";
 import { nanoBanana21ResolutionOptions } from "../nanoBanana21.js";
 import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../imageEdit.js";
 import React from "react";
-import { drawObjectMask, objectAtPoint, selectObjectMarks } from "../objectSelection.js";
-import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
+import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
 import { normalizeImageEditModel } from "../imageEdit.js";
@@ -55,6 +55,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [objectMasks, setObjectMasks] = React.useState([]);
   const [hoverObject, setHoverObject] = React.useState(null);
   const [selectionPrompt, setSelectionPrompt] = React.useState("");
+  const [sam2Settings, setSam2Settings] = React.useState(sam2Defaults);
   const [objectStatus, setObjectStatus] = React.useState("");
   const [busyLabel, setBusyLabel] = React.useState("Generating edit");
   const objectCache = React.useRef(new Map()), hoverRef = React.useRef(null);
@@ -143,15 +144,16 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     }
   }
   function point(event) { return imageEditPoint(event.clientX, event.clientY, surfaceRef.current.getBoundingClientRect()); }
-  async function findObjects(options = {}, modifiers = {}) {
+  async function findObjects(options = {}, modifiers = {}, rescan = false) {
     if (busyRef.current || !size || reviewing || blank) return;
     setTool("object"); setLayer("selection"); setHoverObject(null);
     if (!falAvailable) { setError("Enable a Fal key in Settings to use Object Selection."); return; }
     const kind = options.prompt ? "prompt" : options.point ? "point" : "auto";
+    if (kind === "auto") options = { ...options, sam2: sam2Settings };
     const key = JSON.stringify(options);
     const apply = (data) => {
       const masks = data.masks || [];
-      setObjectMasks(current => [...current.filter(mask => !masks.some(next => next.id === mask.id)), ...masks].slice(-256));
+      setObjectMasks(current => kind === "auto" ? masks : [...current.filter(mask => !masks.some(next => next.id === mask.id)), ...masks].slice(-256));
       if (kind === "point") {
         const mask = objectAtPoint(masks, options.point);
         if (mask) commit(selectObjectMarks(history.marks, mask, modifiers));
@@ -162,13 +164,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       } else setObjectStatus(masks.length ? `${masks.length} objects ready. Hover to preview; click to select.` : "No automatic objects found. Click an object to try SAM 3, or select by prompt.");
       if (data.warning) setWarning(data.warning);
     };
-    if (objectCache.current.has(key)) { apply(objectCache.current.get(key)); return; }
+    if (!rescan && objectCache.current.has(key)) { apply(objectCache.current.get(key)); return; }
     busyRef.current = true; setBusy(true); setBusyLabel(kind === "auto" ? "Finding objects with SAM 2" : "Selecting with SAM 3"); setError(""); setWarning("");
     try {
       const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
       const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...options });
       if (!mounted.current) return;
-      if (objectCache.current.size >= 12) objectCache.current.delete([...objectCache.current.keys()].find(value => value !== "{}"));
+      if (objectCache.current.size >= 12) objectCache.current.delete(objectCache.current.keys().next().value);
       objectCache.current.set(key, data); apply(data);
     } catch (failure) { if (mounted.current) setError(failure.message || "Object Selection failed."); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
@@ -262,7 +264,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
           <div className="ies-segment" role="group" aria-label="Editing layer"><IconButton icon={Pencil} label="Drawing layer" active={layer === "drawing"} disabled={busy || reviewing} onClick={() => setActiveLayer("drawing")} /><IconButton icon={Scan} label="Selection layer" active={layer === "selection"} disabled={busy || reviewing || blank} onClick={() => setActiveLayer("selection")} /></div>
           {tools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy || (reviewing && id !== "hand") || (layer === "selection" && ["text", "arrow"].includes(id))} onClick={() => setTool(id)} />)}
-          <button type="button" className={tool === "object" && !reviewing ? "active" : ""} aria-pressed={tool === "object" && !reviewing} disabled={busy || reviewing || blank || !size} onClick={() => findObjects()}><Scan size={18} />Object Selection</button>
+          <IconButton icon={ScanSearch} label="Object Selection" active={tool === "object" && !reviewing} disabled={busy || reviewing || blank || !size} onClick={() => findObjects()} />
           <div className="ies-divider" />
           <IconButton icon={Undo2} label="Undo stroke" onClick={undo} disabled={busy || reviewing || !history.past.length} /><IconButton icon={Redo2} label="Redo stroke" onClick={redo} disabled={busy || reviewing || !history.future.length} />
           <IconButton icon={Trash2} label="Clear active layer" onClick={() => commit(history.marks.filter((mark) => mark.layer !== layer))} disabled={busy || reviewing || !history.marks.some((mark) => mark.layer === layer)} />
@@ -288,6 +290,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
           <div className="ies-object-controls">
+            {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
+              <strong>SAM 2 detection</strong>
+              {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
+              <button type="button" disabled={!size || blank || !falAvailable} onClick={() => findObjects({}, {}, true)}>Rescan objects</button>
+              <button type="button" onClick={() => setSam2Settings(sam2Defaults)}>Reset detection settings</button>
+              <small>Apply changes with Rescan (a new Fal request). Your current selection is kept.</small>
+            </div>}
             <label>Select by prompt<textarea aria-label="Object selection prompt" rows={2} maxLength={300} placeholder="The jacket, all people…" value={selectionPrompt} onChange={e => setSelectionPrompt(e.target.value)} /></label>
             <button type="button" disabled={!size || blank || !selectionPrompt.trim()} onClick={() => findObjects({ prompt: selectionPrompt.trim() })}>Select with SAM 3</button>
             <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
