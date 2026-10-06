@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 const frames = Array.from({length:3}, (_,i)=>({id:"frame-"+i,number:i+1,shot:"WS",lens:"35mm",angle:"None",beat:"Original beat",prompt:"Original prompt "+i,notes:"",resultUrl:"/outputs/e2e/original-"+i+".png",status:"complete"}));
-async function setup(page, planIsCurrent = false) {
+async function setup(page, planIsCurrent = false, count = 1) {
   await page.addInitScript(({ frames, planIsCurrent }) => { if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({nodes:[{id:"board",type:"storyboard",x:10,y:10,data:{title:"Board",storyboardTab:"view",sceneDescription:"A bottle on a table",storyboardPlanSceneDescription:planIsCurrent ? "A bottle on a table" : "Old scene deliberately changed",storyboardFrames:frames,storyboardAutoQc:false,useInternalStoryboardCharacters:false}}],edges:[],groups:[],viewport:{x:0,y:0,scale:0.7}})); },{ frames, planIsCurrent });
-  const fixture=await openFixture(page,{count:1,settings:{falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal",llm:"fal"}}});
+  const fixture=await openFixture(page,{count,settings:{falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal",llm:"fal"}}});
   return { ...fixture, card:page.locator('[data-node-card-id="board"]') };
 }
 const savedFrames = page => page.evaluate(()=>JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.storyboardFrames);
@@ -123,3 +123,29 @@ test("spatial plans reach generation and review, survive reload, and clear after
  await expect.poll(async()=> (await savedFrames(page))[1].resultUrl).toBe("/outputs/e2e/new.png");expect(qcRequests).toHaveLength(1);
  expect(errors).toEqual([]);
  });
+
+test("board assembles automatically, retries failures, rejects stale uploads and exports directly",async({page},testInfo)=>{
+ await page.addInitScript(frames=>{if(!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1",JSON.stringify({nodes:[{id:"board",type:"storyboard",x:10,y:10,data:{title:"Board",storyboardTab:"view",sceneDescription:"A bottle on a table",storyboardPlanSceneDescription:"A bottle on a table",storyboardFrames:frames,storyboardAutoQc:false,useInternalStoryboardCharacters:false}},{id:"preview-board",type:"preview",x:1000,y:10,data:{title:"Board Preview"}}],edges:[{id:"board-preview",from:{nodeId:"board",port:"storyboardOut"},to:{nodeId:"preview-board",port:"sourceIn"}}],groups:[],viewport:{x:0,y:0,scale:0.7}}));},frames);
+ const {card,errors}=await setup(page,true,2);let uploads=0;let release;
+ await page.route("**/api/node/storyboard-export-frame",r=>r.fulfill({json:{frame:{localUrl:r.request().postDataJSON().sourceUrl,fileName:"generated.png"}}}));
+ await page.route("**/api/node/upload-asset",async r=>{uploads++;if(uploads===1)return r.fulfill({status:500,json:{error:"Mock disk full"}});if(uploads===2){await new Promise(resolve=>release=resolve);return r.fulfill({json:{asset:{localUrl:"/outputs/e2e/stale-board.png",fileName:"stale.png",mimeType:"image/png"}}});}return r.fulfill({json:{asset:{localUrl:"/outputs/e2e/current-board.png",fileName:"board.png",mimeType:"image/png"}}});});
+ await expect(card.getByRole("button",{name:"Export Frames",exact:true})).toBeVisible();await expect(card.getByRole("button",{name:"Export PDF",exact:true})).toBeVisible();
+ await expect(card.getByRole("button",{name:"Retry board assembly"})).toBeVisible();expect(uploads).toBe(1);
+ await card.getByRole("button",{name:"Retry board assembly"}).click();await expect.poll(()=>uploads).toBe(2);
+ await card.getByRole("button",{name:"Add frame",exact:true}).click();
+ await card.locator('[data-storyboard-frame-id="frame-0"]').first().getByRole("button",{name:"Run",exact:true}).click();
+ await expect(card.getByRole("button",{name:"Export PDF",exact:true})).toBeEnabled();
+ // A new source version must supersede an already-uploading sheet.
+ release();
+ await expect.poll(()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.storyboardBoardUrl)).toBe("/outputs/e2e/current-board.png");
+ await expect(page.locator('[data-node-card-id="preview-board"] img').first()).toHaveAttribute("src", /current-board/);
+ const exported=[];
+ await page.route("**/api/system/select-save-path",r=>r.fulfill({json:{path:r.request().postDataJSON().extension==="pdf"?"C:/exports/board.pdf":"C:/exports/frames"}}));
+ await page.route("**/api/node/storyboard-export-board",r=>{exported.push(r.request().postDataJSON());return r.fulfill({json:{export:{frameCount:3,folderPath:"C:/exports",frames:[],pdf:null}}});});
+ await card.getByRole("button",{name:"Export Frames",exact:true}).click();await expect.poll(()=>exported.length).toBe(1);
+ await card.getByRole("button",{name:"Export PDF",exact:true}).click();await expect.poll(()=>exported.length).toBe(2);
+ expect(exported[0].includeFrames).toBe(true);expect(exported[1].includePdf).toBe(true);expect(exported[1].generateDescriptions).toBe(false);expect(exported[1].frames.map(f=>f.number)).toEqual([1,2,3]);
+ await page.screenshot({path:testInfo.outputPath("automatic-board.png")});
+ await page.reload();await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ await expect(card.getByRole("button",{name:"Export PDF",exact:true})).toBeVisible();expect(errors).toEqual([]);
+});

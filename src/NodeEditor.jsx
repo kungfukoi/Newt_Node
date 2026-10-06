@@ -1,3 +1,4 @@
+import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { storyboardReviewSignature } from "./storyboardSequenceReview.js";
 import { storyboardQcMode, storyboardQcModes } from "./storyboardQc.js";
 import { storyboardSpatialPrompt, invalidateStoryboardStaging } from "./storyboardSpatial.js";
@@ -1322,6 +1323,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [projectId, setProjectId] = React.useState(() => savedDraft.projectId || createWorkflowSessionId());
   const [savedProjectName, setSavedProjectName] = React.useState(savedDraft.savedProjectName);
   const [projectPackagePath, setProjectPackagePath] = React.useState(savedDraft.projectPackagePath);
+  const prepareStoryboardBoard = useStoryboardBoardOutput({ nodes, scope: `${projectId}:${projectPackagePath}`, onBuild: buildStoryboardBoard });
   const [workflowFilePath, setWorkflowFilePath] = React.useState(savedDraft.workflowFilePath);
   const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
@@ -3905,7 +3907,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const selectedFrameId = patch.selectedFrameId || node.data.selectedFrameId || nextFrames.find((frame) => frame.resultUrl)?.id || nextFrames[0]?.id || "";
     const selectedFrame = nextFrames.find((frame) => frame.id === selectedFrameId) || nextFrames.find((frame) => frame.resultUrl);
     const dataPatch = {
-      ...clearStoryboardBoardPatch(),
+      ...(storyboardBoardBuildSignature(node) !== storyboardBoardBuildSignature({ ...node, data: { ...node.data, storyboardFrames: nextFrames } }) ? clearStoryboardBoardPatch() : {}),
       ...patch,
       storyboardFrames: nextFrames,
       selectedFrameId,
@@ -4246,7 +4248,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!current || storyboardRevisionRunsRef.current.has(node.id)) return;
     storyboardRevisionRunsRef.current.add(node.id);
     const frames = normalizedStoryboardFrames(current.data.storyboardFrames);
-    const boardUrl = current.data.storyboardBoardUrl || "";
+    const boardUrl = storyboardBoardIsCurrent(current) ? current.data.storyboardBoardUrl : "";
     const signature = storyboardReviewSignature(frames, boardUrl);
     updateNode(node.id, { status: "reviewing-sequence", error: "" });
     try {
@@ -4590,6 +4592,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         exportFilePath: exportingFrames ? "" : selectedExportPath,
         exportFramesPath: exportingFrames ? selectedExportPath : "",
         frames,
+        generateDescriptions: false,
         includePdf: !exportingFrames,
         includeFrames: exportingFrames,
         ...workflowContextPayload(workflowRequestContext()),
@@ -4613,30 +4616,33 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
-  async function lockStoryboardBoard(node) {
+  async function buildStoryboardBoard(node, { signature, isCurrent: isProjectCurrent }) {
+    const isCurrent = () => {
+      const live = nodesRef.current.find(item => item.id === node.id);
+      return isProjectCurrent() && storyboardBoardCanBuild(live) && storyboardBoardBuildSignature(live) === signature;
+    };
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     const frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames)
       .filter((frame) => frame.exportUrl || frame.resultUrl);
 
-    if (!frames.length) {
-      updateNode(currentNode.id, { error: "Generate at least one storyboard frame before locking the board." });
-      return;
-    }
-
-    updateNode(currentNode.id, { status: "compiling-board", storyboardTab: "view", error: "" });
+    if (!frames.length || !isCurrent()) return null;
+    updateNode(currentNode.id, { storyboardBoardError: "", storyboardBoardErrorSource: "" });
 
     try {
       const boardBlob = await createStoryboardBoardImageBlob({
         aspectRatio: storyboardAspectRatioForNode(currentNode),
         frames
       });
+      if (!isCurrent()) return null;
       const baseName = safeStoryboardBoardFileName(currentNode.data.sceneName || currentNode.data.title || "storyboard");
       const boardFile = new File([boardBlob], `${baseName}_board.png`, { type: "image/png" });
       const asset = await uploadNodeAsset(boardFile, "storyboard-board");
+      if (!isCurrent()) return null;
+      if (!asset?.localUrl) throw new Error("Could not save storyboard output. Please retry.");
       const nextData = {
-        status: "complete",
-        error: "",
-        storyboardTab: "view",
+        storyboardBoardSource: signature,
+        storyboardBoardError: "",
+        storyboardBoardErrorSource: "",
         storyboardBoardUrl: asset.localUrl,
         storyboardBoardFileName: asset.fileName,
         storyboardBoardStoredFileName: asset.storedFileName,
@@ -4658,11 +4664,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const updatedNodes = syncConnectedPreviewNodes(nextNodes, currentNode.id, edgesRef.current);
       nodesRef.current = updatedNodes;
       setNodes(updatedNodes);
+      return asset.localUrl;
     } catch (error) {
-      updateNode(currentNode.id, {
-        status: "error",
-        error: error.message || "Could not lock storyboard board."
-      });
+      if (isCurrent()) updateNode(currentNode.id, { storyboardBoardError: error.message || "Could not prepare storyboard output.", storyboardBoardErrorSource: signature });
+      return null;
     }
   }
 
@@ -6045,7 +6050,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target.type === "assembly") return "";
 
     if (source.type === "storyboard") {
-      if (!storyboardOutputItem(source, { from })?.url) return from.port === storyboardBoardOutputPortId ? "Lock this Storyboard board before connecting it" : "Generate this Storyboard frame before connecting it";
+      if (!storyboardOutputItem(source, { from })?.url) return from.port === storyboardBoardOutputPortId ? "Wait for Storyboard board assembly before connecting it" : "Generate this Storyboard frame before connecting it";
       if (target.type === "preview" && to.port === "sourceIn") return "";
       if (target.type === "storyboard" && ["sceneReferenceIn", "propsIn"].includes(to.port)) return "";
       if (target.type === "autoAspect" && to.port === "imageIn") return "";
@@ -7804,7 +7809,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onStoryboardGenerateAll={generateStoryboardNode}
         onStoryboardGenerateFrame={generateStoryboardFrame}
         onStoryboardExport={exportStoryboardBoard}
-        onStoryboardLock={lockStoryboardBoard}
+        onStoryboardLock={prepareStoryboardBoard}
         onStoryboardFrameImport={importImageToStoryboardFrame}
         onStoryboardCharacterUpload={uploadStoryboardCharacter}
         onStoryboardCharacterImport={importStoryboardCharacter}
@@ -8111,7 +8116,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onStoryboardGenerateAll={generateStoryboardNode}
                 onStoryboardGenerateFrame={generateStoryboardFrame}
                 onStoryboardExport={exportStoryboardBoard}
-                onStoryboardLock={lockStoryboardBoard}
+                onStoryboardLock={prepareStoryboardBoard}
                 onStoryboardFrameImport={importImageToStoryboardFrame}
                 onStoryboardCharacterUpload={uploadStoryboardCharacter}
                 onStoryboardCharacterImport={importStoryboardCharacter}
@@ -12071,7 +12076,7 @@ function NodeBody({
     const storyboardLocked = planningStoryboard || runningStoryboard || exportingStoryboard || compilingStoryboardBoard;
     const activeTab = runningStoryboard || exportingStoryboard || compilingStoryboardBoard ? "view" : storedStoryboardTab;
     const completedStoryboardFrameCount = frames.filter((frame) => frame.exportUrl || frame.resultUrl).length;
-    const storyboardBoardLocked = Boolean(node.data.storyboardBoardUrl);
+    const storyboardBoardLocked = storyboardBoardIsCurrent(node);
     const storyboardBoardOutputPort = outputPortDefinitionsForNode(node).find((port) => port.id === storyboardBoardOutputPortId);
     const directorPort = config.input.find((port) => port.id === "directorIn");
     const sceneDescriptionPort = config.input.find((port) => port.id === "sceneDescriptionIn");
@@ -12270,13 +12275,13 @@ function NodeBody({
             <button type="button" onClick={() => onStoryboardPlan?.(node)} disabled={planningStoryboard || runningStoryboard || !sceneDescription.trim()}>
               {planningStoryboard ? "Planning..." : "Plan"}
             </button>
-            {storyboardBoardLocked && (
+            {completedStoryboardFrameCount > 0 && (
               <>
-                <button type="button" onClick={() => onStoryboardExport?.(node, "frames")} disabled={storyboardLocked} title="Export locked storyboard frames as image files">
+                <button type="button" onClick={() => onStoryboardExport?.(node, "frames")} disabled={storyboardLocked} title="Export storyboard frames as image files">
                   {exportingStoryboardFrames ? <Loader2 size={14} className="spin" /> : <FileImage size={14} />}
                   <span>{exportingStoryboardFrames ? "Exporting" : "Export Frames"}</span>
                 </button>
-                <button type="button" onClick={() => onStoryboardExport?.(node, "pdf")} disabled={storyboardLocked} title="Export locked storyboard as a PDF">
+                <button type="button" onClick={() => onStoryboardExport?.(node, "pdf")} disabled={storyboardLocked} title="Export storyboard as a PDF">
                   {exportingStoryboardPdf ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
                   <span>{exportingStoryboardPdf ? "Exporting" : "Export PDF"}</span>
                 </button>
@@ -12292,11 +12297,9 @@ function NodeBody({
             </button>
             {activeTab === "view" && (
               <>
-                <button type="button" className={`icon-only storyboard-board-lock ${storyboardBoardLocked ? "locked" : ""}`} onClick={() => onStoryboardLock?.(node)} disabled={storyboardLocked || !completedStoryboardFrameCount} title={storyboardBoardLocked ? "Rebuild the locked storyboard board" : "Lock the current storyboard into one image output"} aria-label={storyboardBoardLocked ? "Storyboard board locked" : "Lock storyboard board"} aria-pressed={storyboardBoardLocked}>
-                  {compilingStoryboardBoard ? <Loader2 size={15} className="spin" /> : storyboardBoardLocked ? <Lock size={15} /> : <Unlock size={15} />}
-                </button>
+                {!storyboardBoardLocked && <button type="button" className="icon-only" onClick={() => onStoryboardLock?.(node)} disabled={storyboardLocked || !completedStoryboardFrameCount} title={node.data.storyboardBoardError || "Board output assembles automatically; prepare now"} aria-label={node.data.storyboardBoardError ? "Retry board assembly" : "Prepare board output"}><RotateCcw size={15} /></button>}
                 {storyboardBoardOutputPort && (
-                  <span className="storyboard-action-output" title={node.data.storyboardBoardUrl ? "Connect storyboard output" : "Lock board to enable output"}>
+                  <span className="storyboard-action-output" title={storyboardBoardLocked ? "Connect storyboard output" : "Board output is preparing"}>
                     <PortHandle node={node} port={storyboardBoardOutputPort} side="output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
                   </span>
                 )}
@@ -12498,6 +12501,7 @@ function NodeBody({
           </section>
         ) : (
           <section className="storyboard-view storyboard-scroll-surface" style={storyboardFrameAspectStyle}>
+            {node.data.storyboardBoardError && <small role="status">Board assembly: {node.data.storyboardBoardError} Use Retry board assembly to try again.</small>}
             <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} onUpdate={onUpdate} onRevise={onStoryboardRevise} onReview={onStoryboardSequenceReview} />
             <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
               {frames.map((frame) => {
@@ -19704,8 +19708,8 @@ function outputPortDefinitionsForNode(node) {
   if (node?.type === "storyboard") return [
     ...basePorts.map((port) => ({
       ...port,
-      disabled: !node?.data?.storyboardBoardUrl,
-      disabledReason: "Lock the Storyboard board before connecting it"
+      disabled: !storyboardBoardIsCurrent(node),
+      disabledReason: "Generate a frame and wait for board assembly before connecting it"
     })),
     ...storyboardFrameOutputPortsForNode(node)
   ];
@@ -20800,7 +20804,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 
 function connectedOutputItem(source, edge) {
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
-  if (source?.type === "storyboard") return storyboardFrameOutputItem(source, edge);
+  if (source?.type === "storyboard") return storyboardOutputItem(source, edge);
   if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     const item = transitionBuilderResultItemForPort(source, edge?.from?.port);
@@ -23894,7 +23898,10 @@ function clearStoryboardBoardPatch() {
     storyboardBoardStoredFileName: "",
     storyboardBoardMimeType: "",
     storyboardBoardFrames: [],
-    storyboardBoardVersion: 0
+    storyboardBoardVersion: 0,
+    storyboardBoardSource: "",
+    storyboardBoardError: "",
+    storyboardBoardErrorSource: ""
   };
 }
 
@@ -23942,7 +23949,7 @@ async function createStoryboardBoardImageBlob({ aspectRatio = "16:9", frames = [
     try {
       return await loadCanvasImage(frame.exportUrl || frame.resultUrl);
     } catch {
-      return null;
+      throw new Error(`Panel ${frame.number} image is unavailable. Restore the image before assembling the board.`);
     }
   }));
 
@@ -24589,7 +24596,7 @@ function storyboardOutputItem(source, edge) {
 
 function storyboardBoardOutputItem(source) {
   const url = String(source?.data?.storyboardBoardUrl || "").trim();
-  if (!url) return null;
+  if (!url || !storyboardBoardIsCurrent(source)) return null;
   const layoutItems = normalizedPreviewLayoutItems(source.data?.storyboardBoardFrames);
   return {
     url,

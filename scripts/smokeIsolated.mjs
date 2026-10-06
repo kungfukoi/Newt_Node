@@ -69,6 +69,12 @@ try {
     const smoke = spawn(process.execPath, [path.join(root, "scripts", "smokeApp.mjs"), process.env.NEWT_SMOKE_CLIENT_URL, `${api}/api/health`], { cwd: root, windowsHide: true, stdio: "inherit" });
     assert.equal((await once(smoke, "exit"))[0], 0, "Client/API smoke failed");
   }
+  const exportedBoard = await (await request("/api/node/storyboard-export-board", { sceneName: "Smoke Board", frames: [{number:3,sourceUrl:"/outputs/panel.png",description:"Saved caption"}], includePdf:true, includeFrames:true, generateDescriptions:false })).json();
+  assert.equal(exportedBoard.export.frames[0].number, 3);
+  assert.equal(exportedBoard.export.frames[0].description, "Saved caption.");
+  const pdfBytes = await readFile(exportedBoard.export.pdf.localPath);
+  assert.equal(pdfBytes.subarray(0,5).toString(), "%PDF-");
+  assert.equal((await request(exportedBoard.export.frames[0].localUrl)).status, 200);
   const historyFile = path.join(sandbox, "server", "data", "history.json");
   await cp(historyFile, `${historyFile}.bak`);
   await rm(historyFile);
