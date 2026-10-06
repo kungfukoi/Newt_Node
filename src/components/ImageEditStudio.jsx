@@ -298,7 +298,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
               <small>Apply changes with Rescan (a new Fal request). Your current selection is kept.</small>
             </div>}
             <label>Select by prompt<textarea aria-label="Object selection prompt" rows={2} maxLength={300} placeholder="The jacket, all people…" value={selectionPrompt} onChange={e => setSelectionPrompt(e.target.value)} /></label>
-            <button type="button" disabled={!size || blank || !selectionPrompt.trim()} onClick={() => findObjects({ prompt: selectionPrompt.trim() })}>Select with SAM 3</button>
+            <button type="button" disabled={!size || blank || !selectionPrompt.trim()} onClick={() => findObjects({ prompt: selectionPrompt.trim() })}>Select</button>
             <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
             {tool === "object" && <small>Click selects · Shift adds · Alt subtracts</small>}
             {objectStatus && <p role="status">{objectStatus}</p>}

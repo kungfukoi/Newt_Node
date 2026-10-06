@@ -64,7 +64,7 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect.poll(() => alpha(selection, .55, .75)).toBe(255);
   expect(calls[1].point.x).toBeCloseTo(.55, 2);
   await editor.getByLabel("Object selection prompt").fill("the jacket");
-  await editor.getByRole("button", { name: "Select with SAM 3", exact: true }).click();
+  await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
   expect(calls[2].prompt).toBe("the jacket");
   await expect.poll(() => alpha(selection, .55, .75)).toBe(0);
