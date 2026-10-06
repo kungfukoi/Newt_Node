@@ -71,6 +71,9 @@ try {
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
+  assert.equal((await (await request("/api/health")).json()).routes.imageObjectSelection, true);
+  const noKeySelection = await fetch(api + "/api/node/image-objects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceUrl: "/outputs/panel.png", requestId: "smoke-object-selection" }) });
+  assert.equal(noKeySelection.status, 400);
   const invalidReview = await fetch(api + "/api/node/storyboard-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   assert(invalidReview.status === 400, "Sequence review must reject missing panels before paid work.");
   const invalidRevision = await fetch(api + "/api/node/storyboard-revise", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });

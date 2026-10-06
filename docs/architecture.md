@@ -87,6 +87,8 @@ Seedance 2.0/2.5 node requests additionally use durable background jobs in `serv
 
 ## Media And Preview Flow
 
+The preview image editor's Object Selection uses `src/objectSelection.js` for compact mask geometry and selection composition. `server/routes/objectSelection.js` owns the Fal-only `/api/node/image-objects` route with request deduplication, bounded result caching, and History recording; `server/object-selection.js` handles oriented 1024-pixel analysis copies and bounded mask downloads/encoding. SAM 2 automatic masks support local hover previews; SAM 3 provides point selection for missed regions and text-prompt selection. The editor caches masks for the current base image, composes them into the existing selection layer, and exports the normal full-size edit mask. No Scumble source or local model runtime is included.
+
 `src/mediaAssets.js` owns accepted media and drag/drop/import shapes. `src/mediaResults.js` owns normalized result items. `src/components/MediaViews.jsx` owns shared image/video/3D preview surfaces, result navigation, output rail, and lightbox behavior.
 
 Generated or remote media must become a managed local asset before it is treated as a durable result. Browser object URLs and raw absolute filesystem paths are runtime-only and are not valid persisted HTML sources.

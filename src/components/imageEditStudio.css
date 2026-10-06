@@ -25,6 +25,9 @@
 .ies-brush-cursor { position: absolute; pointer-events: none; transform: translate(-50%, -50%); border: 1px solid; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
 .ies-surface > img, .ies-surface > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; pointer-events: none; }
 .ies-surface .ies-selection { opacity: .45; filter: sepia(1) saturate(8) hue-rotate(110deg); }
+.ies-surface .ies-object-hover { opacity: .5; }
+.ies-object-controls { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #393939; }
+.ies-object-controls small, .ies-object-controls p { color: #bbb; font-size: 11px; margin: 0; }
 .ies-split-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
 .ies-viewbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; min-height: 50px; color: #aaa; border-top: 1px solid #343434; font-size: 11px; }
 .ies-zoom, .ies-review-controls { display: flex; align-items: center; gap: 5px; }

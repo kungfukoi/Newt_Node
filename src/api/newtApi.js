@@ -263,6 +263,15 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  async imageObjects(body) {
+    let response;
+    try {
+      response = await fetch(localApiFetchUrl("/api/node/image-objects"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(600000) });
+    } catch {
+      throw new Error("The selection connection was interrupted. Check History and Fal before trying again; the request was not retried.");
+    }
+    return ensureOk(response, await readJsonResponse(response, "Object Selection"), "Object Selection failed.");
+  },
   planExplore: body => postJson("/api/node/explore-plan", body, "Explore planning"),
   async editImage(form) {
     // A paid edit must never be replayed through the generic fallback transport.

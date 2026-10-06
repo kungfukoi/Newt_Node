@@ -113,6 +113,7 @@ import { generateIdeogram45 } from "./ideogram45.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { registerObjectSelectionRoutes } from "./routes/objectSelection.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
   buildMinimaxH3LocalRequest,
@@ -892,6 +893,19 @@ registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, reco
 
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
 
+registerObjectSelectionRoutes(app, {
+  limiter: imageGenerationRequestLimiter,
+  available: () => Boolean(process.env.FAL_KEY),
+  readSource: async sourceUrl => {
+    if (!isLocalAssetUrl(sourceUrl)) throw httpError(400, "Use an image uploaded or generated in NewtNode.");
+    const source = await readLocalAsset(sourceUrl);
+    if (!source.mimeType.startsWith("image/")) throw httpError(400, "Object Selection requires an image.");
+    if (source.buffer.length > 32 * 1024 * 1024) throw httpError(413, "Object Selection supports source files up to 32 MB.");
+    return source;
+  },
+  upload: uploadImageInputToFal, subscribe: subscribeFal, recordHistory: appendHistory, sendError: sendApiError
+});
+
 registerImageEditRoutes(app, {
   limiter: imageGenerationRequestLimiter,
   getProvider: (_req, requestedProvider) => {
@@ -1055,6 +1069,7 @@ function buildHealthPayload() {
       composerPoses: true,
       previewInpaint: true,
       imageEdit: true,
+      imageObjectSelection: true,
       ideogram45: true,
       flux3: true,
       nanoBanana21: true,

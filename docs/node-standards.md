@@ -988,6 +988,10 @@ A NewtNode feature is complete only when every applicable statement is true:
 
 ## Amendment Rule
 
+### Image editor object selection
+
+Object Selection analyzes the current image through Fal SAM 2 once per editor draft, then previews cached masks on hover without paid mouse-move requests. Clicking replaces the selection; Shift adds and Alt subtracts (Alt wins when both are held). A click without a cached object uses Fal SAM 3 point selection. Select by prompt uses SAM 3 and replaces the selection with all returned matches; an empty result preserves the existing selection. Masks share the brush selection's undo/redo, clearing and full-resolution generation path. The generation model remains the User Preferences choice. Missing Fal credentials fail explicitly without another provider. Record completed segmentation calls even when no masks are found or mask downloads fail; use matched Fal billing, the documented SAM 3 estimate, or explicit unpriced SAM 2 metadata. Requests never automatically replay, and caches reset when Continue Editing changes the source. The existing gated Utility SAM 3 nodes remain unchanged.
+
 This document is not law carved in stone. If a future feature needs a different pattern, update this document in the same PR or commit that introduces the new pattern. The important thing is that future development has one shared reference point.
 
 ### Explore

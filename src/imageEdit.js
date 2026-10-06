@@ -1,4 +1,5 @@
 import { isFlux3Model } from "./flux3.js";
+import { drawObjectMask } from "./objectSelection.js";
 import { isNanoBanana21Model } from "./nanoBanana21.js";
 import { openAiImage25Models, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
@@ -68,6 +69,14 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
 export function drawImageEditMarks(context, marks, width, height, layer = "drawing") {
   context.clearRect(0, 0, width, height);
   for (const mark of marks.filter((item) => item.layer === layer)) {
+    if (mark.tool === "object" && mark.mask && layer === "selection") {
+      context.save();
+      context.globalCompositeOperation = mark.subtract ? "destination-out" : "source-over";
+      context.globalAlpha = 1; context.fillStyle = "#ffffff";
+      drawObjectMask(context, mark.mask, width, height);
+      context.restore();
+      continue;
+    }
     if (!mark.points?.length) continue;
     const points = mark.points.map((p) => ({ x: p.x * width, y: p.y * height }));
     const first = points[0], last = points.at(-1);

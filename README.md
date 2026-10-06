@@ -160,6 +160,8 @@ A feature change is not complete until old workflows, ports, results, previews, 
 
 [Explore](docs/explore-node.md) develops up to 25 art directions from a brief, with reference inputs, favorites, refinement and resumable image batches. OpenAI Image 2.5 Flare and Sunburst appear as separate image model choices throughout nodes and Settings. Saved variant selections migrate automatically; the image editor model is selected in Settings → User Preferences.
 
+In the image editor, **Object Selection** uses Fal SAM 2 to find objects: hover to preview, click to select, Shift-click to add, and Alt-click to subtract. Clicking a missed region uses SAM 3. **Select by prompt** also uses SAM 3 (for example, “the jacket” or “all people”). These are hosted requests using your active Fal key; cached hover previews make no API calls. Selections support undo/redo and brush cleanup and feed the existing image-edit model. Source analysis is limited to 1024 pixels on the longest side, with masks mapped back to the original image; fine edges may need brush correction. Closing the editor discards its selection cache.
+
 In Storyboard View, check up to eight panels, enter an instruction, and choose **Revise Selected**. Successful panels receive new directions and images; failed panels keep their originals. Planning and image generation use the configured providers and are billed normally.
 
 Storyboard panels also offer **Protect panel** and **Previous versions**. Keep up to eight prior images with their directions; restoring a version retains the image it replaces.
