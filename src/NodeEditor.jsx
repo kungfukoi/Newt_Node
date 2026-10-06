@@ -1,4 +1,6 @@
-import { storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
+import { normalizeStoryboardVersions, versionStoryboardReplacement, restoreStoryboardVersion, canMoveStoryboardFrame } from "./storyboardVersions.js";
+import { StoryboardPanelHistory } from "./components/StoryboardPanelHistory.jsx";
+import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
 import { StoryboardRevisionControls } from "./components/StoryboardRevisionControls.jsx";
 import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
@@ -3896,7 +3898,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return;
     const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
-    const nextFrames = normalizedStoryboardFrames(typeof updater === "function" ? updater(frames) : updater);
+    const nextFrames = normalizedStoryboardFrames(typeof updater === "function" ? updater(frames) : updater).map(frame => versionStoryboardReplacement(frames.find(old => old.id === frame.id), frame));
     const selectedFrameId = patch.selectedFrameId || node.data.selectedFrameId || nextFrames.find((frame) => frame.resultUrl)?.id || nextFrames[0]?.id || "";
     const selectedFrame = nextFrames.find((frame) => frame.id === selectedFrameId) || nextFrames.find((frame) => frame.resultUrl);
     const dataPatch = {
@@ -3935,7 +3937,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!currentNode || currentNode.data.status === "running" || currentNode.data.status === "planning" || currentNode.data.status === "exporting" || currentNode.data.status === "compiling-board" || currentNode.data.status === "compiling-characters") return;
     const frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
     const targetFrame = frames.find((frame) => frame.id === frameId);
-    if (!targetFrame) return;
+    if (!targetFrame || targetFrame.protected || currentNode.data.storyboardRevisionActive) return;
 
     try {
       let asset = null;
@@ -4197,6 +4199,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, { error: "Add a scene description before planning frames." });
       return null;
     }
+    if (currentNode.data.storyboardFrames?.some(frame => frame.protected)) { updateNode(node.id, { error: "Unprotect panels before replacing the storyboard plan." }); return null; }
     const requestedFrameCount = storyboardFrameCountForNode(currentNode, incoming);
 
     try {
@@ -4288,7 +4291,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const targetIds = new Set(frameIds?.length ? frameIds : frames.map((frame) => frame.id));
-    const targetFrames = frames.filter((frame) => targetIds.has(frame.id)).map(frame => ({ ...frame, ...(revisionOptions.revisions?.find(item => item.id === frame.id) || {}) }));
+    const targetFrames = frames.filter((frame) => targetIds.has(frame.id) && !frame.protected).map(frame => ({ ...frame, ...(revisionOptions.revisions?.find(item => item.id === frame.id) || {}) }));
     if (!targetFrames.length) {
       updateNode(currentNode.id, { error: "No storyboard frames selected to generate." });
       return { status: "error", error: new Error("No storyboard frames selected to generate.") };
@@ -4817,6 +4820,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       ? Math.min(Math.max(0, Math.trunc(Number(editContext.itemIndex) || 0)), Math.max(0, currentResultItems.length - 1))
       : -1;
     const targetFrame = currentFrames.find((frame) => frame.id === editContext.itemId);
+    if (targetFrame?.protected) throw new Error("Unprotect the panel before editing its image.");
     const targetItem = editContext.type === "previewLayout"
       ? currentItems.find((layoutItem) => layoutItem.id === editContext.itemId)
       : editContext.type === "nodeResult"
@@ -4987,6 +4991,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           : "Could not find the Image node source to restore."
     );
 
+    if (editContext.type === "storyboardFrame" && targetItem.protected) throw new Error("Unprotect the panel before replacing its image.");
     const { editContext: _lightboxEditContext, ...itemData } = item;
     const restoredItem = {
       ...targetItem,
@@ -12085,7 +12090,7 @@ function NodeBody({
       : node.data.sceneName || "";
 
     function updateFrame(frameId, patch) {
-      if (storyboardLocked) return;
+      if (storyboardLocked || frames.find(frame => frame.id === frameId)?.protected) return;
       const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame));
       onUpdate(node.id, {
         ...clearStoryboardBoardPatch(),
@@ -12105,7 +12110,7 @@ function NodeBody({
     }
 
     function removeFrame(frameId) {
-      if (storyboardLocked) return;
+      if (storyboardLocked || frames.find(frame => frame.id === frameId)?.protected) return;
       if (frames.length <= 1) return;
       const nextFrames = normalizedStoryboardFrames(frames.filter((frame) => frame.id !== frameId));
       onUndoSnapshot?.();
@@ -12120,7 +12125,7 @@ function NodeBody({
 
     function moveFrame(fromId, toId) {
       if (storyboardLocked) return;
-      if (!fromId || !toId || fromId === toId) return;
+      if (!fromId || !toId || fromId === toId || !canMoveStoryboardFrame(frames, fromId, toId)) return;
       const fromIndex = frames.findIndex((frame) => frame.id === fromId);
       const toIndex = frames.findIndex((frame) => frame.id === toId);
       if (fromIndex < 0 || toIndex < 0) return;
@@ -12134,7 +12139,7 @@ function NodeBody({
     function handleFrameDrop(event, frameId) {
       event.preventDefault();
       event.stopPropagation();
-      if (storyboardLocked) return;
+      if (storyboardLocked || frames.find(frame => frame.id === frameId)?.protected) return;
 
       const sourceFrameId = event.dataTransfer.getData("application/x-storyboard-frame-id");
       if (sourceFrameId) {
@@ -12485,9 +12490,9 @@ function NodeBody({
                     className={`storyboard-frame-card ${selected ? "selected" : ""} ${frame.resultUrl ? "has-result" : ""} ${frameBusy ? "is-busy" : ""}`}
                     data-storyboard-node-id={node.id}
                     data-storyboard-frame-id={frame.id}
-                    draggable={!storyboardLocked}
+                    draggable={!storyboardLocked && !frame.protected}
                     onDragStart={(event) => {
-                      if (storyboardLocked) {
+                      if (storyboardLocked || frame.protected) {
                         event.preventDefault();
                         return;
                       }
@@ -12544,7 +12549,7 @@ function NodeBody({
                         </div>
                       )}
                       <label className="storyboard-revision-select nodrag" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} title="Select panel for revision">
-                        <input type="checkbox" aria-label={"Select panel " + frame.number + " for revision"} disabled={storyboardLocked} checked={(node.data.storyboardSelectedFrameIds || []).includes(frame.id)} onChange={event => onUpdate(node.id, { storyboardSelectedFrameIds: event.target.checked ? [...new Set([...(node.data.storyboardSelectedFrameIds || []), frame.id])] : (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) })} />
+                        <input type="checkbox" aria-label={"Select panel " + frame.number + " for revision"} disabled={storyboardLocked || frame.protected} checked={(node.data.storyboardSelectedFrameIds || []).includes(frame.id)} onChange={event => onUpdate(node.id, { storyboardSelectedFrameIds: event.target.checked ? [...new Set([...(node.data.storyboardSelectedFrameIds || []), frame.id])] : (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) })} />
                       </label>
                       <div className="storyboard-frame-number">
                         <GripVertical size={12} />
@@ -12552,13 +12557,13 @@ function NodeBody({
                       </div>
                     </div>
                     <div className="storyboard-frame-controls">
-                      <select value={frame.shot || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
+                      <select value={frame.shot || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
                         {shotPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
-                      <select value={frame.lens || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
+                      <select value={frame.lens || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
                         {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
-                      <select value={frame.angle || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
+                      <select value={frame.angle || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
                         {typePresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
                     </div>
@@ -12567,17 +12572,18 @@ function NodeBody({
                       value={frame.prompt || ""}
                       placeholder="Frame prompt"
                       tagMatches={frameCharacterTagMatches}
-                      readOnly={storyboardLocked}
+                      readOnly={storyboardLocked || frame.protected}
                       onChange={(event) => updateFrame(frame.id, { prompt: event.target.value })}
                     />
                     <div className="storyboard-frame-actions">
-                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate this frame"}>
+                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || frame.protected || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate this frame"}>
                         {frame.status === "queued" ? "Queued..." : frame.status === "reviewing" ? "Reviewing..." : frame.status === "running" ? "Running..." : "Run"}
                       </button>
-                      <button type="button" className="icon-only" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked}>
+                      <button type="button" className="icon-only" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked || frame.protected}>
                         <Trash2 size={13} />
                       </button>
                     </div>
+                    <StoryboardPanelHistory frame={frame} busy={storyboardLocked} onProtect={() => { onUndoSnapshot?.(); onUpdate(node.id, { storyboardFrames: frames.map(item => item.id === frame.id ? { ...item, protected: !item.protected } : item), storyboardSelectedFrameIds: (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) }); }} onRestore={index => { if (storyboardLocked || frame.protected) return; onUndoSnapshot?.(); updateFrame(frame.id, restoreStoryboardVersion(frame, index)); }} />
                     {frame.qcWarning && <small className="upload-error">{frame.qcWarning}</small>}
                     {frame.error && <small className="upload-error">{frame.error}</small>}
                   </article>
@@ -23753,6 +23759,9 @@ function normalizedStoryboardFrames(frames = []) {
       qcWarning: frame.qcWarning || "",
       qcSummary: frame.qcSummary || "",
       qcIssues: Array.isArray(frame.qcIssues) ? frame.qcIssues.map((issue) => String(issue || "").trim()).filter(Boolean).slice(0, 6) : [],
+      protected: frame.protected === true,
+      versions: normalizeStoryboardVersions(frame.versions),
+      generatedDirection: frame.generatedDirection || (frame.resultUrl || frame.exportUrl ? storyboardFrameDirection(frame) : undefined),
       qcRetryCount: finiteNumber(frame.qcRetryCount, 0)
     })
   );

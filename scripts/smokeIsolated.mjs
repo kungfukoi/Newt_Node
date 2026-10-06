@@ -26,6 +26,7 @@ try {
   await mkdir(path.join(sandbox, "outputs"), { recursive: true });
   await writeFile(path.join(sandbox, ".env"), "# ATLAS_API_KEY=atlas-smoke-key\n");
   await setupMedia();
+  await cp(path.join(root, "e2e", ".generated", "landscape.png"), path.join(sandbox, "outputs", "panel.png"));
   await cp(path.join(root, "e2e", ".generated", "motion.mp4"), path.join(sandbox, "outputs", "clip.mp4"));
   await writeFile(path.join(sandbox, "server", "data", "history.json"), JSON.stringify([
     { id: "smoke-generation", project: { id: "smoke-project", name: "Smoke" }, mediaType: "video", localVideo: "/outputs/clip.mp4", createdAt: new Date().toISOString() }
@@ -127,17 +128,26 @@ try {
   const diagnostics = await (await request("/api/system/performance-diagnostics", { enabled: true })).json();
   assert.equal(diagnostics.enabled, true);
   const saved = await (await request("/api/saved-workflows", {
-    id: "smoke-project", name: "Smoke", nodes: [], edges: [], packageParentPath: path.join(sandbox, "packages")
+    id: "smoke-project", name: "Smoke", nodes: [{ id: "board", type: "storyboard", data: { storyboardFrames: [{ id: "panel", number: 1, protected: true, resultUrl: "/outputs/panel.png", versions: [{ resultUrl: "/outputs/panel.png", prompt: "Original direction", savedAt: 1 }] }] } }], edges: [], packageParentPath: path.join(sandbox, "packages")
   })).json();
   assert.equal(saved.projectOutputs.length, 1);
+  const savedPanel = saved.graph.nodes[0].data.storyboardFrames[0];
+  assert.equal(savedPanel.protected, true);
+  assert.match(savedPanel.versions[0].resultUrl, /^\/workflow-assets\//);
+  assert.equal((await request(savedPanel.versions[0].resultUrl)).status, 200);
   assert.match(saved.projectOutputs[0].url, /^\/workflow-assets\/[^/]+\/outputs\//);
   const clone = await (await request("/api/saved-workflows", {
-    id: "smoke-copy", sourceWorkflowId: saved.id, name: "Smoke Copy", nodes: [], edges: [], packageParentPath: path.join(sandbox, "copies")
+    id: "smoke-copy", sourceWorkflowId: saved.id, name: "Smoke Copy", nodes: saved.graph.nodes, edges: [], packageParentPath: path.join(sandbox, "copies")
   })).json();
   assert.notEqual(clone.id, saved.id);
   assert.equal(clone.projectOutputs.length, 1);
   const reopened = await (await request(`/api/saved-workflows/${encodeURIComponent(clone.fileName)}`)).json();
   assert.equal(reopened.projectOutputs[0].url, clone.projectOutputs[0].url);
+  const restoredPanel = reopened.graph.nodes[0].data.storyboardFrames[0];
+  assert.equal(restoredPanel.protected, true);
+  assert.equal(restoredPanel.versions[0].prompt, "Original direction");
+  assert.ok(restoredPanel.versions[0].resultUrl.includes(clone.id));
+  assert.equal((await request(restoredPanel.versions[0].resultUrl)).status, 200);
   const cloneCatalog = await (await request(`/api/project-outputs?projectId=${encodeURIComponent(clone.id)}`)).json();
   assert.equal(cloneCatalog.total, 1);
   await request("/api/system/performance-diagnostics", { enabled: false });

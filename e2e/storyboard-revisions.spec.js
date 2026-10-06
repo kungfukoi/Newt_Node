@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 const frames = Array.from({length:3}, (_,i)=>({id:"frame-"+i,number:i+1,shot:"WS",lens:"35mm",angle:"None",beat:"Original beat",prompt:"Original prompt "+i,notes:"",resultUrl:"/outputs/e2e/original-"+i+".png",status:"complete"}));
-async function setup(page) {
-  await page.addInitScript(frames => { if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({nodes:[{id:"board",type:"storyboard",x:10,y:10,data:{title:"Board",storyboardTab:"view",sceneDescription:"A bottle on a table",storyboardPlanSceneDescription:"Old scene deliberately changed",storyboardFrames:frames,storyboardAutoQc:false,useInternalStoryboardCharacters:false}}],edges:[],groups:[],viewport:{x:0,y:0,scale:0.7}})); },frames);
+async function setup(page, planIsCurrent = false) {
+  await page.addInitScript(({ frames, planIsCurrent }) => { if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({nodes:[{id:"board",type:"storyboard",x:10,y:10,data:{title:"Board",storyboardTab:"view",sceneDescription:"A bottle on a table",storyboardPlanSceneDescription:planIsCurrent ? "A bottle on a table" : "Old scene deliberately changed",storyboardFrames:frames,storyboardAutoQc:false,useInternalStoryboardCharacters:false}}],edges:[],groups:[],viewport:{x:0,y:0,scale:0.7}})); },{ frames, planIsCurrent });
   const fixture=await openFixture(page,{count:1,settings:{falKeyConfigured:true,modelProviderPreferences:{imageGeneration:"fal",llm:"fal"}}});
   return { ...fixture, card:page.locator('[data-node-card-id="board"]') };
 }
@@ -36,4 +36,34 @@ test("failed revision planning leaves every panel unchanged and submits no image
   await card.getByLabel("Select panel 2 for revision").check();await card.getByLabel("Selected panel revision").fill("Closer");await card.getByRole("button",{name:"Revise Selected",exact:true}).click();
   await expect(card.getByText("Revision returned invalid panels",{exact:true})).toBeVisible();
   expect(images).toBe(0);expect((await savedFrames(page)).map(f=>f.resultUrl)).toEqual(frames.map(f=>f.resultUrl));expect(errors).toEqual([]);
+});
+
+test("panel protection blocks editing, replanning and generation; restoring a version preserves the displaced image", async ({page},testInfo) => {
+ const {card,errors}=await setup(page,true); let plans=0, images=0;
+ await page.route("**/api/node/storyboard-plan",r=>{plans++;return r.abort();});
+ await page.route("**/api/node/generate-image",r=>{images++;return r.fulfill({json:{images:[{localUrl:"/outputs/e2e/new-"+images+".png",mimeType:"image/png"}]}});});
+ await page.route("**/api/node/storyboard-export-frame",r=>r.fulfill({json:{frame:{localUrl:r.request().postDataJSON().sourceUrl,fileName:"new.png"}}}));
+ const panel=card.locator('[data-storyboard-frame-id="frame-0"]').first();
+ await panel.getByRole("button",{name:"Protect panel",exact:true}).click();
+ await expect(panel.getByRole("button",{name:"Run",exact:true})).toBeDisabled();
+ await expect(panel.getByLabel("Select panel 1 for revision")).toBeDisabled();
+ await expect(panel.locator("select").first()).toBeDisabled();
+ await card.getByRole("button",{name:"Plan",exact:true}).click();
+ await expect(card.getByText("Unprotect panels before replacing the storyboard plan.",{exact:true})).toBeVisible();expect(plans).toBe(0);
+ await card.getByRole("button",{name:"Generate",exact:true}).click();
+ await expect.poll(()=>images).toBe(2);
+ await expect.poll(async()=> (await savedFrames(page))[1].versions?.length).toBe(1);
+ expect((await savedFrames(page))[0].resultUrl).toBe(frames[0].resultUrl);
+ const second=card.locator('[data-storyboard-frame-id="frame-1"]').first();
+ await second.getByText("Previous versions (1)",{exact:true}).click();
+ await second.getByRole("button",{name:"Protect panel",exact:true}).click();
+ await expect(second.getByRole("button",{name:"Restore panel 2 version 1"})).toBeDisabled();
+ await second.getByRole("button",{name:"Unprotect panel",exact:true}).click();
+ await second.getByRole("button",{name:"Restore panel 2 version 1"}).click();
+ await expect.poll(async()=> (await savedFrames(page))[1].resultUrl).toBe(frames[1].resultUrl);
+ expect((await savedFrames(page))[1].versions.at(-1).resultUrl).toBe("/outputs/e2e/new-1.png");
+ await page.screenshot({path:testInfo.outputPath("panel-history.png")});
+ await page.reload();await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ await expect(panel.getByRole("button",{name:"Unprotect panel",exact:true})).toBeVisible();
+ expect((await savedFrames(page))[1].versions).toHaveLength(1);expect(errors).toEqual([]);
 });
