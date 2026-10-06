@@ -10464,3 +10464,5 @@ video.newtnode-video-fallback {
 
 .storyboard-qc-hint { display: block; color: #a5a5a5; font-size: 11px; line-height: 1.4; }
 .storyboard-revision-controls details { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+
+.zoom-controls button[aria-pressed="true"] { color: #f4d923; background: rgba(244, 217, 35, 0.15); }

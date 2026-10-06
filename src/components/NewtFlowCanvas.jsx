@@ -1,3 +1,4 @@
+import { canvasSnapGrid } from "../canvasGrid.js";
 import React from "react";
 import "./NewtFlowCanvas.css";
 import {
@@ -9,6 +10,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  useKeyPress,
   useUpdateNodeInternals,
   ViewportPortal
 } from "@xyflow/react";
@@ -47,6 +49,7 @@ export const NewtFlowCanvas = React.forwardRef(function NewtFlowCanvas(props, re
 });
 
 function NewtFlowCanvasInner({
+  snapToGrid = false,
   graphNodes,
   graphEdges,
   groups,
@@ -73,6 +76,7 @@ function NewtFlowCanvasInner({
   forwardedRef
 }) {
   const instance = useReactFlow();
+  const bypassSnap = useKeyPress("Alt", { preventDefault: false });
   const draggingRef = React.useRef(false);
   const selectionCommitFrameRef = React.useRef(null);
   const lastViewportSyncRef = React.useRef(0);
@@ -360,6 +364,8 @@ function NewtFlowCanvasInner({
         nodesConnectable
         connectOnClick={flowConnectOnClick}
         nodesDraggable
+        snapToGrid={snapToGrid && !bypassSnap}
+        snapGrid={canvasSnapGrid}
         noDragClassName="nodrag"
         elementsSelectable
         selectNodesOnDrag={false}

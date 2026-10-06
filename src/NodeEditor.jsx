@@ -1,3 +1,6 @@
+import { Grid3X3 } from "lucide-react";
+import { canvasDragAnchor, canvasDragDelta } from "./canvasGrid.js";
+import { canvasSnapToGridEnabled, rememberCanvasSnapToGrid } from "./workflowPreferences.js";
 import { RunPriceLabel } from "./components/RunPriceLabel.jsx";
 import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { storyboardReviewSignature } from "./storyboardSequenceReview.js";
@@ -1329,6 +1332,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState(null);
+  const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
   const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
@@ -5235,8 +5239,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const pointer = screenToScene(event.clientX, event.clientY);
 
     if (dragState?.type === "nodes") {
-      const deltaX = pointer.x - dragState.startPointer.x;
-      const deltaY = pointer.y - dragState.startPointer.y;
+      const { x: deltaX, y: deltaY } = canvasDragDelta(canvasDragAnchor(dragState.nodes), { x: pointer.x - dragState.startPointer.x, y: pointer.y - dragState.startPointer.y }, snapToGrid && !event.altKey);
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
       const draggedGroups = new Map((dragState.groups || []).map((item) => [item.id, item]));
       if (draggedGroups.size) {
@@ -5268,8 +5271,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (dragState?.type === "group") {
-      const deltaX = pointer.x - dragState.startPointer.x;
-      const deltaY = pointer.y - dragState.startPointer.y;
+      const { x: deltaX, y: deltaY } = canvasDragDelta(dragState.group, { x: pointer.x - dragState.startPointer.x, y: pointer.y - dragState.startPointer.y }, snapToGrid && !event.altKey);
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
 
       setGroups((current) =>
@@ -8004,6 +8006,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       >
         <NewtFlowCanvas
           ref={flowCanvasRef}
+          snapToGrid={snapToGrid}
           graphNodes={nodes}
           graphEdges={edges}
           groups={groups}
@@ -8179,6 +8182,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" aria-label="Snap to grid" aria-pressed={snapToGrid} title={`Snap to grid: ${snapToGrid ? "On" : "Off"}. Hold Alt while dragging to bypass.`} onClick={() => { const enabled = !snapToGrid; setSnapToGrid(enabled); rememberCanvasSnapToGrid(enabled); }}>
+            <Grid3X3 size={14} />
+          </button>
           <button type="button" onClick={() => zoomViewportAtCanvasCenter(1 / viewportZoomStep)} title="Zoom out" aria-label="Zoom out">
             <Minus size={14} />
           </button>

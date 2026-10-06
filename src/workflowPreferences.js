@@ -1,3 +1,6 @@
+export function canvasSnapToGridEnabled() { return readPreference("newtnode-canvas-snap-to-grid") === "true"; }
+export function rememberCanvasSnapToGrid(enabled) { writePreference("newtnode-canvas-snap-to-grid", String(enabled === true)); }
+
 const lastPackageParentKey = "newtnode-last-package-parent";
 const lastOpenWorkflowKey = "newtnode-last-open-workflow";
 
