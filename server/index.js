@@ -92,6 +92,8 @@ import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-ana
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { generateIdeogram45 } from "./ideogram45.js";
+import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
@@ -130,7 +132,7 @@ import {
   rodin25QualityMeshOption
 } from "../src/model3D.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
-import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences } from "../src/modelProviderRouting.js";
+import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences, providerSupportedModels } from "../src/modelProviderRouting.js";
 import { imageReferenceLimitError } from "../src/imageReferenceLimits.js";
 import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
@@ -460,6 +462,7 @@ const imageModelNames = {
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2.5",
   legacyOpenAiImage2: "OpenAI Image 2",
+  ideogram45: "Ideogram 4.5",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -470,6 +473,7 @@ const imageModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.legacyOpenAiImage2,
+  imageModelNames.ideogram45,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -850,6 +854,11 @@ registerImageEditRoutes(app, {
     return source;
   },
   generate: async ({ provider, model, variant, prompt, quality, size, images, mask }) => {
+    if (isIdeogram45Model(model)) {
+      return generateIdeogram45({ prompt, quality, images, mask, editPrecision: "high", preserveSourceSize: true }, {
+        upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
+      });
+    }
     if (provider === "atlas") {
       return atlasMedia.image({
         model,
@@ -963,6 +972,7 @@ function buildHealthPayload() {
       composerPoses: true,
       previewInpaint: true,
       imageEdit: true,
+      ideogram45: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -3729,11 +3739,18 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    const usesKreaImageFallback =
+    const explicitKreaImageProvider = runtimeModelProviderPreferences.imageGeneration === "krea";
+    if (explicitKreaImageProvider && !supportsKreaModel("image", selectedModel.displayName)) {
+      return res.status(400).json({ error: `${selectedModel.displayName} is not supported by NewtNode's Krea image route. Select a supported model or choose Fal in Settings > Model Providers > Image Model.` });
+    }
+    if (explicitKreaImageProvider && !process.env.KREA_API_KEY) {
+      return res.status(400).json({ error: missingModelProviderApiKeyMessage("Image Generation", "krea") });
+    }
+    const usesKreaImageFallback = explicitKreaImageProvider || (
       !process.env.FAL_KEY &&
       Boolean(process.env.KREA_API_KEY) &&
       selectedModel.provider.startsWith("fal-") &&
-      supportsKreaModel("image", selectedModel.displayName);
+      supportsKreaModel("image", selectedModel.displayName));
     const imageReferenceProvider = runtimeModelProviderPreferences.imageGeneration === "atlas"
       ? "atlas"
       : usesKreaImageFallback
@@ -4008,6 +4025,66 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         cost,
         image: {
           ...openAiImage.remoteImage,
+          localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
+    if (selectedModel.provider === "fal-ideogram-4-5") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
+      }
+
+      const ideogramImage = await generateIdeogram45({
+        prompt,
+        images: await Promise.all(imagePromptUrls.map((url) => readLocalAsset(url))),
+        imageLabels: imagePromptLabels,
+        aspectRatio, resolution: req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K",
+        quality: "high"
+      }, { upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult });
+      const output = await downloadImage(req, ideogramImage.remoteImage.url, "ideogram-4-5", ideogramImage.remoteImage.content_type || ideogramImage.remoteImage.mimeType);
+      const cost = ideogramImage.cost;
+
+      await appendHistory({
+        id: ideogramImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: ideogramImage.endpoint,
+        mode: "Ideogram 4.5 " + ideogramImage.mode,
+        prompt,
+        submittedPrompt: ideogramImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K",
+          quality: ideogramImage.input.quality,
+          imageSize: ideogramImage.input.image_size,
+          editPrecision: ideogramImage.input.edit_precision,
+          imagePromptCount: ideogramImage.referenceCount,
+          imagePromptLabels: ideogramImage.referenceLabels
+        },
+        cost,
+        remoteImage: ideogramImage.remoteImage,
+        localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: ideogramImage.resultText || ""
+      });
+
+      return res.json({
+        text: ideogramImage.resultText || "",
+        cost,
+        image: {
+          ...ideogramImage.remoteImage,
           localUrl: output.publicPath,
           thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
@@ -6146,6 +6223,15 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
+    const generalVideoModels = providerSupportedModels("veo", "fal");
+    if (generalVideoModels.includes(selectedVideoModel.displayName)) {
+      const provider = runtimeModelProviderPreferences.veo;
+      if (!providerSupportedModels("veo", provider).includes(selectedVideoModel.displayName)) {
+        return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by the selected Video Model provider. Choose Fal in Settings > Model Providers > Video Model.` });
+      }
+      const key = provider === "google" ? process.env.GOOGLE_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : process.env.FAL_KEY;
+      if (!key) return res.status(400).json({ error: missingModelProviderApiKeyMessage("Video Model", provider) });
+    }
 
     if (req.body.generateAudio !== false && filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
       const audioInputs = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : [])
@@ -6674,7 +6760,7 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
 
   const preferredProvider = runtimeModelProviderPreferences.veo;
   const runtimeProvider = geminiOmniRuntimeProviderForRequest({ hasVideoReference: hasVideoEditReference });
-  let provider = runtimeProvider === "fal" ? "fal.ai" : "Google";
+  let provider = runtimeProvider === "fal" ? "fal.ai" : runtimeProvider === "krea" ? "Krea" : "Google";
   let endpoint = runtimeProvider === "fal" ? geminiOmniFalEndpointForMedia({ hasVideoReference: hasVideoEditReference, hasImageReference: Boolean(imageReferences.length), hasStartFrame: Boolean(startFrameUrl) }) : googleGeminiOmniModel;
   let requestId = "";
   let remoteVideo = null;
@@ -6700,11 +6786,14 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
     remoteVideo = fallback.remoteVideo;
     output = await downloadVideo(req, remoteVideo.url, "gemini-omni", { stripAudio: !generateAudio });
   } else {
-    const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
+    const direct = runtimeProvider === "krea"
+      ? await generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds })
+      : await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
+    endpoint = direct.endpoint || endpoint;
     requestId = direct.requestId;
     remoteVideo = direct.remoteVideo;
-    output = direct.output;
-    if (!generateAudio) {
+    output = runtimeProvider === "krea" ? await downloadVideo(req, remoteVideo.url, "gemini-omni", { stripAudio: !generateAudio }) : direct.output;
+    if (!generateAudio && runtimeProvider !== "krea") {
       const outputBytes = await removeVideoAudioTrack(output.filePath);
       output = { ...output, bytes: outputBytes };
     }
@@ -6761,7 +6850,7 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
 }
 
 function geminiOmniRuntimeProviderForRequest({ hasVideoReference = false } = {}) {
-  if (hasVideoReference && process.env.GOOGLE_API_KEY) return "google";
+  if (hasVideoReference && runtimeModelProviderPreferences.veo === "krea") throw httpError(400, "Krea Gemini Omni does not support video-edit references. Choose Fal or Google under Settings > Model Providers > Video Model.");
   return runtimeModelProviderPreferences.veo;
 }
 
@@ -6952,7 +7041,8 @@ function geminiOmniFalEndpointForMedia({ hasVideoReference = false, hasImageRefe
 async function generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
   const endpoint = kreaEndpointForModel("video", videoModelNames.geminiOmni);
   const startFrame = media.find((item) => item.role === "first-frame");
-  const references = media.filter((item) => item.role !== "first-frame").slice(0, 10);
+  const references = media.filter((item) => item.role !== "first-frame");
+  if (references.length > 10) throw httpError(400, "Krea Gemini Omni supports up to 10 reference images.");
   const input = {
     prompt: submittedPrompt,
     aspect_ratio: normalizeChoice(aspectRatio, ["16:9", "9:16"], "16:9"),
@@ -7645,7 +7735,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
     : hasReferences
       ? "reference"
       : "text";
-  if (!process.env.FAL_KEY && process.env.KREA_API_KEY) {
+  if (runtimeModelProviderPreferences.veo === "krea") {
     if (hasElementsOrReferences) {
       throw httpError(
         400,
@@ -18557,6 +18647,10 @@ function resolveImageModel(model) {
     };
   }
 
+  if (isIdeogram45Model(model)) {
+    return { provider: "fal-ideogram-4-5", displayName: imageModelNames.ideogram45, id: ideogram45TextEndpoint };
+  }
+
   if (isReve21Model(model)) {
     return {
       provider: "fal-reve-2-1",
@@ -19016,6 +19110,9 @@ function resolveVideoModel(model) {
 
 async function resolveImageGenerationAspectRatio({ value, imagePromptUrls, provider }) {
   if (!isAutoImageAspectRatio(value)) {
+    if (provider === "fal-ideogram-4-5" && imagePromptUrls.length) {
+      return String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
+    }
     return normalizeImageAspectRatioForProvider(value, provider);
   }
 
@@ -19033,6 +19130,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-ideogram-4-5") return ideogram45AspectRatios;
   if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;
   return ["fal-gpt-image-2-5", "fal-openai-image-2"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;

@@ -3,17 +3,22 @@ import { createHash, randomUUID } from "node:crypto";
 import { prepareImageEdit, finishImageEdit } from "../image-edit.js";
 import { openAiImage2QualityOptions } from "../../src/openAiImage2.js";
 import { imageModelNames } from "../../src/modelOptions.js";
+import { imageEditModelOptions } from "../../src/imageEdit.js";
+import { isIdeogram45Model, ideogram45QualityOptions } from "../../src/ideogram45.js";
 
 export function registerImageEditRoutes(app, { limiter, getProvider, readSource, generate, readGenerated = readImageEditResult, save, recordHistory, estimateCost, sendError }) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 24 * 1024 * 1024, files: 2, fields: 32, fieldSize: 100000 } });
   const jobs = new Map();
   app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }]), async (req, res) => {
     try {
+      const model = req.body.model || imageModelNames.openAiImage2;
+      if (!imageEditModelOptions.includes(model)) throw Object.assign(new Error("Choose a supported image editor model."), { status: 400 });
+      if (isIdeogram45Model(model) && req.body.provider !== "fal") throw Object.assign(new Error("Ideogram 4.5 edits require Fal. Enable a Fal key in Settings."), { status: 400 });
       const provider = getProvider?.(req, String(req.body.provider || "").trim().toLowerCase()) || "";
-      if (!["fal", "atlas"].includes(provider)) throw Object.assign(new Error("Enable Fal or Atlas Cloud in Settings for OpenAI Image 2.5 drawing and masked edits."), { status: 400 });
+      if (!["fal", "atlas"].includes(provider)) throw Object.assign(new Error("Enable an active key for the selected image editor provider in Settings."), { status: 400 });
       const { sourceUrl, requestId, prompt = "", mode = "edit", quality = "high" } = req.body;
       if (!/^[a-z0-9-]{16,80}$/i.test(requestId || "")) throw Object.assign(new Error("An edit request ID is required."), { status: 400 });
-      if (!openAiImage2QualityOptions.includes(quality)) throw Object.assign(new Error("Choose a valid image quality."), { status: 400 });
+      if (!(isIdeogram45Model(model) ? ideogram45QualityOptions : openAiImage2QualityOptions).includes(quality)) throw Object.assign(new Error("Choose a valid image quality."), { status: 400 });
       const key = `${req.body.projectId || ""}:${requestId}`;
       const hash = createHash("sha256").update(JSON.stringify(Object.entries(req.body).sort(([a], [b]) => a.localeCompare(b))));
       for (const name of ["drawing", "selection"]) hash.update(name).update(req.files?.[name]?.[0]?.buffer || "");
@@ -22,7 +27,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       if (!jobs.has(key)) {
         if (jobs.size >= 100) throw Object.assign(new Error("The image editor is busy. Try again later."), { status: 429 });
         const job = { fingerprint };
-        job.promise = run(req, { sourceUrl, prompt, mode, quality, provider }).finally(() => { job.finished = Date.now(); });
+        job.promise = run(req, { sourceUrl, prompt, mode, quality, provider, model }).finally(() => { job.finished = Date.now(); });
         jobs.set(key, job);
       }
       if (jobs.get(key).fingerprint !== fingerprint) throw Object.assign(new Error("This edit request ID has already been used for a different edit."), { status: 409 });
@@ -30,16 +35,16 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     } catch (error) { sendError(res, error, "Image edit failed."); }
   });
 
-  async function run(req, { sourceUrl, prompt, mode, quality, provider }) {
+  async function run(req, { sourceUrl, prompt, mode, quality, provider, model }) {
     const source = await readSource(sourceUrl);
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
-      selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true" })
+      selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
-    const model = imageModelNames.openAiImage2;
+    const variant = isIdeogram45Model(model) ? undefined : "sunburst";
     let generation;
     let generationProvider = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
     try {
-      generation = await generate({ provider, model, variant: "sunburst", quality, size: `${prepared.size.width}x${prepared.size.height}`, prompt: prepared.submittedPrompt,
+      generation = await generate({ provider, model, variant, quality, size: `${prepared.size.width}x${prepared.size.height}`, prompt: prepared.submittedPrompt,
         images: prepared.images, mask: prepared.mask });
       generationProvider = generation.provider || generationProvider;
       const bytes = await finishImageEdit(prepared, await readGenerated(generation.remoteImage.url));
@@ -53,7 +58,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
           endpoint: generation.endpoint, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
-          settings: { quality, variant: "sunburst", sourceUrl, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
+          settings: { quality, variant, ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), sourceUrl, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
           localImage: item.url, localThumbnail: item.thumbnailUrl, outputFileName: item.fileName, cost });
       } catch { warning = "Image saved, but this run could not be added to History."; }
       return { item, warning };

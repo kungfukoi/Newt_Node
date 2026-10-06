@@ -6,6 +6,20 @@ import { finishImageEdit, prepareImageEdit } from "../server/image-edit.js";
 
 const solid = (width, height, background) => sharp({ create: { width, height, channels: 4, background } }).png().toBuffer();
 
+test("Ideogram masks use black to edit and white to preserve with exact local preservation", async () => {
+  const source = await solid(64, 96, "#224466");
+  const selection = await sharp({ create: { width: 64, height: 96, channels: 4, background: "#00000000" } })
+    .composite([{ input: await solid(16, 16, "#ffffff"), left: 0, top: 0 }]).png().toBuffer();
+  const prepared = await prepareImageEdit({ source, selection, mode: "remove", model: "Ideogram 4.5" });
+  assert.deepEqual((await pixel(prepared.mask, 0, 0)).slice(0, 3), [0, 0, 0]);
+  assert.deepEqual((await pixel(prepared.mask, 40, 40)).slice(0, 3), [255, 255, 255]);
+  assert.match(prepared.submittedPrompt, /black area/);
+  const result = await finishImageEdit(prepared, await solid(64, 96, "#ff0000"));
+  assert.deepEqual(await pixel(result, 40, 40), await pixel(source, 40, 40));
+  assert.deepEqual(await pixel(result, 0, 0), [255, 0, 0, 255]);
+  await assert.rejects(prepareImageEdit({ source, selection: await solid(64, 96, "#fff"), mode: "remove", model: "Ideogram 4.5" }), /both selected and unselected/);
+});
+
 async function pixel(buffer, x, y) {
   const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return [...data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 4)];

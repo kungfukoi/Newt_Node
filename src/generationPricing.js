@@ -10,7 +10,7 @@ import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { reve21CostPerImage } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
-import { normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { normalizeModelProviderPreferences, providerSupportedModels } from "./modelProviderRouting.js";
 import { isGptImage25Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
 
 const falImageRates = Object.freeze({
@@ -60,17 +60,19 @@ export function generationProviderForModel({
     if (isMinimaxH3Model(model)) return preferences.minimaxH3;
     if (normalized.includes("gemini") && normalized.includes("omni")) return preferences.veo;
     if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"))) {
-      return automaticFalKreaProvider(providerAvailability);
+      return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     }
+    if (["Wan 2.7 Reference-to-Video", "Creatify Aurora"].includes(model)) return preferences.veo === "fal" ? "fal" : null;
     return normalized.includes("wan") || normalized.includes("aurora") || normalized.includes("sam 3") ? "fal" : null;
   }
 
   if (mediaType === "image") {
+    if (preferences.imageGeneration === "krea") return supportsKreaModel("image", model) ? "krea" : null;
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage25Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
-    return ["REVE 2.1", "SAM 3 Image"].includes(model) ? "fal" : null;
+    return ["Ideogram 4.5", "REVE 2.1", "SAM 3 Image"].includes(model) ? "fal" : null;
   }
 
   return null;

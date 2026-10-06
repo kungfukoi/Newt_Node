@@ -469,7 +469,7 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", showApiCosts = false }) {
+export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", imageEditorModel, imageEditFalAvailable, showApiCosts = false }) {
   const [aiMode, setAiMode] = React.useState(false);
   const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
@@ -1370,6 +1370,8 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
             item={displayItem}
             workflowContext={workflowContext}
             provider={imageEditProvider}
+            model={imageEditorModel}
+            falAvailable={imageEditFalAvailable ?? imageEditProvider === "fal"}
             showApiCosts={showApiCosts}
             canApply={canEditImage}
             onAccept={onAcceptAiEdit}
@@ -1392,7 +1394,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
           </span>
           <div className="output-lightbox-header-actions">
             {displayItem.type === "image" && typeof onAcceptAiEdit === "function" && (
-              <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title="Draw and edit with OpenAI Image 2.5" aria-label="Draw and edit with OpenAI Image 2.5">
+              <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.5"}`} aria-label={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.5"}`}>
                 <Pencil size={15} />
               </button>
             )}

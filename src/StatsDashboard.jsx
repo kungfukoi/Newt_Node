@@ -559,6 +559,7 @@ function estimateItemCost(item, mediaType, pricing) {
   const modelKey = [item.modelName, settings.model, item.endpoint, item.mode].filter(Boolean).join(" ").toLowerCase();
 
   if (mediaType === "image") {
+    if (modelKey.includes("ideogram")) return null;
     if (modelKey.includes("reve")) {
       return pricing.reve21?.costPerImage ?? defaultPricing.reve21.costPerImage;
     }

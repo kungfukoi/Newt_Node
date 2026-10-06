@@ -32,6 +32,7 @@ import {
 } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
+import { imageEditModelOptions } from "./imageEdit.js";
 import { defaultUserPreferences, directorProcessingModelOptions, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
@@ -488,29 +489,30 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <small className="settings-provider-models">{providerSupportedModelsLabel("seedance", modelProviderPreferences.seedance)}</small>
             </label>
             <label className="settings-field">
-              <span>Veo / Google Video</span>
-              <select
-                value={modelProviderPreferences.veo}
-                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, veo: event.target.value }))}
-              >
-                <option value="google">Google</option>
-                <option value="fal">Fal</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "Google video")}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
-            </label>
-            <label className="settings-field">
-              <span>Image Generation</span>
+              <span>Image Model</span>
               <select
                 value={modelProviderPreferences.imageGeneration}
                 onChange={(event) => setModelProviderPreferences((current) => ({ ...current, imageGeneration: event.target.value }))}
               >
                 <option value="google">Google</option>
                 <option value="fal">Fal</option>
+                <option value="krea">Krea</option>
                 <option value="atlas">Atlas Cloud</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "supported image models")}</small>
               <small className="settings-provider-models">{providerSupportedModelsLabel("imageGeneration", modelProviderPreferences.imageGeneration)}</small>
+            </label>
+            <label className="settings-field">
+              <span>Video Model</span>
+              <select value={modelProviderPreferences.veo}
+                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, veo: event.target.value }))}>
+                <option value="fal">Fal</option>
+                <option value="krea">Krea</option>
+                <option value="google">Google</option>
+              </select>
+              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "video models")}</small>
+              <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
+              <small>Seedance and MiniMax H3 use their dedicated provider settings.</small>
             </label>
             <label className="settings-field">
               <span>Text / Agent / Director LLM</span>
@@ -620,6 +622,16 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <span className="node-toggle compact" aria-hidden="true">
                 <span />
               </span>
+            </label>
+            <label className="settings-preference-model">
+              <span>
+                <strong>Image Editor Model</strong>
+                <small>Model used when editing an image from a preview. Ideogram 4.5 uses Fal.</small>
+              </span>
+              <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
+                onChange={(event) => setUserPreferences((current) => ({ ...current, imageEditorModel: event.target.value }))}>
+                {imageEditModelOptions.map((model) => <option key={model}>{model}</option>)}
+              </select>
             </label>
             <label className="settings-preference-model">
               <span>

@@ -86,6 +86,19 @@ test("image edits preserve the explicitly selected supported provider", () => wi
   assert.equal(calls[0].provider, "atlas");
 }));
 
+test("Ideogram editor requests retain their model and history and reject unsupported routes", () => withEditor(async ({ post, calls, histories }) => {
+  const response = await post({ model: "Ideogram 4.5", quality: "medium" });
+  assert.equal(response.status, 200);
+  assert.equal(calls[0].model, "Ideogram 4.5");
+  assert.equal(calls[0].variant, undefined);
+  assert.equal(histories[0].modelName, "Ideogram 4.5");
+  assert.equal(histories[0].settings.editPrecision, "high");
+  for (const changes of [{ provider: "atlas" }, { quality: "xhigh" }, { model: "made up" }]) {
+    assert.equal((await post({ model: "Ideogram 4.5", ...changes })).status, 400);
+  }
+  assert.equal(calls.length, 1);
+}));
+
 test("duplicate edit IDs share one paid generation and reject changed payloads", () => withEditor(async ({ post, calls, saves }) => {
   const requestId = randomUUID();
   const first = await post({ requestId });

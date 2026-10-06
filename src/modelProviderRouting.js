@@ -1,3 +1,5 @@
+import { kreaEndpoints } from "./kreaApi.js";
+
 export const defaultModelProviderPreferences = Object.freeze({
   seedance: "fal",
   veo: "google",
@@ -20,9 +22,11 @@ const providerModelSupport = Object.freeze({
   }),
   veo: Object.freeze({
     google: Object.freeze(["Gemini Omni Flash"]),
-    fal: Object.freeze(["Gemini Omni Flash"])
+    fal: Object.freeze(["Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]),
+    krea: Object.freeze(["Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K"])
   }),
   imageGeneration: Object.freeze({
+    krea: Object.freeze(Object.keys(kreaEndpoints.image)),
     google: Object.freeze(["Nano Banana Pro"]),
     fal: Object.freeze([
       "Z-Image",
@@ -31,6 +35,7 @@ const providerModelSupport = Object.freeze({
       "Nano Banana Pro",
       "OpenAI Image 2.5",
       "OpenAI Image 2",
+      "Ideogram 4.5",
       "REVE 2.1",
       "Krea 2 Large"
     ]),
@@ -54,9 +59,10 @@ export function normalizeModelProviderPreferences(value = {}, availability = {})
   return {
     seedance: normalizedProvider(incoming.seedance, ["fal", "krea", "atlas"])
       || (!availability.fal && availability.krea ? "krea" : defaultModelProviderPreferences.seedance),
-    veo: normalizedProvider(incoming.veo, ["google", "fal"])
+    // Keep the persisted veo key for compatibility; the UI now calls this Video Model.
+    veo: normalizedProvider(incoming.veo, ["google", "fal", "krea"])
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.veo),
-    imageGeneration: normalizedProvider(incoming.imageGeneration, ["google", "fal", "atlas"])
+    imageGeneration: normalizedProvider(incoming.imageGeneration, ["google", "fal", "krea", "atlas"])
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.imageGeneration),
     minimaxH3: normalizedProvider(incoming.minimaxH3, ["fal", "krea", "atlas", "local"])
       || defaultModelProviderPreferences.minimaxH3,

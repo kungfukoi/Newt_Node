@@ -1,12 +1,13 @@
 import sharp from "sharp";
+import { isIdeogram45Model } from "../src/ideogram45.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
 
 const decode = (buffer) => sharp(buffer, { limitInputPixels: imageEditMaxPixels, animated: false, failOn: "error" });
 
-export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false }) {
+export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model }) {
   const original = await decode(source).rotate().ensureAlpha().png().toBuffer();
   const { width, height } = await decode(original).metadata();
-  const size = imageEditSize(width, height);
+  const size = imageEditSize(width, height, model);
   async function layer(buffer) {
     if (!buffer) return null;
     const metadata = await decode(buffer).metadata();
@@ -20,13 +21,18 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   drawing = await layer(drawing);
   selection = await layer(selection);
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
-  const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection) });
+  const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   let mask = null;
   if (selection) {
     const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
-    mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
+    if (isIdeogram45Model(model)) {
+      const pixels = await decode(selection).extractChannel(3).raw().toBuffer();
+      if (!pixels.some((value) => value < 128) || !pixels.some((value) => value >= 128))
+        throw new Error("Ideogram requires both selected and unselected areas. Clear the selection to edit the entire image.");
+      mask = await decode(selection).extractChannel(3).threshold(128).negate().png().toBuffer();
+    } else mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
   }
   return { original, width, height, size, selection, mask, submittedPrompt,
     images: blank ? [guide] : [original, guide].filter(Boolean) };

@@ -55,6 +55,11 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
+  assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
+  if (process.env.NEWT_SMOKE_CLIENT_URL) {
+    const smoke = spawn(process.execPath, [path.join(root, "scripts", "smokeApp.mjs"), process.env.NEWT_SMOKE_CLIENT_URL, `${api}/api/health`], { cwd: root, windowsHide: true, stdio: "inherit" });
+    assert.equal((await once(smoke, "exit"))[0], 0, "Client/API smoke failed");
+  }
   const historyFile = path.join(sandbox, "server", "data", "history.json");
   await cp(historyFile, `${historyFile}.bak`);
   await rm(historyFile);
@@ -75,7 +80,7 @@ try {
     llm: "openai"
   };
   const savedSettings = await (await request("/api/settings", {
-    userPreferences: { showPresetPanel: false },
+    userPreferences: { showPresetPanel: false, imageEditorModel: "Ideogram 4.5" },
     modelProviderPreferences: expectedRouting
   })).json();
   assert.equal(savedSettings.userPreferences.showPresetPanel, false);
@@ -84,9 +89,26 @@ try {
   assert.ok(savedSettings.activeCredentialIds.atlas);
   const reloadedSettings = await (await request("/api/settings")).json();
   assert.equal(reloadedSettings.userPreferences.showPresetPanel, false);
+  assert.equal(reloadedSettings.userPreferences.imageEditorModel, "Ideogram 4.5");
   assert.deepEqual(reloadedSettings.modelProviderPreferences, expectedRouting);
   assert.equal(reloadedSettings.atlasApiKeyConfigured, true);
   assert.equal(reloadedSettings.activeCredentialIds.atlas, savedSettings.activeCredentialIds.atlas);
+  await request("/api/settings", { modelProviderPreferences: { ...expectedRouting, imageGeneration: "krea", veo: "krea" } });
+  const kreaSettings = await (await request("/api/settings")).json();
+  assert.equal(kreaSettings.modelProviderPreferences.imageGeneration, "krea");
+  assert.equal(kreaSettings.modelProviderPreferences.veo, "krea");
+  for (const [route, model, message] of [
+    ["generate-image", "Ideogram 4.5", /not supported/],
+    ["generate-image", "Nano Banana 2", /Krea API key/],
+    ["generate-video", "Wan 2.7 Reference-to-Video", /not supported/],
+    ["generate-video", "Kling O3 Pro", /Krea API key/],
+    ["generate-video", "Gemini Omni Flash", /Krea API key/]
+  ]) {
+    const rejected = await fetch(`${api}/api/node/${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, prompt: "Routing validation only" }) });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, message);
+  }
+  await request("/api/settings", { modelProviderPreferences: expectedRouting });
   assert.deepEqual(
     JSON.parse(await readFile(path.join(sandbox, "server", "data", "runtime-settings.json"), "utf8")).modelProviderPreferences,
     expectedRouting

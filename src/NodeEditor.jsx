@@ -354,6 +354,7 @@ import { defaultModelProviderPreferences, normalizeModelProviderPreferences } fr
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
+import { isIdeogram45Model, ideogram45AspectRatios, ideogram45ResolutionOptions } from "./ideogram45.js";
 import { isReve21Model } from "./reve21.js";
 import {
   analyzeColorLookPalette,
@@ -767,7 +768,7 @@ const moodBoardOutputFileName = "MOOD_BOARD.png";
 const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
 const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro, imageModelNames.ideogram45];
 const editVideoOutputOptions = [
   ["mp4", "MP4"],
   ["webm", "WebM"],
@@ -794,6 +795,7 @@ const editLocalImageEffectIds = new Set(["imageCrop", "tone", "curves", "textOve
 const coverageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.nanoBananaPro,
+  imageModelNames.ideogram45,
   imageModelNames.reve21,
   imageModelNames.seedream5Pro
 ];
@@ -1263,7 +1265,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true, imageEditorModel = imageModelNames.openAiImage2 } = {}) {
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
@@ -7741,6 +7743,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onAcceptAiEdit={acceptAiImageEdit}
           workflowContext={workflowRequestContext()}
           imageEditProvider={imageEditProvider}
+          imageEditorModel={imageEditorModel}
+          imageEditFalAvailable={Boolean(modelProviderAvailability.fal)}
           showApiCosts={showPriceSnapshot}
           onClose={closePreviewLightbox}
         />
@@ -13206,7 +13210,7 @@ function NodeBody({
     const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
     const advancedOpen = Boolean(node.data.advancedOpen);
     const model = normalizeAutoAspectModel(node.data.model);
-    const resolution = normalizeImageModelResolution(node.data.resolution || "2K");
+    const resolution = normalizeImageModelResolutionForModel(node.data.resolution || "2K", model);
     const removeTextGraphics = Boolean(node.data.removeTextGraphics);
     const resultItems = autoAspectResultItems({ autoAspectResults: results });
     const outputPorts = new Map(autoAspectOutputPortsForNode(node).map((port) => [autoAspectTargetKeyFromOutputPort(port.id), port]));
@@ -13244,7 +13248,7 @@ function NodeBody({
       if (running) return;
       onUpdate(node.id, {
         ...resetAutoAspectOutputPatch(),
-        resolution: normalizeImageModelResolution(value)
+        resolution: normalizeImageModelResolutionForModel(value, model)
       });
     }
 
@@ -13341,7 +13345,7 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Resolution">
                 <select value={resolution} disabled={running} onChange={(event) => updateResolution(event.target.value)}>
-                  {imageResolutionOptions.map((option) => (
+                  {imageModelResolutionOptions(model).map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
@@ -14970,8 +14974,8 @@ function NodeBody({
                         </select>
                       </NodeRow>
                       <NodeRow label="Resolution">
-                        <select value={normalizeImageModelResolution(node.data.resolution || "2K")} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetAutoAspectOutputPatch(), resolution: normalizeImageModelResolution(event.target.value) })}>
-                          {imageResolutionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                        <select value={normalizeImageModelResolutionForModel(node.data.resolution || "2K", utilityGenerationModel)} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetAutoAspectOutputPatch(), resolution: normalizeImageModelResolutionForModel(event.target.value, utilityGenerationModel) })}>
+                          {imageModelResolutionOptions(utilityGenerationModel).map((option) => <option key={option} value={option}>{option}</option>)}
                         </select>
                       </NodeRow>
                       <NodeRow label="Remove Graphics">
@@ -15379,7 +15383,7 @@ function NodeBody({
     const imageReferenceCount = imageReferenceItems.length;
     const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
     const kreaReferenceLimit = imageModelReferenceLimit(node.data.model, "krea");
-    const imageReferenceProvider = imageProviderPreference === "atlas"
+    const imageReferenceProvider = imageProviderPreference === "krea" ? "krea" : imageProviderPreference === "atlas"
       ? "atlas"
       : imageProviderPreference === "google" && node.data.model === imageModelNames.nanoBananaPro
         ? "google"
@@ -18238,6 +18242,7 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
@@ -18522,6 +18527,7 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model) {
+  if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isSeedream5ImageModel(model)) return seedream5ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
@@ -24503,7 +24509,7 @@ function normalizeAutoAspectData(data = {}) {
     resultUrl: resultItems[selectedResultIndex]?.url || resultItems[0]?.url || data.resultUrl || "",
     selectedResultIndex,
     model: normalizeAutoAspectModel(data.model),
-    resolution: normalizeImageModelResolution(data.resolution || "2K"),
+    resolution: normalizeImageModelResolutionForModel(data.resolution || "2K", normalizeAutoAspectModel(data.model)),
     removeTextGraphics: Boolean(data.removeTextGraphics),
     advancedOpen: Boolean(data.advancedOpen)
   };

@@ -56,6 +56,12 @@ Static callable labels, durations, aspect ratios, utility descriptions, and mode
 
 ## Generation Flow
 
+Ideogram 4.5 is available in image generation, Character, Coverage, and Auto Aspect selectors. `src/ideogram45.js` owns Fal request schemas, supported sizes, reference limits, and explicit unpriced cost metadata; `server/ideogram45.js` shares upload/submission/result handling between normal generation and the image editor. Requests without references use `ideogram/v4.5`; up to five ordered images use `ideogram/v4.5/edit`. The preview editor uses precise editing with source geometry, converts selections to black-edit/white-preserve masks, and keeps local unselected pixels intact. Its model is selected only through `userPreferences.imageEditorModel` in Settings, with OpenAI Image 2.5 retained for old settings.
+
+Image Generation can explicitly select Krea using the existing `src/kreaApi.js` endpoint catalog. Supported models use Krea even when Fal keys are present; missing Krea keys and unsupported models fail before submission. The Image Editor preference remains independent: Ideogram edits require Fal.
+
+The general Video Model provider replaces the Veo/Google Video selector while retaining the persisted `veo` key and existing saved choice. Its Fal route supports Gemini Omni, Kling O3 Pro/4K, Wan 2.7 Reference-to-Video, and Creatify Aurora; Krea supports Gemini Omni generation and Kling; Google supports Gemini Omni. Unsupported model/provider pairs and missing selected keys fail before submission. Gemini video-reference edits use the selected Fal or Google route; Krea rejects them. Seedance and MiniMax remain exclusively in their dedicated routing categories.
+
 The normal remote-generation path is:
 
 1. `NodeEditor.jsx` gathers connected, referenced, and local node inputs.

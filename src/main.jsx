@@ -70,6 +70,7 @@ import { defaultModelProviderPreferences, normalizeModelProviderPreferences } fr
 import { defaultUserPreferences, normalizeUserPreferences } from "./userPreferences.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
+import { isIdeogram45Model, ideogram45AspectRatios, ideogram45ResolutionOptions } from "./ideogram45.js";
 import { isReve21Model } from "./reve21.js";
 import "./styles.css";
 
@@ -850,7 +851,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} />
+              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} imageEditorModel={userPreferences.imageEditorModel} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
@@ -1086,6 +1087,7 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   return model === imageModelNames.openAiImage2 || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
@@ -1102,6 +1104,7 @@ function isSeedream5ImageModel(model) {
 }
 
 function imageResolutionOptionsForModel(model) {
+  if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return isSeedream5ImageModel(model) ? seedream5ResolutionOptions : imageResolutionOptions;

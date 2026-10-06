@@ -29,6 +29,7 @@ export const imageModelNames = {
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2.5",
   legacyOpenAiImage2: "OpenAI Image 2",
+  ideogram45: "Ideogram 4.5",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -56,6 +57,7 @@ export const imageModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.legacyOpenAiImage2,
+  imageModelNames.ideogram45,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];

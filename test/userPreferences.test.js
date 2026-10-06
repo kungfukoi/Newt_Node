@@ -13,13 +13,19 @@ test("user preferences default to showing the Preset panel", () => {
 });
 
 test("user preferences preserve an explicit Preset panel choice", () => {
-  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: false }), { showPresetPanel: false, showPriceSnapshot: true, directorProcessingModel: "astra" });
-  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: true }), { showPresetPanel: true, showPriceSnapshot: true, directorProcessingModel: "astra" });
+  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: false }), { ...defaultUserPreferences, showPresetPanel: false });
+  assert.deepEqual(normalizeUserPreferences({ showPresetPanel: true }), { ...defaultUserPreferences, showPresetPanel: true });
 });
 
 test("user preferences preserve the price snapshot choice", () => {
-  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: false }), { showPresetPanel: true, showPriceSnapshot: false, directorProcessingModel: "astra" });
-  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: true }), { showPresetPanel: true, showPriceSnapshot: true, directorProcessingModel: "astra" });
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: false }), { ...defaultUserPreferences, showPriceSnapshot: false });
+  assert.deepEqual(normalizeUserPreferences({ showPriceSnapshot: true }), { ...defaultUserPreferences, showPriceSnapshot: true });
+});
+
+test("image editor preference preserves Ideogram and migrates old settings", () => {
+  assert.equal(normalizeUserPreferences({ imageEditorModel: "Ideogram 4.5" }).imageEditorModel, "Ideogram 4.5");
+  assert.equal(normalizeUserPreferences({ imageEditorModel: "unknown" }).imageEditorModel, "OpenAI Image 2.5");
+  assert.equal(normalizeUserPreferences({}).imageEditorModel, "OpenAI Image 2.5");
 });
 
 test("Director processing preferences switch every Astra default to GPT-5.6 Sol", () => {

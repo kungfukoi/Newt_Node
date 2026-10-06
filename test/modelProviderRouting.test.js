@@ -91,6 +91,24 @@ test("model provider labels are human readable", () => {
   assert.equal(providerPreferenceLabel("openai"), "OpenAI");
 });
 
+test("Krea image routing is explicit and lists only implemented Krea endpoints", () => {
+  assert.equal(normalizeModelProviderPreferences({ imageGeneration: "krea" }, { fal: true }).imageGeneration, "krea");
+  assert.deepEqual(providerSupportedModels("imageGeneration", "krea"), ["Z-Image", "Seedream 5.0 Pro", "Nano Banana 2", "Nano Banana Pro", "OpenAI Image 2", "Krea 2 Large"]);
+  assert.ok(missingModelProviderCredentials({ imageGeneration: "krea" }, { fal: true, google: true }).includes("krea"));
+});
+
+test("general video providers exclude dedicated Seedance and MiniMax routes", () => {
+  for (const provider of ["fal", "krea", "google"]) {
+    const models = providerSupportedModels("veo", provider);
+    assert.ok(models.includes("Gemini Omni Flash"));
+    assert.ok(models.every((model) => !/Seedance|MiniMax/.test(model)));
+  }
+  assert.equal(normalizeModelProviderPreferences({ veo: "krea" }).veo, "krea");
+  assert.ok(providerSupportedModels("veo", "fal").includes("Creatify Aurora"));
+  assert.ok(providerSupportedModels("veo", "krea").includes("Kling O3 Pro"));
+  assert.ok(!providerSupportedModels("veo", "krea").includes("Wan 2.7 Reference-to-Video"));
+});
+
 test("model provider tiles list the models implemented by the selected route", () => {
   assert.deepEqual(providerSupportedModels("seedance", "atlas"), ["Seedance 2.0", "Seedance 2.5"]);
   assert.deepEqual(providerSupportedModels("minimaxH3", "local"), ["MiniMax H3 (576P)"]);

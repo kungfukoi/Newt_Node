@@ -4,7 +4,8 @@ import { openAiImage2Quality } from "./openAiImage2.js";
 export const characterSheetModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
-  imageModelNames.openAiImage2
+  imageModelNames.openAiImage2,
+  imageModelNames.ideogram45
 ];
 
 export function normalizeCharacterSheetModel(value) {
@@ -16,7 +17,7 @@ export function characterSheetGenerationSettings(value) {
   const model = normalizeCharacterSheetModel(value);
   return {
     model,
-    resolution: "4K",
+    resolution: model === imageModelNames.ideogram45 ? "2K" : "4K",
     ...(model === imageModelNames.openAiImage2 ? { quality: openAiImage2Quality } : {})
   };
 }
