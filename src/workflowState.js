@@ -138,6 +138,7 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
+  if (node.type === "storyboard" && node.data?.status === "reviewing-sequence") return { ...node, data: { ...node.data, status: "error", error: "Sequence review interrupted. Check History before submitting again." } };
   if (node.type === "storyboard" && node.data?.storyboardRevisionActive) return { ...node, data: { ...node.data, storyboardRevisionActive: false, status: "error", error: "Storyboard revision interrupted. Existing panels were preserved; check History before submitting again.", storyboardFrames: (node.data.storyboardFrames || []).map(frame => ["running", "queued", "reviewing"].includes(frame.status) ? { ...frame, status: "error", error: "Revision interrupted; check History before retrying." } : frame) } };
   if (node.type === "explore") {
     return { ...node, data: { ...node.data, exploreAction: "", exploreStopRequested: false,

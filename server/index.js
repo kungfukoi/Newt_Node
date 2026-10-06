@@ -1,3 +1,6 @@
+import { registerStoryboardReviewRoutes } from "./routes/storyboardReview.js";
+import { runStoryboardQc } from "./storyboard-qc.js";
+import { storyboardQcPolicy } from "../src/storyboardQc.js";
 import { storyboardSpatialRules, storyboardSpatialSchema, storyboardCastSchema, reconcileStoryboardSpatial } from "../src/storyboardSpatial.js";
 import { registerStoryboardRevisionRoutes } from "./routes/storyboardRevisions.js";
 import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
@@ -845,6 +848,7 @@ registerCoreRoutes(app, {
   readMinimaxH3LocalStatus
 });
 
+registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
@@ -1000,6 +1004,7 @@ function buildHealthPayload() {
       projectOutputPath: true,
       skillDirector: true,
       storyboardQc: true,
+      storyboardSequenceReview: true,
       newtPresets: true,
       mediaThumbnail: true,
       generationProgress: true,
@@ -4647,12 +4652,11 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         angle: String(req.body.angle || "").trim(),
         notes: String(req.body.notes || "").trim()
       };
-    const reviewed = await reviewStoryboardFrameWithOpenAi(qcInput);
-    await recordStoryboardLlmUsage(reviewed, req.body, "Storyboard QC");
+    const reviewed = await runStoryboardQc({ input: { ...qcInput, qcMode: req.body.qcMode, preferredProvider: runtimeModelProviderPreferences.llm || textLlmProvider }, readAsset: readLocalAsset, review: reviewStoryboardFrameWithOpenAi, recordUsage: (result, tier) => recordStoryboardLlmUsage(result, req.body, "Storyboard QC " + tier) });
     res.json({ qc: reviewed.qc, cost: reviewed.cost });
   } catch (error) {
     console.error(error);
-    if (error.llmResult) {
+    if (error.llmResult && !error.qcUsageRecorded) {
       await recordStoryboardLlmUsage({ result: error.llmResult, cost: error.cost }, req.body, "Storyboard QC (invalid response)")
         .catch((historyError) => console.error("Could not record failed Storyboard QC usage.", historyError));
     }
@@ -16673,7 +16677,7 @@ async function runMediaDescriptionLlm({
     else throw httpError(400, "Atlas Cloud Responses supports image analysis but not native video. Enable Fal for video analysis.");
   }
   if (provider === "fal") {
-    const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
+    const mediaUrls = await Promise.all(inputs.map((item) => item.asset ? fal.storage.upload(new File([item.asset.buffer], item.asset.fileName || "review.png", { type: item.asset.mimeType })) : localAssetToFalUrl(item.url)));
     const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
     const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
     const input = mediaType === "video"
@@ -16690,8 +16694,8 @@ async function runMediaDescriptionLlm({
     inputs,
     mediaType,
     prompt,
-    readLocalAsset,
-    optimizeImages: atlas
+    readLocalAsset: url => inputs.find(item => item.url === url && item.asset)?.asset || readLocalAsset(url),
+    optimizeImages: atlas && !inputs.some(item => item.asset)
   });
   const model = atlas ? `openai/${String(openAiModel || "").replace(/^openai\//, "")}` : openAiModel;
   const body = openAiLlmBody({ model, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route });
@@ -19595,7 +19599,10 @@ Return this exact JSON shape:
   "summary": "short reviewer note",
   "issues": [],
   "shouldRetry": false,
-  "correctionPrompt": "short direct prompt addon for regeneration if failed"
+  "correctionPrompt": "short direct prompt addon for regeneration if failed",
+  "failureType": "none",
+  "confidence": "high",
+  "needsDetail": false
 }
 
 If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
@@ -19610,9 +19617,10 @@ async function reviewStoryboardFrameWithOpenAi({
   frameNumber = 1,
   shot = "",
   angle = "",
+  preparedInputs = null, qcMode = "balanced", reasoningEffort = "high", preferredProvider,
   notes = ""
 } = {}) {
-  const inputs = [
+  const inputs = preparedInputs || [
     sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
     previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
     spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
@@ -19630,17 +19638,18 @@ async function reviewStoryboardFrameWithOpenAi({
   const result = await runMediaDescriptionLlm({
     inputs,
     mediaType: "image",
-    prompt,
+    preferredProvider,
+    prompt: prompt + "\nReview mode: " + qcMode + "\n" + storyboardQcPolicy,
     systemPrompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
     falModel: storyboardVisionFalModel,
     openAiModel: storyboardVisionOpenAiModel,
     responseMimeType: "application/json",
-    reasoningEffort: "high",
+    reasoningEffort,
     route: "storyboard-qc"
   });
   const cost = estimateTextProcessingCost({ provider: result.provider, helperUsages: result.usages, hasMainRequest: false });
   try {
-    return { qc: normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text)), cost, result };
+    return { qc: parseStoryboardPlanJson(result.text), cost, result };
   } catch (error) {
     error.cost = cost;
     error.llmResult = result;

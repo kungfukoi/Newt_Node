@@ -32,7 +32,7 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
-  if (path === "/api/node/storyboard-plan" || path === "/api/node/storyboard-revise" || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
+  if (path === "/api/node/storyboard-review" || path === "/api/node/storyboard-qc" || path === "/api/node/storyboard-plan" || path === "/api/node/storyboard-revise" || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
     try {
       response = await fetchWithTimeout(requestUrl, options, timeoutMs);
       return { response, data: await readJsonResponse(response, label) };
@@ -327,6 +327,7 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/preview-inpaint", jsonBody(body), label);
   },
 
+  reviewStoryboardSequence(body) { return fetchJsonApi("/api/node/storyboard-review", jsonBody(body), "Storyboard sequence review"); },
   reviseStoryboard(body) { return fetchJsonApi("/api/node/storyboard-revise", jsonBody(body), "Storyboard revision"); },
   planStoryboard(body, label = "Storyboard planning") {
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);

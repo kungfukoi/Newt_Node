@@ -61,6 +61,8 @@ try {
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
+  const invalidReview = await fetch(api + "/api/node/storyboard-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  assert(invalidReview.status === 400, "Sequence review must reject missing panels before paid work.");
   const invalidRevision = await fetch(api + "/api/node/storyboard-revise", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   assert.equal(invalidRevision.status, 400);
   if (process.env.NEWT_SMOKE_CLIENT_URL) {

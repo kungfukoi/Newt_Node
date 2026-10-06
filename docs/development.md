@@ -238,3 +238,5 @@ Operational local state under `server/data/`, output trees, uploads, workflow pa
 - Do not rewrite history or use destructive reset/checkout operations unless explicitly authorized.
 - Do not commit, merge, pull, push, or switch branches unless the user asks.
 - When asked to publish, verify the exact branch, upstream, remote URL, clean status, and pushed commit.
+
+Storyboard quality review supports Balanced (bounded review copies, one high-detail confirmation for suspected failures), Deep (original images), and Off. Legacy Auto QC false migrates to Off; other workflows default to Balanced. Only confident essential major failures permit the existing single regeneration attempt. Uncertain, invalid, or failed reviews preserve the image without replaying paid requests. Each completed review call records usage. Review Sequence provides advisory notes on the compiled board when present, otherwise directions only; it never regenerates panels. Saved notes identify when panels have changed.

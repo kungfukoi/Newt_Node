@@ -1,0 +1,4 @@
+export const storyboardQcModes = ["balanced", "deep", "off"];
+export function storyboardQcMode(data = {}) { return storyboardQcModes.includes(data.storyboardQcMode) ? data.storyboardQcMode : data.storyboardAutoQc === false ? "off" : "balanced"; }
+export const storyboardQcFailureTypes = ["none", "polish", "identity", "missing_cast", "spatial", "action", "prop", "physical", "rendering"];
+export const storyboardQcPolicy = "Classify failureType, confidence (high/low), and needsDetail. Only confirmed major identity, missing_cast, spatial, action, prop, physical or rendering failures justify an automatic retry. Optional polish and subtle performance intensity do not. In Balanced mode accept readable emotion without demanding literal micro-expressions. If detail is unreadable, mark needsDetail instead of guessing. Deep may scrutinize explicit performance direction more closely. Never invent a change of camera or acting direction.";

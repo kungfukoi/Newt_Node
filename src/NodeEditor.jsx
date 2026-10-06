@@ -1,3 +1,5 @@
+import { storyboardReviewSignature } from "./storyboardSequenceReview.js";
+import { storyboardQcMode, storyboardQcModes } from "./storyboardQc.js";
 import { storyboardSpatialPrompt, invalidateStoryboardStaging } from "./storyboardSpatial.js";
 import { normalizeStoryboardVersions, versionStoryboardReplacement, restoreStoryboardVersion, canMoveStoryboardFrame } from "./storyboardVersions.js";
 import { StoryboardPanelHistory } from "./components/StoryboardPanelHistory.jsx";
@@ -4239,6 +4241,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
+  async function reviewStoryboardSequence(node) {
+    const current = nodesRef.current.find(item => item.id === node.id);
+    if (!current || storyboardRevisionRunsRef.current.has(node.id)) return;
+    storyboardRevisionRunsRef.current.add(node.id);
+    const frames = normalizedStoryboardFrames(current.data.storyboardFrames);
+    const boardUrl = current.data.storyboardBoardUrl || "";
+    const signature = storyboardReviewSignature(frames, boardUrl);
+    updateNode(node.id, { status: "reviewing-sequence", error: "" });
+    try {
+      const incomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+      const incoming = expandStoryboardDirectorIncoming(incomingByNode[node.id] || {}, incomingByNode);
+      const { response, data } = await nodeApi.reviewStoryboardSequence({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming) });
+      if (!response.ok) throw new Error(data.error || "Sequence review failed.");
+      updateNode(node.id, { status: "complete", storyboardSequenceReview: { ...data.review, signature }, storyboardRevisionWarning: data.warning || "" });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    } finally { storyboardRevisionRunsRef.current.delete(node.id); loadOutputHistory(); }
+  }
+
   async function reviseStoryboardPanels(node, frameIds, instruction) {
     const currentNode = nodesRef.current.find(item => item.id === node.id);
     if (!currentNode || storyboardRevisionRunsRef.current.has(node.id) || ["running", "planning", "revising", "compiling"].includes(currentNode.data.status)) return;
@@ -4311,7 +4332,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
     const aspectRatio = storyboardAspectRatioForNode(currentNode);
     const resolution = storyboardResolutionForNode(currentNode);
-    const qcEnabled = currentNode.data.storyboardAutoQc !== false;
+    const qcEnabled = storyboardQcMode(currentNode.data) !== "off";
     const successes = [];
     const failures = [];
 
@@ -4467,6 +4488,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const spatialAnchor = continuityReferenceItems.find((item) => item.label === storyboardSpatialAnchorLabel);
       const { response, data } = await nodeApi.reviewStoryboardFrame({
         sourceUrl: generated.url,
+        qcMode: storyboardQcMode(node.data),
         previousFrameUrl: previousFrame?.url || "",
         spatialAnchorUrl: spatialAnchor?.url || "",
         sceneDescription,
@@ -7778,6 +7800,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onCharacterUnlock={unlockCharacterNode}
         onStoryboardPlan={planStoryboardNode}
         onStoryboardRevise={reviseStoryboardPanels}
+        onStoryboardSequenceReview={reviewStoryboardSequence}
         onStoryboardGenerateAll={generateStoryboardNode}
         onStoryboardGenerateFrame={generateStoryboardFrame}
         onStoryboardExport={exportStoryboardBoard}
@@ -8084,6 +8107,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onCharacterUnlock={unlockCharacterNode}
                 onStoryboardPlan={planStoryboardNode}
                 onStoryboardRevise={reviseStoryboardPanels}
+        onStoryboardSequenceReview={reviewStoryboardSequence}
         onStoryboardGenerateAll={generateStoryboardNode}
                 onStoryboardGenerateFrame={generateStoryboardFrame}
                 onStoryboardExport={exportStoryboardBoard}
@@ -8559,6 +8583,7 @@ function NodeCard({
   onCharacterUnlock,
   onStoryboardPlan,
   onStoryboardRevise,
+  onStoryboardSequenceReview,
   onStoryboardGenerateAll,
   onStoryboardGenerateFrame,
   onStoryboardExport,
@@ -8907,6 +8932,7 @@ function NodeCard({
         onCharacterUnlock={onCharacterUnlock}
         onStoryboardPlan={onStoryboardPlan}
         onStoryboardRevise={onStoryboardRevise}
+        onStoryboardSequenceReview={onStoryboardSequenceReview}
         onStoryboardGenerateAll={onStoryboardGenerateAll}
         onStoryboardGenerateFrame={onStoryboardGenerateFrame}
         onStoryboardExport={onStoryboardExport}
@@ -11297,6 +11323,7 @@ function NodeBody({
   onCharacterUnlock,
   onStoryboardPlan,
   onStoryboardRevise,
+  onStoryboardSequenceReview,
   onStoryboardGenerateAll,
   onStoryboardGenerateFrame,
   onStoryboardExport,
@@ -12036,7 +12063,7 @@ function NodeBody({
     const selectedFrame = frames.find((frame) => frame.id === node.data.selectedFrameId) || frames[0];
     const preparingCharacters = node.data.status === "compiling-characters";
     const compilingStoryboardBoard = node.data.status === "compiling-board";
-    const runningStoryboard = node.data.status === "running" || node.data.status === "revising" || preparingCharacters;
+    const runningStoryboard = node.data.status === "running" || node.data.status === "revising" || node.data.status === "reviewing-sequence" || preparingCharacters;
     const planningStoryboard = node.data.status === "planning";
     const exportingStoryboard = node.data.status === "exporting";
     const exportingStoryboardFrames = exportingStoryboard && node.data.storyboardExportMode === "frames";
@@ -12443,20 +12470,12 @@ function NodeBody({
                     ))}
                   </select>
                 </NodeRow>
-                <div className="storyboard-style-master-row">
-                  <span>Auto QC</span>
-                  <button
-                    type="button"
-                    className={`storyboard-master-toggle ${node.data.storyboardAutoQc !== false ? "enabled" : ""}`}
-                    disabled={storyboardLocked}
-                    onClick={() => onUpdate(node.id, { storyboardAutoQc: node.data.storyboardAutoQc === false })}
-                    aria-pressed={node.data.storyboardAutoQc !== false}
-                    title={node.data.storyboardAutoQc !== false ? "Storyboard QC enabled" : "Storyboard QC disabled"}
-                  >
-                    <span />
-                  </button>
-                  <small>Reviews frames, retries obvious physical or continuity errors once, and skips failed frames as anchors.</small>
-                </div>
+                <NodeRow label="Quality Control">
+                  <select aria-label="Storyboard quality control" disabled={storyboardLocked} value={storyboardQcMode(node.data)} onChange={event => onUpdate(node.id, { storyboardQcMode: event.target.value, storyboardAutoQc: event.target.value !== "off" })}>
+                    {storyboardQcModes.map(mode => <option key={mode} value={mode}>{mode[0].toUpperCase() + mode.slice(1)}</option>)}
+                  </select>
+                </NodeRow>
+                <small className="storyboard-qc-hint">Balanced confirms possible major problems at higher detail. Deep reviews full-resolution images. Off skips automatic review.</small>
               </div>
               <div className={`storyboard-custom-inputs ${storyboardStyleEnabled ? "disabled" : ""}`}>
                 <NodeRow label="Style" inputPort={customStylePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -12479,7 +12498,7 @@ function NodeBody({
           </section>
         ) : (
           <section className="storyboard-view storyboard-scroll-surface" style={storyboardFrameAspectStyle}>
-            <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} onUpdate={onUpdate} onRevise={onStoryboardRevise} />
+            <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} onUpdate={onUpdate} onRevise={onStoryboardRevise} onReview={onStoryboardSequenceReview} />
             <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
               {frames.map((frame) => {
                 const selected = frame.id === selectedFrame?.id;
@@ -23709,7 +23728,8 @@ function normalizeStoryboardData(data = {}) {
     model: [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst].includes(data.model) ? data.model : storyboardFixedModel,
     aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
     resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
-    storyboardAutoQc: data.storyboardAutoQc !== false,
+    storyboardQcMode: storyboardQcMode(data),
+    storyboardAutoQc: storyboardQcMode(data) !== "off",
     useStoryboardStyle: data.useStoryboardStyle !== false,
     useMoodBoard: data.useMoodBoard !== false,
     useInternalStoryboardCharacters: data.useInternalStoryboardCharacters !== false,

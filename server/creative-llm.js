@@ -1,3 +1,4 @@
+import { storyboardQcFailureTypes } from "../src/storyboardQc.js";
 import { storyboardSpatialSchema, storyboardCastSchema } from "../src/storyboardSpatial.js";
 import Ajv from "ajv";
 import { explorePlanSchema } from "../src/explore.js";
@@ -50,7 +51,8 @@ export const creativeSchemas = {
       beat: nonempty, prompt: { ...nonempty, maxLength: 1400 }, notes: { ...text, maxLength: 240 }
     }), 1, 35)
   }),
-  "storyboard-qc": object({ pass: { type: "boolean" }, severity: { type: "string", enum: ["ok", "minor", "major"] }, summary: nonempty, issues: list(nonempty, 0, 6), shouldRetry: { type: "boolean" }, correctionPrompt: text }),
+  "storyboard-review": object({ summary: nonempty, issues: list(object({ frameIds: list(nonempty, 0, 35), message: nonempty }), 0, 20) }),
+  "storyboard-qc": object({ failureType: { type: "string", enum: storyboardQcFailureTypes }, confidence: { type: "string", enum: ["high", "low"] }, needsDetail: { type: "boolean" }, pass: { type: "boolean" }, severity: { type: "string", enum: ["ok", "minor", "major"] }, summary: nonempty, issues: list(nonempty, 0, 6), shouldRetry: { type: "boolean" }, correctionPrompt: text }),
   "storyboard-export-captions": captions,
   "storyboard-export-visual-captions": captions
 };

@@ -91,3 +91,35 @@ test("spatial plans reach generation and review, survive reload, and clear after
  expect((await savedFrames(page))[0].generatedDirection.spatial).toEqual(spatial);
  expect(errors).toEqual([]);
 });
+
+ test("sequence review is advisory and quality mode persists",async({page},testInfo)=>{
+ const {card,errors}=await setup(page,true);let reviews=0,images=0;
+ await page.route("**/api/node/storyboard-review",r=>{reviews++;return r.fulfill({json:{review:{summary:"Sequence reads clearly",directionsOnly:true,issues:[{frameIds:["frame-1"],message:"Consider a closer reaction"}]}}});});
+ await page.route("**/api/node/generate-image",r=>{images++;return r.abort();});
+ await card.getByRole("button",{name:"Review Sequence",exact:true}).click();
+ await expect(card.getByText("Sequence reads clearly",{exact:true})).toBeVisible();
+ await expect(card.getByText("Panels 2: Consider a closer reaction",{exact:true})).toBeVisible();
+ expect(reviews).toBe(1);expect(images).toBe(0);expect((await savedFrames(page)).map(f=>f.resultUrl)).toEqual(frames.map(f=>f.resultUrl));
+ await card.getByText("Advanced",{exact:true}).click();
+ await expect(card.getByLabel("Storyboard quality control")).toHaveValue("off");
+ await card.getByLabel("Storyboard quality control").selectOption("deep");
+ await expect.poll(()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.storyboardQcMode)).toBe("deep");
+ await page.screenshot({path:testInfo.outputPath("quality-control.png")});
+ await page.reload();await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ await expect(card.getByLabel("Storyboard quality control")).toHaveValue("deep");
+ await card.getByRole("tab",{name:"Storyboard View",exact:true}).click();
+ await expect(card.getByText("Sequence reads clearly",{exact:true})).toBeVisible();
+ await page.screenshot({path:testInfo.outputPath("sequence-review.png")});
+ const qcRequests=[];
+ await page.route("**/api/node/storyboard-qc",r=>{qcRequests.push(r.request().postDataJSON());return r.fulfill({json:{qc:{pass:true,severity:"ok",summary:"Fine",shouldRetry:false,issues:[],correctionPrompt:""}}});});
+ await page.route("**/api/node/generate-image",r=>r.fulfill({json:{images:[{localUrl:"/outputs/e2e/new.png",mimeType:"image/png"}]}}));
+ await page.route("**/api/node/storyboard-export-frame",r=>r.fulfill({json:{frame:{localUrl:r.request().postDataJSON().sourceUrl,fileName:"new.png"}}}));
+ await card.locator('[data-storyboard-frame-id="frame-0"]').first().getByRole("button",{name:"Run",exact:true}).click();
+ await expect.poll(()=>qcRequests.length).toBe(1);expect(qcRequests[0].qcMode).toBe("deep");
+ await expect(card.getByRole("button",{name:"Review Sequence",exact:true})).toBeEnabled();
+ await card.getByText("Advanced",{exact:true}).click();await card.getByLabel("Storyboard quality control").selectOption("off");
+ await card.getByRole("tab",{name:"Storyboard View",exact:true}).click();
+ await card.locator('[data-storyboard-frame-id="frame-1"]').first().getByRole("button",{name:"Run",exact:true}).click();
+ await expect.poll(async()=> (await savedFrames(page))[1].resultUrl).toBe("/outputs/e2e/new.png");expect(qcRequests).toHaveLength(1);
+ expect(errors).toEqual([]);
+ });

@@ -10461,3 +10461,6 @@ video.newtnode-video-fallback {
 .storyboard-panel-version img { width: 64px; height: 48px; object-fit: contain; }
 .storyboard-panel-version span { flex: 1; min-width: 0; }
 .storyboard-panel-version small { display: block; max-height: 48px; overflow: auto; }
+
+.storyboard-qc-hint { display: block; color: #a5a5a5; font-size: 11px; line-height: 1.4; }
+.storyboard-revision-controls details { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
