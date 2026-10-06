@@ -58,6 +58,9 @@ try {
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
   assert.equal((await (await request("/api/health")).json()).routes.explore, true);
+  const builtIns = await (await request("/api/newt-presets")).json();
+  assert.equal(builtIns.filter(item => item.isSystem).length, 6);
+  for (const item of builtIns) assert.ok((await (await request("/api/newt-presets/" + item.id)).json()).graph.nodes.length);
   const priceStatus = await (await request("/api/pricing")).json();
   assert.equal(priceStatus.enabled, false);
   assert.equal(priceStatus.running, false);

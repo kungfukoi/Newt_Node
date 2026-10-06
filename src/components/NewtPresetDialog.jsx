@@ -122,12 +122,12 @@ export function NewtPresetLibrary({ controller }) {
       <div className="newt-preset-library-controls">
         <select value={controller.selectedId} onChange={(event) => controller.select(event.target.value)} disabled={controller.busy} aria-label="Newt Preset">
           <option value="">{controller.items.length ? "Select preset" : "No presets saved"}</option>
-          {controller.items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.nodeCount})</option>)}
+          {controller.items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.isSystem ? "System" : "User"}, {item.nodeCount})</option>)}
         </select>
         <button type="button" className="icon-button" onClick={controller.insert} disabled={controller.busy || !selected} title="Insert preset" aria-label="Insert preset">
           <Plus size={16} />
         </button>
-        <button type="button" className="icon-button" onClick={controller.remove} disabled={controller.busy || !selected} title="Delete preset" aria-label="Delete preset">
+        <button type="button" className="icon-button" onClick={controller.remove} disabled={controller.busy || !selected || selected.isSystem} title="Delete preset" aria-label="Delete preset">
           <Trash2 size={15} />
         </button>
       </div>

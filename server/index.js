@@ -967,6 +967,7 @@ registerComposerPoseRoutes(app, {
 
 registerNewtPresetRoutes(app, {
   directory: newtPresetsDir,
+  systemDirectory: path.join(__dirname, "system-newt-presets"),
   assetsDirectory: newtPresetAssetsDir,
   assetsUrl: newtPresetAssetsUrl,
   resolveAsset: resolveLocalAssetPath,

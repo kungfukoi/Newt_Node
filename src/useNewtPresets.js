@@ -91,7 +91,7 @@ export function useNewtPresets(adapter) {
 
   const remove = () => {
     const selected = items.find((item) => item.id === selectedId);
-    if (!selected || !window.confirm(`Delete Newt Preset "${selected.name}"? Nodes already placed in projects will be kept.`)) return;
+    if (!selected || selected.isSystem || !window.confirm(`Delete Newt Preset "${selected.name}"? Nodes already placed in projects will be kept.`)) return;
     return perform(async () => {
       await newtPresetsApi.remove(selected.id);
       setItems((current) => current.filter((item) => item.id !== selected.id));
