@@ -25,6 +25,15 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
+  // Annotation ink is an instruction, never output artwork. Restore the clean
+  // source along its footprint, including antialiased edges and a small halo.
+  // Render sketch deliberately turns the drawing into content and is excluded.
+  let annotationMask = null;
+  if (drawing && mode !== "sketch") {
+    const ink = await decode(drawing).extractChannel(3).threshold(1).png().toBuffer();
+    const halo = await decode(ink).blur(2).png().toBuffer();
+    annotationMask = await decode(halo).threshold(1).png().toBuffer();
+  }
   let mask = null;
   if (selection) {
     const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
@@ -37,18 +46,19 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
       mask = await decode(selection).extractChannel(3).threshold(128).negate().png().toBuffer();
     } else mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
   }
-  return { original, width, height, size, selection, mask, submittedPrompt,
+  return { original, width, height, size, selection, mask, annotationMask, submittedPrompt,
     images: blank ? [guide] : [original, guide].filter(Boolean) };
 }
 
 export async function finishImageEdit(prepared, generated) {
   const { data: result, info } = await decode(generated).rotate().resize(prepared.width, prepared.height, { fit: "fill" }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  if (prepared.selection) {
+  if (prepared.selection || prepared.annotationMask) {
     const original = await decode(prepared.original).ensureAlpha().raw().toBuffer();
-    const mask = await decode(prepared.selection).extractChannel(3).raw().toBuffer();
+    const mask = prepared.selection ? await decode(prepared.selection).extractChannel(3).raw().toBuffer() : null;
+    const annotations = prepared.annotationMask ? await decode(prepared.annotationMask).greyscale().raw().toBuffer() : null;
     // Composite in premultiplied alpha; unselected pixels remain byte-for-byte identical.
-    for (let p = 0; p < mask.length; p++) {
-      const i = p * 4, m = mask[p] / 255;
+    for (let p = 0; p < prepared.width * prepared.height; p++) {
+      const i = p * 4, m = (mask ? mask[p] / 255 : 1) * (annotations ? 1 - annotations[p] / 255 : 1);
       if (m === 0) { original.copy(result, i, i, i + 4); continue; }
       const a = result[i + 3] / 255 * m, b = original[i + 3] / 255 * (1 - m), alpha = a + b;
       for (let c = 0; c < 3; c++) result[i + c] = alpha ? Math.round((result[i + c] * a + original[i + c] * b) / alpha) : 0;
