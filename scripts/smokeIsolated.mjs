@@ -193,6 +193,16 @@ try {
   }
   assert.equal(director.referenceTags.length, 19);
   assert.equal(director.referenceTags.at(-1), "@Extra10");
+  const elevenSaved = await (await request("/api/settings", { credentials: { elevenLabs: [{ id: "eleven-smoke", label: "Smoke", key: "eleven-fixture-key" }] }, activeCredentialIds: { elevenLabs: "eleven-smoke" } })).json();
+  assert.equal(elevenSaved.elevenLabsApiKeyConfigured, true);
+  assert.equal(elevenSaved.activeCredentialIds.elevenLabs, "eleven-smoke");
+  assert.equal(JSON.stringify(elevenSaved).includes("eleven-fixture-key"), false);
+  const elevenReloaded = await (await request("/api/settings")).json();
+  assert.equal(elevenReloaded.elevenLabsApiKeyConfigured, true);
+  assert.match(await readFile(path.join(sandbox, ".env"), "utf8"), /^ELEVENLABS_API_KEY=eleven-fixture-key$/m);
+  const elevenDisabled = await (await request("/api/settings", { activeCredentialIds: { elevenLabs: "" } })).json();
+  assert.equal(elevenDisabled.elevenLabsApiKeyConfigured, false);
+  assert.equal(elevenDisabled.credentialProfiles.elevenLabs.length, 1);
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");

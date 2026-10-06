@@ -1,0 +1,18 @@
+import {test,expect} from '@playwright/test';
+import {openFixture} from './helpers.mjs';
+test('ElevenLabs credential field saves the active key masked and reloads',async({page},info)=>{
+ await openFixture(page,{count:1});let saved;
+ let state={credentials:{},activeCredentialIds:{},modelProviderPreferences:{minimaxH3:'local'}};
+ await page.route(/\/api\/settings(?:\?.*)?$/,async r=>{if(r.request().method()==='POST'){saved=r.request().postDataJSON();state={...state,...saved,elevenLabsApiKeyConfigured:true};}return r.fulfill({json:{...state,secrets:{credentials:state.credentials}}});});
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByTitle('Add ElevenLabs key',{exact:true}).click();
+ const input=page.getByRole('textbox',{name:'ElevenLabs API key',exact:true});
+ await page.getByLabel('ElevenLabs API key',{exact:true}).fill('eleven-browser-fixture');
+ await expect(page.getByLabel('ElevenLabs API key',{exact:true})).toHaveAttribute('type','password');
+ await page.getByRole('button',{name:'Save & Validate',exact:true}).click();
+ await expect.poll(()=>saved?.credentials?.elevenLabs?.[0]?.key).toBe('eleven-browser-fixture');
+ expect(saved.activeCredentialIds.elevenLabs).toBe(saved.credentials.elevenLabs[0].id);
+ await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByLabel('ElevenLabs API key',{exact:true})).toHaveValue('eleven-browser-fixture');
+ await page.screenshot({path:info.outputPath('elevenlabs-settings.png')});
+});

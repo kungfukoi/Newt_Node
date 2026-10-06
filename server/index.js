@@ -378,7 +378,8 @@ const apiKeyRuntimeConfig = Object.freeze({
   google: Object.freeze({ envKey: "GOOGLE_API_KEY" }),
   krea: Object.freeze({ envKey: "KREA_API_KEY" }),
   openAi: Object.freeze({ envKey: "OPENAI_API_KEY" }),
-  atlas: Object.freeze({ envKey: "ATLAS_API_KEY" })
+  atlas: Object.freeze({ envKey: "ATLAS_API_KEY" }),
+  elevenLabs: Object.freeze({ envKey: "ELEVENLABS_API_KEY" })
 });
 const initialRuntimeApiKeyValues = Object.freeze(
   Object.fromEntries(
@@ -391,6 +392,7 @@ const runtimeConfigSources = {
   COMFYUI_ROOT: process.env.COMFYUI_ROOT ? "runtime" : "",
   KREA_API_KEY: process.env.KREA_API_KEY ? "runtime" : "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "runtime" : "",
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ? "runtime" : "",
   ATLAS_API_KEY: process.env.ATLAS_API_KEY ? "runtime" : "",
   [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
 };
@@ -399,6 +401,7 @@ const startupProviderCredentials = Object.freeze({
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || "",
   KREA_API_KEY: process.env.KREA_API_KEY || "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || "",
   ATLAS_API_KEY: process.env.ATLAS_API_KEY || ""
 });
 let runtimeModelProviderPreferences = defaultModelProviderPreferences;
@@ -976,7 +979,7 @@ registerNewtPresetRoutes(app, {
 });
 
 function buildHealthPayload() {
-  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY || process.env.ATLAS_API_KEY);
+  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY || process.env.ATLAS_API_KEY || process.env.ELEVENLABS_API_KEY);
   return {
     ok: true,
     version: appVersion,
@@ -1047,6 +1050,7 @@ function buildHealthPayload() {
     kreaApiKeyConfigured: Boolean(process.env.KREA_API_KEY),
     openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
     atlasApiKeyConfigured: Boolean(process.env.ATLAS_API_KEY),
+    elevenLabsApiKeyConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
@@ -1176,8 +1180,8 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     resolveUpdateRepository(),
     resolveUpdateBranch(),
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"]),
-    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
   const credentialConfiguration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
@@ -1190,7 +1194,8 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     google: Boolean(selectedCredentials.google?.key),
     krea: Boolean(selectedCredentials.krea?.key),
     openAi: Boolean(selectedCredentials.openAi?.key),
-    atlas: Boolean(selectedCredentials.atlas?.key)
+    atlas: Boolean(selectedCredentials.atlas?.key),
+    elevenLabs: Boolean(selectedCredentials.elevenLabs?.key)
   };
   const apiKeysFound = Object.values(configuredKeys).some(Boolean);
   const activeApiKeysFound = apiKeysFound;
@@ -1207,6 +1212,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     kreaApiKeyConfigured: configuredKeys.krea,
     openAiApiKeyConfigured: configuredKeys.openAi,
     atlasApiKeyConfigured: configuredKeys.atlas,
+    elevenLabsApiKeyConfigured: configuredKeys.elevenLabs,
     apiKeysFound,
     activeApiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
@@ -1241,8 +1247,8 @@ async function saveRuntimeSettings(body = {}) {
   const repository = normalizeUpdateRepository(body.repository);
   const [settingsValues, envValues, disabledEnvValues] = await Promise.all([
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"]),
-    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"])
   ]);
   const currentConfiguration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
   const currentSelectedCredentials = activeProviderCredentials(
@@ -1316,8 +1322,8 @@ async function saveRuntimeSettings(body = {}) {
 async function validateRuntimeApiKeys() {
   const [settingsValues, envValues, disabledEnvValues] = await Promise.all([
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"]),
-    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"])
   ]);
   const configuration = readProviderCredentialConfiguration(settingsValues, envValues, disabledEnvValues);
   const checkedAt = new Date().toISOString();
@@ -2121,8 +2127,8 @@ async function requestServerRestart() {
 
 async function refreshRuntimeConfigFromEnvFile() {
   const [envValues, disabledEnvValues, settingsValues] = await Promise.all([
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "COMFYUI_ROOT", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", updateRepositoryEnvKey]),
-    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY"]),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "COMFYUI_ROOT", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY", updateRepositoryEnvKey]),
+    readCommentedEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"]),
     readRuntimeSettingsStore()
   ]);
 
@@ -2163,6 +2169,7 @@ async function readRuntimeSettingsStore() {
     kreaApiKey: optionalRuntimeSetting(data?.kreaApiKey) || "",
     openAiApiKey: optionalRuntimeSetting(data?.openAiApiKey) || "",
     atlasApiKey: optionalRuntimeSetting(data?.atlasApiKey) || "",
+    elevenLabsApiKey: optionalRuntimeSetting(data?.elevenLabsApiKey) || "",
     repository: normalizeUpdateRepository(data?.repository),
     comfyWanRootPath: normalizeComfyRootPath(data?.comfyWanRootPath),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences),
@@ -2199,6 +2206,7 @@ async function writeRuntimeSettingsStore(patch) {
     delete next.kreaApiKey;
     delete next.openAiApiKey;
     delete next.atlasApiKey;
+    delete next.elevenLabsApiKey;
     delete next.providerPreferences;
   }
   if (patch.activeCredentialIds !== undefined) {

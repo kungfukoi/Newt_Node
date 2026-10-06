@@ -81,7 +81,7 @@ test("a routed provider activates its sole saved credential without guessing bet
   });
   assert.deepEqual(
     activateSoleProviderCredentials(credentials, {}, ["atlas", "openAi"]),
-    { fal: "", google: "", krea: "", openAi: "", atlas: "atlas-only" }
+    { fal: "", google: "", krea: "", openAi: "", atlas: "atlas-only", elevenLabs: "" }
   );
 });
 
@@ -175,4 +175,11 @@ test("an active .env key takes precedence over a commented value", () => {
   assert.equal(recovered.credentials.openAi.length, 1);
   assert.equal(recovered.credentials.openAi[0].key, "active-openai");
   assert.equal(activeProviderCredentials(recovered.credentials, recovered.activeCredentialIds).openAi.key, "active-openai");
+});
+
+test("ElevenLabs keys import, activate and disable without losing their profile", () => {
+ const imported = mergeProviderCredentialsWithEnv({env:{ELEVENLABS_API_KEY:"eleven-test"}});
+ assert.equal(activeProviderCredentials(imported.credentials,imported.activeCredentialIds).elevenLabs.key,"eleven-test");
+ const disabled = mergeProviderCredentialsWithEnv({...imported,disabledEnv:{ELEVENLABS_API_KEY:"eleven-test"}});
+ assert.equal(disabled.activeCredentialIds.elevenLabs,"");assert.equal(disabled.credentials.elevenLabs.length,1);
 });

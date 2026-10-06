@@ -58,3 +58,10 @@ test("provider key validation does not send missing keys or return secret values
   assert.equal(validation.providers.atlas.status, "missing");
   assert.equal(JSON.stringify(validation).includes("secret"), false);
 });
+
+test("ElevenLabs uses a read-only authenticated check and restricted keys stay unverified", async () => {
+ const request=providerKeyValidationRequest("elevenLabs","fixture");
+ assert.equal(request.url,"https://api.elevenlabs.io/v1/user");assert.equal(request.options.method,"GET");assert.equal(request.options.headers["xi-api-key"],"fixture");
+ assert.equal((await validateProviderKey("elevenLabs","fixture",{fetchImpl:async()=>({status:403})})).status,"unverified");
+ assert.equal((await validateProviderKey("elevenLabs","fixture",{fetchImpl:async()=>({status:200})})).status,"valid");
+});

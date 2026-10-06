@@ -3,7 +3,7 @@ const providerKeyValidationTimeoutMs = 8000;
 export async function validateProviderKeys(keys = {}, { fetchImpl = fetch, timeoutMs = providerKeyValidationTimeoutMs } = {}) {
   const checkedAt = new Date().toISOString();
   const entries = await Promise.all(
-    ["fal", "google", "krea", "openAi", "atlas"].map(async (provider) => [
+    ["fal", "google", "krea", "openAi", "atlas", "elevenLabs"].map(async (provider) => [
       provider,
       await validateProviderKey(provider, keys[provider], { fetchImpl, timeoutMs })
     ])
@@ -21,6 +21,7 @@ export async function validateProviderKey(provider, key, { fetchImpl = fetch, ti
   timeout.unref?.();
   try {
     const response = await fetchImpl(request.url, { ...request.options, signal: controller.signal });
+    if (provider === "elevenLabs" && response.status === 403) return { status: "unverified", reason: "restricted-key" };
     return providerKeyValidationResult(response.status);
   } catch (error) {
     return { status: "unverified", reason: error?.name === "AbortError" ? "timeout" : "unavailable" };
@@ -60,6 +61,10 @@ export function providerKeyValidationRequest(provider, key) {
       options: { method: "GET", headers: { Authorization: `Bearer ${key}` } }
     };
   }
+  if (provider === "elevenLabs") return {
+    url: "https://api.elevenlabs.io/v1/user",
+    options: { method: "GET", headers: { "xi-api-key": key } }
+  };
   throw new Error(`Unsupported API key provider: ${provider}`);
 }
 

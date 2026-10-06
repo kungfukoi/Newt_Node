@@ -42,11 +42,12 @@ const providerDefinitions = Object.freeze([
   Object.freeze({ id: "google", label: "Google" }),
   Object.freeze({ id: "krea", label: "Krea" }),
   Object.freeze({ id: "openAi", label: "OpenAI" }),
-  Object.freeze({ id: "atlas", label: "Atlas Cloud" })
+  Object.freeze({ id: "atlas", label: "Atlas Cloud" }),
+  Object.freeze({ id: "elevenLabs", label: "ElevenLabs" })
 ]);
 
-const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [], atlas: [] });
-const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "", atlas: "" });
+const emptyCredentialState = Object.freeze({ fal: [], google: [], krea: [], openAi: [], atlas: [], elevenLabs: [] });
+const emptyActiveCredentialIds = Object.freeze({ fal: "", google: "", krea: "", openAi: "", atlas: "", elevenLabs: "" });
 const modelProviderPreferenceKeys = Object.freeze(Object.keys(defaultModelProviderPreferences));
 
 export default function SettingsPage({ onUserPreferencesSaved } = {}) {
@@ -1078,6 +1079,7 @@ function providerConfiguredField(provider) {
   if (provider === "google") return "googleApiKeyConfigured";
   if (provider === "krea") return "kreaApiKeyConfigured";
   if (provider === "atlas") return "atlasApiKeyConfigured";
+  if (provider === "elevenLabs") return "elevenLabsApiKeyConfigured";
   return "openAiApiKeyConfigured";
 }
 
