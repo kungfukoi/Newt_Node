@@ -1,8 +1,9 @@
+import { isFlux3Model } from "./flux3.js";
 import { openAiImage25Models, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 import { isIdeogram45Model } from "./ideogram45.js";
 
-export const imageEditModelOptions = [openAiImage25Models.sunburst, openAiImage25Models.flare, imageModelNames.ideogram45];
+export const imageEditModelOptions = [openAiImage25Models.sunburst, openAiImage25Models.flare, imageModelNames.ideogram45, imageModelNames.flux3];
 export const normalizeImageEditModel = (model) => {
   const normalized = normalizeOpenAiImage25Model(model, "sunburst");
   return imageEditModelOptions.includes(normalized) ? normalized : openAiImage25Models.sunburst;
@@ -27,7 +28,7 @@ export function imageEditPoint(clientX, clientY, rect) {
 export function imageEditSize(width, height, model) {
   if (![width, height].every((value) => Number.isInteger(value) && value > 0) || width * height > imageEditMaxPixels)
     throw new Error("This image is too large for the editor. Use an image up to 24 megapixels.");
-  if (isIdeogram45Model(model)) return { width, height };
+  if (isIdeogram45Model(model) || isFlux3Model(model)) return { width, height };
   if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.5 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
   let scale = Math.min(1, 3840 / Math.max(width, height), Math.sqrt(8294400 / (width * height)));
   scale = Math.max(scale, Math.sqrt(655360 / (width * height)));
@@ -54,7 +55,7 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
       ? "The drawn marks are a composition sketch. Turn their shapes, placement and colors into finished visual content according to the brief. Preserve the sketch's intended arrangement, not its rough pen texture unless requested."
       : "Image 2 shows annotations over the same original. Circles, arrows, outlines, handwriting and colored strokes are editing instructions and location guides, not artwork to copy into the result. Interpret them together with the brief. Remove every guide mark from the final image; use the clean original to recover the underlying content. Only include literal text if the brief explicitly requests visible text."
       : "Use the written brief to direct the edit.",
-    hasSelection ? `The ${isIdeogram45Model(model) ? "black" : "transparent"} area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay.` : "",
+    hasSelection && isFlux3Model(model) ? "The last reference is a black-and-white selection guide aligned with image 1: white marks the area to change; black must remain unchanged. Use it only to locate the edit. Do not reproduce the guide." : hasSelection ? `The ${isIdeogram45Model(model) ? "black" : "transparent"} area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay.` : "",
     mode === "remove" ? "Remove the selected content and reconstruct the exposed area naturally from its surroundings. Do not add replacement objects unless requested." : "",
     brief ? `USER EDIT BRIEF:\n${brief}` : mode === "sketch" ? "Render a polished finished version of the sketch." : "",
     "Return one image only. Do not add comparison panels, interface controls, borders, or annotation marks."

@@ -169,3 +169,5 @@ New Storyboard plans track character positions and camera visibility across pane
 ### Audio Model
 
 Add **Audio Model** from the node palette to generate Text to Speech, Speech to Speech, Sound Effects, or Music using ElevenLabs. Configure the active ElevenLabs key in Settings; voice modes need Voices Read and the corresponding generation permission. Select a Default or Mine voice, model, duration and advanced controls in the node. Results support playback, download, Preview, Output, compatible video/Director audio inputs, and workflow packages. Batches retain successful outputs if another generation fails. Cost labels are estimates; custom voice charges and unknown durations remain unpriced.
+
+Flux 3 image generation and editing are available with a Fal key. Select Flux 3 in image model controls or Settings → User Preferences → image-edit model. It supports 1K, 2K, and 4K output and up to ten reference images.

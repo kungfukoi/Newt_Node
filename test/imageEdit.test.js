@@ -98,3 +98,16 @@ test("EXIF orientation is normalized before edit layers align", async () => {
   assert.equal(prepared.width, 90);
   assert.equal(prepared.height, 60);
 });
+
+test("Flux selection guide marks edits white and preserves unselected original pixels", async () => {
+  const source = await solid(64, 96, "#224466");
+  const selection = await sharp({ create: { width: 64, height: 96, channels: 4, background: "#00000000" } })
+    .composite([{ input: await solid(16, 16, "#ffffff"), left: 0, top: 0 }]).png().toBuffer();
+  const prepared = await prepareImageEdit({ source, selection, mode: "remove", model: "Flux 3" });
+  assert.deepEqual((await pixel(prepared.mask, 0, 0)).slice(0, 3), [255, 255, 255]);
+  assert.deepEqual((await pixel(prepared.mask, 40, 40)).slice(0, 3), [0, 0, 0]);
+  assert.match(prepared.submittedPrompt, /last reference/);
+  const result = await finishImageEdit(prepared, await solid(64, 96, "#ff0000"));
+  assert.deepEqual(await pixel(result, 40, 40), await pixel(source, 40, 40));
+  assert.deepEqual(await pixel(result, 0, 0), [255, 0, 0, 255]);
+});

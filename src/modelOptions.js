@@ -33,6 +33,7 @@ export const imageModelNames = {
   openAiImage25Sunburst: openAiImage25Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
+  flux3: "Flux 3",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -57,6 +58,7 @@ export const imageModelOptions = [
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
+  imageModelNames.flux3,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];

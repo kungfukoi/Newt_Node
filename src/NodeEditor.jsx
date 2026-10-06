@@ -1,3 +1,4 @@
+import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
 import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
@@ -792,7 +793,7 @@ const moodBoardOutputFileName = "MOOD_BOARD.png";
 const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
 const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45, imageModelNames.flux3];
 const editVideoOutputOptions = [
   ["mp4", "MP4"],
   ["webm", "WebM"],
@@ -821,6 +822,7 @@ const coverageModelOptions = [
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.nanoBananaPro,
   imageModelNames.ideogram45,
+  imageModelNames.flux3,
   imageModelNames.reve21,
   imageModelNames.seedream5Pro
 ];
@@ -1052,6 +1054,7 @@ const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardFixedModel = imageModelNames.openAiImage2;
+const storyboardImageModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.flux3];
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
 const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBoardOutputPortId = "storyboardOut";
@@ -12496,7 +12499,7 @@ function NodeBody({
           <section className="storyboard-advanced storyboard-scroll-surface">
             <div className="storyboard-advanced-panel">
               <div className="storyboard-advanced-controls">
-                <NodeRow label="Image Model"><select aria-label="Storyboard image model" value={node.data.model || storyboardFixedModel} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { model: event.target.value })}>{[imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst].map(model => <option key={model} disabled={!imageModelOptions.includes(model)}>{model}</option>)}</select></NodeRow>
+                <NodeRow label="Image Model"><select aria-label="Storyboard image model" value={node.data.model || storyboardFixedModel} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { model: event.target.value })}>{storyboardImageModelOptions.map(model => <option key={model} disabled={!imageModelOptions.includes(model)}>{model}</option>)}</select></NodeRow>
                 <div className="storyboard-style-master-row">
                   <span>Storyboard Style</span>
                   <button
@@ -18462,6 +18465,7 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isFlux3Model(model)) return flux3AspectRatios;
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
@@ -18743,6 +18747,7 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model) {
+  if (isFlux3Model(model)) return flux3ResolutionOptions;
   if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isSeedream5ImageModel(model)) return seedream5ResolutionOptions;
@@ -23806,7 +23811,7 @@ function normalizeStoryboardData(data = {}) {
     storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
     sceneName: data.sceneName || "Scene 1",
     frameCount: normalizeStoryboardFrameCountValue(data.frameCount),
-    model: [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst].includes(data.model) ? data.model : storyboardFixedModel,
+    model: storyboardImageModelOptions.includes(data.model) ? data.model : storyboardFixedModel,
     aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
     resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
     storyboardQcMode: storyboardQcMode(data),

@@ -1,3 +1,4 @@
+import { isFlux3Model } from "../src/flux3.js";
 import sharp from "sharp";
 import { isIdeogram45Model } from "../src/ideogram45.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
@@ -27,7 +28,9 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   let mask = null;
   if (selection) {
     const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
-    if (isIdeogram45Model(model)) {
+    if (isFlux3Model(model)) {
+      mask = await decode(selection).extractChannel(3).png().toBuffer();
+    } else if (isIdeogram45Model(model)) {
       const pixels = await decode(selection).extractChannel(3).raw().toBuffer();
       if (!pixels.some((value) => value < 128) || !pixels.some((value) => value >= 128))
         throw new Error("Ideogram requires both selected and unselected areas. Clear the selection to edit the entire image.");

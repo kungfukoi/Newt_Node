@@ -30,7 +30,8 @@ test("character sheets expose the mirrored choices and reject removed Seedream s
     imageModelNames.nanoBananaPro,
     imageModelNames.openAiImage2,
     imageModelNames.openAiImage25Sunburst,
-    imageModelNames.ideogram45
+    imageModelNames.ideogram45,
+    imageModelNames.flux3
   ]);
   assert.equal(characterSheetModelOptions.includes(imageModelNames.seedream5Pro), false);
   assert.deepEqual(characterSheetGenerationSettings(imageModelNames.seedream5Pro), {

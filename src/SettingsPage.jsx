@@ -629,7 +629,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             <label className="settings-preference-model">
               <span>
                 <strong>Image Editor Model</strong>
-                <small>Model used when editing an image from a preview. Ideogram 4.5 uses Fal.</small>
+                <small>Model used when editing an image from a preview. Ideogram 4.5 and Flux 3 use Fal.</small>
               </span>
               <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
                 onChange={(event) => setUserPreferences((current) => ({ ...current, imageEditorModel: event.target.value }))}>

@@ -6,7 +6,8 @@ export const characterSheetModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
-  imageModelNames.ideogram45
+  imageModelNames.ideogram45,
+  imageModelNames.flux3
 ];
 
 export function normalizeCharacterSheetModel(value) {

@@ -1,3 +1,5 @@
+import { generateFlux3 } from "./flux3.js";
+import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
@@ -482,6 +484,7 @@ const imageModelNames = {
   openAiImage25Sunburst: openAiImage25Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
+  flux3: "Flux 3",
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -494,6 +497,7 @@ const imageModelOptions = [
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
+  imageModelNames.flux3,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -898,7 +902,12 @@ registerImageEditRoutes(app, {
     if (source.buffer.length > 32 * 1024 * 1024) throw httpError(413, "Image editing supports source files up to 32 MB.");
     return source;
   },
-  generate: async ({ provider, model, variant, prompt, quality, size, images, mask }) => {
+  generate: async ({ provider, model, variant, prompt, quality, size, images, mask, resolution }) => {
+    if (isFlux3Model(model)) {
+      return generateFlux3({ prompt, images, mask, aspectRatio: "auto", resolution }, {
+        upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
+      });
+    }
     if (isIdeogram45Model(model)) {
       return generateIdeogram45({ prompt, quality, images, mask, editPrecision: "high", preserveSourceSize: true }, {
         upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
@@ -1038,6 +1047,7 @@ function buildHealthPayload() {
       previewInpaint: true,
       imageEdit: true,
       ideogram45: true,
+      flux3: true,
       explore: true,
       storyboardRevisions: true,
       apiJsonErrors: true,
@@ -4108,58 +4118,60 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-ideogram-4-5") {
+    if (["fal-ideogram-4-5", "fal-flux-3"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
 
-      const ideogramImage = await generateIdeogram45({
+      const flux = isFlux3Model(selectedModel.displayName);
+      const resolution = flux ? (req.body.resolution || "2K") : req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K";
+      const modelImage = await (flux ? generateFlux3 : generateIdeogram45)({
         prompt,
         images: await Promise.all(imagePromptUrls.map((url) => readLocalAsset(url))),
         imageLabels: imagePromptLabels,
-        aspectRatio, resolution: req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K",
+        aspectRatio, resolution,
         quality: "high"
       }, { upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult });
-      const output = await downloadImage(req, ideogramImage.remoteImage.url, "ideogram-4-5", ideogramImage.remoteImage.content_type || ideogramImage.remoteImage.mimeType);
-      const cost = ideogramImage.cost;
+      const output = await downloadImage(req, modelImage.remoteImage.url, flux ? "flux-3" : "ideogram-4-5", modelImage.remoteImage.content_type || modelImage.remoteImage.mimeType);
+      const cost = modelImage.cost;
 
       await appendHistory({
-        id: ideogramImage.requestId || randomUUID(),
+        id: modelImage.requestId || randomUUID(),
         createdAt: new Date().toISOString(),
         mediaType: "image",
         provider: "fal.ai",
         modelName: selectedModel.displayName,
-        endpoint: ideogramImage.endpoint,
-        mode: "Ideogram 4.5 " + ideogramImage.mode,
+        endpoint: modelImage.endpoint,
+        mode: selectedModel.displayName + " " + modelImage.mode,
         prompt,
-        submittedPrompt: ideogramImage.submittedPrompt,
+        submittedPrompt: modelImage.submittedPrompt,
         project: projectFromBody(req.body),
         node: nodeFromBody(req.body),
         settings: {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: req.body.resolution === "2K" || req.body.resolution === "4K" ? "2K" : "1K",
-          quality: ideogramImage.input.quality,
-          imageSize: ideogramImage.input.image_size,
-          editPrecision: ideogramImage.input.edit_precision,
-          imagePromptCount: ideogramImage.referenceCount,
-          imagePromptLabels: ideogramImage.referenceLabels
+          resolution,
+          quality: modelImage.input.quality,
+          imageSize: modelImage.input.image_size,
+          editPrecision: modelImage.input.edit_precision,
+          imagePromptCount: modelImage.referenceCount,
+          imagePromptLabels: modelImage.referenceLabels
         },
         cost,
-        remoteImage: ideogramImage.remoteImage,
+        remoteImage: modelImage.remoteImage,
         localImage: output.publicPath,
         localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
-        text: ideogramImage.resultText || ""
+        text: modelImage.resultText || ""
       });
 
       return res.json({
-        text: ideogramImage.resultText || "",
+        text: modelImage.resultText || "",
         cost,
         image: {
-          ...ideogramImage.remoteImage,
+          ...modelImage.remoteImage,
           localUrl: output.publicPath,
           thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
@@ -18751,6 +18763,7 @@ function resolveImageModel(model) {
     };
   }
 
+  if (isFlux3Model(model)) return { provider: "fal-flux-3", displayName: imageModelNames.flux3, id: flux3TextEndpoint };
   if (isIdeogram45Model(model)) {
     return { provider: "fal-ideogram-4-5", displayName: imageModelNames.ideogram45, id: ideogram45TextEndpoint };
   }
@@ -19234,6 +19247,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-flux-3") return flux3AspectRatios;
   if (provider === "fal-ideogram-4-5") return ideogram45AspectRatios;
   if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;

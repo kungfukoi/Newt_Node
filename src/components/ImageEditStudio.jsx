@@ -1,3 +1,4 @@
+import { isFlux3Model, flux3ResolutionOptions } from "../flux3.js";
 import React from "react";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
@@ -17,7 +18,7 @@ function IconButton({ icon: Icon, label, active = false, ...props }) {
 
 export function ImageEditStudio({ item, workflowContext, falAvailable, provider: defaultProvider = falAvailable ? "fal" : "", model: selectedModel, canApply, onAccept, onClose, showApiCosts = false }) {
   const model = normalizeImageEditModel(selectedModel);
-  const provider = isIdeogram45Model(model) ? (falAvailable ? "fal" : "") : defaultProvider;
+  const provider = isIdeogram45Model(model) || isFlux3Model(model) ? (falAvailable ? "fal" : "") : defaultProvider;
   const [base, setBase] = React.useState(item);
   const [size, setSize] = React.useState(null);
   const [history, setHistory] = React.useState(emptyHistory);
@@ -31,6 +32,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [prompt, setPrompt] = React.useState("");
   const [mode, setMode] = React.useState("edit");
   const [blank, setBlank] = React.useState(false);
+  const [resolution, setResolution] = React.useState("2K");
   const [quality, setQuality] = React.useState("high");
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -166,7 +168,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
-      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), prompt, mode, quality, model, blank: String(blank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), prompt, mode, quality, resolution, model, blank: String(blank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
       const data = await nodeApi.editImage(form);
@@ -228,13 +230,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
-          <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>
+          {isFlux3Model(model) ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={e => setResolution(e.target.value)}>{flux3ResolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>}
         </fieldset>}
         <div className="ies-run-section">
           <small>{isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
           {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
-          {!providerAvailable && <p role="status" className="ies-warning">{isIdeogram45Model(model) ? "Enable a Fal key in Settings to use Ideogram 4.5." : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
+          {!providerAvailable && <p role="status" className="ies-warning">{(isIdeogram45Model(model) || isFlux3Model(model)) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
         </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">

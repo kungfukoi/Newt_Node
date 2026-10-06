@@ -136,3 +136,15 @@ test("history failures do not lose a generated and saved edit", () => withEditor
   assert.match(data.warning, /History/);
   assert.equal(saves.length, 1);
 }, { recordHistory: async () => { throw new Error("history unavailable"); } }));
+
+test("Flux editor uses saved model and resolution, rejects unsupported providers before generation", async () => {
+  await withEditor(async ({ post, calls, histories }) => {
+    assert.equal((await post({ model: "Flux 3", provider: "atlas" })).status, 400);
+    assert.equal((await post({ model: "Flux 3", resolution: "8K" })).status, 400);
+    assert.equal(calls.length, 0);
+    const response = await post({ model: "Flux 3", resolution: "4K" });
+    assert.equal(response.status, 200); assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "Flux 3"); assert.equal(calls[0].resolution, "4K");
+    assert.equal(calls[0].variant, undefined); assert.equal(histories[0].settings.resolution, "4K");
+  });
+});
