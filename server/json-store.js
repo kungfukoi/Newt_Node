@@ -19,11 +19,11 @@ export async function readJsonFile(filePath, fallback) {
   }
 }
 
-export function writeJsonAtomic(filePath, value, { renameFile = renameFileWithRetry } = {}) {
+export function writeJsonAtomic(filePath, value, { renameFile = renameFileWithRetry, mode } = {}) {
   const key = path.resolve(filePath);
   const json = JSON.stringify(value, null, 2);
   JSON.parse(json);
-  const operation = (pendingWrites.get(key) || Promise.resolve()).catch(() => {}).then(() => replaceJson(filePath, json, renameFile));
+  const operation = (pendingWrites.get(key) || Promise.resolve()).catch(() => {}).then(() => replaceJson(filePath, json, renameFile, mode));
   pendingWrites.set(key, operation);
   operation.finally(() => {
     if (pendingWrites.get(key) === operation) pendingWrites.delete(key);
@@ -31,13 +31,13 @@ export function writeJsonAtomic(filePath, value, { renameFile = renameFileWithRe
   return operation;
 }
 
-async function replaceJson(filePath, json, renameFile) {
+async function replaceJson(filePath, json, renameFile, mode) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
 
   try {
     await retryTransientFileOperation(async () => {
-      const handle = await open(tempPath, "w");
+      const handle = await open(tempPath, "w", mode);
       try {
         await handle.writeFile(json, "utf8");
         await handle.sync();
