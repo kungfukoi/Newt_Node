@@ -32,10 +32,11 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   references = await Promise.all(references.map(async reference => ({ ...reference, buffer: await decode(reference.buffer).rotate().png().toBuffer() })));
   const referenceIndices = Object.fromEntries(references.map((reference, index) => [reference.url, guideIndex + index + 1]));
   const staged = await prepareMoveCutouts({ original, boxes, model, objects: boxObjects, width, height });
-  const boxEdit = await prepareEditBoxes({ boxes, original, width, height, selection, guideIndex, referenceIndices, staged });
+  const boxEdit = await prepareEditBoxes({ boxes, original, width, height, selection, guideIndex, referenceIndices, staged, objects: boxObjects });
   selection = boxEdit.selection;
+  const sendSelection = selection && !(boxes.length && isFlux3Model(model));
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
-  let submittedPrompt = buildImageEditPrompt({ prompt: [prompt, boxEdit.prompt].filter(Boolean).join("\n\n"), mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
+  let submittedPrompt = buildImageEditPrompt({ prompt: [prompt, boxEdit.prompt].filter(Boolean).join("\n\n"), mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(sendSelection), contextualSelection: Boolean(boxes.length), model });
   if (staged.ids.length) submittedPrompt = "Image 1 is a prepared composite with the selected objects already moved. Neutral gray source vacancies need background reconstruction. All scene guides show this same prepared state. The move requested in the user brief has already been applied geometrically; do not repeat it. Remove the neutral gray placeholders and reconstruct background only at each vacated source. Never restore or duplicate the moved subject at its old location. Remove the original object completely, including its contact/cast shadows, ambient occlusion, reflections and color spill; reconstruct the supporting surface from the surrounding scene. The source and destination context margins are editable for these effects. Regenerate and relight destination cutouts at their specified geometry, inferring light direction, softness, color, exposure, supporting surface, perspective and depth from the full scene. Add new contact shadows, cast shadows, reflections and color interaction appropriate to their new location. Preserve subject identity and unrelated objects, including their shadows. Where regions overlap, the destination placement takes precedence.\n\n" + submittedPrompt.replace("Edit image 1, the clean original.", "Finish image 1, the prepared composite.");
   if (boxes.length && isFlux3Model(model)) {
     const structured = fluxBoxInstructions(boxes, width, height, referenceIndices, staged.ids);
@@ -61,7 +62,7 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     }
   }
   let mask = null;
-  if (selection) {
+  if (sendSelection) {
     const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
     if (imageEditUsesSelectionGuide(model)) {
       mask = await decode(selection).extractChannel(3).png().toBuffer();
@@ -72,15 +73,16 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
       mask = await decode(selection).extractChannel(3).threshold(128).negate().png().toBuffer();
     } else mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
   }
-  return { original: staged.base, width, height, size, selection, mask, annotationMask, submittedPrompt, boxStrategy: staged.ids.length ? "cutout-cleanup" : boxes.length && isFlux3Model(model) ? "flux-structured" : "guide", boxes: boxEdit.boxes,
+  return { original: staged.base, width, height, size, selection, compositeSelection: boxEdit.compositeSelection, mask, annotationMask, submittedPrompt, boxStrategy: staged.ids.length ? "cutout-cleanup" : boxes.length && isFlux3Model(model) ? "flux-structured" : Object.keys(boxObjects).length ? "object-guided" : "guide", boxes: boxEdit.boxes,
     images: blank ? [guide] : [staged.base, guide, boxEdit.guide, ...references.map(reference => reference.buffer)].filter(Boolean) };
 }
 
 export async function finishImageEdit(prepared, generated) {
   const { data: result, info } = await decode(generated).rotate().resize(prepared.width, prepared.height, { fit: "fill" }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  if (prepared.selection || prepared.annotationMask) {
+  const compositeSelection = prepared.compositeSelection || prepared.selection;
+  if (compositeSelection || prepared.annotationMask) {
     const original = await decode(prepared.original).ensureAlpha().raw().toBuffer();
-    const mask = prepared.selection ? await decode(prepared.selection).extractChannel(3).raw().toBuffer() : null;
+    const mask = compositeSelection ? await decode(compositeSelection).extractChannel(3).raw().toBuffer() : null;
     const annotations = prepared.annotationMask ? await decode(prepared.annotationMask).greyscale().raw().toBuffer() : null;
     // Composite in premultiplied alpha; unselected pixels remain byte-for-byte identical.
     for (let p = 0; p < prepared.width * prepared.height; p++) {

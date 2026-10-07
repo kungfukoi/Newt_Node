@@ -1,6 +1,6 @@
 import React from "react";
 import { drawObjectMask } from "../objectSelection.js";
-import { boxNeedsCutout } from "../imageEditBoxModels.js";
+import { boxNeedsObject, boxNeedsIdentification } from "../imageEditBoxModels.js";
 import { boxCorners, boxContextRect, boxFromDrag, transformEditBox, maxEditBoxes, editBoxModes, clampBoxValue } from "../imageEditBoxes.js";
 
 export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedId, onSelect, onCommit, onGesture }) {
@@ -98,12 +98,12 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
     {box && <>
       <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label>Description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
-      {box.mode === "move" && <>
-        <small>{boxNeedsCutout(box, model) ? "Select the object first. Its cutout is placed at the destination; your edit model removes source shadows and relights the subject for its new surroundings. SAM 3 selection is a separate Fal request." : "FLUX 3 uses structured source/destination boxes. Adding rotation requires an isolated object."}</small>
-        {boxNeedsCutout(box, model) && <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>}
+      {boxNeedsObject(box) && <>
+        <small>{boxNeedsIdentification(box, model) ? "Generate identifies the named object with SAM 3 when no selection exists (a separate Fal request), then uses its shape as the placement reference." : "FLUX 3 identifies the named subject using native source/destination instructions. Select object for a precise shape if needed."} The full generated scene is kept for continuous lighting; Keep boxes protect exact pixels.</small>
+        <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>
         {box.sourceMask && <small role="status">Object selected. Check the highlighted source and destination preview before generating.</small>}
       </>}
-      {box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the dashed area to include shadows, reflections and room for new lighting. Keep boxes protect nearby objects.</small></label>}
+      {box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the context around the object for shadows and lighting. Dashed boxes indicate approximate reach; blending follows the selected shape. Keep boxes protect nearby objects.</small></label>}
       {box.mode === "text" && <label>Text to render<textarea aria-label="Box text" rows={2} maxLength={500} value={box.text || ""} onChange={event => onCommit({ ...box, text: event.target.value })} /></label>}
       {box.mode === "reference" && <>
         <label>Reference image<input aria-label="Box reference image" type="file" accept="image/*" disabled={busy} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUploadReference(box, file); }} /></label>
@@ -135,9 +135,10 @@ export function ImageEditBoxPreview({ box, size, sourceUrl }) {
       if (cancelled) return;
       const cutout = document.createElement("canvas"); cutout.width = width; cutout.height = height;
       const c = cutout.getContext("2d");
-      c.save(); c.beginPath(); c.rect((box.source.x - box.source.w / 2) * width, (box.source.y - box.source.h / 2) * height, box.source.w * width, box.source.h * height); c.clip();
+      c.save();
       c.drawImage(image, 0, 0, width, height); c.globalCompositeOperation = "destination-in"; c.fillStyle = "white"; drawObjectMask(c, box.sourceMask, width, height); c.restore();
       context.save(); context.fillStyle = "#f2db5177"; drawObjectMask(context, box.sourceMask, width, height); context.restore();
+      if (box.mode !== "move") return;
       context.save(); context.translate(box.target.x * width, box.target.y * height); context.rotate(box.target.rotation * Math.PI / 180); context.scale(box.target.w / box.source.w, box.target.h / box.source.h); context.translate(-box.source.x * width, -box.source.y * height); context.drawImage(cutout, 0, 0); context.restore();
     };
     image.src = sourceUrl;

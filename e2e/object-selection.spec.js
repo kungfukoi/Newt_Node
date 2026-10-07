@@ -141,3 +141,22 @@ test("Object Selection converts to a named Move box with its exact mask and no e
   expect(form.get("model")).toBe("Flux 3");
   expect(selections).toBe(1);
 });
+
+test("native Flux boxes identify by description without a segmentation request", async ({ page }) => {
+  const { editor } = await openEditor(page); let selections = 0, form;
+  await page.route("**/api/node/image-objects", route => { selections++; return route.fulfill({ json: { masks: [] } }); });
+  await page.route("**/api/node/edit-image", async route => {
+    const request = route.request();
+    form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
+    await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", type: "image" } } });
+  });
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await move(page, editor, .2, .2); await page.mouse.down(); await move(page, editor, .4, .4); await page.mouse.up();
+  await editor.getByLabel("Box description", { exact: true }).fill("Cat");
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect.poll(() => Boolean(form)).toBe(true);
+  expect(selections).toBe(0);
+  expect(form.get("boxObjects")).toBeNull();
+  expect(JSON.parse(form.get("boxes"))[0].label).toBe("Cat");
+});

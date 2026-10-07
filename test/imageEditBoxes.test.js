@@ -53,12 +53,13 @@ test("every editable box mode includes context beyond its footprint while Keep s
     assert.match(prepared.submittedPrompt, /SCENE CONTEXT/);
     assert.match(prepared.submittedPrompt, /TRANSFORMS/);
     const tight = await prepareImageEdit({ ...args, boxes: [{ ...item, contextPadding: 0 }] });
-    assert.deepEqual(await pixel(await finishImageEdit(tight, await solid("#ff0000")), 55, 103), [18, 52, 86, 255], `${mode}: zero margin limits editing`);
+    assert.equal((await pixel(tight.selection, 55, 115))[3], 0, `${mode}: zero margin limits guidance`);
+    assert.deepEqual(await pixel(await finishImageEdit(tight, await solid("#ff0000")), 55, 115), [255, 0, 0, 255], `${mode}: output is never clipped to guidance`);
   }
 });
 
 for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
-  test(`${model}: source and transformed destination edit, Keep and outside pixels survive`, async () => {
+  test(`${model}: full scene output survives box edges while Keep protects original pixels`, async () => {
     const source = await solid("#123456");
     const moving = { ...box(), target: { x: .7, y: .7, w: .25, h: .2, rotation: 45 } };
     const keep = { ...boxFromDrag({ x: .65, y: .65 }, { x: .75, y: .75 }, "keep"), mode: "keep" };
@@ -68,7 +69,7 @@ for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ide
     const result = await finishImageEdit(prepared, await solid("#ff0000"));
     assert.deepEqual(await pixel(result, 40, 60), [255, 0, 0, 255]);
     assert.deepEqual(await pixel(result, 140, 210), [18, 52, 86, 255]);
-    assert.deepEqual(await pixel(result, 180, 30), [18, 52, 86, 255]);
+    assert.deepEqual(await pixel(result, 180, 30), [255, 0, 0, 255]);
     assert.deepEqual(await pixel(result, 123, 193), [255, 0, 0, 255]);
   });
 }

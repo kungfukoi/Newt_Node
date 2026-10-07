@@ -45,7 +45,7 @@ export function imageEditSize(width, height, model) {
   return { width: w, height: h };
 }
 
-export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, blank = false, model }) {
+export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, contextualSelection = false, blank = false, model }) {
   if (!imageEditModes.includes(mode)) throw new Error("Choose an image editing method.");
   const brief = String(prompt).trim();
   if (brief.length > 16000) throw new Error("Keep the edit prompt under 16,000 characters.");
@@ -59,7 +59,7 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
       ? "The drawn marks are a composition sketch. Turn their shapes, placement and colors into finished visual content according to the brief. Preserve the sketch's intended arrangement, not its rough pen texture unless requested."
       : "Image 2 shows annotations over the same original. Circles, arrows, outlines, handwriting and colored strokes are editing instructions and location guides, not artwork to copy into the result. Interpret them together with the brief. Remove every guide mark from the final image; use the clean original to recover the underlying content. Only include literal text if the brief explicitly requests visible text."
       : "Use the written brief to direct the edit.",
-    hasSelection && imageEditUsesSelectionGuide(model) ? "The last reference is a black-and-white selection guide aligned with image 1: white marks the area to change; black must remain unchanged. Use it only to locate the edit. Do not reproduce the guide." : hasSelection ? `The ${isIdeogram45Model(model) ? "black" : "transparent"} area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay.` : "",
+    hasSelection && contextualSelection && imageEditUsesSelectionGuide(model) ? "The last reference is a soft black-and-white guide: white identifies the main repair area. Follow the object contours and naturally integrate associated shadows, reflections and background; the guide is not a visible crop or frame. Preserve unrelated content and never reproduce the guide." : hasSelection && imageEditUsesSelectionGuide(model) ? "The last reference is a black-and-white selection guide aligned with image 1: white marks the area to change; black must remain unchanged. Use it only to locate the edit. Do not reproduce the guide." : hasSelection ? `The ${isIdeogram45Model(model) ? "black" : "transparent"} area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay.` : "",
     mode === "remove" ? "Remove the selected content and reconstruct the exposed area naturally from its surroundings. Do not add replacement objects unless requested." : "",
     brief ? `USER EDIT BRIEF:\n${brief}` : mode === "sketch" ? "Render a polished finished version of the sketch." : "",
     "Return one image only. Do not add comparison panels, interface controls, borders, or annotation marks."

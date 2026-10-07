@@ -207,3 +207,14 @@ test("cutout edit masks participate in deduplication and preserve selected provi
   assert.equal((await post(body, { boxObjects: Buffer.from("{}") })).status, 409);
   assert.equal((await post({ boxes })).status, 400); assert.equal(calls.length, 1);
 }));
+
+test("Remove accepts an identified object and rejects malformed masks before generation", () => withEditor(async ({ post, calls, histories }) => {
+  const rect = { x: .2, y: .2, w: .2, h: .2, rotation: 0 };
+  const boxes = JSON.stringify([{ id: "cat", mode: "remove", label: "cat", source: rect, target: rect }]);
+  const masks = { boxObjects: Buffer.from(JSON.stringify({ cat: { width: 10, height: 10, runs: [11, 2, 21, 2] } })) };
+  assert.equal((await post({ boxes, provider: "atlas" }, masks)).status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(histories[0].settings.boxStrategy, "object-guided");
+  assert.equal((await post({ boxes }, { boxObjects: Buffer.from(JSON.stringify({ cat: { width: 10, height: 10, runs: [0, 500] } })) })).status, 400);
+  assert.equal(calls.length, 1);
+}));

@@ -30,7 +30,7 @@ test("Flux rows use y/x 1000 coordinates and correct reference slots for every m
   assert.equal(boxNeedsCutout({ ...box, target: { ...box.target, rotation: 90 } }, "Flux 3"), true);
   assert.equal(boxNeedsCutout({ ...box, sourceMask: mask }, "Flux 3"), true);
 });
-test("cutout relocation provides identity reference but allows model relighting only inside context regions", async () => {
+test("cutout relocation provides identity reference but keeps the complete regenerated scene without box-edge clipping", async () => {
   const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } })
     .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: "#00ff00" } }).png().toBuffer(), left: 20, top: 20 }]).png().toBuffer();
   const moved = { ...box, target: { ...box.target, x: .7, y: .7, rotation: 90 } };
@@ -45,10 +45,12 @@ test("cutout relocation provides identity reference but allows model relighting 
   assert.deepEqual(pixel(40, 66), [255, 0, 0, 255]);
   assert.deepEqual(pixel(140, 166), [255, 0, 0, 255]);
   assert.deepEqual(pixel(40, 40), [255, 0, 0, 255]);
-  assert.deepEqual(pixel(180, 20), [17, 34, 51, 255]);
+  assert.deepEqual(pixel(180, 20), [255, 0, 0, 255]);
   await assert.rejects(prepareImageEdit({ source, mode: "edit", model: "Nano Banana 2.1", boxes: [moved] }), /Select the object/);
   const native = await prepareImageEdit({ source, mode: "edit", model: "Flux 3", boxes: [{ ...moved, target: { ...moved.target, rotation: 0 } }] });
   assert.equal(native.boxStrategy, "flux-structured");
+  assert.equal(native.mask, null, "native boxes must not also receive a restrictive selection guide");
+  assert.doesNotMatch(native.submittedPrompt, /black must remain unchanged/);
   assert.ok(native.submittedPrompt.endsWith('"desc":"Object"}]'));
 });
 

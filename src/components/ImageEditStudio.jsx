@@ -4,7 +4,7 @@ import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../imageEdit.
 import React from "react";
 import { Boxes } from "lucide-react";
 import { validateEditBoxes } from "../imageEditBoxes.js";
-import { boxNeedsCutout, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
+import { boxNeedsObject, boxNeedsIdentification, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
 import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
@@ -146,6 +146,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     setHistory((current) => ({ past: [...current.past.slice(-59), current.marks], marks: nextMarks, future: [] }));
   }
   function commitBox(box) {
+    const previous = boxes.find(entry => entry.id === box.id);
+    if (previous && previous.label !== box.label && previous.sourceMask === box.sourceMask) box = { ...box, sourceMask: undefined };
     commit(history.marks.some(mark => mark.id === box.id) ? history.marks.map(mark => mark.id === box.id ? box : mark) : [...history.marks, box]);
     setSelectedBoxId(box.id);
   }
@@ -175,17 +177,23 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     } catch (failure) { if (mounted.current) setError(failure.message); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
+  async function identifyBoxObject(box) {
+    if (!falAvailable) throw new Error("Enable a Fal key to identify box objects with SAM 3, or use an existing Object Selection.");
+    setBusyLabel(`Identifying ${box.label} with SAM 3`);
+    const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
+    const query = box.label.trim() && !/^Object(?: \d+)?$/i.test(box.label.trim()) ? { prompt: box.label.trim() } : { point: { x: box.source.x, y: box.source.y } };
+    const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
+    const sourceMask = objectMaskForBox(data.masks || [], box);
+    if (!sourceMask) throw new Error(`No object matched "${box.label}" inside its box. Refine the description or use Object Selection, then try again.`);
+    if (mounted.current) setWarning(data.warning || "");
+    return { ...box, sourceMask };
+  }
   async function selectBoxObject(box) {
     if (busyRef.current || !size) return;
-    if (!falAvailable) { setError("Enable a Fal key to isolate the object for Move."); return; }
     busyRef.current = true; setBusy(true); setBusyLabel("Selecting box object with SAM 3"); setError("");
     try {
-      const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
-      const query = box.label.trim() && box.label !== "Object" ? { prompt: box.label.trim() } : { point: { x: box.source.x, y: box.source.y } };
-      const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
-      const sourceMask = objectMaskForBox(data.masks || [], box);
-      if (!sourceMask) throw new Error("No object was isolated inside this box. Describe the object more precisely or draw a box around the complete object, then select again.");
-      if (mounted.current) { commitBox({ ...box, sourceMask }); setWarning(data.warning || ""); }
+      const selected = await identifyBoxObject(box);
+      if (mounted.current) commitBox(selected);
     } catch (failure) { if (mounted.current) setError(failure.message); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
@@ -307,15 +315,25 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     busyRef.current = true; setBusy(true); setBusyLabel("Generating edit"); setError(""); setWarning("");
     try {
       imageEditSize(size.width, size.height, model);
-      const editBoxes = validateEditBoxes(boxes);
-      if (boxes.some(box => boxNeedsCutout(box, model) && !box.sourceMask)) throw new Error("Select the object inside each Move box before generating. Use Select object in Boxes settings and check the highlighted shape.");
+      validateEditBoxes(boxes);
+      let resolvedBoxes = boxes;
+      for (const box of boxes.filter(box => boxNeedsIdentification(box, model) && !box.sourceMask)) {
+        const selected = await identifyBoxObject(box);
+        if (!mounted.current) return;
+        resolvedBoxes = resolvedBoxes.map(entry => entry.id === box.id ? selected : entry);
+        // Save each successful selection before another paid step so retries reuse it.
+        const byId = new Map(resolvedBoxes.map(entry => [entry.id, entry]));
+        commit(history.marks.map(mark => byId.get(mark.id) || mark));
+      }
+      setBusyLabel("Generating edit");
+      const editBoxes = validateEditBoxes(resolvedBoxes);
       const drawing = await renderLayer("drawing"), selection = blank ? null : await renderLayer("selection");
       if (mode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
       form.append("boxes", JSON.stringify(editBoxes));
-      const objects = Object.fromEntries(boxes.filter(box => boxNeedsCutout(box, model)).map(box => [box.id, box.sourceMask]));
+      const objects = Object.fromEntries(resolvedBoxes.filter(box => boxNeedsObject(box) && box.sourceMask).map(box => [box.id, box.sourceMask]));
       if (Object.keys(objects).length) form.append("boxObjects", new Blob([JSON.stringify(objects)], { type: "application/json" }), "box-objects.json");
       for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), prompt, mode, quality, resolution, model, blank: String(blank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
       if (drawing) form.append("drawing", drawing, "drawing.png");
@@ -360,7 +378,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false} style={{ visibility: blank && !reviewing ? "hidden" : "visible" }} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setError("Could not load the original full-resolution image.")} />
             {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /><canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /></>}
             {!reviewing && size && <canvas ref={hoverRef} aria-label="Object hover preview" className="ies-object-hover" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} />}
-            {!reviewing && size && !blank && tool === "boxes" && <ImageEditBoxPreview box={boxes.find(box => box.id === selectedBoxId && box.mode === "move")} size={size} sourceUrl={base.url} />}
+            {!reviewing && size && !blank && tool === "boxes" && <ImageEditBoxPreview box={boxes.find(box => box.id === selectedBoxId && boxNeedsObject(box))} size={size} sourceUrl={base.url} />}
             {!reviewing && size && !blank && (boxes.length > 0 || tool === "boxes") && <ImageEditBoxesOverlay boxes={boxes} size={size} active={tool === "boxes"} disabled={busy || saving} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onGesture={active => { boxGesture.current = active; }} />}
             {reviewing && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
             {reviewing && view === "split" && <CompareHandle split={split} setSplit={setSplit} surfaceRef={surfaceRef} />}

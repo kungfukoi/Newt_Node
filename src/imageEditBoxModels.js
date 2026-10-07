@@ -1,5 +1,7 @@
 import { isFlux3Model } from "./flux3.js";
 import { boxCorners, boxFromDrag, boxContextRect } from "./imageEditBoxes.js";
+export const boxNeedsObject = box => ["move", "remove"].includes(box.mode);
+export const boxNeedsIdentification = (box, model) => boxNeedsObject(box) && (Boolean(box.sourceMask) || !isFlux3Model(model) || (box.mode === "move" && Math.abs(box.target.rotation) > .001));
 export const boxNeedsCutout = (box, model) => box.mode === "move" && (Boolean(box.sourceMask) || !isFlux3Model(model) || Math.abs(box.target.rotation) > .001);
 
 export function boxFromSelectionPixels({ data, width, height, id, label = "Object" }) {
@@ -38,7 +40,7 @@ export function objectMaskForBox(masks, box) {
       const x = (p % mask.width + .5) / mask.width, y = (Math.floor(p / mask.width) + .5) / mask.height;
       if (Math.abs(x - box.source.x) <= box.source.w / 2 && Math.abs(y - box.source.y) <= box.source.h / 2) inside++;
     }
-    const containment = inside / mask.area, value = containment >= .8 ? inside * containment : 0;
+    const containment = inside / mask.area, value = containment >= .5 ? inside * containment : 0;
     if (value > score) { score = value; best = mask; }
   }
   return best;

@@ -56,8 +56,10 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await editor.getByLabel("Rotation (°)", { exact: true }).fill("25");
   await editor.getByRole("button", { name: "Zoom in", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("boxes.png") });
-  let form;
+  let form, edits = 0;
   await page.route("**/api/node/edit-image", async route => {
+    edits++;
+    if (edits === 1) { await route.fulfill({ status: 503, json: { error: "Temporary edit failure" } }); return; }
     const request = route.request();
     form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
     await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", fileName: "edited.png", type: "image" } } });
@@ -68,14 +70,19 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await expect(editor.getByRole("alert")).toContainText("Describe each boxed object");
   expect(form).toBeUndefined();
   await editor.getByLabel("Box description", { exact: true }).fill("Cat");
+  await page.route("**/api/node/image-objects", route => route.fulfill({ json: { masks: [] } }));
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
-  await expect(editor.getByRole("alert")).toContainText("Select the object inside each Move box");
+  await expect(editor.getByRole("alert")).toContainText('No object matched "Cat"');
   expect(form).toBeUndefined();
-  await page.route("**/api/node/image-objects", route => route.fulfill({ json: { masks: [{ width: 10, height: 10, runs: [22, 2, 32, 2], area: 4 }] } }));
-  await editor.getByRole("button", { name: "Select object", exact: true }).click();
+  let selections = 0;
+  await page.route("**/api/node/image-objects", route => { selections++; expect(route.request().postDataJSON().prompt).toBe("Cat"); return route.fulfill({ json: { masks: [{ width: 10, height: 10, runs: [22, 2, 32, 2], area: 4 }] } }); });
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect(editor.getByRole("alert")).toContainText("Temporary edit failure");
   await expect(editor.getByText("Object selected. Check", { exact: false })).toBeVisible();
+  expect(selections).toBe(1);
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
   await expect.poll(() => Boolean(form)).toBe(true);
+  expect(selections).toBe(1);
   expect(form.get("model")).toBe("OpenAI Image 2.5 Flare");
   expect(form.get("boxObjects")).toBeTruthy();
   const [box] = JSON.parse(form.get("boxes"));

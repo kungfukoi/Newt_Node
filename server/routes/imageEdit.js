@@ -49,7 +49,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     let boxObjects = {};
     try {
       if (req.files?.boxObjects?.[0]) boxObjects = JSON.parse(req.files.boxObjects[0].buffer.toString("utf8"));
-      if (!boxObjects || typeof boxObjects !== "object" || Array.isArray(boxObjects) || Object.keys(boxObjects).some(id => !boxes.some(box => box.id === id && box.mode === "move"))) throw new Error("Unknown box object mask.");
+      if (!boxObjects || typeof boxObjects !== "object" || Array.isArray(boxObjects) || Object.keys(boxObjects).some(id => !boxes.some(box => box.id === id && ["move", "remove"].includes(box.mode)))) throw new Error("Unknown box object mask.");
     } catch { throw Object.assign(new Error("Invalid box object masks. Select the objects again."), { status: 400 }); }
     const referenceUrls = [...new Set(boxes.filter(box => box.mode === "reference").map(box => box.referenceUrl))];
     if (referenceUrls.length > 1) throw Object.assign(new Error("Use one shared reference image across From Reference boxes per edit."), { status: 400 });
