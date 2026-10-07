@@ -22,6 +22,11 @@ export function buildImageGenerationRequest({
     requestedAspectRatio: node.data.aspectRatio,
     resolution: node.data.resolution,
     quality: node.data.quality,
+    flux3Options: node.data.model === "Flux 3" ? node.data.flux3Options : undefined,
+    ideogram45Options: node.data.model === "Ideogram 4.5" ? {
+      ...node.data.ideogram45Options,
+      quality: !imagePromptItems.length && node.data.ideogram45Options?.quality === "very_low" ? "high" : node.data.ideogram45Options?.quality
+    } : undefined,
     imageBackground: node.data.imageBackground,
     openAiImageVariant: node.data.openAiImageVariant,
     kreaCreativity: node.data.kreaCreativity,

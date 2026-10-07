@@ -4156,7 +4156,19 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         images: await Promise.all(imagePromptUrls.map((url) => readLocalAsset(url))),
         imageLabels: imagePromptLabels,
         aspectRatio, resolution,
-        quality: "high"
+        ...(flux ? {
+          outputFormat: req.body.flux3Options?.outputFormat,
+          enablePromptExpansion: req.body.flux3Options?.enablePromptExpansion,
+          safetyTolerance: req.body.flux3Options?.safetyTolerance,
+          version: req.body.flux3Options?.version
+        } : nano21 ? {} : {
+          quality: req.body.ideogram45Options?.quality,
+          editPrecision: req.body.ideogram45Options?.editPrecision,
+          preserveSourceSize: req.body.ideogram45Options?.preserveSourceSize,
+          enablePromptExpansion: req.body.ideogram45Options?.enablePromptExpansion,
+          seed: req.body.ideogram45Options?.seed,
+          imageSize: req.body.ideogram45Options?.imageSize
+        })
       }, { upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult });
       const output = await downloadImage(req, modelImage.remoteImage.url, nano21 ? "nano-banana-2-1" : flux ? "flux-3" : "ideogram-4-5", modelImage.remoteImage.content_type || modelImage.remoteImage.mimeType);
       const cost = modelImage.cost;
@@ -4179,6 +4191,11 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
           resolution,
           quality: modelImage.input.quality,
+          outputFormat: modelImage.input.output_format,
+          enablePromptExpansion: modelImage.input.enable_prompt_expansion,
+          safetyTolerance: modelImage.input.safety_tolerance,
+          version: modelImage.input.version,
+          seed: modelImage.input.seed,
           imageSize: modelImage.input.image_size,
           editPrecision: modelImage.input.edit_precision,
           thinkingLevel: modelImage.input.thinking_level,

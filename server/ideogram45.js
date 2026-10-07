@@ -2,6 +2,7 @@ import { buildIdeogram45Request, ideogram45UnpricedCost } from "../src/ideogram4
 
 export async function generateIdeogram45({ images = [], mask, ...options }, { upload, subscribe, firstImage }) {
   if (images.length > (mask ? 4 : 5)) throw Object.assign(new Error("Ideogram 4.5 reference limit exceeded."), { status: 400 });
+  buildIdeogram45Request({ ...options, imageUrls: images.map(() => "reference"), maskUrl: mask ? "mask" : "" });
   const imageUrls = await Promise.all(images.map((image, index) => upload(Buffer.isBuffer(image)
     ? { buffer: image, mimeType: "image/png", fileName: `ideogram-reference-${index + 1}.png` } : image, index)));
   const maskUrl = mask ? await upload({ buffer: mask, mimeType: "image/png", fileName: "ideogram-mask.png" }, images.length) : "";

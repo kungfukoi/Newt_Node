@@ -1,4 +1,5 @@
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
+import ImageModelAdvancedOptions from "./components/ImageModelAdvancedOptions.jsx";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions } from "./nanoBanana21.js";
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
@@ -15725,6 +15726,7 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
+          <ImageModelAdvancedOptions node={node} onUpdate={onUpdate} referenceCount={imageReferenceCount} Row={NodeRow} />
           {isGptImage25Model(node.data.model) && (
             <NodeRow label="Background">
               <select
