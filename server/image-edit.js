@@ -1,11 +1,17 @@
 import { imageEditUsesSelectionGuide } from "../src/imageEdit.js";
 import sharp from "sharp";
+import { isFlux3Model } from "../src/flux3.js";
+import { fluxBoxInstructions } from "../src/imageEditBoxModels.js";
+import { prepareMoveCutouts } from "./image-edit-move.js";
+import { validateEditBoxes } from "../src/imageEditBoxes.js";
+import { prepareEditBoxes } from "./image-edit-boxes.js";
 import { isIdeogram45Model } from "../src/ideogram45.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
 
 const decode = (buffer) => sharp(buffer, { limitInputPixels: imageEditMaxPixels, animated: false, failOn: "error" });
 
-export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model }) {
+export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model, boxes = [], references = [], boxObjects = {} }) {
+  boxes = validateEditBoxes(boxes);
   const original = await decode(source).rotate().ensureAlpha().png().toBuffer();
   const { width, height } = await decode(original).metadata();
   const size = imageEditSize(width, height, model);
@@ -21,8 +27,20 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   }
   drawing = await layer(drawing);
   selection = await layer(selection);
+  if (boxes.length && (blank || mode !== "edit")) throw new Error("Boxes require the Edit image method and an existing image.");
+  const guideIndex = drawing ? 3 : 2;
+  references = await Promise.all(references.map(async reference => ({ ...reference, buffer: await decode(reference.buffer).rotate().png().toBuffer() })));
+  const referenceIndices = Object.fromEntries(references.map((reference, index) => [reference.url, guideIndex + index + 1]));
+  const staged = await prepareMoveCutouts({ original, boxes, model, objects: boxObjects, width, height });
+  const boxEdit = await prepareEditBoxes({ boxes, original, width, height, selection, guideIndex, referenceIndices, staged });
+  selection = boxEdit.selection;
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
-  const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
+  let submittedPrompt = buildImageEditPrompt({ prompt: [prompt, boxEdit.prompt].filter(Boolean).join("\n\n"), mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
+  if (staged.ids.length) submittedPrompt = "Image 1 is a prepared composite with the selected objects already moved. Neutral gray source vacancies need background reconstruction. The box guide shows the original source and destination for reference. Preserve the placed objects and clean up vacancies, seams and shadows.\n\n" + submittedPrompt.replace("Edit image 1, the clean original.", "Finish image 1, the prepared composite.");
+  if (boxes.length && isFlux3Model(model)) {
+    const structured = fluxBoxInstructions(boxes, width, height, referenceIndices, staged.ids);
+    submittedPrompt += "\n\n" + structured.caption + "\n" + JSON.stringify(structured.rows);
+  }
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   // Annotation ink is an instruction, never output artwork. Restore the clean
@@ -33,6 +51,14 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     const ink = await decode(drawing).extractChannel(3).threshold(1).png().toBuffer();
     const halo = await decode(ink).blur(2).png().toBuffer();
     annotationMask = await decode(halo).threshold(1).png().toBuffer();
+    if (staged.editMask) {
+      // Restoring drawing ink from the staged image inside a vacated source
+      // would restore the gray hole. Let cleanup repair that region instead.
+      const inkPixels = await decode(annotationMask).greyscale().raw().toBuffer();
+      const movingPixels = await decode(staged.editMask).extractChannel(3).raw().toBuffer();
+      for (let p = 0; p < inkPixels.length; p++) if (movingPixels[p]) inkPixels[p] = 0;
+      annotationMask = await sharp(inkPixels, { raw: { width, height, channels: 1 } }).png().toBuffer();
+    }
   }
   let mask = null;
   if (selection) {
@@ -46,8 +72,8 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
       mask = await decode(selection).extractChannel(3).threshold(128).negate().png().toBuffer();
     } else mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
   }
-  return { original, width, height, size, selection, mask, annotationMask, submittedPrompt,
-    images: blank ? [guide] : [original, guide].filter(Boolean) };
+  return { original: staged.base, width, height, size, selection, mask, annotationMask, submittedPrompt, boxStrategy: staged.ids.length ? "cutout-cleanup" : boxes.length && isFlux3Model(model) ? "flux-structured" : "guide", boxes: boxEdit.boxes,
+    images: blank ? [guide] : [staged.base, guide, boxEdit.guide, ...references.map(reference => reference.buffer)].filter(Boolean) };
 }
 
 export async function finishImageEdit(prepared, generated) {

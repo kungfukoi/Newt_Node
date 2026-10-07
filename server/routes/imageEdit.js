@@ -1,4 +1,5 @@
 import { isFlux3Model, flux3ResolutionOptions } from "../../src/flux3.js";
+import { validateEditBoxes } from "../../src/imageEditBoxes.js";
 import { isNanoBanana21Model, nanoBanana21ResolutionOptions } from "../../src/nanoBanana21.js";
 import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../../src/imageEdit.js";
 import { openAiImage25Variant } from "../../src/openAiImageModels.js";
@@ -11,9 +12,9 @@ import { imageEditModelOptions, normalizeImageEditModel } from "../../src/imageE
 import { isIdeogram45Model, ideogram45QualityOptions } from "../../src/ideogram45.js";
 
 export function registerImageEditRoutes(app, { limiter, getProvider, readSource, generate, readGenerated = readImageEditResult, save, recordHistory, estimateCost, sendError }) {
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 24 * 1024 * 1024, files: 2, fields: 32, fieldSize: 100000 } });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 24 * 1024 * 1024, files: 3, fields: 32, fieldSize: 100000 } });
   const jobs = new Map();
-  app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }]), async (req, res) => {
+  app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }, { name: "boxObjects", maxCount: 1 }]), async (req, res) => {
     try {
       const model = !req.body.model || ["OpenAI Image 2.5", "GPT Image 2.5"].includes(req.body.model) ? normalizeImageEditModel(req.body.model) : req.body.model;
       if (!imageEditModelOptions.includes(model)) throw Object.assign(new Error("Choose a supported image editor model."), { status: 400 });
@@ -27,7 +28,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       if (isNanoBanana21Model(model) && !nanoBanana21ResolutionOptions.includes(req.body.resolution || "2K")) throw Object.assign(new Error("Choose 1K, 2K, or 4K for Nano Banana 2.1."), { status: 400 });
       const key = `${req.body.projectId || ""}:${requestId}`;
       const hash = createHash("sha256").update(JSON.stringify(Object.entries(req.body).sort(([a], [b]) => a.localeCompare(b))));
-      for (const name of ["drawing", "selection"]) hash.update(name).update(req.files?.[name]?.[0]?.buffer || "");
+      for (const name of ["drawing", "selection", "boxObjects"]) hash.update(name).update(req.files?.[name]?.[0]?.buffer || "");
       const fingerprint = hash.digest("hex");
       for (const [id, job] of jobs) if (job.finished && Date.now() - job.finished > 3600000) jobs.delete(id);
       if (!jobs.has(key)) {
@@ -42,9 +43,20 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
   });
 
   async function run(req, { sourceUrl, prompt, mode, quality, provider, model }) {
+    let boxes;
+    try { boxes = validateEditBoxes(JSON.parse(req.body.boxes || "[]")); }
+    catch (error) { throw Object.assign(new Error(`Invalid edit boxes: ${error.message}`), { status: 400 }); }
+    let boxObjects = {};
+    try {
+      if (req.files?.boxObjects?.[0]) boxObjects = JSON.parse(req.files.boxObjects[0].buffer.toString("utf8"));
+      if (!boxObjects || typeof boxObjects !== "object" || Array.isArray(boxObjects) || Object.keys(boxObjects).some(id => !boxes.some(box => box.id === id && box.mode === "move"))) throw new Error("Unknown box object mask.");
+    } catch { throw Object.assign(new Error("Invalid box object masks. Select the objects again."), { status: 400 }); }
+    const referenceUrls = [...new Set(boxes.filter(box => box.mode === "reference").map(box => box.referenceUrl))];
+    if (referenceUrls.length > 1) throw Object.assign(new Error("Use one shared reference image across From Reference boxes per edit."), { status: 400 });
+    const references = await Promise.all(referenceUrls.map(async url => ({ url, ...(await readSource(url)) })));
     const source = await readSource(sourceUrl);
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
-      selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model })
+      selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model, boxes, references, boxObjects })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
     const variant = imageEditRequiresFal(model) ? undefined : openAiImage25Variant(model);
     let generation;
@@ -64,12 +76,20 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
           endpoint: generation.endpoint, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
-          settings: { quality: imageEditUsesSelectionGuide(model) ? undefined : quality, variant, ...(imageEditUsesSelectionGuide(model) ? { resolution: req.body.resolution || "2K", selectionGuide: Boolean(prepared.mask) } : {}), ...(isNanoBanana21Model(model) ? { thinkingLevel: "high", enableWebSearch: false } : {}), ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), sourceUrl, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
+          settings: { quality: imageEditUsesSelectionGuide(model) ? undefined : quality, variant, ...(imageEditUsesSelectionGuide(model) ? { resolution: req.body.resolution || "2K", selectionGuide: Boolean(prepared.mask) } : {}), ...(isNanoBanana21Model(model) ? { thinkingLevel: "high", enableWebSearch: false } : {}), ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), sourceUrl, boxes: prepared.boxes, boxStrategy: prepared.boxStrategy, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
           localImage: item.url, localThumbnail: item.thumbnailUrl, outputFileName: item.fileName, cost });
       } catch { warning = "Image saved, but this run could not be added to History."; }
       return { item, warning };
     } catch (error) {
       if (generation) throw Object.assign(new Error(`The model completed the edit, but NewtNode could not save it. Check ${generationProvider === "fal.ai" ? "Fal" : generationProvider} history before rerunning. ${error.message}`), { status: 502 });
+      // Fal's SDK uses the generic message "Forbidden" for upload failures;
+      // the actionable account/billing explanation lives in body.detail.
+      const status = Number(error.status || error.statusCode || error.response?.status);
+      if ([401, 403].includes(status)) {
+        const detail = [error.body?.detail, error.body?.message, error.message].find(value => typeof value === "string" && value.trim());
+        const label = provider === "fal" ? "Fal" : "Atlas Cloud";
+        throw Object.assign(new Error(`${label} rejected the ${model} edit (HTTP ${status}). ${detail || "Check the selected account's access and billing."}`), { status });
+      }
       throw error;
     }
   }

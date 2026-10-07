@@ -166,3 +166,44 @@ test("Nano Banana 2.1 editor preserves routing, resolution and history", () => w
   assert.equal(histories[0].settings.thinkingLevel, "high");
   assert.equal(histories[0].settings.enableWebSearch, false);
 }));
+
+
+test("boxes retain preferred model, reference image, workflow context and history", () => withEditor(async ({ post, calls, saves, histories }) => {
+  const rect = { x: .3, y: .3, w: .2, h: .2, rotation: 0 };
+  const box = { id: "reference", mode: "reference", label: "cat", referenceUrl: "/uploads/cat.jpg", source: rect, target: { ...rect, x: .7, rotation: 20 } };
+  const response = await post({ model: "OpenAI Image 2.5 Flare", provider: "atlas", boxes: JSON.stringify([box]) });
+  assert.equal(response.status, 200, JSON.stringify(await response.json()));
+  assert.equal(calls[0].model, "OpenAI Image 2.5 Flare"); assert.equal(calls[0].provider, "atlas");
+  assert.equal(calls[0].images.length, 3); assert.match(calls[0].prompt, /reference image 3/);
+  assert.equal(histories[0].settings.boxes[0].target.rotation, 20);
+  assert.equal(saves[0].body.workflowPackageId, "package");
+  for (const boxes of ["broken", JSON.stringify([{ ...box, referenceUrl: "" }]), JSON.stringify([box, { ...box, id: "second", referenceUrl: "/uploads/different.jpg" }])]) {
+    assert.equal((await post({ boxes })).status, 400);
+  }
+  assert.equal(calls.length, 1);
+}));
+
+
+test("image edit exposes provider billing detail instead of bare Forbidden and never retries", () => withEditor(async ({ post, calls }) => {
+  const requestId = randomUUID();
+  for (let i = 0; i < 2; i++) {
+    const response = await post({ requestId, model: "Nano Banana 2.1" });
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.match(body.error, /Fal rejected the Nano Banana 2.1 edit/);
+    assert.match(body.error, /Exhausted balance/);
+  }
+}, { generate: async () => { throw Object.assign(new Error("Forbidden"), { status: 403, body: { detail: "User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing" } }); } }));
+
+
+test("cutout edit masks participate in deduplication and preserve selected provider", () => withEditor(async ({ post, calls, histories }) => {
+  const rect = { x: .2, y: .2, w: .2, h: .2, rotation: 0 };
+  const boxes = JSON.stringify([{ id: "cat", mode: "move", label: "cat", source: rect, target: { ...rect, x: .7 } }]);
+  const body = { requestId: randomUUID(), boxes, provider: "atlas" };
+  const masks = { boxObjects: Buffer.from(JSON.stringify({ cat: { width: 10, height: 10, runs: [11, 2, 21, 2] } })) };
+  assert.equal((await post(body, masks)).status, 200);
+  assert.equal(calls[0].provider, "atlas"); assert.equal(histories[0].settings.boxStrategy, "cutout-cleanup");
+  assert.equal((await post(body, masks)).status, 200); assert.equal(calls.length, 1);
+  assert.equal((await post(body, { boxObjects: Buffer.from("{}") })).status, 409);
+  assert.equal((await post({ boxes })).status, 400); assert.equal(calls.length, 1);
+}));

@@ -2,6 +2,10 @@ import { isFlux3Model, flux3ResolutionOptions } from "../flux3.js";
 import { nanoBanana21ResolutionOptions } from "../nanoBanana21.js";
 import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../imageEdit.js";
 import React from "react";
+import { Boxes } from "lucide-react";
+import { validateEditBoxes } from "../imageEditBoxes.js";
+import { boxNeedsCutout, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
+import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
@@ -27,6 +31,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [size, setSize] = React.useState(null);
   const [history, setHistory] = React.useState(emptyHistory);
   const [draft, setDraft] = React.useState(null);
+  const [selectedBoxId, setSelectedBoxId] = React.useState("");
+  const boxGesture = React.useRef(false);
   const [tool, setTool] = React.useState("pen");
   const [layer, setLayer] = React.useState("drawing");
   const [color, setColor] = React.useState(imageEditColors[2]);
@@ -55,6 +61,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [objectMasks, setObjectMasks] = React.useState([]);
   const [hoverObject, setHoverObject] = React.useState(null);
   const [selectionPrompt, setSelectionPrompt] = React.useState("");
+  const selectionName = React.useRef("");
   const [sam2Settings, setSam2Settings] = React.useState(sam2Defaults);
   const [objectStatus, setObjectStatus] = React.useState("");
   const [busyLabel, setBusyLabel] = React.useState("Generating edit");
@@ -65,6 +72,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const result = versions[resultIndex];
   const reviewing = Boolean(result);
   const marks = draft ? [...history.marks, draft] : history.marks;
+  const boxes = history.marks.filter(mark => mark.layer === "boxes");
   const hasDrawing = history.marks.some((mark) => mark.layer === "drawing" && mark.tool !== "eraser");
   const hasSelection = history.marks.some((mark) => mark.layer === "selection" && mark.tool !== "eraser");
   const dirty = history.marks.length || prompt.trim();
@@ -119,16 +127,61 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   function commit(nextMarks) {
     setHistory((current) => ({ past: [...current.past.slice(-59), current.marks], marks: nextMarks, future: [] }));
   }
+  function commitBox(box) {
+    commit(history.marks.some(mark => mark.id === box.id) ? history.marks.map(mark => mark.id === box.id ? box : mark) : [...history.marks, box]);
+    setSelectedBoxId(box.id);
+  }
+  function activateBoxes() {
+    if (busyRef.current || !size) return;
+    setError(""); setTool("boxes"); setLayer("boxes"); setMode("edit"); setBlank(false);
+    if (!hasSelection || blank) return;
+    if (boxes.length >= 8) { setError("Use up to 8 boxes. Delete one before converting this selection."); return; }
+    try {
+      const canvas = document.createElement("canvas"), scale = Math.min(1, 1024 / Math.max(size.width, size.height));
+      canvas.width = Math.round(size.width * scale); canvas.height = Math.round(size.height * scale);
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      drawImageEditMarks(context, history.marks, canvas.width, canvas.height, "selection");
+      const box = boxFromSelectionPixels({ data: context.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height, id: crypto.randomUUID(), label: selectionName.current || `Object ${boxes.length + 1}` });
+      commit([...history.marks.filter(mark => mark.layer !== "selection"), box]); setSelectedBoxId(box.id);
+    } catch (failure) { setError(failure.message); }
+  }
+  async function uploadBoxReference(box, file) {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setBusyLabel("Uploading reference"); setError("");
+    try {
+      const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
+      form.append("nodeType", "image"); form.append("asset", file);
+      const { response, data } = await nodeApi.uploadAsset(form);
+      if (!response.ok || !data.asset?.localUrl) throw new Error(data.error || "Reference upload failed.");
+      if (mounted.current) commit(history.marks.map(mark => mark.layer === "boxes" && (mark.id === box.id || mark.mode === "reference") ? { ...mark, referenceUrl: data.asset.localUrl } : mark));
+    } catch (failure) { if (mounted.current) setError(failure.message); }
+    finally { busyRef.current = false; if (mounted.current) setBusy(false); }
+  }
+  async function selectBoxObject(box) {
+    if (busyRef.current || !size) return;
+    if (!falAvailable) { setError("Enable a Fal key to isolate the object for Move."); return; }
+    busyRef.current = true; setBusy(true); setBusyLabel("Selecting box object with SAM 3"); setError("");
+    try {
+      const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
+      const query = box.label.trim() && box.label !== "Object" ? { prompt: box.label.trim() } : { point: { x: box.source.x, y: box.source.y } };
+      const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
+      const sourceMask = objectMaskForBox(data.masks || [], box);
+      if (!sourceMask) throw new Error("No object was isolated inside this box. Describe the object more precisely or draw a box around the complete object, then select again.");
+      if (mounted.current) { commitBox({ ...box, sourceMask }); setWarning(data.warning || ""); }
+    } catch (failure) { if (mounted.current) setError(failure.message); }
+    finally { busyRef.current = false; if (mounted.current) setBusy(false); }
+  }
   function undo() {
-    if (busyRef.current || dragRef.current) return;
+    if (busyRef.current || dragRef.current || boxGesture.current) return;
     setHistory((s) => !s.past.length ? s : ({ past: s.past.slice(0, -1), marks: s.past.at(-1), future: [s.marks, ...s.future] }));
   }
   function redo() {
-    if (busyRef.current || dragRef.current) return;
+    if (busyRef.current || dragRef.current || boxGesture.current) return;
     setHistory((s) => !s.future.length ? s : ({ past: [...s.past, s.marks], marks: s.future[0], future: s.future.slice(1) }));
   }
   function close() { if (!busyRef.current && !saving) dirty ? setConfirmClose(true) : onClose(); }
   function keyboard(event) {
+    if (event.target.closest(".ies-box-name-input")) return;
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
     if (event.key === "Tab") {
@@ -159,6 +212,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         if (mask) commit(selectObjectMarks(history.marks, mask, modifiers));
         setObjectStatus(mask ? "Object selected. Shift adds; Alt subtracts." : "No object found here. Try selecting by prompt or use the selection brush.");
       } else if (kind === "prompt") {
+        if (masks.length) selectionName.current = options.prompt;
         if (masks.length) commit([...history.marks.filter(mark => mark.layer !== "selection"), ...masks.map(mask => ({ tool: "object", layer: "selection", mask }))]);
         setObjectStatus(masks.length ? `Selected ${masks.length} matching regions. Refine with Shift/Alt or the brush.` : "No matching objects found. Try a different description; your selection is unchanged.");
       } else setObjectStatus(masks.length ? `${masks.length} objects ready. Hover to preview; click to select.` : "No automatic objects found. Click an object to try SAM 3, or select by prompt.");
@@ -176,16 +230,19 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
   function pointerDown(event) {
+    if (tool === "boxes" && !reviewing) return;
     if (event.button !== 0 || busyRef.current || !size || dragRef.current) return;
     event.preventDefault(); event.stopPropagation();
     const start = point(event);
     if (!reviewing && tool === "object" && !blank) {
+      selectionName.current = "";
       const mask = objectAtPoint(objectMasks, start);
       if (mask) commit(selectObjectMarks(history.marks, mask, event));
       else void findObjects({ point: start }, { shiftKey: event.shiftKey, altKey: event.altKey });
       return;
     }
     if (!reviewing && tool === "text" && !note.trim()) { setError("Enter a text note first, then place it on the image."); return; }
+    if (!reviewing && layer === "selection" && tool !== "hand") selectionName.current = "";
     event.currentTarget.setPointerCapture(event.pointerId);
     const mark = { tool: reviewing ? "hand" : tool, layer, color, opacity: opacity / 100, size: brushSize / 100, points: [start], text: note.slice(0, 500) };
     dragRef.current = { pointerId: event.pointerId, mark, clientX: event.clientX, clientY: event.clientY, pan };
@@ -223,15 +280,25 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     return imageEditHasPixels(ctx, size.width, size.height) ? blobOf(canvas) : null;
   }
   async function generate() {
-    if (busyRef.current || !size || !providerAvailable) return;
+    if (busyRef.current) return;
+    if (!size) { setError("Wait for the original image to load before generating."); return; }
+    if (!providerAvailable) { setError("Enable an image-edit provider in Settings before generating."); return; }
+    // Pointer capture can be lost when focus leaves the canvas. It must never
+    // silently block an explicit Generate click using the committed boxes.
+    boxGesture.current = false;
     busyRef.current = true; setBusy(true); setBusyLabel("Generating edit"); setError(""); setWarning("");
     try {
       imageEditSize(size.width, size.height, model);
+      const editBoxes = validateEditBoxes(boxes);
+      if (boxes.some(box => boxNeedsCutout(box, model) && !box.sourceMask)) throw new Error("Select the object inside each Move box before generating. Use Select object in Boxes settings and check the highlighted shape.");
       const drawing = await renderLayer("drawing"), selection = blank ? null : await renderLayer("selection");
       if (mode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
+      form.append("boxes", JSON.stringify(editBoxes));
+      const objects = Object.fromEntries(boxes.filter(box => boxNeedsCutout(box, model)).map(box => [box.id, box.sourceMask]));
+      if (Object.keys(objects).length) form.append("boxObjects", new Blob([JSON.stringify(objects)], { type: "application/json" }), "box-objects.json");
       for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), prompt, mode, quality, resolution, model, blank: String(blank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
@@ -255,7 +322,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const scale = size ? Math.min(1, (viewport.width - 40) / size.width, (viewport.height - 40) / size.height) : 1;
   const displaySize = size ? { width: size.width * scale, height: size.height * scale } : { width: 300, height: 300 };
   const previewScale = size ? Math.min(1, 1600 / Math.max(size.width, size.height)) : 1;
-  const setActiveLayer = (value) => { setLayer(value); if ((value === "selection" && ["text", "arrow"].includes(tool)) || (value === "drawing" && tool === "object")) setTool("pen"); };
+  const setActiveLayer = (value) => { setLayer(value); if (tool === "boxes" || (value === "selection" && ["text", "arrow"].includes(tool)) || (value === "drawing" && tool === "object")) setTool("pen"); };
 
   return <section ref={rootRef} tabIndex={-1} className="image-edit-studio" aria-label="Image Edit" role="dialog" aria-modal="true" onKeyDownCapture={keyboard} onPointerDown={(event) => event.stopPropagation()}>
     <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving} /></header>
@@ -263,8 +330,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
           <div className="ies-segment" role="group" aria-label="Editing layer"><IconButton icon={Pencil} label="Drawing layer" active={layer === "drawing"} disabled={busy || reviewing} onClick={() => setActiveLayer("drawing")} /><IconButton icon={Scan} label="Selection layer" active={layer === "selection"} disabled={busy || reviewing || blank} onClick={() => setActiveLayer("selection")} /></div>
-          {tools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy || (reviewing && id !== "hand") || (layer === "selection" && ["text", "arrow"].includes(id))} onClick={() => setTool(id)} />)}
+          {tools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy || (reviewing && id !== "hand") || (layer === "selection" && ["text", "arrow"].includes(id))} onClick={() => { setTool(id); if (layer === "boxes" && id !== "hand") setLayer("drawing"); }} />)}
           <IconButton icon={ScanSearch} label="Object Selection" active={tool === "object" && !reviewing} disabled={busy || reviewing || blank || !size} onClick={() => findObjects()} />
+          <IconButton icon={Boxes} label="Boxes" active={tool === "boxes" && !reviewing} disabled={busy || reviewing || !size} onClick={activateBoxes} />
           <div className="ies-divider" />
           <IconButton icon={Undo2} label="Undo stroke" onClick={undo} disabled={busy || reviewing || !history.past.length} /><IconButton icon={Redo2} label="Redo stroke" onClick={redo} disabled={busy || reviewing || !history.future.length} />
           <IconButton icon={Trash2} label="Clear active layer" onClick={() => commit(history.marks.filter((mark) => mark.layer !== layer))} disabled={busy || reviewing || !history.marks.some((mark) => mark.layer === layer)} />
@@ -274,12 +342,15 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false} style={{ visibility: blank && !reviewing ? "hidden" : "visible" }} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setError("Could not load the original full-resolution image.")} />
             {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /><canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /></>}
             {!reviewing && size && <canvas ref={hoverRef} aria-label="Object hover preview" className="ies-object-hover" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} />}
+            {!reviewing && size && !blank && tool === "boxes" && <ImageEditBoxPreview box={boxes.find(box => box.id === selectedBoxId && box.mode === "move")} size={size} sourceUrl={base.url} />}
+            {!reviewing && size && !blank && (boxes.length > 0 || tool === "boxes") && <ImageEditBoxesOverlay boxes={boxes} size={size} active={tool === "boxes"} disabled={busy || saving} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onGesture={active => { boxGesture.current = active; }} />}
             {reviewing && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
             {reviewing && view === "split" && <div className="ies-split-line" style={{ left: `${split}%` }} />}
             {cursor && !reviewing && !busy && ["pen", "eraser"].includes(tool) && <div className="ies-brush-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, width: Math.max(3, brushSize / 100 * Math.min(displaySize.width, displaySize.height)), aspectRatio: "1", borderColor: tool === "eraser" ? "#fff" : layer === "selection" ? "#72efd8" : color }} />}
           </div>
           {busy && <div className="ies-progress" role="status"><LoaderCircle size={22} className="ies-spinning" /><span>{busyLabel}</span><time>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</time></div>}
           {!size && !error && <div className="ies-progress" role="status"><LoaderCircle className="ies-spinning" size={22} />Loading image</div>}
+          {error && <div className="ies-stage-error" role="alert">{error}</div>}
         </div>
         <div className="ies-viewbar">
           <span>{size ? `${size.width} x ${size.height}` : ""}</span>
@@ -289,7 +360,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       </div>
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
-          <div className="ies-object-controls">
+          {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} model={model} busy={busy} />}
+          {tool !== "boxes" && <div className="ies-object-controls">
             {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
               <strong>SAM 2 detection</strong>
               {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
@@ -302,19 +374,20 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
             <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
             {tool === "object" && <small>Click selects · Shift adds · Alt subtracts</small>}
             {objectStatus && <p role="status">{objectStatus}</p>}
-          </div>
-          <label>Method<select aria-label="Edit method" value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
+          </div>}
+          <label>Method<select aria-label="Edit method" disabled={boxes.length > 0} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
-          <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
+          {tool !== "boxes" && <><div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
           <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
           <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
+          </>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
           {imageEditUsesSelectionGuide(model) ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={e => setResolution(e.target.value)}>{resolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>}
         </fieldset>}
         <div className="ies-run-section">
           <small>{isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
-          {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
+          {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
           {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
         </div>
@@ -325,7 +398,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           <button type="button" disabled={saving} onClick={continueEditing}><Pencil size={17} />Continue Editing</button>
           <a href={result.url} download={result.fileName}><Download size={17} />Download</a>
         </div>}
-        {error && <p className="ies-error" role="alert">{error}</p>}{warning && <p className="ies-warning" role="status">{warning}</p>}
+        {warning && <p className="ies-warning" role="status">{warning}</p>}
       </aside>
     </div>
     {confirmClose && <div className="ies-confirm"><div role="alertdialog" aria-label="Discard edit draft"><h3>Discard this draft?</h3><p>Generated edits are kept in History. Unsaved drawing marks will be discarded.</p><div><button onClick={() => setConfirmClose(false)}>Keep Editing</button><button className="ies-primary" onClick={onClose}>Discard Draft</button></div></div></div>}

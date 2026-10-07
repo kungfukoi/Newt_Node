@@ -111,3 +111,33 @@ test("SAM 2 controls only appear in object mode and apply on explicit rescan", a
   await editor.getByRole("button", { name: "Draw", exact: true }).click();
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
 });
+
+
+test("Object Selection converts to a named Move box with its exact mask and no extra SAM call", async ({ page }) => {
+  const { editor } = await openEditor(page); let selections = 0, form;
+  await page.route("**/api/node/image-objects", async route => { selections++; await route.fulfill({ json: { masks: [masks[0]] } }); });
+  await page.route("**/api/node/edit-image", async route => {
+    const request = route.request();
+    form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
+    await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", fileName: "edited.png", type: "image" } } });
+  });
+  await editor.getByLabel("Object selection prompt").fill("the red jacket");
+  await editor.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("the red jacket");
+  await expect(editor.getByText("Object selected. Check", { exact: false })).toBeVisible();
+  expect(selections).toBe(1);
+  await editor.getByRole("button", { name: "Undo stroke" }).click();
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveCount(0);
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Redo stroke" }).click();
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect.poll(() => Boolean(form)).toBe(true);
+  expect(form.get("selection")).toBeNull();
+  const objects = JSON.parse(await form.get("boxObjects").text());
+  expect(Object.values(objects)[0].area).toBeGreaterThan(0);
+  expect(form.get("model")).toBe("Flux 3");
+  expect(selections).toBe(1);
+});
