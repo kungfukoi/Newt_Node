@@ -59,7 +59,7 @@ export function transformEditBox(box, operation, start, point, width, height) {
 export function editBoxesPrompt(boxes, guideIndex, referenceIndices = {}, staged = []) {
   if (!boxes.length) return "";
   return [
-    `BOX INSTRUCTIONS: Image ${guideIndex} is a placement guide over the original. Red dashed boxes identify source regions; cyan boxes show destinations; yellow boxes mark protected regions. Numbered pairs refer to the same object. Guide lines and labels are instructions only: remove all of them from the output.`,
+    `BOX INSTRUCTIONS: Image ${guideIndex} is a placement guide over ${staged.length ? "the prepared composite, with the moved subjects already placed and their old locations cleared" : "the original"}. Red dashed boxes identify source regions; cyan boxes show destinations; yellow boxes mark protected regions. Numbered pairs refer to the same object. Guide lines and labels are instructions only: remove all of them from the output.`,
     "Follow each box's operation. Preserve object identity and details when moving or using a reference, apply the requested scale and clockwise rotation, and integrate edges, lighting and shadows. Keep everything outside the editable regions unchanged. Coordinates below are percentages of the original frame, measured from the top-left; x/y locate the center, width/height are unrotated dimensions.",
     ...boxes.map((box, index) => {
       const position = r => `center (${(r.x * 100).toFixed(2)}%, ${(r.y * 100).toFixed(2)}%), width ${(r.w * 100).toFixed(2)}%, height ${(r.h * 100).toFixed(2)}%`;
@@ -70,7 +70,7 @@ export function editBoxesPrompt(boxes, guideIndex, referenceIndices = {}, staged
       if (box.mode === "new") return `${description} ADD the described new object. ${destination}`;
       if (box.mode === "text") return `${description} Render exactly this visible text: ${JSON.stringify(box.text)}. The description specifies its appearance. ${destination}`;
       if (box.mode === "reference") return `${description} Place the subject from reference image ${referenceIndices[box.referenceUrl]} in this scene. ${destination}`;
-      if (staged.includes(box.id)) return `${description} The isolated object is ALREADY positioned and rotated at its destination in image 1. Repair the neutral gray vacancy at ${position(box.source)}, remove any old shadows, and blend destination edges and shadows. Preserve the placed subject; do not move it again. ${destination}`;
+      if (staged.includes(box.id)) return `${description} The isolated object is ALREADY positioned and rotated at its destination in image 1. REMOVE the neutral gray placeholder at ${position(box.source)} and reconstruct background only. Do not recreate the moved object at its old location. Remove old shadows and blend destination edges and shadows, preserving any moved objects overlapping this source region. Preserve the placed subject; do not move it again. ${destination}`;
       return `${description} MOVE the original object from ${position(box.source)}. ${destination} Reconstruct the vacated background and do not leave a duplicate at the source.`;
     })
   ].join("\n");

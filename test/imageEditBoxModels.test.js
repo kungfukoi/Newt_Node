@@ -62,3 +62,21 @@ test("overlapping moves sample the original and annotation restoration does not 
   assert.deepEqual(at(40, 140), [255, 0, 0, 255]);
   assert.deepEqual(at(40, 40), [0, 0, 255, 255]);
 });
+
+
+test("cutout references never reintroduce the original subject and Flux explicitly removes the vacancy", async () => {
+  const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } }).composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: "#00ff00" } }).png().toBuffer(), left: 20, top: 20 }]).png().toBuffer();
+  const drawing = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#00000000" } }).composite([{ input: await sharp({ create: { width: 3, height: 3, channels: 4, background: "white" } }).png().toBuffer(), left: 180, top: 180 }]).png().toBuffer();
+  const moved = { ...box, target: { ...box.target, x: .7, y: .7 } };
+  const prepared = await prepareImageEdit({ source, drawing, mode: "edit", model: "Flux 3", boxes: [moved], boxObjects: { cat: mask }, prompt: "Move the object to the right." });
+  assert.equal(prepared.images.length, 3);
+  for (const reference of prepared.images) {
+    const data = await sharp(reference).ensureAlpha().raw().toBuffer();
+    assert.deepEqual([...data.subarray((40 * 200 + 40) * 4, (40 * 200 + 40) * 4 + 4)], [128, 128, 128, 255]);
+  }
+  const rows = JSON.parse(prepared.submittedPrompt.split("\n").at(-1));
+  const vacancy = rows.find(row => row.id === "vacancy_1");
+  assert.equal(vacancy.tgt_bbox, null); assert.deepEqual(vacancy.src_bbox, [100, 100, 300, 300]);
+  assert.match(prepared.submittedPrompt, /background only/);
+  assert.match(prepared.submittedPrompt, /already been applied geometrically/);
+});

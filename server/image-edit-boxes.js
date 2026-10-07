@@ -16,7 +16,9 @@ export async function prepareEditBoxes({ boxes: input, original, width, height, 
     const r = ["keep", "remove"].includes(box.mode) ? box.source : box.target;
     return shapes + `<text x="${r.x * width}" y="${r.y * height}" font-size="${stroke * 6}" fill="white" stroke="black" stroke-width="${stroke / 3}" paint-order="stroke">${i + 1}</text>`;
   }).join("");
-  const guide = await sharp(original).composite([{ input: svg(overlay) }]).png().toBuffer();
+  // A clean-original guide would reintroduce the removed object as a visual
+  // reference and encourage the model to reconstruct it in the source vacancy.
+  const guide = await sharp(staged.base || original).composite([{ input: svg(overlay) }]).png().toBuffer();
   // Union old/new footprints, with a small edge halo. Keep boxes override every edit region.
   let canvas = sharp({ create: { width, height, channels: 4, background: "#00000000" } });
   const layers = [];

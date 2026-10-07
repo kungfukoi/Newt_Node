@@ -58,5 +58,11 @@ export function fluxBoxInstructions(boxes, width, height, referenceIndices = {},
     captions.push(placed ? `Keep <${id}> already placed in <ref_image_0>; repair the vacated source and blend its edges. Do not move or rotate it again.` : `${box.mode === "reference" ? "Place from reference" : box.mode.toUpperCase()} ${JSON.stringify(desc)} <${id}> ${box.mode === "move" ? `to the destination ${direction ? `(${direction})` : ""}, filling the vacated background without a duplicate, ` : ""}using the source and target rectangles below.${box.target.rotation ? ` Destination orientation is ${box.target.rotation} degrees clockwise.` : ""}`);
     return { id, from: ["new", "text"].includes(box.mode) ? null : box.mode === "reference" ? `ref_image_${referenceIndices[box.referenceUrl] - 1}` : "ref_image_0", src_bbox: ["new", "text"].includes(box.mode) ? null : box.mode === "reference" ? [0, 0, 1000, 1000] : grid(placed ? box.target : box.source), tgt_bbox: box.mode === "remove" ? null : grid(box.mode === "keep" ? box.source : box.target), desc };
   });
+  boxes.forEach((box, i) => {
+    if (!staged.includes(box.id)) return;
+    const id = `vacancy_${i + 1}`;
+    captions.push(`Remove the neutral gray source placeholder <${id}> and reconstruct only the surrounding background there. Do not regenerate ${JSON.stringify(box.label)} at its old location. Keep the already placed destination objects, including any that overlap this source region.`);
+    rows.push({ id, from: "ref_image_0", src_bbox: grid(box.source), tgt_bbox: null, desc: `The neutral gray vacancy left by moving ${box.label}; remove the placeholder and fill with background only, with no duplicate object. Preserve any destination cutouts overlapping this region.` });
+  });
   return { caption: "In <ref_image_0>, follow these element instructions. Keep everything else unchanged.\n" + captions.join("\n"), rows };
 }

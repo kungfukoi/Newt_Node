@@ -36,12 +36,12 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   selection = boxEdit.selection;
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
   let submittedPrompt = buildImageEditPrompt({ prompt: [prompt, boxEdit.prompt].filter(Boolean).join("\n\n"), mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection), model });
-  if (staged.ids.length) submittedPrompt = "Image 1 is a prepared composite with the selected objects already moved. Neutral gray source vacancies need background reconstruction. The box guide shows the original source and destination for reference. Preserve the placed objects and clean up vacancies, seams and shadows.\n\n" + submittedPrompt.replace("Edit image 1, the clean original.", "Finish image 1, the prepared composite.");
+  if (staged.ids.length) submittedPrompt = "Image 1 is a prepared composite with the selected objects already moved. Neutral gray source vacancies need background reconstruction. All scene guides show this same prepared state. The move requested in the user brief has already been applied geometrically; do not repeat it. Remove the neutral gray placeholders and reconstruct background only at each vacated source. Never restore or duplicate the moved subject at its old location. Preserve destination cutouts, including where they overlap a source region, and blend seams and shadows.\n\n" + submittedPrompt.replace("Edit image 1, the clean original.", "Finish image 1, the prepared composite.");
   if (boxes.length && isFlux3Model(model)) {
     const structured = fluxBoxInstructions(boxes, width, height, referenceIndices, staged.ids);
     submittedPrompt += "\n\n" + structured.caption + "\n" + JSON.stringify(structured.rows);
   }
-  const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
+  const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : staged.base;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   // Annotation ink is an instruction, never output artwork. Restore the clean
   // source along its footprint, including antialiased edges and a small halo.

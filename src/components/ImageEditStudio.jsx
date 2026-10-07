@@ -23,6 +23,24 @@ function IconButton({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" title={label} aria-label={label} aria-pressed={active} className={`ies-icon ${active ? "active" : ""}`} {...props}><Icon size={18} /></button>;
 }
 
+function CompareHandle({ split, setSplit, surfaceRef }) {
+  const update = event => {
+    const rect = surfaceRef.current.getBoundingClientRect();
+    setSplit(Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)));
+  };
+  const release = event => {
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  return <div className="ies-split-line ies-compare-handle" role="slider" tabIndex={0} aria-label="Compare divider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(split)} style={{ left: `${split}%` }}
+    onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); update(event); }}
+    onPointerMove={event => { event.stopPropagation(); if (event.currentTarget.hasPointerCapture(event.pointerId)) update(event); }}
+    onPointerUp={release} onPointerCancel={release} onLostPointerCapture={event => event.stopPropagation()}
+    onKeyDown={event => { event.stopPropagation(); if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); setSplit(value => event.key === "Home" ? 0 : event.key === "End" ? 100 : Math.max(0, Math.min(100, value + (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)))); } }}>
+    <span className="ies-compare-grip" aria-hidden="true">↔</span>
+  </div>;
+}
+
 export function ImageEditStudio({ item, workflowContext, falAvailable, provider: defaultProvider = falAvailable ? "fal" : "", model: selectedModel, canApply, onAccept, onClose, showApiCosts = false }) {
   const model = normalizeImageEditModel(selectedModel);
   const provider = imageEditRequiresFal(model) ? (falAvailable ? "fal" : "") : defaultProvider;
@@ -181,12 +199,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   }
   function close() { if (!busyRef.current && !saving) dirty ? setConfirmClose(true) : onClose(); }
   function keyboard(event) {
-    if (event.target.closest(".ies-box-name-input")) return;
+    if (event.target.closest(".ies-box-name-input") || (event.target.closest(".ies-compare-handle") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))) return;
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
     if (event.key === "Tab") {
       const container = confirmClose ? rootRef.current.querySelector(".ies-confirm") : rootRef.current;
-      const controls = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled)')].filter((element) => element.offsetParent && !element.matches(":disabled"));
+      const controls = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [role="slider"][tabindex="0"]')].filter((element) => element.offsetParent && !element.matches(":disabled"));
       const first = controls[0], last = controls.at(-1);
       if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first?.focus(); }
@@ -345,7 +363,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
             {!reviewing && size && !blank && tool === "boxes" && <ImageEditBoxPreview box={boxes.find(box => box.id === selectedBoxId && box.mode === "move")} size={size} sourceUrl={base.url} />}
             {!reviewing && size && !blank && (boxes.length > 0 || tool === "boxes") && <ImageEditBoxesOverlay boxes={boxes} size={size} active={tool === "boxes"} disabled={busy || saving} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onGesture={active => { boxGesture.current = active; }} />}
             {reviewing && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
-            {reviewing && view === "split" && <div className="ies-split-line" style={{ left: `${split}%` }} />}
+            {reviewing && view === "split" && <CompareHandle split={split} setSplit={setSplit} surfaceRef={surfaceRef} />}
             {cursor && !reviewing && !busy && ["pen", "eraser"].includes(tool) && <div className="ies-brush-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, width: Math.max(3, brushSize / 100 * Math.min(displaySize.width, displaySize.height)), aspectRatio: "1", borderColor: tool === "eraser" ? "#fff" : layer === "selection" ? "#72efd8" : color }} />}
           </div>
           {busy && <div className="ies-progress" role="status"><LoaderCircle size={22} className="ies-spinning" /><span>{busyLabel}</span><time>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</time></div>}

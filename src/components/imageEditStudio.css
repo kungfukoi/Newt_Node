@@ -92,3 +92,6 @@
 .ies-stage-error { position: absolute; bottom: 12px; left: 12px; right: 12px; padding: 12px 16px; background: #351b18; color: #ffbdad; border: 1px solid #975648; border-radius: 6px; overflow-wrap: anywhere; max-height: 35%; overflow-y: auto; }
 .ies-box-scale-hit { fill: transparent; cursor: nwse-resize; }
 .ies-box-corner { pointer-events: none; stroke-width: 1; }
+.ies-split-line.ies-compare-handle { width: 24px; transform: translateX(-50%); background: transparent; box-shadow: none; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.ies-compare-handle::before { content: ""; position: absolute; left: calc(50% - 1px); top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
+.ies-compare-grip { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 28px; height: 38px; color: #fff; background: #202020e8; border: 1px solid #fff; border-radius: 10px; pointer-events: none; }
