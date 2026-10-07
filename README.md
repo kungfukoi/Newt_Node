@@ -175,3 +175,5 @@ Add **Audio Model** from the node palette to generate Text to Speech, Speech to 
 Flux 3 image generation and editing are available with a Fal key. Select Flux 3 in image model controls or Settings → User Preferences → image-edit model. It supports 1K, 2K, and 4K output and up to ten reference images.
 
 Nano Banana 2.1 is integrated through Fal in Image Model, Explore, Character sheets, Coverage, Auto Aspect, Storyboard, and Settings → User Preferences → Image Editor Model. It is a separate selection from Nano Banana 2 and supports 1K/2K/4K output. Generation uses high thinking with web search disabled; estimated prices are $0.082/$0.122/$0.162 per image. Selected-region edits use an image guide and restore unselected pixels locally. Fal currently describes its [generation](https://fal.ai/models/google/nano-banana-2.1) and [editing](https://fal.ai/models/google/nano-banana-2.1/edit) endpoints as integration-only; live generation availability is not verified.
+
+`Settings > User Preferences > Text Agent Model` selects GPT-5.6 Sol or GPT-6 Astra for new Text Agent messages. Click **Save Preferences** to apply the choice through your selected text provider.

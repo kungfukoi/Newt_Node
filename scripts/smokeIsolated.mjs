@@ -109,6 +109,7 @@ try {
   const initialSettings = await (await request("/api/settings")).json();
   assert.match(initialSettings.historyRecoveryNotice, /restored/);
   assert.equal(initialSettings.userPreferences.showPresetPanel, true);
+  assert.equal(initialSettings.userPreferences.textAgentModel, "sol");
   assert.equal(initialSettings.repository, "https://github.com/kungfukoi/Newt_Node.git");
   assert.equal(initialSettings.branch, "main");
   assert.equal(initialSettings.branchStatus.state, "archive-install");
@@ -121,7 +122,7 @@ try {
     llm: "openai"
   };
   const savedSettings = await (await request("/api/settings", {
-    userPreferences: { showPresetPanel: false, imageEditorModel: "Ideogram 4.5" },
+    userPreferences: { showPresetPanel: false, imageEditorModel: "Ideogram 4.5", textAgentModel: "astra" },
     modelProviderPreferences: expectedRouting
   })).json();
   assert.equal(savedSettings.userPreferences.showPresetPanel, false);
@@ -131,6 +132,7 @@ try {
   const reloadedSettings = await (await request("/api/settings")).json();
   assert.equal(reloadedSettings.userPreferences.showPresetPanel, false);
   assert.equal(reloadedSettings.userPreferences.imageEditorModel, "Ideogram 4.5");
+  assert.equal(reloadedSettings.userPreferences.textAgentModel, "astra");
   assert.deepEqual(reloadedSettings.modelProviderPreferences, expectedRouting);
   assert.equal(reloadedSettings.atlasApiKeyConfigured, true);
   assert.equal(reloadedSettings.activeCredentialIds.atlas, savedSettings.activeCredentialIds.atlas);

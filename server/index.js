@@ -153,7 +153,7 @@ import {
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences, providerSupportedModels } from "../src/modelProviderRouting.js";
 import { imageReferenceLimitError } from "../src/imageReferenceLimits.js";
-import { defaultUserPreferences, directorProcessingModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
+import { defaultUserPreferences, directorProcessingModelIds, textAgentModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
 import {
   comfyWanRequirementsPath as defaultComfyWanRequirementsPath,
   normalizeComfyRootPath,
@@ -18403,7 +18403,7 @@ async function processTextWithFal({ mode = "process", messages = [], text, textI
     throw new Error("No active Fal API key is selected in Settings.");
   }
 
-  const model = falTextModel;
+  const model = mode === "agent" ? textAgentModelIds(runtimeUserPreferences.textAgentModel).falModel : falTextModel;
   const imageContext = await describeImageInputs(imageInputs);
   const videoContext = await describeVideoInputs(videoInputs);
   const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
@@ -18437,7 +18437,7 @@ async function processTextWithOpenAi({ mode = "process", messages = [], text, te
     throw new Error("No OpenAI text API key is configured.");
   }
 
-  const model = openAiTextModel;
+  const model = mode === "agent" ? textAgentModelIds(runtimeUserPreferences.textAgentModel).openAiModel : openAiTextModel;
   const prompt = buildTextProcessingPrompt({
     mode,
     messages,
@@ -21022,6 +21022,7 @@ async function generateFalOpenAiImage2({ modelName, prompt, imagePromptUrls, ima
 }
 
 async function processTextWithAtlas({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
+  const model = mode === "agent" ? textAgentModelIds(runtimeUserPreferences.textAgentModel).openAiModel : openAiTextModel;
   const videoContext = videoInputs.length
     ? await runMediaDescriptionLlm({
         inputs: videoInputs,
@@ -21045,7 +21046,7 @@ async function processTextWithAtlas({ mode = "process", messages = [], text, tex
     prompt,
     systemPrompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions(),
     preferredProvider: "atlas",
-    openAiModel: openAiTextModel,
+    openAiModel: model,
     route: mode === "agent" ? "text-agent" : "text-processing"
   };
   const result = imageInputs.length

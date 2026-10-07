@@ -4,12 +4,18 @@ export const defaultUserPreferences = Object.freeze({
   showPresetPanel: true,
   showPriceSnapshot: true,
   imageEditorModel: normalizeImageEditModel(),
-  directorProcessingModel: "astra"
+  directorProcessingModel: "astra",
+  textAgentModel: "sol"
 });
 
 export const directorProcessingModelOptions = Object.freeze([
   Object.freeze({ value: "astra", label: "GPT-6 Astra" }),
   Object.freeze({ value: "sol", label: "GPT-5.6 Sol" })
+]);
+
+export const textAgentModelOptions = Object.freeze([
+  Object.freeze({ value: "sol", label: "GPT-5.6 Sol" }),
+  Object.freeze({ value: "astra", label: "GPT-6 Astra" })
 ]);
 
 export function normalizeUserPreferences(value) {
@@ -22,8 +28,20 @@ export function normalizeUserPreferences(value) {
       ? source.showPriceSnapshot
       : defaultUserPreferences.showPriceSnapshot,
     imageEditorModel: normalizeImageEditModel(source.imageEditorModel),
-    directorProcessingModel: normalizeDirectorProcessingModel(source.directorProcessingModel)
+    directorProcessingModel: normalizeDirectorProcessingModel(source.directorProcessingModel),
+    textAgentModel: normalizeTextAgentModel(source.textAgentModel)
   };
+}
+
+export function normalizeTextAgentModel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return textAgentModelOptions.some((option) => option.value === normalized)
+    ? normalized
+    : defaultUserPreferences.textAgentModel;
+}
+
+export function textAgentModelIds(value) {
+  return directorProcessingModelIds(normalizeTextAgentModel(value));
 }
 
 export function normalizeDirectorProcessingModel(value) {

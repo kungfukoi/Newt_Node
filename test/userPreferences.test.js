@@ -4,8 +4,21 @@ import {
   defaultUserPreferences,
   directorProcessingModelIds,
   normalizeDirectorProcessingModel,
+  textAgentModelIds,
   normalizeUserPreferences
 } from "../src/userPreferences.js";
+
+test("Text Agent model preference defaults safely and remains independent of Director", () => {
+  for (const value of [undefined, "unknown", null]) {
+    assert.equal(normalizeUserPreferences({ textAgentModel: value }).textAgentModel, "sol");
+  }
+  for (const [preference, model] of [["sol", "gpt-5.6-sol"], ["astra", "gpt-6-astra"]]) {
+    const saved = JSON.parse(JSON.stringify(normalizeUserPreferences({ textAgentModel: preference, directorProcessingModel: "sol" })));
+    assert.equal(normalizeUserPreferences(saved).textAgentModel, preference);
+    assert.equal(saved.directorProcessingModel, "sol");
+    assert.deepEqual(textAgentModelIds(preference), { preference, openAiModel: model, falModel: `openai/${model}` });
+  }
+});
 
 test("user preferences default to showing the Preset panel", () => {
   assert.deepEqual(normalizeUserPreferences(), defaultUserPreferences);

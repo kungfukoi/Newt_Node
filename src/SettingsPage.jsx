@@ -34,7 +34,7 @@ import {
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
 import { imageEditModelOptions } from "./imageEdit.js";
-import { defaultUserPreferences, directorProcessingModelOptions, normalizeUserPreferences } from "./userPreferences.js";
+import { defaultUserPreferences, directorProcessingModelOptions, textAgentModelOptions, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
 const providerDefinitions = Object.freeze([
@@ -634,6 +634,18 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
                 onChange={(event) => setUserPreferences((current) => ({ ...current, imageEditorModel: event.target.value }))}>
                 {imageEditModelOptions.map((model) => <option key={model}>{model}</option>)}
+              </select>
+            </label>
+            <label className="settings-preference-model">
+              <span>
+                <strong>Text Agent Model</strong>
+                <small>Used for new Text Agent messages through your selected text provider.</small>
+              </span>
+              <select aria-label="Text Agent Model" value={userPreferences.textAgentModel}
+                onChange={(event) => setUserPreferences((current) => ({ ...current, textAgentModel: event.target.value }))}>
+                {textAgentModelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
             <label className="settings-preference-model">
