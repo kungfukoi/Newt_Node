@@ -10,7 +10,7 @@ This is the practical build and verification guide for agents and developers. Re
 - A local ComfyUI installation only for Comfy-backed Utility features.
 - An optional SGLang MiniMax H3 service for the Local H3 provider; see `minimaxH3-local.md`.
 
-FFmpeg and FFprobe are supplied by `ffmpeg-static` and `ffprobe-static`. Use `FFMPEG_PATH` and `FFPROBE_PATH` only when testing a deliberate system-binary override.
+FFmpeg and FFprobe are supplied by `ffmpeg-static` and `@ffprobe-installer/ffprobe`. Use `FFMPEG_PATH` and `FFPROBE_PATH` only when testing a deliberate system-binary override.
 
 ## First Run
 

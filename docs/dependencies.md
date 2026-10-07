@@ -10,7 +10,9 @@ For setup commands, validation tiers, environment overrides, and troubleshooting
 - npm, distributed with Node.js.
 - Git is recommended but optional for public GitHub ZIP installs. The first Settings update adopts a shallow Git checkout when Git is available and otherwise uses GitHub source archives.
 - Network access to the npm registry when dependencies are missing or the lockfile changes.
-- FFmpeg and FFprobe are supplied by `ffmpeg-static` and `ffprobe-static`.
+- FFmpeg and FFprobe are supplied by `ffmpeg-static` and `@ffprobe-installer/ffprobe`.
+
+FFprobe uses platform-specific packages, including a native macOS ARM64 binary. The previous `ffprobe-static@3.1.0` package placed an Intel executable in its Darwin ARM64 directory. The isolated smoke test probes its generated video directly before exercising API recovery, so binary launch failures retain their original diagnostic.
 
 Important direct runtime packages include:
 
@@ -22,7 +24,7 @@ Important direct runtime packages include:
 | `three` | Frame It and 3D media previews. |
 | `express`, `cors`, `multer` | Local API and uploads. |
 | `@fal-ai/client` | Fal model requests. |
-| `ffmpeg-static`, `ffprobe-static` | Local media inspection and editing. |
+| `ffmpeg-static`, `@ffprobe-installer/ffprobe` | Local media inspection and editing. |
 
 ## Automatic Launcher Install
 

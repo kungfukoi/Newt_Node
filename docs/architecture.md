@@ -179,7 +179,7 @@ Local ComfyUI integrations live in focused server engines such as `server/wanwar
 Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed Newt assets to server-visible `file://` URIs, submits asynchronous video jobs to loopback SGLang, polls completion, and copies content back into managed outputs. FL2VA/T2VA use the primary URL; Ref2VA may use a separately configured service because it is a distinct deployment variant.
 
 
-Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/probe work, Output transcoding, and related Utility operations. Use `ffmpeg-static` and `ffprobe-static` by default, with documented environment overrides for controlled installations.
+Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/probe work, Output transcoding, and related Utility operations. Use `ffmpeg-static` and `@ffprobe-installer/ffprobe` by default, with documented environment overrides for controlled installations.
 
 ## Timeline Compatibility
 

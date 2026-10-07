@@ -37,7 +37,7 @@ import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
+import ffprobeStatic from "@ffprobe-installer/ffprobe";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
 import { normalizeTextAgentMessages } from "../src/textAgent.js";

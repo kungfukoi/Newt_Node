@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -7,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import setupMedia from "../e2e/setup.mjs";
+import ffprobe from "@ffprobe-installer/ffprobe";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const sandbox = await mkdtemp(path.join(os.tmpdir(), "newt-isolated-smoke-"));
@@ -26,6 +28,17 @@ try {
   await mkdir(path.join(sandbox, "outputs"), { recursive: true });
   await writeFile(path.join(sandbox, ".env"), "# ATLAS_API_KEY=atlas-smoke-key\n");
   await setupMedia();
+  // Exercise the bundled probe before the API can turn a launch error into
+  // an empty metadata result and a misleading "unreadable video" response.
+  const { stdout: probeOutput } = await promisify(execFile)(ffprobe.path, [
+    "-v", "error", "-select_streams", "v:0",
+    "-show_entries", "stream=width,height:format=duration", "-of", "json",
+    path.join(root, "e2e", ".generated", "motion.mp4")
+  ], { windowsHide: true, timeout: 15000 });
+  const probe = JSON.parse(probeOutput);
+  assert.equal(probe.streams?.[0]?.width, 640, "Bundled FFprobe must read the fixture width");
+  assert.equal(probe.streams?.[0]?.height, 360, "Bundled FFprobe must read the fixture height");
+  assert.ok(Number(probe.format?.duration) > 0, "Bundled FFprobe must read the fixture duration");
   await cp(path.join(root, "e2e", ".generated", "landscape.png"), path.join(sandbox, "outputs", "panel.png"));
   await cp(path.join(root, "e2e", ".generated", "motion.mp4"), path.join(sandbox, "outputs", "clip.mp4"));
   await writeFile(path.join(sandbox, "server", "data", "history.json"), JSON.stringify([

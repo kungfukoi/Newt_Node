@@ -83,6 +83,6 @@ test("old variant fields migrate and both choices reach all existing image model
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: /User Preferences/ }).click();
   const editor = page.getByLabel("Image Editor Model", { exact: true });
-  await expect(editor.locator("option")).toHaveText(["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3"]);
+  await expect(editor.locator("option")).toHaveText(["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]);
   expect(errors).toEqual([]);
 });
