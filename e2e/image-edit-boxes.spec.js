@@ -24,6 +24,8 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("Cat");
   const corner = editor.locator(".ies-box-corner").first(), hit = editor.locator(".ies-box-scale-hit").first();
   expect(Number(await corner.getAttribute("r"))).toBe(Number(await hit.getAttribute("r")) / 4);
+  await expect(editor.getByLabel("Shadow / lighting area", { exact: true })).toHaveValue("35");
+  await editor.getByLabel("Shadow / lighting area", { exact: true }).fill("60");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("60");
   await editor.getByLabel("Rotation (°)", { exact: true }).fill("35");
   await editor.getByRole("button", { name: "Undo stroke" }).click();
@@ -77,7 +79,7 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   expect(form.get("model")).toBe("OpenAI Image 2.5 Flare");
   expect(form.get("boxObjects")).toBeTruthy();
   const [box] = JSON.parse(form.get("boxes"));
-  expect(box.label).toBe("Cat"); expect(box.mode).toBe("move");
+  expect(box.contextPadding).toBe(.6); expect(box.label).toBe("Cat"); expect(box.mode).toBe("move");
   expect(box.target.x).toBe(.65); expect(box.target.rotation).toBe(25);
   expect(box.source.x).toBeCloseTo(.3, 2);
   const divider = editor.getByRole("slider", { name: "Compare divider", exact: true });

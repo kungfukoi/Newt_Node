@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { boxCorners } from "../src/imageEditBoxes.js";
+import { boxCorners, boxContextRect } from "../src/imageEditBoxes.js";
 import { boxNeedsCutout, validateBoxObject } from "../src/imageEditBoxModels.js";
 
 export async function prepareMoveCutouts({ original, boxes, model, objects = {}, width, height }) {
@@ -44,10 +44,17 @@ export async function prepareMoveCutouts({ original, boxes, model, objects = {},
   }
   const halo = Math.max(1, Math.min(6, Math.min(width, height) / 200));
   const combined = Buffer.from(vacated.map((value, p) => Math.max(value, destination[p])));
+  for (const { box } of prepared) for (const rect of [box.source, box.target]) {
+    const corners = boxCorners(boxContextRect(rect, width, height, box.contextPadding), width, height);
+    const left = Math.max(0, Math.floor(Math.min(...corners.map(p => p.x)))), right = Math.min(width, Math.ceil(Math.max(...corners.map(p => p.x))));
+    const top = Math.max(0, Math.floor(Math.min(...corners.map(p => p.y)))), bottom = Math.min(height, Math.ceil(Math.max(...corners.map(p => p.y))));
+    for (let y = top; y < bottom; y++) combined.fill(255, y * width + left, y * width + right);
+  }
   const dilated = await sharp(combined, { raw: { width, height, channels: 1 } }).blur(halo).threshold(1).greyscale().raw().toBuffer();
-  const interior = await sharp(destination, { raw: { width, height, channels: 1 } }).blur(halo).threshold(254).greyscale().raw().toBuffer();
-  const edit = Buffer.alloc(pixels * 4, 255), protect = Buffer.alloc(pixels * 4, 255);
-  for (let p = 0; p < pixels; p++) { edit[p * 4 + 3] = dilated[p]; protect[p * 4 + 3] = interior[p]; }
+  // The cutout is a placement reference, not a lighting lock: the model must
+  // be able to regenerate the subject as well as its surrounding effects.
+  const edit = Buffer.alloc(pixels * 4, 255);
+  for (let p = 0; p < pixels; p++) edit[p * 4 + 3] = dilated[p];
   // Protected Keep regions must be restored in the staged baseline as well as
   // excluded from the generation mask, including overlaps with pasted cutouts.
   for (const box of boxes.filter(box => box.mode === "keep")) {
@@ -55,5 +62,5 @@ export async function prepareMoveCutouts({ original, boxes, model, objects = {},
       for (let x = Math.max(0, Math.floor((box.source.x - box.source.w / 2) * width)); x < Math.min(width, Math.ceil((box.source.x + box.source.w / 2) * width)); x++) source.copy(result, (y * width + x) * 4, (y * width + x) * 4, (y * width + x) * 4 + 4);
   }
   const png = buffer => sharp(buffer, { raw: { width, height, channels: 4 } }).png().toBuffer();
-  return { base: await png(result), ids: moves.map(box => box.id), editMask: await png(edit), protectedMask: await png(protect) };
+  return { base: await png(result), ids: moves.map(box => box.id), editMask: await png(edit), protectedMask: null };
 }

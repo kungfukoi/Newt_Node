@@ -1,7 +1,7 @@
 import React from "react";
 import { drawObjectMask } from "../objectSelection.js";
 import { boxNeedsCutout } from "../imageEditBoxModels.js";
-import { boxCorners, boxFromDrag, transformEditBox, maxEditBoxes, editBoxModes, clampBoxValue } from "../imageEditBoxes.js";
+import { boxCorners, boxContextRect, boxFromDrag, transformEditBox, maxEditBoxes, editBoxModes, clampBoxValue } from "../imageEditBoxes.js";
 
 export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedId, onSelect, onCommit, onGesture }) {
   const svgRef = React.useRef(null), drag = React.useRef(null);
@@ -60,6 +60,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
       const length = Math.max(1, Math.hypot(top.x - cx, top.y - cy));
       const rotate = { x: top.x + (top.x - cx) / length * radius * 4, y: top.y + (top.y - cy) / length * radius * 4 };
       return <g key={box.id}>
+        {active && selectedId === box.id && box.mode !== "keep" && (box.mode === "move" ? [box.source, box.target] : [rect]).map((region, i) => <polygon key={`context-${i}`} points={points(boxContextRect(region, size.width, size.height, box.contextPadding))} fill="none" stroke="#ffffff88" strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />)}
         {box.mode === "move" && <><polygon className="ies-box-source" points={points(box.source)} /><line className="ies-box-link" x1={box.source.x * size.width} y1={box.source.y * size.height} x2={cx} y2={cy} /></>}
         <polygon data-box-id={box.id} aria-label={`Box ${index + 1}: ${box.label}`} className={`ies-box-target ${selectedId === box.id ? "selected" : ""} ${sourceOnly ? box.mode : ""}`} points={points(rect)} onPointerDown={event => begin(event, box)} onDoubleClick={event => rename(event, box)} />
         <text className="ies-box-caption" aria-label={`Rename box ${index + 1}`} x={corners[0].x} y={corners[0].y - radius} fontSize={radius * 1.2} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => rename(event, box)}>{index + 1}. {box.label} · {editBoxModes[box.mode]}</text>
@@ -98,10 +99,11 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
       <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label>Description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
       {box.mode === "move" && <>
-        <small>{boxNeedsCutout(box, model) ? "Select the object first. Its cutout is placed at the destination; your edit model fills the old location and blends the edges. SAM 3 selection is a separate Fal request." : "FLUX 3 uses structured source/destination boxes. Adding rotation requires an isolated object."}</small>
+        <small>{boxNeedsCutout(box, model) ? "Select the object first. Its cutout is placed at the destination; your edit model removes source shadows and relights the subject for its new surroundings. SAM 3 selection is a separate Fal request." : "FLUX 3 uses structured source/destination boxes. Adding rotation requires an isolated object."}</small>
         {boxNeedsCutout(box, model) && <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>}
         {box.sourceMask && <small role="status">Object selected. Check the highlighted source and destination preview before generating.</small>}
       </>}
+      {box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the dashed area to include shadows, reflections and room for new lighting. Keep boxes protect nearby objects.</small></label>}
       {box.mode === "text" && <label>Text to render<textarea aria-label="Box text" rows={2} maxLength={500} value={box.text || ""} onChange={event => onCommit({ ...box, text: event.target.value })} /></label>}
       {box.mode === "reference" && <>
         <label>Reference image<input aria-label="Box reference image" type="file" accept="image/*" disabled={busy} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUploadReference(box, file); }} /></label>

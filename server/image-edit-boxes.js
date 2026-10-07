@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { boxCorners, editBoxesPrompt, validateEditBoxes } from "../src/imageEditBoxes.js";
+import { boxCorners, boxContextRect, editBoxesPrompt, validateEditBoxes } from "../src/imageEditBoxes.js";
 
 export async function prepareEditBoxes({ boxes: input, original, width, height, selection, guideIndex, referenceIndices, staged = { ids: [] } }) {
   const boxes = validateEditBoxes(input);
@@ -7,7 +7,7 @@ export async function prepareEditBoxes({ boxes: input, original, width, height, 
   const polygon = (rect, attributes = "") => `<polygon points="${boxCorners(rect, width, height).map(p => `${p.x},${p.y}`).join(" ")}" ${attributes}/>`;
   const svg = body => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`);
   const stroke = Math.max(2, Math.min(width, height) / 180);
-  const changed = boxes.flatMap(box => staged.ids.includes(box.id) ? [] : box.mode === "keep" ? [] : box.mode === "remove" ? [box.source] : box.mode === "move" ? [box.source, box.target] : [box.target]);
+  const changed = boxes.flatMap(box => staged.ids.includes(box.id) ? [] : box.mode === "keep" ? [] : box.mode === "remove" ? [boxContextRect(box.source, width, height, box.contextPadding)] : box.mode === "move" ? [boxContextRect(box.source, width, height, box.contextPadding), boxContextRect(box.target, width, height, box.contextPadding)] : [boxContextRect(box.target, width, height, box.contextPadding)]);
   const keep = boxes.filter(box => box.mode === "keep").map(box => box.source);
   const overlay = boxes.map((box, i) => {
     let shapes = "";

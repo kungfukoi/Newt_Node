@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { boxFromDrag, boxCorners, transformEditBox, validateEditBoxes, editBoxModes } from "../src/imageEditBoxes.js";
+import { boxFromDrag, boxCorners, boxContextRect, transformEditBox, validateEditBoxes, editBoxModes } from "../src/imageEditBoxes.js";
 import { prepareImageEdit, finishImageEdit } from "../server/image-edit.js";
 const box = (id = "cat") => boxFromDrag({ x: .1, y: .1 }, { x: .3, y: .3 }, id);
 const solid = color => sharp({ create: { width: 200, height: 300, channels: 4, background: color } }).png().toBuffer();
@@ -25,10 +25,36 @@ test("box transforms use image pixels for rotation and preserve the original sou
 });
 
 test("box validation rejects incomplete modes, duplicate IDs and unbounded transforms", () => {
-  for (const patch of [{ mode: "other" }, { mode: "text", text: "" }, { mode: "reference" }, { label: "" }, { target: { ...box().target, rotation: Infinity } }])
+  for (const patch of [{ contextPadding: -1 }, { contextPadding: 1.1 }, { contextPadding: "large" }, { mode: "other" }, { mode: "text", text: "" }, { mode: "reference" }, { label: "" }, { target: { ...box().target, rotation: Infinity } }])
     assert.throws(() => validateEditBoxes([{ ...box(), ...patch }]));
   assert.throws(() => validateEditBoxes([box(), box()]));
   assert.throws(() => validateEditBoxes(Array.from({ length: 9 }, (_, i) => box(`box-${i}`))));
+});
+
+test("context margins contain rotated geometry and default safely for older boxes", () => {
+  assert.equal(validateEditBoxes([box()])[0].contextPadding, .35);
+  const rect = { x: .5, y: .5, w: .2, h: .4, rotation: 90 };
+  const context = boxContextRect(rect, 200, 300, .5);
+  assert.equal(context.rotation, 0);
+  assert.ok(Math.abs(context.w - .8) < 1e-10);
+  assert.ok(Math.abs(context.h - 80 / 300) < 1e-10);
+});
+
+test("every editable box mode includes context beyond its footprint while Keep still wins", async () => {
+  const source = await solid("#123456");
+  for (const mode of ["remove", "new", "reference", "text", "move"]) {
+    const item = { ...box(), mode, text: "Hello", referenceUrl: "ref" };
+    const keep = { ...boxFromDrag({ x: .16, y: .315 }, { x: .24, y: .36 }, "protected"), mode: "keep" };
+    const args = { source, mode: "edit", model: "Flux 3", references: [{ url: "ref", buffer: source }] };
+    const prepared = await prepareImageEdit({ ...args, boxes: [item, keep] });
+    const result = await finishImageEdit(prepared, await solid("#ff0000"));
+    assert.deepEqual(await pixel(result, 40, 100), [18, 52, 86, 255], `${mode}: Keep protects context`);
+    assert.deepEqual(await pixel(result, 55, 98), [255, 0, 0, 255], `${mode}: shadow outside footprint is editable`);
+    assert.match(prepared.submittedPrompt, /SCENE CONTEXT/);
+    assert.match(prepared.submittedPrompt, /TRANSFORMS/);
+    const tight = await prepareImageEdit({ ...args, boxes: [{ ...item, contextPadding: 0 }] });
+    assert.deepEqual(await pixel(await finishImageEdit(tight, await solid("#ff0000")), 55, 103), [18, 52, 86, 255], `${mode}: zero margin limits editing`);
+  }
 });
 
 for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
@@ -43,7 +69,7 @@ for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ide
     assert.deepEqual(await pixel(result, 40, 60), [255, 0, 0, 255]);
     assert.deepEqual(await pixel(result, 140, 210), [18, 52, 86, 255]);
     assert.deepEqual(await pixel(result, 180, 30), [18, 52, 86, 255]);
-    assert.deepEqual(await pixel(result, 123, 193), [18, 52, 86, 255]);
+    assert.deepEqual(await pixel(result, 123, 193), [255, 0, 0, 255]);
   });
 }
 

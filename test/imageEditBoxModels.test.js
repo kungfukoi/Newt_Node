@@ -30,7 +30,7 @@ test("Flux rows use y/x 1000 coordinates and correct reference slots for every m
   assert.equal(boxNeedsCutout({ ...box, target: { ...box.target, rotation: 90 } }, "Flux 3"), true);
   assert.equal(boxNeedsCutout({ ...box, sourceMask: mask }, "Flux 3"), true);
 });
-test("cutout relocation preserves the subject even when the model repaints the entire frame", async () => {
+test("cutout relocation provides identity reference but allows model relighting only inside context regions", async () => {
   const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } })
     .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: "#00ff00" } }).png().toBuffer(), left: 20, top: 20 }]).png().toBuffer();
   const moved = { ...box, target: { ...box.target, x: .7, y: .7, rotation: 90 } };
@@ -39,7 +39,11 @@ test("cutout relocation preserves the subject even when the model repaints the e
   const generated = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#ff0000" } }).png().toBuffer();
   const result = await sharp(await finishImageEdit(prepared, generated)).raw().toBuffer();
   const pixel = (x, y) => [...result.subarray((y * 200 + x) * 4, (y * 200 + x) * 4 + 4)];
-  assert.deepEqual(pixel(140, 140), [0, 255, 0, 255]);
+  const reference = await sharp(prepared.images[0]).raw().toBuffer();
+  assert.deepEqual([...reference.subarray((140 * 200 + 140) * 4, (140 * 200 + 140) * 4 + 4)], [0, 255, 0, 255]);
+  assert.deepEqual(pixel(140, 140), [255, 0, 0, 255]);
+  assert.deepEqual(pixel(40, 66), [255, 0, 0, 255]);
+  assert.deepEqual(pixel(140, 166), [255, 0, 0, 255]);
   assert.deepEqual(pixel(40, 40), [255, 0, 0, 255]);
   assert.deepEqual(pixel(180, 20), [17, 34, 51, 255]);
   await assert.rejects(prepareImageEdit({ source, mode: "edit", model: "Nano Banana 2.1", boxes: [moved] }), /Select the object/);
@@ -58,8 +62,8 @@ test("overlapping moves sample the original and annotation restoration does not 
   const prepared = await prepareImageEdit({ source, drawing: await solid("#ffffff"), mode: "edit", model: "Nano Banana 2.1", boxes: [first, second], boxObjects: { cat: mask, other: { width: 10, height: 10, runs: [16, 2, 26, 2] } } });
   const pixels = await sharp(await finishImageEdit(prepared, await solid("#0000ff"))).raw().toBuffer();
   const at = (x, y) => [...pixels.subarray((y * 200 + x) * 4, (y * 200 + x) * 4 + 4)];
-  assert.deepEqual(at(140, 40), [0, 255, 0, 255]);
-  assert.deepEqual(at(40, 140), [255, 0, 0, 255]);
+  assert.deepEqual(at(140, 40), [0, 0, 255, 255]);
+  assert.deepEqual(at(40, 140), [0, 0, 255, 255]);
   assert.deepEqual(at(40, 40), [0, 0, 255, 255]);
 });
 
@@ -76,7 +80,7 @@ test("cutout references never reintroduce the original subject and Flux explicit
   }
   const rows = JSON.parse(prepared.submittedPrompt.split("\n").at(-1));
   const vacancy = rows.find(row => row.id === "vacancy_1");
-  assert.equal(vacancy.tgt_bbox, null); assert.deepEqual(vacancy.src_bbox, [100, 100, 300, 300]);
+  assert.equal(vacancy.tgt_bbox, null); assert.deepEqual(vacancy.src_bbox, [30, 30, 370, 370]);
   assert.match(prepared.submittedPrompt, /background only/);
   assert.match(prepared.submittedPrompt, /already been applied geometrically/);
 });

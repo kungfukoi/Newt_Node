@@ -1,5 +1,5 @@
 import { isFlux3Model } from "./flux3.js";
-import { boxCorners, boxFromDrag } from "./imageEditBoxes.js";
+import { boxCorners, boxFromDrag, boxContextRect } from "./imageEditBoxes.js";
 export const boxNeedsCutout = (box, model) => box.mode === "move" && (Boolean(box.sourceMask) || !isFlux3Model(model) || Math.abs(box.target.rotation) > .001);
 
 export function boxFromSelectionPixels({ data, width, height, id, label = "Object" }) {
@@ -55,14 +55,14 @@ export function fluxBoxInstructions(boxes, width, height, referenceIndices = {},
     const dx = box.target.x - box.source.x, dy = box.target.y - box.source.y;
     const direction = [Math.abs(dx) > .01 ? dx < 0 ? "left" : "right" : "", Math.abs(dy) > .01 ? dy < 0 ? "up" : "down" : ""].filter(Boolean).join(" and ");
     const desc = box.mode === "text" ? `${box.label}; visible text ${JSON.stringify(box.text)}` : box.label;
-    captions.push(placed ? `Keep <${id}> already placed in <ref_image_0>; repair the vacated source and blend its edges. Do not move or rotate it again.` : `${box.mode === "reference" ? "Place from reference" : box.mode.toUpperCase()} ${JSON.stringify(desc)} <${id}> ${box.mode === "move" ? `to the destination ${direction ? `(${direction})` : ""}, filling the vacated background without a duplicate, ` : ""}using the source and target rectangles below.${box.target.rotation ? ` Destination orientation is ${box.target.rotation} degrees clockwise.` : ""}`);
+    captions.push(placed ? `Regenerate and relight <${id}> already placed in <ref_image_0> at the same position, preserving identity and geometry. Infer scene lighting and supporting surfaces; create new contact/cast shadows, reflections and appropriate occlusion. Do not move or rotate it again.` : `${box.mode === "reference" ? "Place from reference" : box.mode.toUpperCase()} ${JSON.stringify(desc)} <${id}> ${box.mode === "move" ? `to the destination ${direction ? `(${direction})` : ""}, filling the vacated background without a duplicate, ` : ""}using the source and target rectangles below.${box.target.rotation ? ` Destination orientation is ${box.target.rotation} degrees clockwise.` : ""}`);
     return { id, from: ["new", "text"].includes(box.mode) ? null : box.mode === "reference" ? `ref_image_${referenceIndices[box.referenceUrl] - 1}` : "ref_image_0", src_bbox: ["new", "text"].includes(box.mode) ? null : box.mode === "reference" ? [0, 0, 1000, 1000] : grid(placed ? box.target : box.source), tgt_bbox: box.mode === "remove" ? null : grid(box.mode === "keep" ? box.source : box.target), desc };
   });
   boxes.forEach((box, i) => {
     if (!staged.includes(box.id)) return;
     const id = `vacancy_${i + 1}`;
     captions.push(`Remove the neutral gray source placeholder <${id}> and reconstruct only the surrounding background there. Do not regenerate ${JSON.stringify(box.label)} at its old location. Keep the already placed destination objects, including any that overlap this source region.`);
-    rows.push({ id, from: "ref_image_0", src_bbox: grid(box.source), tgt_bbox: null, desc: `The neutral gray vacancy left by moving ${box.label}; remove the placeholder and fill with background only, with no duplicate object. Preserve any destination cutouts overlapping this region.` });
+    rows.push({ id, from: "ref_image_0", src_bbox: grid(boxContextRect(box.source, width, height, box.contextPadding)), tgt_bbox: null, desc: `The neutral gray vacancy left by moving ${box.label}; remove the placeholder AND all shadows, ambient occlusion, reflections and color spill belonging to the old object. Reconstruct the surface as if it had never been present. Preserve unrelated scene objects and their effects, with no duplicate object. Preserve any destination cutouts overlapping this region.` });
   });
   return { caption: "In <ref_image_0>, follow these element instructions. Keep everything else unchanged.\n" + captions.join("\n"), rows };
 }
