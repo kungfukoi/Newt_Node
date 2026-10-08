@@ -42,6 +42,23 @@ test("custom SAM 2 controls reach Fal and History; invalid values fail before su
   for (const invalid of [{ pointsPerSide: 1000 }, { confidence: -1 }, { stability: "0.8" }, { minRegionArea: .5 }, null]) assert.equal((await post({ sam2: invalid })).status, 400);
   assert.equal(calls.length, 1);
 }));
+
+test("box object identification stays within SAM 3's mask limit", () => fixture(async ({ post, histories }) => {
+  const response = await post({ prompt: "the object to move and rotate" });
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result));
+  assert.equal(result.model, "SAM 3");
+  assert.equal(result.masks[0].area, 128);
+  assert.equal(histories.length, 1);
+}, {
+  subscribe: async (endpoint, { input }) => {
+    assert.equal(endpoint, "fal-ai/sam-3/image");
+    if (!Number.isInteger(input.max_masks) || input.max_masks < 1 || input.max_masks > 32) {
+      throw Object.assign(new Error("max_masks: Input should be less than or equal to 32"), { status: 422 });
+    }
+    return { data: { masks: [{ url: "mask" }] } };
+  }
+}));
 test("concurrent duplicate selections share inference and reject conflicting payloads", () => fixture(async ({ post, calls }) => {
   const requestId = randomUUID();
   const responses = await Promise.all([post({ requestId }), post({ requestId })]);

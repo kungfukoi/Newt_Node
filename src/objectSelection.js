@@ -13,7 +13,8 @@ export function validateSam2Settings(settings = {}) {
 }
 
 export function objectSelectionInput({ imageUrl, point, prompt, width, height, sam2 }) {
-  if (prompt) return { image_url: imageUrl, prompt, apply_mask: false, output_format: "png", return_multiple_masks: true, max_masks: 64, include_scores: true };
+  // SAM 3 accepts at most 32 masks, including text identification for Boxes.
+  if (prompt) return { image_url: imageUrl, prompt, apply_mask: false, output_format: "png", return_multiple_masks: true, max_masks: 32, include_scores: true };
   if (!point) {
     const settings = validateSam2Settings(sam2);
     return { image_url: imageUrl, output_format: "png", points_per_side: settings.pointsPerSide, pred_iou_thresh: settings.confidence, stability_score_thresh: settings.stability, min_mask_region_area: settings.minRegionArea };
