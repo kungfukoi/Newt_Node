@@ -1,9 +1,9 @@
 import { normalizeStatsRecord } from "../../src/statsAnalytics.js";
 
-export function registerStatsRoutes(app, { ledger, providers, readHistory, refreshKeys = async () => {} }) {
+export function registerStatsRoutes(app, { ledger, providers, readHistory, refreshKeys = async () => {}, readKeyIdentities = async () => [] }) {
   const snapshot = async () => {
     const document = await ledger.snapshot(await readHistory());
-    return { history: document.records, coverage: { source: "This installation's retained history + durable accounting ledger", trackingStartedAt: document.trackingStartedAt,
+    return { history: document.records, keyIdentities: await readKeyIdentities(), coverage: { source: "This installation's retained history + durable accounting ledger", trackingStartedAt: document.trackingStartedAt,
       recordCount: document.records.length, note: "Earlier evicted history and other machines are not included. Shared API keys do not synchronize local records. Only recorded operations appear; this is not a live job queue." },
       capabilities: providers.capabilities, fetchedAt: new Date().toISOString() };
   };

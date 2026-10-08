@@ -42,9 +42,11 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
     return () => { mounted.current = false; request.current++; window.clearInterval(interval); };
   }, [refresh]);
   React.useEffect(() => { setLimit(25); }, [filters]);
-  const analytics = React.useMemo(() => buildAnalytics(data?.history || [], filters), [data, filters]);
+  const analytics = React.useMemo(() => buildAnalytics(data?.history || [], filters, new Date(), data?.keyIdentities || []), [data, filters]);
   const now = new Date();
-  const range = resolveDateRange(filters, scope === "global" ? new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) : now);
+  const range = scope === "local" ? analytics.range : filters.range === "all"
+    ? { error: "All Time covers this installation's recorded runs. Choose a date range of up to 180 days for provider billing." }
+    : resolveDateRange(filters, new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const query = { ...globalFilters, start: range.start ? dateKey(range.start) : "", end: range.end ? dateKey(range.end) : "" };
   const queryId = JSON.stringify(query), queryCurrent = accounts?.queryId === queryId;
   const [activeQuery, setActiveQuery] = React.useState("");
@@ -83,7 +85,7 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
 
   return <section className="stats-page analytics-page" aria-label="Spend analytics">
     <header className="stats-hero analytics-hero">
-      <div><span className="stats-kicker">Know where your budget goes</span><h1>Spend & usage</h1><p>Follow the cost of a run, a workflow, or your provider account.</p></div>
+      <div><span className="stats-kicker">Know where your budget goes</span><h1>Stats</h1><p>Follow the cost of a run, a workflow, or your provider account.</p></div>
       <div className="analytics-hero-actions"><div className="analytics-scope" role="group" aria-label="Accounting scope">
         <button aria-pressed={scope === "local"} onClick={() => setScope("local")}><HardDrive size={16}/>Local</button>
         <button aria-pressed={scope === "global"} onClick={() => setScope("global")}><Globe2 size={16}/>Global</button>
@@ -93,7 +95,7 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
     <section className="analytics-filters" aria-label="Analytics filters">
       <div className="analytics-filter-heading"><span><SlidersHorizontal size={16}/>Filter your view</span><button onClick={reset}>Reset all filters</button></div>
       <div className="analytics-filter-grid">
-        <label>Date range<select aria-label="Date range" value={filters.range} onChange={e => change("range", e.target.value)}><option value="5">Last 5 days</option><option value="30">Last 30 days</option><option value="custom">Custom range</option></select></label>
+        <label>Date range<select aria-label="Date range" value={filters.range} onChange={e => change("range", e.target.value)}><option value="5">Last 5 days</option><option value="30">Last 30 days</option><option value="all" disabled={scope === "global"}>All Time</option><option value="custom">Custom range</option></select></label>
         {filters.range === "custom" && <><label>Start date<input type="date" value={filters.start} onChange={e => change("start", e.target.value)}/></label><label>End date (inclusive)<input type="date" value={filters.end} onChange={e => change("end", e.target.value)}/></label></>}
         {scope === "local" ? <>
           {["workflow", "provider", "model", "key"].map(key => <label key={key}>{labels[key]}<select aria-label={labels[key]} value={filters[key]} onChange={e => change(key, e.target.value)}><option value="">All {key === "key" ? "key identities" : key === "workflow" ? "workflows" : `${key}s`}</option>{analytics.options[key].map(row => <option key={row.id} value={row.id}>{row.name}{key === "workflow" ? ` [${row.id}]` : ""}</option>)}</select></label>)}

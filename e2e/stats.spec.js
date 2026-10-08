@@ -7,9 +7,12 @@ const snapshot = { history, fetchedAt: "2026-10-08T12:00:00Z", coverage: { track
 async function openStats(page) {
   await page.clock.install({ time: new Date("2026-10-08T12:00:00Z") });
   const fixture = await openFixture(page);
-  await page.route("**/api/stats/local", route => route.fulfill({ json: snapshot }));
+  await page.route("**/api/stats/local", route => route.fulfill({ json: { ...snapshot, keyIdentities: [
+    { provider: "atlas", fingerprint, name: "Atlas Cloud–Studio" },
+    { provider: "krea", fingerprint: "b".repeat(64), name: "Krea–Backup" }
+  ] } }));
   await page.getByRole("button", { name: "Stats", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Spend & usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Stats", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Run ledger" })).toBeVisible();
   return fixture;
 }
@@ -17,11 +20,18 @@ test("local ledger combines filters, resets, dates, drill-down and repeated navi
   const { errors, requests } = await openStats(page);
   const ledger = page.locator(".analytics-ledger");
   await expect(ledger.locator("tbody tr")).toHaveCount(4);
+  await page.getByLabel("Date range", { exact: true }).selectOption("all");
+  await expect(ledger.locator("tbody tr")).toHaveCount(4);
+  await page.getByLabel("Provider", { exact: true }).selectOption("krea");
+  await expect(ledger.locator("tbody tr")).toHaveCount(1);
+  await page.getByLabel("Provider", { exact: true }).selectOption("");
   await page.getByLabel("Date range", { exact: true }).selectOption("5"); await expect(ledger.locator("tbody tr")).toHaveCount(3);
   await page.getByLabel("Workflow / JSON file", { exact: true }).selectOption("workflow-a");
   await page.getByLabel("Provider", { exact: true }).selectOption("atlas");
   await page.getByLabel("Model", { exact: true }).selectOption("Seedance 2.5");
   await page.getByLabel("API-key identity", { exact: true }).selectOption(`atlas:${fingerprint}`);
+  await expect(page.getByLabel("API-key identity", { exact: true }).locator("option:checked")).toHaveText("Atlas Cloud–Studio");
+  await expect(page.getByLabel("API-key identity", { exact: true }).locator(`option[value="krea:${"b".repeat(64)}"]`)).toHaveText("Krea–Backup");
   await page.getByLabel("Find run / job / JSON file").fill("job-a");
   await expect(ledger.locator("tbody tr")).toHaveCount(1);
   await ledger.locator("summary").click(); await expect(ledger.getByText("Saved provider-specific estimate")).toBeVisible();
@@ -79,5 +89,23 @@ test("responsive layout and empty records remain usable", async ({ page }, testI
   await page.screenshot({ path: testInfo.outputPath("stats-narrow.png"), fullPage: true });
   await page.route("**/api/stats/local", route => route.fulfill({ json: { ...snapshot, history: [] } }));
   await page.getByRole("button", { name: "Refresh records" }).click(); await expect(page.getByRole("heading", { name: "Your first recorded run starts the story" })).toBeVisible();
+  await expect(page.getByLabel("Provider", { exact: true }).locator('option[value="krea"]')).toHaveText("Krea");
   await expect(page.locator(".analytics-metrics").getByText("Unavailable", { exact: true })).toHaveCount(2);
+});
+
+test("All Time includes the first recorded year and explains Global billing limits", async ({ page }) => {
+  await openStats(page);
+  await page.route("**/api/stats/local", route => route.fulfill({ json: { ...snapshot, history: [
+    ...history, record("first-ever", 1, 7, { createdAt: "2024-01-01T12:00:00Z" })
+  ] } }));
+  await page.getByRole("button", { name: "Refresh records" }).click();
+  await expect(page.locator(".analytics-ledger tbody tr")).toHaveCount(4);
+  await page.getByLabel("Date range", { exact: true }).selectOption("all");
+  await expect(page.locator(".analytics-ledger tbody tr")).toHaveCount(5);
+  await expect(page.locator(".analytics-filter-summary")).toContainText("2024-01-01 to 2026-10-08");
+  await page.getByRole("button", { name: "Global", exact: true }).click();
+  await expect(page.locator(".analytics-filter-summary")).toContainText("up to 180 days");
+  await expect(page.getByRole("button", { name: "Apply & query providers" })).toBeDisabled();
+  await page.getByRole("button", { name: "Local", exact: true }).click();
+  await expect(page.locator(".analytics-ledger tbody tr")).toHaveCount(5);
 });

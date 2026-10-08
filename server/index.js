@@ -5,6 +5,7 @@ import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
+import { statsCredentialIdentities } from "./stats-credentials.js";
 import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { ProviderPricing } from "./provider-pricing.js";
 import { registerPricingRoutes } from "./routes/pricing.js";
@@ -899,7 +900,13 @@ registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing
     return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
   }
 }));
-registerStatsRoutes(app, { ledger: statsLedger, providers: statsProviders, readHistory, refreshKeys: refreshRuntimeConfigFromEnvFile });
+registerStatsRoutes(app, { ledger: statsLedger, providers: statsProviders, readHistory, refreshKeys: refreshRuntimeConfigFromEnvFile,
+  readKeyIdentities: async () => {
+    const keys = ["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"];
+    const [settings, env, disabled] = await Promise.all([readRuntimeSettingsStore(), readEnvFileValues(keys), readCommentedEnvFileValues(keys)]);
+    return statsCredentialIdentities(readProviderCredentialConfiguration(settings, env, disabled).credentials);
+  }
+});
 app.use(["/api/node", "/api/generate"], (req, _res, next) => {
   const fingerprints = Object.fromEntries(Object.entries(statsRuntimeKeys()).map(([provider, key]) => [provider, key ? providerKeyFingerprint(key) : ""]));
   statsCredentialScope.run({ fingerprints, projectId: req.body?.projectId, fileName: String(req.body?.workflowFileName || "").split(/[\\/]/).at(-1) }, () => generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next)));

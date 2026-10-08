@@ -49,16 +49,22 @@ function parseDay(value) {
   const date = new Date(y, m - 1, d);
   return dateKey(date) === value ? date : null;
 }
-export function resolveDateRange(filters, now = new Date()) {
+export function resolveDateRange(filters, now = new Date(), history = []) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const start = filters.range === "custom" ? parseDay(filters.start) : new Date(today);
+  if (filters.range === "all") {
+    for (const row of history) {
+      const date = new Date(row.createdAt);
+      if (row.createdAt && Number.isFinite(date.getTime()) && date <= now && date < start) start.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+    }
+  }
   const endDay = filters.range === "custom" ? parseDay(filters.end) : today;
   if (!start || !endDay || endDay < start) return { error: "Choose a valid start and end date; end must follow start." };
-  if (filters.range !== "custom") start.setDate(start.getDate() - (filters.range === "5" ? 4 : 29));
+  if (!["custom", "all"].includes(filters.range)) start.setDate(start.getDate() - (filters.range === "5" ? 4 : 29));
   const end = new Date(endDay); end.setDate(end.getDate() + 1);
   const days = [];
-  for (let date = new Date(start); date < end && days.length <= 366; date.setDate(date.getDate() + 1)) days.push({ key: dateKey(date), date: new Date(date), count: 0, cost: 0, pricedCount: 0 });
-  if (days.length > 366) return { error: "Choose a range of at most 366 days." };
+  for (let date = new Date(start); date < end && (filters.range === "all" || days.length <= 366); date.setDate(date.getDate() + 1)) days.push({ key: dateKey(date), date: new Date(date), count: 0, cost: 0, pricedCount: 0 });
+  if (filters.range !== "all" && days.length > 366) return { error: "Choose a range of at most 366 days." };
   return { start, end, days, label: `${dateKey(start)} to ${dateKey(endDay)}` };
 }
 
@@ -86,9 +92,15 @@ export function aggregateRecords(rows, dimension) {
   }
   return [...map.values()].sort((a, b) => b.cost - a.cost || a.name.localeCompare(b.name));
 }
-export function buildAnalytics(history, filters = defaultFilters(), now = new Date()) {
-  const range = resolveDateRange(filters, now);
+export function buildAnalytics(history, filters = defaultFilters(), now = new Date(), keyIdentities = []) {
   const unique = uniqueRecords(history);
+  const namedKeys = new Map();
+  for (const identity of keyIdentities) {
+    const provider = canonicalProvider(identity.provider);
+    if (provider !== "unknown" && /^[a-f0-9]{64}$/.test(identity.fingerprint) && identity.name) namedKeys.set(`${provider}:${identity.fingerprint}`, safeLabel(identity.name));
+  }
+  for (const row of unique.rows) if (namedKeys.has(row.keyId)) row.keyLabel = namedKeys.get(row.keyId);
+  const range = resolveDateRange(filters, now, unique.rows);
   const invalidDates = unique.rows.filter(row => !row.createdAt).length;
   const rows = range.error ? [] : unique.rows.filter(row => {
     const date = new Date(row.createdAt);
@@ -106,6 +118,8 @@ export function buildAnalytics(history, filters = defaultFilters(), now = new Da
     if (row.cost.amountUsd !== null) { pricedCount++; total += row.cost.amountUsd; day.cost += row.cost.amountUsd; day.pricedCount++; if (row.cost.estimated) estimated += row.cost.amountUsd; else actual += row.cost.amountUsd; }
   }
   const options = Object.fromEntries(["provider", "workflow", "model", "key"].map(dimension => [dimension, aggregateRecords(unique.rows, dimension)]));
+  options.provider = Object.entries(providerLabels).map(([id, name]) => options.provider.find(row => row.id === id) || { id, name, count: 0, pricedCount: 0, unpricedCount: 0, cost: 0, actual: 0, estimated: 0 });
+  for (const [id, name] of namedKeys) if (!options.key.some(row => row.id === id)) options.key.push({ id, name, count: 0, pricedCount: 0, unpricedCount: 0, cost: 0, actual: 0, estimated: 0 });
   return { range, rows, days, total: pricedCount ? total : null, actual, estimated, pricedCount, unpricedCount: rows.length - pricedCount,
     average: pricedCount ? total / pricedCount : null, options, duplicates: unique.duplicates, invalidDates,
     breakdowns: Object.fromEntries(["provider", "workflow", "model", "key"].map(dimension => [dimension, aggregateRecords(rows, dimension)])) };

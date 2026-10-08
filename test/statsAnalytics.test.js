@@ -7,6 +7,24 @@ const now = new Date(2026, 9, 8, 12);
 const date = (day, hour = 12) => new Date(2026, 9, day, hour).toISOString();
 const fingerprint = "a".repeat(64);
 const record = (id, day, cost = 1, extra = {}) => ({ id, createdAt: date(day), provider: "Atlas Cloud", modelName: "Model A", mediaType: "image", project: { id: "workflow-a", name: "Same name", fileName: "one.json" }, keyIdentity: { fingerprint }, cost: { amountUsd: cost, currency: "USD", estimated: true }, ...extra });
+
+test("All Time starts at the first valid recorded day, spans years and intersects provider filters", () => {
+  const rows = [record("old", 8, 2, { createdAt: new Date(2024, 0, 1, 12).toISOString() }), record("today", 8, 3, { provider: "Krea" }), record("future", 9, 9), record("invalid", 8, 4, { createdAt: "invalid" })];
+  const filters = { ...defaultFilters(), range: "all" };
+  const result = buildAnalytics(rows, filters, now);
+  assert.equal(result.range.error, undefined);
+  assert.equal(result.days[0].key, "2024-01-01");
+  assert.equal(result.days.at(-1).key, "2026-10-08");
+  assert.ok(result.days.length > 366);
+  assert.equal(result.total, 5);
+  const krea = buildAnalytics(rows, { ...filters, provider: "krea" }, now);
+  assert.equal(krea.total, 3);
+  assert.equal(krea.days[0].key, "2024-01-01");
+  const empty = buildAnalytics([], filters, now);
+  assert.equal(empty.days.length, 1);
+  assert.equal(empty.total, null);
+  assert.ok(empty.options.provider.some(row => row.id === "krea"));
+});
 test("composable filters intersect date, workflow, provider, model, key, job search and state", () => {
   const records = [record("a", 8), record("b", 7, 3, { provider: "fal.ai" }), record("c", 2), record("d", 8, 4, { project: { id: "workflow-b", name: "Same name", fileName: "two.json" } })];
   const filters = { ...defaultFilters(), range: "5", provider: "atlas", workflow: "workflow-a", model: "Model A", key: `atlas:${fingerprint}`, search: "one.json", status: "completed" };
