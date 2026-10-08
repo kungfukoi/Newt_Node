@@ -6,6 +6,26 @@ import { boxFromDrag } from "../src/imageEditBoxes.js";
 import { prepareImageEdit, finishImageEdit } from "../server/image-edit.js";
 const box = boxFromDrag({ x: .1, y: .1 }, { x: .3, y: .3 }, "cat");
 const mask = { width: 10, height: 10, runs: [11, 2, 21, 2], area: 4 };
+
+test("native and cutout moves submit explicit source erasure and guide removal requirements", async () => {
+  const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } }).png().toBuffer();
+  for (const model of ["Flux 3", "Nano Banana 2.1", "OpenAI Image 2.5 Flare"]) {
+    for (const rotation of [0, 35]) {
+      const moved = { ...box, target: { ...box.target, x: .7, rotation } };
+      const native = model === "Flux 3" && rotation === 0;
+      const prepared = await prepareImageEdit({ source, mode: "edit", model, boxes: [moved], boxObjects: native ? {} : { cat: mask } });
+      assert.match(prepared.submittedPrompt, /turquoise\/cyan destination bounding boxes/);
+      assert.match(prepared.submittedPrompt, /relocate the identified instance rather than copy it/);
+      assert.match(prepared.submittedPrompt, /completely erase its old appearance/);
+      assert.match(prepared.submittedPrompt, /Reconstruct natural image detail beneath every guide mark/);
+      assert.match(prepared.submittedPrompt, /explicit Keep regions remain protected/);
+      if (model === "Flux 3") {
+        assert.match(fluxBoxInstructions([moved], 200, 200, {}, native ? [] : [moved.id]).caption, /no visible guide graphics anywhere/);
+        assert.ok(Array.isArray(JSON.parse(prepared.submittedPrompt.split("\n").at(-1))));
+      }
+    }
+  }
+});
 test("selection becomes a bounded named box with holes preserved", () => {
   const data = Buffer.alloc(400); for (const p of [22, 23, 32]) data[p * 4 + 3] = 255;
   const converted = boxFromSelectionPixels({ data, width: 10, height: 10, id: "jacket", label: "the red jacket" });

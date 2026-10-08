@@ -260,3 +260,5 @@ aggregation; `StatsDashboard.jsx` / `stats.css` own the Local/Global interface.
 `server/stats-providers.js` owns read-only official provider adapters and scope validation;
 `server/routes/stats.js` exposes local, account, export and readonly import-preview routes.
 See [spend analytics](stats-analytics.md) for capabilities and limits.
+
+Boxes output instructions share explicit cleanup requirements through boxOutputRules in src/imageEditBoxes.js. Both general guides and native FLUX captions require relocation without a source duplicate, reconstruction of vacated backgrounds, and removal of all guide graphics (including turquoise destination outlines). Cleanup takes precedence over generic scene-preservation wording while honoring Keep regions and genuine scene content. These are generation instructions, not a deterministic output guarantee.
