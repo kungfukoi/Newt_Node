@@ -176,6 +176,75 @@ test("marquee selects intersected nodes and releases cleanly before copy", async
   expect(errors).toEqual([]);
 });
 
+test("Timeline preview dimensions accept typed values, persist and preserve wide frames", async ({ page }) => {
+  const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
+  const timeline = page.locator('[data-node-card-id="timeline"]');
+  const width = timeline.getByLabel("Preview width", { exact: true });
+  const height = timeline.getByLabel("Preview height", { exact: true });
+  const canvas = timeline.locator("canvas.assembly-frame-canvas");
+  await width.fill("");
+  await width.pressSequentially("3840");
+  await expect(width).toHaveValue("3840");
+  await width.press("Enter");
+  await expect(height).toHaveValue("360");
+  await height.fill("1080"); await height.press("Enter");
+  await expect.poll(() => canvas.evaluate(element => element.width / element.height)).toBeCloseTo(3840 / 1080, 1);
+  await width.fill("5760"); await height.click();
+  await expect.poll(() => canvas.evaluate(element => element.height)).toBe(120);
+  await height.fill("1440"); await height.press("Enter");
+  await expect.poll(() => canvas.evaluate(element => element.height)).toBe(160);
+  await width.fill("4000"); await width.press("Escape");
+  await expect(width).toHaveValue("5760");
+  await height.fill(""); await height.press("Enter");
+  await expect(height).toHaveValue("1440");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes?.find(node => node.id === "timeline")?.data?.assembly?.outputWidth)).toBe(5760);
+  await page.reload();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(width).toHaveValue("5760");
+  await expect(height).toHaveValue("1440");
+  expect(errors).toEqual([]);
+});
+
+test("Timeline live Preview grows with its window and keeps the full frame contained", async ({ page }, testInfo) => {
+  const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
+  const viewer = page.locator('[data-node-card-id="viewer"]');
+  const image = viewer.locator(".preview-stage img");
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate(element => element.naturalWidth)).toBeGreaterThan(0);
+  const size = () => image.evaluate(element => {
+    const rect = element.getBoundingClientRect(), stage = element.parentElement.getBoundingClientRect();
+    const scale = Math.min(rect.width / element.naturalWidth, rect.height / element.naturalHeight);
+    return { width: element.naturalWidth * scale, height: element.naturalHeight * scale, box: { width: rect.width, height: rect.height }, stage: { width: stage.width, height: stage.height }, fit: getComputedStyle(element).objectFit };
+  });
+  const initial = await size();
+  const resize = async (dx, dy) => {
+    const handle = await viewer.getByRole("button", { name: "Resize node", exact: true }).boundingBox();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down(); await page.mouse.move(handle.x + handle.width / 2 + dx, handle.y + handle.height / 2 + dy, { steps: 12 }); await page.mouse.up();
+  };
+  await resize(200, 0);
+  await expect.poll(async () => (await size()).width).toBeGreaterThanOrEqual(initial.width - 1);
+  await resize(0, 200);
+  await expect.poll(async () => (await size()).width).toBeGreaterThan(initial.width + 50);
+  const enlarged = await size();
+  expect(enlarged.fit).toBe("contain");
+  expect(enlarged.width).toBeLessThanOrEqual(enlarged.stage.width + 1);
+  expect(enlarged.height).toBeLessThanOrEqual(enlarged.stage.height + 1);
+  await resize(150, 0);
+  await expect.poll(async () => (await size()).width).toBeGreaterThanOrEqual(enlarged.width - 1);
+  const timeline = page.locator('[data-node-card-id="timeline"]');
+  await timeline.getByLabel("Preview width", { exact: true }).fill("1280");
+  await timeline.getByLabel("Preview width", { exact: true }).press("Enter");
+  await expect.poll(() => image.evaluate(element => element.naturalHeight)).toBe(180);
+  const wide = await size();
+  expect(wide.width / wide.height).toBeCloseTo(1280 / 360, 1);
+  await resize(100, 0);
+  await expect.poll(async () => (await size()).width).toBeGreaterThanOrEqual(wide.width - 1);
+  await testInfo.attach("preview-sizes", { contentType: "application/json", body: JSON.stringify({ initial, enlarged, wider: await size() }) });
+  await page.screenshot({ path: testInfo.outputPath("timeline-preview-resized.png") });
+  expect(errors).toEqual([]);
+});
+
 test("Timeline scrubbing updates a nonblack connected preview", async ({ page }, testInfo) => {
   const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
   const viewer = page.locator('[data-node-card-id="viewer"]');

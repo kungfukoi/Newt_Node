@@ -3,6 +3,7 @@ export function workflowContextPayload(workflowContext = {}, projectId = "", pro
     projectId: workflowContext.projectId || projectId || "",
     projectName: workflowContext.projectName || projectName || "Untitled node project",
     workflowName: workflowContext.workflowName || workflowContext.projectName || projectName || "Untitled node project",
+    workflowFileName: String(workflowContext.workflowFileName || "").split(/[\\/]/).at(-1),
     workflowPackageId: workflowContext.workflowPackageId || "",
     workflowPackagePath: workflowContext.workflowPackagePath || "",
     outputTargetPath: workflowContext.outputTargetPath || "",

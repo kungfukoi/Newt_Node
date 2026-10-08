@@ -60,10 +60,11 @@ test("Audio Model modes, partial batches, Preview and reload preserve audio", as
 
 test("Stats includes audio generations and recorded cost", async ({ page }) => {
   const { errors } = await openFixture(page, { count: 2 });
-  await page.route("**/api/stats", route => route.fulfill({ json: { history: [{ id: "audio-stat", createdAt: new Date().toISOString(), mediaType: "audio", modelName: "Eleven Music v2", provider: "ElevenLabs", project: { id: "audio", name: "Audio project" }, settings: { durationSeconds: 60 }, cost: { amountUsd: 0.15, estimated: true } }] } }));
+  await page.route("**/api/stats/local", route => route.fulfill({ json: { history: [{ id: "audio-stat", createdAt: new Date().toISOString(), mediaType: "audio", modelName: "Eleven Music v2", provider: "ElevenLabs", project: { id: "audio", name: "Audio project" }, settings: { durationSeconds: 60 }, cost: { amountUsd: 0.15, estimated: true } }] } }));
   await page.getByRole("button", { name: "Stats", exact: true }).click();
-  await expect(page.getByText("0 video, 0 image, 0 text, 1 audio, 0 3D", { exact: true })).toBeVisible();
-  await expect(page.locator(".media-legend").getByText("Audio1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Eleven Music v2").first()).toBeVisible();
+  await expect(page.locator(".analytics-ledger tbody tr")).toHaveCount(1);
+  await expect(page.locator(".analytics-ledger summary")).toContainText("audio");
+  await expect(page.locator(".analytics-ledger").getByText("$0.15", { exact: true })).toBeVisible();
+  await expect(page.locator(".analytics-ledger summary strong")).toHaveText("Eleven Music v2");
   expect(errors).toEqual([]);
 });

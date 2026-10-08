@@ -7485,6 +7485,24 @@ video.newtnode-video-fallback {
   min-height: 0;
 }
 
+/* Resized viewers own their media viewport. Intrinsic frame dimensions must not
+   compete with the flex allocation as the window gets wider or taller. */
+.node-card.custom-node-height > .preview-node-body > .preview-stage.has-preview {
+  display: block;
+}
+
+.node-card.custom-node-height > .preview-node-body > .preview-stage.has-preview > :is(img, video) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.node-card.custom-node-height > .preview-node-body > .preview-live-playback-rate {
+  flex: 0 0 auto;
+}
+
 .preview-stage img,
 .preview-stage video {
   display: block;

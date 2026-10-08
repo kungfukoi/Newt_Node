@@ -65,6 +65,7 @@ import { assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyP
 import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
 import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
+import { AssemblyFrameSizeControls } from "./AssemblyFrameSizeControls.jsx";
 import { AssemblyMediaBin, assemblyMediaDragType } from "./AssemblyMediaBin.jsx";
 import "../assembly/assembly.css";
 import "../assembly/assemblyMediaBin.css";
@@ -239,7 +240,7 @@ export function AssemblyNodeBody({
   React.useEffect(() => {
     syncMediaElements(timeline, timeline.playhead, playingRef.current);
     renderCompositionFrame(timeline, timeline.playhead, true);
-  }, [timeline.media.length, timeline.tracks.length]);
+  }, [timeline.media.length, timeline.tracks.length, timeline.outputWidth, timeline.outputHeight]);
 
   function persistTimeline(next) {
     const normalized = normalizeAssemblyState(next);
@@ -388,7 +389,7 @@ export function AssemblyNodeBody({
 
     const aspect = state.outputWidth / state.outputHeight;
     canvas.width = 640;
-    canvas.height = Math.max(180, Math.round(canvas.width / aspect));
+    canvas.height = Math.max(1, Math.round(canvas.width / aspect));
     context.fillStyle = "#000";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1029,8 +1030,8 @@ export function AssemblyNodeBody({
           <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
           <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
         </div>
-        <label><span>W</span><input type="number" min="16" step="2" value={timeline.outputWidth} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputWidth: Number(event.target.value) }), true)} /></label>
-        <label><span>H</span><input type="number" min="16" step="2" value={timeline.outputHeight} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { outputHeight: Number(event.target.value) }), true)} /></label>
+        <AssemblyFrameSizeControls width={timeline.outputWidth} height={timeline.outputHeight}
+          onChange={patch => commitTimeline(setAssemblyView(timelineRef.current, patch))} />
         <label><span>FPS</span><input type="number" min="1" max="120" value={timeline.frameRate} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { frameRate: Number(event.target.value) }), true)} /></label>
         <button type="button" className="run-node-button assembly-render-button" disabled={running || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
           {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}

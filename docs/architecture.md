@@ -189,6 +189,12 @@ Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/
 
 Timeline is the visible product name; `assembly` remains its internal node type for saved-workflow compatibility. Existing source filenames such as `AssemblyNodeBody.jsx` also remain valid implementation names until a deliberate migration updates imports, tests, docs, and old workflows together.
 
+`AssemblyFrameSizeControls.jsx` owns draft editing for preview width/height. It commits
+to the existing `assembly.outputWidth` / `outputHeight`, shared by the live frame and
+FFmpeg render. Dimension changes refresh the live frame immediately and participate
+in Timeline undo/redo. Preview node resizing changes only its display viewport;
+contained image/video layers fill that viewport independently of intrinsic frame size.
+
 The same rule applies to other legacy identifiers. Visible copy can improve without invalidating persisted internal types or backend route contracts.
 
 ## Platform Launch And Updates
@@ -245,3 +251,12 @@ ElevenLabs may return HTTP 401 with `detail.status: missing_permissions` for a v
 Audio Model (`audioModel`) uses `src/audioModel.js` for defaults, validation and estimated pricing, `AudioModelNodeBody.jsx` for controls, and `src/nodeRunners/audioModels.js` for tracked sequential batches. `server/routes/audioModel.js` exposes voices and generate-audio through the server-only active ElevenLabs key; `server/elevenlabs.js` owns bounded, non-retried provider calls. MP3 outputs use managed workflow/Output targets and audio History records. Input ports are stable `promptIn` / `audioIn` with mode-dependent activation; output is `audioOut`. Source recordings and generated results participate in generic package asset rebasing.
 
 `src/userPreferences.js` owns the independent Text Agent model choice (GPT-5.6 Sol or GPT-6 Astra). Settings persists it through the shared runtime settings store; each Text Agent request reads the current preference before provider submission, and existing result/history metadata records the actual model. Text Model and media-analysis helper defaults remain independent.
+
+## Spend analytics ownership
+
+`src/statsAnalytics.js` owns sanitized accounting records, composable filters and exact
+aggregation; `StatsDashboard.jsx` / `stats.css` own the Local/Global interface.
+`server/stats-ledger.js` retains accounting beyond the recent-history cache.
+`server/stats-providers.js` owns read-only official provider adapters and scope validation;
+`server/routes/stats.js` exposes local, account, export and readonly import-preview routes.
+See [spend analytics](stats-analytics.md) for capabilities and limits.

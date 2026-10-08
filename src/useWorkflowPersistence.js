@@ -112,11 +112,11 @@ export function useWorkflowPersistence({
   }, [onStatusChange, saveStatus, currentWorkflowPath, hasUnsavedChanges]);
 
   function workflowRequestContext(overrides = {}) {
-    return workflowRequestContextForState({ projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
+    return workflowRequestContextForState({ projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, localWorkflowFileName, workflowFilePath }, overrides);
   }
 
   function appendWorkflowContextToForm(form, overrides = {}) {
-    appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
+    appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, localWorkflowFileName, workflowFilePath }, overrides);
   }
 
   async function loadProjects() {
@@ -357,13 +357,11 @@ export function useWorkflowPersistence({
   async function saveProjectToSavedWorkflows(options = {}) {
     try {
       const cleanProjectName = String(options.name || projectName || "").trim() || "Untitled node project";
-      const lastSavedName = String(savedProjectName || selectedProjectName || "").trim();
-      const shouldCreateNewProject = Boolean(!projectPackagePath && projectId && lastSavedName && cleanProjectName !== lastSavedName);
       const saveNodes = nodesForSave();
 
       setSaveStatus(options.saveAsPackage ? "Saving workflow package..." : "Saving...");
       const project = await workflowApi.save({
-        id: options.saveAsPackage || shouldCreateNewProject ? null : projectId,
+        id: options.saveAsPackage ? null : projectId,
         sourceWorkflowId: options.saveAsPackage ? projectId : "",
         name: cleanProjectName,
         packageParentPath: options.packageParentPath || "",
@@ -380,7 +378,7 @@ export function useWorkflowPersistence({
       setProjectPackagePath(nextPackagePath);
       const savedPath = workflowDisplayPath(project);
       setWorkflowFilePath(savedPath);
-      setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
+      setSaveStatus(savedPath ? `Saved ${savedPath}` : "Saved");
       upsertProject(project);
       let cleanNodes = saveNodes;
       let cleanEdges = edges;

@@ -240,3 +240,10 @@ Operational local state under `server/data/`, output trees, uploads, workflow pa
 - When asked to publish, verify the exact branch, upstream, remote URL, clean status, and pushed commit.
 
 Storyboard quality review supports Balanced (bounded review copies, one high-detail confirmation for suspected failures), Deep (original images), and Off. Legacy Auto QC false migrates to Off; other workflows default to Balanced. Only confident essential major failures permit the existing single regeneration attempt. Uncertain, invalid, or failed reviews preserve the image without replaying paid requests. Each completed review call records usage. Review Sequence provides advisory notes on the compiled board when present, otherwise directions only; it never regenerates panels. Saved notes identify when panels have changed.
+
+## Isolated stats playtesting
+
+`node scripts/playtestStats.mjs` starts this checkout on client 5296, API 3346 and
+control 3347 without interrupting another instance. See [spend analytics](stats-analytics.md)
+for Local/Global behavior and credential requirements. Run focused browser coverage with
+`npx playwright test e2e/stats.spec.js`; fixtures make no paid calls.

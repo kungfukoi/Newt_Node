@@ -21,6 +21,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rollupOptions: {
+      input: process.env.NEWTNODE_STATS_DEMO === "1" ? { app: "index.html", statsDemo: "stats-demo.html" } : undefined,
       output: {
         manualChunks(id) {
           const moduleId = id.replace(/\\/g, "/");

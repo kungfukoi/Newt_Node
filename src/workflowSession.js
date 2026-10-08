@@ -32,13 +32,16 @@ export function workflowRequestContextForState({
   projectName = "",
   savedProjectName = "",
   selectedProjectName = "",
-  projectPackagePath = ""
+  projectPackagePath = "",
+  localWorkflowFileName = "",
+  workflowFilePath = ""
 } = {}, overrides = {}) {
   const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
   return {
     projectId: projectId || "",
     projectName: projectName || "Untitled node project",
     workflowName,
+    workflowFileName: String(localWorkflowFileName || workflowFilePath || "").split(/[\\/]/).at(-1),
     workflowPackageId: projectPackagePath ? projectId || "" : "",
     workflowPackagePath: projectPackagePath || "",
     ...overrides
