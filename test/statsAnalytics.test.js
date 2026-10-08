@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { buildAnalytics, defaultFilters, normalizeStatsRecord, resolveDateRange, formatMoney, recordedAmount } from "../src/statsAnalytics.js";
 import { workflowRequestContextForState } from "../src/workflowSession.js";
 import { workflowContextPayload } from "../src/workflowContext.js";
@@ -41,13 +42,20 @@ test("custom ranges include both calendar dates, exclude future records, reject 
   assert.ok(resolveDateRange({ ...filters, start: "2024-01-01" }, now).error);
 });
 test("date presets have exact boundaries and calendar arithmetic survives DST", () => {
-  const previous = process.env.TZ; process.env.TZ = "America/New_York";
-  try {
+  // Deleting TZ does not reliably restore Windows' runtime timezone. Isolate
+  // the DST check so later fixtures use the same timezone as the shared `now`.
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { resolveDateRange, defaultFilters } from ${JSON.stringify(new URL("../src/statsAnalytics.js", import.meta.url).href)};
     const date = new Date(2026, 10, 3, 12);
     const result = resolveDateRange({ ...defaultFilters(), range: "5" }, date);
     assert.equal(result.days.length, 5); assert.equal(result.days[0].key, "2026-10-30"); assert.equal(result.days.at(-1).key, "2026-11-03");
+    assert.equal(result.days[0].date.getTimezoneOffset(), 240);
+    assert.equal(result.days.at(-1).date.getTimezoneOffset(), 300);
     assert.equal(resolveDateRange(defaultFilters(), date).days.length, 30);
-  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+  `], { env: { ...process.env, TZ: "America/New_York" }, encoding: "utf8", timeout: 10000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 test("missing, malformed, negative and non-USD costs remain unpriced; zero is known", () => {
   const values = [null, undefined, "", "garbage", -1, Infinity, true, [], "0x10", "  "];
