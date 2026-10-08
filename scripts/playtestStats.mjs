@@ -21,3 +21,4 @@ const stop = () => { if (stopping) return; stopping = true; children.forEach(chi
 process.on("SIGINT", stop); process.on("SIGTERM", stop);
 children.forEach(child => { child.on("error", error => { console.error(error.message); process.exitCode = 1; stop(); }); child.on("exit", code => { if (!stopping) { process.exitCode = code || 0; stop(); } }); });
 console.log("Stats playtest: http://127.0.0.1:5296 — independent checkout data/settings; Ctrl+C stops only this launcher.");
+console.log("Synthetic in-memory demo: http://127.0.0.1:5296/stats-demo.html — no real records, credentials or provider calls.");

@@ -1,17 +1,28 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "./json-store.js";
 import { normalizeStatsRecord } from "../src/statsAnalytics.js";
 
 export function statsEventId(item) {
   const row = normalizeStatsRecord(item);
-  return createHash("sha256").update(JSON.stringify([row.provider, row.generationRunId || row.id || row])).digest("hex");
+  const anonymousIdentity = [row.createdAt, row.project.id, row.modelName, row.endpoint, row.mediaType];
+  // Price, display name, filename and key enrichment must not create a second event.
+  return createHash("sha256").update(JSON.stringify([row.provider, row.generationRunId || row.id || anonymousIdentity])).digest("hex");
 }
 export function mergeStatsRecords(existing, incoming) {
-  const records = new Map(existing.map(row => [statsEventId(row), normalizeStatsRecord(row)]));
+  const indexed = rows => {
+    const occurrences = new Map();
+    return rows.map(raw => {
+      const row = normalizeStatsRecord(raw), signature = statsEventId(row);
+      if (row.id || row.generationRunId) return [signature, row];
+      const occurrence = occurrences.get(signature) || 0; occurrences.set(signature, occurrence + 1);
+      return [`${signature}:anonymous:${occurrence}`, row];
+    });
+  };
+  const records = new Map(indexed(existing));
   let duplicates = 0;
-  for (const raw of incoming) {
-    const row = normalizeStatsRecord(raw), id = statsEventId(row), prior = records.get(id);
+  for (const [id, row] of indexed(incoming)) {
+    const prior = records.get(id);
     if (prior) {
       duplicates++;
       // Reconciliation may fill unknown costs; never replace a known charge with an estimate.
@@ -19,7 +30,7 @@ export function mergeStatsRecords(existing, incoming) {
     }
     records.set(id, row);
   }
-  return { records: [...records.values()], duplicates };
+  return { records: [...records.values()], duplicates, anonymousCount: incoming.filter(row => !row.id && !row.generationRunId).length };
 }
 export function createStatsLedger({ filePath, now = () => new Date().toISOString() }) {
   let queue = Promise.resolve();
@@ -45,7 +56,7 @@ export function createStatsLedger({ filePath, now = () => new Date().toISOString
     return next;
   }
   return {
-    append: item => enqueue(() => ingest([item])),
+    append: item => enqueue(() => ingest([item.id || item.generationRunId ? item : { ...item, id: `ledger-anonymous-${randomUUID()}` }])),
     snapshot: history => enqueue(() => ingest(history)),
     // Preview is intentionally read-only. No imports are silently added to Local scope.
     preview: rows => enqueue(async () => mergeStatsRecords((await read()).records, rows))

@@ -78,6 +78,7 @@ test("Global validates real UTC dates and IDs before provider calls; no key secr
   assert.throws(() => globalQuery({ ...query, provider: "fal", key: `${"a".repeat(32)}:${"b".repeat(32)}` }));
 });
 test("OpenAI costs require separate admin credential and use organization scope, not remaining balance", async () => {
-  const service = createStatsProviders({ getKey: () => "fixture-admin", fetchImpl: async () => Response.json({ data: [{ start_time: Date.parse("2026-10-08T00:00:00Z") / 1000, results: [{ amount: { value: "0.15", currency: "usd" }, api_key_id: "public-id", line_item: "model/input" }] }], has_more: false, next_page: null }) });
+  const service = createStatsProviders({ getKey: () => "fixture-admin", fetchImpl: async () => Response.json({ data: [{ start_time: Date.parse("2026-10-08T00:00:00Z") / 1000, results: [{ amount: { value: "0.15", currency: "usd" }, api_key_id: "public-id", line_item: "model, input tokens" }] }], has_more: false, next_page: null }) });
   const result = await service.load({ ...query, provider: "openai" }); assert.equal(result.providers[0].spend.amount, .15); assert.equal(result.providers[0].spend.scope, "organization"); assert.equal(result.providers[0].balance.status, "unsupported");
+  assert.equal(result.providers[0].spend.rows[0].model, "Line item: model, input tokens");
 });

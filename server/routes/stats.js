@@ -24,7 +24,7 @@ export function registerStatsRoutes(app, { ledger, providers, readHistory, refre
     if (document?.format !== "newt-accounting-v1" || !Array.isArray(document.records) || document.records.length > 10000 || document.records.some(row => !row || typeof row !== "object" || Array.isArray(row))) return res.status(400).json({ error: "Expected a Newt accounting export with at most 10000 records." });
     try {
       const result = await ledger.preview(document.records.map(normalizeStatsRecord));
-      res.json({ records: result.records, duplicates: result.duplicates, persisted: false, scope: "Read-only comparison of Local and imported records; not provider account history." });
+      res.json({ records: result.records, duplicates: result.duplicates, anonymousCount: result.anonymousCount, persisted: false, scope: "Read-only comparison of Local and imported records; not provider account history. Anonymous records retain occurrence counts, but cross-machine overlap cannot be verified." });
     } catch { res.status(503).json({ error: "Could not preview accounting import. Nothing was changed." }); }
   });
 }

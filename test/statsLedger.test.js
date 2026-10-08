@@ -24,3 +24,22 @@ test("corruption refuses unsafe writes and does not erase data", async t => {
   const filePath = path.join(folder, "ledger.json"); await writeFile(filePath, "broken");
   await assert.rejects(createStatsLedger({ filePath }).append(record("a")), /preserved/); assert.equal(await readFile(filePath, "utf8"), "broken");
 });
+test("identical anonymous occurrences remain distinct across snapshots and restart", async t => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "newt-stats-anonymous-")); t.after(() => rm(folder, { recursive: true, force: true }));
+  const filePath = path.join(folder, "ledger.json"); const ledger = createStatsLedger({ filePath });
+  const anonymous = record("");
+  assert.equal((await ledger.snapshot([anonymous, anonymous])).records.length, 2);
+  assert.equal((await ledger.snapshot([anonymous, anonymous])).records.length, 2);
+  assert.equal((await createStatsLedger({ filePath }).snapshot([anonymous])).records.length, 2);
+  const preview = await ledger.preview([anonymous, anonymous]);
+  assert.equal(preview.records.length, 2); assert.equal(preview.anonymousCount, 2);
+  await ledger.append(anonymous); await ledger.append(anonymous);
+  assert.equal((await ledger.snapshot([])).records.length, 4);
+});
+test("anonymous cost reconciliation and display renames do not create another accounting event", () => {
+  const original = { ...record("", null), project: { id: "workflow", name: "Old", fileName: "Old.json" } };
+  const changed = { ...record("", 2, false), project: { id: "workflow", name: "Renamed", fileName: "Renamed.json" } };
+  const merged = mergeStatsRecords([original], [changed]);
+  assert.equal(merged.records.length, 1); assert.equal(merged.records[0].cost.amountUsd, 2);
+  assert.equal(mergeStatsRecords(merged.records, [{ ...changed, cost: { amountUsd: 10 } }]).records[0].cost.amountUsd, 2);
+});

@@ -64,3 +64,8 @@ test("workflow filename is basename only, renames preserve ID and duplicate IDs 
   assert.equal(context.projectId, "stable"); assert.equal(context.workflowFileName, "renamed.json");
   assert.equal(workflowContextPayload({ workflowFileName: "/shared/folder/file.json" }).workflowFileName, "file.json");
 });
+test("UUID-shaped secret pairs and Google-style tokens are redacted from permitted labels", () => {
+  const secret = "00000000-0000-0000-0000-000000000000:11111111-1111-1111-1111-111111111111";
+  const result = normalizeStatsRecord({ id: secret, modelName: secret, project: { name: `AIza${"x".repeat(30)}` } });
+  assert.ok(!JSON.stringify(result).includes(secret)); assert.ok(!JSON.stringify(result).includes("AIza"));
+});

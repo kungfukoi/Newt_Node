@@ -7,7 +7,7 @@ import "./stats.css";
 const readableDate = value => value ? new Date(value).toLocaleString() : "Not checked";
 const labels = { provider: "Provider", model: "Model", workflow: "Workflow / JSON file", key: "API-key identity" };
 
-export default function StatsDashboard() {
+export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
   const [scope, setScope] = React.useState("local");
   const [filters, setFilters] = React.useState(defaultFilters);
   const [data, setData] = React.useState(null);
@@ -28,14 +28,14 @@ export default function StatsDashboard() {
     busy.current = true; const id = ++request.current;
     setStatus(current => current === "loading" ? "loading" : "refreshing");
     try {
-      const result = await statsApi.local();
+      const result = await api.local();
       if (!mounted.current || id !== request.current) return;
       if (!Array.isArray(result.history)) throw new Error("Invalid stats response");
       setData(result); setStatus("ready"); setError("");
     } catch {
       if (mounted.current && id === request.current) { setStatus("error"); setError("Local accounting could not refresh. Existing data may be stale. Records are preserved; retry when the server is available."); }
     } finally { busy.current = false; }
-  }, []);
+  }, [api]);
   React.useEffect(() => {
     mounted.current = true; refresh();
     const interval = window.setInterval(refresh, 30000);
@@ -52,7 +52,7 @@ export default function StatsDashboard() {
     if (range.error || accountStatus === "loading") return;
     const id = queryId; setActiveQuery(id); setAccountStatus("loading"); setAccountError("");
     try {
-      const result = await statsApi.accounts(query);
+      const result = await api.accounts(query);
       if (!mounted.current) return;
       if (!Array.isArray(result.providers)) throw new Error("Invalid provider response");
       setAccounts({ ...result, queryId: id }); setAccountStatus("ready");
@@ -64,7 +64,7 @@ export default function StatsDashboard() {
   const reset = () => { setFilters(defaultFilters()); setGlobalFilters({ provider: "", model: "", key: "", atlasScope: "account" }); setComparison(null); setTransferStatus(""); };
   const exportRecords = async () => {
     try {
-      const exported = await statsApi.export();
+      const exported = await api.export();
       const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" }));
       const anchor = document.createElement("a"); anchor.href = url; anchor.download = `newt-accounting-${dateKey(new Date())}.json`; anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000); setTransferStatus("Local accounting exported without prompts or secret credentials.");
@@ -75,7 +75,7 @@ export default function StatsDashboard() {
     if (!file) return;
     if (file.size > 4e6) { setTransferStatus("Choose an accounting JSON export smaller than 4 MB."); return; }
     try {
-      const result = await statsApi.previewImport(JSON.parse(await file.text()));
+      const result = await api.previewImport(JSON.parse(await file.text()));
       setComparison(result); setTransferStatus(`${result.duplicates} overlapping records excluded. Read-only comparison; Local accounting is unchanged.`);
     } catch { setTransferStatus("Import preview unavailable. Use a Newt accounting JSON export; nothing was changed."); }
   };
@@ -124,7 +124,7 @@ export default function StatsDashboard() {
           <section className="stats-panel analytics-breakdown"><Panel title="Where it went" aside="Click a row to filter"/><div className="analytics-tabs" role="group" aria-label="Breakdown dimension">{["provider", "model", "workflow", "key"].map(id => <button key={id} aria-pressed={dimension === id} onClick={() => setDimension(id)}>{id === "key" ? "Keys" : id === "workflow" ? "Workflows" : `${labels[id]}s`}</button>)}</div><Breakdown rows={analytics.breakdowns[dimension]} onSelect={id => change(dimension, id)}/></section>
         </div>
         <section className="stats-panel analytics-ledger"><Panel title="Run ledger" aside={`${Math.min(limit, analytics.rows.length)} of ${analytics.rows.length} matching records`}/><RunLedger rows={analytics.rows.slice(0, limit)}/>{limit < analytics.rows.length && <button className="analytics-load" onClick={() => setLimit(current => current + 25)}>Show 25 more runs</button>}</section>
-        <details className="analytics-coverage"><summary>Coverage & portable accounting</summary><p>{data?.coverage?.note || "Retained history only; complete past billing cannot be reconstructed locally."}</p><p>Durable tracking began {readableDate(data?.coverage?.trackingStartedAt)}. {analytics.duplicates} duplicate records excluded; {analytics.invalidDates} records with invalid dates excluded from date views. Deleted recent history does not delete accounting records.</p><p>Workflow IDs distinguish same-named JSON files. Renames retain existing identity; Save As uses the app's new package identity. Legacy records without file/key attribution remain unknown.</p><div className="analytics-transfer"><button onClick={exportRecords}><ArrowDownToLine size={15}/>Export local accounting</button><button onClick={() => importInput.current?.click()}>Preview another machine's export</button><input ref={importInput} hidden type="file" accept=".json,application/json" onChange={previewImport}/></div><p role="status">{transferStatus}</p>{comparison && <ImportComparison comparison={comparison}/>}</details>
+        <details className="analytics-coverage"><summary>Coverage & portable accounting</summary><p>{data?.coverage?.note || "Retained history only; complete past billing cannot be reconstructed locally."}</p><p>Durable tracking began {readableDate(data?.coverage?.trackingStartedAt)}. {analytics.duplicates} duplicate records excluded; {analytics.invalidDates} records with invalid dates excluded from date views. Deleted recent history does not delete accounting records.</p><p>Workflow IDs distinguish same-named JSON files. Renames retain existing identity; Save As uses the app's new package identity. Legacy records without file/key attribution remain unknown.</p><div className="analytics-transfer"><button disabled={demo} onClick={exportRecords}><ArrowDownToLine size={15}/>Export local accounting</button><button disabled={demo} onClick={() => importInput.current?.click()}>Preview another machine's export</button><input ref={importInput} hidden type="file" accept=".json,application/json" onChange={previewImport}/></div><p role="status">{transferStatus}</p>{comparison && <ImportComparison comparison={comparison}/>}</details>
       </>}
     </> : <>
       {accountError && activeQuery === queryId && <div role="alert" className="analytics-alert">{accountError} {queryCurrent ? "Previous query shown with original timestamp." : "No provider totals substituted."}</div>}

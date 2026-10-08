@@ -6,6 +6,19 @@ The launcher refuses occupied ports and leaves existing Newt Node instances runn
 This isolated checkout has independent settings/history; an empty ledger is expected
 until records exist. No generation is needed to inspect the panel.
 
+For populated morning playtesting, open **http://127.0.0.1:5296/stats-demo.html**.
+This separate development entry has a persistent SYNTHETIC DEMO notice. Every amount
+is fabricated in memory using dates relative to today; no API request, credential,
+local/session storage or real ledger is used. Import/export are disabled. Exercise
+workflow/provider/model/key filters together, last 5/30 days, custom dates, reset,
+run Details and Global. Use `demo/model` / `demo-public-key` as the public fixture IDs.
+Simulate demo outage, then Refresh records; restore demo connection and Retry to
+inspect stale/error recovery. Closing the page discards its data.
+
+Normal production builds exclude this entry. To include it for preview/browser tests
+in PowerShell: `$env:NEWTNODE_STATS_DEMO='1'; npm run build; npm run test:browser`.
+The browser fixture preview test verifies zero API requests and zero browser storage.
+
 Local means this installation's retained history plus its durable accounting ledger,
 not complete lifetime or cross-machine history. `/api/stats/local` sanitizes records
 through a strict allowlist. New history appends persist to `server/data/stats-ledger.json`
@@ -53,7 +66,13 @@ Export downloads `newt-accounting-v1` sanitized records. Import comparison valid
 10,000 rows and previews a deduplicated merge without persisting or changing Local totals.
 Stable provider + run/job IDs prevent replay duplicates; actual charges can replace
 estimates, missing costs can be filled, existing known prices are preserved. Anonymous
-legacy records cannot guarantee globally unique identity. A future approved shared backend
+legacy records retain matching occurrence counts across retained-history snapshots,
+so identical legacy events are not silently collapsed. Standalone anonymous appends
+receive synthetic ledger record IDs. Cross-machine anonymous overlap cannot be verified;
+read-only comparisons explicitly disclose this ambiguity. Cost, display-name, filename
+and key enrichment do not split anonymous events. Changes to their timestamp, provider,
+workflow ID, model or endpoint cannot be reliably reconciled without a stable source ID.
+A future approved shared backend
 can consume this format with authenticated device IDs, idempotent event ingestion and
 explicit conflict review. A shared API key alone does not synchronize installations.
 

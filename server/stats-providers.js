@@ -14,7 +14,7 @@ const money = (value, currency) => {
   if (!(typeof value === "number" || typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value)) || !Number.isFinite(Number(value))) throw new Error("Invalid amount");
   return Number(value);
 };
-const publicId = value => /^[a-zA-Z0-9_.:/-]{1,180}$/.test(String(value || "")) && !/^(?:sk-|apikey-|Bearer)/i.test(value) ? String(value) : "";
+const publicId = value => /^[a-zA-Z0-9_.:/-]{1,180}$/.test(String(value || "")) && !/^(?:sk-|apikey-|key-|Bearer|AIza)/i.test(value) && !/[a-f0-9-]{32,36}:[a-f0-9-]{32,36}/i.test(value) ? String(value) : "";
 export function globalQuery(raw = {}) {
   const start = String(raw.start || ""), end = String(raw.end || "");
   const a = Date.parse(`${start}T00:00:00Z`), b = Date.parse(`${end}T00:00:00Z`);
@@ -50,7 +50,7 @@ export function parseCostPage(provider, data, query) {
     if (date < new Date(`${query.start}T00:00:00Z`) || date >= new Date(`${query.end}T00:00:00Z`)) throw new Error("Unexpected date coverage");
     for (const row of bucket.results) {
       const amount = provider === "fal" ? money(row.cost_total, row.currency) : provider === "atlas" ? money(row.amount?.value, row.amount?.currency) : money(row.amount?.value, row.amount?.currency);
-      const model = publicId(provider === "fal" ? row.endpoint_id : provider === "atlas" ? row.model?.id || row.model_id : row.line_item);
+      const model = provider === "openai" ? row.line_item ? `Line item: ${safeLabel(row.line_item)}` : "Unattributed line item" : publicId(provider === "fal" ? row.endpoint_id : row.model?.id || row.model_id);
       const key = publicId(provider === "fal" ? row.auth_method_structured?.api_key_id : provider === "atlas" ? row.api_key?.id || row.api_key_id : row.api_key_id);
       rows.push({ date: date.toISOString().slice(0, 10), amount, currency: "USD", model: safeLabel(model || "Unattributed model"), key: safeLabel(key || "Unattributed key"), partial: bucket.partial === true,
         coveredUntil: Number.isFinite(Date.parse(bucket.covered_until)) ? new Date(bucket.covered_until).toISOString() : null });

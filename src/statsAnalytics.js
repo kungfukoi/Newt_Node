@@ -12,7 +12,7 @@ export function canonicalProvider(value) {
 // Exports and browser responses are allowlists. Nested settings/provider payloads
 // and prompts are deliberately excluded, even when supplied by an import.
 export function safeLabel(value, fallback = "") {
-  return String(value ?? fallback).slice(0, 300).replace(/(?:Bearer\s+\S+|(?:sk-|apikey-|key-)[a-zA-Z0-9_-]{8,}|[a-f0-9]{32}:[a-f0-9]{32})/gi, "[redacted]");
+  return String(value ?? fallback).slice(0, 300).replace(/(?:Bearer\s+\S+|(?:sk-|apikey-|key-)[a-zA-Z0-9_-]{8,}|AIza[a-zA-Z0-9_-]{20,}|[a-f0-9-]{32,36}:[a-f0-9-]{32,36})/gi, "[redacted]");
 }
 export function recordedAmount(cost) {
   const value = cost?.amountUsd;
@@ -56,9 +56,9 @@ export function resolveDateRange(filters, now = new Date()) {
   if (!start || !endDay || endDay < start) return { error: "Choose a valid start and end date; end must follow start." };
   if (filters.range !== "custom") start.setDate(start.getDate() - (filters.range === "5" ? 4 : 29));
   const end = new Date(endDay); end.setDate(end.getDate() + 1);
-  if ((end - start) / 864e5 > 366) return { error: "Choose a range of at most 366 days." };
   const days = [];
-  for (let date = new Date(start); date < end; date.setDate(date.getDate() + 1)) days.push({ key: dateKey(date), date: new Date(date), count: 0, cost: 0, pricedCount: 0 });
+  for (let date = new Date(start); date < end && days.length <= 366; date.setDate(date.getDate() + 1)) days.push({ key: dateKey(date), date: new Date(date), count: 0, cost: 0, pricedCount: 0 });
+  if (days.length > 366) return { error: "Choose a range of at most 366 days." };
   return { start, end, days, label: `${dateKey(start)} to ${dateKey(endDay)}` };
 }
 
