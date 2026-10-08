@@ -66,6 +66,7 @@ test("Global queries only on demand, ignores local workflow filters, labels bala
   await expect(page.getByText(/local run search and local hashed key filters are paused/)).toBeVisible();
   await page.getByRole("button", { name: "Apply & query providers" }).click(); await expect(page.getByText("$80.00", { exact: true })).toBeVisible();
   expect(received.has("workflow")).toBe(false); await expect(page.getByText("permission-required", { exact: true })).toHaveCount(2);
+  await expect(page.locator(".analytics-chart polygon")).toHaveCount(0); // A single bucket must not imply a later decline.
   await page.getByText("Daily provider costs · 1 buckets", { exact: true }).click(); await expect(page.getByText("ak_public", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("stats-global-coverage.png"), fullPage: true });
   await page.getByLabel("Provider", { exact: true }).selectOption("atlas"); await expect(page.getByRole("heading", { name: /Filters changed/ })).toBeVisible(); await expect(page.getByText("$80.00", { exact: true })).toHaveCount(0);
