@@ -15,6 +15,7 @@ const requiredHealthRoutes = [
   "storyboardRevisions",
   "storyboardSequenceReview",
   "providerPricing",
+  "spendAnalytics",
   "remoteVideoJobs",
   "atlasDurableVideo",
   "characterWardrobeFullSheet",

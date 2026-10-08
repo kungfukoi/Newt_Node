@@ -12,6 +12,8 @@ saved_workflows/outputs/
 saved_workflows/dependencies/
 saved_workflows/.*.tmp
 server/data/history.json
+server/data/stats-ledger.json
+server/data/stats-ledger.json.bak
 server/data/history.json.bak
 server/data/history.json.corrupt-*
 server/data/node-projects.json

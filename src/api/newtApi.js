@@ -227,6 +227,21 @@ export const historyApi = {
 };
 
 export const statsApi = {
+  local() {
+    return getJson("/api/stats/local", "Could not load local accounting. Records are preserved.");
+  },
+  accounts(query) {
+    if (query.key && (!/^[a-zA-Z0-9_.-]{1,180}$/.test(query.key) || /^(?:sk-|apikey-|Bearer)/i.test(query.key))) {
+      return Promise.reject(new Error("Use a public provider key ID, never an API secret."));
+    }
+    return getJson(`/api/stats/accounts?${new URLSearchParams(query)}`, "Could not query provider accounts.");
+  },
+  export() {
+    return getJson("/api/stats/export", "Could not export accounting.");
+  },
+  previewImport(document) {
+    return postJson("/api/stats/import-preview", document, "Could not preview accounting import.");
+  },
   load() {
     return getJson("/api/stats", "Could not load stats.");
   },

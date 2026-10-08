@@ -28,6 +28,10 @@ import { createWriteStream, existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createStatsLedger } from "./stats-ledger.js";
+import { createStatsProviders } from "./stats-providers.js";
+import { registerStatsRoutes } from "./routes/stats.js";
+import { canonicalProvider } from "../src/statsAnalytics.js";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
@@ -355,11 +359,15 @@ const maxHistoryItems = 500;
 let historyRecoveryNotice = "";
 const projectOutputStore = createProjectOutputStore({ directory: path.join(dataDir, "project-outputs") });
 const projectOutputPackageImports = new Map();
+const statsLedger = createStatsLedger({ filePath: path.join(dataDir, "stats-ledger.json") });
 const historyStore = createHistoryStore({
   filePath: historyPath,
   limit: maxHistoryItems,
   onRecovery: (message) => { historyRecoveryNotice = message; console.warn(message); },
-  onAppend: archiveProjectOutput,
+  onAppend: async (item, history) => {
+    await archiveProjectOutput(item, history);
+    await statsLedger.snapshot([...history, item]).catch(() => console.warn("Accounting ledger write unavailable; generation history retained for later accounting recovery."));
+  },
   onWrite: (history) => writeHistoryIndex(summarizeHistoryItems(history)).catch(() => {})
 });
 let updatePromise = null;
@@ -742,6 +750,10 @@ const pricingRefresh = new PricingRefresh({filePath:path.join(dataDir,"pricing-c
 await pricingRefresh.ready;
 const generationPricingScope = new AsyncLocalStorage();
 const generationBillingScope = new AsyncLocalStorage();
+const statsCredentialScope = new AsyncLocalStorage();
+const statsRuntimeKeys = () => ({ atlas: process.env.ATLAS_API_KEY, fal: process.env.FAL_KEY, krea: process.env.KREA_API_KEY,
+  openai: openAiTextApiKey, google: process.env.GOOGLE_API_KEY, elevenlabs: process.env.ELEVENLABS_API_KEY });
+const statsProviders = createStatsProviders({ getKey: provider => provider === "openai" ? process.env.OPENAI_ADMIN_KEY || "" : statsRuntimeKeys()[provider] || "" });
 configurePricingReader(()=>generationPricingScope.getStore() || pricingRefresh.catalog());
 const providerPricing = new ProviderPricing({pricing:pricingRefresh,getKey:p=>pricingRefresh.getProviderKey(p)});
 
@@ -887,7 +899,11 @@ registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing
     return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
   }
 }));
-app.use(["/api/node", "/api/generate"], (_req, _res, next) => generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next)));
+registerStatsRoutes(app, { ledger: statsLedger, providers: statsProviders, readHistory, refreshKeys: refreshRuntimeConfigFromEnvFile });
+app.use(["/api/node", "/api/generate"], (req, _res, next) => {
+  const fingerprints = Object.fromEntries(Object.entries(statsRuntimeKeys()).map(([provider, key]) => [provider, key ? providerKeyFingerprint(key) : ""]));
+  statsCredentialScope.run({ fingerprints, projectId: req.body?.projectId, fileName: String(req.body?.workflowFileName || "").split(/[\\/]/).at(-1) }, () => generationBillingScope.run([], () => generationPricingScope.run(pricingRefresh.snapshot(), next)));
+});
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 
@@ -1091,6 +1107,7 @@ function buildHealthPayload() {
       skillDirector: true,
       storyboardQc: true,
       providerPricing: true,
+      spendAnalytics: true,
       storyboardSequenceReview: true,
       newtPresets: true,
       mediaThumbnail: true,
@@ -6830,7 +6847,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     mediaType: "video", provider, modelName, endpoint, mode: routeKindLabel(routeKind),
     prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
     project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed },
-    cost, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
+    cost, keyIdentity: { fingerprint: spec.credentialFingerprint }, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
     ...(job.runId ? { generationRunId: job.runId } : {})
   }, { deduplicate: Boolean(job.runId) });
   return {
@@ -15666,6 +15683,18 @@ function truncateString(value, maxLength) {
 }
 
 async function appendHistory(item, { deduplicate = false } = {}) {
+  const statsProvider = canonicalProvider(item.provider);
+  const statsContext = statsCredentialScope.getStore();
+  const capturedFingerprint = statsContext?.fingerprints?.[statsProvider];
+  const currentKey = statsRuntimeKeys()[statsProvider];
+  // Durable jobs retain their original key. Foreground attribution requires a
+  // matching request snapshot; never backfill old records with today's key.
+  if (!item.keyIdentity && capturedFingerprint && currentKey && capturedFingerprint === providerKeyFingerprint(currentKey)) {
+    item = { ...item, keyIdentity: { fingerprint: capturedFingerprint } };
+  }
+  if (item.project?.id && item.project.id === statsContext?.projectId && !item.project.fileName && statsContext.fileName) {
+    item = { ...item, project: { ...item.project, fileName: statsContext.fileName } };
+  }
   if(item.provider === "fal.ai") {
     const matches = (generationBillingScope.getStore() || []).filter(row=>!row.used && row.endpoint===item.endpoint);
     const settled = matches.find(row=>row.id===item.id) || (matches.length===1 ? matches[0] : null);
@@ -16559,7 +16588,8 @@ function projectFromBody(body) {
   const name = String(body.projectName || body.workflowName || "").trim();
   return {
     id: id || "node-workspace",
-    name: name || "Node workspace"
+    name: name || "Node workspace",
+    fileName: String(body.workflowFileName || "").trim().split(/[\\/]/).at(-1)
   };
 }
 

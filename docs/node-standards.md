@@ -680,7 +680,7 @@ Every paid remote model should record cost metadata.
 - Keep provider-specific estimates separate when the same model can route through different providers. Atlas Cloud runs must use Atlas pricing metadata; when Atlas does not publish a fixed locally calculable rate, leave the pre-run estimate blank and preserve the provider's returned billing data.
 - Append history with `mediaType`, `provider`, `modelName`, `endpoint`, `mode`, `settings`, `cost`, and local output paths.
 - Update `/api/stats` pricing payload.
-- Update `StatsDashboard.jsx` so historical and current runs estimate consistently.
+- Stats must use recorded historical costs, distinguish estimates from charges, and keep missing costs unpriced. See `docs/stats-analytics.md` for Local/Global scope and reconciliation rules.
 - Shared pre-run estimates belong in `src/generationPricing.js`. Resolve the provider from the model's explicit provider preference and actual configured-key availability; do not infer it from arbitrary key priority. Multiply known unit cost by batch count and label the number as an estimate.
 - Preserve a history item's stored provider-specific cost when it has a named pricing source. Repricing old runs with another provider's current formula corrupts the historical record.
 - `Auto` duration and any other unresolved billing input remain unpriced until the provider returns the actual value. Do not substitute a convenient default merely to display a number.

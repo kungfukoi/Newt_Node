@@ -1,1199 +1,166 @@
-import { recordedCostAmount } from "./pricingCatalog.js";
 import React from "react";
-import {
-  Activity,
-  CalendarDays,
-  DollarSign,
-  Film,
-  Image,
-  Layers3,
-  RefreshCcw,
-  TrendingUp
-} from "lucide-react";
+import { Activity, ArrowDownToLine, BarChart3, DollarSign, Globe2, HardDrive, RefreshCcw, SlidersHorizontal } from "lucide-react";
 import { statsApi } from "./api/newtApi.js";
-import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
-import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
-import { reve21CostPerImage } from "./reve21.js";
-import { estimateFluxVideoUpscaleCost } from "./fluxVideoUpscale.js";
-import { estimateTopazSdrToHdrCost } from "./topazSdrToHdr.js";
-import { estimateMinimaxH3Cost, minimaxH3CostPerSecond, minimaxH3ReferenceLimits } from "./minimaxH3.js";
-import { estimateKreaMiniMaxH3Cost } from "./kreaApi.js";
-import { model3DNames } from "./modelOptions.js";
+import { buildAnalytics, dateKey, defaultFilters, formatMoney, providerLabels, resolveDateRange } from "./statsAnalytics.js";
+import "./stats.css";
 
-const defaultPricing = {
-  seedance: {
-    standardCostPerSecond: 0.3034,
-    fastCostPerSecond: 0.2419,
-    standardCostPerThousandTokens: 0.014,
-    fastCostPerThousandTokens: 0.0112,
-    billingFps: 24
-  },
-  minimaxH3: {
-    costPerSecond480P: minimaxH3CostPerSecond["480P"],
-    costPerSecond768P: minimaxH3CostPerSecond["768P"],
-    costPerSecond2K: minimaxH3CostPerSecond["2K"],
-    costPerSecond4K: minimaxH3CostPerSecond["4K"],
-    freeReferenceImages: minimaxH3ReferenceLimits.freeImages,
-    additionalReferenceImageCost: minimaxH3ReferenceLimits.additionalImageCost
-  },
-  geminiOmni: {
-    googleCostPerSecond: 0.1,
-    falCostPerSecond: 0.13
-  },
-  nanoBananaPro: {
-    cost1K2K: 0.15,
-    cost4K: 0.3,
-    fal: {
-      cost1K2K: 0.15,
-      cost4K: 0.3
-    },
-    google: {
-      cost1K2K: 0.134,
-      cost4K: 0.24
-    }
-  },
-  nanoBanana2: {
-    cost0_5K: nanoBanana2Costs["0.5K"],
-    cost1K: nanoBanana2Costs["1K"],
-    cost2K: nanoBanana2Costs["2K"],
-    cost4K: nanoBanana2Costs["4K"]
-  },
-  zImage: {
-    costPerMegapixel: 0.005
-  },
-  openAiImage2: {
-    quality: openAiImage2Quality,
-    costs: openAiImage2Costs
-  },
-  krea2Large: {
-    cost: 0.06,
-    styleReferenceCost: 0.065
-  },
-  reve21: {
-    costPerImage: reve21CostPerImage
-  },
-  hunyuan3DPro: {
-    baseCost: 0.375,
-    addOnCost: 0.15
-  },
-  rodin25: {
-    baseCost: 0.4
-  },
-  textProcessing: {
-    falRequestCost: 0.001,
-    falVisionUnitCost: 0.01,
-    falVideoUnitCost: 0.01
-  },
-  utility: {
-    wanFunControl: {
-      costPerSecond: 0.1
-    },
-    wan22A14bLora: {
-      costPerSecond: 0.1
-    },
-    wanVaceInpainting: {
-      costPerSecond480p: 0.04,
-      costPerSecond580p: 0.06,
-      costPerSecond720p: 0.08,
-      billingFps: 16
-    },
-    wan22VaceInpainting: {
-      costPerSecond480p: 0.04,
-      costPerSecond580p: 0.06,
-      costPerSecond720p: 0.08,
-      billingFps: 16
-    },
-    wan22VaceDepth: {
-      costPerSecond480p: 0.04,
-      costPerSecond580p: 0.06,
-      costPerSecond720p: 0.08,
-      billingFps: 16
-    },
-    wan22VacePose: {
-      costPerSecond480p: 0.04,
-      costPerSecond580p: 0.06,
-      costPerSecond720p: 0.08,
-      billingFps: 16
-    },
-    voidVideoInpainting: {
-      baseCost: 0.05,
-      pass2Cost: 0.05,
-      sam3QuadMaskCost: 0.05
-    },
-    sam3Image: {
-      costPerRequest: 0.005
-    },
-    sam3Video: {
-      costPer16Frames: 0.005
-    },
-    aurora: {
-      costPerSecond480p: 0.07,
-      costPerSecond720p: 0.14
-    },
-    bytedanceUpscaler: {
-      costPerSecond1080p: 0.0072,
-      costPerSecond2K: 0.0144,
-      costPerSecond4K: 0.0288,
-      proMultiplier: 10,
-      fps60Multiplier: 2
-    },
-    fluxVideoUpscale: {
-      preciseCostPerSecond1080p: 0.14,
-      preciseCostPerSecond2K: 0.25,
-      preciseCostPerSecond4K: 0.55,
-      creativeCostPerSecond1080p: 0.2,
-      creativeCostPerSecond2K: 0.35,
-      creativeCostPerSecond4K: 0.79
-    },
-    topazUpscaler: {
-      costPerSecondUpTo720p: 0.01,
-      costPerSecond720pTo1080p: 0.02,
-      costPerSecondAbove1080p: 0.08,
-      fps60Multiplier: 2,
-      gaia2Multiplier: 0.5
-    },
-    topazSdrToHdr: {
-      costPerSecondUpTo1080p: 0.24,
-      costPerSecond4K: 0.51
-    },
-    topazImageUpscaler: {
-      costUpTo24MP: 0.08,
-      costUpTo48MP: 0.16,
-      costUpTo96MP: 0.32,
-      costUpTo512MP: 1.36
-    },
-    dwpose: {
-      costPerComputeSecond: 0.0006
-    },
-    depthAnything: {
-      costPerComputeSecond: 0
-    },
-    birefnet: {
-      costPerComputeSecond: 0
-    },
-    patina: {
-      baseCost: 0.01,
-      mapCostPerMegapixel: 0.01
-    }
-  }
-};
-
-const mediaColors = {
-  text: "#f0c83b",
-  image: "#3d85ff",
-  video: "#58ce63",
-  audio: "#ff8b35",
-  model3d: "#14d8c8"
-};
+const readableDate = value => value ? new Date(value).toLocaleString() : "Not checked";
+const labels = { provider: "Provider", model: "Model", workflow: "Workflow / JSON file", key: "API-key identity" };
 
 export default function StatsDashboard() {
-  const [history, setHistory] = React.useState([]);
-  const [pricing, setPricing] = React.useState(defaultPricing);
+  const [scope, setScope] = React.useState("local");
+  const [filters, setFilters] = React.useState(defaultFilters);
+  const [data, setData] = React.useState(null);
   const [status, setStatus] = React.useState("loading");
-  const [lastUpdated, setLastUpdated] = React.useState(null);
-
-  React.useEffect(() => {
-    refreshStats();
-    const interval = window.setInterval(refreshStats, 10000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const stats = React.useMemo(() => buildUsageStats(history, pricing), [history, pricing]);
-
-  async function refreshStats() {
+  const [error, setError] = React.useState("");
+  const [globalFilters, setGlobalFilters] = React.useState({ provider: "", model: "", key: "", atlasScope: "account" });
+  const [accounts, setAccounts] = React.useState(null);
+  const [accountStatus, setAccountStatus] = React.useState("idle");
+  const [accountError, setAccountError] = React.useState("");
+  const [dimension, setDimension] = React.useState("provider");
+  const [limit, setLimit] = React.useState(25);
+  const [transferStatus, setTransferStatus] = React.useState("");
+  const [comparison, setComparison] = React.useState(null);
+  const mounted = React.useRef(false), request = React.useRef(0), busy = React.useRef(false);
+  const importInput = React.useRef(null);
+  const refresh = React.useCallback(async () => {
+    if (busy.current) return;
+    busy.current = true; const id = ++request.current;
+    setStatus(current => current === "loading" ? "loading" : "refreshing");
     try {
-      setStatus((current) => (current === "loading" ? "loading" : "refreshing"));
-      const data = await statsApi.load();
-      setHistory(Array.isArray(data.history) ? data.history : []);
-      setPricing(data.pricing || defaultPricing);
-      setStatus("ready");
-      setLastUpdated(new Date());
+      const result = await statsApi.local();
+      if (!mounted.current || id !== request.current) return;
+      if (!Array.isArray(result.history)) throw new Error("Invalid stats response");
+      setData(result); setStatus("ready"); setError("");
     } catch {
-      try {
-        const historyData = await statsApi.loadHistoryFallback();
-        setHistory(Array.isArray(historyData) ? historyData : []);
-        setStatus("ready");
-        setLastUpdated(new Date());
-      } catch {
-        setStatus("error");
-      }
+      if (mounted.current && id === request.current) { setStatus("error"); setError("Local accounting could not refresh. Existing data may be stale. Records are preserved; retry when the server is available."); }
+    } finally { busy.current = false; }
+  }, []);
+  React.useEffect(() => {
+    mounted.current = true; refresh();
+    const interval = window.setInterval(refresh, 30000);
+    return () => { mounted.current = false; request.current++; window.clearInterval(interval); };
+  }, [refresh]);
+  React.useEffect(() => { setLimit(25); }, [filters]);
+  const analytics = React.useMemo(() => buildAnalytics(data?.history || [], filters), [data, filters]);
+  const now = new Date();
+  const range = resolveDateRange(filters, scope === "global" ? new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) : now);
+  const query = { ...globalFilters, start: range.start ? dateKey(range.start) : "", end: range.end ? dateKey(range.end) : "" };
+  const queryId = JSON.stringify(query), queryCurrent = accounts?.queryId === queryId;
+  const [activeQuery, setActiveQuery] = React.useState("");
+  const queryAccounts = async () => {
+    if (range.error || accountStatus === "loading") return;
+    const id = queryId; setActiveQuery(id); setAccountStatus("loading"); setAccountError("");
+    try {
+      const result = await statsApi.accounts(query);
+      if (!mounted.current) return;
+      if (!Array.isArray(result.providers)) throw new Error("Invalid provider response");
+      setAccounts({ ...result, queryId: id }); setAccountStatus("ready");
+    } catch (failure) {
+      if (mounted.current) { setAccountStatus("error"); setAccountError(failure.message || "Provider query unavailable. Retry later."); }
     }
-  }
+  };
+  const change = (key, value) => setFilters(current => ({ ...current, [key]: value }));
+  const reset = () => { setFilters(defaultFilters()); setGlobalFilters({ provider: "", model: "", key: "", atlasScope: "account" }); setComparison(null); setTransferStatus(""); };
+  const exportRecords = async () => {
+    try {
+      const exported = await statsApi.export();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" }));
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = `newt-accounting-${dateKey(new Date())}.json`; anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000); setTransferStatus("Local accounting exported without prompts or secret credentials.");
+    } catch { setTransferStatus("Export unavailable. Retry after local accounting loads."); }
+  };
+  const previewImport = async event => {
+    const file = event.target.files?.[0]; event.target.value = "";
+    if (!file) return;
+    if (file.size > 4e6) { setTransferStatus("Choose an accounting JSON export smaller than 4 MB."); return; }
+    try {
+      const result = await statsApi.previewImport(JSON.parse(await file.text()));
+      setComparison(result); setTransferStatus(`${result.duplicates} overlapping records excluded. Read-only comparison; Local accounting is unchanged.`);
+    } catch { setTransferStatus("Import preview unavailable. Use a Newt accounting JSON export; nothing was changed."); }
+  };
+  const count = [filters.workflow, filters.provider, filters.model, filters.key, filters.status, filters.search].filter(Boolean).length;
 
-  return (
-    <section className="stats-page">
-      <header className="stats-hero">
-        <div>
-          <span className="stats-kicker">Past 30 days</span>
-          <h1>Generation stats</h1>
-        </div>
-        <button onClick={refreshStats} disabled={status === "loading" || status === "refreshing"} title="Refresh stats">
-          <RefreshCcw className={status === "refreshing" ? "spin" : ""} size={17} />
-          <span>{lastUpdated ? `Updated ${timeLabel(lastUpdated)}` : "Syncing"}</span>
-        </button>
-      </header>
-
-      <div className="stats-metrics">
-        <MetricCard icon={<DollarSign size={20} />} label="Estimated spend" value={formatCurrency(stats.totalCost)} detail={`${formatCurrency(stats.averageCost)} avg / priced run${unpricedSuffix(stats.unpricedCount)}`} />
-        <MetricCard icon={<Activity size={20} />} label="Generations" value={stats.totalCount} detail={`${stats.videoCount} video, ${stats.imageCount} image, ${stats.textCount} text, ${stats.audioCount} audio, ${stats.model3dCount} 3D`} />
-        <MetricCard icon={<Film size={20} />} label="Video seconds" value={`${stats.videoSeconds}s`} detail={`${stats.fastCount} fast runs`} />
-        <MetricCard icon={<Layers3 size={20} />} label="Top project" value={stats.topProject?.name || "None yet"} detail={stats.topProject ? `${formatCostLabel(stats.topProject)} tracked${unpricedSuffix(stats.topProject.unpricedCount)}` : "Waiting for runs"} />
+  return <section className="stats-page analytics-page" aria-label="Spend analytics">
+    <header className="stats-hero analytics-hero">
+      <div><span className="stats-kicker">Know where your budget goes</span><h1>Spend & usage</h1><p>Follow the cost of a run, a workflow, or your provider account.</p></div>
+      <div className="analytics-hero-actions"><div className="analytics-scope" role="group" aria-label="Accounting scope">
+        <button aria-pressed={scope === "local"} onClick={() => setScope("local")}><HardDrive size={16}/>Local</button>
+        <button aria-pressed={scope === "global"} onClick={() => setScope("global")}><Globe2 size={16}/>Global</button>
+      </div><button onClick={scope === "local" ? refresh : queryAccounts} disabled={scope === "local" ? ["loading", "refreshing"].includes(status) : accountStatus === "loading" || !!range.error}><RefreshCcw size={16}/>{scope === "local" ? "Refresh records" : "Query providers"}</button></div>
+    </header>
+    <div className="analytics-context"><span className="analytics-source">{scope === "local" ? "LOCAL RECORDS" : "PROVIDER BILLING"}</span><p>{scope === "local" ? "This installation only. Recorded charges and estimates; shared keys do not synchronize records." : "Across machines and apps within the provider's permitted billing scope. Separate from Newt's local records."}</p><small>{scope === "local" ? `Last refresh: ${readableDate(data?.fetchedAt)}` : `Last query: ${readableDate(accounts?.fetchedAt)}`}</small></div>
+    <section className="analytics-filters" aria-label="Analytics filters">
+      <div className="analytics-filter-heading"><span><SlidersHorizontal size={16}/>Filter your view</span><button onClick={reset}>Reset all filters</button></div>
+      <div className="analytics-filter-grid">
+        <label>Date range<select aria-label="Date range" value={filters.range} onChange={e => change("range", e.target.value)}><option value="5">Last 5 days</option><option value="30">Last 30 days</option><option value="custom">Custom range</option></select></label>
+        {filters.range === "custom" && <><label>Start date<input type="date" value={filters.start} onChange={e => change("start", e.target.value)}/></label><label>End date (inclusive)<input type="date" value={filters.end} onChange={e => change("end", e.target.value)}/></label></>}
+        {scope === "local" ? <>
+          {["workflow", "provider", "model", "key"].map(key => <label key={key}>{labels[key]}<select aria-label={labels[key]} value={filters[key]} onChange={e => change(key, e.target.value)}><option value="">All {key === "key" ? "key identities" : key === "workflow" ? "workflows" : `${key}s`}</option>{analytics.options[key].map(row => <option key={row.id} value={row.id}>{row.name}{key === "workflow" ? ` [${row.id}]` : ""}</option>)}</select></label>)}
+          <label>Cost / run state<select value={filters.status} onChange={e => change("status", e.target.value)}><option value="">All recorded runs</option><option value="completed">Completed</option><option value="unpriced">Unpriced</option><option value="failed">Failed (if recorded)</option></select></label>
+          <label className="analytics-search">Find run / job / JSON file<input type="search" value={filters.search} onChange={e => change("search", e.target.value)} placeholder="Run ID, model or workflow"/></label>
+        </> : <>
+          <label>Provider<select aria-label="Provider" value={globalFilters.provider} onChange={e => setGlobalFilters(current => ({ ...current, provider: e.target.value, model: "", key: "" }))}><option value="">All providers</option>{["atlas", "fal", "krea", "openai", "google", "elevenlabs"].map(id => <option key={id} value={id}>{providerLabels[id]}</option>)}</select></label>
+          <label>Public model / endpoint ID<input value={globalFilters.model} disabled={!["atlas", "fal"].includes(globalFilters.provider)} onChange={e => setGlobalFilters(current => ({ ...current, model: e.target.value }))} placeholder="Select Atlas or Fal"/></label>
+          <label>Public provider key ID<input value={globalFilters.key} disabled={!["atlas", "fal", "openai"].includes(globalFilters.provider)} onChange={e => setGlobalFilters(current => ({ ...current, key: e.target.value }))} placeholder="Public ID, never the secret key" autoComplete="off"/></label>
+          <label>Atlas billing scope<select value={globalFilters.atlasScope} onChange={e => setGlobalFilters(current => ({ ...current, atlasScope: e.target.value }))}><option value="account">Entire account (billing permission)</option><option value="self">Authenticated user's keys</option></select></label>
+        </>}
       </div>
-
-      <div className="stats-grid">
-        <section className="stats-panel wide">
-          <PanelTitle icon={<TrendingUp size={17} />} title="Cost over time" aside={stats.unpricedCount ? `${stats.unpricedCount} unpriced` : "Estimated USD"} />
-          <CostChart days={stats.days} />
-        </section>
-
-        <section className="stats-panel">
-          <PanelTitle icon={<CalendarDays size={17} />} title="Daily volume" aside="30 days" />
-          <VolumeBars days={stats.days} />
-        </section>
-
-        <section className="stats-panel">
-          <PanelTitle icon={<Image size={17} />} title="Media mix" aside={`${stats.totalCount} total`} />
-          <MediaSplit imageCount={stats.imageCount} videoCount={stats.videoCount} textCount={stats.textCount} model3dCount={stats.model3dCount} audioCount={stats.audioCount} />
-        </section>
-
-        <section className="stats-panel">
-          <PanelTitle icon={<Activity size={17} />} title="Models" aside="By spend" />
-          <RankedBars rows={stats.models} emptyLabel="No model usage yet" />
-        </section>
-
-        <section className="stats-panel">
-          <PanelTitle icon={<Layers3 size={17} />} title="Projects" aside="By spend" />
-          <RankedBars rows={stats.projects} emptyLabel="No project data yet" />
-        </section>
-
-        <section className="stats-panel wide">
-          <PanelTitle icon={<CalendarDays size={17} />} title="Recent runs" aside="Auto-updating" />
-          <RecentRuns rows={stats.recent} />
-        </section>
-      </div>
-
-      <p className="cost-note">
-        Costs use each run's recorded charge or estimate. Reconciled historical estimates use rates checked at reconciliation, not original charges. Unpriced means billing details are still missing; confirm final charges in your provider dashboards.
-      </p>
+      <div className="analytics-filter-summary" role="status">{range.error || <>{range.label} · {scope === "local" ? `Calendar days in ${Intl.DateTimeFormat().resolvedOptions().timeZone}; ${count} additional filters; ${analytics.rows.length} matching records` : "UTC calendar days; click Query providers to apply"}</>}</div>
+      {scope === "global" && <p className="analytics-note">Workflow, local run search and local hashed key filters are paused: providers cannot attribute account charges to Newt JSON files. A key filter needs the provider's public ID. Balance always covers the account regardless of these filters.</p>}
     </section>
-  );
-}
-
-function MetricCard({ icon, label, value, detail }) {
-  return (
-    <article className="metric-card">
-      <span className="metric-icon">{icon}</span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-      <span>{detail}</span>
-    </article>
-  );
-}
-
-function PanelTitle({ icon, title, aside }) {
-  return (
-    <div className="panel-title">
-      <span>
-        {icon}
-        {title}
-      </span>
-      <small>{aside}</small>
-    </div>
-  );
-}
-
-function CostChart({ days }) {
-  const width = 680;
-  const height = 220;
-  const padding = 22;
-  const maxCost = Math.max(1, ...days.map((day) => day.cost));
-  const points = days.map((day, index) => {
-    const x = padding + (index / Math.max(1, days.length - 1)) * (width - padding * 2);
-    const y = height - padding - (day.cost / maxCost) * (height - padding * 2);
-    return { x, y, day };
-  });
-  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const area = `${padding},${height - padding} ${line} ${width - padding},${height - padding}`;
-
-  return (
-    <div className="chart-shell">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Estimated cost over the past 30 days">
-        <defs>
-          <linearGradient id="costFill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#ddc631" stopOpacity="0.34" />
-            <stop offset="100%" stopColor="#ddc631" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polyline className="chart-grid-line" points={`${padding},${height - padding} ${width - padding},${height - padding}`} />
-        <polygon points={area} fill="url(#costFill)" />
-        <polyline className="cost-line" points={line} />
-        {points
-          .filter((point) => point.day.cost > 0)
-          .map((point) => (
-            <circle key={point.day.key} cx={point.x} cy={point.y} r="4" />
-          ))}
-      </svg>
-      <div className="chart-axis">
-        <span>{formatShortDate(days[0]?.date)}</span>
-        <span>{formatShortDate(days[14]?.date)}</span>
-        <span>{formatShortDate(days.at(-1)?.date)}</span>
-      </div>
-    </div>
-  );
-}
-
-function VolumeBars({ days }) {
-  const maxCount = Math.max(1, ...days.map((day) => day.count));
-
-  return (
-    <div className="volume-bars" aria-label="Daily generation volume">
-      {days.map((day, index) => (
-        <div className="volume-bar" key={day.key} title={`${formatShortDate(day.date)}: ${day.count} generations`}>
-          <span style={{ height: `${Math.max(4, (day.count / maxCount) * 100)}%` }} />
-          {index % 7 === 0 && <small>{formatDay(day.date)}</small>}
+    {scope === "local" ? <>
+      {error && <div role="alert" className="analytics-alert">{error}<button onClick={refresh}>Retry local records</button></div>}
+      {status === "loading" ? <div className="analytics-empty" role="status">Loading recorded usage…</div> : <>
+        <div className="stats-metrics analytics-metrics">
+          <Metric icon={<DollarSign size={18}/>} label="Recorded spend" value={formatMoney(analytics.total)} detail={`${analytics.pricedCount} priced · ${analytics.unpricedCount} unpriced`}/>
+          <Metric icon={<Activity size={18}/>} label="Runs / jobs" value={analytics.rows.length} detail="Recorded operations in this view"/>
+          <Metric icon={<BarChart3 size={18}/>} label="Average / priced run" value={formatMoney(analytics.average)} detail="Unpriced records excluded"/>
+          <Metric icon={<DollarSign size={18}/>} label="Charge confidence" value={analytics.pricedCount ? `${formatMoney(analytics.actual)} reported` : "No priced records"} detail={`${formatMoney(analytics.estimated)} estimated or unverified`}/>
         </div>
-      ))}
-    </div>
-  );
-}
-
-function MediaSplit({ imageCount, videoCount, textCount, model3dCount, audioCount }) {
-  const totalCount = imageCount + videoCount + textCount + model3dCount + audioCount;
-  const total = Math.max(1, totalCount);
-  const imagePercent = Math.round((imageCount / total) * 100);
-  const videoPercent = Math.round((videoCount / total) * 100);
-  const textPercent = Math.round((textCount / total) * 100);
-  const imageStop = imagePercent;
-  const videoStop = imagePercent + videoPercent;
-  const textStop = videoStop + textPercent;
-  const audioStop = textStop + Math.round((audioCount / total) * 100);
-  const dominant = [
-    { label: "image", count: imageCount },
-    { label: "video", count: videoCount },
-    { label: "text", count: textCount },
-    { label: "audio", count: audioCount },
-    { label: "3D", count: model3dCount }
-  ].sort((a, b) => b.count - a.count)[0];
-  const donutBackground = totalCount
-    ? `conic-gradient(${mediaColors.image} 0 ${imageStop}%, ${mediaColors.video} ${imageStop}% ${videoStop}%, ${mediaColors.text} ${videoStop}% ${textStop}%, ${mediaColors.audio} ${textStop}% ${audioStop}%, ${mediaColors.model3d} ${audioStop}% 100%)`
-    : "rgba(255, 255, 255, 0.08)";
-
-  return (
-    <div className="media-split">
-      <div className="media-donut" style={{ background: donutBackground }}>
-        <span>{totalCount}</span>
-      </div>
-      <div className="media-legend">
-        <span>
-          <i className="image-dot" />
-          Images
-          <strong>{imageCount}</strong>
-        </span>
-        <span>
-          <i className="video-dot" />
-          Videos
-          <strong>{videoCount}</strong>
-        </span>
-        <span>
-          <i className="text-dot" />
-          Text
-          <strong>{textCount}</strong>
-        </span>
-        <span>
-          <i className="model3d-dot" />
-          3D
-          <strong>{model3dCount}</strong>
-        </span>
-        <span><i style={{ background: mediaColors.audio }} />Audio<strong>{audioCount}</strong></span>
-        <small>{dominant.count ? `${dominant.label} leads by count` : "No runs yet"}</small>
-      </div>
-    </div>
-  );
-}
-
-function RankedBars({ rows, emptyLabel }) {
-  const maxCost = Math.max(1, ...rows.map((row) => row.cost));
-
-  if (!rows.length) {
-    return <div className="empty-stats">{emptyLabel}</div>;
-  }
-
-  return (
-    <div className="ranked-bars">
-      {rows.slice(0, 6).map((row) => (
-        <div className="ranked-row" key={row.name}>
-          <div>
-            <span>{row.name}</span>
-            <small>{row.count} run{row.count === 1 ? "" : "s"}{unpricedSuffix(row.unpricedCount)}</small>
-          </div>
-          <div className="ranked-meter">
-            <span style={{ width: `${(row.cost / maxCost) * 100}%` }} />
-          </div>
-          <strong className={row.pricedCount ? "" : "unpriced-cost"}>{formatCostLabel(row)}</strong>
+        {!analytics.rows.length && <div className="analytics-empty"><h2>{data?.history?.length ? "No runs match this view" : "Your first recorded run starts the story"}</h2><p>{data?.history?.length ? "Broaden a filter or change the date range." : "Records appear after generation. Missing historical amounts remain unpriced."}</p><button onClick={reset}>Reset all filters</button></div>}
+        <div className="analytics-grid">
+          <section className="stats-panel analytics-trend"><Panel title="Spend over time" aside="USD · recorded amounts"/><Trend days={analytics.days}/></section>
+          <section className="stats-panel analytics-breakdown"><Panel title="Where it went" aside="Click a row to filter"/><div className="analytics-tabs" role="group" aria-label="Breakdown dimension">{["provider", "model", "workflow", "key"].map(id => <button key={id} aria-pressed={dimension === id} onClick={() => setDimension(id)}>{id === "key" ? "Keys" : id === "workflow" ? "Workflows" : `${labels[id]}s`}</button>)}</div><Breakdown rows={analytics.breakdowns[dimension]} onSelect={id => change(dimension, id)}/></section>
         </div>
-      ))}
-    </div>
-  );
+        <section className="stats-panel analytics-ledger"><Panel title="Run ledger" aside={`${Math.min(limit, analytics.rows.length)} of ${analytics.rows.length} matching records`}/><RunLedger rows={analytics.rows.slice(0, limit)}/>{limit < analytics.rows.length && <button className="analytics-load" onClick={() => setLimit(current => current + 25)}>Show 25 more runs</button>}</section>
+        <details className="analytics-coverage"><summary>Coverage & portable accounting</summary><p>{data?.coverage?.note || "Retained history only; complete past billing cannot be reconstructed locally."}</p><p>Durable tracking began {readableDate(data?.coverage?.trackingStartedAt)}. {analytics.duplicates} duplicate records excluded; {analytics.invalidDates} records with invalid dates excluded from date views. Deleted recent history does not delete accounting records.</p><p>Workflow IDs distinguish same-named JSON files. Renames retain existing identity; Save As uses the app's new package identity. Legacy records without file/key attribution remain unknown.</p><div className="analytics-transfer"><button onClick={exportRecords}><ArrowDownToLine size={15}/>Export local accounting</button><button onClick={() => importInput.current?.click()}>Preview another machine's export</button><input ref={importInput} hidden type="file" accept=".json,application/json" onChange={previewImport}/></div><p role="status">{transferStatus}</p>{comparison && <ImportComparison comparison={comparison}/>}</details>
+      </>}
+    </> : <>
+      {accountError && activeQuery === queryId && <div role="alert" className="analytics-alert">{accountError} {queryCurrent ? "Previous query shown with original timestamp." : "No provider totals substituted."}</div>}
+      {accountStatus === "loading" && <div role="status" className="analytics-empty">Querying supported billing APIs… no generation requests are submitted.</div>}
+      {!queryCurrent && accountStatus !== "loading" && <div className="analytics-empty"><h2>{accounts ? "Filters changed — ready for a new query" : "See beyond this machine"}</h2><p>Query official billing APIs with existing local credentials. Unsupported providers and permission limits remain visible.</p><button onClick={queryAccounts} disabled={!!range.error}>Apply & query providers</button></div>}
+      {queryCurrent && <GlobalAccounts data={accounts} stale={accountStatus === "error"}/>}
+      <section className="stats-panel analytics-capabilities"><Panel title="Provider coverage" aside="Official API capabilities"/>{(data?.capabilities || []).map(capability => <article key={capability.provider}><strong>{providerLabels[capability.provider]}</strong><span>{capability.note}</span><a href={capability.docs} target="_blank" rel="noreferrer">API documentation ↗</a></article>)}</section>
+    </>}
+  </section>;
 }
-
-function RecentRuns({ rows }) {
-  if (!rows.length) {
-    return <div className="empty-stats">No generations in the last 30 days yet.</div>;
-  }
-
-  return (
-    <div className="recent-table">
-      {rows.slice(0, 12).map((row) => (
-        <article key={row.id}>
-          <span className={`media-pill ${row.mediaType}`}>{row.mediaType}</span>
-          <div>
-            <strong>{row.modelName}</strong>
-            <small>{row.projectName}</small>
-          </div>
-          <p>{row.prompt || "Untitled generation"}</p>
-          <span>{formatShortDate(row.date)}</span>
-          <strong className={row.hasCostEstimate ? "" : "unpriced-cost"}>{formatCostLabel(row)}</strong>
-        </article>
-      ))}
-    </div>
-  );
+function Metric({ icon, label, value, detail }) { return <article className="metric-card"><span className="metric-icon">{icon}</span><small>{label}</small><strong>{value}</strong><span>{detail}</span></article>; }
+function Panel({ title, aside }) { return <div className="panel-title"><h2>{title}</h2><small>{aside}</small></div>; }
+function Trend({ days }) {
+  const max = Math.max(0.000001, ...days.map(day => day.cost));
+  const points = days.map((day, index) => `${20 + index / Math.max(1, days.length - 1) * 640},${190 - day.cost / max * 155}`).join(" ");
+  return <div className="analytics-chart"><div className="analytics-chart-ceiling">{formatMoney(max === 0.000001 ? 0 : max)}</div><svg viewBox="0 0 680 220" role="img" aria-label={`Daily recorded spend for ${days.length} calendar days; exact values in daily data table`}><line x1="20" y1="190" x2="660" y2="190" className="analytics-chart-grid"/><line x1="20" y1="112" x2="660" y2="112" className="analytics-chart-grid"/><polygon points={`20,190 ${points} 660,190`} fill="rgba(221,198,49,.12)"/><polyline points={points} fill="none" stroke="#ddc631" strokeWidth="3"/>{days.map((day, index) => day.count ? <circle key={day.key} cx={20 + index / Math.max(1, days.length - 1) * 640} cy={190 - day.cost / max * 155} r="3" fill="#ddc631"><title>{day.key}: {day.pricedCount ? formatMoney(day.cost) : "Unpriced"}, {day.count} records</title></circle> : null)}</svg><div className="chart-axis"><span>{days[0]?.key}</span><span>{days.at(-1)?.key}</span></div><details><summary>Daily spend & record counts</summary><div className="analytics-table-scroll"><table><caption>Exact chart data; empty days have no recorded runs</caption><thead><tr><th>Date</th><th>Spend</th><th>Records</th><th>Unpriced</th></tr></thead><tbody>{days.map(day => <tr key={day.key}><td>{day.key}</td><td>{day.pricedCount ? formatMoney(day.cost) : day.count ? "Unpriced" : "No records"}</td><td>{day.count}</td><td>{day.count - day.pricedCount}</td></tr>)}</tbody></table></div></details></div>;
 }
-
-function buildUsageStats(history, pricing) {
-  const days = makeThirtyDays();
-  const dayMap = new Map(days.map((day) => [day.key, day]));
-  const normalized = history.map((item) => normalizeUsageItem(item, pricing)).filter((item) => item.inWindow);
-  const modelMap = new Map();
-  const projectMap = new Map();
-
-  normalized.forEach((item) => {
-    const day = dayMap.get(item.dayKey);
-    if (day) {
-      day.count += 1;
-      day.cost += item.cost;
-      if (!item.hasCostEstimate) day.unpricedCount += 1;
-      if (item.mediaType === "image") day.imageCount += 1;
-      if (item.mediaType === "video") day.videoCount += 1;
-      if (item.mediaType === "text") day.textCount += 1;
-      if (item.mediaType === "model3d") day.model3dCount += 1;
-    }
-
-    addAggregate(modelMap, item.modelName, item);
-    addAggregate(projectMap, item.projectId, item, item.projectName);
-  });
-
-  days.forEach((day) => {
-    day.cost = round(day.cost);
-  });
-
-  const models = aggregateRows(modelMap);
-  const projects = aggregateRows(projectMap);
-  const pricedTotalCost = round(normalized.reduce((sum, item) => sum + item.cost, 0));
-  const totalCount = normalized.length;
-  const pricedCount = normalized.filter((item) => item.hasCostEstimate).length;
-  const unpricedCount = totalCount - pricedCount;
-  const videoCount = normalized.filter((item) => item.mediaType === "video").length;
-  const imageCount = normalized.filter((item) => item.mediaType === "image").length;
-  const textCount = normalized.filter((item) => item.mediaType === "text").length;
-  const audioCount = normalized.filter((item) => item.mediaType === "audio").length;
-  const model3dCount = normalized.filter((item) => item.mediaType === "model3d").length;
-  const videoSeconds = normalized.reduce((sum, item) => sum + (item.mediaType === "video" ? item.durationSeconds : 0), 0);
-
-  return {
-    days,
-    totalCost: pricedCount ? pricedTotalCost : null,
-    totalCount,
-    imageCount,
-    videoCount,
-    textCount,
-    model3dCount,
-    audioCount,
-    pricedCount,
-    unpricedCount,
-    videoSeconds,
-    fastCount: normalized.filter((item) => item.isFast).length,
-    averageCost: pricedCount ? round(pricedTotalCost / pricedCount) : null,
-    topProject: projects[0],
-    models,
-    projects,
-    recent: normalized.sort((a, b) => b.date - a.date)
-  };
+function Breakdown({ rows, onSelect }) {
+  const max = Math.max(0.000001, ...rows.map(row => row.cost));
+  return rows.length ? <div className="analytics-ranked">{rows.map(row => <button key={row.id} onClick={() => onSelect(row.id)}><span><strong>{row.name}</strong><small>{row.count} runs · {row.unpricedCount} unpriced</small></span><b>{row.pricedCount ? formatMoney(row.cost) : "Unpriced"}</b><i style={{ width: `${row.cost / max * 100}%` }}/></button>)}</div> : <p className="analytics-note">No spend breakdown in this view.</p>;
 }
-
-function normalizeUsageItem(item, pricing) {
-  const date = new Date(item.createdAt || Date.now());
-  const mediaType = item.mediaType || (item.localModel ? "model3d" : item.localImage ? "image" : "video");
-  const settings = item.settings || {};
-  const modelName = item.modelName || inferModelName(item, mediaType);
-  const projectId = item.project?.id || (mediaType === "image" ? "image" : mediaType === "text" ? "text" : mediaType === "model3d" ? "model3d" : "video");
-  const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
-  const cost = recordedCostAmount(item.cost);
-  const hasCostEstimate = Number.isFinite(cost);
-  const durationSeconds = mediaType === "audio" ? Number(settings.durationSeconds) || 0 : mediaType === "video" ? durationToSeconds(item.remoteVideo?.duration ?? settings.duration) : 0;
-  const cutoff = startOfDay(new Date());
-  cutoff.setDate(cutoff.getDate() - 29);
-
-  return {
-    id: item.id || `${item.createdAt}-${item.prompt}`,
-    date,
-    dayKey: dayKey(date),
-    inWindow: date >= cutoff,
-    mediaType,
-    modelName,
-    projectId,
-    projectName,
-    prompt: item.prompt,
-    cost: hasCostEstimate ? round(cost) : 0,
-    hasCostEstimate,
-    pricingBasis: item.cost?.pricingBasis || "",
-    durationSeconds,
-    isFast: settings.speed === "fast" || String(item.endpoint || "").includes("/fast/")
-  };
+function RunLedger({ rows }) {
+  if (!rows.length) return <p className="analytics-note">No matching recorded runs.</p>;
+  return <div className="analytics-table-scroll"><table><caption className="analytics-sr-only">Recorded runs. Expand Details for attribution and pricing.</caption><thead><tr><th>Run / job</th><th>Workflow / file</th><th>Provider / key</th><th>Date</th><th>Recorded cost</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.provider}:${row.generationRunId || row.id}:${index}`}><td><details><summary><strong>{row.modelName}</strong><small>{row.mediaType} · {row.status} · Details</small></summary><dl><dt>Run ID</dt><dd>{row.generationRunId || "Not recorded"}</dd><dt>Request / record ID</dt><dd>{row.id || "Not recorded"}</dd><dt>Endpoint</dt><dd>{row.endpoint || "Not recorded"}</dd><dt>Workflow ID</dt><dd>{row.project.id}</dd><dt>Pricing basis</dt><dd>{row.cost.pricingBasis || "No verified basis recorded"}</dd><dt>Pricing source</dt><dd>{row.cost.pricingSource || "Unknown"}</dd><dt>Price checked</dt><dd>{row.cost.pricingCheckedAt ? readableDate(row.cost.pricingCheckedAt) : "Not recorded"}</dd></dl></details></td><td>{row.project.name}<small>{row.project.fileName || "JSON filename not recorded"}</small></td><td>{providerLabels[row.provider]}<small>{row.keyLabel}</small></td><td><time dateTime={row.createdAt}>{readableDate(row.createdAt)}</time></td><td><strong>{row.cost.amountUsd === null ? "Unpriced" : formatMoney(row.cost.amountUsd)}</strong><small>{row.cost.amountUsd === null ? "Billing details missing" : row.cost.estimated ? "Estimate / unverified" : "Provider reported"}</small></td></tr>)}</tbody></table></div>;
 }
-
-function resolvedItemCost(item, mediaType, pricing) {
-  const storedCost = numericCostAmount(item.cost);
-  const estimatedCost = estimateItemCost(item, mediaType, pricing);
-  const trustedSource = item.cost?.pricingSource && item.cost.pricingSource !== "configured-pricing-v1";
-
-  if (storedCost !== null && trustedSource) return storedCost;
-  if (estimatedCost !== null) return estimatedCost;
-  return storedCost;
+function GlobalAccounts({ data, stale }) {
+  const ready = data.providers.filter(row => row.spend.status === "ready");
+  const total = ready.length ? ready.reduce((sum, row) => sum + row.spend.amount, 0) : null;
+  const bucketMap = new Map();
+  for (const provider of ready) for (const row of provider.spend.rows) { const day = bucketMap.get(row.date) || { key: row.date, cost: 0, count: 0, pricedCount: 0 }; day.cost += row.amount; day.count++; day.pricedCount++; bucketMap.set(row.date, day); }
+  return <><div className="stats-metrics analytics-metrics"><Metric icon={<Globe2 size={18}/>} label="Provider-reported spend" value={formatMoney(total)} detail={`${ready.length} of ${data.providers.length} providers returned costs; incomplete coverage`}/><Metric icon={<Activity size={18}/>} label="Query period (UTC)" value={`${data.query.start} → ${data.query.end}`} detail="Start inclusive · end exclusive"/><Metric icon={<RefreshCcw size={18}/>} label="Billing freshness" value={stale ? "Stale · retry required" : "Provider snapshot"} detail={readableDate(data.fetchedAt)}/><Metric icon={<BarChart3 size={18}/>} label="Coverage" value="Provider scope" detail="No Newt workflow or local job attribution"/></div>
+    <div className="analytics-accounts">{data.providers.map(provider => <section className="stats-panel" key={provider.provider}><Panel title={providerLabels[provider.provider]} aside={provider.scope}/><div className="analytics-account-numbers"><div><small>Spend in queried period</small><strong>{formatMoney(provider.spend.amount)}</strong><span className="analytics-badge">{provider.spend.status}</span><p>{provider.spend.scope || provider.spend.message}</p></div><div><small>Current remaining balance</small><strong>{provider.balance.unit === "characters" && provider.balance.amount !== null ? `${provider.balance.amount.toLocaleString()} characters` : formatMoney(provider.balance.amount)}</strong><span className="analytics-badge">{provider.balance.status}</span><p>{provider.balance.scope || provider.balance.message}</p></div></div><p className="analytics-note">{provider.note}</p>{provider.spend.status === "ready" && <><p className="analytics-note">{provider.spend.message} {provider.spend.partial && "Includes partial daily buckets; billing still accruing."}</p><details><summary>Daily provider costs · {provider.spend.rows.length} buckets</summary><div className="analytics-table-scroll"><table><thead><tr><th>Date (UTC)</th><th>Model / endpoint</th><th>Public key ID</th><th>Cost</th><th>Coverage</th></tr></thead><tbody>{provider.spend.rows.map((row, index) => <tr key={index}><td>{row.date}</td><td>{row.model}</td><td>{row.key}</td><td>{formatMoney(row.amount)}</td><td>{row.partial ? "Partial" : "Reported"}{row.coveredUntil && <small>Through {readableDate(row.coveredUntil)}</small>}</td></tr>)}</tbody></table></div></details></>}<small>Retrieved {readableDate(provider.fetchedAt)} · Balance ignores date/model/key filters</small></section>)}</div>
+    {!!bucketMap.size && <section className="stats-panel analytics-trend"><Panel title="Reported spend over time" aside="Available providers only · USD"/><Trend days={[...bucketMap.values()].sort((a, b) => a.key.localeCompare(b.key))}/></section>}
+  </>;
 }
-
-function estimateItemCost(item, mediaType, pricing) {
-  const settings = item.settings || {};
-  const modelKey = [item.modelName, settings.model, item.endpoint, item.mode].filter(Boolean).join(" ").toLowerCase();
-
-  if (mediaType === "image") {
-    if (modelKey.includes("ideogram")) return null;
-    if (modelKey.includes("reve")) {
-      return pricing.reve21?.costPerImage ?? defaultPricing.reve21.costPerImage;
-    }
-
-    if (modelKey.includes("qwen")) {
-      return estimateMegapixelCost(item.remoteImage, 0.035);
-    }
-
-    if (modelKey.includes("z-image") || modelKey.includes("z image") || modelKey.includes("zimage")) {
-      return estimateZImageStatsCost(item, settings, pricing);
-    }
-
-    if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
-      return pricing.utility?.sam3Image?.costPerRequest ?? defaultPricing.utility.sam3Image.costPerRequest;
-    }
-
-    if (modelKey.includes("depth anything") || modelKey.includes("depth-anything") || modelKey.includes("birefnet")) {
-      return 0;
-    }
-
-    if (modelKey.includes("patina")) {
-      return estimatePatinaStatsCost(item, pricing);
-    }
-
-    if (modelKey.includes("topaz")) {
-      return estimateTopazImageUpscalerStatsCost(item, settings, pricing);
-    }
-
-    if (modelKey.includes("dwpose")) {
-      return null;
-    }
-
-    const isLegacyOpenAiImage2 = modelKey.includes("openai image 2")
-      || /(?:^|\s)openai\/gpt-image-2(?:\/|\s|$)/.test(modelKey);
-    if (isLegacyOpenAiImage2) {
-      return estimateLegacyOpenAiImage2Cost({
-        resolution: settings.resolution,
-        size: settings.imageSize,
-        quality: settings.quality || openAiImage2Quality,
-        edit: String(item.endpoint || "").includes("/edit")
-      });
-    }
-
-    if (modelKey.includes("gpt image") || modelKey.includes("gpt-image")) {
-      return estimateOpenAiImage2Cost({
-        resolution: settings.resolution,
-        size: settings.imageSize,
-        quality: settings.quality || pricing.openAiImage2?.quality || defaultPricing.openAiImage2.quality,
-        edit: String(item.endpoint || "").includes("/edit"),
-        pricing: pricing.openAiImage2?.costs || defaultPricing.openAiImage2.costs
-      });
-    }
-
-    if (modelKey.includes("krea") && modelKey.includes("large")) {
-      const kreaPricing = pricing.krea2Large || defaultPricing.krea2Large;
-      return Number(settings.imageStyleReferenceCount || 0) > 0
-        ? kreaPricing.styleReferenceCost
-        : kreaPricing.cost;
-    }
-
-    if (modelKey.includes("nano banana 2") || modelKey.includes("nano-banana-2") || modelKey.includes("gemini 3.1 flash image")) {
-      const nano2Pricing = pricing.nanoBanana2 || defaultPricing.nanoBanana2;
-      const resolutionKey = normalizeNanoBanana2Resolution(settings.resolution).replace(".", "_");
-      return nano2Pricing[`cost${resolutionKey}`] ?? defaultPricing.nanoBanana2[`cost${resolutionKey}`];
-    }
-
-    if (modelKey.includes("nano") || modelKey.includes("banana") || modelKey.includes("gemini")) {
-      const nanoPricing = nanoBananaPricingForItem(item, pricing);
-      return String(settings.resolution || "").toUpperCase().includes("4K")
-        ? nanoPricing.cost4K
-        : nanoPricing.cost1K2K;
-    }
-
-    return null;
-  }
-
-  if (mediaType === "text") {
-    const textPricing = pricing.textProcessing || defaultPricing.textProcessing;
-    if (String(item.provider || settings.provider || "").toLowerCase() !== "fal") return null;
-
-    const usageAmount = usageCost(item.usage);
-    if (usageAmount !== null) return usageAmount;
-
-    return (
-      textPricing.falRequestCost +
-      (Number(settings.imageInputCount || 0) > 0 ? textPricing.falVisionUnitCost : 0) +
-      (Number(settings.videoInputCount || 0) > 0 ? textPricing.falVideoUnitCost : 0)
-    );
-  }
-
-  if (mediaType === "model3d") {
-    if (modelKey.includes("rodin") || modelKey.includes("hyper3d")) {
-      return pricing.rodin25?.baseCost ?? defaultPricing.rodin25.baseCost;
-    }
-    if (modelKey.includes("hunyuan") || modelKey.includes("3d")) {
-      return estimateHunyuan3DStatsCost(settings, pricing);
-    }
-    return null;
-  }
-
-  if (modelKey.includes("minimax h3") || modelKey.includes("minimax/h3")) {
-    return estimateMinimaxH3StatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("seedance") || modelKey.includes("bytedance/seedance")) {
-    return estimateSeedanceStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("gemini") && modelKey.includes("omni")) {
-    const modelPricing = pricing.geminiOmni || defaultPricing.geminiOmni;
-    const provider = String(item.provider || "").toLowerCase();
-    const rate = provider.includes("fal") ? modelPricing.falCostPerSecond : modelPricing.googleCostPerSecond;
-    return durationToSeconds(settings.duration) * rate;
-  }
-
-  if (modelKey.includes("wan-fun-control") || modelKey.includes("wan fun control")) {
-    const utilityPricing = pricing.utility?.wanFunControl || defaultPricing.utility.wanFunControl;
-    const billingFrames = settings.matchInputNumFrames === false ? Number(settings.numFrames || 81) : 81;
-    return (billingFrames / 16) * utilityPricing.costPerSecond;
-  }
-
-  if (isWan22A14bLoraModel(modelKey)) {
-    return estimateWan22A14bLoraStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("wan-vace") || modelKey.includes("wan-22-vace") || modelKey.includes("wan vace") || modelKey.includes("wan 2.2 vace")) {
-    return estimateWanVaceStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("void") || modelKey.includes("video inpainting")) {
-    return estimateVoidStatsCost(settings, pricing);
-  }
-
-  if (modelKey.includes("aurora") || modelKey.includes("creatify")) {
-    return estimateAuroraStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("bytedance") && modelKey.includes("upscal")) {
-    return estimateBytedanceUpscalerStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("flux") && modelKey.includes("video") && modelKey.includes("upscal")) {
-    return estimateFluxVideoUpscaleStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("topaz") && (modelKey.includes("hdr") || modelKey.includes("sdr-to-hdr"))) {
-    return estimateTopazSdrToHdrStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("topaz")) {
-    return estimateTopazUpscalerStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
-    return estimateSam3VideoStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("birefnet")) {
-    return 0;
-  }
-
-  return null;
-}
-
-function numericCostAmount(cost) {
-  if (!cost || cost.amountUsd === null || cost.amountUsd === undefined || cost.amountUsd === "") return null;
-  const amount = Number(cost.amountUsd);
-  return Number.isFinite(amount) ? amount : null;
-}
-
-function usageCost(usage) {
-  if (!usage) return null;
-
-  if (Array.isArray(usage)) {
-    const amounts = usage.map(usageCost).filter((amount) => amount !== null);
-    return amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) : null;
-  }
-
-  if (typeof usage === "object") {
-    const nestedAmounts = [usage.request, ...(Array.isArray(usage.helpers) ? usage.helpers : [])].map(usageCost).filter((amount) => amount !== null);
-    if (nestedAmounts.length) return nestedAmounts.reduce((sum, amount) => sum + amount, 0);
-
-    for (const key of ["cost", "amountUsd", "amount_usd", "totalCost", "total_cost"]) {
-      const amount = Number(usage[key]);
-      if (usage[key] !== null && usage[key] !== undefined && Number.isFinite(amount)) return amount;
-    }
-  }
-
-  return null;
-}
-
-function estimateMegapixelCost(image, unitRateUsd) {
-  const width = Number(image?.width || 0);
-  const height = Number(image?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-  return (width * height * unitRateUsd) / 1000000;
-}
-
-function estimateZImageStatsCost(item, settings, pricing) {
-  const zImagePricing = pricing.zImage || defaultPricing.zImage;
-  const unitRateUsd = zImagePricing.costPerMegapixel ?? defaultPricing.zImage.costPerMegapixel;
-  const remoteImageCost = estimateMegapixelCost(item.remoteImage, unitRateUsd);
-  if (remoteImageCost !== null) return remoteImageCost;
-
-  const imageSize = settings.imageSize || item.cost?.imageSize;
-  const width = Number(imageSize?.width || 0);
-  const height = Number(imageSize?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-  return (width * height * unitRateUsd) / 1000000;
-}
-
-function nanoBananaPricingForItem(item, pricing) {
-  const configured = pricing.nanoBananaPro || defaultPricing.nanoBananaPro;
-  const providerKey = String(item.provider || item.settings?.provider || "").toLowerCase();
-  const endpointKey = String(item.endpoint || item.cost?.endpoint || "").toLowerCase();
-  const basisKey = String(item.cost?.pricingBasis || "").toLowerCase();
-  const route = providerKey.includes("google") || endpointKey.includes("gemini") || basisKey.includes("google")
-    ? configured.google || defaultPricing.nanoBananaPro.google
-    : configured.fal || defaultPricing.nanoBananaPro.fal;
-
-  return {
-    cost1K2K: route?.cost1K2K ?? configured.cost1K2K ?? defaultPricing.nanoBananaPro.cost1K2K,
-    cost4K: route?.cost4K ?? configured.cost4K ?? defaultPricing.nanoBananaPro.cost4K
-  };
-}
-
-const seedanceResolutionDimensions = {
-  "480p": {
-    "21:9": [992, 432],
-    "16:9": [864, 496],
-    "4:3": [752, 560],
-    "1:1": [640, 640],
-    "3:4": [560, 752],
-    "9:16": [496, 864]
-  },
-  "720p": {
-    "21:9": [1470, 630],
-    "16:9": [1280, 720],
-    "4:3": [1112, 834],
-    "1:1": [960, 960],
-    "3:4": [834, 1112],
-    "9:16": [720, 1280]
-  },
-  "1080p": {
-    "21:9": [2352, 1008],
-    "16:9": [2048, 1152],
-    "4:3": [1792, 1344],
-    "1:1": [1536, 1536],
-    "3:4": [1344, 1792],
-    "9:16": [1152, 2048]
-  }
-};
-
-function estimateSeedanceStatsCost(item, settings, pricing) {
-  const modelKey = [item.modelName, item.endpoint].filter(Boolean).join(" ").toLowerCase();
-  if (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5")) {
-    const storedCost = numericCostAmount(item.cost);
-    if (storedCost !== null) return storedCost;
-    if (String(item.provider || "").toLowerCase().includes("krea")) return null;
-  }
-  const seedancePricing = pricing.seedance || defaultPricing.seedance;
-  const isFast = settings.speed === "fast" || String(item.endpoint || "").includes("/fast/");
-  const fallbackTokenRate =
-    isFast && seedancePricing.fastCostPerSecond
-      ? seedancePricing.fastCostPerSecond / 21.6
-      : seedancePricing.standardCostPerSecond
-        ? seedancePricing.standardCostPerSecond / 21.6
-        : defaultPricing.seedance.standardCostPerThousandTokens;
-  const unitRate = isFast
-    ? seedancePricing.fastCostPerThousandTokens || fallbackTokenRate
-    : seedancePricing.standardCostPerThousandTokens || fallbackTokenRate;
-  const billingFps = Number(seedancePricing.billingFps || defaultPricing.seedance.billingFps);
-  const durationSeconds = durationToSeconds(settings.duration || item.cost?.durationSeconds || item.cost?.units);
-  const dimensions = seedanceBillingDimensions(settings.resolution || item.cost?.resolution, settings.aspectRatio || item.cost?.aspectRatio);
-  const billableUnits = (dimensions.width * dimensions.height * durationSeconds * billingFps) / 1024 / 1000;
-  return billableUnits * unitRate;
-}
-
-function seedanceBillingDimensions(resolution, aspectRatio) {
-  const normalizedResolution = normalizeChoice(resolution, ["480p", "720p", "1080p"], "720p");
-  const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
-  const [width, height] =
-    seedanceResolutionDimensions[normalizedResolution]?.[normalizedAspectRatio] ||
-    seedanceResolutionDimensions[normalizedResolution]?.["16:9"] ||
-    seedanceResolutionDimensions["720p"]["16:9"];
-  return { width, height };
-}
-
-function estimatePatinaStatsCost(item, pricing) {
-  const image = item.remoteImage || item.remoteImages?.[0];
-  const width = Number(image?.width || 0);
-  const height = Number(image?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-
-  const utilityPricing = pricing.utility?.patina || defaultPricing.utility.patina;
-  const maps = Array.isArray(item.settings?.maps) ? item.settings.maps : [];
-  const mapCount = Math.max(1, maps.length || Number(item.settings?.mapCount || 0) || 1);
-  const megapixels = (width * height) / 1000000;
-  return utilityPricing.baseCost + megapixels * mapCount * utilityPricing.mapCostPerMegapixel;
-}
-
-function estimateVoidStatsCost(settings, pricing) {
-  const utilityPricing = pricing.utility?.voidVideoInpainting || defaultPricing.utility.voidVideoInpainting;
-  return (
-    utilityPricing.baseCost +
-    (settings.enablePass2Refinement ? utilityPricing.pass2Cost : 0) +
-    (Number(settings.maskVideoCount || 0) > 0 ? 0 : utilityPricing.sam3QuadMaskCost)
-  );
-}
-
-function isWan22A14bLoraModel(modelKey) {
-  return (
-    modelKey.includes("wan") &&
-    (modelKey.includes("2.2") || modelKey.includes("v2.2") || modelKey.includes("22")) &&
-    modelKey.includes("a14b") &&
-    modelKey.includes("lora")
-  );
-}
-
-function estimateWan22A14bLoraStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.wan22A14bLora || defaultPricing.utility.wan22A14bLora;
-  const duration = Number(item.remoteVideo?.duration || settings.duration || settings.durationSeconds || 0);
-  if (Number.isFinite(duration) && duration > 0) return duration * utilityPricing.costPerSecond;
-
-  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.frames || item.remoteVideo?.frame_count || item.remoteVideo?.frameCount || settings.numFrames || 0);
-  const fps = Number(item.remoteVideo?.fps || settings.fps || 0);
-  if (Number.isFinite(frames) && frames > 0 && Number.isFinite(fps) && fps > 0) {
-    return (frames / fps) * utilityPricing.costPerSecond;
-  }
-
-  return null;
-}
-
-function estimateWanVaceStatsCost(item, settings, pricing) {
-  const modelKey = String(item.modelName || item.endpoint || settings.model || "").toLowerCase();
-  const utilityPricing = modelKey.includes("2.2")
-    ? modelKey.includes("pose")
-      ? pricing.utility?.wan22VacePose || pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VacePose
-      : modelKey.includes("depth")
-        ? pricing.utility?.wan22VaceDepth || pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VaceDepth
-        : pricing.utility?.wan22VaceInpainting || defaultPricing.utility.wan22VaceInpainting
-    : pricing.utility?.wanVaceInpainting || defaultPricing.utility.wanVaceInpainting;
-  const resolution = String(settings.resolution || item.cost?.billingResolution || item.cost?.resolution || "480p").toLowerCase();
-  const unitRate =
-    resolution === "720p"
-      ? utilityPricing.costPerSecond720p
-      : resolution === "580p"
-        ? utilityPricing.costPerSecond580p
-        : utilityPricing.costPerSecond480p;
-  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.frames || item.remoteVideo?.frame_count || settings.numFrames || item.cost?.billingFrames || 0);
-  const secondsFromFrames = Number.isFinite(frames) && frames > 0 ? frames / (utilityPricing.billingFps || 16) : 0;
-  const seconds = secondsFromFrames || Number(item.remoteVideo?.duration || item.cost?.durationSeconds || item.cost?.units || 0);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * unitRate : null;
-}
-
-function estimateHunyuan3DStatsCost(settings, pricing) {
-  const modelPricing = pricing.hunyuan3DPro || defaultPricing.hunyuan3DPro;
-  const addOnCount =
-    (settings.enablePbr && settings.generateType !== "Geometry" ? 1 : 0) +
-    (Number(settings.faceCount || 500000) !== 500000 ? 1 : 0) +
-    (Number(settings.inputImageCount || 1) > 1 ? 1 : 0);
-  return modelPricing.baseCost + addOnCount * modelPricing.addOnCost;
-}
-
-function estimateAuroraStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.aurora || defaultPricing.utility.aurora;
-  const duration = Number(item.remoteVideo?.duration || settings.duration || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const rate = settings.resolution === "480p" ? utilityPricing.costPerSecond480p : utilityPricing.costPerSecond720p;
-  return Math.ceil(duration) * rate;
-}
-
-function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.bytedanceUpscaler || defaultPricing.utility.bytedanceUpscaler;
-  const duration = Number(item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const resolution = String(settings.targetResolution || item.cost?.targetResolution || "1080p").toLowerCase();
-  const baseRate =
-    resolution === "4k"
-      ? utilityPricing.costPerSecond4K
-      : resolution === "2k"
-        ? utilityPricing.costPerSecond2K
-        : utilityPricing.costPerSecond1080p;
-  const fpsMultiplier = String(settings.targetFps || item.cost?.targetFps || "30fps") === "60fps" ? utilityPricing.fps60Multiplier : 1;
-  const tierMultiplier = String(settings.enhancementTier || item.cost?.enhancementTier || "standard") === "pro" ? utilityPricing.proMultiplier : 1;
-  return duration * baseRate * fpsMultiplier * tierMultiplier;
-}
-
-function estimateMinimaxH3StatsCost(item, settings, pricing) {
-  const provider = String(item.provider || settings.runtimeProvider || settings.provider || "").toLowerCase();
-  if (provider.includes("local")) return 0;
-  if (provider.includes("krea")) {
-    return estimateKreaMiniMaxH3Cost({
-      durationSeconds: settings.duration || item.cost?.durationSeconds || item.cost?.units,
-      referenceImageCount: settings.referenceImageCount || item.cost?.referenceImageCount
-    }).amountUsd;
-  }
-  const modelPricing = pricing.minimaxH3 || defaultPricing.minimaxH3;
-  return estimateMinimaxH3Cost({
-    duration: settings.duration || item.cost?.durationSeconds || item.cost?.units,
-    resolution: settings.resolution || item.cost?.resolution,
-    referenceImageCount: settings.referenceImageCount || item.cost?.referenceImageCount,
-    rates: {
-      "480P": modelPricing.costPerSecond480P,
-      "768P": modelPricing.costPerSecond768P,
-      "2K": modelPricing.costPerSecond2K,
-      "4K": modelPricing.costPerSecond4K
-    },
-    freeReferenceImages: modelPricing.freeReferenceImages,
-    additionalReferenceImageCost: modelPricing.additionalReferenceImageCost
-  }).amountUsd;
-}
-
-function estimateFluxVideoUpscaleStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.fluxVideoUpscale || defaultPricing.utility.fluxVideoUpscale;
-  const cost = estimateFluxVideoUpscaleCost({
-    durationSeconds: item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units,
-    sourceWidth: settings.sourceWidth || item.cost?.sourceWidth,
-    sourceHeight: settings.sourceHeight || item.cost?.sourceHeight,
-    outputWidth: item.remoteVideo?.width || settings.outputWidth || item.cost?.outputWidth,
-    outputHeight: item.remoteVideo?.height || settings.outputHeight || item.cost?.outputHeight,
-    upscaleFactor: settings.upscaleFactor || item.cost?.upscaleFactor,
-    creativity: settings.creativity ?? item.cost?.creativity,
-    rates: {
-      precise: {
-        "1080p": utilityPricing.preciseCostPerSecond1080p,
-        "2k": utilityPricing.preciseCostPerSecond2K,
-        "4k": utilityPricing.preciseCostPerSecond4K
-      },
-      creative: {
-        "1080p": utilityPricing.creativeCostPerSecond1080p,
-        "2k": utilityPricing.creativeCostPerSecond2K,
-        "4k": utilityPricing.creativeCostPerSecond4K
-      }
-    }
-  });
-  return cost.amountUsd;
-}
-
-function estimateTopazUpscalerStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.topazUpscaler || defaultPricing.utility.topazUpscaler;
-  const duration = Number(item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const tier = resolveTopazStatsBillingTier(settings.billingResolutionTier || item.cost?.billingResolutionTier, item.remoteVideo);
-  const baseRate =
-    tier === "up-to-720p"
-      ? utilityPricing.costPerSecondUpTo720p
-      : tier === "720p-1080p"
-        ? utilityPricing.costPerSecond720pTo1080p
-        : utilityPricing.costPerSecondAbove1080p;
-  const fpsMultiplier = Number(settings.targetFps || item.cost?.targetFps || 0) >= 60 ? utilityPricing.fps60Multiplier : 1;
-  const modelMultiplier = String(settings.model || item.cost?.model || "").toLowerCase() === "gaia 2" ? utilityPricing.gaia2Multiplier : 1;
-  return duration * baseRate * fpsMultiplier * modelMultiplier;
-}
-
-function estimateTopazSdrToHdrStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.topazSdrToHdr || defaultPricing.utility.topazSdrToHdr;
-  const cost = estimateTopazSdrToHdrCost({
-    durationSeconds: item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units,
-    width: item.remoteVideo?.width || settings.sourceWidth || item.cost?.sourceWidth,
-    height: item.remoteVideo?.height || settings.sourceHeight || item.cost?.sourceHeight,
-    rates: {
-      "up-to-1080p": utilityPricing.costPerSecondUpTo1080p,
-      "4k": utilityPricing.costPerSecond4K
-    }
-  });
-  return cost.amountUsd;
-}
-
-function estimateTopazImageUpscalerStatsCost(item, _settings, pricing) {
-  const utilityPricing = pricing.utility?.topazImageUpscaler || defaultPricing.utility.topazImageUpscaler;
-  const tier = item.cost?.billingTier || resolveTopazImageStatsBillingTier(item.remoteImage, item.cost?.outputMegapixels || item.cost?.units);
-  if (tier === "up-to-24mp") return utilityPricing.costUpTo24MP;
-  if (tier === "up-to-48mp") return utilityPricing.costUpTo48MP;
-  if (tier === "up-to-96mp") return utilityPricing.costUpTo96MP;
-  if (tier === "up-to-512mp") return utilityPricing.costUpTo512MP;
-  return null;
-}
-
-function resolveTopazImageStatsBillingTier(remoteImage, fallbackMegapixels) {
-  const width = Number(remoteImage?.width || remoteImage?.metadata?.width || 0);
-  const height = Number(remoteImage?.height || remoteImage?.metadata?.height || 0);
-  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : Number(fallbackMegapixels || 0);
-  if (!Number.isFinite(megapixels) || megapixels <= 0) return "";
-  if (megapixels <= 24) return "up-to-24mp";
-  if (megapixels <= 48) return "up-to-48mp";
-  if (megapixels <= 96) return "up-to-96mp";
-  return "up-to-512mp";
-}
-
-function resolveTopazStatsBillingTier(value, remoteVideo) {
-  const configured = String(value || "auto");
-  if (["up-to-720p", "720p-1080p", "above-1080p"].includes(configured)) return configured;
-  const width = Number(remoteVideo?.width || remoteVideo?.metadata?.width || 0);
-  const height = Number(remoteVideo?.height || remoteVideo?.metadata?.height || 0);
-  const longSide = Math.max(width, height);
-  const shortSide = Math.min(width, height);
-  if (longSide > 0 && shortSide > 0) {
-    if (longSide <= 1280 && shortSide <= 720) return "up-to-720p";
-    if (longSide <= 1920 && shortSide <= 1080) return "720p-1080p";
-  }
-  return "above-1080p";
-}
-
-function estimateSam3VideoStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.sam3Video || defaultPricing.utility.sam3Video;
-  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.numFrames || settings.numFrames || 0);
-  if (!Number.isFinite(frames) || frames <= 0) return null;
-  return Math.ceil(frames / 16) * utilityPricing.costPer16Frames;
-}
-
-function inferModelName(item, mediaType) {
-  if (mediaType === "image") return "Nano Banana Pro";
-  if (mediaType === "text") return item.settings?.model || "Text processing";
-  if (mediaType === "model3d") {
-    if (String(item.endpoint || "").includes("hyper3d/rodin")) return model3DNames.rodin25;
-    return item.settings?.model || model3DNames.hunyuanPro;
-  }
-  if (String(item.endpoint || "").includes("minimax/h3")) return "MiniMax H3";
-  if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
-  return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";
-}
-
-function addAggregate(map, key, item, label = key) {
-  const row = map.get(key) || { name: label, count: 0, pricedCount: 0, unpricedCount: 0, cost: 0 };
-  row.count += 1;
-  if (item.hasCostEstimate) {
-    row.pricedCount += 1;
-  } else {
-    row.unpricedCount += 1;
-  }
-  row.cost = round(row.cost + item.cost);
-  map.set(key, row);
-}
-
-function aggregateRows(map) {
-  return [...map.values()].sort((a, b) => b.cost - a.cost);
-}
-
-function makeThirtyDays() {
-  const today = startOfDay(new Date());
-
-  return Array.from({ length: 30 }, (_value, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - (29 - index));
-    return {
-      date,
-      key: dayKey(date),
-      count: 0,
-      cost: 0,
-      imageCount: 0,
-      videoCount: 0,
-      textCount: 0,
-      model3dCount: 0,
-      unpricedCount: 0
-    };
-  });
-}
-
-function startOfDay(date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
-
-function dayKey(date) {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-}
-
-function durationToSeconds(duration) {
-  if (String(duration || "").trim().toLowerCase() === "auto") return 0;
-  const match = String(duration || "").match(/\d+(?:\.\d+)?/);
-  return Number(match?.[0] || 0);
-}
-
-function normalizeChoice(value, choices, fallback) {
-  const normalized = String(value || fallback);
-  return choices.includes(normalized) ? normalized : fallback;
-}
-
-function normalizeAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return normalizeChoice(normalized, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "16:9");
-}
-
-function formatCostLabel(row) {
-  if (row?.hasCostEstimate === false || row?.pricedCount === 0) return "Unpriced";
-  return formatCurrency(row?.cost ?? row);
-}
-
-function unpricedSuffix(count) {
-  return count ? ` · ${count} unpriced` : "";
-}
-
-function formatCurrency(value) {
-  if (value === null || value === undefined || value === "") return "Unpriced";
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return "Unpriced";
-  const absolute = Math.abs(amount);
-  const maximumFractionDigits = absolute > 0 && absolute < 0.01 ? 4 : amount >= 10 ? 2 : 3;
-  const minimumFractionDigits = absolute > 0 && absolute < 0.01 ? 4 : 0;
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits,
-    maximumFractionDigits
-  }).format(amount);
-}
-
-function formatShortDate(date) {
-  if (!date) return "";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
-}
-
-function formatDay(date) {
-  return new Intl.DateTimeFormat("en-US", { day: "numeric" }).format(date);
-}
-
-function timeLabel(date) {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
-}
-
-function round(value) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? Math.round(amount * 10000) / 10000 : 0;
+function ImportComparison({ comparison }) {
+  const result = buildAnalytics(comparison.records, defaultFilters());
+  return <div className="analytics-import"><strong>Read-only combined comparison · last 30 days</strong><p>{comparison.scope}</p><p>{result.rows.length} distinct records · {formatMoney(result.total)} recorded spend · {result.unpricedCount} unpriced. Provider and local totals are never added together.</p><RunLedger rows={result.rows.slice(0, 25)}/></div>;
 }

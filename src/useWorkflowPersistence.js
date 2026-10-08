@@ -112,11 +112,11 @@ export function useWorkflowPersistence({
   }, [onStatusChange, saveStatus, currentWorkflowPath, hasUnsavedChanges]);
 
   function workflowRequestContext(overrides = {}) {
-    return workflowRequestContextForState({ projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
+    return workflowRequestContextForState({ projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, localWorkflowFileName, workflowFilePath }, overrides);
   }
 
   function appendWorkflowContextToForm(form, overrides = {}) {
-    appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
+    appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, localWorkflowFileName, workflowFilePath }, overrides);
   }
 
   async function loadProjects() {
