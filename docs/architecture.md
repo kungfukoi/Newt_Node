@@ -189,6 +189,12 @@ Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/
 
 Timeline is the visible product name; `assembly` remains its internal node type for saved-workflow compatibility. Existing source filenames such as `AssemblyNodeBody.jsx` also remain valid implementation names until a deliberate migration updates imports, tests, docs, and old workflows together.
 
+`AssemblyFrameSizeControls.jsx` owns draft editing for preview width/height. It commits
+to the existing `assembly.outputWidth` / `outputHeight`, shared by the live frame and
+FFmpeg render. Dimension changes refresh the live frame immediately and participate
+in Timeline undo/redo. Preview node resizing changes only its display viewport;
+contained image/video layers fill that viewport independently of intrinsic frame size.
+
 The same rule applies to other legacy identifiers. Visible copy can improve without invalidating persisted internal types or backend route contracts.
 
 ## Platform Launch And Updates
