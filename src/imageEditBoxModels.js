@@ -18,7 +18,7 @@ export function boxFromSelectionPixels({ data, width, height, id, label = "Objec
   // Tiny selections still need a valid transform rectangle.
   const w = Math.max(.005, (right - left) / width), h = Math.max(.005, (bottom - top) / height);
   const x = Math.min(1 - w, Math.max(0, left / width)), y = Math.min(1 - h, Math.max(0, top / height));
-  return { ...boxFromDrag({ x, y }, { x: x + w, y: y + h }, id), label: label.trim().slice(0, 200) || "Object", sourceMask: validateBoxObject({ width, height, runs }) };
+  return { ...boxFromDrag({ x, y }, { x: x + w, y: y + h }, id), label: label.trim().slice(0, 200) || "Object", selectionDerived: true, sourceMask: validateBoxObject({ width, height, runs }) };
 }
 
 export function validateBoxObject(mask) {

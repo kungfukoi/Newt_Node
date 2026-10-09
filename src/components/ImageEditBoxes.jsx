@@ -93,7 +93,7 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
     onCommit({ ...box, target, ...(sourceOnly ? { source: target, sourceMask: undefined } : {}) });
   }
   return <div className="ies-box-controls" role="group" aria-label="Boxes settings">
-    <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it.</small>
+    <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it. Shift-select objects, then click Boxes to combine them into one named selection.</small>
     {boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}
     {box && <>
       <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
@@ -101,7 +101,7 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
       {boxNeedsObject(box) && <>
         <small>{boxNeedsIdentification(box, model) ? "Generate identifies the named object with SAM 3 when no selection exists (a separate Fal request), then uses its shape as the placement reference." : "FLUX 3 identifies the named subject using native source/destination instructions. Select object for a precise shape if needed."} The full generated scene is kept for continuous lighting; Keep boxes protect exact pixels.</small>
         <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>
-        {box.sourceMask && <small role="status">Object selected. Check the highlighted source and destination preview before generating.</small>}
+        {box.sourceMask && <small role="status">Object selected. Check the highlighted source and destination preview before generating.{box.selectionDerived && " All selected regions share the box name and transform; renaming keeps the selection."}</small>}
       </>}
       {box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the context around the object for shadows and lighting. Dashed boxes indicate approximate reach; blending follows the selected shape. Keep boxes protect nearby objects.</small></label>}
       {box.mode === "text" && <label>Text to render<textarea aria-label="Box text" rows={2} maxLength={500} value={box.text || ""} onChange={event => onCommit({ ...box, text: event.target.value })} /></label>}

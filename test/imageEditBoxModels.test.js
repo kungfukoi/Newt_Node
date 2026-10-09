@@ -33,6 +33,18 @@ test("selection becomes a bounded named box with holes preserved", () => {
   assert.ok(Math.abs(converted.source.x - .3) < 1e-10); assert.equal(converted.label, "the red jacket");
   assert.throws(() => boxFromSelectionPixels({ data: Buffer.alloc(400), width: 10, height: 10, id: "empty" }), /empty/);
 });
+test("disjoint selected objects form one box without filling their gap", () => {
+  const data = Buffer.alloc(400);
+  for (const p of [21, 22, 26, 27, 31, 36, 37]) data[p * 4 + 3] = 255;
+  const grouped = boxFromSelectionPixels({ data, width: 10, height: 10, id: "group", label: "People" });
+  assert.equal(grouped.selectionDerived, true);
+  assert.equal(grouped.label, "People");
+  assert.equal(grouped.sourceMask.area, 7);
+  assert.deepEqual(grouped.sourceMask.runs, [21, 2, 26, 2, 31, 1, 36, 2]);
+  assert.ok(Math.abs(grouped.source.w - .7) < 1e-10);
+  assert.deepEqual(grouped.target, grouped.source);
+});
+
 test("object masks are bounded, ordered, and selected within the source box", () => {
   for (const runs of [[1, 1000], [1, -1], [2, 3, 1, 1], [1], []]) assert.throws(() => validateBoxObject({ width: 10, height: 10, runs }));
   assert.deepEqual(objectMaskForBox([{ width: 10, height: 10, runs: [0, 100], area: 100 }, mask], box), mask);

@@ -183,7 +183,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   }
   function commitBox(box) {
     const previous = boxes.find(entry => entry.id === box.id);
-    if (previous && previous.label !== box.label && previous.sourceMask === box.sourceMask) box = { ...box, sourceMask: undefined };
+    if (previous && !box.selectionDerived && previous.label !== box.label && previous.sourceMask === box.sourceMask) box = { ...box, sourceMask: undefined };
     commit(history.marks.some(mark => mark.id === box.id) ? history.marks.map(mark => mark.id === box.id ? box : mark) : [...history.marks, box]);
     setSelectedBoxId(box.id);
   }
@@ -222,7 +222,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     const sourceMask = objectMaskForBox(data.masks || [], box);
     if (!sourceMask) throw new Error(`No object matched "${box.label}" inside its box. Refine the description or use Object Selection, then try again.`);
     if (mounted.current) setWarning(data.warning || "");
-    return { ...box, sourceMask };
+    return { ...box, selectionDerived: false, sourceMask };
   }
   async function selectBoxObject(box) {
     if (busyRef.current || !size) return;

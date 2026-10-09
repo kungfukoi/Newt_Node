@@ -142,6 +142,51 @@ test("Object Selection converts to a named Move box with its exact mask and no e
   expect(selections).toBe(1);
 });
 
+test("Shift-selected objects stay one named selection through rename, undo and transforms", async ({ page }, testInfo) => {
+  const { editor, errors } = await openEditor(page); let selections = 0, form;
+  await page.route("**/api/node/image-objects", async route => { selections++; await route.fulfill({ json: { masks } }); });
+  await page.route("**/api/node/edit-image", async route => {
+    const request = route.request();
+    form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
+    await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", type: "image" } } });
+  });
+  await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
+  await move(page, editor, .2, .3, true);
+  await move(page, editor, .7, .3, true, "Shift");
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await expect(editor.getByLabel("Active box").locator("option")).toHaveCount(2);
+  await editor.getByRole("button", { name: "Undo stroke" }).click();
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  expect(await alpha(editor.getByLabel("Selection canvas"), .7, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Redo stroke" }).click();
+  await editor.getByLabel("Box description", { exact: true }).fill("People");
+  await expect(editor.getByText("All selected regions share", { exact: false })).toBeVisible();
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("55");
+  await editor.getByLabel("Width (%)", { exact: true }).fill("60");
+  await editor.getByLabel(/^Rotation /).fill("20");
+  await page.screenshot({ path: testInfo.outputPath("combined-selection.png") });
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect.poll(() => Boolean(form)).toBe(true);
+  const boxes = JSON.parse(form.get("boxes"));
+  expect(boxes).toHaveLength(1);
+  expect(boxes[0].label).toBe("People");
+  expect(boxes[0].target).toMatchObject({ x: .55, w: .6, rotation: 20 });
+  const objects = JSON.parse(await form.get("boxObjects").text());
+  expect(Object.keys(objects)).toEqual([boxes[0].id]);
+  const mask = objects[boxes[0].id];
+  const selected = (x, y) => {
+    const pixel = Math.floor(y * mask.height) * mask.width + Math.floor(x * mask.width);
+    return mask.runs.some((start, i) => i % 2 === 0 && pixel >= start && pixel < start + mask.runs[i + 1]);
+  };
+  expect(selected(.2, .3)).toBe(true);
+  expect(selected(.7, .3)).toBe(true);
+  expect(selected(.45, .3)).toBe(false);
+  expect(form.get("selection")).toBeNull();
+  expect(selections).toBe(1);
+  expect(errors).toEqual([]);
+});
+
 test("native Flux boxes identify by description without a segmentation request", async ({ page }) => {
   const { editor } = await openEditor(page); let selections = 0, form;
   await page.route("**/api/node/image-objects", route => { selections++; return route.fulfill({ json: { masks: [] } }); });
