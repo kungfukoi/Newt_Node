@@ -1,5 +1,7 @@
 import React from "react";
-import { clampCropRect, dragCropRect } from "../cropGeometry.js";
+import CropModeControls from "./CropModeControls.jsx";
+import { constrainVideoCrop, dragVideoCrop } from "../videoCrop.js";
+import { clampCropRect } from "../cropGeometry.js";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
@@ -491,6 +493,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
   const activeItemRef = React.useRef(item);
   const [cropMode, setCropMode] = React.useState(false);
   const [cropRect, setCropRect] = React.useState(defaultCropRect);
+  const [cropStyleSettings, setCropStyleSettings] = React.useState({ cropMode: "normal" });
   const [toneMode, setToneMode] = React.useState(false);
   const [toneAdjustments, setToneAdjustments] = React.useState(defaultToneAdjustments);
   const [curvesMode, setCurvesMode] = React.useState(false);
@@ -588,6 +591,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
   function currentEditSnapshot() {
     return {
       cropRect: { ...cropRect },
+      cropStyleSettings: { ...cropStyleSettings },
       toneAdjustments: normalizedToneAdjustments(toneAdjustments),
       curvePoints: normalizedCurvePoints(curvePoints),
       textOverlay: normalizedTextOverlay(textOverlay)
@@ -596,7 +600,8 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 
   function restoreEditSnapshot(snapshot) {
     if (!snapshot) return;
-    setCropRect(clampCropRect(snapshot.cropRect || defaultCropRect));
+    setCropRect(clampCropRect(snapshot.cropRect || defaultCropRect, 0.000001));
+    setCropStyleSettings(snapshot.cropStyleSettings || { cropMode: "normal" });
     setToneAdjustments(normalizedToneAdjustments(snapshot.toneAdjustments || defaultToneAdjustments));
     setCurvePoints(normalizedCurvePoints(snapshot.curvePoints || defaultCurvePoints));
     setTextOverlay(normalizedTextOverlay(snapshot.textOverlay || defaultTextOverlay));
@@ -700,7 +705,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
   function applyActivePreviewTool() {
     if (!canEditImage || editBusy) return false;
     if (cropMode) {
-      applyEdit({ type: "crop", cropRect: clampCropRect(cropRect) });
+      applyEdit({ type: "crop", cropRect: clampCropRect(cropRect, 0.000001) });
       return true;
     }
     if (textMode) {
@@ -775,7 +780,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
+  }, [canEditImage, cropMode, cropRect, cropStyleSettings, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
 
   React.useEffect(() => {
     setAiMode(false);
@@ -929,7 +934,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
     const deltaX = point.x - drag.startPoint.x;
     const deltaY = point.y - drag.startPoint.y;
 
-    setCropRect(dragCropRect(drag.startRect, drag.mode, deltaX, deltaY));
+    setCropRect(dragVideoCrop(drag.startRect, drag.mode, deltaX, deltaY, cropStyleSettings, imageNaturalSize));
   }
 
   function stopCropDrag(event) {
@@ -1446,8 +1451,16 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
                   <Sun size={15} />
                 </button>
                 {cropMode && (
+                  <CropModeControls settings={cropStyleSettings} dimensions={imageNaturalSize} onChange={patch => {
+                    pushEditUndoSnapshot();
+                    const next = { ...cropStyleSettings, ...patch };
+                    setCropStyleSettings(next);
+                    setCropRect(constrainVideoCrop(cropRect, next, imageNaturalSize));
+                  }} />
+                )}
+                {cropMode && (
                   <>
-                    <button type="button" className="crop-apply" onClick={() => applyEdit({ type: "crop", cropRect: clampCropRect(cropRect) })} disabled={editBusy} title="Apply crop" aria-label="Apply crop">
+                    <button type="button" className="crop-apply" onClick={() => applyEdit({ type: "crop", cropRect: clampCropRect(cropRect, 0.000001) })} disabled={editBusy} title="Apply crop" aria-label="Apply crop">
                       <Check size={15} />
                     </button>
                     <button type="button" onClick={() => {
@@ -1774,7 +1787,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
                   onPointerUp={stopCropDrag}
                   onPointerCancel={stopCropDrag}
                 >
-                  {[["n", "top"], ["ne", "top right"], ["e", "right"], ["se", "bottom right"], ["s", "bottom"], ["sw", "bottom left"], ["w", "left"], ["nw", "top left"]].map(([handle, label]) => (
+                  {[["n", "top"], ["ne", "top right"], ["e", "right"], ["se", "bottom right"], ["s", "bottom"], ["sw", "bottom left"], ["w", "left"], ["nw", "top left"]].filter(([handle]) => cropStyleSettings.cropMode !== "size" && (cropStyleSettings.cropMode !== "ratio" || handle.length === 2)).map(([handle, label]) => (
                     <span
                       key={handle}
                       className={`output-crop-handle output-crop-handle-${handle}`}

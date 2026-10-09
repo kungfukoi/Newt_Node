@@ -8,6 +8,19 @@ export const editEffectGroups = [
 
 export const editEffectDefinitions = [
   {
+    id: "crop",
+    groupId: "transform",
+    label: "Crop",
+    mediaTypes: ["video"],
+    definition: "Crop video frames using a movable region. Enlarge the editor to place the crop precisely.",
+    controls: [
+      { id: "cropX", label: "Left", type: "number", min: 0, max: 99, step: 0.1, defaultValue: 0 },
+      { id: "cropY", label: "Top", type: "number", min: 0, max: 99, step: 0.1, defaultValue: 0 },
+      { id: "cropWidth", label: "Width", type: "number", min: 1, max: 100, step: 0.1, defaultValue: 100 },
+      { id: "cropHeight", label: "Height", type: "number", min: 1, max: 100, step: 0.1, defaultValue: 100 }
+    ]
+  },
+  {
     id: "imageCrop",
     groupId: "transform",
     label: "Crop",

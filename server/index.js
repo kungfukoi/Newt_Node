@@ -1,4 +1,5 @@
 import { generateFlux3 } from "./flux3.js";
+import { videoCropFilter, normalizeVideoCropSettings } from "../src/videoCrop.js";
 import { generateNanoBanana21 } from "./nano-banana-21.js";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint } from "../src/nanoBanana21.js";
 import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3.js";
@@ -14281,6 +14282,7 @@ async function createEditPreviewResult(req, res, { effect, sourceMediaType, sour
 }
 
 function normalizedEditSettings(effect, rawSettings = {}, sourceMetadata = {}) {
+  if (effect.id === "crop") return normalizeVideoCropSettings(rawSettings, sourceMetadata);
   const defaults = defaultEditEffectSettings(effect, sourceMetadata);
   const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
   return Object.fromEntries((effect.controls || []).map((control) => [control.id, normalizedEditControlValue(control, source[control.id] ?? defaults[control.id])]));
@@ -14324,6 +14326,7 @@ function editEffectFilter(effect, settings = {}, context = {}) {
     case "scale":
       return `scale=${ensureEven(settings.width)}:${ensureEven(settings.height)}:flags=${settings.algorithm},setsar=1`;
     case "crop": {
+      if (settings.cropWidth != null) return videoCropFilter(settings);
       const width = editCropDimension(settings.width, sourceMetadata.width, 1280, sourceMediaType);
       const height = editCropDimension(settings.height, sourceMetadata.height, 720, sourceMediaType);
       return `crop=${width}:${height}:(iw-ow)/2:(ih-oh)/2`;

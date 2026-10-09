@@ -4,6 +4,8 @@ This document is the descriptive map of the current NewtNode implementation. `no
 
 ## Runtime Shape
 
+Video crop geometry and FFmpeg filter construction live in `src/videoCrop.js`, using shared `cropGeometry.js` bounds. `src/components/VideoCropEditor.jsx` owns the inline and enlarged video crop UI; the Edit node passes persisted settings to the existing local Edit route.
+
 NewtNode is a local-first React application backed by a local Express service.
 
 | Surface | Default | Owner |

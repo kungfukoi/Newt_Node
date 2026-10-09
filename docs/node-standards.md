@@ -42,6 +42,10 @@ Before completion:
 
 ## Current Product Snapshot
 
+- Edit Image Crop and the enlarged image editor share Normal, Fixed Size, and Fixed Ratio controls with video cropping. Fixed Size uses source pixels, Fixed Ratio uses source-aware proportions, and image editor undo restores the crop style alongside the region.
+
+- Edit > Video > Crop offers Normal (freeform), Fixed Size (pixel dimensions), and Fixed Ratio (user-entered width:height proportions). All modes allow positioning; Fixed Size disables resize handles and Fixed Ratio constrains corner resizing using source dimensions. Its enlarged editor supports playback and frame seeking; settings persist with the workflow and produce an even-pixel local FFmpeg crop. Legacy centered pixel crops normalize using source dimensions.
+
 These are durable current surfaces independent of the checked-out branch name:
 
 - The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.

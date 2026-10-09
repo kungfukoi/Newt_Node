@@ -18,6 +18,9 @@ import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboard
 import { StoryboardRevisionControls } from "./components/StoryboardRevisionControls.jsx";
 import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
+import VideoCropEditor from "./components/VideoCropEditor.jsx";
+import { normalizeVideoCropSettings, constrainVideoCrop, dragVideoCrop } from "./videoCrop.js";
+import CropModeControls from "./components/CropModeControls.jsx";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
 import { runExploreGeneration } from "./nodeRunners/explore.js";
 const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
@@ -9393,9 +9396,10 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
   const [previewUrl, setPreviewUrl] = React.useState("");
   const [paintHasMask, setPaintHasMask] = React.useState(Boolean(settings.maskDataUrl));
   const [imageAspect, setImageAspect] = React.useState(16 / 9);
+  const [cropSourceSize, setCropSourceSize] = React.useState({ width: 1920, height: 1080 });
   const [brushDialogOpen, setBrushDialogOpen] = React.useState(false);
   const [maskCreateBusy, setMaskCreateBusy] = React.useState(false);
-  const cropRect = normalizeEditCropRect(settings.cropRect);
+  const cropRect = constrainVideoCrop(normalizeEditCropRect(settings.cropRect), settings, cropSourceSize);
   const toneAdjustments = normalizeEditToneAdjustments(settings.adjustments);
   const curvePoints = normalizeEditCurvePoints(settings.points);
   const textOverlay = normalizeEditTextOverlay(settings.overlay);
@@ -9507,7 +9511,9 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
     if (!point) return;
     const deltaX = point.x - drag.startPoint.x;
     const deltaY = point.y - drag.startPoint.y;
-    const nextRect = drag.mode === "resize"
+    const nextRect = settings.cropMode && settings.cropMode !== "normal"
+      ? dragVideoCrop(drag.startRect, drag.mode === "resize" ? "se" : "move", deltaX, deltaY, settings, cropSourceSize)
+      : drag.mode === "resize"
       ? event.ctrlKey
         ? resizeCropRectWithAspect(drag.startRect, deltaX, deltaY)
         : normalizeEditCropRect({
@@ -9750,7 +9756,10 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
     const image = event.currentTarget;
     const width = image.naturalWidth || image.width;
     const height = image.naturalHeight || image.height;
-    if (width > 0 && height > 0) setImageAspect(width / height);
+    if (width > 0 && height > 0) {
+      setImageAspect(width / height);
+      setCropSourceSize({ width, height });
+    }
     if (isBrush) window.requestAnimationFrame(() => resizePaintCanvas(true));
   }
 
@@ -9765,6 +9774,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
 
   return (
     <div className={`edit-image-tool-surface ${effect.id}`} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+      {isCrop && <CropModeControls settings={settings} dimensions={cropSourceSize} onChange={patch => updateSettings({ ...patch, cropRect: constrainVideoCrop(cropRect, { ...settings, ...patch }, cropSourceSize) })} />}
       {isCurves && (
         <div className="edit-image-curves-panel">
           <svg
@@ -9899,7 +9909,7 @@ function EditImageToolSurface({ sourceUrl, effect, settings = {}, onSettingsChan
             onPointerUp={stopCropDrag}
             onPointerCancel={stopCropDrag}
           >
-            <span className="edit-image-crop-handle" title="Drag to resize. Hold Ctrl to keep proportions." onPointerDown={(event) => startCropDrag(event, "resize")} />
+            {settings.cropMode !== "size" && <span className="edit-image-crop-handle" title="Drag to resize. Hold Ctrl to keep proportions." onPointerDown={(event) => startCropDrag(event, "resize")} />}
           </div>
         )}
       </div>
@@ -14136,6 +14146,8 @@ function NodeBody({
               onSettingsChange={updateEditSettingsPatch}
               onCreateMask={(maskDataUrl) => onCreateBrushMask?.(node, maskDataUrl)}
             />
+          ) : effect.id === "crop" ? (
+            <VideoCropEditor sourceUrl={sourceUrl} settings={settings} onSettingsChange={updateEditSettingsPatch} />
           ) : effect.id !== "trim" ? (
             <EditLivePreview
               sourceUrl={sourceUrl}
@@ -14148,7 +14160,7 @@ function NodeBody({
           {!isLocalImageEffect && effect.id === "scale" ? (
             renderEditScaleControls()
           ) : !isLocalImageEffect && effect.id === "crop" ? (
-            renderEditCropControls()
+            null
           ) : !isLocalImageEffect && effect.id === "trim" ? (
             renderEditTrimControls()
           ) : !isLocalImageEffect && effect.controls.length ? (
@@ -19463,6 +19475,7 @@ function shouldSeedEditTrimSettings(rawSettings = {}, settings = {}, previousDim
 function editSettingsForEffect(data = {}, effect = findEditEffect(data.editEffect), sourceDimensions = null) {
   const defaults = defaultEditEffectSettings(effect);
   const rawSettings = data.editSettings && typeof data.editSettings === "object" ? data.editSettings : {};
+  if (effect.id === "crop") return normalizeVideoCropSettings(rawSettings, sourceDimensions || data.editSourceDimensions || {});
   const settings = (effect.controls || []).length
     ? Object.fromEntries((effect.controls || []).map((control) => [control.id, rawSettings[control.id] ?? defaults[control.id]]))
     : { ...defaults, ...rawSettings };
@@ -19562,8 +19575,8 @@ function normalizeEditCropRect(rect = editDefaultCropRect) {
   const rawHeight = Number(source.height);
   const rawX = Number(source.x);
   const rawY = Number(source.y);
-  const width = clamp(Number.isFinite(rawWidth) ? rawWidth : editDefaultCropRect.width, 1, 100);
-  const height = clamp(Number.isFinite(rawHeight) ? rawHeight : editDefaultCropRect.height, 1, 100);
+  const width = clamp(Number.isFinite(rawWidth) ? rawWidth : editDefaultCropRect.width, 0.000001, 100);
+  const height = clamp(Number.isFinite(rawHeight) ? rawHeight : editDefaultCropRect.height, 0.000001, 100);
   return {
     x: clamp(Number.isFinite(rawX) ? rawX : editDefaultCropRect.x, 0, 100 - width),
     y: clamp(Number.isFinite(rawY) ? rawY : editDefaultCropRect.y, 0, 100 - height),
@@ -22306,8 +22319,8 @@ function drawPreviewTextOverlay(context, width, height, overlay = {}) {
 
 function previewCropRectToPixels(rect, imageWidth, imageHeight) {
   const source = rect && typeof rect === "object" ? rect : {};
-  const widthPct = clamp(Number(source.width) || 100, 1, 100);
-  const heightPct = clamp(Number(source.height) || 100, 1, 100);
+  const widthPct = clamp(Number(source.width) || 100, 100 / imageWidth, 100);
+  const heightPct = clamp(Number(source.height) || 100, 100 / imageHeight, 100);
   const xPct = clamp(Number(source.x) || 0, 0, 100 - widthPct);
   const yPct = clamp(Number(source.y) || 0, 0, 100 - heightPct);
   return {

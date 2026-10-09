@@ -2,9 +2,9 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const finite = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 // Percentages of the source image, independently bounded on each axis.
-export function clampCropRect(rect = {}) {
-  const width = clamp(finite(rect.width, 100), 1, 100);
-  const height = clamp(finite(rect.height, 100), 1, 100);
+export function clampCropRect(rect = {}, minimum = 1) {
+  const width = clamp(finite(rect.width, 100), minimum, 100);
+  const height = clamp(finite(rect.height, 100), minimum, 100);
   return {
     x: clamp(finite(rect.x, 0), 0, 100 - width),
     y: clamp(finite(rect.y, 0), 0, 100 - height),
