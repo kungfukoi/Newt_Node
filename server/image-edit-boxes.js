@@ -14,6 +14,7 @@ export async function prepareEditBoxes({ boxes: input, original, width, height, 
     let shapes = "";
     if (["move", "remove", "keep"].includes(box.mode)) shapes += polygon(box.source, `fill="none" stroke="${box.mode === "keep" ? "#ffee22" : "#ff3344"}" stroke-width="${stroke}" stroke-dasharray="${stroke * 3} ${stroke * 2}"`);
     if (!["keep", "remove"].includes(box.mode)) shapes += polygon(box.target, `fill="none" stroke="#00eeee" stroke-width="${stroke}"`);
+    if (staged.ids.includes(box.id)) shapes += `<text x="${Math.max(0, (box.source.x - box.source.w / 2) * width)}" y="${Math.max(stroke * 6, (box.source.y - box.source.h / 2) * height - stroke * 2)}" font-size="${stroke * 5}" fill="white" stroke="black" stroke-width="${stroke / 3}" paint-order="stroke">${i + 1}: BACKGROUND ONLY</text>`;
     const r = ["keep", "remove"].includes(box.mode) ? box.source : box.target;
     return shapes + `<text x="${r.x * width}" y="${r.y * height}" font-size="${stroke * 6}" fill="white" stroke="black" stroke-width="${stroke / 3}" paint-order="stroke">${i + 1}</text>`;
   }).join("");

@@ -40,6 +40,10 @@ If code, tests, and standards disagree, investigate the mismatch. Do not silentl
 - Preserve both Windows and macOS launch, restart, file-dialog, path, and update behavior whenever platform-sensitive code changes.
 - Keep output claims technically honest. A 10-bit ProRes transcode does not restore precision absent from an 8-bit source and is not automatically HDR.
 
+## Image Editor Reference
+
+For image-editor work, always consider [Scumble](https://github.com/DenRakEiw/scumble) (also referred to as Scrumble by the user) as the reference implementation. Inspect its relevant source and interaction flow before designing or changing corresponding NewtNode functionality, including object selection, grouping, boxes, transforms, source cleanup, contextual generation, and rerunning edits. Recreate the useful behavior here using NewtNode's existing architecture, preferred models, explicit provider routing, persistence, undo/redo, and History/Stats contracts. Verify the actual Scumble behavior rather than inferring it from feature names; distinguish observed behavior from adaptations and report any material differences.
+
 ## Required Change Process
 
 1. Inspect `git status --short --branch` and preserve changes you did not create.

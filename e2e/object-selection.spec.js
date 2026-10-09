@@ -275,3 +275,57 @@ test("a saved scan works without Fal credentials", async ({ page }) => {
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
   expect(paid).toBe(0);
 });
+
+test("box versions rerun their original setup, preserve masks after failure, and restore adjustable boxes", async ({ page }, testInfo) => {
+  const { editor, errors } = await openEditor(page); let selections = 0;
+  const forms = [];
+  await page.route("**/api/node/image-objects", async route => { selections++; await route.fulfill({ json: { masks: [masks[0]] } }); });
+  await page.route("**/api/node/edit-image", async route => {
+    const request = route.request();
+    forms.push(await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData());
+    if (forms.length === 2) return route.fulfill({ status: 503, json: { error: "Cleanup attempt failed" } });
+    await route.fulfill({ json: { item: { url: `/outputs/e2e/edited-${forms.length}.png`, fileName: `edited-${forms.length}.png`, type: "image" } } });
+  });
+  await editor.getByLabel("Object selection prompt").fill("pizza box");
+  await editor.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("70");
+  await editor.getByLabel("Edit resolution").selectOption("4K");
+  await editor.getByLabel("Edit prompt").fill("Move the pizza box; repair the tabletop where it was.");
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect(editor.getByRole("button", { name: "Rerun Box Edit", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("box-rerun.png") });
+  await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
+  await expect(editor.getByRole("alert")).toContainText("Cleanup attempt failed");
+  await expect(editor.getByLabel("Edit version")).toHaveValue("0");
+  expect(forms).toHaveLength(2);
+  await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
+  await expect(editor.getByLabel("Edit version")).toHaveValue("1");
+  await editor.getByRole("button", { name: "Adjust Boxes", exact: true }).click();
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("pizza box");
+  await expect(editor.getByLabel("Translate X (%)", { exact: true })).toHaveValue("70");
+  await expect(editor.getByLabel("Edit resolution")).toHaveValue("4K");
+  await expect(editor.getByLabel("Edit prompt")).toHaveValue(forms[0].get("prompt"));
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("80");
+  await editor.getByLabel("Edit prompt").fill("Move farther right.");
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect(editor.getByLabel("Edit version")).toHaveValue("2");
+  await editor.getByRole("button", { name: "Continue Editing", exact: true }).click();
+  await expect(editor.getByLabel("Edit prompt")).toHaveValue("");
+  await editor.getByLabel("Edit version").selectOption("0");
+  await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
+  await expect(editor.getByLabel("Edit version")).toHaveValue("3");
+  expect(forms).toHaveLength(5);
+  for (const form of [forms[1], forms[2], forms[4]]) {
+    for (const key of ["sourceUrl", "boxes", "prompt", "resolution", "quality", "model", "provider"]) expect(form.get(key)).toBe(forms[0].get(key));
+    expect(await form.get("boxObjects").text()).toBe(await forms[0].get("boxObjects").text());
+  }
+  expect(new Set(forms.map(form => form.get("requestId"))).size).toBe(5);
+  expect(JSON.parse(forms[3].get("boxes"))[0].target.x).toBe(.8);
+  expect(selections).toBe(1);
+  await editor.getByLabel("Edit version").selectOption("-1");
+  await expect(editor.getByAltText("Original image", { exact: true })).toHaveAttribute("src", "/outputs/e2e/edited-4.png");
+  await expect(editor.getByLabel("Edit prompt")).toHaveValue("");
+  expect(errors).toEqual([]);
+});

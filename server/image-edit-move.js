@@ -25,10 +25,16 @@ export async function prepareMoveCutouts({ original, boxes, model, objects = {},
     let area = 0;
     for (let y = bounds.top; y < bounds.bottom; y++) for (let x = bounds.left; x < bounds.right; x++) if (selected(x, y)) {
       const p = y * width + x; if (!source[p * 4 + 3]) continue;
-      sourceCore[p] = 255; result.set([128, 128, 128, 255], p * 4); area++;
+      sourceCore[p] = 255; area++;
     }
     if (!area) throw new Error(`The selection for "${box.label}" is empty inside its source box. Select it again.`);
-    layers.push({ input: await contextMask(sourceCore, width, height, box.source, box.contextPadding) });
+    // Clear a one-pixel safety edge as well as the exact cutout. Coarse masks
+    // otherwise leave antialiased subject fragments for the model to regrow.
+    // Only erasure expands: destination identity pixels still use the exact mask.
+    const removalCore = await sharp(sourceCore, { raw: { width, height, channels: 1 } })
+      .convolve({ width: 3, height: 3, kernel: Array(9).fill(1), scale: 1 }).threshold(1).greyscale().raw().toBuffer();
+    for (let p = 0; p < pixels; p++) if (removalCore[p] && source[p * 4 + 3]) result.set([128, 128, 128, 255], p * 4);
+    layers.push({ input: await contextMask(removalCore, width, height, box.source, box.contextPadding) });
     prepared.push({ box, selected, bounds });
   }
   // Sample every cutout from the clean original, then paste in box order. Removing

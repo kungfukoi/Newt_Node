@@ -19,6 +19,10 @@ test("native and cutout moves submit explicit source erasure and guide removal r
       assert.match(prepared.submittedPrompt, /completely erase its old appearance/);
       assert.match(prepared.submittedPrompt, /Reconstruct natural image detail beneath every guide mark/);
       assert.match(prepared.submittedPrompt, /explicit Keep regions remain protected/);
+      assert.match(prepared.submittedPrompt, /SOURCE CLEANUP PRIORITY/);
+      assert.match(prepared.submittedPrompt, /Treat the vacated footprint as missing background/);
+      assert.match(prepared.submittedPrompt, /continue the same tabletop, floor, wall, texture, perspective lines/);
+      assert.match(prepared.submittedPrompt, /preserve unrelated similar instances/);
       if (model === "Flux 3") {
         assert.match(fluxBoxInstructions([moved], 200, 200, {}, native ? [] : [moved.id]).caption, /no visible guide graphics anywhere/);
         assert.ok(Array.isArray(JSON.parse(prepared.submittedPrompt.split("\n").at(-1))));
@@ -117,4 +121,22 @@ test("cutout references never reintroduce the original subject and Flux explicit
   assert.equal(vacancy.tgt_bbox, null); assert.deepEqual(vacancy.src_bbox, [30, 30, 370, 370]);
   assert.match(prepared.submittedPrompt, /background only/);
   assert.match(prepared.submittedPrompt, /already been applied geometrically/);
+});
+
+test("source erasure clears a safety edge while cutout identity and Keep regions stay exact", async () => {
+  const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } })
+    .composite([{ input: await sharp({ create: { width: 42, height: 42, channels: 4, background: "#00ff00" } }).png().toBuffer(), left: 19, top: 19 }]).png().toBuffer();
+  const moved = { ...box, target: { ...box.target, x: .7 } };
+  const prepare = boxes => prepareImageEdit({ source, mode: "edit", model: "Flux 3", boxes, boxObjects: { cat: mask } });
+  const prepared = await prepare([moved]);
+  const pixels = await sharp(prepared.images[0]).raw().toBuffer();
+  const at = (data, x, y) => [...data.subarray((y * 200 + x) * 4, (y * 200 + x) * 4 + 4)];
+  assert.deepEqual(at(pixels, 19, 40), [128, 128, 128, 255], "missed edge is removed");
+  assert.deepEqual(at(pixels, 18, 40), [17, 34, 51, 255], "erasure stays bounded");
+  assert.deepEqual(at(pixels, 140, 40), [0, 255, 0, 255], "exact cutout still moves");
+  assert.deepEqual(at(pixels, 119, 40), [17, 34, 51, 255], "safety edge is not copied");
+  const keep = { ...boxFromDrag({ x: .09, y: .15 }, { x: .1, y: .25 }, "keep-edge"), mode: "keep" };
+  const protectedEdit = await prepare([moved, keep]);
+  const protectedPixels = await sharp(protectedEdit.images[0]).raw().toBuffer();
+  assert.deepEqual(at(protectedPixels, 19, 40), [0, 255, 0, 255], "Keep wins over expanded erasure");
 });

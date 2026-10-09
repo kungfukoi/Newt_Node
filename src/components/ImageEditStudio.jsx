@@ -7,7 +7,7 @@ import { validateEditBoxes } from "../imageEditBoxes.js";
 import { boxNeedsObject, boxNeedsIdentification, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
 import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
-import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, RefreshCcw, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
 import { imageEditModelOptions, normalizeImageEditModel } from "../imageEdit.js";
@@ -67,6 +67,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const [viewport, setViewport] = React.useState({ width: 700, height: 600 });
   const [versions, setVersions] = React.useState([]);
+  const versionDrafts = React.useRef([]);
   const [resultIndex, setResultIndex] = React.useState(-1);
   const [view, setView] = React.useState("result");
   const [split, setSplit] = React.useState(50);
@@ -213,12 +214,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     } catch (failure) { if (mounted.current) setError(failure.message); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
-  async function identifyBoxObject(box) {
+  async function identifyBoxObject(box, sourceBase = base) {
     if (!falAvailable) throw new Error("Enable a Fal key to identify box objects with SAM 3, or use an existing Object Selection.");
     setBusyLabel(`Identifying ${box.label} with SAM 3`);
     const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
     const query = box.label.trim() && !/^Object(?: \d+)?$/i.test(box.label.trim()) ? { prompt: box.label.trim() } : { point: { x: box.source.x, y: box.source.y } };
-    const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
+    const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: sourceBase.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
     const sourceMask = objectMaskForBox(data.masks || [], box);
     if (!sourceMask) throw new Error(`No object matched "${box.label}" inside its box. Refine the description or use Object Selection, then try again.`);
     if (mounted.current) setWarning(data.warning || "");
@@ -336,55 +337,64 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     dragRef.current = null; setDraft(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
-  async function renderLayer(targetLayer) {
-    const canvas = document.createElement("canvas"); canvas.width = size.width; canvas.height = size.height;
+  async function renderLayer(targetLayer, layerMarks = history.marks, layerSize = size) {
+    const canvas = document.createElement("canvas"); canvas.width = layerSize.width; canvas.height = layerSize.height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    drawImageEditMarks(ctx, history.marks, size.width, size.height, targetLayer);
-    return imageEditHasPixels(ctx, size.width, size.height) ? blobOf(canvas) : null;
+    drawImageEditMarks(ctx, layerMarks, layerSize.width, layerSize.height, targetLayer);
+    return imageEditHasPixels(ctx, layerSize.width, layerSize.height) ? blobOf(canvas) : null;
   }
-  async function generate() {
+  async function generate(retryDraft) {
+    const edit = retryDraft || { base, size, marks: history.marks, prompt, mode, blank, quality, resolution, selectedBoxId };
+    const { base: editBase, size: editSize, marks: editMarks, prompt: editPrompt, mode: editMode, blank: editBlank } = edit;
+    const editBoxesDraft = editMarks.filter(mark => mark.layer === "boxes");
+    const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
+    const editQuality = qualities.includes(edit.quality) ? edit.quality : "high";
+    const editResolution = resolutionOptions.includes(edit.resolution) ? edit.resolution : "2K";
     if (busyRef.current || modelSavePending.current) return;
-    if (!size) { setError("Wait for the original image to load before generating."); return; }
+    if (!editSize) { setError("Wait for the original image to load before generating."); return; }
     if (!providerAvailable) { setError("Enable an image-edit provider in Settings before generating."); return; }
     // Pointer capture can be lost when focus leaves the canvas. It must never
     // silently block an explicit Generate click using the committed boxes.
     boxGesture.current = false;
     busyRef.current = true; setBusy(true); setBusyLabel("Generating edit"); setError(""); setWarning("");
     try {
-      imageEditSize(size.width, size.height, model);
-      validateEditBoxes(boxes);
-      let resolvedBoxes = boxes;
-      for (const box of boxes.filter(box => boxNeedsIdentification(box, model) && !box.sourceMask)) {
-        const selected = await identifyBoxObject(box);
+      imageEditSize(editSize.width, editSize.height, model);
+      validateEditBoxes(editBoxesDraft);
+      let resolvedBoxes = editBoxesDraft;
+      for (const box of editBoxesDraft.filter(box => boxNeedsIdentification(box, model) && !box.sourceMask)) {
+        const selected = await identifyBoxObject(box, editBase);
         if (!mounted.current) return;
         resolvedBoxes = resolvedBoxes.map(entry => entry.id === box.id ? selected : entry);
         // Save each successful selection before another paid step so retries reuse it.
         const byId = new Map(resolvedBoxes.map(entry => [entry.id, entry]));
-        commit(history.marks.map(mark => byId.get(mark.id) || mark));
+        if (retryDraft) retryDraft.marks = editMarks.map(mark => byId.get(mark.id) || mark);
+        else commit(editMarks.map(mark => byId.get(mark.id) || mark));
       }
       setBusyLabel("Generating edit");
       const editBoxes = validateEditBoxes(resolvedBoxes);
-      const drawing = await renderLayer("drawing"), selection = blank ? null : await renderLayer("selection");
-      if (mode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
-      if (blank && !drawing) throw new Error("Draw a sketch first.");
+      const drawing = await renderLayer("drawing", editMarks, editSize), selection = editBlank ? null : await renderLayer("selection", editMarks, editSize);
+      if (editMode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
+      if (editBlank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
       form.append("boxes", JSON.stringify(editBoxes));
       const objects = Object.fromEntries(resolvedBoxes.filter(box => boxNeedsObject(box) && box.sourceMask).map(box => [box.id, box.sourceMask]));
       if (Object.keys(objects).length) form.append("boxObjects", new Blob([JSON.stringify(objects)], { type: "application/json" }), "box-objects.json");
-      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), prompt, mode, quality, resolution, model, blank: String(blank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      for (const [key, value] of Object.entries({ sourceUrl: editBase.url, requestId: globalThis.crypto.randomUUID(), prompt: editPrompt, mode: editMode, quality: editQuality, resolution: editResolution, model, blank: String(editBlank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
       const data = await nodeApi.editImage(form);
       if (!data.item?.url) throw new Error("The edit returned no image. Check History before running again.");
       let scanWarning = "";
-      if (!blank && objectCache.current.size) {
+      if (!editBlank && (retryDraft || objectCache.current.size)) {
         try {
-          const linked = await nodeApi.imageObjectCache({ sourceUrl: base.url, targetUrl: data.item.url });
+          const linked = await nodeApi.imageObjectCache({ sourceUrl: editBase.url, targetUrl: data.item.url });
           scanWarning = linked.warning || "";
         } catch { scanWarning = "The edit completed, but its object scan could not be carried forward. The earlier image's scan is still saved."; }
       }
-      setVersions((old) => [...old, { ...data.item, modelName: model, before: base.url }]);
+      const resolvedById = new Map(resolvedBoxes.map(box => [box.id, box]));
+      versionDrafts.current.push({ ...edit, quality: editQuality, resolution: editResolution, marks: editMarks.map(mark => resolvedById.get(mark.id) || mark) });
+      setVersions((old) => [...old, { ...data.item, modelName: model, before: editBase.url }]);
       setResultIndex(versions.length); setView("split"); setSplit(50); setWarning([data.warning, scanWarning].filter(Boolean).join(" "));
     } catch (failure) { setError(failure.message || "Image edit failed."); }
     finally { busyRef.current = false; setBusy(false); }
@@ -395,6 +405,17 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     try { await onAccept(item, result, action); onClose(); }
     catch (failure) { setError(failure.message || "Could not apply the edit."); }
     finally { busyRef.current = false; setSaving(false); }
+  }
+  function adjustBoxes() {
+    const saved = versionDrafts.current[resultIndex];
+    if (!saved || busyRef.current || saving) return;
+    setBase(saved.base); setSize(saved.size); setHistory({ past: [], marks: saved.marks, future: [] });
+    setPrompt(saved.prompt); setMode(saved.mode); setBlank(saved.blank);
+    const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
+    setQuality(qualities.includes(saved.quality) ? saved.quality : "high");
+    setResolution(resolutionOptions.includes(saved.resolution) ? saved.resolution : "2K");
+    setSelectedBoxId(saved.selectedBoxId || saved.marks.find(mark => mark.layer === "boxes")?.id || "");
+    setTool("boxes"); setLayer("boxes"); setResultIndex(-1); setError(""); setWarning(""); setZoom(1); setPan({ x: 0, y: 0 });
   }
   function continueEditing() {
     setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); setZoom(1); setPan({ x: 0, y: 0 });
@@ -468,15 +489,20 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         </fieldset>}
         <div className="ies-run-section">
           <small>{reviewing ? result.modelName || model : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
-          {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
+          {!reviewing && <button className="ies-primary" type="button" onClick={() => generate()} disabled={busy || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
           {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
         </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">
-          <button className="ies-primary" type="button" disabled={saving} onClick={() => accept("copy")}><Plus size={17} />Add Image to Canvas</button>
-          {canApply && <button type="button" disabled={saving} onClick={() => accept("apply")}><Check size={17} />Apply to Source</button>}
-          <button type="button" disabled={saving} onClick={continueEditing}><Pencil size={17} />Continue Editing</button>
+          {versionDrafts.current[resultIndex]?.marks.some(mark => mark.layer === "boxes") && <>
+            <button type="button" disabled={busy || saving || modelSaving || !providerAvailable} onClick={() => generate(versionDrafts.current[resultIndex])}><RefreshCcw size={17} />Rerun Box Edit</button>
+            <button type="button" disabled={busy || saving} onClick={adjustBoxes}><Boxes size={17} />Adjust Boxes</button>
+            <small>Rerun starts a new generation from the original source and saved boxes, using the model selected above.</small>
+          </>}
+          <button className="ies-primary" type="button" disabled={busy || saving} onClick={() => accept("copy")}><Plus size={17} />Add Image to Canvas</button>
+          {canApply && <button type="button" disabled={busy || saving} onClick={() => accept("apply")}><Check size={17} />Apply to Source</button>}
+          <button type="button" disabled={busy || saving} onClick={continueEditing}><Pencil size={17} />Continue Editing</button>
           <a href={result.url} download={result.fileName}><Download size={17} />Download</a>
         </div>}
         {warning && <p className="ies-warning" role="status">{warning}</p>}
