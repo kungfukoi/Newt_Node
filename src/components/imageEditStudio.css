@@ -10,6 +10,12 @@
 .ies-header > span { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .ies-header strong { white-space: nowrap; font-size: 15px; }
 .ies-header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a7a7a7; }
+.ies-header-actions { display: flex; align-items: center; gap: 12px; min-width: 0; flex-shrink: 0; }
+.ies-model-select { display: flex; align-items: center; gap: 8px; min-width: 0; color: #bbb; white-space: nowrap; }
+.ies-model-select select { width: 255px; max-width: 32vw; min-width: 0; padding: 7px 9px; border: 1px solid #444; border-radius: 5px; background: #121212; color: #eee; }
+.ies-model-select select:disabled { opacity: .45; }
+.ies-model-saving { color: #bbb; font-size: 11px; }
+@media (max-width: 760px) { .ies-header { padding: 0 10px; gap: 8px; } .ies-header-actions { gap: 8px; flex: 1; justify-content: flex-end; } .ies-model-select > span, .ies-model-saving { display: none; } .ies-model-select { flex: 0 1 255px; } .ies-model-select select { width: 100%; max-width: none; } .ies-header > span { flex-shrink: 0; gap: 6px; } }
 .ies-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 276px; flex: 1; min-height: 0; }
 .ies-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ies-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 10px 12px; border-bottom: 1px solid #343434; }

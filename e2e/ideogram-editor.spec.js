@@ -29,7 +29,7 @@ test("Settings saves the editor model and exposes Krea image routing", async ({ 
   expect(errors).toEqual([]);
 });
 
-test("saved editor preference opens Ideogram without a per-edit model picker", async ({ page }, testInfo) => {
+test("saved editor preference opens Ideogram in the shared model picker", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: 0.8 }
@@ -45,7 +45,7 @@ test("saved editor preference opens Ideogram without a per-edit model picker", a
   await page.getByRole("button", { name: "Draw and edit with Ideogram 4.5", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   await expect(editor.getByText("Ideogram 4.5 Precise Edit", { exact: false })).toBeVisible();
-  await expect(editor.getByRole("combobox", { name: /model/i })).toHaveCount(0);
+  await expect(editor.getByRole("combobox", { name: "Image Editor Model", exact: true })).toHaveValue("Ideogram 4.5");
   await editor.getByLabel("Edit prompt").fill("Make the sky blue");
   await editor.getByLabel("Edit quality").selectOption("medium");
   await page.screenshot({ path: testInfo.outputPath("ideogram-editor.png") });

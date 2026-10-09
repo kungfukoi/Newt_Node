@@ -119,6 +119,7 @@ import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } fro
 import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { registerObjectSelectionRoutes } from "./routes/objectSelection.js";
+import { createObjectSelectionCache } from "./object-selection-cache.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import {
   buildMinimaxH3LocalRequest,
@@ -917,6 +918,7 @@ registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, reco
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
 
 registerObjectSelectionRoutes(app, {
+  cache: createObjectSelectionCache(path.join(dataDir, "object-scans")),
   limiter: imageGenerationRequestLimiter,
   available: () => Boolean(process.env.FAL_KEY),
   readSource: async sourceUrl => {
@@ -1092,6 +1094,7 @@ function buildHealthPayload() {
       composerPoses: true,
       previewInpaint: true,
       imageEdit: true,
+      objectSelectionCache: true,
       imageObjectSelection: true,
       ideogram45: true,
       flux3: true,

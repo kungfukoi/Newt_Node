@@ -10,7 +10,8 @@ import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
-import { normalizeImageEditModel } from "../imageEdit.js";
+import { imageEditModelOptions, normalizeImageEditModel } from "../imageEdit.js";
+import { saveImageEditorModel } from "../imageEditorPreference.js";
 import { isIdeogram45Model, ideogram45QualityOptions } from "../ideogram45.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
 import "./imageEditStudio.css";
@@ -71,6 +72,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [split, setSplit] = React.useState(50);
   const [busy, setBusy] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [modelSaving, setModelSaving] = React.useState(false);
+  const modelSavePending = React.useRef(false);
   const [error, setError] = React.useState("");
   const [warning, setWarning] = React.useState("");
   const [elapsed, setElapsed] = React.useState(0);
@@ -84,6 +87,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const [objectStatus, setObjectStatus] = React.useState("");
   const [busyLabel, setBusyLabel] = React.useState("Generating edit");
   const objectCache = React.useRef(new Map()), hoverRef = React.useRef(null);
+  const scanRevision = React.useRef(0);
+  const [inheritedScan, setInheritedScan] = React.useState(false);
   const mounted = React.useRef(true);
   const drawingRef = React.useRef(null), selectionRef = React.useRef(null), stageRef = React.useRef(null), surfaceRef = React.useRef(null);
   const dragRef = React.useRef(null), busyRef = React.useRef(false), rootRef = React.useRef(null);
@@ -99,9 +104,40 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const resultProvider = result?.provider || result?.cost?.provider;
 
   React.useEffect(() => { rootRef.current?.focus(); }, []);
+  React.useEffect(() => {
+    const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
+    setQuality(current => qualities.includes(current) ? current : "high");
+    setResolution(current => resolutionOptions.includes(current) ? current : "2K");
+  }, [model]);
+  async function changeModel(value) {
+    if (busyRef.current || saving || modelSavePending.current) return;
+    modelSavePending.current = true; setModelSaving(true); setError("");
+    try { await saveImageEditorModel(value); }
+    catch (failure) { if (mounted.current) setError(failure.message || "Could not save the image editor model."); }
+    finally { modelSavePending.current = false; if (mounted.current) setModelSaving(false); }
+  }
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   React.useEffect(() => {
-    objectCache.current.clear(); setObjectMasks([]); setHoverObject(null); setObjectStatus("");
+    const revision = ++scanRevision.current;
+    objectCache.current.clear(); setObjectMasks([]); setHoverObject(null); setObjectStatus(""); setInheritedScan(false);
+    let cancelled = false;
+    nodeApi.imageObjectCache({ sourceUrl: base.url }).then(data => {
+      if (cancelled || !mounted.current || revision !== scanRevision.current) return;
+      const entries = data.entries || [];
+      for (const entry of entries) objectCache.current.set(entry.key, entry.data);
+      const auto = entries.filter(entry => entry.options.sam2).at(-1);
+      if (entries.length) {
+        const active = auto ? entries.slice(entries.indexOf(auto)) : entries;
+        const masks = [...new Map(active.flatMap(entry => entry.data.masks).map(mask => [mask.id, mask])).values()].slice(-256);
+        if (auto) setSam2Settings(auto.options.sam2);
+        setObjectMasks(masks);
+        setInheritedScan(active.some(entry => entry.data.inherited));
+        setObjectStatus(`${masks.length} objects ready. Saved scan restored; hover to preview, click to select.`);
+      }
+    }).catch(() => {
+      if (!cancelled && revision === scanRevision.current) setWarning("Could not restore the saved object scan. Object Selection can try again; no segmentation was submitted.");
+    });
+    return () => { cancelled = true; };
   }, [base.url]);
   React.useLayoutEffect(() => {
     const canvas = hoverRef.current;
@@ -226,12 +262,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   async function findObjects(options = {}, modifiers = {}, rescan = false) {
     if (busyRef.current || !size || reviewing || blank) return;
     setTool("object"); setLayer("selection"); setHoverObject(null);
-    if (!falAvailable) { setError("Enable a Fal key in Settings to use Object Selection."); return; }
+    ++scanRevision.current;
     const kind = options.prompt ? "prompt" : options.point ? "point" : "auto";
     if (kind === "auto") options = { ...options, sam2: sam2Settings };
     const key = JSON.stringify(options);
     const apply = (data) => {
       const masks = data.masks || [];
+      setInheritedScan(current => kind === "auto" ? Boolean(data.inherited) : current || Boolean(data.inherited));
       setObjectMasks(current => kind === "auto" ? masks : [...current.filter(mask => !masks.some(next => next.id === mask.id)), ...masks].slice(-256));
       if (kind === "point") {
         const mask = objectAtPoint(masks, options.point);
@@ -248,7 +285,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     busyRef.current = true; setBusy(true); setBusyLabel(kind === "auto" ? "Finding objects with SAM 2" : "Selecting with SAM 3"); setError(""); setWarning("");
     try {
       const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
-      const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...options });
+      const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...options, rescan });
       if (!mounted.current) return;
       if (objectCache.current.size >= 12) objectCache.current.delete(objectCache.current.keys().next().value);
       objectCache.current.set(key, data); apply(data);
@@ -306,7 +343,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     return imageEditHasPixels(ctx, size.width, size.height) ? blobOf(canvas) : null;
   }
   async function generate() {
-    if (busyRef.current) return;
+    if (busyRef.current || modelSavePending.current) return;
     if (!size) { setError("Wait for the original image to load before generating."); return; }
     if (!providerAvailable) { setError("Enable an image-edit provider in Settings before generating."); return; }
     // Pointer capture can be lost when focus leaves the canvas. It must never
@@ -340,8 +377,15 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       if (selection) form.append("selection", selection, "selection.png");
       const data = await nodeApi.editImage(form);
       if (!data.item?.url) throw new Error("The edit returned no image. Check History before running again.");
-      setVersions((old) => [...old, { ...data.item, before: base.url }]);
-      setResultIndex(versions.length); setView("split"); setSplit(50); setWarning(data.warning || "");
+      let scanWarning = "";
+      if (!blank && objectCache.current.size) {
+        try {
+          const linked = await nodeApi.imageObjectCache({ sourceUrl: base.url, targetUrl: data.item.url });
+          scanWarning = linked.warning || "";
+        } catch { scanWarning = "The edit completed, but its object scan could not be carried forward. The earlier image's scan is still saved."; }
+      }
+      setVersions((old) => [...old, { ...data.item, modelName: model, before: base.url }]);
+      setResultIndex(versions.length); setView("split"); setSplit(50); setWarning([data.warning, scanWarning].filter(Boolean).join(" "));
     } catch (failure) { setError(failure.message || "Image edit failed."); }
     finally { busyRef.current = false; setBusy(false); }
   }
@@ -361,7 +405,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const setActiveLayer = (value) => { setLayer(value); if (tool === "boxes" || (value === "selection" && ["text", "arrow"].includes(tool)) || (value === "drawing" && tool === "object")) setTool("pen"); };
 
   return <section ref={rootRef} tabIndex={-1} className="image-edit-studio" aria-label="Image Edit" role="dialog" aria-modal="true" onKeyDownCapture={keyboard} onPointerDown={(event) => event.stopPropagation()}>
-    <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving} /></header>
+    <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><div className="ies-header-actions"><label className="ies-model-select" title="Shared with User Preferences"><span>Edit model</span><select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving} onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>{modelSaving && <span role="status" className="ies-model-saving">Saving…</span>}<IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} /></div></header>
     <div className="ies-workspace">
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
@@ -410,6 +454,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
             <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
             {tool === "object" && <small>Click selects · Shift adds · Alt subtracts</small>}
             {objectStatus && <p role="status">{objectStatus}</p>}
+            {inheritedScan && <p role="status">Using scan from before this edit. Boundaries may have changed; Rescan objects updates them.</p>}
           </div>}
           <label>Method<select aria-label="Edit method" disabled={boxes.length > 0} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
@@ -422,8 +467,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           {imageEditUsesSelectionGuide(model) ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={e => setResolution(e.target.value)}>{resolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>}
         </fieldset>}
         <div className="ies-run-section">
-          <small>{isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
-          {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
+          <small>{reviewing ? result.modelName || model : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
+          {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
           {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
         </div>

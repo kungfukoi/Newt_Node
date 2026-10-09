@@ -21,7 +21,7 @@ for (const type of ["imageModel", "character", "coverage", "autoAspect", "storyb
     expect(errors).toEqual([]);
   });
 }
-test("saved editor preference opens Nano Banana 2.1 without a per-edit model picker", async ({ page }, testInfo) => {
+test("saved editor preference opens Nano Banana 2.1 in the shared model picker", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: 0.8 }
@@ -36,8 +36,7 @@ test("saved editor preference opens Nano Banana 2.1 without a per-edit model pic
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
   await page.getByRole("button", { name: "Draw and edit with Nano Banana 2.1", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
-  await expect(editor.getByText("Nano Banana 2.1", { exact: false })).toBeVisible();
-  await expect(editor.getByRole("combobox", { name: /model/i })).toHaveCount(0);
+  await expect(editor.getByRole("combobox", { name: "Image Editor Model", exact: true })).toHaveValue("Nano Banana 2.1");
   await editor.getByLabel("Edit prompt").fill("Make the sky blue");
   await expect(editor.getByLabel("Edit quality")).toHaveCount(0);
   await editor.getByLabel("Edit resolution").selectOption("4K");

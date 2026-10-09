@@ -278,6 +278,10 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  async imageObjectCache(body) {
+    const { response, data } = await fetchJsonApi("/api/node/image-object-cache", jsonBody(body), "Object scan", { timeoutMs: 15000, retryLocalApi: false });
+    return ensureOk(response, data, "Could not restore the object scan.");
+  },
   async imageObjects(body) {
     let response;
     try {

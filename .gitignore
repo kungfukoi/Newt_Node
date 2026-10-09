@@ -25,6 +25,7 @@ server/data/remote-video-jobs.json.d/
 server/data/remote-video-jobs.json.legacy-backup
 server/data/project-outputs/
 server/data/newt-presets/
+server/data/object-scans/
 **/.newtnode/output-records/
 server/data/*-index.json
 server/data/.*.tmp

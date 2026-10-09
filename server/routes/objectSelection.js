@@ -1,13 +1,31 @@
 import { createHash, randomUUID } from "node:crypto";
 import { objectSelectionEndpoints, objectSelectionInput, validateSam2Settings } from "../../src/objectSelection.js";
 import { prepareObjectSource, encodeObjectMask, readObjectMask } from "../object-selection.js";
+import { objectSourceHash, objectQueryKey } from "../object-selection-cache.js";
 
-export function registerObjectSelectionRoutes(app, { limiter, available, readSource, upload, subscribe, recordHistory, sendError, readMask = readObjectMask }) {
+export function registerObjectSelectionRoutes(app, { limiter, available, readSource, upload, subscribe, recordHistory, sendError, readMask = readObjectMask, cache }) {
   const jobs = new Map();
+  // This route only reads/copies local maps. It never submits provider work.
+  app.post("/api/node/image-object-cache", limiter, async (req, res) => {
+    try {
+      const { sourceUrl, targetUrl } = req.body;
+      if (typeof sourceUrl !== "string" || (targetUrl !== undefined && typeof targetUrl !== "string")) throw Object.assign(new Error("An image source is required."), { status: 400 });
+      const source = await readSource(sourceUrl);
+      const entries = cache ? await cache.get(objectSourceHash(source.buffer)) : [];
+      if (targetUrl !== undefined) {
+        const target = await readSource(targetUrl);
+        const [before, after] = await Promise.all([prepareObjectSource(source.buffer), prepareObjectSource(target.buffer)]);
+        if (before.info.width !== after.info.width || before.info.height !== after.info.height) return res.json({ entries: [], inherited: false, warning: "Image dimensions changed. Rescan objects to align the selection map." });
+        if (cache && entries.length) await cache.inherit(objectSourceHash(target.buffer), entries);
+        return res.json({ inherited: Boolean(entries.length) });
+      }
+      res.json({ entries });
+    } catch (error) { sendError(res, error, "Could not restore the object scan."); }
+  });
   app.post("/api/node/image-objects", limiter, async (req, res) => {
     try {
-      if (!available()) throw Object.assign(new Error("Enable a Fal key in Settings to use Object Selection."), { status: 400 });
       const { sourceUrl, requestId, point, prompt } = req.body;
+      if (req.body.rescan !== undefined && typeof req.body.rescan !== "boolean") throw Object.assign(new Error("Invalid rescan option."), { status: 400 });
       if (!point && !prompt) {
         try { req.body.sam2 = validateSam2Settings(req.body.sam2); }
         catch (error) { throw Object.assign(error, { status: 400 }); }
@@ -40,6 +58,13 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
   async function run(req) {
     const { sourceUrl, point, prompt, sam2 } = req.body;
     const source = await readSource(sourceUrl);
+    const hash = objectSourceHash(source.buffer);
+    const options = prompt ? { prompt } : point ? { point } : { sam2 };
+    if (cache && !req.body.rescan) {
+      const saved = (await cache.get(hash)).find(entry => entry.key === objectQueryKey(options));
+      if (saved) return { ...saved.data, cached: true };
+    }
+    if (!available()) throw Object.assign(new Error("Enable a Fal key in Settings to use Object Selection."), { status: 400 });
     const { data, info } = await prepareObjectSource(source.buffer).catch(() => { throw Object.assign(new Error("Use an image up to 24 megapixels."), { status: 400 }); });
     const sam3 = Boolean(point || prompt);
     const endpoint = objectSelectionEndpoints[sam3 ? "point" : "auto"];
@@ -71,7 +96,12 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
         }
       }
       if (remote.length > 128) warning = [warning, "Showing the first 128 objects; click an unhighlighted area to select it with SAM 3."].filter(Boolean).join(" ");
-      return { masks, model, warning };
+      const data = { masks, model, warning, inherited: false };
+      if (cache) {
+        try { await cache.put(hash, options, data); }
+        catch { data.warning = [warning, "Objects are ready, but the scan could not be saved. Keep this editor open to reuse it."].filter(Boolean).join(" "); }
+      }
+      return data;
     } catch (error) { throw Object.assign(new Error(`${model} completed, but its masks could not be loaded. Check History before retrying. ${error.message}`), { status: 502 }); }
   }
 }

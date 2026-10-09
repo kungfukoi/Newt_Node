@@ -160,3 +160,73 @@ test("native Flux boxes identify by description without a segmentation request",
   expect(form.get("boxObjects")).toBeNull();
   expect(JSON.parse(form.get("boxes"))[0].label).toBe("Cat");
 });
+
+test("saved objects survive Continue Editing, reopen, and explicit rescan without losing the selection", async ({ page }, testInfo) => {
+  const { editor, errors } = await openEditor(page);
+  const saved = new Map(), scans = [], links = [];
+  await page.route("**/api/node/image-object-cache", async route => {
+    const body = route.request().postDataJSON();
+    if (body.targetUrl) {
+      links.push(body);
+      saved.set(body.targetUrl, (saved.get(body.sourceUrl) || []).map(entry => ({ ...entry, data: { ...entry.data, inherited: true } })));
+      return route.fulfill({ json: { inherited: true } });
+    }
+    return route.fulfill({ json: { entries: saved.get(body.sourceUrl) || [] } });
+  });
+  await page.route("**/api/node/image-objects", async route => {
+    const body = route.request().postDataJSON(); scans.push(body);
+    const options = { sam2: body.sam2 };
+    const data = { masks: body.rescan ? [masks[1]] : masks, inherited: false };
+    saved.set(body.sourceUrl, [{ key: JSON.stringify(options), options, data }]);
+    await route.fulfill({ json: data });
+  });
+  await page.route("**/api/node/edit-image", route => route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", type: "image" } } }));
+  await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
+  await editor.getByLabel("Edit prompt").fill("Change the colors");
+  await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await expect(editor.getByRole("button", { name: "Continue Editing", exact: true })).toBeVisible();
+  expect(links).toEqual([{ sourceUrl: "/outputs/e2e/landscape.png", targetUrl: "/outputs/e2e/edited.png" }]);
+  await editor.getByRole("button", { name: "Continue Editing", exact: true }).click();
+  await expect(editor.getByText("Using scan from before this edit.", { exact: false })).toBeVisible();
+  await move(page, editor, .2, .3, true);
+  const selection = editor.getByLabel("Selection canvas");
+  await expect.poll(() => alpha(selection, .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Undo stroke", exact: true }).click();
+  await expect.poll(() => alpha(selection, .2, .3)).toBe(0);
+  await editor.getByRole("button", { name: "Redo stroke", exact: true }).click();
+  await expect.poll(() => alpha(selection, .2, .3)).toBe(255);
+  expect(scans).toHaveLength(1);
+  await page.screenshot({ path: testInfo.outputPath("object-scan-inherited.png") });
+  await editor.getByRole("button", { name: "Rescan objects", exact: true }).click();
+  await expect(editor.getByText("1 objects ready.", { exact: false })).toBeVisible();
+  await expect(editor.getByText("Using scan from before this edit.", { exact: false })).toHaveCount(0);
+  expect(scans).toHaveLength(2); expect(scans[1].rescan).toBe(true);
+  expect(await alpha(selection, .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  // Reopen the original: its saved map remains distinct from the edited scan.
+  await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
+  await expect(editor.getByText("Saved scan restored", { exact: false })).toBeVisible();
+  await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await move(page, editor, .2, .3, true);
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  expect(scans).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
+test("a saved scan works without Fal credentials", async ({ page }) => {
+  const { editor } = await openEditor(page, false);
+  const options = { sam2: { pointsPerSide: 32, confidence: .88, stability: .95, minRegionArea: 100 } };
+  let paid = 0;
+  await page.route("**/api/node/image-object-cache", route => route.fulfill({ json: { entries: [{ key: JSON.stringify(options), options, data: { masks } }] } }));
+  await page.route("**/api/node/image-objects", route => { paid++; return route.fulfill({ status: 400, json: { error: "No key" } }); });
+  // Remount so restoration reads the persisted scan with no provider enabled.
+  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
+  await expect(editor.getByText("Saved scan restored", { exact: false })).toBeVisible();
+  await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await move(page, editor, .2, .3, true);
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  expect(paid).toBe(0);
+});

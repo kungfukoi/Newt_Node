@@ -34,6 +34,7 @@ import {
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
 import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
 import { imageEditModelOptions } from "./imageEdit.js";
+import { saveImageEditorModel } from "./imageEditorPreference.js";
 import { defaultUserPreferences, directorProcessingModelOptions, textAgentModelOptions, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
 
@@ -76,6 +77,21 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   React.useEffect(() => {
     refreshSettings();
   }, []);
+  React.useEffect(() => {
+    const syncEditorModel = event => setUserPreferences(current => ({ ...current, imageEditorModel: normalizeUserPreferences(event.detail).imageEditorModel }));
+    window.addEventListener("newtnode:user-preferences-updated", syncEditorModel);
+    return () => window.removeEventListener("newtnode:user-preferences-updated", syncEditorModel);
+  }, []);
+  async function changeImageEditorModel(value) {
+    if (actionsDisabled) return;
+    setBusy("imageEditorModel"); setMessage("");
+    try {
+      const preferences = await saveImageEditorModel(value);
+      setUserPreferences(current => ({ ...current, imageEditorModel: preferences.imageEditorModel }));
+      setMessage("Image editor model saved.");
+    } catch (failure) { setMessage(failure.message || "Could not save the image editor model."); }
+    finally { setBusy(""); }
+  }
 
   async function refreshSettings() {
     try {
@@ -629,10 +645,10 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             <label className="settings-preference-model">
               <span>
                 <strong>Image Editor Model</strong>
-                <small>Model used when editing an image from a preview. Ideogram 4.5, Flux 3, and Nano Banana 2.1 use Fal.</small>
+                <small>Shared with the image editor; saves immediately. Ideogram 4.5, Flux 3, and Nano Banana 2.1 use Fal.</small>
               </span>
               <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
-                onChange={(event) => setUserPreferences((current) => ({ ...current, imageEditorModel: event.target.value }))}>
+                disabled={actionsDisabled} onChange={(event) => changeImageEditorModel(event.target.value)}>
                 {imageEditModelOptions.map((model) => <option key={model}>{model}</option>)}
               </select>
             </label>

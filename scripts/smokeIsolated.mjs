@@ -73,6 +73,9 @@ try {
   assert.equal((await (await request("/api/health")).json()).routes.nanoBanana21, true);
   assert.equal((await (await request("/api/health")).json()).routes.explore, true);
   assert.equal((await (await request("/api/health")).json()).routes.spendAnalytics, true);
+  assert.equal((await (await request("/api/health")).json()).routes.objectSelectionCache, true);
+  const restoredObjects = await (await request("/api/node/image-object-cache", { sourceUrl: "/outputs/panel.png" })).json();
+  assert.deepEqual(restoredObjects.entries, []);
   const accounting = await (await request("/api/stats/local")).json();
   assert.equal(accounting.history.length, 1);
   assert.equal(accounting.history[0].cost.amountUsd, null);
