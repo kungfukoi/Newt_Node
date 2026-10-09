@@ -25,7 +25,6 @@ import {
 import {
   activateSoleModelProviderCredentials,
   defaultModelProviderPreferences,
-  missingModelProviderApiKeyMessage,
   missingModelProviderCredentials,
   normalizeModelProviderPreferences,
   providerPreferenceLabel,
@@ -70,6 +69,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
+  const [routingMessage, setRoutingMessage] = React.useState("");
   const [updateLog, setUpdateLog] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState(null);
   const actionsDisabled = status === "loading" || Boolean(busy);
@@ -164,6 +164,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   async function saveProviderRouting() {
     setBusy("routing");
     setMessage("");
+    setRoutingMessage("");
     setUpdateLog("");
     const requested = normalizeModelProviderPreferences(modelProviderPreferences);
     const draftCredentialPayload = normalizedCredentialPayload(credentials, activeCredentialIds);
@@ -176,12 +177,6 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
       )
     };
     try {
-      const missingProviders = missingModelProviderCredentials(requested, credentialAvailability(credentialPayload));
-      if (missingProviders.length) {
-        throw new Error(missingProviders
-          .map((provider) => missingModelProviderApiKeyMessage("This routing", provider))
-          .join(" "));
-      }
       await settingsApi.save({
         credentials: credentialPayload.credentials,
         activeCredentialIds: credentialPayload.activeCredentialIds,
@@ -196,10 +191,23 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
       setActiveCredentialIds(normalizeActiveCredentialIdsForUi(loadedData.activeCredentialIds));
       setModelProviderPreferences(saved);
       dispatchModelProviderPreferences({ ...loadedData, modelProviderPreferences: saved });
-      setMessage("Model provider routing saved.");
+      const missingProviders = missingModelProviderCredentials(saved, {
+        fal: Boolean(loadedData.falKeyConfigured),
+        google: Boolean(loadedData.googleApiKeyConfigured),
+        krea: Boolean(loadedData.kreaApiKeyConfigured),
+        openai: Boolean(loadedData.openAiApiKeyConfigured || loadedData.openAiKeyConfigured),
+        atlas: Boolean(loadedData.atlasApiKeyConfigured)
+      });
+      const notice = "Model provider routing saved." + (missingProviders.length
+        ? ` Add or select an active API key for ${missingProviders.map(providerPreferenceLabel).join(", ")} in API Credentials before generating.`
+        : "");
+      setMessage(notice);
+      setRoutingMessage(notice);
       setLastUpdated(new Date());
     } catch (error) {
-      setMessage(error.message || "Could not save model provider routing.");
+      const notice = error.message || "Could not save model provider routing.";
+      setMessage(notice);
+      setRoutingMessage(notice);
     } finally {
       setBusy("");
     }
@@ -553,6 +561,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
               <span>{busy === "routing" ? "Saving" : "Save Routing"}</span>
             </button>
           </div>
+          {routingMessage && <p className="settings-message" role="status">{routingMessage}</p>}
         </CollapsibleSettingsSection>
 
         <CollapsibleSettingsSection
@@ -1015,15 +1024,6 @@ function assertCredentialsSaved(data, credentialPayload) {
     const labels = lostCredentialProviders.map((provider) => provider.label).join(", ");
     throw new Error(`The running Settings server did not preserve ${labels} credentials. Your entry is still shown here; restart NewtNode, then save again.`);
   }
-}
-
-function credentialAvailability({ credentials = {}, activeCredentialIds = {} } = {}) {
-  return Object.fromEntries(providerDefinitions.map((provider) => {
-    const activeId = activeCredentialIds[provider.id];
-    const active = (credentials[provider.id] || []).find((credential) => credential.id === activeId && credential.key);
-    const routingId = provider.id === "openAi" ? "openai" : provider.id;
-    return [routingId, Boolean(active)];
-  }));
 }
 
 function SettingsMetric({ icon, label, value, detail, tone = "" }) {

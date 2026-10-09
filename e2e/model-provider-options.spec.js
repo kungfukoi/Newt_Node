@@ -27,3 +27,44 @@ for (const provider of ["atlas", "krea", "fal"]) {
     expect(errors).toEqual([]);
   });
 }
+
+async function routingFixture(page, { failSave = false, staleReload = false } = {}) {
+  const fixture = await openFixture(page, { count: 1 });
+  let state = { modelProviderPreferences: { seedance: "fal", veo: "google", imageGeneration: "google", minimaxH3: "fal", llm: "fal" }, credentials: {}, activeCredentialIds: {} };
+  const saves = [];
+  await page.route(/\/api\/settings(?:\?.*)?$/, async route => {
+    if (route.request().method() === "POST") {
+      const payload = route.request().postDataJSON(); saves.push(payload);
+      if (failSave) return route.fulfill({ status: 500, json: { error: "Routing write failed" } });
+      if (!staleReload) state = { ...state, ...payload };
+    }
+    return route.fulfill({ json: { ...state, secrets: { credentials: state.credentials } } });
+  });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  return { ...fixture, saves };
+}
+
+test("Save Routing persists choices without requiring keys for every category", async ({ page }, testInfo) => {
+  const { saves, errors } = await routingFixture(page);
+  await page.getByRole("combobox", { name: /^Image Model/ }).selectOption("atlas");
+  await page.getByRole("button", { name: "Save Routing", exact: true }).click();
+  await expect.poll(() => saves.length).toBe(1);
+  await expect(page.getByRole("status")).toContainText("Model provider routing saved.");
+  await expect(page.getByRole("status")).toContainText("Atlas Cloud");
+  await page.screenshot({ path: testInfo.outputPath("routing-save.png") });
+  await page.reload();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: /^Image Model/ })).toHaveValue("atlas");
+  expect(errors).toEqual([]);
+});
+
+for (const failure of ["write", "reload"]) {
+  test(`Save Routing shows ${failure} failure beside the button and keeps the draft`, async ({ page }) => {
+    const { saves } = await routingFixture(page, { failSave: failure === "write", staleReload: failure === "reload" });
+    await page.getByRole("combobox", { name: /^Image Model/ }).selectOption("atlas");
+    await page.getByRole("button", { name: "Save Routing", exact: true }).click();
+    await expect.poll(() => saves.length).toBe(1);
+    await expect(page.getByRole("status")).toContainText(failure === "write" ? "Routing write failed" : "did not preserve model provider routing");
+    await expect(page.getByRole("combobox", { name: /^Image Model/ })).toHaveValue("atlas");
+  });
+}
