@@ -4,6 +4,10 @@ This document is the descriptive map of the current NewtNode implementation. `no
 
 ## Runtime Shape
 
+`src/components/CompositeLivePreview.jsx` owns disposable browser image/video resources, local thumbnail playback and seeking; `src/compositePreview.js` owns thumbnail blend/alpha/mask pixel math. Thumbnail state stays out of workflow/result persistence and backend execution.
+
+Composite Video uses `src/compositeLayers.js` for stable layer/mask port identities, normalization and legacy shared-input migration. `src/components/CompositeLayerControls.jsx` owns the layer controls; `server/composite-stack.js` builds the planar RGB/alpha FFmpeg graph. The existing Utility video route records the complete stack and writes one managed video result.
+
 Video crop geometry and FFmpeg filter construction live in `src/videoCrop.js`, using shared `cropGeometry.js` bounds. `src/components/VideoCropEditor.jsx` owns the inline and enlarged video crop UI; the Edit node passes persisted settings to the existing local Edit route.
 
 NewtNode is a local-first React application backed by a local Express service.

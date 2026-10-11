@@ -146,6 +146,8 @@ import {
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
 import { compositeVideoBlendModeOptions, model3DNames, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { normalizeCompositeLayers, compositeLayerLimit } from "../src/compositeLayers.js";
+import { buildCompositeStackArgs } from "./composite-stack.js";
 import {
   buildRodin25FalInput,
   isRodin25Model,
@@ -6211,6 +6213,11 @@ async function runColorIdMatteUtilityVideo(req, res, { referenceVideoUrls }) {
 }
 
 async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVideoUrls }) {
+  if (Array.isArray(req.body.compositeVideo?.layers)) {
+    const layers = req.body.compositeVideo.layers;
+    if (layers.length < 2 || layers.length > compositeLayerLimit || layers.some((layer) => !layer?.url || !["image", "video"].includes(layer.type) || (layer.maskUrl && !["image", "video"].includes(layer.maskType)))) return res.status(400).json({ error: "Composite requires 2–32 image or video layers. Each optional mask must be an image or video." });
+    return res.json(await createCompositeVideoResult({ body: req.body, layers }));
+  }
   if (referenceVideoUrls.length < 2) {
     return res.status(400).json({ error: "Composite Video requires a base video and a layer video connected to Video." });
   }
@@ -13284,42 +13291,41 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
   }
 }
 
-async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, maskVideoUrl }) {
+async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, maskVideoUrl, layers }) {
   let outputPath = "";
   try {
-    const baseVideo = await resolveLocalAssetPathFromUrl(baseVideoUrl);
-    const layerVideo = await resolveLocalAssetPathFromUrl(layerVideoUrl);
-    const maskVideo = maskVideoUrl ? await resolveLocalAssetPathFromUrl(maskVideoUrl) : null;
-    const baseMetadata = await probeVideoFile(baseVideo.filePath);
     const options = body.compositeVideo && typeof body.compositeVideo === "object" ? body.compositeVideo : {};
+    const requestedLayers = layers || [{ id: "base", url: baseVideoUrl, type: "video", blendMode: "normal", mixAmount: 100 }, { id: "layer1", url: layerVideoUrl, type: "video", maskUrl: maskVideoUrl, maskType: "video", ...options }];
+    const settings = normalizeCompositeLayers({ compositeLayers: requestedLayers });
+    const resolvedLayers = [];
+    for (const [index, layer] of requestedLayers.entries()) {
+      const asset = await resolveLocalAssetPathFromUrl(layer.url);
+      const mask = layer.maskUrl ? await resolveLocalAssetPathFromUrl(layer.maskUrl) : null;
+      const metadata = await probeVideoFile(asset.filePath);
+      resolvedLayers.push({ ...layer, ...settings[index], filePath: asset.filePath, maskPath: mask?.filePath || "", metadata });
+    }
+    const baseMetadata = resolvedLayers[0].metadata;
+    const firstVideo = resolvedLayers.find((layer) => layer.type === "video");
+    const duration = firstVideo?.metadata.duration || clampNumber(options.duration, 0.1, 600, 5);
+    const fps = clampNumber(firstVideo?.metadata.fps, 1, 120, 24);
     const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
     const output = await createManagedAssetTarget({ body }, "composite-video", videoOutputExtension(outputFormat), workflowPackageOutputDirName);
     outputPath = output.filePath;
     const blendMode = normalizeChoice(options.blendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal");
-    const blendLabel = compositeVideoBlendModeOptions.find(([value]) => value === blendMode)?.[1] || "Normal";
     const mixAmount = clampNumber(options.mixAmount, 0, 100, 100);
     const invertMask = Boolean(options.invertMask);
     const maskBlur = clampNumber(options.maskBlur, 0, 24, 0);
     const maskExpand = clampInteger(options.maskExpand, -12, 12, 0);
 
-    await compositeVideoWithFfmpeg({
-      basePath: baseVideo.filePath,
-      layerPath: layerVideo.filePath,
-      maskPath: maskVideo?.filePath || "",
-      outputPath,
-      baseMetadata,
-      blendMode,
-      mixAmount,
-      invertMask,
-      maskBlur,
-      maskExpand,
-      outputFormat
-    });
+    const args = buildCompositeStackArgs({ layers: resolvedLayers, width: Math.max(2, Math.ceil((baseMetadata.width || 1280) / 2) * 2), height: Math.max(2, Math.ceil((baseMetadata.height || 720) / 2) * 2), fps, duration, cleanupMask: matteCleanupFilterParts });
+    addVideoEncoderArgs(args, outputFormat);
+    args.push("-c:a", "aac", outputPath);
+    await runFfmpeg(args, "Composite layers", 600000);
 
     const outputStats = await stat(outputPath);
     const outputMetadata = await probeVideoFile(outputPath);
     const localUrl = output.publicPath;
-    const text = `${blendLabel} video mix at ${mixAmount}%${maskVideo ? " with mask" : ""}.`;
+    const text = `Composited ${resolvedLayers.length} image/video layers with individual blend modes and optional masks.`;
     const cost = {
       amountUsd: 0,
       currency: "USD",
@@ -13338,13 +13344,14 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
       provider: "local",
       modelName: "Composite Video",
       endpoint: "local/composite-video",
-      mode: maskVideo ? "Masked video layer mix" : "Video layer mix",
+      mode: "Image/video layer stack",
       prompt: text,
       submittedPrompt: text,
       project: projectFromBody(body),
       node: nodeFromBody(body),
       settings: {
         model: "Composite Video",
+        layers: requestedLayers.map((layer, index) => ({ ...settings[index], url: layer.url, type: layer.type, maskUrl: layer.maskUrl || null, maskType: layer.maskType || null })),
         baseVideoUrl,
         layerVideoUrl,
         maskVideoUrl: maskVideoUrl || null,
@@ -14590,107 +14597,6 @@ async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selec
   await runFfmpeg(args, "Color ID video matte", 600000);
 }
 
-async function compositeVideoWithFfmpeg({
-  basePath,
-  layerPath,
-  maskPath,
-  outputPath,
-  baseMetadata,
-  blendMode,
-  mixAmount,
-  invertMask,
-  maskBlur,
-  maskExpand,
-  outputFormat
-}) {
-  const width = Math.max(2, Math.round(Number(baseMetadata.width || 0)) || 1280);
-  const height = Math.max(2, Math.round(Number(baseMetadata.height || 0)) || 720);
-  const normalizedBlendMode = normalizeChoice(
-    blendMode,
-    compositeVideoBlendModeOptions.map(([value]) => value),
-    "normal"
-  );
-  const opacity = clampNumber(mixAmount, 0, 100, 100) / 100;
-  const hasMask = Boolean(maskPath);
-  const ffmpegBlendMode = {
-    overlay: "hardlight",
-    hardlight: "overlay"
-  }[normalizedBlendMode] || normalizedBlendMode;
-  const swapBlendInputs = ["softlight", "subtract", "divide"].includes(normalizedBlendMode);
-  const blendTop = swapBlendInputs ? "base_blend" : "layer";
-  const blendBottom = swapBlendInputs ? "layer" : "base_blend";
-  const layerWeight = opacity.toFixed(6);
-  const baseWeight = (1 - opacity).toFixed(6);
-
-  // FFmpeg's blend filter needs planar RGB; packed RGB shifts color channels.
-  const baseFilters = [
-    "setpts=PTS-STARTPTS",
-    `scale=${width}:${height}:flags=bicubic`,
-    "setsar=1",
-    "format=gbrp"
-  ];
-  const layerFilters = [
-    "setpts=PTS-STARTPTS",
-    `scale=${width}:${height}:flags=bicubic`,
-    "setsar=1",
-    "format=gbrp"
-  ];
-  const filter = [];
-  const baseSplitCount = hasMask ? 3 : 2;
-  const baseSplitLabels = hasMask
-    ? "[base_blend][base_mix][base_output]"
-    : "[base_blend][base_mix]";
-
-  filter.push(
-    `[0:v]${baseFilters.join(",")},split=${baseSplitCount}${baseSplitLabels}`,
-    `[1:v]${layerFilters.join(",")}[layer]`,
-    `[${blendTop}][${blendBottom}]blend=all_mode=${ffmpegBlendMode}:all_opacity=1:shortest=1[blended]`,
-    `[blended][base_mix]blend=all_expr=A*${layerWeight}+B*${baseWeight}:shortest=1[mixed]`
-  );
-
-  if (hasMask) {
-    const maskFilters = [
-      "setpts=PTS-STARTPTS",
-      `scale=${width}:${height}:flags=bicubic`,
-      "setsar=1",
-      "format=gray"
-    ];
-    if (invertMask) maskFilters.push("negate");
-    maskFilters.push(...matteCleanupFilterParts({ blur: maskBlur, expand: maskExpand }));
-    filter.push(
-      `[2:v]${maskFilters.join(",")}[mask]`,
-      "[mixed][mask]alphamerge[mixed_alpha]",
-      "[base_output][mixed_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
-    );
-  } else {
-    filter.push("[mixed]format=yuv420p[out]");
-  }
-
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-i",
-    basePath,
-    "-i",
-    layerPath
-  ];
-  if (hasMask) args.push("-i", maskPath);
-  args.push(
-    "-filter_complex",
-    filter.join(";"),
-    "-map",
-    "[out]",
-    "-map",
-    "0:a?",
-    "-shortest"
-  );
-
-  addVideoEncoderArgs(args, outputFormat);
-  args.push("-c:a", "aac", outputPath);
-  await runFfmpeg(args, "Composite video", 600000);
-}
 
 async function stitchVideosWithFfmpeg({ sourcePaths, outputPath, targetWidth, targetHeight, targetFps, outputFormat }) {
   const width = Math.max(2, Math.round(Number(targetWidth || 0)) || 512);

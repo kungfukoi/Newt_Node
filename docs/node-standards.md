@@ -42,6 +42,12 @@ Before completion:
 
 ## Current Product Snapshot
 
+- Composite Video shows a local live thumbnail before rendering. Blend, mix, layer wiring and image/video masks (invert, blur and expansion) update the sampled frame immediately; muted playback and seeking preview video layers. Work is bounded to a 320-pixel thumbnail and approximately 12 fps, and playback pauses while hidden. The browser thumbnail is an approximation; Run creates the full-quality FFmpeg result, available through Rendered output, with existing downloads and preview actions. Live preview never replaces persisted results or submits a render.
+
+- Composite layer and mask input dots start gray. Connected image inputs turn image blue and video inputs turn video green; colors follow the connected source without restricting either accepted media type. Still images remain visible for the first video layer's full duration, or default to five seconds when no video is connected.
+
+- Utility Composite Video accepts 2–32 ordered image/video layers. Each layer has a dedicated media dot, optional image/video mask dot, blend method and opacity; masks support inversion, blur and expansion. + adds a layer and each − removes that layer and its connections, leaving at least two. Layer IDs remain stable when deleting another layer. Transparent images preserve alpha; complete media is fitted to the base dimensions without cropping. Output is a video following the first video layer's duration/fps/audio, or a configurable duration (default five seconds, 24 fps) for image-only stacks. Shorter videos hold their last frame. Legacy shared Video inputs migrate in connection order and legacy mask/mix controls belong to the former overlay layer.
+
 - Edit Image Crop and the enlarged image editor share Normal, Fixed Size, and Fixed Ratio controls with video cropping. Fixed Size uses source pixels, Fixed Ratio uses source-aware proportions, and image editor undo restores the crop style alongside the region.
 
 - Edit > Video > Crop offers Normal (freeform), Fixed Size (pixel dimensions), and Fixed Ratio (user-entered width:height proportions). All modes allow positioning; Fixed Size disables resize handles and Fixed Ratio constrains corner resizing using source dimensions. Its enlarged editor supports playback and frame seeking; settings persist with the workflow and produce an even-pixel local FFmpeg crop. Legacy centered pixel crops normalize using source dimensions.

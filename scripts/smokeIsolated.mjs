@@ -257,7 +257,23 @@ try {
   assert.ok(audioData.sourceAudioUrl.includes(audioCopy.id));
   assert.ok(audioData.resultItems[0].url.includes(audioCopy.id));
   assert.equal((await request(audioData.sourceAudioUrl)).status, 200);
-  console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness; no provider calls.");
+  const composite = await (await request("/api/node/utility-video", { model: "Composite Video", compositeVideo: { duration: 0.2, layers: [
+    { id: "base", url: "/outputs/panel.png", type: "image", blendMode: "normal", mixAmount: 100 },
+    { id: "layer1", url: "/outputs/clip.mp4", type: "video", blendMode: "screen", mixAmount: 50, maskUrl: "/outputs/panel.png", maskType: "image", maskBlur: 1, maskExpand: 1 },
+    { id: "extra", url: "/outputs/panel.png", type: "image", blendMode: "multiply", mixAmount: 25, maskUrl: "/outputs/clip.mp4", maskType: "video", invertMask: true }
+  ] } })).json();
+  assert.ok(composite.video.localUrl);
+  assert.ok(Math.abs(composite.video.duration - Number(probe.format.duration)) < 0.1, "Still layers must last for the video duration, regardless of Still Duration");
+  assert.equal(composite.cost.amountUsd, 0);
+  assert.equal((await request(composite.video.localUrl)).status, 200);
+  const stillComposite = await (await request("/api/node/utility-video", { model: "Composite Video", compositeVideo: { layers: [
+    { id: "base", url: "/outputs/panel.png", type: "image" }, { id: "layer1", url: "/outputs/panel.png", type: "image" }
+  ] } })).json();
+  assert.ok(stillComposite.video.localUrl);
+  assert.ok(Math.abs(stillComposite.video.duration - 5) < 0.1, "Image-only stacks must default to five seconds");
+  const legacyComposite = await (await request("/api/node/utility-video", { model: "Composite Video", referenceVideoUrls: ["/outputs/clip.mp4", "/outputs/clip.mp4"], compositeVideo: { blendMode: "screen", mixAmount: 50 } })).json();
+  assert.ok(legacyComposite.video.localUrl);
+  console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");
 } finally {
   if (child && child.exitCode === null) child.kill("SIGTERM");
   if (exited) await exited;

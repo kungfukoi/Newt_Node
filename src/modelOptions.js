@@ -534,7 +534,7 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.wanFunControl]: "Legacy Wan Fun Control alias. New runs route to Wan 2.2 VACE Fun A14B Depth.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white matte video from picked source-video Color IDs.",
-  [utilityVideoModelNames.compositeVideo]: "Mixes a layer video over a base video with standard blend modes and an optional mask.",
+  [utilityVideoModelNames.compositeVideo]: "Composites an ordered stack of images and videos with a blend method, opacity, and optional image or video mask for each layer.",
   [utilityVideoModelNames.dwposeVideo]: "Creates a pose/control-map video from a connected source video with selectable body, face, hand, or mask drawing modes.",
   [utilityVideoModelNames.depthAnythingVideo]: "Creates a temporally consistent depth-map video from a connected source video with Video Depth Anything.",
   [utilityVideoModelNames.wanBlend]: "Runs the local ComfyUI context-smashing attention-mask workflow from connected color-region images and a color-mask video.",

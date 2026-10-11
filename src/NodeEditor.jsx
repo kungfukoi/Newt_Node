@@ -18,6 +18,9 @@ import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboard
 import { StoryboardRevisionControls } from "./components/StoryboardRevisionControls.jsx";
 import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
+import { normalizeCompositeLayers, compositeInputPorts, compositeLayerPortId, compositeMaskPortId, isCompositeLayerPort, migrateCompositeEdges } from "./compositeLayers.js";
+import { CompositeLayerControls } from "./components/CompositeLayerControls.jsx";
+import { CompositeLivePreview } from "./components/CompositeLivePreview.jsx";
 import VideoCropEditor from "./components/VideoCropEditor.jsx";
 import { normalizeVideoCropSettings, constrainVideoCrop, dragVideoCrop } from "./videoCrop.js";
 import CropModeControls from "./components/CropModeControls.jsx";
@@ -2662,7 +2665,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return updatedNodes;
     });
 
-    if (nextUtilityData && ("utilityMode" in patch || "utilityImageModel" in patch || "utilityVideoModel" in patch)) {
+    if (nextUtilityData && ("utilityMode" in patch || "utilityImageModel" in patch || "utilityVideoModel" in patch || "compositeLayers" in patch)) {
       const activePorts = new Set(utilityInputPortIds(nextUtilityData.utilityMode, nextUtilityData.utilityImageModel, nextUtilityData.utilityVideoModel, nextUtilityData));
       setEdges((current) =>
         current.filter((edge) => {
@@ -5745,7 +5748,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           from: draftEdge.from,
           to,
           color: draftEdge.color
-        }));
+        }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel)));
         if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
         if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
       }
@@ -5792,7 +5795,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       nodeDataIds: shouldResetAutoAspectOutput || shouldResetCoverageOutput ? [to.nodeId] : [],
       restoreStructure: true
     });
-    setEdges((current) => appendInputConnection(targetNodeForConnection?.type === "audioModel" && to.port === "audioIn" ? current.filter(edge => edge.to.nodeId !== to.nodeId || edge.to.port !== to.port) : current, { id: `edge-${Date.now()}`, from, to, color }));
+    setEdges((current) => appendInputConnection(targetNodeForConnection?.type === "audioModel" && to.port === "audioIn" ? current.filter(edge => edge.to.nodeId !== to.nodeId || edge.to.port !== to.port) : current, { id: `edge-${Date.now()}`, from, to, color }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel)));
     if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
     if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
     setSaveStatus("Connected nodes");
@@ -5845,6 +5848,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
+      return normalizeCompositeLayers(target.data).map(compositeLayerPortId).filter((port) => !edgesRef.current.some((edge) => edge.to.nodeId === target.id && edge.to.port === port));
+    }
     if (target.type === "explore") return ({ prompt: ["promptIn"], image: ["imageIn"], character: ["characterIn"], transfer: ["transferIn"], style: ["styleIn"], camera: ["cameraIn"] })[outputKind] || [];
     if (isOutputSinkConnection(target.type, "sourceIn", outputKind)) {
       return ["sourceIn"];
@@ -5972,6 +5978,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && isCompositeLayerPort(target.data, to.port)) {
+      const outputPort = portDefinitionForNode(source, from.port, "output");
+      return outputPort?.disabled ? outputPort.disabledReason || "Generate this output before connecting it" : "";
+    }
     if (target.type === "audioModel") return audioInputEnabled(target.data.audioMode, to.port) ? "" : "Select Speech to Speech for an audio input, or a text-driven mode for a prompt input";
     if (target.type === "explore") {
       if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
@@ -14359,7 +14369,7 @@ function NodeBody({
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
-        (!isCompositeVideo || (incoming.referenceVideoIn?.length || 0) >= 2) &&
+        (!isCompositeVideo || normalizeCompositeLayers(node.data).filter((layer) => incoming[compositeLayerPortId(layer)]?.length).length >= 2) &&
         (!isWanBlend || Boolean(incoming.referenceVideoIn?.length) && wanBlendImageCount > 0) &&
         (!isVideoStitch || wanWarpSegmentCount >= 1 || wanWarpBlendRefineReady) &&
         (!isTransitionBuilder || hasWanSegmentInputs && Boolean(promptValue.trim())) &&
@@ -14455,6 +14465,22 @@ function NodeBody({
             ? "Source Video"
             : "Control Video";
     const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanBlend ? "Add color map" : isVideoStitch ? "Add WanBlend or segments" : isWanVaceMaskToVideo ? "Optional video" : "Add video";
+    const compositePreviewLayers = isVideoMode && isCompositeVideo ? normalizeCompositeLayers(node.data).map((layer) => {
+      const source = incoming[compositeLayerPortId(layer)]?.at(-1);
+      const mask = incoming[compositeMaskPortId(layer)]?.at(-1);
+      return { ...layer, url: source ? connectedOutputUrl(source.source, source.edge) : "", type: source ? previewMediaType(source.source, source.edge) : "", maskUrl: mask ? connectedOutputUrl(mask.source, mask.edge) : "", maskType: mask ? previewMediaType(mask.source, mask.edge) : "" };
+    }).filter((layer) => layer.url) : [];
+    const utilityResultPane = <ResultPane
+      label={isAutoAspect ? "Aspect outputs will appear here" : isCoverage ? "9 coverage angles will appear here" : "Results will appear here"}
+      resultUrl={node.data.resultUrl}
+      resultItems={node.data.resultItems}
+      selectedIndex={node.data.selectedResultIndex}
+      type={resultType}
+      status={node.data.status}
+      error={node.data.error}
+      onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+      onPreviewOpen={onPreviewOpen}
+    />;
 
     function setMode(nextMode) {
       if (mode === nextMode) return;
@@ -14488,17 +14514,7 @@ function NodeBody({
             Video
           </button>
         </div>
-        <ResultPane
-          label={isAutoAspect ? "Aspect outputs will appear here" : isCoverage ? "9 coverage angles will appear here" : "Results will appear here"}
-          resultUrl={node.data.resultUrl}
-          resultItems={node.data.resultItems}
-          selectedIndex={node.data.selectedResultIndex}
-          type={resultType}
-          status={node.data.status}
-          error={node.data.error}
-          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
-          onPreviewOpen={onPreviewOpen}
-        />
+        {isVideoMode && isCompositeVideo ? <CompositeLivePreview layers={compositePreviewLayers} stillDuration={node.data.compositeDuration || 5} renderedResult={utilityResultPane} hasResult={Boolean(node.data.resultUrl)} runError={node.data.error} /> : utilityResultPane}
         {isTransitionBuilder ? (
           <>
             <OutputPortRow node={node} port={outclipOutputPort} label="Last Frame" align="right" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
@@ -14507,7 +14523,8 @@ function NodeBody({
         ) : (
           <OutputPortRow node={node} port={utilityOutputPort} label={utilityOutputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         )}
-        {!settingsOpen && (
+        {isVideoMode && isCompositeVideo && <CompositeLayerControls node={node} incoming={incoming} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} colors={portColors} mediaType={previewMediaType} connectedSummary={connectedSummary} />}
+        {!settingsOpen && !isCompositeVideo && (
           <div className="model-input-port-stack utility-input-port-stack" aria-label="Utility inputs">
             {collapsedPorts.filter(Boolean).map((port) => (
               <PortHandle
@@ -14553,7 +14570,7 @@ function NodeBody({
                   </select>
                 </NodeRow>
               )}
-              {hasReferenceVideoInput && !isTransitionBuilder && !isVideoStitch && (
+              {hasReferenceVideoInput && !isTransitionBuilder && !isVideoStitch && !isCompositeVideo && (
                 <NodeRow label={referenceVideoLabel} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
                 </NodeRow>
@@ -14592,7 +14609,7 @@ function NodeBody({
                   />
                 </React.Suspense>
               ) : isCompositeVideo ? (
-                <CompositeVideoControls incoming={incoming} maskVideoPort={maskVideoPort} settingsOpen={settingsOpen} node={node} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+                null
               ) : isWanBlend ? (
                 <WanBlendControls
                   incoming={incoming}
@@ -16344,69 +16361,6 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
   );
 }
 
-function CompositeVideoControls({ incoming, maskVideoPort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
-  const videoCount = incoming.referenceVideoIn?.length || 0;
-  const maskConnected = Boolean(incoming.maskVideoIn?.length);
-  const blur = colorIdMatteBlur(node.data.compositeMaskBlur);
-  const expand = colorIdMatteExpand(node.data.compositeMaskExpand);
-  const blendMode = normalizeChoice(node.data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal");
-  const mixAmount = clampedNumber(node.data.compositeMixAmount, 0, 100, 100);
-  const outputFormat = normalizeChoice(node.data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4");
-
-  return (
-    <>
-      <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Optional mask")}</button>
-      </NodeRow>
-      <NodeRow label="Layers">
-        <div className="utility-mini-note">{videoCount >= 2 ? "First: Base | Last: Layer 1" : "Connect Base, then Layer 1."}</div>
-      </NodeRow>
-      <NodeRow label="Blend Mode">
-        <select value={blendMode} onChange={(event) => onUpdate(node.id, { compositeBlendMode: event.target.value })}>
-          {compositeVideoBlendModeOptions.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-      </NodeRow>
-      <NodeRow label="Mix">
-        <div className="color-id-slider">
-          <input type="range" min="0" max="100" step="1" value={mixAmount} onChange={(event) => onUpdate(node.id, { compositeMixAmount: event.target.value })} />
-          <span>{mixAmount}%</span>
-        </div>
-      </NodeRow>
-      {maskConnected && (
-        <>
-        <NodeRow label="Invert Mask">
-          <button className={`node-toggle ${node.data.compositeInvertMask ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { compositeInvertMask: !node.data.compositeInvertMask })}>
-            <span />
-          </button>
-        </NodeRow>
-        <NodeRow label="Mask Blur">
-          <div className="color-id-slider">
-            <input type="range" min="0" max="24" step="0.5" value={blur} onChange={(event) => onUpdate(node.id, { compositeMaskBlur: event.target.value })} />
-            <span>{blur}</span>
-          </div>
-        </NodeRow>
-        <NodeRow label="Expand">
-          <div className="color-id-slider">
-            <input type="range" min="-12" max="12" step="1" value={expand} onChange={(event) => onUpdate(node.id, { compositeMaskExpand: event.target.value })} />
-            <span>{expand}</span>
-          </div>
-        </NodeRow>
-        </>
-      )}
-      <NodeRow label="Format">
-        <select value={outputFormat} onChange={(event) => onUpdate(node.id, { compositeOutputFormat: event.target.value })}>
-          {colorIdMatteVideoOutputOptions.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label.replace("mask", "video")}
-            </option>
-          ))}
-        </select>
-      </NodeRow>
-    </>
-  );
-}
 
 function WanBlendControls({ incoming, wanBlendImagePorts = [], settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const imageCount = wanBlendConnectedImageCount(incoming);
@@ -19249,7 +19203,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
-  if (isUtilityCompositeVideoModel(videoModel)) return ["referenceVideoIn", "maskVideoIn"];
+  if (isUtilityCompositeVideoModel(videoModel)) return compositeInputPorts(data).map((port) => port.id);
   if (isUtilityWanBlendModel(videoModel)) return ["promptIn", ...wanBlendImagePortIds, "referenceVideoIn"];
   if (isUtilityVideoStitchModel(videoModel)) return ["promptIn", "referenceVideoIn", "controlVideoIn", "maskVideoIn"];
   if (isUtilityTransitionBuilderModel(videoModel)) return ["promptIn", "startFrameIn", "endFrameIn", "referenceVideoIn", "maskVideoIn"];
@@ -19696,6 +19650,7 @@ function visiblePortIdsForNode(node) {
 
 function inputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.input || [];
+  if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)) return compositeInputPorts(node.data, portColors.preview);
   return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
 }
 
@@ -19801,6 +19756,7 @@ function portKindFromColor(color) {
 
 function portKindForNodePort(node, portId, role) {
   if (!node || !portId) return "";
+  if (role === "input" && node.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel) && isCompositeLayerPort(node.data, portId)) return "media";
   if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
   if (role === "input" && node.type === "output" && portId === "sourceIn") return "output";
   if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
@@ -19814,6 +19770,7 @@ function portKindForNodePort(node, portId, role) {
 }
 
 function acceptedInputPortKinds(node, portId) {
+  if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel) && isCompositeLayerPort(node.data, portId)) return ["image", "video"];
   const inputKind = portKindForNodePort(node, portId, "input");
   if (inputKind === "preview") return ["image", "video", "audio", "model3d", "transfer", "character"];
   if (inputKind === "output") return outputAcceptedSourceKinds;
@@ -19832,6 +19789,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   const inputKind = portKindForNodePort(target, toPort, "input");
   if (inputKind === "preview") return "Preview accepts image, video, audio, 3D, Mood Board, or Character outputs";
   if (inputKind === "output") return "Output accepts image, video, audio, 3D, prompt, Director, Mood Board, or Character outputs";
+  if (inputKind === "media") return "Composite layers and masks accept image or video outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -21860,6 +21818,12 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
       outputFormat: node.data.colorIdMatteOutputFormat || "mp4"
     },
     compositeVideo: {
+      layers: normalizeCompositeLayers(node.data).map((layer) => {
+        const connection = incoming[compositeLayerPortId(layer)]?.at(-1);
+        const mask = incoming[compositeMaskPortId(layer)]?.at(-1);
+        return { ...layer, url: connection ? connectedOutputUrl(connection.source, connection.edge) : "", type: connection ? previewMediaType(connection.source, connection.edge) : "", maskUrl: mask ? connectedOutputUrl(mask.source, mask.edge) : "", maskType: mask ? previewMediaType(mask.source, mask.edge) : "" };
+      }).filter((layer) => layer.url),
+      duration: clampedNumber(node.data.compositeDuration, 0.1, 600, 5),
       blendMode: normalizeChoice(node.data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal"),
       mixAmount: clampedNumber(node.data.compositeMixAmount, 0, 100, 100),
       invertMask: Boolean(node.data.compositeInvertMask),
@@ -23237,7 +23201,7 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
   const nodeMap = new Map(normalizedNodes.map((node) => [node.id, node]));
   const normalizedEdges = [];
 
-  edges.forEach((edge) => {
+  migrateCompositeEdges(normalizedNodes, edges, (node) => node.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)).forEach((edge) => {
     const split = legacySplits.get(edge.from.nodeId);
     if (split) {
       normalizedEdges.push(...edgesForLegacyDirection(edge, split));
@@ -24831,6 +24795,8 @@ function normalizeUtilityData(data = {}) {
     colorIdMatteStartTime: data.colorIdMatteStartTime ?? "",
     colorIdMatteEndTime: data.colorIdMatteEndTime ?? "",
     colorIdMatteOutputFormat: normalizeChoice(data.colorIdMatteOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
+    compositeLayers: normalizeCompositeLayers(data),
+    compositeDuration: clampedNumber(data.compositeDuration, 0.1, 600, 5),
     compositeBlendMode: normalizeChoice(data.compositeBlendMode, compositeVideoBlendModeOptions.map(([value]) => value), "normal"),
     compositeMixAmount: clampedNumber(data.compositeMixAmount, 0, 100, 100),
     compositeInvertMask: Boolean(data.compositeInvertMask),
