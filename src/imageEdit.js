@@ -116,6 +116,13 @@ export function drawImageEditMarks(context, marks, width, height, layer = "drawi
   }
 }
 
+export function compositeImageEditDrawing(context, marks, width, height) {
+  if (!marks.some(mark => mark.layer === "drawing")) return;
+  const drawing = document.createElement("canvas"); drawing.width = width; drawing.height = height;
+  drawImageEditMarks(drawing.getContext("2d"), marks, width, height, "drawing");
+  context.drawImage(drawing, 0, 0);
+}
+
 export function imageEditHasPixels(context, width, height) {
   const pixels = context.getImageData(0, 0, width, height).data;
   for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) return true;

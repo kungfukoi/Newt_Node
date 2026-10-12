@@ -316,6 +316,11 @@ export const nodeApi = {
     return ensureOk(response, data, "Could not save selection.");
   },
 
+  async identifyImageBox(body) {
+    const { response, data } = await fetchJsonApi("/api/node/identify-image-box", jsonBody(body), "Box identification", { retryLocalApi: false, timeoutMs: 330000 });
+    return ensureOk(response, data, "Could not identify this box.");
+  },
+
   uploadVideoAsset(form, label = "Video import") {
     return fetchJsonApi("/api/node/upload-video-asset", { method: "POST", body: form }, label);
   },

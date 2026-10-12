@@ -5,10 +5,12 @@ import React from "react";
 import { Boxes } from "lucide-react";
 import { validateEditBoxes } from "../imageEditBoxes.js";
 import { exportBoxSelections } from "../imageEditBoxExport.js";
+import { useImageEditBoxNames } from "../useImageEditBoxNames.js";
+import { imageEditDownload, downloadImageEdit } from "../imageEditSave.js";
 import { boxNeedsObject, boxNeedsIdentification, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
 import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
-import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, RefreshCcw, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, RefreshCcw, Save, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
 import { imageEditModelOptions, normalizeImageEditModel } from "../imageEdit.js";
@@ -104,6 +106,26 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const providerAvailable = provider === "fal" || provider === "atlas";
   const providerLabel = provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
   const resultProvider = result?.provider || result?.cost?.provider;
+  const namingBoxes = useImageEditBoxNames({ boxes, base, enabled: !blank && !reviewing, workflowContext,
+    nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", onWarning: setWarning,
+    onNamed: ({ id, label, expectedLabel, region }) => {
+      if (busyRef.current) return;
+      setHistory(current => {
+        const previous = current.marks.find(mark => mark.id === id && mark.layer === "boxes");
+        if (!previous || previous.label !== expectedLabel || JSON.stringify(previous.source) !== JSON.stringify(region)) return current;
+        const next = { ...previous, label, ...(!previous.selectionDerived ? { sourceMask: undefined } : {}) };
+        return { past: [...current.past.slice(-59), current.marks], marks: current.marks.map(mark => mark.id === id ? next : mark), future: [] };
+      });
+    }
+  });
+
+  async function saveToDisk() {
+    if (busyRef.current || saving || !size || namingBoxes.length) return;
+    setSaving(true); setError("");
+    try { downloadImageEdit(await imageEditDownload({ base, result, size, marks: history.marks, prompt, blank })); }
+    catch (failure) { setError(failure.message || "Could not save the image to disk."); }
+    finally { if (mounted.current) setSaving(false); }
+  }
 
   React.useEffect(() => { rootRef.current?.focus(); }, []);
   React.useEffect(() => {
@@ -215,10 +237,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
   async function exportBoxes() {
-    if (busyRef.current || saving || !size) return;
+    if (busyRef.current || saving || !size || namingBoxes.length) return;
     setSaving(true); setError("");
     try {
-      const png = await exportBoxSelections({ boxes, size, base, prompt });
+      const png = await exportBoxSelections({ boxes, size, base, prompt, drawingMarks: history.marks });
       const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
       form.append("sourceUrl", base.url);
       form.append("nodeId", item.editContext?.nodeId || "");
@@ -366,7 +388,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
     const editQuality = qualities.includes(edit.quality) ? edit.quality : "high";
     const editResolution = resolutionOptions.includes(edit.resolution) ? edit.resolution : "2K";
-    if (busyRef.current || modelSavePending.current) return;
+    if (busyRef.current || saving || namingBoxes.length || modelSavePending.current) return;
     if (!editSize) { setError("Wait for the original image to load before generating."); return; }
     if (!providerAvailable) { setError("Enable an image-edit provider in Settings before generating."); return; }
     // Pointer capture can be lost when focus leaves the canvas. It must never
@@ -442,7 +464,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const setActiveLayer = (value) => { setLayer(value); if (tool === "boxes" || (value === "selection" && ["text", "arrow"].includes(tool)) || (value === "drawing" && tool === "object")) setTool("pen"); };
 
   return <section ref={rootRef} tabIndex={-1} className="image-edit-studio" aria-label="Image Edit" role="dialog" aria-modal="true" onKeyDownCapture={keyboard} onPointerDown={(event) => event.stopPropagation()}>
-    <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><div className="ies-header-actions"><label className="ies-model-select" title="Shared with User Preferences"><span>Edit model</span><select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving} onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>{modelSaving && <span role="status" className="ies-model-saving">Saving…</span>}<IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} /></div></header>
+<header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><div className="ies-header-actions"><label className="ies-model-select" title="Shared with User Preferences"><span>Edit model</span><select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving} onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>{modelSaving && <span role="status" className="ies-model-saving">Saving…</span>}<IconButton icon={Save} label="Save image to disk" onClick={saveToDisk} disabled={busy || saving || !size || namingBoxes.length > 0} /><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} /></div></header>
     <div className="ies-workspace">
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
@@ -477,7 +499,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       </div>
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
-          {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
+          {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} namingBoxes={namingBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
           {tool !== "boxes" && <div className="ies-object-controls">
             {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
               <strong>SAM 2 detection</strong>
@@ -505,7 +527,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         </fieldset>}
         <div className="ies-run-section">
           <small>{reviewing ? result.modelName || model : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
-          {!reviewing && <button className="ies-primary" type="button" onClick={() => generate()} disabled={busy || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
+          {!reviewing && <button className="ies-primary" type="button" onClick={() => generate()} disabled={busy || saving || namingBoxes.length > 0 || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
           {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
         </div>

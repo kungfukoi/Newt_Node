@@ -79,7 +79,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
   </svg>;
 }
 
-export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, onSaveSelection, model, busy }) {
+export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, onSaveSelection, namingBoxes = [], model, busy }) {
   const box = boxes.find(entry => entry.id === selectedId);
   const reference = boxes.find(entry => entry.mode === "reference" && entry.referenceUrl)?.referenceUrl;
   const sourceOnly = box && ["keep", "remove"].includes(box.mode);
@@ -94,7 +94,9 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
   return <div className="ies-box-controls" role="group" aria-label="Boxes settings">
     <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it. Shift-select objects, then click Boxes to combine them into one named selection.</small>
     <small>Reference tags in your prompt, for example @lamp. Tags follow descriptions; duplicate names receive a numeric suffix.</small>
-    <button type="button" disabled={busy || !boxes.length} onClick={onSaveSelection}>Save Selection</button>
+    <small>New boxes are named automatically. You can edit any name. Uncertain selections stay “Object”.</small>
+    {namingBoxes.length > 0 && <small role="status">Naming {namingBoxes.length} {namingBoxes.length === 1 ? "box" : "boxes"}…</small>}
+    <button type="button" disabled={busy || namingBoxes.length > 0 || !boxes.length} onClick={onSaveSelection}>Save Selection</button>
     <small>Saves a PNG copy to outputs and adds it to the canvas, with visible tagged boxes and embedded descriptions, coordinates and selection metadata.</small>
     {boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}
     {box && <>

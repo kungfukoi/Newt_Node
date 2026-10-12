@@ -4,6 +4,70 @@ import fs from "node:fs/promises";
 import { readSelectionMetadata } from "../src/imageEditBoxExport.js";
 import sharp from "sharp";
 
+test("new boxes name themselves, respect manual edits and save the annotated image to disk", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
+    nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
+    edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
+  })));
+  const { errors } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.5 Flare" } } });
+  let naming = 0, delayed, requested;
+  let waitRequest = new Promise(resolve => { requested = resolve; });
+  await page.route("**/api/node/identify-image-box", async route => {
+    naming++;
+    expect(route.request().postDataJSON().region.w).toBeCloseTo(.15, 2);
+    if (naming === 2 || naming === 4) { delayed = route; requested(); return; }
+    return route.fulfill({ json: { label: naming === 1 ? "pickleball" : "Object", confidence: naming === 1 ? .95 : .3, provider: "fal", model: "fixture" } });
+  });
+  await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
+  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.5 Flare", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
+  const save = editor.getByRole("button", { name: "Save image to disk", exact: true });
+  await expect(save).toBeVisible();
+  const firstDownload = page.waitForEvent("download"); await save.click();
+  const originalDownload = await firstDownload;
+  expect(originalDownload.suggestedFilename()).toBe("landscape.png");
+  const original = await fs.readFile(await originalDownload.path());
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  const surface = await editor.locator(".ies-surface").boundingBox();
+  async function draw(x, y) {
+    await page.mouse.move(surface.x + surface.width * x, surface.y + surface.height * y); await page.mouse.down();
+    await page.mouse.move(surface.x + surface.width * (x + .15), surface.y + surface.height * (y + .15)); await page.mouse.up();
+  }
+  await draw(.1, .15);
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("pickleball");
+  await expect(editor.getByLabel("Rename box 1", { exact: true })).toHaveText("1. pickleball");
+  await draw(.5, .15); await waitRequest;
+  await expect(save).toBeDisabled();
+  await editor.getByLabel("Box description", { exact: true }).fill("my cup");
+  await delayed.fulfill({ json: { label: "pencil cup", confidence: .9 } });
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("my cup");
+  await draw(.5, .6);
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("Object");
+  await expect(save).toBeEnabled();
+  const downloadWait = page.waitForEvent("download"); await save.click();
+  const download = await downloadWait, png = await fs.readFile(await download.path());
+  expect(download.suggestedFilename()).toBe("image-selection.png");
+  const metadata = readSelectionMetadata(png);
+  expect(metadata.boxes.map(box => box.label)).toEqual(["pickleball", "my cup", "Object"]);
+  const pixel = async (bytes, left = 320, top = 340) => (await sharp(bytes).ensureAlpha().extract({ left, top, width: 1, height: 1 }).raw().toBuffer()).toString("hex");
+  expect(await pixel(png)).toBe(await pixel(original));
+  waitRequest = new Promise(resolve => { requested = resolve; });
+  await draw(.1, .6); await waitRequest;
+  await editor.getByRole("button", { name: "Delete box", exact: true }).click();
+  await delayed.fulfill({ json: { label: "deleted box", confidence: .99 } });
+  await expect(editor.locator(".ies-box-target")).toHaveCount(3);
+  await editor.getByRole("button", { name: "Draw", exact: true }).click();
+  async function stroke() {
+    await page.mouse.move(surface.x + surface.width * .3, surface.y + surface.height * .8); await page.mouse.down();
+    await page.mouse.move(surface.x + surface.width * .4, surface.y + surface.height * .8); await page.mouse.up();
+  }
+  await stroke(); await editor.getByRole("button", { name: "Erase marks", exact: true }).click(); await stroke();
+  const erasedWait = page.waitForEvent("download"); await save.click();
+  const erased = await fs.readFile(await (await erasedWait).path());
+  expect(await pixel(erased, 224, 288)).toBe(await pixel(original, 224, 288));
+  await expect(editor).toBeVisible(); expect(errors).toEqual([]);
+});
+
 test("Save Selection creates a tagged PNG output and canvas copy with more than eight boxes", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
@@ -132,6 +196,9 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   expect(box.source.x).toBeCloseTo(.3, 2);
   const divider = editor.getByRole("slider", { name: "Compare divider", exact: true });
   await expect(divider).toBeVisible();
+  const resultDownload = page.waitForEvent("download");
+  await editor.getByRole("button", { name: "Save image to disk", exact: true }).click();
+  expect((await resultDownload).suggestedFilename()).toBe("edited.png");
   const imageRect = await editor.locator(".ies-surface").boundingBox();
   const transform = await editor.locator(".ies-surface").evaluate(el => el.style.transform);
   const grip = await divider.boundingBox();

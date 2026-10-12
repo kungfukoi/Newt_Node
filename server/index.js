@@ -123,6 +123,7 @@ import { generateIdeogram45 } from "./ideogram45.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { registerImageBoxNameRoutes } from "./routes/imageBoxNames.js";
 import { registerObjectSelectionRoutes } from "./routes/objectSelection.js";
 import { createObjectSelectionCache } from "./object-selection-cache.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
@@ -948,6 +949,21 @@ registerObjectSelectionRoutes(app, {
   upload: uploadImageInputToFal, subscribe: subscribeFal, recordHistory: appendHistory, sendError: sendApiError
 });
 
+registerImageBoxNameRoutes(app, {
+  limiter: imageGenerationRequestLimiter,
+  readSource: async url => {
+    if (!isLocalAssetUrl(url)) throw httpError(400, "Use an image uploaded or generated in NewtNode.");
+    const source = await readLocalAsset(url);
+    if (!source.mimeType.startsWith("image/") || source.buffer.length > 32 * 1024 * 1024) throw httpError(400, "Use a local image up to 32 MB.");
+    return source;
+  },
+  describe: runMediaDescriptionLlm,
+  recordHistory: appendHistory,
+  estimateCost: estimateTextProcessingCost,
+  cacheScope: () => JSON.stringify([runtimeModelProviderPreferences.llm || textLlmProvider, falVisionTextModel, openAiTextModel]),
+  sendError: sendApiError
+});
+
 registerImageEditRoutes(app, {
   limiter: imageGenerationRequestLimiter,
   getProvider: (_req, requestedProvider) => {
@@ -1144,6 +1160,7 @@ function buildHealthPayload() {
       previewInpaint: true,
       imageEdit: true,
       imageSelectionExport: true,
+      imageBoxIdentification: true,
       objectSelectionCache: true,
       imageObjectSelection: true,
       ideogram45: true,

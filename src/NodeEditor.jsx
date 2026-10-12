@@ -15923,7 +15923,7 @@ function NodeBody({
       />
       <GenerationProgress scope={generationScope} nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
-      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
           : <RunPriceLabel label="Run Video" options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}

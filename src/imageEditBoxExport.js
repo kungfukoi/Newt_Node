@@ -1,5 +1,6 @@
 import { boxCorners, editBoxTags, validateEditBoxes } from "./imageEditBoxes.js";
 import { validateBoxObject } from "./imageEditBoxModels.js";
+import { compositeImageEditDrawing } from "./imageEdit.js";
 
 export const selectionMetadataKeyword = "NewtNodeSelections";
 const signature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -64,7 +65,7 @@ export function readSelectionMetadata(png) {
   return null;
 }
 
-export async function exportBoxSelections({ boxes, size, base, prompt }) {
+export async function exportBoxSelections({ boxes, size, base, prompt, drawingMarks = [] }) {
   const saved = boxSelectionDocument(boxes, size, base, prompt);
   const image = new Image();
   await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("Could not load the source for export.")); image.src = base.url; });
@@ -72,6 +73,7 @@ export async function exportBoxSelections({ boxes, size, base, prompt }) {
   canvas.width = size.width; canvas.height = size.height;
   const context = canvas.getContext("2d");
   context.drawImage(image, 0, 0, size.width, size.height);
+  compositeImageEditDrawing(context, drawingMarks, size.width, size.height);
   const font = Math.max(12, Math.min(size.width, size.height) / 65);
   context.font = `${font}px sans-serif`; context.lineWidth = Math.max(2, font / 8);
   saved.boxes.forEach((box, index) => {

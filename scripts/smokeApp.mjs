@@ -8,6 +8,7 @@ const requiredHealthRoutes = [
   "editMedia",
   "editPreview",
   "imageSelectionExport",
+  "imageBoxIdentification",
   "extractVideoFrame",
   "generate3d",
   "ideogram45",

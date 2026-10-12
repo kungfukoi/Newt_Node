@@ -117,6 +117,9 @@ try {
   }
   assert.equal((await (await request("/api/health")).json()).routes.imageObjectSelection, true);
   assert.equal((await (await request("/api/health")).json()).routes.imageSelectionExport, true);
+  assert.equal((await (await request("/api/health")).json()).routes.imageBoxIdentification, true);
+  const invalidBoxName = await fetch(api + "/api/node/identify-image-box", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  assert.equal(invalidBoxName.status, 400);
   const emptyImageSelection = await fetch(api + "/api/node/save-image-selection", { method: "POST", body: new FormData() });
   assert.equal(emptyImageSelection.status, 400);
   const noKeySelection = await fetch(api + "/api/node/image-objects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceUrl: "/outputs/panel.png", requestId: "smoke-object-selection" }) });
