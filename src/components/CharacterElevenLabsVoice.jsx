@@ -1,4 +1,5 @@
 import React from "react";
+import { RefreshCw } from "lucide-react";
 import { audioModelApi } from "../api/newtApi.js";
 
 let pendingCatalog;
@@ -36,16 +37,20 @@ export function CharacterElevenLabsVoice({ node, onUpdate, disabled }) {
   const selected = node.data.characterVoiceProvider === "elevenlabs" ? node.data.characterElevenLabsVoiceId || "" : "";
   const unavailable = selected && !voices.some(voice => voice.id === selected);
   return <div className="character-elevenlabs-voice nodrag nowheel">
-    <label>ElevenLabs voice<select aria-label="Character ElevenLabs voice" value={selected} disabled={disabled || loading} onChange={event => {
+    <div className="character-voice-field">
+    <label className="character-section-label" htmlFor={`character-voice-${node.id}`}>ElevenLabs</label>
+    <div className="character-voice-controls">
+    <select id={`character-voice-${node.id}`} aria-label="Character ElevenLabs voice" title="Director or Video Model dialogue uses this voice. Uploaded samples are retained." value={selected} disabled={disabled || loading} onChange={event => {
       const voice = voices.find(item => item.id === event.target.value);
       onUpdate(node.id, { characterVoiceProvider: voice ? "elevenlabs" : "uploaded", characterElevenLabsVoiceId: voice?.id || "", characterElevenLabsVoiceName: voice?.name || "" });
     }}>
       <option value="">Use uploaded dialogue audio</option>
       {unavailable && <option value={selected}>{node.data.characterElevenLabsVoiceName || selected} — unavailable; refresh</option>}
       {["Mine", "Default"].map(group => <optgroup key={group} label={group === "Mine" ? "My voices and custom voices" : "Default voices"}>{voices.filter(voice => voice.group === group).map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</optgroup>)}
-    </select></label>
-    <button type="button" disabled={disabled || loading} onClick={() => void refresh(true)} aria-label="Refresh Character ElevenLabs voices">{loading ? "Loading voices…" : "Refresh voices"}</button>
-    {error && <small role="status">{error}</small>}
-    {selected && <small>Director dialogue generates speech in this voice when you run the connected Video Model. Existing uploaded audio is retained.</small>}
+    </select>
+    <button className="character-add-button" type="button" disabled={disabled || loading} onClick={() => void refresh(true)} aria-label="Refresh Character ElevenLabs voices" title={loading ? "Loading voices…" : "Refresh ElevenLabs voices"}><RefreshCw size={13} /></button>
+    </div>
+    </div>
+    {error && <small className="upload-error" role="status">{error}</small>}
   </div>;
 }

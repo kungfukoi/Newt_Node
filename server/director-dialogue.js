@@ -47,10 +47,10 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
 
   return async function prepare(req) {
     const body = req.body;
-    const dialogue = body.filmDirector?.dialogue;
+    const dialogue = body.characterDialogue || body.filmDirector?.dialogue;
     if (!dialogue?.lines?.length) return null;
     if (!directorDialogueModelSupported(body.model)) throw new Error("The selected video model cannot use Character dialogue audio. Choose Seedance 2.0, Seedance 2.5 or MiniMax H3.");
-    if (body.generateAudio === false || body.filmDirector.audioMode === "silent") throw new Error("Enable Generate Audio and a speaking Director audio mode to use assigned character voices.");
+    if (body.generateAudio === false || body.filmDirector?.audioMode === "silent") throw new Error("Enable Generate Audio and a speaking Director audio mode to use assigned character voices.");
     if (body.startFrameUrls?.length || body.endFrameUrls?.length) throw new Error("Character dialogue requires reference-to-video. Move start/end frames to Reference Images so the speech is not ignored.");
     const audioLimit = /seedance.*2[ .-]?5/i.test(body.model) ? 10 : 3;
     if ((body.referenceAudioUrls || []).length >= audioLimit) throw new Error("There are too many audio references for Character dialogue. Remove unused audio inputs before generating speech.");
@@ -127,7 +127,7 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
     const instructions = ["AUTHORITATIVE CHARACTER DIALOGUE AUDIO: @DirectorDialogue contains the exact voiced lines below. Preserve the words, voice identity, speaker assignments and audio timing; lip-sync only the assigned character during their own speaking interval. Do not swap voices, paraphrase speech, add dialogue or have listeners speak.",
       ...cues.map(cue => `${cue.startSeconds.toFixed(2)}–${cue.endSeconds.toFixed(2)} seconds: @${cue.tag} speaks ${JSON.stringify(cue.text)} in their assigned voice.`)].join("\n");
     body.prompt = [body.prompt, instructions].filter(Boolean).join("\n\n");
-    body.filmDirector.finalPrompt = [body.filmDirector.finalPrompt, instructions].filter(Boolean).join("\n\n");
+    if (body.filmDirector) body.filmDirector.finalPrompt = [body.filmDirector.finalPrompt, instructions].filter(Boolean).join("\n\n");
     return { url: track.url, fileName: track.fileName, durationSeconds: track.durationSeconds, cues, clips: clips.map(({ url, fileName, requestId, historyWarning }) => ({ url, fileName, requestId, historyWarning })) };
   };
 }

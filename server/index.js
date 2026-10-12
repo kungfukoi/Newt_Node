@@ -6431,7 +6431,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     delete req.body.directorDialogueAudio;
-    if (req.body.filmDirector?.dialogue?.lines?.length) {
+    if ((req.body.characterDialogue || req.body.filmDirector?.dialogue)?.lines?.length) {
       const model = selectedVideoModel.displayName;
       const group = /minimax.*h3/i.test(model) ? "minimaxH3" : /seedance/i.test(model) ? "seedance" : "";
       if (!group) return res.status(400).json({ error: `${model} does not accept assigned Character dialogue audio. Choose Seedance or MiniMax H3.` });

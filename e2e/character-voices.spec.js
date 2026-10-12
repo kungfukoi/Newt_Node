@@ -41,6 +41,25 @@ test("Director dialogue controls bind lines to Character IDs and retain them aft
   expect(errors).toEqual([]);
 });
 
+test("direct Character to Video uses assigned voices without a Director", async ({ page }) => {
+  const video = { id: "video", type: "videoModel", x: 10, y: 0, data: { title: "Video", model: "Seedance 2.5", prompt: "Alex and Bea greet each other", generateAudio: true, settingsOpen: true, directorDialogue: lines } };
+  const { errors } = await setup(page, { nodes: [video, actor("alex", "Alex", "voiceA"), { ...actor("bea", "Bea", "voiceB"), y: 700 }], edges: ["alex", "bea"].map(id => ({ id: id + "-video", from: { nodeId: id, port: "characterOut" }, to: { nodeId: "video", port: "characterIn" } })) });
+  const card = page.locator('[data-node-card-id="video"]');
+  await expect(card.getByLabel("Dialogue line 1 character")).toHaveValue("alex");
+  await card.getByLabel("Dialogue line 1 text").fill("Good morning, Bea.");
+  let request;
+  await page.route("**/api/node/generate-video", route => { request = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/motion.mp4" } } }); });
+  await card.locator(".run-node-button").click();
+  await expect.poll(() => request?.characterDialogue?.lines?.length || 0).toBe(2);
+  expect(request.filmDirector).toBeNull();
+  expect(request.characterDialogue.characters.map(character => character.voice.id)).toEqual(["voiceA", "voiceB"]);
+  expect(request.characterDialogue.lines[0].text).toBe("Good morning, Bea.");
+  expect(request.referenceAudioUrls).not.toContain("/outputs/e2e/old.mp3");
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(card.getByLabel("Dialogue line 1 text")).toHaveValue("Good morning, Bea.");
+  expect(errors).toEqual([]);
+});
+
 test("Character to Director to Seedance passes exact speaker/voice pairs and retains prepared speech assets", async ({ page }) => {
   const director = { id: "director", type: "skillDirector", x: 1800, y: 0, data: { title: "Director", skillDirectorBuilt: true, resultText: "@Alex and @Bea greet each other.", lastRunReferenceTags: ["@Alex", "@Bea"], skillVideoModel: "Seedance 2.5", skillDirectorAudioMode: "production", directorDialogue: lines } };
   const video = { id: "video", type: "videoModel", x: 10, y: 0, data: { title: "Video", model: "Seedance 2.5", prompt: "Alex and Bea talk", generateAudio: true, settingsOpen: true } };

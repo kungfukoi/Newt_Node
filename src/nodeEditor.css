@@ -6639,7 +6639,8 @@ video.newtnode-video-fallback {
   align-items: center;
 }
 
-.character-model-field select {
+.character-model-field select,
+.character-elevenlabs-voice select {
   width: 100%;
   min-width: 0;
   min-height: 31px;
@@ -6649,18 +6650,30 @@ video.newtnode-video-fallback {
   outline: 0;
   color: #f4f0e8;
   background: #101010;
+  font-family: inherit;
   font-size: 11.5px;
   font-weight: 680;
 }
 
-.character-model-field select:focus {
+.character-model-field select:focus,
+.character-elevenlabs-voice select:focus {
   border-color: rgba(39, 213, 232, 0.42);
 }
 
-.character-model-field select:disabled {
+.character-model-field select:disabled,
+.character-elevenlabs-voice select:disabled {
   opacity: 0.58;
   cursor: not-allowed;
 }
+
+.character-elevenlabs-voice { display: grid; gap: 5px; min-width: 0; }
+.character-voice-field { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr); align-items: center; gap: 8px; }
+.character-voice-controls { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.character-voice-controls select { flex: 1; }
+.character-voice-controls .character-add-button { flex: 0 0 25px; padding: 0; border: 0; }
+.character-voice-controls .character-add-button:hover:not(:disabled) { color: #f4f0e8; background: rgba(255, 255, 255, 0.12); }
+.character-voice-controls .character-add-button:focus-visible { outline: 1px solid rgba(39, 213, 232, 0.42); outline-offset: 2px; }
+.character-voice-controls .character-add-button:disabled { opacity: 0.58; cursor: not-allowed; }
 
 .character-reference-notes textarea {
   width: 100%;

@@ -56,6 +56,14 @@ export function directorDialogueModelSupported(model = "") {
   return /seedance.*2(?:[ .-]|$)|minimax.*h3/i.test(model);
 }
 
+export function videoCharacterDialogue(direct = {}, director = null) {
+  if (!direct.lines?.length) return director || direct;
+  if (!director?.lines?.length) return direct;
+  const characters = new Map((director.characters || []).map(character => [character.nodeId, character]));
+  for (const character of direct.characters || []) characters.set(character.nodeId, character);
+  return { ...direct, revision: `${director.revision || 0}:${direct.revision || 0}`, lines: [...director.lines, ...direct.lines], characters: [...characters.values()] };
+}
+
 export function remapDirectorDialogueData(data, idMap) {
   const remap = rows => Array.isArray(rows) ? rows.map(line => ({ ...line, characterNodeId: idMap.get(line.characterNodeId) || line.characterNodeId })) : rows;
   return { ...data,

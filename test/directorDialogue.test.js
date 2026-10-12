@@ -82,3 +82,11 @@ test("MiniMax H3 receives the same exact assigned speech and timed references", 
   assert.deepEqual(value.referenceAudioUrls, [prepared.url]);
   assert.match(value.prompt, /@DirectorDialogue/);
 });
+
+test("direct Video Model dialogue uses Character voices without a Director package", async t => {
+  const h = await harness(t);
+  const value = body(); value.characterDialogue = value.filmDirector.dialogue; delete value.filmDirector;
+  const prepared = await h.prepare({ body: value });
+  assert.deepEqual(h.calls.map(call => [call.voiceId, call.prompt]), [["voiceA", "Hello, Bea."], ["voiceB", "Hello, Alex."]]);
+  assert.deepEqual(value.referenceAudioUrls, [prepared.url]);
+});

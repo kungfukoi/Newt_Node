@@ -32,7 +32,7 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
-  if (/^\/api\/node\/storyboard-(?:review|qc|plan|revise)(?:-v2)?$/.test(path) || path === "/api/node/explore-plan" || (path === "/api/node/generate-video" && typeof options.body === "string" && JSON.parse(options.body).filmDirector?.dialogue?.lines?.length) || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
+  if (/^\/api\/node\/storyboard-(?:review|qc|plan|revise)(?:-v2)?$/.test(path) || path === "/api/node/explore-plan" || (path === "/api/node/generate-video" && typeof options.body === "string" && (JSON.parse(options.body).characterDialogue?.lines?.length || JSON.parse(options.body).filmDirector?.dialogue?.lines?.length)) || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
     try {
       response = await fetchWithTimeout(requestUrl, options, timeoutMs);
       return { response, data: await readJsonResponse(response, label) };

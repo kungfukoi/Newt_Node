@@ -1,12 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { characterElevenLabsVoice, directorDialoguePackage, validateDirectorDialogue, remapDirectorDialogueData, directorDialogueBrief } from "../src/characterDialogue.js";
+import { characterElevenLabsVoice, directorDialoguePackage, validateDirectorDialogue, remapDirectorDialogueData, directorDialogueBrief, videoCharacterDialogue } from "../src/characterDialogue.js";
 import { remapImportedGraph } from "../src/workflowState.js";
 import { addFilmDirectorScene, switchFilmDirectorScene } from "../src/filmDirectorScenes.js";
 import { nodeApi } from "../src/api/newtApi.js";
 
 const actor = (id, name, voice) => ({ id, type: "character", x: 0, y: 0, data: { title: name, locked: true, activated: true, resultUrl: `/outputs/${id}.png`, characterVoiceProvider: "elevenlabs", characterElevenLabsVoiceId: voice, characterElevenLabsVoiceName: name + " voice" } });
 const lines = [{ id: "line-a", characterNodeId: "a", text: "Hello, Bea.", pauseAfter: 0.2 }, { id: "line-b", characterNodeId: "b", text: "Hello, Alex.", pauseAfter: 0 }];
+
+test("direct and Director dialogue combine without exchanging duplicate speakers", () => {
+  const director = directorDialoguePackage({ directorDialogue: [lines[0]] }, [actor("a", "Alex", "voiceA")].map(source => ({ source })), "director");
+  const direct = directorDialoguePackage({ directorDialogue: [lines[1]] }, [actor("a", "Alex", "voiceA"), actor("b", "Bea", "voiceB")].map(source => ({ source })), "video");
+  const merged = videoCharacterDialogue(direct, director);
+  assert.deepEqual(validateDirectorDialogue(merged).map(line => line.voiceId), ["voiceA", "voiceB"]);
+  assert.equal(merged.characters.length, 2);
+  assert.equal(videoCharacterDialogue({ lines: [] }, director), director);
+});
 
 test("dialogue binds exact lines and voice IDs to stable Character IDs, including after rename", () => {
   const a = actor("a", "Alex", "voiceA"), b = actor("b", "Bea", "voiceB");

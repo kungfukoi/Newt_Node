@@ -16,6 +16,7 @@ import { storyboardPlannedCastPatch, currentStoryboardCast, resolveStoryboardFra
 import { storyboardImageModelOptions } from "./modelOptions.js";
 import { storyboardImageSettings } from "./storyboardImageModels.js";
 import { CharacterElevenLabsVoice } from "./components/CharacterElevenLabsVoice.jsx";
+import { DirectorDialogueControls } from "./components/DirectorDialogueControls.jsx";
 import { directorDialoguePackage } from "./characterDialogue.js";
 import "./characterDialogue.css";
 import { storyboardSkillVersion, storyboardPlanningSettings, storyboardFrameContext, storyboardApproachDetails, storyboardPacing, storyboardPanelEditingLocked, validateStoryboardRevision as validateStoryboardRevisionV2 } from "./storyboardWorkflow.js";
@@ -15936,6 +15937,7 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
           />
         </NodeRow>
+        {(incoming.characterIn?.length || node.data.directorDialogue?.length) && <DirectorDialogueControls node={node} incoming={incoming} disabled={node.data.status === "running" || node.data.status === "uploading"} onChange={(rows, revision) => onUpdate(node.id, { directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) })} />}
         {supportsDirectorInput && (
           <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
@@ -21731,6 +21733,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
       referenceAudioUrls: referenceAudioItems.map((item) => item.url),
       referenceAudioLabels: referenceAudioItems.map((item) => item.label),
       filmDirector: directorPackageForVideo(directorSource, incomingByNode),
+      characterDialogue: directorDialoguePackage(node.data, incoming.characterIn || [], node.id),
       outputTargetIndex: String((Number(index) || 0) + 1)
     }),
     ...progress

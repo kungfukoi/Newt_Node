@@ -1,4 +1,5 @@
 import { workflowContextPayload } from "../workflowContext.js";
+import { videoCharacterDialogue } from "../characterDialogue.js";
 import { normalizeFilmDirectorVideoModel } from "../filmDirectorVideoModels.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorGenerateAudio } from "../filmDirectorAudio.js";
 import { isGeminiOmniModel } from "../geminiOmni.js";
@@ -171,6 +172,7 @@ export function buildVideoGenerationRequest({
   referenceAudioUrls = [],
   referenceAudioLabels = [],
   filmDirector = null,
+  characterDialogue = null,
   outputTargetIndex = ""
 }) {
   node = { ...node, data: filmDirectorVideoSettings(node.data, filmDirector) };
@@ -212,6 +214,7 @@ export function buildVideoGenerationRequest({
     referenceAudioUrls: generateAudio ? referenceAudioUrls : [],
     referenceAudioLabels: generateAudio ? referenceAudioLabels : [],
     filmDirector: effectiveFilmDirector,
+    ...(characterDialogue || filmDirector?.dialogue?.lines?.length ? { characterDialogue: videoCharacterDialogue(characterDialogue || {}, filmDirector?.dialogue) } : {}),
     minimaxH3: {
       enablePromptExpansion: node.data.minimaxH3EnablePromptExpansion !== false
     },
