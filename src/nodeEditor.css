@@ -6675,6 +6675,13 @@ video.newtnode-video-fallback {
 .character-voice-controls .character-add-button:focus-visible { outline: 1px solid rgba(39, 213, 232, 0.42); outline-offset: 2px; }
 .character-voice-controls .character-add-button:disabled { opacity: 0.58; cursor: not-allowed; }
 
+.character-voice-sample { min-width: 0; }
+.character-voice-sample summary { cursor: pointer; padding: 5px 0; }
+.character-voice-sample audio, .video-model-body audio[aria-label="Prepared Character dialogue"] { width: 100%; height: 30px; margin-top: 5px; }
+.character-sample-generate { width: 100%; min-height: 29px; border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 6px; color: #f4f0e8; background: rgba(255, 255, 255, 0.07); font: inherit; font-size: 11px; cursor: pointer; }
+.character-sample-generate:disabled { opacity: 0.58; cursor: not-allowed; }
+.character-voice-handoff-status { display: block; color: rgba(244, 240, 232, 0.6); font-size: 11px; margin: 5px 0; }
+
 .character-reference-notes textarea {
   width: 100%;
   height: 52px;

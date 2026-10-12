@@ -23,6 +23,11 @@ test("Character lists default/custom ElevenLabs voices and preserves selection a
   await expect.poll(async () => (await saved(page)).nodes[0].data.characterElevenLabsVoiceId).toBe("voiceB");
   expect((await saved(page)).nodes[0].data.characterVoices).toHaveLength(1);
   expect(generations).toBe(0);
+  await page.route("**/api/node/generate-audio", route => { generations++; return route.fulfill({ json: { audio: "/outputs/e2e/sample.mp3", durationSeconds: 4, fileName: "sample.mp3" } }); });
+  await card.locator(".character-voice-sample summary").click();
+  await card.getByRole("button", { name: "Generate voice sample", exact: true }).click();
+  await expect.poll(async () => (await saved(page)).nodes[0].data.characterElevenLabsVoiceSample?.voiceId).toBe("voiceB");
+  expect(generations).toBe(1);
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(selector).toHaveValue("voiceB");
   expect(errors).toEqual([]);
@@ -48,8 +53,13 @@ test("direct Character to Video uses assigned voices without a Director", async 
   await expect(card.getByLabel("Dialogue line 1 character")).toHaveValue("alex");
   await card.getByLabel("Dialogue line 1 text").fill("Good morning, Bea.");
   let request;
+  let preparations = 0;
+  await page.route("**/api/node/prepare-character-dialogue", route => { preparations++; return route.fulfill({ json: { directorDialogueAudio: { url: "/outputs/e2e/dialogue.mp3", cues: [], durationSeconds: 3 } } }); });
+  await card.getByRole("button", { name: "Prepare ElevenLabs dialogue", exact: true }).click();
+  await expect(card.getByText("ElevenLabs audio ready. Video Run reuses this speech.", { exact: true })).toBeVisible();
+  expect(preparations).toBe(1);
   await page.route("**/api/node/generate-video", route => { request = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/motion.mp4" } } }); });
-  await card.locator(".run-node-button").click();
+  await card.locator(".run-node-button").first().click();
   await expect.poll(() => request?.characterDialogue?.lines?.length || 0).toBe(2);
   expect(request.filmDirector).toBeNull();
   expect(request.characterDialogue.characters.map(character => character.voice.id)).toEqual(["voiceA", "voiceB"]);
@@ -57,6 +67,21 @@ test("direct Character to Video uses assigned voices without a Director", async 
   expect(request.referenceAudioUrls).not.toContain("/outputs/e2e/old.mp3");
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(card.getByLabel("Dialogue line 1 text")).toHaveValue("Good morning, Bea.");
+  expect(errors).toEqual([]);
+});
+
+test("Voice samples mode carries current Character samples to the video request", async ({ page }) => {
+  const character = actor("alex", "Alex", "voiceA"); character.data.characterElevenLabsVoiceSample = { voiceId: "voiceA", url: "/outputs/e2e/sample.mp3", durationSeconds: 4 };
+  const video = { id: "video", type: "videoModel", x: 10, y: 0, data: { title: "Video", model: "Seedance 2.5", prompt: "@Alex says hello", settingsOpen: true, generateAudio: true } };
+  const { errors } = await setup(page, { nodes: [video, character], edges: [{ id: "actor-video", from: { nodeId: "alex", port: "characterOut" }, to: { nodeId: "video", port: "characterIn" } }] });
+  const card = page.locator('[data-node-card-id="video"]');
+  await card.getByLabel("Character voice handoff mode").selectOption("samples");
+  let request;
+  await page.route("**/api/node/generate-video", route => { request = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/motion.mp4" } } }); });
+  await card.locator(".run-node-button").first().click();
+  await expect.poll(() => request?.characterDialogue?.mode).toBe("samples");
+  expect(request.characterDialogue.characters[0].sample.voiceId).toBe("voiceA");
+  expect(request.characterDialogue.characters[0].sample.url).toBe("/outputs/e2e/sample.mp3");
   expect(errors).toEqual([]);
 });
 
@@ -71,7 +96,7 @@ test("Character to Director to Seedance passes exact speaker/voice pairs and ret
   const prepared = { url: "/outputs/e2e/dialogue.mp3", durationSeconds: 2, cues: [], clips: [{ url: "/outputs/e2e/line.mp3" }] };
   await page.route("**/api/node/generate-video", route => { request = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/motion.mp4", fileName: "motion.mp4", mimeType: "video/mp4" }, directorDialogueAudio: prepared } }); });
   const card = page.locator('[data-node-card-id="video"]');
-  await card.locator(".run-node-button").click();
+  await card.locator(".run-node-button").first().click();
   await expect.poll(() => request?.filmDirector?.dialogue?.lines?.length || 0).toBe(2);
   expect(request.filmDirector.dialogue.lines.map(line => [line.characterNodeId, line.text])).toEqual([["alex", "Hello, Bea."], ["bea", "Hello, Alex."]]);
   expect(request.filmDirector.dialogue.characters.map(character => character.voice.id)).toEqual(["voiceA", "voiceB"]);

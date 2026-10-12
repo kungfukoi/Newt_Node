@@ -637,6 +637,12 @@ export const pricingApi = {
 };
 
 export const audioModelApi = {
+  async prepareDialogue(body) {
+    let response;
+    try { response = await fetch(localApiFetchUrl("/api/node/prepare-character-dialogue"), { ...jsonBody(body), signal: AbortSignal.timeout(960000) }); }
+    catch { throw new Error("Speech preparation was interrupted. Check History before trying again; no automatic retry was made."); }
+    return ensureOk(response, await readJsonResponse(response, "Character dialogue"), "Could not prepare Character dialogue.");
+  },
   voices: (refresh = false) => getJson(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`, "Could not load ElevenLabs voices."),
   async generate(body) {
     // A paid audio POST must never be replayed by the generic localhost fallback.

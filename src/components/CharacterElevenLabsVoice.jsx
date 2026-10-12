@@ -1,6 +1,7 @@
 import React from "react";
 import { RefreshCw } from "lucide-react";
 import { audioModelApi } from "../api/newtApi.js";
+import { displayMediaUrl } from "../mediaAssets.js";
 
 let pendingCatalog;
 let savedCatalog;
@@ -13,7 +14,8 @@ const loadVoices = async force => {
   finally { pendingCatalog = null; }
 };
 
-export function CharacterElevenLabsVoice({ node, onUpdate, disabled }) {
+export function CharacterElevenLabsVoice({ node, onUpdate, onGenerateSample, disabled }) {
+  disabled = disabled || node.data.characterVoiceBusy;
   const [voices, setVoices] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -51,6 +53,13 @@ export function CharacterElevenLabsVoice({ node, onUpdate, disabled }) {
     <button className="character-add-button" type="button" disabled={disabled || loading} onClick={() => void refresh(true)} aria-label="Refresh Character ElevenLabs voices" title={loading ? "Loading voices…" : "Refresh ElevenLabs voices"}><RefreshCw size={13} /></button>
     </div>
     </div>
-    {error && <small className="upload-error" role="status">{error}</small>}
+    {selected && <details className="character-voice-sample">
+      <summary className="character-section-label">Voice sample</summary>
+      <label className="character-reference-notes"><textarea aria-label="Character voice sample text" maxLength={300} value={node.data.characterVoiceSampleText ?? "Hello there. I'm glad you're here. Let's explore together, share a story, and discover something wonderful today."} onChange={event => onUpdate(node.id, { characterVoiceSampleText: event.target.value })} disabled={disabled || node.data.characterVoiceBusy} /></label>
+      <button type="button" className="character-sample-generate" disabled={disabled || loading || unavailable || node.data.characterVoiceBusy || node.data.characterVoiceSampleText === ""} onClick={onGenerateSample}>{node.data.characterVoiceBusy ? "Generating speech…" : "Generate voice sample"}</button>
+      {node.data.characterElevenLabsVoiceSample?.url && <audio aria-label="Character ElevenLabs voice sample" controls preload="none" src={displayMediaUrl(node.data.characterElevenLabsVoiceSample.url)} />}
+      {node.data.characterElevenLabsVoiceSample && node.data.characterElevenLabsVoiceSample.voiceId !== selected && <small className="upload-error">Regenerate the sample for the selected voice.</small>}
+    </details>}
+    {(error || node.data.characterVoiceError) && <small className="upload-error" role="status">{error || node.data.characterVoiceError}</small>}
   </div>;
 }

@@ -252,7 +252,8 @@ export function normalizeVideoGenerationResult(data, index) {
     seed: data.seed,
     cost: data.cost,
     ...(data.generationRunId ? { generationRunId: data.generationRunId } : {}),
-    ...(data.directorDialogueAudio ? { directorDialogueAudio: data.directorDialogueAudio } : {})
+    ...(data.directorDialogueAudio ? { directorDialogueAudio: data.directorDialogueAudio } : {}),
+    ...(data.characterVoiceReferences ? { characterVoiceReferences: data.characterVoiceReferences } : {})
   };
 }
 

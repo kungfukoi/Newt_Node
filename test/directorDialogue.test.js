@@ -90,3 +90,25 @@ test("direct Video Model dialogue uses Character voices without a Director packa
   assert.deepEqual(h.calls.map(call => [call.voiceId, call.prompt]), [["voiceA", "Hello, Bea."], ["voiceB", "Hello, Alex."]]);
   assert.deepEqual(value.referenceAudioUrls, [prepared.url]);
 });
+
+test("voice samples bind audio to distinct speaker tags without synthesizing or replacing final dialogue", async t => {
+  const h = await harness(t, { readAudio: async url => ({ mimeType: url.endsWith(".png") ? "image/png" : "audio/mpeg", durationSeconds: 3 }) });
+  const value = body(); value.characterDialogue = value.filmDirector.dialogue; delete value.filmDirector;
+  value.characterDialogue.mode = "samples";
+  for (const character of value.characterDialogue.characters) character.sample = { voiceId: character.voice.id, url: `/outputs/${character.nodeId}.mp3` };
+  const prepared = await h.prepare({ body: value });
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(value.referenceAudioLabels, ["AlexVoice", "BeaVoice"]);
+  assert.match(value.prompt, /@Alex uses the voice from @AlexVoice/);
+  assert.match(value.prompt, /do not recite the sample paragraph/);
+  assert.equal(prepared.cues, undefined);
+  value.characterDialogue.characters[0].sample.voiceId = "oldVoice";
+  await assert.rejects(h.prepare({ body: value }), /Generate a current/);
+});
+
+test("assigned voices without dialogue rows cannot silently submit native speech", async t => {
+  const h = await harness(t);
+  const value = body(); value.filmDirector.dialogue.lines = [];
+  await assert.rejects(h.prepare({ body: value }), /need exact dialogue lines or Voice samples mode/);
+  assert.equal(h.calls.length, 0);
+});

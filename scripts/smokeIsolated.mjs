@@ -103,6 +103,10 @@ try {
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardPlanningV2, true);
   assert.equal((await (await request("/api/health")).json()).routes.directorCharacterDialogue, true);
+  assert.equal((await (await request("/api/health")).json()).routes.prepareCharacterDialogue, true);
+  const emptySpeech = await fetch(api + "/api/node/prepare-character-dialogue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Seedance 2.5" }) });
+  assert.equal(emptySpeech.status, 400);
+  assert.match((await emptySpeech.json()).error, /Add exact dialogue lines/);
   const invalidDialogue = await fetch(api + "/api/node/generate-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Kling O3 Pro", prompt: "Two people talk", generationRunId: "smoke-dialogue-unsupported", filmDirector: { dialogue: { lines: [{ id: "one", characterNodeId: "actor", text: "Hi" }] } } }) });
   assert.equal(invalidDialogue.status, 400);
   assert.match((await invalidDialogue.json()).error, /does not accept assigned Character dialogue audio/);

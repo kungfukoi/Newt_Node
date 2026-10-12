@@ -9,11 +9,13 @@ export function characterElevenLabsVoice(data = {}) {
 export function directorDialoguePackage(data = {}, connections = [], directorNodeId = "") {
   return {
     directorNodeId, revision: Number(data.directorDialogueAudioVersion) || 0,
+    mode: data.characterVoiceMode === "samples" ? "samples" : "dialogue",
     lines: Array.isArray(data.directorDialogue) ? data.directorDialogue : [],
     characters: connections.map(({ source }) => ({
       nodeId: source.id, tag: String(source.data.characterName || source.data.title || "Character").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 28),
       imageUrl: source.data.locked && source.data.activated ? characterOutputReference(source.data)?.url || "" : "",
-      voice: characterElevenLabsVoice(source.data)
+      voice: characterElevenLabsVoice(source.data),
+      sample: source.data.characterElevenLabsVoiceSample || null
     }))
   };
 }
@@ -57,6 +59,7 @@ export function directorDialogueModelSupported(model = "") {
 }
 
 export function videoCharacterDialogue(direct = {}, director = null) {
+  if (direct.mode === "samples") return { ...direct, characters: [...new Map([...(director?.characters || []), ...(direct.characters || [])].map(character => [character.nodeId, character])).values()] };
   if (!direct.lines?.length) return director || direct;
   if (!director?.lines?.length) return direct;
   const characters = new Map((director.characters || []).map(character => [character.nodeId, character]));

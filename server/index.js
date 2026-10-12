@@ -1050,7 +1050,10 @@ app.post("/api/system/performance-diagnostics", async (req, res) => {
 const prepareDirectorDialogue = createDirectorDialoguePreparation({
   cacheDir: path.join(dataDir, "director-dialogue-cache"),
   getKey: () => process.env.ELEVENLABS_API_KEY,
-  readAudio: readLocalAsset,
+  readAudio: async url => {
+    const asset = await readLocalAsset(url);
+    return asset.mimeType?.startsWith("audio/") ? { ...asset, durationSeconds: (await probeVideoFile((await resolveLocalAssetPathFromUrl(url)).filePath)).duration } : asset;
+  },
   recordHistory: appendHistory,
   progress: message => updateCurrentGenerationProgress({ status: "running", phase: "generating", message }),
   saveAudio: async (req, buffer) => {
@@ -1066,6 +1069,13 @@ const prepareDirectorDialogue = createDirectorDialoguePreparation({
     await runFfmpeg(["-y", ...inputs.flatMap(input => ["-i", input.filePath]), "-filter_complex", filters.join(";"), "-map", "[dialogue]", "-c:a", "libmp3lame", "-b:a", "192k", target.filePath], "Assemble Director character dialogue");
     return { url: target.publicPath, fileName: target.fileName, durationSeconds: (await probeVideoFile(target.filePath)).duration };
   }
+});
+
+app.post("/api/node/prepare-character-dialogue", async (req, res) => {
+  try {
+    if (!(req.body.characterDialogue || req.body.filmDirector?.dialogue)?.lines?.length) return res.status(400).json({ error: "Add exact dialogue lines before preparing speech." });
+    res.json({ directorDialogueAudio: await prepareDirectorDialogue(req) });
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 registerAudioModelRoutes(app, {
@@ -1141,6 +1151,7 @@ function buildHealthPayload() {
       storyboardRevisions: true,
       storyboardPlanningV2: true,
       directorCharacterDialogue: true,
+      prepareCharacterDialogue: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -6431,7 +6442,9 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     delete req.body.directorDialogueAudio;
-    if ((req.body.characterDialogue || req.body.filmDirector?.dialogue)?.lines?.length) {
+    delete req.body.characterVoiceReferences;
+    const characterSpeech = req.body.characterDialogue || req.body.filmDirector?.dialogue;
+    if (characterSpeech?.lines?.length || characterSpeech?.mode === "samples" || (req.body.generateAudio !== false && characterSpeech?.characters?.some(character => character.voice?.id))) {
       const model = selectedVideoModel.displayName;
       const group = /minimax.*h3/i.test(model) ? "minimaxH3" : /seedance/i.test(model) ? "seedance" : "";
       if (!group) return res.status(400).json({ error: `${model} does not accept assigned Character dialogue audio. Choose Seedance or MiniMax H3.` });
@@ -6440,9 +6453,10 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       if (provider !== "local" && !(provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY)) return res.status(400).json({ error: missingModelProviderApiKeyMessage(model, provider) });
       const dialogueAudio = await prepareDirectorDialogue(req);
       prompt = req.body.prompt;
-      req.body.directorDialogueAudio = dialogueAudio;
+      if (dialogueAudio?.cues) req.body.directorDialogueAudio = dialogueAudio;
+      else if (dialogueAudio?.references) req.body.characterVoiceReferences = dialogueAudio.references;
       const json = res.json.bind(res);
-      res.json = value => json({ ...value, directorDialogueAudio: dialogueAudio });
+      res.json = value => json({ ...value, ...(dialogueAudio?.cues ? { directorDialogueAudio: dialogueAudio } : { characterVoiceReferences: dialogueAudio?.references }) });
     }
     const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
     const generalVideoModels = providerSupportedModels("veo", "fal");
@@ -6700,7 +6714,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           generationStartedAt: listGenerationProgress().find((entry) => entry.runId === req.body.generationRunId)?.startedAt,
           generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal,
           generationSubmittedAt: req.body.generationSubmittedAt,
-          ...(req.body.directorDialogueAudio ? { directorDialogueAudio: req.body.directorDialogueAudio } : {})
+          ...(req.body.directorDialogueAudio ? { directorDialogueAudio: req.body.directorDialogueAudio } : {}),
+          ...(req.body.characterVoiceReferences ? { characterVoiceReferences: req.body.characterVoiceReferences } : {})
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
         pricingSnapshot: generationPricingScope.getStore() || pricingRefresh.snapshot(),
@@ -6928,6 +6943,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
     submittedPrompt: spec.submittedPrompt, cost,
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
+    ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
   };
 }

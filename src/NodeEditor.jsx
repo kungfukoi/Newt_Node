@@ -104,7 +104,7 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { audioModelApi, composerApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
 import { nodeSchedulingKey } from "./nodeScheduling.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
@@ -3217,6 +3217,28 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
     }
+  }
+
+  async function runCharacterVoiceAction(node, kind) {
+    const current = nodesRef.current.find(item => item.id === node.id);
+    if (!current || current.data.characterVoiceBusy) return;
+    updateNode(node.id, { characterVoiceBusy: true, characterVoiceError: "" });
+    try {
+      if (kind === "sample") {
+        const voiceId = current.data.characterElevenLabsVoiceId;
+        if (!voiceId || current.data.characterVoiceProvider !== "elevenlabs") throw new Error("Select an ElevenLabs voice first.");
+        const text = current.data.characterVoiceSampleText || "Hello there. I'm glad you're here. Let's explore together, share a story, and discover something wonderful today.";
+        const sample = await runAudioModelGeneration({ node: { ...current, data: { ...current.data, audioMode: "tts", ttsModel: "eleven_multilingual_v2", voiceId } }, prompt: text, workflowContext: workflowRequestContext() });
+        updateNode(node.id, { characterElevenLabsVoiceSample: { ...sample, voiceId, text } });
+      } else {
+        const incomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+        const incoming = incomingByNode[node.id] || {};
+        const request = videoModelRequestForNode({ node: current, prompt: connectedText(incoming.promptIn) || current.data.prompt || "Prepare exact Character dialogue", incoming, incomingByNode, workflowContext: workflowRequestContext() });
+        const result = await runTrackedGeneration({ scope: remoteVideoScope(workflowRequestContext()), nodeId: current.id, nodeTitle: current.data.title, kind: "audio", label: "Character dialogue preparation" }, progress => audioModelApi.prepareDialogue({ ...request, ...progress }));
+        updateNode(node.id, { preparedCharacterDialogue: result.directorDialogueAudio, preparedCharacterDialogueSignature: JSON.stringify({ model: request.model, dialogue: request.characterDialogue }) });
+      }
+    } catch (error) { updateNode(node.id, { characterVoiceError: error.message }); }
+    finally { updateNode(node.id, { characterVoiceBusy: false }); }
   }
 
   async function uploadCharacterVoices(node, fileList) {
@@ -7799,6 +7821,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onCharacterCustomSheetRemove={removeCharacterCustomSheet}
         onCharacterVoiceRemove={removeCharacterVoice}
         onCharacterActivate={activateCharacterNode}
+        onCharacterVoiceAction={runCharacterVoiceAction}
         onCharacterUnlock={unlockCharacterNode}
         onStoryboardPlan={planStoryboardNode}
         onStoryboardRevise={reviseStoryboardPanels}
@@ -8107,6 +8130,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onCharacterCustomSheetRemove={removeCharacterCustomSheet}
                 onCharacterVoiceRemove={removeCharacterVoice}
                 onCharacterActivate={activateCharacterNode}
+                onCharacterVoiceAction={runCharacterVoiceAction}
                 onCharacterUnlock={unlockCharacterNode}
                 onStoryboardPlan={planStoryboardNode}
                 onStoryboardRevise={reviseStoryboardPanels}
@@ -8586,6 +8610,7 @@ function NodeCard({
   onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
+  onCharacterVoiceAction,
   onCharacterUnlock,
   onStoryboardPlan,
   onStoryboardRevise,
@@ -8935,6 +8960,7 @@ function NodeCard({
         onCharacterCustomSheetRemove={onCharacterCustomSheetRemove}
         onCharacterVoiceRemove={onCharacterVoiceRemove}
         onCharacterActivate={onCharacterActivate}
+        onCharacterVoiceAction={onCharacterVoiceAction}
         onCharacterUnlock={onCharacterUnlock}
         onStoryboardPlan={onStoryboardPlan}
         onStoryboardRevise={onStoryboardRevise}
@@ -11333,6 +11359,7 @@ function NodeBody({
   onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
+  onCharacterVoiceAction,
   onCharacterUnlock,
   onStoryboardPlan,
   onStoryboardRevise,
@@ -11967,7 +11994,7 @@ function NodeBody({
                     <ChevronDown size={13} />
                   </summary>
                   <div className="character-collapsible-body">
-                    <CharacterElevenLabsVoice node={node} onUpdate={onUpdate} disabled={compiling} />
+                    <CharacterElevenLabsVoice node={node} onUpdate={onUpdate} onGenerateSample={() => onCharacterVoiceAction(node, "sample")} disabled={compiling} />
                     <div className="character-section-head">
                       <small>Dialogue references</small>
                       {voices.length < maxCharacterVoices && (
@@ -15840,6 +15867,7 @@ function NodeBody({
   const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
   const directorConnected = supportsDirectorInput && Boolean(incoming.directorIn?.length);
   const hasVideoPrompt = Boolean(String(promptValue || "").trim());
+  const preparedSpeechCurrent = Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
   const characterConnected = supportsCharacterInput && Boolean(displayIncoming.characterIn?.length);
   const videoRunOptions = {
@@ -15937,7 +15965,13 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
           />
         </NodeRow>
-        {(incoming.characterIn?.length || node.data.directorDialogue?.length) && <DirectorDialogueControls node={node} incoming={incoming} disabled={node.data.status === "running" || node.data.status === "uploading"} onChange={(rows, revision) => onUpdate(node.id, { directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) })} />}
+        {(incoming.characterIn?.length || incoming.directorIn?.length || node.data.directorDialogue?.length) && <>
+          <NodeRow label="Character voices"><select aria-label="Character voice handoff mode" value={node.data.characterVoiceMode || "dialogue"} onChange={event => onUpdate(node.id, { characterVoiceMode: event.target.value })} disabled={running || node.data.characterVoiceBusy}><option value="dialogue">Exact dialogue audio</option><option value="samples">Voice samples (model dialogue)</option></select></NodeRow>
+          <DirectorDialogueControls node={node} incoming={incoming} disabled={running || node.data.characterVoiceBusy} onChange={(rows, revision) => onUpdate(node.id, { directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) })} />
+          {node.data.characterVoiceMode !== "samples" && <button type="button" className="character-sample-generate" disabled={running || node.data.characterVoiceBusy} onClick={() => onCharacterVoiceAction(node, "dialogue")}>{node.data.characterVoiceBusy ? "Preparing speech…" : "Prepare ElevenLabs dialogue"}</button>}
+          <small className="character-voice-handoff-status" role="status">{node.data.characterVoiceError || (node.data.characterVoiceMode === "samples" ? "Voice sample references; video model generates dialogue." : preparedSpeechCurrent ? "ElevenLabs audio ready. Video Run reuses this speech." : node.data.preparedCharacterDialogue ? "Lines or voices changed. Prepare speech again; unchanged clips are reused." : "Add exact speaker lines and prepare speech before Video Run.")}</small>
+          {node.data.preparedCharacterDialogue?.url && node.data.characterVoiceMode !== "samples" && <audio aria-label="Prepared Character dialogue" controls preload="none" src={displayMediaUrl(node.data.preparedCharacterDialogue.url)} />}
+        </>}
         {supportsDirectorInput && (
           <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
@@ -21688,7 +21722,7 @@ function connected3DViewUrls(incoming = {}) {
   );
 }
 
-async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
+function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index = 0 }) {
   const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
   const characterReferences = connectedCharacterReferences(characterConnections);
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
@@ -21706,6 +21740,16 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     }))
   ]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
+  return buildVideoGenerationRequest({ node, prompt, workflowContext, projectId, projectName,
+    startFrameUrls: connectedAssetUrls(incoming.startFrameIn), endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
+    referenceImageUrls: referenceImageItems.map(item => item.url), referenceImageLabels: referenceImageItems.map(item => item.label),
+    characterReferenceUrls: characterReferences.map(item => item.url), characterReferenceLabels: characterReferences.map(item => item.label),
+    referenceVideoUrls: referenceVideoItems.map(item => item.url), referenceVideoLabels: referenceVideoItems.map(item => item.label),
+    referenceAudioUrls: referenceAudioItems.map(item => item.url), referenceAudioLabels: referenceAudioItems.map(item => item.label),
+    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: directorDialoguePackage(node.data, incoming.characterIn || [], node.id), outputTargetIndex: String(index + 1) });
+}
+
+async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
   const { response, data } = await runTrackedGeneration({
     scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
@@ -21716,26 +21760,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     batchIndex: index + 1,
     batchTotal
   }, (progress) => nodeApi.generateVideo({
-    ...buildVideoGenerationRequest({
-      node,
-      prompt,
-      workflowContext,
-      projectId,
-      projectName,
-      startFrameUrls: connectedAssetUrls(incoming.startFrameIn),
-      endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
-      referenceImageUrls: referenceImageItems.map((item) => item.url),
-      referenceImageLabels: referenceImageItems.map((item) => item.label),
-      characterReferenceUrls: characterReferences.map((item) => item.url),
-      characterReferenceLabels: characterReferences.map((item) => item.label),
-      referenceVideoUrls: referenceVideoItems.map((item) => item.url),
-      referenceVideoLabels: referenceVideoItems.map((item) => item.label),
-      referenceAudioUrls: referenceAudioItems.map((item) => item.url),
-      referenceAudioLabels: referenceAudioItems.map((item) => item.label),
-      filmDirector: directorPackageForVideo(directorSource, incomingByNode),
-      characterDialogue: directorDialoguePackage(node.data, incoming.characterIn || [], node.id),
-      outputTargetIndex: String((Number(index) || 0) + 1)
-    }),
+    ...videoModelRequestForNode({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index }),
     ...progress
   }));
   if (!response.ok) {

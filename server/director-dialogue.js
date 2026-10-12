@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import path from "node:path";
-import { validateDirectorDialogue, directorDialogueModelSupported } from "../src/characterDialogue.js";
+import { validateDirectorDialogue, directorDialogueModelSupported, directorDialogueBrief } from "../src/characterDialogue.js";
 import { audioModelDefaults, estimateAudioCost } from "../src/audioModel.js";
 import { createElevenLabsClient } from "./elevenlabs.js";
 
@@ -48,6 +48,33 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
   return async function prepare(req) {
     const body = req.body;
     const dialogue = body.characterDialogue || body.filmDirector?.dialogue;
+    if (dialogue?.mode === "samples") {
+      if (!directorDialogueModelSupported(body.model)) throw new Error("This video adapter cannot consume Character voice samples.");
+      if (body.generateAudio === false || body.filmDirector?.audioMode === "silent") throw new Error("Enable audio to use Character voice samples.");
+      if (body.startFrameUrls?.length || body.endFrameUrls?.length) throw new Error("Character voices require reference-to-video, not start/end frames.");
+      const speakers = (dialogue.characters || []).filter(character => character.voice?.id);
+      const max = /seedance.*2[ .-]?5/i.test(body.model) ? 10 : 3;
+      if (!speakers.length || speakers.length + (body.referenceAudioUrls || []).length > max) throw new Error("Connect Characters with selected voices and keep within the model's audio reference limit.");
+      const references = [];
+      for (const character of speakers) {
+        if (!/^\/(?:outputs|uploads|workflow-assets|saved_workflows)\//.test(character.imageUrl || "") || !/^[A-Za-z0-9_-]{1,28}$/.test(character.tag)) throw new Error("Lock and activate each voice sample's Character sheet first.");
+        if (!(await readAudio(character.imageUrl)).mimeType?.startsWith("image/")) throw new Error("The voice sample's Character sheet is not readable.");
+        const sample = character.sample;
+        if (sample?.voiceId !== character.voice.id || !/^\/(?:outputs|uploads|workflow-assets|saved_workflows)\//.test(sample?.url || "")) throw new Error(`Generate a current ElevenLabs voice sample for @${character.tag} first.`);
+        const audio = await readAudio(sample.url);
+        if (!audio.mimeType?.startsWith("audio/") || !(audio.durationSeconds >= 1.8) || audio.durationSeconds > (max === 10 ? 30.2 : 15)) throw new Error(`The voice sample for @${character.tag} has an unsupported duration or format.`);
+        references.push({ url: sample.url, label: `${character.tag}Voice`, characterNodeId: character.nodeId, tag: character.tag, voiceId: character.voice.id, durationSeconds: audio.durationSeconds });
+      }
+      if (new Set(references.map(reference => reference.label.toLowerCase())).size !== references.length) throw new Error("Voice sample speakers need distinct name tags.");
+      if (references.reduce((sum, reference) => sum + reference.durationSeconds, 0) > (max === 10 ? 30.2 : 15)) throw new Error("Character voice samples exceed the model's combined audio duration. Shorten the samples or use fewer speakers per shot.");
+      body.referenceAudioUrls = [...(body.referenceAudioUrls || []), ...references.map(reference => reference.url)];
+      const existingLabels = (body.referenceAudioLabels || []).slice();
+      while (existingLabels.length < body.referenceAudioUrls.length - references.length) existingLabels.push(`Audio${existingLabels.length + 1}`);
+      body.referenceAudioLabels = [...existingLabels, ...references.map(reference => reference.label)];
+      body.prompt = [body.prompt, directorDialogueBrief(dialogue), "CHARACTER VOICE REFERENCES: Use these audio clips only as each speaker's voice identity reference. Speak only the dialogue specified in the scene prompt; do not recite the sample paragraph. Keep speakers distinct.", ...references.map(reference => `@${reference.tag} uses the voice from @${reference.label}.`)].filter(Boolean).join("\n");
+      return { references };
+    }
+    if (!dialogue?.lines?.length && body.generateAudio !== false && dialogue?.characters?.some(character => character.voice?.id)) throw new Error("Selected ElevenLabs voices need exact dialogue lines or Voice samples mode. Add lines in Dialogue and character voices; the video was not submitted.");
     if (!dialogue?.lines?.length) return null;
     if (!directorDialogueModelSupported(body.model)) throw new Error("The selected video model cannot use Character dialogue audio. Choose Seedance 2.0, Seedance 2.5 or MiniMax H3.");
     if (body.generateAudio === false || body.filmDirector?.audioMode === "silent") throw new Error("Enable Generate Audio and a speaking Director audio mode to use assigned character voices.");
