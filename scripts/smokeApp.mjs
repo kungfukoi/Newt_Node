@@ -7,6 +7,7 @@ const requiredHealthRoutes = [
   "composerPoses",
   "editMedia",
   "editPreview",
+  "imageSelectionExport",
   "extractVideoFrame",
   "generate3d",
   "ideogram45",

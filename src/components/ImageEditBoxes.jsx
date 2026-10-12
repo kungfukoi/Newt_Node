@@ -80,7 +80,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
   </svg>;
 }
 
-export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, onExport, onImport, model, busy }) {
+export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, onSaveSelection, model, busy }) {
   const box = boxes.find(entry => entry.id === selectedId);
   const reference = boxes.find(entry => entry.mode === "reference" && entry.referenceUrl)?.referenceUrl;
   const sourceOnly = box && ["keep", "remove"].includes(box.mode);
@@ -95,11 +95,8 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
   return <div className="ies-box-controls" role="group" aria-label="Boxes settings">
     <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it. Shift-select objects, then click Boxes to combine them into one named selection.</small>
     <small>Reference tags in your prompt, for example @lamp. Tags follow descriptions; duplicate names receive a numeric suffix.</small>
-    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("selections")}>Save box selections</button>
-    <label>Load box selections<input aria-label="Load box selections" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onImport(file); }} /></label>
-    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("guide")}>Export tagged guide</button>
-    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("sheet")}>Export selection sheet</button>
-    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("prompt")}>Export box instructions</button>
+    <button type="button" disabled={busy || !boxes.length} onClick={onSaveSelection}>Save Selection</button>
+    <small>Saves a PNG copy to outputs and adds it to the canvas, with visible tagged boxes and embedded descriptions, coordinates and selection metadata.</small>
     {boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}
     {box && <>
       <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>

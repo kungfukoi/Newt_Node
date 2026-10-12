@@ -1,8 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 import fs from "node:fs/promises";
+import { readSelectionMetadata } from "../src/imageEditBoxExport.js";
+import sharp from "sharp";
 
-test("more than eight boxes save, reload and export tagged references", async ({ page }) => {
+test("Save Selection creates a tagged PNG output and canvas copy with more than eight boxes", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
@@ -20,20 +22,24 @@ test("more than eight boxes save, reload and export tagged references", async ({
     await editor.getByLabel("Box description", { exact: true }).fill(`Lamp ${i + 1}`);
   }
   await expect(editor.locator(".ies-box-target")).toHaveCount(12);
-  const wait = page.waitForEvent("download");
-  await editor.getByRole("button", { name: "Save box selections", exact: true }).click();
-  const download = await wait, buffer = await fs.readFile(await download.path()), saved = JSON.parse(buffer);
-  expect(saved.boxes).toHaveLength(12); expect(saved.boxes[11].tag).toBe("@lamp-12");
-  await editor.getByRole("button", { name: "Delete box", exact: true }).click();
-  await editor.getByLabel("Load box selections", { exact: true }).setInputFiles({ name: "boxes.json", mimeType: "application/json", buffer });
-  await expect(editor.locator(".ies-box-target")).toHaveCount(12);
-  for (const name of ["Export tagged guide", "Export selection sheet", "Export box instructions"]) {
-    const waiting = page.waitForEvent("download");
-    await editor.getByRole("button", { name, exact: true }).click();
-    const exported = await waiting, data = await fs.readFile(await exported.path());
-    if (name === "Export box instructions") expect(data.toString()).toContain("@lamp-12");
-    else expect(data.subarray(1, 4).toString()).toBe("PNG");
-  }
+  await expect(editor.getByLabel("Load box selections", { exact: true })).toHaveCount(0);
+  let saved;
+  await page.route("**/api/node/save-image-selection", async route => {
+    const body = route.request().postDataBuffer(), start = body.indexOf(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(start).toBeGreaterThan(0);
+    let end = start + 8;
+    for (;;) { const length = body.readUInt32BE(end), type = body.subarray(end + 4, end + 8).toString(); end += length + 12; if (type === "IEND") break; }
+    const png = body.subarray(start, end); saved = readSelectionMetadata(png);
+    expect(saved.boxes).toHaveLength(12); expect(saved.boxes[11].tag).toBe("@lamp-12");
+    const info = await sharp(png).metadata(); expect(info.width).toBe(saved.source.width); expect(info.height).toBe(saved.source.height);
+    await fs.writeFile(testInfo.outputPath("image-selection.png"), png);
+    await route.fulfill({ json: { item: { url: "/outputs/e2e/landscape.png", label: "Image Selection", fileName: "image-selection.png", type: "image", provider: "local", width: info.width, height: info.height } } });
+  });
+  await editor.getByRole("button", { name: "Save Selection", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator('[data-node-card-id]')).toHaveCount(2);
+  await expect(page.locator('[data-node-card-id="edit-source"] img').first()).toHaveAttribute("src", /landscape.png/);
+  expect(saved.boxes).toHaveLength(12);
 });
 
 test("Boxes modes, transforms, undo, reference upload and preferred-model submission", async ({ page }, testInfo) => {

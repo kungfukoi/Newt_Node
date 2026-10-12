@@ -4779,7 +4779,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       ...position,
       data: {
         ...createDefaultNodeData("image", "Image", count),
-        title: "Image Edit",
+        title: savedResult.label === "Image Selection" ? "Image Selection" : "Image Edit",
         resultUrl: resultItem.url,
         thumbnailUrl: resultItem.thumbnailUrl || "",
         resultItems: [resultItem],

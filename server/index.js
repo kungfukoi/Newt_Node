@@ -1020,9 +1020,10 @@ registerImageEditRoutes(app, {
     };
   },
   save: async (req, buffer) => {
-    const target = await createManagedAssetTarget(req, "image-edit", ".png", workflowPackageOutputDirName);
+    const kind = req.path === "/api/node/save-image-selection" ? "image-selection" : "image-edit";
+    const target = await createManagedAssetTarget(req, kind, ".png", workflowPackageOutputDirName);
     await writeFileWithRetry(target.filePath, buffer);
-    const thumbnail = await createImagePreview(req, target, "image-edit");
+    const thumbnail = await createImagePreview(req, target, kind);
     return {
       url: target.publicPath,
       thumbnailUrl: thumbnail?.publicPath || "",
@@ -1142,6 +1143,7 @@ function buildHealthPayload() {
       composerPoses: true,
       previewInpaint: true,
       imageEdit: true,
+      imageSelectionExport: true,
       objectSelectionCache: true,
       imageObjectSelection: true,
       ideogram45: true,

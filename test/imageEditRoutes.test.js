@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import sharp from "sharp";
 import { registerImageEditRoutes } from "../server/routes/imageEdit.js";
+import { boxSelectionDocument, embedSelectionMetadata, readSelectionMetadata } from "../src/imageEditBoxExport.js";
+import { boxFromDrag } from "../src/imageEditBoxes.js";
 
 async function withEditor(run, overrides = {}) {
   const source = await sharp({ create: { width: 64, height: 96, channels: 4, background: "#123456" } }).png().toBuffer();
@@ -62,12 +64,36 @@ async function withEditor(run, overrides = {}) {
     return fetch(`http://127.0.0.1:${server.address().port}/api/node/edit-image`, { method: "POST", body: form });
   };
   try {
-    await run({ post, source, calls, saves, histories });
+    const postSelection = (buffer, changes = {}) => {
+      const form = new FormData();
+      for (const [key, value] of Object.entries({ sourceUrl: "/uploads/source.png", projectId: "project", projectName: "Edit QA", workflowPackageId: "package", ...changes })) form.append(key, value);
+      if (buffer) form.append("selection", new Blob([buffer], { type: "image/png" }), "image-selection.png");
+      return fetch(`http://127.0.0.1:${server.address().port}/api/node/save-image-selection`, { method: "POST", body: form });
+    };
+    await run({ post, postSelection, source, calls, saves, histories });
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+test("Save Selection preserves embedded PNG metadata in managed outputs with no model request", () => withEditor(async ({ postSelection, source, calls, saves, histories }) => {
+  const boxes = Array.from({ length: 12 }, (_, i) => ({ ...boxFromDrag({ x: .1, y: .1 }, { x: .3, y: .3 }, `box-${i}`), label: `Lamp ${i + 1}` }));
+  const document = boxSelectionDocument(boxes, { width: 64, height: 96 }, {}, "Move @lamp-12");
+  const png = embedSelectionMetadata(source, document);
+  const response = await postSelection(png);
+  assert.equal(response.status, 200);
+  const { item } = await response.json();
+  assert.equal(item.label, "Image Selection"); assert.equal(item.provider, "local"); assert.equal(item.cost.amountUsd, 0);
+  assert.equal(item.url, "/workflow-assets/test/outputs/edit.png");
+  assert.equal(calls.length, 0); assert.deepEqual(readSelectionMetadata(saves[0].buffer), document);
+  assert.equal(saves[0].body.workflowPackageId, "package");
+  assert.equal(histories[0].localImage, item.url); assert.equal(histories[0].settings.boxes.length, 12);
+  for (const invalid of [null, source, embedSelectionMetadata(source, { ...document, source: { width: 10, height: 10 } }), embedSelectionMetadata(source, { ...document, boxes: [{ ...document.boxes[0], tag: "@wrong" }] })]) {
+    assert.equal((await postSelection(invalid)).status, 400);
+  }
+  assert.equal(saves.length, 1);
+}));
 
 test("image edits use OpenAI Image 2.5 Sunburst and retain workflow context", () => withEditor(async ({ post, calls, saves, histories }) => {
   const response = await post();

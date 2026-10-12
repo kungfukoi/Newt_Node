@@ -311,6 +311,11 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/upload-asset", { method: "POST", body: form }, label);
   },
 
+  async saveImageSelection(form) {
+    const { response, data } = await fetchJsonApi("/api/node/save-image-selection", { method: "POST", body: form }, "Save Selection", { retryLocalApi: false });
+    return ensureOk(response, data, "Could not save selection.");
+  },
+
   uploadVideoAsset(form, label = "Video import") {
     return fetchJsonApi("/api/node/upload-video-asset", { method: "POST", body: form }, label);
   },

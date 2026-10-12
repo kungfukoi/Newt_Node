@@ -10,10 +10,39 @@ import { openAiImage2QualityOptions } from "../../src/openAiImage2.js";
 import { imageModelNames } from "../../src/modelOptions.js";
 import { imageEditModelOptions, normalizeImageEditModel } from "../../src/imageEdit.js";
 import { isIdeogram45Model, ideogram45QualityOptions } from "../../src/ideogram45.js";
+import sharp from "sharp";
+import { boxSelectionDocument, readSelectionMetadata } from "../../src/imageEditBoxExport.js";
 
 export function registerImageEditRoutes(app, { limiter, getProvider, readSource, generate, readGenerated = readImageEditResult, save, recordHistory, estimateCost, sendError }) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 24 * 1024 * 1024, files: 3, fields: 32, fieldSize: 100000 } });
   const jobs = new Map();
+  app.post("/api/node/save-image-selection", upload.single("selection"), async (req, res) => {
+    try {
+      let metadata, image;
+      try {
+        if (!req.file?.buffer) throw new Error("No selection image supplied.");
+        metadata = readSelectionMetadata(req.file.buffer);
+        if (metadata?.format !== "newtnode-box-selections" || metadata.version !== 1 || typeof metadata.prompt !== "string") throw new Error("Selection metadata is missing or unsupported.");
+        image = await sharp(req.file.buffer).metadata();
+        if (image.format !== "png" || image.width !== metadata.source?.width || image.height !== metadata.source?.height) throw new Error("Selection image dimensions do not match its metadata.");
+        const validated = boxSelectionDocument(metadata.boxes, image, {}, metadata.prompt);
+        if (!validated.boxes.length || validated.boxes.some((box, i) => box.tag !== metadata.boxes[i].tag)) throw new Error("Selection tags must match the box descriptions.");
+      } catch (error) { throw Object.assign(error, { status: 400 }); }
+      await readSource(req.body.sourceUrl);
+      const output = await save(req, req.file.buffer);
+      const cost = { amountUsd: 0, currency: "USD", source: "Local selection export", estimated: false };
+      const item = { ...output, type: "image", mimeType: "image/png", label: "Image Selection", provider: "local", sourceUrl: req.body.sourceUrl, width: image.width, height: image.height, cost };
+      let warning = "";
+      try {
+        await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: "local", modelName: "Image Selection", endpoint: "local/image-selection", mode: "Image Selection", prompt: metadata.prompt,
+          project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
+          node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
+          settings: { sourceUrl: req.body.sourceUrl, boxes: metadata.boxes, selectionMetadata: "NewtNodeSelections" },
+          localImage: item.url, localThumbnail: item.thumbnailUrl, outputFileName: item.fileName, cost });
+      } catch { warning = "Selection saved, but it could not be added to History."; }
+      res.json({ item, warning });
+    } catch (error) { sendError(res, error, "Could not save selection."); }
+  });
   app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }, { name: "boxObjects", maxCount: 1 }]), async (req, res) => {
     try {
       const model = !req.body.model || ["OpenAI Image 2.5", "GPT Image 2.5"].includes(req.body.model) ? normalizeImageEditModel(req.body.model) : req.body.model;
