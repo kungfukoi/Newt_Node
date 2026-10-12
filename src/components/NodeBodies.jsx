@@ -205,7 +205,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
             className="icon-button text-agent-clear"
             title="Clear conversation"
             aria-label="Clear conversation"
-            disabled={running || !messages.length}
+            disabled={running || (!messages.length && !response.trim())}
             onClick={() => onUpdate(node.id, {
               agentMessages: [],
               resultText: "",
@@ -224,7 +224,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
           aria-busy={running}
           readOnly={running}
           value={response}
-          placeholder={running ? "Thinking..." : "Responses will appear here"}
+          placeholder={running ? "Thinking..." : "Your image or video prompt will appear here"}
           onChange={(event) => {
             const resultText = event.target.value;
             onUpdate(node.id, {
@@ -248,7 +248,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
             </span>
             <textarea
               aria-label="Message Text Agent"
-              placeholder="Message Text Agent"
+              placeholder={response.trim() ? "Describe changes to the prompt above" : "Describe an image or video prompt"}
               value={draft}
               onChange={(event) => onUpdate(node.id, {
                 agentDraft: event.target.value,

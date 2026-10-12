@@ -478,7 +478,7 @@ import {
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
-import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentReferenceText } from "./textAgent.js";
+import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentMessagesForPrompt, textAgentReferenceText } from "./textAgent.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -7035,7 +7035,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (currentNode.type === "textAgent") {
         const agentMessage = String(runOptions.agentMessage ?? currentNode.data.agentDraft ?? "").trim();
         if (!agentMessage) throw new Error("Enter a message before running Text Agent.");
-        const previousMessages = normalizeTextAgentMessages(currentNode.data.agentMessages);
+        const previousMessages = textAgentMessagesForPrompt(currentNode.data);
         const userMessage = createTextAgentMessage("user", agentMessage);
         const messagesWithUser = appendTextAgentMessage(previousMessages, userMessage);
         updateNode(currentNode.id, {

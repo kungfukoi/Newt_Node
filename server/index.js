@@ -50,7 +50,7 @@ import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "@ffprobe-installer/ffprobe";
 import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
-import { normalizeTextAgentMessages } from "../src/textAgent.js";
+import { buildTextAgentPrompt, normalizeTextAgentMessages, textAgentInstructions } from "../src/textAgent.js";
 import {
   defaultFalTextModel,
   defaultFalVideoTextModel,
@@ -16674,20 +16674,15 @@ function textInputContext(textInputs) {
 
 function buildTextProcessingPrompt({ mode = "process", messages = [], text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
   if (mode === "agent") {
-    const conversation = normalizeTextAgentMessages(messages)
-      .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}:\n${message.text}`)
-      .join("\n\n");
-    return [
-      textAgentInstructions(),
-      conversation ? `Conversation history:\n${conversation}` : "",
-      textInputContext(textInputs),
-      imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
-      videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : "",
-      `Current user message:\n${text}`,
-      "Reply directly to the current user message."
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    return buildTextAgentPrompt({
+      messages,
+      text,
+      context: [
+        textInputContext(textInputs),
+        imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
+        videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : ""
+      ]
+    });
   }
   return [
     textProcessingInstructions(),
@@ -18504,10 +18499,6 @@ async function processTextWithOpenAi({ mode = "process", messages = [], text, te
 
 function textProcessingInstructions() {
   return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
-}
-
-function textAgentInstructions() {
-  return "You are NewtNode's Text Agent. Continue the saved conversation naturally and helpfully. Use connected text, style, image, and video context when relevant, preserve the user's intent, and do not rewrite their request unless they ask you to.";
 }
 
 async function describeImageInputs(imageInputs) {

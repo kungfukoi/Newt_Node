@@ -274,6 +274,8 @@ Audio Model (`audioModel`) uses `src/audioModel.js` for defaults, validation and
 
 ## Storyboard upstream planner
 
+`src/textAgent.js` owns Text Agent's image/video prompt editing instructions, conversation normalization, current-output synchronization and request prompt assembly. NodeEditor persists synchronized turns; the text runner sends the current visible prompt in assistant history, and all three server provider routes share the same complete-prompt revision contract. Existing workflow fields and Prompt/Output routing stay compatible.
+
 `server/routes/storyboard.js` and `server/storyboard-skills/directing-v2.md` now
 provide upstream skill 2.2.0 independent planning, selected revisions and sequence
 review. `src/storyboardWorkflow.js`, `storyboardCast.js` and `storyboardPromptPolicy.js`

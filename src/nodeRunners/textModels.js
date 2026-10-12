@@ -1,7 +1,7 @@
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
-import { textAgentRequestMessages } from "../textAgent.js";
+import { textAgentMessagesForPrompt, textAgentRequestMessages } from "../textAgent.js";
 import { remoteVideoScope } from "../remoteVideoJobs.js";
 
 export async function runTextNodeProcessing({
@@ -28,7 +28,7 @@ export async function runTextNodeProcessing({
     batchTotal: 1
   }, (progress) => nodeApi.processText({
     mode: agentMode ? "agent" : "process",
-    messages: agentMode ? textAgentRequestMessages(messages) : [],
+    messages: agentMode ? textAgentRequestMessages(textAgentMessagesForPrompt(node.data, messages)) : [],
     text: text ?? node.data.text,
     textInputs: [
       ...normalizedReferenceInputs(nodeReferences.textInputs),

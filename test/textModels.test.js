@@ -61,7 +61,7 @@ test("Text Agent runner sends prior turns separately and keeps connected inputs"
   };
 
   const result = await runTextNodeProcessing({
-    node: { id: "agent-1", data: { title: "Design Agent" } },
+    node: { id: "agent-1", data: { title: "Design Agent", resultText: "The second layout, with manually added blue controls." } },
     incoming: {
       textIn: [{ source: { type: "plainText", data: { title: "Requirements", text: "Keep the controls compact." } } }]
     },
@@ -80,7 +80,7 @@ test("Text Agent runner sends prior turns separately and keeps connected inputs"
   assert.equal(requestBody.mode, "agent");
   assert.deepEqual(requestBody.messages, [
     { role: "user", text: "Which layout is clearer?" },
-    { role: "assistant", text: "The second is clearer." }
+    { role: "assistant", text: "The second layout, with manually added blue controls." }
   ]);
   assert.deepEqual(requestBody.textInputs, [{ label: "Requirements", text: "Keep the controls compact." }]);
 });

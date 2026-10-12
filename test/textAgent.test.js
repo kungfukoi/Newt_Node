@@ -2,12 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appendTextAgentMessage,
+  buildTextAgentPrompt,
   createTextAgentMessage,
   normalizeTextAgentMessages,
   replaceLatestTextAgentAssistantMessage,
   textAgentReferenceText,
+  textAgentMessagesForPrompt,
   textAgentRequestMessages
 } from "../src/textAgent.js";
+
+test("saved output without conversation becomes the prompt editing baseline", () => {
+  const messages = textAgentMessagesForPrompt({ resultText: "A cluttered dorm desk. Keep the laptop and mug untouched." });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, "assistant");
+  const request = buildTextAgentPrompt({ messages, text: "Add an energy drink." });
+  assert.ok(request.includes("Current prompt (authoritative editing baseline):\nA cluttered dorm desk. Keep the laptop and mug untouched."));
+  assert.ok(request.includes("Current user instruction:\nAdd an energy drink."));
+  assert.ok(request.includes("Return the complete revised prompt"));
+});
+
+test("follow-up edits retain the thread and use manually edited output", () => {
+  const messages = textAgentMessagesForPrompt({
+    resultText: "A red car at night, wide shot. Keep the camera still.",
+    agentMessages: [
+      { role: "user", text: "Keep the camera still." },
+      { role: "assistant", text: "A blue car at night." }
+    ]
+  });
+  assert.equal(messages[0].text, "Keep the camera still.");
+  assert.equal(messages[1].text, "A red car at night, wide shot. Keep the camera still.");
+  const request = buildTextAgentPrompt({ messages, text: "Make it rain.", context: ["Style: cinematic"] });
+  assert.ok(request.includes("Conversation history:"));
+  assert.ok(request.includes("Style: cinematic"));
+  assert.ok(!request.includes("A blue car"));
+});
+
+test("fresh and cleared agents default to a complete generation prompt", () => {
+  const request = buildTextAgentPrompt({ messages: textAgentMessagesForPrompt({ resultText: "", agentMessages: [] }), text: "A fox in a snowy forest" });
+  assert.ok(!request.includes("Current prompt (authoritative editing baseline):"));
+  assert.ok(request.includes("Return the complete descriptive image or video generation prompt."));
+});
 
 test("Text Agent normalizes and preserves alternating saved conversation turns", () => {
   const messages = normalizeTextAgentMessages([

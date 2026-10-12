@@ -1,6 +1,34 @@
 export const textAgentHistoryLimit = 80;
 export const textAgentRequestMessageLimit = 40;
 
+export function textAgentInstructions() {
+  return "You are NewtNode's Text Agent, an image and video prompt editor. By default, turn every user input into a descriptive prompt ready for image or video generation; the user does not need to say 'write a prompt'. When a current prompt exists, treat subsequent user input as an instruction to modify that prompt, even if it does not say 'edit' or 'update'. Use the saved conversation to retain earlier decisions and constraints. The current prompt is the authoritative editing baseline, including manual edits. Preserve all existing subjects, scene details, style, composition, camera, motion, timing, and constraints unless the user asks to change or remove them. Apply the requested changes and return the entire complete revised prompt, never only the changed fragment or a summary. Start a different prompt only when the user explicitly requests a new prompt or a fresh start. Use connected text, style, image, and video context when relevant. Include motion and temporal detail when video is requested or implied. Return only the final prompt text, without explanations, introductions, markdown fences, or conversational replies.";
+}
+
+export function textAgentMessagesForPrompt(data = {}, messages = data.agentMessages) {
+  const normalized = normalizeTextAgentMessages(messages);
+  const currentPrompt = String(data.resultText || "").trim();
+  return currentPrompt ? replaceLatestTextAgentAssistantMessage(normalized, currentPrompt) : normalized;
+}
+
+export function buildTextAgentPrompt({ messages = [], text = "", context = [] } = {}) {
+  const normalized = normalizeTextAgentMessages(messages);
+  const currentPrompt = normalized.findLast((message) => message.role === "assistant")?.text || "";
+  const conversation = normalized
+    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}:\n${message.text}`)
+    .join("\n\n");
+  return [
+    textAgentInstructions(),
+    conversation ? `Conversation history:\n${conversation}` : "",
+    ...context,
+    currentPrompt ? `Current prompt (authoritative editing baseline):\n${currentPrompt}` : "",
+    `Current user instruction:\n${text}`,
+    currentPrompt
+      ? "Apply this instruction to the current prompt. Return the complete revised prompt, preserving all details not changed by the instruction."
+      : "Return the complete descriptive image or video generation prompt."
+  ].filter(Boolean).join("\n\n");
+}
+
 export function normalizeTextAgentMessages(messages = [], limit = textAgentHistoryLimit) {
   if (!Array.isArray(messages)) return [];
   const normalized = messages
