@@ -28,7 +28,7 @@ test("box validation rejects incomplete modes, duplicate IDs and unbounded trans
   for (const patch of [{ contextPadding: -1 }, { contextPadding: 1.1 }, { contextPadding: "large" }, { mode: "other" }, { mode: "text", text: "" }, { mode: "reference" }, { label: "" }, { target: { ...box().target, rotation: Infinity } }])
     assert.throws(() => validateEditBoxes([{ ...box(), ...patch }]));
   assert.throws(() => validateEditBoxes([box(), box()]));
-  assert.throws(() => validateEditBoxes(Array.from({ length: 9 }, (_, i) => box(`box-${i}`))));
+  assert.equal(validateEditBoxes(Array.from({ length: 64 }, (_, i) => box(`box-${i}`))).length, 64);
 });
 
 test("context margins contain rotated geometry and default safely for older boxes", () => {

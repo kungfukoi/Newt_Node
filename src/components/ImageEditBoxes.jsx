@@ -1,7 +1,7 @@
 import React from "react";
 import { drawObjectMask } from "../objectSelection.js";
 import { boxNeedsObject, boxNeedsIdentification } from "../imageEditBoxModels.js";
-import { boxCorners, boxContextRect, boxFromDrag, transformEditBox, maxEditBoxes, editBoxModes, clampBoxValue } from "../imageEditBoxes.js";
+import { boxCorners, boxContextRect, boxFromDrag, transformEditBox, editBoxTags, editBoxModes, clampBoxValue } from "../imageEditBoxes.js";
 
 export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedId, onSelect, onCommit, onGesture }) {
   const svgRef = React.useRef(null), drag = React.useRef(null);
@@ -29,7 +29,6 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
   function begin(event, box, operation = "translate") {
     if (!active || disabled || event.button !== 0 || drag.current) return;
     event.preventDefault(); event.stopPropagation();
-    if (!box && boxes.length >= maxEditBoxes) return;
     const start = point(event);
     const original = box || boxFromDrag(start, start, crypto.randomUUID());
     drag.current = { original, operation: box ? operation : "create", start, pointerId: event.pointerId, next: original };
@@ -50,6 +49,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
     if (svgRef.current.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
   }
   const shown = draft ? [...boxes.filter(box => box.id !== draft.id), draft] : boxes;
+  const tags = editBoxTags(shown);
   const points = rect => boxCorners(rect, size.width, size.height).map(p => `${p.x},${p.y}`).join(" ");
   const radius = Math.max(4, Math.min(size.width, size.height) / 65);
   return <svg ref={svgRef} className={`ies-box-overlay ${active ? "interactive" : ""}`} aria-label="Boxes canvas" viewBox={`0 0 ${size.width} ${size.height}`} onPointerDown={event => begin(event)} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
@@ -63,7 +63,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
         {active && selectedId === box.id && box.mode !== "keep" && (box.mode === "move" ? [box.source, box.target] : [rect]).map((region, i) => <polygon key={`context-${i}`} points={points(boxContextRect(region, size.width, size.height, box.contextPadding))} fill="none" stroke="#ffffff88" strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />)}
         {box.mode === "move" && <><polygon className="ies-box-source" points={points(box.source)} /><line className="ies-box-link" x1={box.source.x * size.width} y1={box.source.y * size.height} x2={cx} y2={cy} /></>}
         <polygon data-box-id={box.id} aria-label={`Box ${index + 1}: ${box.label}`} className={`ies-box-target ${selectedId === box.id ? "selected" : ""} ${sourceOnly ? box.mode : ""}`} points={points(rect)} onPointerDown={event => begin(event, box)} onDoubleClick={event => rename(event, box)} />
-        <text className="ies-box-caption" aria-label={`Rename box ${index + 1}`} x={corners[0].x} y={corners[0].y - radius} fontSize={radius * 1.2} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => rename(event, box)}>{index + 1}. {box.label} · {editBoxModes[box.mode]}</text>
+        <text className="ies-box-caption" aria-label={`Rename box ${index + 1}`} x={corners[0].x} y={corners[0].y - radius} fontSize={radius * 1.2} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => rename(event, box)}>{index + 1}. {box.label} · {tags[index]} · {editBoxModes[box.mode]}</text>
         {active && selectedId === box.id && <>
           {corners.map((p, i) => <g key={i}>
             <circle aria-label={`Scale box ${index + 1}`} className="ies-box-scale-hit" cx={p.x} cy={p.y} r={radius} onPointerDown={event => begin(event, box, "scale")} />
@@ -80,7 +80,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
   </svg>;
 }
 
-export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, model, busy }) {
+export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onDelete, onUploadReference, onSelectObject, onExport, onImport, model, busy }) {
   const box = boxes.find(entry => entry.id === selectedId);
   const reference = boxes.find(entry => entry.mode === "reference" && entry.referenceUrl)?.referenceUrl;
   const sourceOnly = box && ["keep", "remove"].includes(box.mode);
@@ -94,10 +94,17 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
   }
   return <div className="ies-box-controls" role="group" aria-label="Boxes settings">
     <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it. Shift-select objects, then click Boxes to combine them into one named selection.</small>
+    <small>Reference tags in your prompt, for example @lamp. Tags follow descriptions; duplicate names receive a numeric suffix.</small>
+    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("selections")}>Save box selections</button>
+    <label>Load box selections<input aria-label="Load box selections" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onImport(file); }} /></label>
+    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("guide")}>Export tagged guide</button>
+    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("sheet")}>Export selection sheet</button>
+    <button type="button" disabled={busy || !boxes.length} onClick={() => onExport("prompt")}>Export box instructions</button>
     {boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}
     {box && <>
       <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label>Description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
+      <small>Tag: {editBoxTags(boxes)[boxes.indexOf(box)]}</small>
       {boxNeedsObject(box) && <>
         <small>{boxNeedsIdentification(box, model) ? "Generate identifies the named object with SAM 3 when no selection exists (a separate Fal request), then uses its shape as the placement reference." : "FLUX 3 identifies the named subject using native source/destination instructions. Select object for a precise shape if needed."} The full generated scene is kept for continuous lighting; Keep boxes protect exact pixels.</small>
         <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>
@@ -117,7 +124,7 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
       <button type="button" onClick={() => onCommit({ ...box, target: { ...box.source } })}>Reset transform</button>
       <button type="button" onClick={() => onDelete(box.id)}>Delete box</button>
     </>}
-    <small>{boxes.length}/{maxEditBoxes} boxes · Uses your preferred image-edit model. Results may vary by model.</small>
+    <small>{boxes.length} boxes · Uses your preferred image-edit model. Results may vary by model.</small>
   </div>;
 }
 

@@ -1,5 +1,5 @@
 import { isFlux3Model } from "./flux3.js";
-import { boxCorners, boxFromDrag, boxContextRect, boxOutputRules } from "./imageEditBoxes.js";
+import { boxCorners, boxFromDrag, boxContextRect, boxOutputRules, editBoxTags } from "./imageEditBoxes.js";
 export const boxNeedsObject = box => ["move", "remove"].includes(box.mode);
 export const boxNeedsIdentification = (box, model) => boxNeedsObject(box) && (Boolean(box.sourceMask) || !isFlux3Model(model) || (box.mode === "move" && Math.abs(box.target.rotation) > .001));
 export const boxNeedsCutout = (box, model) => box.mode === "move" && (Boolean(box.sourceMask) || !isFlux3Model(model) || Math.abs(box.target.rotation) > .001);
@@ -47,6 +47,7 @@ export function objectMaskForBox(masks, box) {
 }
 
 export function fluxBoxInstructions(boxes, width, height, referenceIndices = {}, staged = []) {
+  const tags = editBoxTags(boxes);
   const grid = rect => {
     const points = boxCorners(rect, width, height);
     const q = (v, dimension) => Math.max(0, Math.min(1000, Math.round(v / dimension * 1000)));
@@ -54,6 +55,7 @@ export function fluxBoxInstructions(boxes, width, height, referenceIndices = {},
   };
   const captions = [], rows = boxes.map((box, i) => {
     const id = `object_${i + 1}`, placed = staged.includes(box.id);
+    captions.push(`${tags[i]} in the user prompt refers to <${id}> (${JSON.stringify(box.label)}).`);
     const dx = box.target.x - box.source.x, dy = box.target.y - box.source.y;
     const direction = [Math.abs(dx) > .01 ? dx < 0 ? "left" : "right" : "", Math.abs(dy) > .01 ? dy < 0 ? "up" : "down" : ""].filter(Boolean).join(" and ");
     const desc = box.mode === "text" ? `${box.label}; visible text ${JSON.stringify(box.text)}` : box.label;

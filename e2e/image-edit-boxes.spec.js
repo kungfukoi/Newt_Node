@@ -1,5 +1,40 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
+import fs from "node:fs/promises";
+
+test("more than eight boxes save, reload and export tagged references", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
+    nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
+    edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
+  })));
+  await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.5 Flare" } } });
+  await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
+  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.5 Flare", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  const surface = await editor.locator(".ies-surface").boundingBox();
+  for (let i = 0; i < 12; i++) {
+    const x = .1 + i % 4 * .2, y = .15 + Math.floor(i / 4) * .25;
+    await page.mouse.move(surface.x + surface.width * x, surface.y + surface.height * y);
+    await page.mouse.down(); await page.mouse.move(surface.x + surface.width * (x + .08), surface.y + surface.height * (y + .08)); await page.mouse.up();
+    await editor.getByLabel("Box description", { exact: true }).fill(`Lamp ${i + 1}`);
+  }
+  await expect(editor.locator(".ies-box-target")).toHaveCount(12);
+  const wait = page.waitForEvent("download");
+  await editor.getByRole("button", { name: "Save box selections", exact: true }).click();
+  const download = await wait, buffer = await fs.readFile(await download.path()), saved = JSON.parse(buffer);
+  expect(saved.boxes).toHaveLength(12); expect(saved.boxes[11].tag).toBe("@lamp-12");
+  await editor.getByRole("button", { name: "Delete box", exact: true }).click();
+  await editor.getByLabel("Load box selections", { exact: true }).setInputFiles({ name: "boxes.json", mimeType: "application/json", buffer });
+  await expect(editor.locator(".ies-box-target")).toHaveCount(12);
+  for (const name of ["Export tagged guide", "Export selection sheet", "Export box instructions"]) {
+    const waiting = page.waitForEvent("download");
+    await editor.getByRole("button", { name, exact: true }).click();
+    const exported = await waiting, data = await fs.readFile(await exported.path());
+    if (name === "Export box instructions") expect(data.toString()).toContain("@lamp-12");
+    else expect(data.subarray(1, 4).toString()).toBe("PNG");
+  }
+});
 
 test("Boxes modes, transforms, undo, reference upload and preferred-model submission", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({

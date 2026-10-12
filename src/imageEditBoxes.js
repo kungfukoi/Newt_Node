@@ -1,4 +1,3 @@
-export const maxEditBoxes = 8;
 export const editBoxModes = { new: "New", keep: "Keep", move: "Move", remove: "Remove", reference: "From Reference", text: "Text" };
 export const clampBoxValue = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -19,7 +18,7 @@ export function boxCorners(rect, width, height) {
 }
 
 export function validateEditBoxes(value = []) {
-  if (!Array.isArray(value) || value.length > maxEditBoxes) throw new Error(`Use up to ${maxEditBoxes} edit boxes.`);
+  if (!Array.isArray(value)) throw new Error("Edit boxes must be a list.");
   const ids = new Set();
   return value.map(box => {
     if (!box || typeof box.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(box.id) || ids.has(box.id)) throw new Error("Each edit box needs a unique ID.");
@@ -68,6 +67,7 @@ export function transformEditBox(box, operation, start, point, width, height) {
 
 export function editBoxesPrompt(boxes, guideIndex, referenceIndices = {}, staged = []) {
   if (!boxes.length) return "";
+  const tags = editBoxTags(boxes);
   return [
     `BOX INSTRUCTIONS: Image ${guideIndex} is a placement guide over ${staged.length ? "the prepared composite, with the moved subjects already placed and their old locations cleared" : "the original"}. Red dashed boxes identify source regions; cyan boxes show destinations; yellow boxes mark protected regions. Numbered pairs refer to the same object. Guide lines and labels are instructions only: remove all of them from the output.`,
     "Follow each box's operation. Preserve object identity and details when moving or using a reference, apply the requested scale and clockwise rotation, and integrate edges, lighting and shadows. Preserve unrelated scene content while allowing associated lighting and reconstructed surfaces to continue naturally beyond box boundaries. Coordinates below are percentages of the original frame, measured from the top-left; x/y locate the center, width/height are unrotated dimensions.",
@@ -77,7 +77,7 @@ export function editBoxesPrompt(boxes, guideIndex, referenceIndices = {}, staged
     boxOutputRules,
     ...boxes.map((box, index) => {
       const position = r => `center (${(r.x * 100).toFixed(2)}%, ${(r.y * 100).toFixed(2)}%), width ${(r.w * 100).toFixed(2)}%, height ${(r.h * 100).toFixed(2)}%`;
-      const description = `Box ${index + 1}: ${JSON.stringify(box.label)}.`;
+      const description = `Box ${index + 1} (${tags[index]}): ${JSON.stringify(box.label)}.`;
       const destination = `Destination ${position(box.target)}. Rotate ${box.target.rotation.toFixed(2)} degrees clockwise.`;
       if (box.mode === "keep") return `${description} KEEP this original region unchanged: ${position(box.source)}.`;
       if (box.mode === "remove") return `${description} REMOVE the described object at ${position(box.source)} and all associated contact/cast shadows, ambient occlusion, reflections and color spill. Reconstruct the exposed surface, texture and background from surrounding context, as if the object had never been present. Preserve unrelated objects and their effects. Do not add a replacement, ghost or duplicate.`;
@@ -88,4 +88,15 @@ export function editBoxesPrompt(boxes, guideIndex, referenceIndices = {}, staged
       return `${description} MOVE the original object from ${position(box.source)}. ${destination} Reconstruct the vacated background as if the object had never been there, removing its contact and cast shadows, ambient occlusion, reflections and color spill. Regenerate the subject at the destination with scene-consistent lighting, contact and cast shadows, supporting-surface contact, reflections, perspective and occlusion. Preserve unrelated objects and their effects; do not leave a duplicate at the source.`;
     })
   ].join("\n");
+}
+
+export function editBoxTags(boxes) {
+  const used = new Set();
+  return boxes.map(box => {
+    const stem = box.label.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 64) || "object";
+    let tag = `@${stem}`, suffix = 2;
+    while (used.has(tag)) tag = `@${stem}-${suffix++}`;
+    used.add(tag);
+    return tag;
+  });
 }

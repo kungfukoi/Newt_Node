@@ -4,6 +4,7 @@ import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../imageEdit.
 import React from "react";
 import { Boxes } from "lucide-react";
 import { validateEditBoxes } from "../imageEditBoxes.js";
+import { exportBoxSelections, importBoxSelections } from "../imageEditBoxExport.js";
 import { boxNeedsObject, boxNeedsIdentification, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
 import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
@@ -192,7 +193,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     if (busyRef.current || !size) return;
     setError(""); setTool("boxes"); setLayer("boxes"); setMode("edit"); setBlank(false);
     if (!hasSelection || blank) return;
-    if (boxes.length >= 8) { setError("Use up to 8 boxes. Delete one before converting this selection."); return; }
     try {
       const canvas = document.createElement("canvas"), scale = Math.min(1, 1024 / Math.max(size.width, size.height));
       canvas.width = Math.round(size.width * scale); canvas.height = Math.round(size.height * scale);
@@ -213,6 +213,24 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       if (mounted.current) commit(history.marks.map(mark => mark.layer === "boxes" && (mark.id === box.id || mark.mode === "reference") ? { ...mark, referenceUrl: data.asset.localUrl } : mark));
     } catch (failure) { if (mounted.current) setError(failure.message); }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
+  }
+  async function exportBoxes(kind) {
+    if (busyRef.current || saving || !size) return;
+    setSaving(true); setError("");
+    try { await exportBoxSelections({ kind, boxes, size, base, prompt }); }
+    catch (failure) { setError(failure.message); }
+    finally { setSaving(false); }
+  }
+  async function importBoxes(file) {
+    if (busyRef.current || saving || !size) return;
+    setSaving(true); setError("");
+    try {
+      const loaded = importBoxSelections(JSON.parse(await file.text()), size);
+      commit([...history.marks.filter(mark => mark.layer !== "boxes"), ...loaded.boxes]);
+      setSelectedBoxId(loaded.boxes[0]?.id || ""); setPrompt(loaded.prompt);
+      setWarning("Selections loaded onto the current image. Check that it is the original source before generating.");
+    } catch (failure) { setError(failure.message); }
+    finally { setSaving(false); }
   }
   async function identifyBoxObject(box, sourceBase = base) {
     if (!falAvailable) throw new Error("Enable a Fal key to identify box objects with SAM 3, or use an existing Object Selection.");
@@ -461,7 +479,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       </div>
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
-          {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} model={model} busy={busy} />}
+          {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onExport={exportBoxes} onImport={importBoxes} model={model} busy={busy || saving} />}
           {tool !== "boxes" && <div className="ies-object-controls">
             {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
               <strong>SAM 2 detection</strong>
