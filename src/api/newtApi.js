@@ -32,7 +32,7 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
-  if (path === "/api/node/storyboard-review" || path === "/api/node/storyboard-qc" || path === "/api/node/storyboard-plan" || path === "/api/node/storyboard-revise" || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
+  if (/^\/api\/node\/storyboard-(?:review|qc|plan|revise)(?:-v2)?$/.test(path) || path === "/api/node/explore-plan" || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
     try {
       response = await fetchWithTimeout(requestUrl, options, timeoutMs);
       return { response, data: await readJsonResponse(response, label) };
@@ -360,6 +360,11 @@ export const nodeApi = {
   planStoryboard(body, label = "Storyboard planning") {
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
   },
+  planStoryboardV2(body, label = "Storyboard planning") {
+    return fetchJsonApi("/api/node/storyboard-plan-v2", jsonBody(body), label);
+  },
+  reviseStoryboardV2(body) { return fetchJsonApi("/api/node/storyboard-revise-v2", jsonBody(body), "Storyboard revision"); },
+  reviewStoryboardSequenceV2(body) { return fetchJsonApi("/api/node/storyboard-review-v2", jsonBody(body), "Storyboard sequence review"); },
 
   reviewStoryboardFrame(body, label = "Storyboard frame QC") {
     return fetchJsonApi("/api/node/storyboard-qc", jsonBody(body), label);

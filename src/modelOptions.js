@@ -64,6 +64,8 @@ export const imageModelOptions = [
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
+export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
+export const storyboardImageModelOptions = [storyboardImageDefaultModel, imageModelNames.openAiImage25Sunburst, imageModelNames.legacyOpenAiImage2, imageModelNames.seedream5Pro, imageModelNames.flux3, imageModelNames.nanoBanana21];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
 export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];

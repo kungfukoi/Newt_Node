@@ -1,33 +1,119 @@
 import sharp from "sharp";
-import { storyboardQcMode } from "../src/storyboardQc.js";
+import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
+import { storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
-const essential = new Set(["identity","missing_cast","spatial","action","prop","physical","rendering"]);
+import { storyboardQcMode } from "../src/storyboardQc.js";
+
+export const storyboardQcPolicyVersion = "balanced-v2";
+export const storyboardQcFailureTypes = ["none", "polish", "identity", "missing_cast", "spatial", "action", "prop", "physical", "rendering"];
+const essentialFailures = new Set(storyboardQcFailureTypes.slice(2));
+const totalCost = costs => ({ amountUsd: costs.every(cost => Number.isFinite(cost?.amountUsd)) ? costs.reduce((sum, cost) => sum + cost.amountUsd, 0) : null, currency: "USD", source: "Storyboard QC usage", estimated: true });
+
+export function storyboardQcInputs(input) {
+  return [
+    { url: input.sourceUrl, label: "Generated frame to review" },
+    ...storyboardQcCharacterInputs(input.characterReferences || []),
+    input.previousFrameUrl ? { url: input.previousFrameUrl, label: "Previous approved frame for continuity" } : null,
+    input.spatialAnchorUrl && input.spatialAnchorUrl !== input.previousFrameUrl ? { url: input.spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
+  ].filter(Boolean);
+}
+
+export async function storyboardQcImage(asset, maxDimension) {
+  // Review copies only: never crop, overwrite or resize the generation references on disk.
+  const buffer = await sharp(asset.buffer).rotate().resize({ width: maxDimension, height: maxDimension, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" }).png().toBuffer();
+  return { buffer, mimeType: "image/png", fileName: "storyboard-qc.png" };
+}
+
+function needsConfirmation(qc) {
+  return !qc.pass || qc.severity === "major" || essentialFailures.has(qc.failureType) || qc.confidence !== "high" || qc.needsDetail !== false;
+}
+
 export function storyboardQcDecision(qc) {
- if(qc.confidence !== "high" || qc.needsDetail !== false) return storyboardQcUnavailable(qc.summary || "Review was uncertain.");
- if(qc.pass === false && qc.severity === "major" && essential.has(qc.failureType)) return {...qc,shouldRetry:qc.shouldRetry===true};
- if((qc.pass !== true && qc.failureType !== "polish") || essential.has(qc.failureType) || (qc.severity === "major" && qc.failureType !== "polish")) return storyboardQcUnavailable("Inconsistent review; image preserved without automatic retry.");
- return {...qc,pass:true,shouldRetry:false,severity:qc.failureType === "polish" || qc.severity === "minor" ? "minor":"ok",correctionPrompt:""};
+  if (qc.confidence !== "high" || qc.needsDetail !== false) return storyboardQcUnavailable(qc.summary || "QC could not confidently verify this frame.");
+  if (qc.severity === "major" && qc.pass === false && essentialFailures.has(qc.failureType)) {
+    return { ...qc, shouldRetry: qc.shouldRetry === true };
+  }
+  if (essentialFailures.has(qc.failureType) || (qc.severity === "major" && qc.failureType !== "polish")) {
+    return storyboardQcUnavailable("QC returned an inconsistent verdict. The image was preserved without an automatic retry.");
+  }
+  const minor = qc.failureType === "polish" || qc.severity === "minor";
+  return { ...qc, pass: true, shouldRetry: false, severity: minor ? "minor" : "ok", correctionPrompt: "" };
 }
-export async function storyboardQcImage(asset,limit) {
- return {...asset, buffer:await sharp(asset.buffer).rotate().resize({width:limit,height:limit,fit:"inside",withoutEnlargement:true}).flatten({background:"#ffffff"}).png().toBuffer(),mimeType:"image/png",fileName:"storyboard-qc.png"};
+
+export function createStoryboardQc({ readLocalAsset, review, cache = createCreativeAnalysisCache() }) {
+  return async function reviewFrame(input, { connection, model, policy, recordUsage = async () => {} }) {
+    const mode = input.qcMode === "deep" ? "deep" : "balanced";
+    const inputs = storyboardQcInputs(input);
+    const assets = [];
+    const byUrl = new Map();
+    for (const item of inputs) {
+      if (!byUrl.has(item.url)) byUrl.set(item.url, await readLocalAsset(item.url));
+      assets.push(byUrl.get(item.url));
+    }
+    const key = creativeAnalysisKey({ provider: connection.provider, credential: connection.key, model,
+      instructions: { version: storyboardQcPolicyVersion, policy, mode, input, labels: inputs.map(item => item.label) }, assets: assets.map((asset, index) => ({ ...asset, tag: inputs[index].label })) });
+    const result = await cache(key, async () => {
+      const costs = [];
+      const call = async tier => {
+        const prepared = [];
+        for (let i = 0; i < inputs.length; i += 1) {
+          const limit = tier === "routine" ? (/continuity|geography/.test(inputs[i].label) ? 1024 : 1536) : 2048;
+          prepared.push({ ...inputs[i], asset: mode === "deep" ? assets[i] : await storyboardQcImage(assets[i], limit) });
+        }
+        let reviewed;
+        try {
+          reviewed = await review({ ...input, qcMode: mode, preparedInputs: prepared, adaptiveQc: true, connection,
+            reasoningEffort: tier === "routine" ? "low" : "high" });
+        } catch (error) {
+          costs.push(error.cost || { amountUsd: null });
+          if (error.llmResult) {
+            await recordUsage({ result: error.llmResult, cost: error.cost }, `${mode}/${tier} (invalid response)`);
+            error.qcUsageRecorded = true;
+          }
+          error.cost = totalCost(costs);
+          throw error;
+        }
+        costs.push(reviewed.cost);
+        await recordUsage(reviewed, `${mode}/${tier}`);
+        return reviewed.qc;
+      };
+      try {
+        let qc = await call(mode === "deep" ? "deep" : "routine");
+        const escalated = mode === "balanced" && needsConfirmation(qc);
+        // One independent confirmation at most; never replay provider or schema failures.
+        if (escalated) qc = await call("confirmation");
+        qc = { ...storyboardQcDecision(qc), mode, escalated };
+        if (qc.severity === "unreviewed") {
+          const error = new Error(qc.summary);
+          error.qc = qc;
+          throw error; // Never cache an uncertain approval.
+        }
+        return { qc, cost: totalCost(costs) };
+      } catch (error) {
+        error.cost = totalCost(costs);
+        throw error;
+      }
+    });
+    return { ...result, cost: result.cacheHit ? totalCost([]) : result.cost, qc: { ...result.qc, cacheHit: Boolean(result.cacheHit) } };
+  };
 }
-export async function runStoryboardQc({ input, readAsset, review, recordUsage }) {
- const mode=storyboardQcMode({storyboardQcMode:input.qcMode});
- if(mode === "off") return {qc:{...storyboardQcUnavailable("Automatic review is off."),mode},cost:{amountUsd:0,currency:"USD"}};
- const inputs=[{url:input.sourceUrl,label:"Generated frame to review"},input.previousFrameUrl?{url:input.previousFrameUrl,label:"Previous approved frame for continuity"}:null,input.spatialAnchorUrl && input.spatialAnchorUrl!==input.previousFrameUrl?{url:input.spatialAnchorUrl,label:"Spatial anchor frame for room geography"}:null].filter(Boolean);
- const assets=await Promise.all(inputs.map(item=>readAsset(item.url)));const costs=[];
- const totalCost=()=>({amountUsd:costs.every(c=>Number.isFinite(c?.amountUsd))?costs.reduce((n,c)=>n+c.amountUsd,0):null,currency:"USD",estimated:true,source:"Storyboard review usage"});
- const call=async tier=>{
-  const preparedInputs=await Promise.all(inputs.map(async(item,i)=>({...item,asset:mode==="deep"?assets[i]:await storyboardQcImage(assets[i],tier==="routine"?(i===0?1536:1024):2048)})));
-  let result;
-  try { result=await review({...input,qcMode:mode,preparedInputs,reasoningEffort:tier==="routine"?"low":"high"}); }
-  catch(error){costs.push(error.cost || {amountUsd:null});if(error.llmResult){await recordUsage({result:error.llmResult,cost:error.cost},mode+"/"+tier+" (invalid response)");error.qcUsageRecorded=true;}throw error;}
-  costs.push(result.cost);await recordUsage(result,mode+"/"+tier);return result.qc;
- };
- try {
-  let qc=await call(mode==="deep"?"deep":"routine");
-  const escalated=mode==="balanced" && (!qc.pass || qc.severity==="major" || essential.has(qc.failureType) || qc.confidence!=="high" || qc.needsDetail!==false);
-  if(escalated)qc=await call("confirmation");
-  return {qc:{...storyboardQcDecision(qc),mode,escalated},cost:totalCost()};
- }catch(error){error.cost=totalCost();throw error;}
+
+// Compatibility entry point for the existing server and saved QC modes.
+const compatibleReviewers = new WeakMap();
+export async function runStoryboardQc({ input, readAsset, review, recordUsage, connection, model, policy }) {
+  const mode = storyboardQcMode({ storyboardQcMode: input.qcMode });
+  if (mode === "off") return { qc: { ...storyboardQcUnavailable("Automatic review is off."), mode }, cost: totalCost([]) };
+  let reviewers = compatibleReviewers.get(readAsset);
+  if (!reviewers) compatibleReviewers.set(readAsset, reviewers = new WeakMap());
+  let reviewFrame = reviewers.get(review);
+  if (!reviewFrame) reviewers.set(review, reviewFrame = createStoryboardQc({ readLocalAsset: readAsset, review }));
+  try {
+    return await reviewFrame({ ...input, qcMode: mode }, { connection: connection || { provider: input.preferredProvider }, model: model || "configured-storyboard-vision", policy: policy || "balanced-v2", recordUsage });
+  } catch (error) {
+    if (error.qc) {
+      return { qc: error.qc, cost: error.cost };
+    }
+    throw error;
+  }
 }

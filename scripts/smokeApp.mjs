@@ -13,6 +13,7 @@ const requiredHealthRoutes = [
   "nanoBanana21",
   "explore",
   "storyboardRevisions",
+  "storyboardPlanningV2",
   "storyboardSequenceReview",
   "providerPricing",
   "spendAnalytics",

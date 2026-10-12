@@ -5663,8 +5663,7 @@ video.newtnode-video-fallback {
 }
 
 .storyboard-node-body.is-rendering .storyboard-frame-card:not(.is-busy) {
-  opacity: 0.5;
-  pointer-events: none;
+  opacity: 1;
 }
 
 .storyboard-node-body.is-rendering .storyboard-frame-card.is-busy .storyboard-frame-controls,

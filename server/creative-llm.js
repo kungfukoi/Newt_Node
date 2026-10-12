@@ -1,5 +1,6 @@
 import { storyboardQcFailureTypes } from "../src/storyboardQc.js";
 import { storyboardSpatialSchema, storyboardCastSchema } from "../src/storyboardSpatial.js";
+import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema, storyboardCastRepairSchema } from "../src/storyboardWorkflow.js";
 import Ajv from "ajv";
 import { explorePlanSchema } from "../src/explore.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
@@ -22,6 +23,11 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "storyboard-plan-v2": storyboardPlanSchema,
+  "storyboard-revision-v2": storyboardRevisionSchema,
+  "storyboard-cast-repair": storyboardCastRepairSchema,
+  "storyboard-sequence-review": storyboardReviewSchema,
+  "storyboard-reference-analysis": object({ assets: list(object({ tag: nonempty, description: nonempty }), 1, 8) }),
   "explore-plan": explorePlanSchema,
   "film-director-style": object({ styleDirection: nonempty }),
   "film-director-motion": object({ cameraDirection: nonempty }),
@@ -65,7 +71,7 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
-  if (/shotlist|revision|shot-repair|spatial-repair|storyboard-plan|explore-plan/.test(route)) return 24000;
+  if (/shotlist|revision|shot-repair|spatial-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;
   return 8000;

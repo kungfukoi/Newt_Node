@@ -12,10 +12,16 @@ import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuil
 import { storyboardReviewSignature } from "./storyboardSequenceReview.js";
 import { storyboardQcMode, storyboardQcModes } from "./storyboardQc.js";
 import { storyboardSpatialPrompt, invalidateStoryboardStaging } from "./storyboardSpatial.js";
+import { storyboardPlannedCastPatch, currentStoryboardCast, resolveStoryboardFrameCast, storyboardCastPrompt, assertStoryboardCharacterTags } from "./storyboardCast.js";
+import { storyboardImageModelOptions } from "./modelOptions.js";
+import { storyboardImageSettings } from "./storyboardImageModels.js";
+import { storyboardSkillVersion, storyboardPlanningSettings, storyboardFrameContext, storyboardApproachDetails, storyboardPacing, storyboardPanelEditingLocked, validateStoryboardRevision as validateStoryboardRevisionV2 } from "./storyboardWorkflow.js";
+import { storyboardPromptPolicy } from "./storyboardPromptPolicy.js";
+import "./storyboardUpstream.css";
 import { normalizeStoryboardVersions, versionStoryboardReplacement, restoreStoryboardVersion, canMoveStoryboardFrame } from "./storyboardVersions.js";
 import { StoryboardPanelHistory } from "./components/StoryboardPanelHistory.jsx";
 import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
-import { StoryboardRevisionControls } from "./components/StoryboardRevisionControls.jsx";
+import { StoryboardRevisionControls, StoryboardPlanButton, StoryboardExportMenu } from "./components/StoryboardRevisionControls.jsx";
 import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
 import { normalizeCompositeLayers, compositeInputPorts, compositeLayerPortId, compositeMaskPortId, isCompositeLayerPort, migrateCompositeEdges } from "./compositeLayers.js";
@@ -1063,7 +1069,6 @@ const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardFixedModel = imageModelNames.openAiImage2;
-const storyboardImageModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.flux3, imageModelNames.nanoBanana21];
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
 const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBoardOutputPortId = "storyboardOut";
@@ -4151,24 +4156,32 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       updateNode(currentNode.id, { status: "planning", error: "" });
-      const { response, data } = await nodeApi.planStoryboard({
+      const planRequest = directorControlsScene ? nodeApi.planStoryboard : nodeApi.planStoryboardV2;
+      const { response, data } = await planRequest({
         nodeId: currentNode.id,
         nodeTitle: currentNode.data.title,
         ...workflowRequestContext(),
         sceneDescription,
-        frameCount: requestedFrameCount,
+        frameCount: directorControlsScene ? requestedFrameCount : currentNode.data.frameCount || "Auto",
+        ...storyboardPlanningSettings(currentNode.data),
+        storyboardApproach: currentNode.data.storyboardApproach,
+        storyboardPacing: currentNode.data.storyboardPacing,
+        storyboardTargetDuration: currentNode.data.storyboardTargetDuration,
+        useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
         notes: directorControlsScene ? "" : currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode, { includeInternal: !directorControlsScene }),
-        locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], currentIncomingByNode),
-        props: storyboardPropReferenceSummaries(incoming.propsIn || [], currentIncomingByNode),
+        locations: storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], currentIncomingByNode),
+        props: storyboardPropReferenceSources(incoming.propsIn || [], currentIncomingByNode),
         directorShotList: directorSource?.data?.shotList || directorSource?.data?.resultText || ""
       }, "Storyboard planning");
       const plan = requireStoryboardPlanResponse(response, data);
-      const plannedFrames = storyboardFramesFromPlan(plan.frames);
+      const plannedFrames = storyboardFramesFromPlan(plan.frames, Boolean(data.skillVersion));
 
       pushUndoSnapshot({ nodeDataIds: [currentNode.id] });
       updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(requestedFrameCount), {
         storyboardAnalysis: plan.analysis || "",
+        storyboardContinuity: plan.continuity || null,
+        storyboardSkillVersion: data.skillVersion || "legacy-director",
         storyboardPlanSceneDescription: sceneDescription,
         sceneName: plan.sceneTitle || currentNode.data.sceneName || "Scene 1",
         storyboardTab: "view",
@@ -4196,7 +4209,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       const incomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
       const incoming = expandStoryboardDirectorIncoming(incomingByNode[node.id] || {}, incomingByNode);
-      const { response, data } = await nodeApi.reviewStoryboardSequence({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming) });
+      const reviewRequest = current.data.storyboardSkillVersion === storyboardSkillVersion ? nodeApi.reviewStoryboardSequenceV2 : nodeApi.reviewStoryboardSequence;
+      const { response, data } = await reviewRequest({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming), continuity: current.data.storyboardContinuity, useStoryboardStyle: current.data.useStoryboardStyle !== false, characters: storyboardCharacterSummariesForNode(current, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }) });
       if (!response.ok) throw new Error(data.error || "Sequence review failed.");
       updateNode(node.id, { status: "complete", storyboardSequenceReview: { ...data.review, signature }, storyboardRevisionWarning: data.warning || "" });
     } catch (error) {
@@ -4217,12 +4231,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (!instruction.trim() || !sceneDescription.trim()) throw new Error("Add a scene description and revision instruction.");
       pushUndoSnapshot({ nodeDataIds: [node.id] });
       updateNode(node.id, { status: "revising", storyboardRevisionActive: true, error: "", storyboardRevisionWarning: "" });
-      const { response, data } = await nodeApi.reviseStoryboard({ ...workflowRequestContext(), nodeId: node.id, nodeTitle: currentNode.data.title,
+      const revisionRequest = currentNode.data.storyboardSkillVersion === storyboardSkillVersion ? nodeApi.reviseStoryboardV2 : nodeApi.reviseStoryboard;
+      const { response, data } = await revisionRequest({ ...workflowRequestContext(), nodeId: node.id, nodeTitle: currentNode.data.title,
+        continuity: currentNode.data.storyboardContinuity, useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
         frames, frameIds, instruction, sceneDescription, notes: currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }),
         locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], incomingByNode), props: storyboardPropReferenceSummaries(incoming.propsIn || [], incomingByNode) });
       if (!response.ok) throw new Error(data.error || "Storyboard revision failed.");
-      const revisions = validateStoryboardRevision(data.revision, frames, frameIds);
+      const revisions = currentNode.data.storyboardSkillVersion === storyboardSkillVersion
+        ? validateStoryboardRevisionV2(data.revision, frames, frameIds, storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }))
+        : validateStoryboardRevision(data.revision, frames, frameIds);
       const live = nodesRef.current.find(item => item.id === node.id);
       if (!live || frameIds.some(id => !storyboardRevisionSourceMatches(live.data.storyboardFrames.find(f => f.id === id), frames.find(f => f.id === id)))) throw new Error("Selected panels changed while revising. Their current work was preserved.");
       updateNode(node.id, { storyboardRevisionWarning: [data.warning, ...(data.revision.warnings || [])].filter(Boolean).join(" ") });
@@ -4248,15 +4266,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     let frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
     const sceneDescription = storyboardSceneDescriptionForNode(currentNode, incoming);
 
-    if (!revisionOptions.revisions && !storyboardPlanIsCurrent(currentNode, sceneDescription)) {
+    if (!revisionOptions.revisions && !frames.some(frame => frame.prompt?.trim())) {
       updateNode(currentNode.id, {
         status: "ready",
-        error: "Plan the storyboard again after changing the scene description."
+        error: "Create a storyboard plan before generating panels."
       });
-      return { status: "error", error: new Error("Plan the storyboard again after changing the scene description.") };
+      return { status: "error", error: new Error("Create a storyboard plan before generating panels.") };
     }
 
-    const targetIds = new Set(frameIds?.length ? frameIds : frames.map((frame) => frame.id));
+    const targetIds = new Set(frameIds?.length ? frameIds : frames.filter(frame => !frame.resultUrl && !frame.exportUrl).map((frame) => frame.id));
     const targetFrames = frames.filter((frame) => targetIds.has(frame.id) && !frame.protected).map(frame => ({ ...frame, ...(revisionOptions.revisions?.find(item => item.id === frame.id) || {}) }));
     if (!targetFrames.length) {
       updateNode(currentNode.id, { error: "No storyboard frames selected to generate." });
@@ -4295,11 +4313,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
         const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
         const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
-        const requiredCharacterSources = storyboardRequiredCharacterSourcesForFrame(latestStoryboardNode, frame, sceneDescription, incoming, currentIncomingByNode, { includeInternal: !directorControlsScene });
+        const frameCast = storyboardFrameCastForNode(latestStoryboardNode, frame, incoming, currentIncomingByNode, { includeInternal: !directorControlsScene });
         const allCharacterSources = storyboardCharacterSourcesForNode(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, { includeInternal: !directorControlsScene });
-        const activeCharacterSources = requiredCharacterSources.length
-          ? requiredCharacterSources
-          : !frame.spatial && allCharacterSources.length === 1 ? allCharacterSources : [];
+        const requiredCharacterSources = frameCast.references.map(reference => allCharacterSources.find(source => characterTag(source).toLowerCase() === reference.tag.toLowerCase())).filter(Boolean);
+        const activeCharacterSources = requiredCharacterSources;
         const allLocationSources = storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], currentIncomingByNode);
         const activeLocationSources = storyboardRequiredLocationSourcesForFrame(frame, sceneDescription, allLocationSources);
         const allPropSources = storyboardPropReferenceSources(incoming.propsIn || [], currentIncomingByNode);
@@ -4322,6 +4339,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           throw new Error(`Character sheet missing for ${missingCharacterTags.map((tag) => `@${tag}`).join(", ")}. Regenerate or re-upload that Storyboard character before running this frame.`);
         }
         const basePrompt = buildStoryboardFramePrompt(latestStoryboardNode, frame, sceneDescription, incoming, currentIncomingByNode, {
+          castReferences: frameCast.references,
           hasPreviousFrameReference: continuityReferenceItems.some((item) => item.label === storyboardPreviousFrameLabel),
           hasSpatialAnchorReference: continuityReferenceItems.some((item) => item.label === storyboardSpatialAnchorLabel),
           requiredCharacterSources,
@@ -4344,9 +4362,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ...currentNode.data,
                 title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
                 storyboardRevision: Boolean(revisionOptions.revisions),
-                model: currentNode.data.model || storyboardFixedModel,
-                aspectRatio,
-                resolution
+                ...storyboardImageSettings({ ...currentNode.data, aspectRatio, resolution })
               }
             },
             prompt,
@@ -4366,6 +4382,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             generated,
             sceneDescription,
             framePrompt: prompt,
+            characterReferences: frameCast.references.map(({ tag, url }) => ({ tag, url })),
             continuityReferenceItems
           });
 
@@ -4426,13 +4443,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return successes.length ? { status: "complete" } : { status: "error", error: failures[0] || new Error("Storyboard generation failed.") };
   }
 
-  async function reviewStoryboardGeneratedFrame({ node, frame, generated, sceneDescription, framePrompt, continuityReferenceItems = [] }) {
+  async function reviewStoryboardGeneratedFrame({ node, frame, generated, sceneDescription, framePrompt, characterReferences = [], continuityReferenceItems = [] }) {
     try {
       const previousFrame = continuityReferenceItems.find((item) => item.label === storyboardPreviousFrameLabel);
       const spatialAnchor = continuityReferenceItems.find((item) => item.label === storyboardSpatialAnchorLabel);
       const { response, data } = await nodeApi.reviewStoryboardFrame({
         sourceUrl: generated.url,
         qcMode: storyboardQcMode(node.data),
+        useStoryboardStyle: node.data.useStoryboardStyle !== false,
+        characterReferences,
         previousFrameUrl: previousFrame?.url || "",
         spatialAnchorUrl: spatialAnchor?.url || "",
         sceneDescription,
@@ -4791,6 +4810,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       : -1;
     const targetFrame = currentFrames.find((frame) => frame.id === editContext.itemId);
     if (targetFrame?.protected) throw new Error("Unprotect the panel before editing its image.");
+    if (targetFrame && storyboardPanelEditingLocked(currentNode, targetFrame)) throw new Error("Wait for this panel's active task before editing its image.");
     const targetItem = editContext.type === "previewLayout"
       ? currentItems.find((layoutItem) => layoutItem.id === editContext.itemId)
       : editContext.type === "nodeResult"
@@ -12103,7 +12123,7 @@ function NodeBody({
     const directorInputPort = directorPort ? { ...directorPort, disabled: storyboardLocked, disabledReason: "Storyboard is generating" } : null;
     const customStylePort = stylePort ? { ...stylePort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
     const customTransferPort = transferPort ? { ...transferPort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
-    const customCharacterPort = characterPort ? { ...characterPort, disabled: customInputDisabled || directorControlsScene, disabledReason: directorControlsScene ? directorDisabledReason : customInputDisabledReason } : null;
+    const customCharacterPort = characterPort ? { ...characterPort, disabled: storyboardLocked || directorControlsScene, disabledReason: directorControlsScene ? directorDisabledReason : "Storyboard is generating" } : null;
     const storyboardAspectRatio = storyboardAspectRatioForNode(node);
     const storyboardAspectKey = storyboardAspectRatio.replace(":", "x");
     const storyboardFrameAspectStyle = { "--storyboard-frame-aspect": storyboardCssAspectRatio(storyboardAspectRatio) };
@@ -12115,7 +12135,8 @@ function NodeBody({
       : node.data.sceneName || "";
 
     function updateFrame(frameId, patch) {
-      if (storyboardLocked || frames.find(frame => frame.id === frameId)?.protected) return;
+      const frame = frames.find(frame => frame.id === frameId);
+      if (!frame || storyboardPanelEditingLocked(node, frame) || frame.protected) return;
       const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...invalidateStoryboardStaging(frame, patch) } : frame));
       onUpdate(node.id, {
         ...clearStoryboardBoardPatch(),
@@ -12206,7 +12227,7 @@ function NodeBody({
     function openStoryboardFrame(frame, event) {
       event?.preventDefault?.();
       event?.stopPropagation?.();
-      if (storyboardLocked) return;
+      if (storyboardPanelEditingLocked(node, frame) || frame.protected) return;
       const url = frame.exportUrl || frame.resultUrl || "";
       if (!url) return;
       onPreviewOpen?.({
@@ -12264,28 +12285,17 @@ function NodeBody({
             </button>
           </div>
           <div className="storyboard-actions">
-            <button type="button" onClick={() => onStoryboardPlan?.(node)} disabled={planningStoryboard || runningStoryboard || !sceneDescription.trim()}>
-              {planningStoryboard ? "Planning..." : "Plan"}
-            </button>
+            {activeTab === "setup" && <StoryboardPlanButton busy={storyboardLocked} disabled={!sceneDescription.trim()} planning={planningStoryboard} hasPlan={frames.some(frame => frame.prompt?.trim() || frame.resultUrl || frame.exportUrl)} protectedCount={frames.filter(frame => frame.protected).length} onPlan={options => onStoryboardPlan?.(node, options)} />}
             {completedStoryboardFrameCount > 0 && (
-              <>
-                <button type="button" onClick={() => onStoryboardExport?.(node, "frames")} disabled={storyboardLocked} title="Export storyboard frames as image files">
-                  {exportingStoryboardFrames ? <Loader2 size={14} className="spin" /> : <FileImage size={14} />}
-                  <span>{exportingStoryboardFrames ? "Exporting" : "Export Frames"}</span>
-                </button>
-                <button type="button" onClick={() => onStoryboardExport?.(node, "pdf")} disabled={storyboardLocked} title="Export storyboard as a PDF">
-                  {exportingStoryboardPdf ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-                  <span>{exportingStoryboardPdf ? "Exporting" : "Export PDF"}</span>
-                </button>
-              </>
+              <StoryboardExportMenu disabled={storyboardLocked} exporting={exportingStoryboard} onExport={mode => onStoryboardExport?.(node, mode)} />
             )}
             {(preparingCharacters || exportingStoryboard || compilingStoryboardBoard) && (
               <span className="storyboard-action-busy" title={preparingCharacters ? "Generating character sheets" : compilingStoryboardBoard ? "Locking storyboard board" : "Exporting storyboard boards"}>
                 <Loader2 size={15} />
               </span>
             )}
-            <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node)} disabled={runningStoryboard || planningStoryboard || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate storyboard frames"}>
-              {preparingCharacters ? "Preparing..." : runningStoryboard ? "Generating..." : "Generate"}
+            <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node)} disabled={storyboardLocked || !sceneDescription.trim() || !frames.some(frame => frame.prompt?.trim() && !frame.protected && !frame.resultUrl && !frame.exportUrl)} title="Generate images only for unprotected panels without an image">
+              {preparingCharacters ? "Preparing..." : runningStoryboard ? "Generating..." : "Generate Missing"}
             </button>
             {activeTab === "view" && (
               <>
@@ -12357,6 +12367,13 @@ function NodeBody({
                     />
                   </div>
                 </NodeRow>
+                <NodeRow label="Approach">
+                  <select aria-label="Storyboard approach" disabled={storyboardLocked || directorControlsScene} value={storyboardPlanningSettings(node.data).approach} onChange={event => onUpdate(node.id, { storyboardApproach: event.target.value })}>{Object.entries(storyboardApproachDetails).map(([value, detail]) => <option key={value} value={value}>{detail.label}</option>)}</select>
+                  <small>{storyboardApproachDetails[storyboardPlanningSettings(node.data).approach].description}</small>
+                </NodeRow>
+                <NodeRow label="Pacing"><select aria-label="Storyboard pacing" disabled={storyboardLocked || directorControlsScene} value={storyboardPlanningSettings(node.data).pacing} onChange={event => onUpdate(node.id, { storyboardPacing: event.target.value })}>{storyboardPacing.map(value => <option key={value}>{value}</option>)}</select></NodeRow>
+                <NodeRow label="Target Duration"><input aria-label="Storyboard target duration" type="number" min="1" max="600" placeholder="Optional seconds" value={node.data.storyboardTargetDuration || ""} disabled={storyboardLocked || directorControlsScene} onChange={event => onUpdate(node.id, { storyboardTargetDuration: event.target.value })} /></NodeRow>
+                <NodeRow label="Character" inputPort={customCharacterPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}><button type="button" disabled={storyboardLocked || directorControlsScene}>{connectedSummary(storyboardIncoming.characterIn, "Optional characters")}</button></NodeRow>
                 <NodeRow label="Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={directorConnected ? "connected-field" : ""} disabled={storyboardLocked}>
                     {connectedSummary(incoming.directorIn, "Optional Director")}
@@ -12483,18 +12500,13 @@ function NodeBody({
                     {connectedSummary(incoming.transferIn, "Add mood board")}
                   </button>
                 </NodeRow>
-                <NodeRow label="Character" inputPort={customCharacterPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                  <button type="button" className={incoming.characterIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
-                    {connectedSummary(incoming.characterIn, "Add character")}
-                  </button>
-                </NodeRow>
               </div>
             </div>
           </section>
         ) : (
           <section className="storyboard-view storyboard-scroll-surface" style={storyboardFrameAspectStyle}>
             {node.data.storyboardBoardError && <small role="status">Board assembly: {node.data.storyboardBoardError} Use Retry board assembly to try again.</small>}
-            <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} onUpdate={onUpdate} onRevise={onStoryboardRevise} onReview={onStoryboardSequenceReview} />
+            <StoryboardRevisionControls node={node} frames={frames} busy={storyboardLocked} editingLocked={storyboardPanelEditingLocked(node)} setupChanged={!storyboardPlanCurrent && frames.some(frame => frame.prompt)} onUpdate={onUpdate} onRevise={onStoryboardRevise} onGenerate={onStoryboardGenerateAll} onReview={onStoryboardSequenceReview} />
             <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
               {frames.map((frame) => {
                 const selected = frame.id === selectedFrame?.id;
@@ -12565,21 +12577,23 @@ function NodeBody({
                         </div>
                       )}
                       <label className="storyboard-revision-select nodrag" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} title="Select panel for revision">
-                        <input type="checkbox" aria-label={"Select panel " + frame.number + " for revision"} disabled={storyboardLocked || frame.protected} checked={(node.data.storyboardSelectedFrameIds || []).includes(frame.id)} onChange={event => onUpdate(node.id, { storyboardSelectedFrameIds: event.target.checked ? [...new Set([...(node.data.storyboardSelectedFrameIds || []), frame.id])] : (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) })} />
+                        <input type="checkbox" aria-label={"Select panel " + frame.number + " for revision"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} checked={(node.data.storyboardSelectedFrameIds || []).includes(frame.id)} onChange={event => onUpdate(node.id, { storyboardSelectedFrameIds: event.target.checked ? [...new Set([...(node.data.storyboardSelectedFrameIds || []), frame.id])] : (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) })} />
                       </label>
                       <div className="storyboard-frame-number">
                         <GripVertical size={12} />
                         <span>{String(frame.number).padStart(2, "0")}</span>
                       </div>
                     </div>
+                    <details className="storyboard-panel-details" name={`storyboard-panel-editor-${node.id}`}>
+                    <summary>Edit panel {frame.number}</summary>
                     <div className="storyboard-frame-controls">
-                      <select value={frame.shot || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
+                      <select value={frame.shot || "None"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
                         {shotPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
-                      <select value={frame.lens || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
+                      <select value={frame.lens || "None"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
                         {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
-                      <select value={frame.angle || "None"} disabled={storyboardLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
+                      <select value={frame.angle || "None"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
                         {typePresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
                     </div>
@@ -12588,19 +12602,21 @@ function NodeBody({
                       value={frame.prompt || ""}
                       placeholder="Frame prompt"
                       tagMatches={frameCharacterTagMatches}
-                      readOnly={storyboardLocked || frame.protected}
+                      readOnly={storyboardPanelEditingLocked(node, frame) || frame.protected}
                       onChange={(event) => updateFrame(frame.id, { prompt: event.target.value })}
                     />
                     <div className="storyboard-frame-actions">
-                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || frame.protected || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate this frame"}>
+                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || frame.protected || !sceneDescription.trim() || !frame.prompt?.trim()} title="Generate this frame using its current directions">
                         {frame.status === "queued" ? "Queued..." : frame.status === "reviewing" ? "Reviewing..." : frame.status === "running" ? "Running..." : "Run"}
                       </button>
                       <button type="button" className="icon-only" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked || frame.protected}>
                         <Trash2 size={13} />
                       </button>
                     </div>
-                    <StoryboardPanelHistory frame={frame} busy={storyboardLocked} onProtect={() => { onUndoSnapshot?.(); onUpdate(node.id, { storyboardFrames: frames.map(item => item.id === frame.id ? { ...item, protected: !item.protected } : item), storyboardSelectedFrameIds: (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) }); }} onRestore={index => { if (storyboardLocked || frame.protected) return; onUndoSnapshot?.(); updateFrame(frame.id, restoreStoryboardVersion(frame, index)); }} />
+                    <StoryboardPanelHistory frame={frame} busy={storyboardPanelEditingLocked(node, frame)} onProtect={() => { if (storyboardPanelEditingLocked(node, frame)) return; onUndoSnapshot?.(); onUpdate(node.id, { storyboardFrames: frames.map(item => item.id === frame.id ? { ...item, protected: !item.protected } : item), storyboardSelectedFrameIds: (node.data.storyboardSelectedFrameIds || []).filter(id => id !== frame.id) }); }} onRestore={index => { if (storyboardPanelEditingLocked(node, frame) || frame.protected) return; onUndoSnapshot?.(); updateFrame(frame.id, restoreStoryboardVersion(frame, index)); }} />
                     {frame.qcWarning && <small className="upload-error">{frame.qcWarning}</small>}
+                    {frame.qcSummary && !frame.qcWarning && <small>{frame.qcSummary}</small>}
+                    </details>
                     {frame.error && <small className="upload-error">{frame.error}</small>}
                   </article>
                 );
@@ -17887,7 +17903,10 @@ function createDefaultNodeData(type, label, count) {
       resolution: storyboardDefaultResolution,
       useStoryboardStyle: true,
       useMoodBoard: true,
-      useInternalStoryboardCharacters: true,
+      useInternalStoryboardCharacters: false,
+      storyboardApproach: "Narrative",
+      storyboardPacing: "Balanced",
+      storyboardTargetDuration: "",
       storyboardStylePreset: "None",
       storyboardMoodBoardUrl: storyboardDefaultMoodBoardUrl,
       storyboardMoodBoardFileName: storyboardMoodBoardLabel,
@@ -23708,7 +23727,7 @@ function normalizeStoryboardData(data = {}) {
     storyboardAutoQc: storyboardQcMode(data) !== "off",
     useStoryboardStyle: data.useStoryboardStyle !== false,
     useMoodBoard: data.useMoodBoard !== false,
-    useInternalStoryboardCharacters: data.useInternalStoryboardCharacters !== false,
+    useInternalStoryboardCharacters: typeof data.useInternalStoryboardCharacters === "boolean" ? data.useInternalStoryboardCharacters : Boolean(data.storyboardCharacters?.length),
     useHighResolution: Boolean(data.useHighResolution),
     storyboardStylePreset: normalizeStylePresetName(data.storyboardStylePreset || "None"),
     storyboardMoodBoardUrl: data.storyboardMoodBoardUrl || storyboardDefaultMoodBoardUrl,
@@ -24058,10 +24077,12 @@ function storyboardFrameCountForNode(node, incoming = null) {
   return storyboardFrameCountNumber(value);
 }
 
-function storyboardFramesFromPlan(frames = []) {
+function storyboardFramesFromPlan(frames = [], bindCast = true) {
   if (!Array.isArray(frames)) return [];
   return frames.slice(0, storyboardMaxFrameCount).map((frame, index) =>
     createStoryboardFrame(index + 1, {
+      ...frame,
+      ...(bindCast ? storyboardPlannedCastPatch(frame) : {}),
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
       angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
@@ -24220,9 +24241,25 @@ function storyboardCharacterReferenceItems(node, externalItems = [], incomingByN
 
 function storyboardCharacterReferenceItemForSource(source) {
   return {
-    url: source.data.resultUrl,
+    url: characterOutputReference(source.data)?.url || "",
     label: characterReferenceLabel(source, true)
   };
+}
+
+function storyboardFrameCastForNode(node, frame, incoming = {}, incomingByNode = null, options = {}) {
+  const includeInternal = options.includeInternal !== false;
+  const summaries = storyboardCharacterSummariesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal });
+  assertStoryboardCharacterTags(summaries);
+  const sources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal });
+  const references = summaries.map((character) => {
+    const source = sources.find((item) => characterTag(item).toLowerCase() === character.tag.toLowerCase());
+    return {
+      ...character,
+      url: source ? characterOutputReference(source.data)?.url || "" : "",
+      label: source ? characterReferenceLabel(source, true) : `${character.tag} Character Sheet`
+    };
+  });
+  return resolveStoryboardFrameCast(frame, references);
 }
 
 function storyboardImagePromptItems(node, incoming = {}, incomingByNode = null, options = {}) {
@@ -24343,12 +24380,15 @@ function storyboardSceneReferenceSources(items = [], incomingByNode = null) {
   return [...uniqueSources.values()];
 }
 
-function storyboardSceneReferenceMapPrompt(referenceSources = []) {
+function storyboardSceneReferenceMapPrompt(referenceSources = [], useStoryboardStyle = true) {
   if (!referenceSources.length) return "";
   const mappings = referenceSources
     .map((source) => `@${source.tag} = uploaded location reference labeled "${source.label}"`)
     .join("; ");
-  return `Location reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching uploaded image for environment layout, architecture, geography, materials, lighting logic, palette, and recurring set details. Preserve the Storyboard node's final drawing style and do not copy a photographic rendering style. Do not merge multiple named locations into one frame unless the scene explicitly requires it.`;
+  const rendering = useStoryboardStyle !== false
+    ? "Translate its lighting and surfaces into simple monochrome value groups, not source colors or photographic texture."
+    : "Preserve relevant materials and palette within the user's chosen rendering style.";
+  return `Location reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching uploaded image for environment layout, architecture, geography, lighting direction, and recurring set details. ${rendering} Do not merge multiple named locations into one frame unless the scene explicitly requires it.`;
 }
 
 function storyboardSceneReferenceSummaries(items = [], incomingByNode = null) {
@@ -24363,12 +24403,15 @@ function storyboardPropReferenceSources(items = [], incomingByNode = null) {
   return storyboardSceneReferenceSources(items, incomingByNode);
 }
 
-function storyboardPropReferenceMapPrompt(propSources = []) {
+function storyboardPropReferenceMapPrompt(propSources = [], useStoryboardStyle = true) {
   if (!propSources.length) return "";
   const mappings = propSources
     .map((source) => `@${source.tag} = uploaded prop reference labeled "${source.label}"`)
     .join("; ");
-  return `Prop reference map: ${mappings}. Use each matching uploaded image only for that named product, object, wardrobe item, tool, set dressing, or practical element. Preserve its recognizable shape, materials, color, graphics, and important details while keeping the Storyboard node's drawing style. Do not force a prop into frames that do not name or require it.`;
+  const rendering = useStoryboardStyle !== false
+    ? "Preserve its recognizable shape and story-relevant features as simple monochrome linework/value groups, not source hues or rendered material textures."
+    : "Preserve its recognizable shape, materials, color and important details within the user's chosen rendering style.";
+  return `Prop reference map: ${mappings}. Use each matching uploaded image only for that named product, object, wardrobe item, tool, set dressing, or practical element. ${rendering} Do not force a prop into frames that do not name or require it.`;
 }
 
 function storyboardPropReferenceSummaries(items = [], incomingByNode = null) {
@@ -24426,6 +24469,11 @@ function storyboardCharacterSourcesTaggedInText(characterSources = [], text = ""
 function storyboardRequiredCharacterSourcesForFrame(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
   const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
   const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal: options.includeInternal ?? !directorControlsScene });
+  if (frame.castSource) {
+    const resolved = resolveStoryboardFrameCast(frame, characterSources.map(source => ({ tag: characterTag(source), name: source.data.characterName || source.data.title, url: source.data.resultUrl })));
+    const visibleTags = new Set(resolved.references.map(reference => reference.tag.toLowerCase()));
+    return characterSources.filter(source => visibleTags.has(characterTag(source).toLowerCase()));
+  }
   if (frame.spatial && Array.isArray(frame.cast)) return characterSources.filter(source => frame.cast.some(member => member.visibility === "visible" && String(member.tag).replace(/^@/, "").toLowerCase() === characterTag(source).replace(/^@/, "").toLowerCase()));
   const framePrompt = frame.prompt || frame.beat || "";
   const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
@@ -24479,39 +24527,25 @@ function resolveStoryboardCharacterMentions(prompt, characterSources = []) {
 }
 
 function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
-  const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
-  const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode, { includeInternal: !directorControlsScene });
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
   const sceneReferenceSources = Array.isArray(options.activeLocationSources)
     ? options.activeLocationSources
     : storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], incomingByNode);
   const propSources = Array.isArray(options.activePropSources)
     ? options.activePropSources
     : storyboardPropReferenceSources(incoming.propsIn || [], incomingByNode);
-  const namedCharacterReferences = characterSources.length > 0;
   const framePrompt = frame.prompt || frame.beat || sceneDescription || "Storyboard frame";
   const aspectRatio = storyboardAspectRatioForNode(node);
-  const scenePlanningNote = directorControlsScene ? "" : String(node.data.storyboardNotes || "").trim();
-  const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
-  const requiredCharacterSources = Array.isArray(options.requiredCharacterSources)
-    ? options.requiredCharacterSources
-    : storyboardRequiredCharacterSourcesForFrame(node, frame, sceneDescription, incoming, incomingByNode, { includeInternal: !directorControlsScene });
-  const activeCharacterSources = Array.isArray(options.activeCharacterSources)
-    ? options.activeCharacterSources
-    : (requiredCharacterSources.length ? requiredCharacterSources : characterSources);
-  const resolvedPrompt = resolveStoryboardCharacterMentions(framePrompt, characterSources);
-  const resolvedSceneDescription = resolveStoryboardCharacterMentions(sceneDescription, characterSources);
-  const characterReferenceMap = storyboardCharacterReferenceMapPrompt(activeCharacterSources);
-  const sceneReferenceMap = storyboardSceneReferenceMapPrompt(sceneReferenceSources);
-  const propReferenceMap = storyboardPropReferenceMapPrompt(propSources);
-  const requiredCastPrompt = storyboardRequiredCastPrompt(requiredCharacterSources);
-  const characterIsolationPrompt = storyboardFrameCharacterIsolationPrompt(activeCharacterSources, characterSources);
+  const scenePlanningNote = String(node.data.storyboardNotes || "").trim();
+  const castReferences = options.castReferences || storyboardFrameCastForNode(node, frame, incoming, incomingByNode).references;
+  const castPrompt = storyboardCastPrompt(frame, castReferences);
+  const sceneReferenceMap = storyboardSceneReferenceMapPrompt(sceneReferenceSources, storyboardStyleEnabled);
+  const propReferenceMap = storyboardPropReferenceMapPrompt(propSources, storyboardStyleEnabled);
   const cameraPieces = [
     shotPresetPrompts[frame.shot] || "",
     lensPresetPrompts[frame.lens] || "",
     typePresetPrompts[frame.angle] || ""
   ].filter(Boolean);
-  const characterPieces = activeCharacterSources.flatMap((source) => characterImagePromptPieces(source, namedCharacterReferences));
-  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
   const moodBoardConnected = Boolean(storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl);
   const stylePieces = storyboardStyleEnabled
     ? [stylePresetPrompts.Storyboard, storyboardBaseInstruction]
@@ -24520,14 +24554,14 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     ? (moodBoardConnected ? [storyboardMoodBoardStyleInstruction] : [])
     : (incoming.transferIn || []).flatMap(({ source }) => promptPiecesForSource(source));
   const sceneContinuityPieces = [
-    resolvedSceneDescription
-      ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
+    sceneDescription
+      ? `Scene background context only (not a cast list or a request to illustrate every beat): ${sceneDescription}. Preserve relevant environment, lighting, recurring objects and physical geography. The current frame prompt, PHYSICAL STAGING and FRAME CAST AND BLOCKING determine visible people, their camera-relative positions, action and shot. Keep people who occupy the visible area, even while listening; do not import people outside this camera view.`
       : "",
     options.hasPreviousFrameReference
-      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as the last approved continuity frame for the immediately preceding story beat, lighting direction, character identity, wardrobe, and recurring objects. Do not copy its rendering style if it looks photographic or overly realistic. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it for the preceding action state, physical occupancy, lighting direction and recurring objects. It is NOT an identity source: the named character sheets remain identity authority. Preserve an occupant when their established place remains in view; do not copy genuinely out-of-frame cast, faces or rendering style into the new shot. Do not let an insert or close-up redefine room geography or the 180 degree line. Follow current-frame blocking, including intentional camera reverses and crossings.`
       : "",
     options.hasSpatialAnchorReference
-      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the approved spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. Use the anchor for geography only, not rendering style. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it for physical room geography, occupied seats/places and object placement, not identity or rendering style. Project that established layout into the current camera view: an in-view occupied seat cannot become empty just because the other character is the focus. Respect actual tighter crops, occlusion, camera reverses and explicit physical moves. Do not copy the anchor's exact composition or add people whose positions fall outside the current frame.`
       : ""
   ].filter(Boolean);
   const frameHeader = [
@@ -24541,19 +24575,19 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
 
   return [
     frameHeader,
-    resolvedPrompt,
-    storyboardSpatialPrompt(frame.spatial),
+    framePrompt,
+    castPrompt,
+    storyboardFrameContext(frame),
+    node.data.storyboardContinuity ? `Established scene geography (current panel direction wins for explicit changes): ${JSON.stringify(node.data.storyboardContinuity)}` : "",
+    `CURRENT CAMERA CONTROLS: Shot ${frame.shot || "None"}; lens ${frame.lens || "None"}; angle ${frame.angle || "None"}. Any non-None camera setting here overrides conflicting camera wording in an older prompt, beat or reference. Apply these controls to this panel only.`,
     ...cameraPieces,
     storyboardContinuityInstruction,
-    characterReferenceMap,
     sceneReferenceMap,
     propReferenceMap,
-    requiredCastPrompt,
-    characterIsolationPrompt,
     ...sceneContinuityPieces,
     ...stylePieces,
     ...moodBoardPieces,
-    ...characterPieces,
+    storyboardPromptPolicy(storyboardStyleEnabled),
     storyboardStyleEnabled ? storyboardReferenceStyleGuard : "",
     storyboardStyleEnabled ? storyboardFinalStyleClamp : "",
     "Output only the image. Do not include captions, labels, panel borders, numbering, or text unless specifically requested in the frame prompt."

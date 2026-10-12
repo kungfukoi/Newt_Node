@@ -77,6 +77,16 @@ Music Video uses the actual connected audio as the timing and vocal authority. L
 
 ## Storyboard
 
+Independent scenes now use Sugermilk's directing skill 2.2.0. Setup offers Auto or
+an exact panel count, Standard/Dialogue/Action/Commercial/Montage approaches,
+pacing, and optional duration guidance. Create New Plan confirms replacement.
+Generate Missing preserves existing images; Regenerate Selected uses the current
+directions, and Revise Selected updates directions and images together. Edit panel
+opens camera/prompt controls, protection, prior versions and QC notes. Idle panels
+remain editable during another panel's render. The export icon offers Frames or
+PDF. Character inputs work in monochrome mode. Existing Director connections and
+uploaded character sheets remain supported.
+
 Storyboard can use its own scene description and references or accept a built Director package. When Director is connected, Director controls the scene description, active characters, selected references, and requested shot coverage.
 
 Planning validates the proposed board before replacing visible frames. It checks that every Director cut remains in order, continuous shots receive required progression frames, frame numbers are consecutive, and prompts are nonempty and distinct. A rejected plan leaves the existing board untouched.

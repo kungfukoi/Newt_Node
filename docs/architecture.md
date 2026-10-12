@@ -258,6 +258,18 @@ Audio Model (`audioModel`) uses `src/audioModel.js` for defaults, validation and
 
 `src/userPreferences.js` owns the independent Text Agent model choice (GPT-5.6 Sol or GPT-6 Astra). Settings persists it through the shared runtime settings store; each Text Agent request reads the current preference before provider submission, and existing result/history metadata records the actual model. Text Model and media-analysis helper defaults remain independent.
 
+## Storyboard upstream planner
+
+`server/routes/storyboard.js` and `server/storyboard-skills/directing-v2.md` now
+provide upstream skill 2.2.0 independent planning, selected revisions and sequence
+review. `src/storyboardWorkflow.js`, `storyboardCast.js` and `storyboardPromptPolicy.js`
+own the shared contracts, shot phases/action states, bounded cast correction,
+reference fingerprints and rendering policy. Versioned endpoints coexist with
+the original Director planning and revision contracts. `server/storyboard-qc.js`
+uses named character sheets and caches only confident review results within the
+configured provider, credential, model and policy scope. See
+[upstream comparison](storyboard-upstream.md) for the pinned source and adaptations.
+
 ## Spend analytics ownership
 
 `src/statsAnalytics.js` owns sanitized accounting records, composable filters and exact

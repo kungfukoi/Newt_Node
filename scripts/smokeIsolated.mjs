@@ -101,6 +101,12 @@ try {
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
+  assert.equal((await (await request("/api/health")).json()).routes.storyboardPlanningV2, true);
+  for (const route of ["plan-v2", "revise-v2", "review-v2"]) {
+    const invalid = await fetch(api + `/api/node/storyboard-${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    assert.equal(invalid.status, 400);
+    assert.match((await invalid.json()).error, /scene description/i);
+  }
   assert.equal((await (await request("/api/health")).json()).routes.imageObjectSelection, true);
   const noKeySelection = await fetch(api + "/api/node/image-objects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceUrl: "/outputs/panel.png", requestId: "smoke-object-selection" }) });
   assert.equal(noKeySelection.status, 400);

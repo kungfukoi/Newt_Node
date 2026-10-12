@@ -1,0 +1,12 @@
+.storyboard-revision-toolbar, .storyboard-revision-input, .storyboard-plan-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.storyboard-toolbar-spacer { flex: 1; }
+.storyboard-revision-input textarea { flex: 1; min-width: 180px; }
+.storyboard-revision-toolbar label { display: flex; align-items: center; gap: 6px; }
+.storyboard-export-menu { position: relative; }
+.storyboard-export-options { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: 4px; min-width: 150px; padding: 8px; background: #20252d; border: 1px solid #4a515f; border-radius: 8px; }
+.storyboard-export-options button { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.storyboard-panel-details { padding: 8px; }
+.storyboard-panel-details > summary { cursor: pointer; color: #c5cfdf; }
+.storyboard-panel-details[open] > summary { margin-bottom: 8px; }
+.storyboard-panel-details .storyboard-tagged-editor { min-height: 100px; }
+.storyboard-settings-grid small { display: block; white-space: normal; }

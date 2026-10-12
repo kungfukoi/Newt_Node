@@ -8,6 +8,18 @@ Before starting any new feature, read this document first. If the feature change
 
 ## Goals
 
+Storyboard now follows upstream directing skill 2.2.0 for independent plans:
+Auto selects the needed panel count; explicit counts must match exactly. Approach,
+pacing and optional duration guide planning. Generate Missing only fills panels
+without an image; completed panels require explicit Run or Regenerate Selected.
+Replacing a plan requires confirmation and cannot replace protected panels.
+Cast fingerprints prevent manual camera/prompt edits from inheriting stale
+hidden blocking. Connected Character inputs work with monochrome rendering.
+Idle panels can be edited, selected, protected or restored while another renders;
+queued/active panels remain immutable. Exports and new paid work wait for the run.
+Our Director input, legacy uploaded characters, ports and saved responses remain
+compatible. See [Storyboard upstream comparison](storyboard-upstream.md).
+
 - Keep every node predictable to build, use, save, load, preview, run, and debug.
 - Preserve a clean canvas by default, with advanced controls hidden behind Settings.
 - Make media types explicit so connector lines, ports, previews, stats, and backend routes stay in agreement.

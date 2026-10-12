@@ -97,7 +97,7 @@ export function storyboardSpatialPrompt(spatial) {
 
 export const storyboardCastSchema = { type: "array", maxItems: 16, items: { type: "object", additionalProperties: false, required: ["tag", "visibility", "position", "action", "eyeline"], properties: { tag, visibility: {type: "string", enum: ["visible", "offscreen"]}, position: text, action: text, eyeline: text } } };
 export function invalidateStoryboardStaging(frame, patch) {
-  return ["prompt", "beat", "notes", "shot", "lens", "angle"].some(key => Object.hasOwn(patch, key) && patch[key] !== frame[key]) && !Object.hasOwn(patch, "spatial") ? { ...patch, spatial: null, cast: [] } : patch;
+  return ["prompt", "beat", "notes", "shot", "lens", "angle"].some(key => Object.hasOwn(patch, key) && patch[key] !== frame[key]) && !Object.hasOwn(patch, "spatial") ? { ...patch, spatial: null, cast: [], castSource: "" } : patch;
 }
 export async function reconcileStoryboardSpatial(frames, characters, repair, editableNumbers = null) {
   const issues = storyboardSpatialPlanIssues(frames, characters);

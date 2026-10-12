@@ -16,6 +16,9 @@ import { runStoryboardQc } from "./storyboard-qc.js";
 import { storyboardQcPolicy } from "../src/storyboardQc.js";
 import { storyboardSpatialRules, storyboardSpatialSchema, storyboardCastSchema, reconcileStoryboardSpatial } from "../src/storyboardSpatial.js";
 import { registerStoryboardRevisionRoutes } from "./routes/storyboardRevisions.js";
+import { registerStoryboardRoutes } from "./routes/storyboard.js";
+import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
+import { storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
 import "dotenv/config";
 
@@ -917,6 +920,16 @@ app.use(["/api/node", "/api/generate"], (req, _res, next) => {
 });
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
+// Keep the saved Director/legacy routes while exposing the latest independent planner.
+registerStoryboardRoutes({ post: (route, handler) => app.post(route === "/api/node/storyboard-revise" ? "/api/node/storyboard-revise-v2" : route === "/api/node/storyboard-review" ? "/api/node/storyboard-review-v2" : route, handler) }, {
+  runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory,
+  estimateCost: estimateTextProcessingCost, readLocalAsset,
+  getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }),
+  connection: () => {
+    const provider = requireActiveLlmProvider();
+    return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : openAiTextApiKey };
+  }
+});
 
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: skillDirectorOpenAiModel, falModel: skillDirectorFalModel }) });
 
@@ -1104,6 +1117,7 @@ function buildHealthPayload() {
       nanoBanana21: true,
       explore: true,
       storyboardRevisions: true,
+      storyboardPlanningV2: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -4762,6 +4776,7 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
       props: Array.isArray(req.body.props) ? req.body.props : [],
       notes: String(req.body.notes || "").trim(),
       directorShotList,
+      useStoryboardStyle: req.body.useStoryboardStyle !== false,
       recordSpatialUsage: generated => recordStoryboardLlmUsage(generated, req.body, "Storyboard spatial correction")
     });
     await recordStoryboardLlmUsage(generated, req.body, "Storyboard planning");
@@ -4795,9 +4810,11 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         frameNumber: req.body.frameNumber,
         shot: String(req.body.shot || "").trim(),
         angle: String(req.body.angle || "").trim(),
-        notes: String(req.body.notes || "").trim()
+        notes: String(req.body.notes || "").trim(),
+        characterReferences: Array.isArray(req.body.characterReferences) ? req.body.characterReferences : [],
+        useStoryboardStyle: req.body.useStoryboardStyle !== false
       };
-    const reviewed = await runStoryboardQc({ input: { ...qcInput, qcMode: req.body.qcMode, preferredProvider: runtimeModelProviderPreferences.llm || textLlmProvider }, readAsset: readLocalAsset, review: reviewStoryboardFrameWithOpenAi, recordUsage: (result, tier) => recordStoryboardLlmUsage(result, req.body, "Storyboard QC " + tier) });
+    const reviewed = await runStoryboardQc({ input: { ...qcInput, qcMode: req.body.qcMode, preferredProvider: runtimeModelProviderPreferences.llm || textLlmProvider }, connection: storyboardLlmConnection(), model: `${storyboardVisionOpenAiModel}|${storyboardVisionFalModel}`, policy: storyboardQcPolicy, readAsset: readLocalAsset, review: reviewStoryboardFrameWithOpenAi, recordUsage: (result, tier) => recordStoryboardLlmUsage(result, req.body, "Storyboard QC " + tier) });
     res.json({ qc: reviewed.qc, cost: reviewed.cost });
   } catch (error) {
     console.error(error);
@@ -16648,6 +16665,11 @@ function requireActiveLlmProvider(preferredProvider = runtimeModelProviderPrefer
   throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
 }
 
+function storyboardLlmConnection() {
+  const provider = activeLlmProvider();
+  return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : openAiTextApiKey };
+}
+
 async function runTextLlm({
   prompt,
   systemPrompt = "",
@@ -19409,7 +19431,7 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "", recordSpatialUsage = async () => {} }) {
+async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "", useStoryboardStyle = true, recordSpatialUsage = async () => {} }) {
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -19462,7 +19484,7 @@ Rules:
 11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
 12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
 13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
-14. When a known location appears in a frame, preserve its exact @tag from Known locations. Use its reference for environment layout, architecture, geography, materials, lighting logic, palette, and recurring set details.
+14. When a known location appears in a frame, preserve its exact @tag from Known locations. Use its reference for environment layout, architecture, geography, lighting direction, and recurring set details, following the selected rendering policy.
 15. Keep different named locations separate, do not force locations into unrelated frames, and preserve the final storyboard drawing style rather than copying a photographic rendering style.
 16. Maintain side-of-room logic. If a character starts screen-left or screen-right relative to the room, preserve that side unless the action explicitly moves them.
 17. Vary adjacent shot scale and composition with purpose. Avoid writing two neighboring frames that are almost the same size, angle, and background. Prefer clear editorial contrast such as WS to CU, MS to insert, OTS to reaction, or EWS to ECU.
@@ -19494,8 +19516,8 @@ ${directorExpansionInstruction
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
   const result = await runTextLlm({
-    prompt: prompt + "\n\n" + storyboardSpatialRules + "\nWhen no named references are supplied, assign stable tags only to people actually described in the scene. Every frame must also include spatial and cast matching these schemas: " + JSON.stringify({ spatial: storyboardSpatialSchema, cast: storyboardCastSchema }),
-    systemPrompt: `You are NewtNode's senior storyboard director. Return only valid JSON.\n\n${storyboardReasoningSkill}`,
+    prompt: prompt + "\n\n" + storyboardSpatialRules + "\nWhen no named references are supplied, assign stable tags only to people actually described in the scene. Every frame must also include spatial and cast matching these schemas: " + JSON.stringify({ spatial: storyboardSpatialSchema, cast: storyboardCastSchema }) + "\n" + storyboardPromptPolicy(useStoryboardStyle) + "\nDo not move unwanted descriptions into cast metadata or notes.",
+    systemPrompt: `You are NewtNode's senior storyboard director. Return only valid JSON. Define referenced characters by exact tags, not by redescribing their physical features, clothing or colors.\n\n${storyboardReasoningSkill}`,
     falModel: storyboardFalModel,
     openAiModel: storyboardOpenAiModel,
     responseMimeType: "application/json",
@@ -19651,6 +19673,9 @@ function storyboardQcReviewPrompt({
   shot = "",
   angle = "",
   notes = "",
+  useStoryboardStyle = true,
+  adaptiveQc = false,
+  qcMode = "deep",
   imageLabels = []
 } = {}) {
   return `You are a professional storyboard supervisor reviewing one generated storyboard frame before it becomes a continuity reference.
@@ -19659,9 +19684,10 @@ Return strict JSON only. Do not include markdown fences.
 
 Review goal:
 - Pass the image if it is broadly usable and physically coherent.
-- Fail for obvious storyboard-breaking problems and weak editorial progression.
+- Fail only for clear storyboard-breaking problems or a missing explicitly required story beat.
 - Do not fail for small style differences, minor line-art imperfections, or harmless model variation.
-- If the frame prompt includes STORYBOARD STYLE LOCK, fail obvious realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism, heavy shaded realism, or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking.
+- ${qcMode === "balanced" ? "BALANCED PERFORMANCE REVIEW: Judge whether the intended story beat reads, not literal execution of every acting adjective. A readable smile, laugh or emotional beat need not have a particular intensity, exact eyebrow angle, gaze nuance, finger pose or micro-expression. Subtle performance, stronger aesthetic preferences or speculative left/right-hand anatomy are polish, not grounds to regenerate. Do not fail a single still for motion/timing that cannot be depicted in it. A clearly missing or opposite story action, or an unmistakably wrong hand/object assignment essential to the story, remains a real action/continuity failure. This tolerance also applies during higher-detail confirmation." : "DEEP PERFORMANCE REVIEW: Check explicit acting direction closely, including readable emotional nuance, gesture, gaze, expression intensity and specified hand/prop choreography. A clearly contradictory or omitted requested performance beat can be an action failure even when the broader story remains understandable. Use visible evidence; never invent requirements or claim certainty about an expression or movement a single still cannot establish."} Never invent requirements from reference images.
+- ${useStoryboardStyle !== false ? "Fail obvious colored output, realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking. Never fail a monochrome board for not matching the colors of its references or source prose, and never request those colors in a correction." : "Evaluate against the user's chosen custom style. Color and photographic rendering are allowed when that style calls for them; do not demand black-and-white line art."}
 
 Current frame:
 Frame ${frameNumber || 1}
@@ -19676,8 +19702,13 @@ ${sceneDescription || "No scene description provided."}
 Frame notes:
 ${notes || "None"}
 
+Prompt and rendering policy:
+${storyboardPromptPolicy(useStoryboardStyle)}
+In issues and correctionPrompt, identify referenced characters by exact @tags and their assigned sheets, not new physical descriptions or wardrobe/color catalogues. Request a match to the correct named sheet and fix only the failed action, blocking, identity assignment or rendering. Do not undo an explicit clothing interaction or story-state change just to restore the reference's baseline outfit.
+
 Uploaded image order:
 ${imageLabels.length ? imageLabels.map((label, index) => `${index + 1}. ${label}`).join("\n") : "1. Generated frame to review"}
+Use this uploaded order for review. Generation-reference numbers quoted inside the frame prompt describe the generator's original inputs, not the review images. Match original identities by their @tag labels.
 
 Check for these problems:
 1. Physical logic errors: floating objects, impossible contact points, impossible object placement, broken perspective, major anatomy failures.
@@ -19685,8 +19716,10 @@ Check for these problems:
 3. Spatial consistency: kitchen drawers, counters, doors, props, walls, and other environment details should belong to the room and not float or jump to impossible places.
 4. Shot progression: judge the requested frame, not an invented camera move. Within a continuous CUT, the same scale/composition is valid when the action state changes or the camera remains locked. Between cuts, check a requested scale change is visible; matching close-ups of different speakers are valid. Do not force a tighter frame or new angle that contradicts the current prompt.
 5. Background variety with continuity: different shots may share the same environment, but should not keep showing the exact same background from the exact same camera unless the prompt calls for a locked-off repeat.
-6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props. Inspect actual occupied space against previous and anchor images. A listening character cannot disappear while their established seat stays visible. Do not accept an offscreen label that contradicts the camera view. Partial bodies count as visible; deliberate singles, inserts, reverses and real occlusion remain valid.
-7. Storyboard style: when STORYBOARD STYLE LOCK is present, the frame should read as clean minimal line-art production boards, not realistic grayscale photography.
+6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
+7. Rendering: apply the explicit rendering policy above, even if an old prompt or source reference describes a different look.
+8. Cast audit: compare each visible tagged character against that tag's original identity sheet. Multiple views in a sheet are ONE person. Check for a duplicated person replacing another, blended faces or wardrobe, extra people, missing visible cast, and an offscreen person incorrectly shown. Compare the exact tag-to-position, foreground/background depth, action, prop ownership and eyeline assignments in FRAME CAST AND BLOCKING. A clearly wrong identity or swapped assignment is a major failure, not harmless variation. Do not require an offscreen person's face, or a visible face on a back view/foreground shoulder. Judge stylized line-art likeness by available distinctive features, not photographic detail. Original identity sheets outrank earlier frames; the current frame's camera-relative blocking outranks a prior shot's screen coordinates. Never require every character mentioned in the full scene to appear in this frame. A correction must name the affected @tags and their correct positions, without swapping their reference bindings.
+9. Occupancy audit: use PHYSICAL STAGING, the previous image and spatial anchor to check the actual field of view, not only the declared visible cast. A listening partner must not vanish while their established seat/area remains visible. In a two-person table scene, a broad view of the same table cannot have an empty half where the other person still sits. An offscreen label alone does not excuse this. Pass a genuine tighter crop, reverse, insert, motivated opaque occlusion or explicit exit; a partial shoulder/hand/body is visible and need not show a face. A lens label alone is not evidence of reframing. Fail unexplained disappearing occupants as major continuity errors; preserve the intended camera and restore missing in-view people, rather than inventing an exit or forcing all scene characters into a legitimate single.
 
 Return this exact JSON shape:
 {
@@ -19695,13 +19728,14 @@ Return this exact JSON shape:
   "summary": "short reviewer note",
   "issues": [],
   "shouldRetry": false,
-  "correctionPrompt": "short direct prompt addon for regeneration if failed",
-  "failureType": "none",
+  "correctionPrompt": "short direct prompt addon for regeneration if failed"${adaptiveQc ? `,
   "confidence": "high",
-  "needsDetail": false
+  "needsDetail": false,
+  "failureType": "none"` : ""}
 }
 
-If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
+Use severity "minor", pass true and shouldRetry false for optional polish; do not pay to regenerate it. A major failure must cite visible evidence that contradicts required staging, identity, story action, physical logic or the requested rendering. Only then set pass false, shouldRetry true and write correctionPrompt as direct image-generation instructions under 80 words.${adaptiveQc ? `
+Choose failureType from none, polish, identity, missing_cast, spatial, action, prop, physical, rendering. Use none for a clean pass, polish for minor optional improvements, or the essential category for a major failure. confidence describes certainty in this verdict, not image quality. Set confidence to uncertain and needsDetail true when size, occlusion or ambiguity prevents verifying identities, anatomy or required action. Never guess a pass or fail from unreadable evidence. Keep summary and issues concise; no extended critique or restatement of the scene.` : ""}`;
 }
 
 async function reviewStoryboardFrameWithOpenAi({
@@ -19714,10 +19748,13 @@ async function reviewStoryboardFrameWithOpenAi({
   shot = "",
   angle = "",
   preparedInputs = null, qcMode = "balanced", reasoningEffort = "high", preferredProvider,
+  useStoryboardStyle = true,
+  characterReferences = [],
   notes = ""
 } = {}) {
   const inputs = preparedInputs || [
     sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
+    ...storyboardQcCharacterInputs(characterReferences),
     previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
     spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
   ].filter(Boolean);
@@ -19729,13 +19766,14 @@ async function reviewStoryboardFrameWithOpenAi({
     shot,
     angle,
     notes,
+    qcMode, useStoryboardStyle,
     imageLabels: inputs.map((item) => item.label)
   });
   const result = await runMediaDescriptionLlm({
     inputs,
     mediaType: "image",
     preferredProvider,
-    prompt: prompt + "\nReview mode: " + qcMode + "\n" + storyboardQcPolicy,
+    prompt: prompt + "\nReview mode: " + qcMode + "\n" + storyboardQcPolicy + "\n" + storyboardPromptPolicy(useStoryboardStyle) + (qcMode === "balanced" ? "\nJudge whether the intended emotional beat reads; exact eyebrow angle, gaze nuance, finger pose and expression intensity are optional polish, including during confirmation. Never infer timing from a single still." : "\nCheck explicit performance direction closely, using visible evidence only."),
     systemPrompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
     falModel: storyboardVisionFalModel,
     openAiModel: storyboardVisionOpenAiModel,
