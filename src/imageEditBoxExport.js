@@ -74,7 +74,8 @@ export async function exportBoxSelections({ boxes, size, base, prompt }) {
   context.drawImage(image, 0, 0, size.width, size.height);
   const font = Math.max(12, Math.min(size.width, size.height) / 65);
   context.font = `${font}px sans-serif`; context.lineWidth = Math.max(2, font / 8);
-  saved.boxes.forEach(box => {
+  saved.boxes.forEach((box, index) => {
+    const name = `${index + 1}. ${box.label}`;
     const draw = (rect, color, dashed) => {
       const corners = boxCorners(rect, size.width, size.height);
       context.strokeStyle = color; context.setLineDash(dashed ? [font / 2, font / 3] : []);
@@ -83,10 +84,10 @@ export async function exportBoxSelections({ boxes, size, base, prompt }) {
     };
     if (box.mode === "move") {
       const source = draw(box.source, "#ff3344", true);
-      label(box.tag, source);
+      label(name, source);
     }
     const p = draw(["keep", "remove"].includes(box.mode) ? box.source : box.target, box.mode === "keep" ? "#ffee22" : box.mode === "remove" ? "#ff3344" : "#00eeee", false);
-    label(box.tag, p);
+    label(name, p);
   });
   function label(text, point) {
     const x = Math.max(0, Math.min(point.x, size.width - context.measureText(text).width)), y = Math.max(font, Math.min(size.height - 2, point.y - 4));

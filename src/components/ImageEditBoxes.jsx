@@ -49,7 +49,6 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
     if (svgRef.current.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
   }
   const shown = draft ? [...boxes.filter(box => box.id !== draft.id), draft] : boxes;
-  const tags = editBoxTags(shown);
   const points = rect => boxCorners(rect, size.width, size.height).map(p => `${p.x},${p.y}`).join(" ");
   const radius = Math.max(4, Math.min(size.width, size.height) / 65);
   return <svg ref={svgRef} className={`ies-box-overlay ${active ? "interactive" : ""}`} aria-label="Boxes canvas" viewBox={`0 0 ${size.width} ${size.height}`} onPointerDown={event => begin(event)} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
@@ -63,7 +62,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
         {active && selectedId === box.id && box.mode !== "keep" && (box.mode === "move" ? [box.source, box.target] : [rect]).map((region, i) => <polygon key={`context-${i}`} points={points(boxContextRect(region, size.width, size.height, box.contextPadding))} fill="none" stroke="#ffffff88" strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />)}
         {box.mode === "move" && <><polygon className="ies-box-source" points={points(box.source)} /><line className="ies-box-link" x1={box.source.x * size.width} y1={box.source.y * size.height} x2={cx} y2={cy} /></>}
         <polygon data-box-id={box.id} aria-label={`Box ${index + 1}: ${box.label}`} className={`ies-box-target ${selectedId === box.id ? "selected" : ""} ${sourceOnly ? box.mode : ""}`} points={points(rect)} onPointerDown={event => begin(event, box)} onDoubleClick={event => rename(event, box)} />
-        <text className="ies-box-caption" aria-label={`Rename box ${index + 1}`} x={corners[0].x} y={corners[0].y - radius} fontSize={radius * 1.2} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => rename(event, box)}>{tags[index]}</text>
+        <text className="ies-box-caption" aria-label={`Rename box ${index + 1}`} x={corners[0].x} y={corners[0].y - radius} fontSize={radius * 1.2} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => rename(event, box)}>{index + 1}. {box.label}</text>
         {active && selectedId === box.id && <>
           {corners.map((p, i) => <g key={i}>
             <circle aria-label={`Scale box ${index + 1}`} className="ies-box-scale-hit" cx={p.x} cy={p.y} r={radius} onPointerDown={event => begin(event, box, "scale")} />
