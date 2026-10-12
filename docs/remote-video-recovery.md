@@ -9,6 +9,7 @@ The elapsed timer retains the original run start across acceptance retries and t
 - Each generation in a batch has its own job ID and lifecycle. A 20-minute elapsed time is a warning per job, including queue time, not a batch deadline or a failure.
 - Queued or processing jobs remain pending. A responsive status endpoint does not prove that inference is advancing; the UI reports what the provider actually says, without claiming it can reliably detect an internal stall.
 - Status/network failures retry with backoff. Delayed jobs poll less frequently. No new paid request is submitted to recover an accepted job.
+- Explicit Atlas HTTP 400 parameter rejections (including InvalidParameter.AspectRatioTooLarge and non-adaptive first-frame ratios) are confirmed task failures and stop polling. They must not appear as perpetual reconnecting jobs. Correct future inputs and submit only through a new explicit Run; existing request IDs are never replayed.
 - Completed clips appear individually, updating connected Preview nodes, the generation's Output target, and project history while other batch clips are still running.
 - Restarting Newt resumes jobs with saved provider IDs. Reopening the original workflow restores pending state and applies new results once. Save As copies and unrelated workflows do not adopt those jobs.
 - Changing or disabling the provider key pauses provider access until the original key is enabled and selected again. There is no silent provider or account fallback.

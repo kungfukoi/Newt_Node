@@ -64,6 +64,10 @@ function start() {
     clearTimeout(killTimer);
     log(`exited code=${code ?? ""} signal=${signal || ""}`);
     if (stopping) { finish(); return; }
+    if (!client && code === 73) {
+      log("another backend owns this checkout's data; stopping duplicate supervisor");
+      stopping = true; unwatchFile(markerPath); finish(); return;
+    }
     const policy = restartDelay({ failures, uptimeMs: Date.now() - startedAt, requested });
     failures = policy.failures;
     requested = false;

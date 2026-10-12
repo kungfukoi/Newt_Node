@@ -69,6 +69,20 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
+  const duplicatePort = await freePort();
+  const duplicate = spawn(process.execPath, [path.join(sandbox, "server", "index.js")], { cwd: sandbox,
+    env: { ...env, PORT: String(duplicatePort), NEWTNODE_CONTROL_PORT: String(duplicatePort) }, windowsHide: true, stdio: "ignore" });
+  const duplicateClosed = once(duplicate, "close");
+  let duplicateTimeout;
+  try {
+    const [code] = await Promise.race([duplicateClosed, new Promise((_, reject) => { duplicateTimeout = setTimeout(() => reject(new Error("Duplicate backend did not reject shared data ownership")), 10000); })]);
+    assert.equal(code, 73, "A second backend must reject the shared datastore before opening jobs/history, even on different HTTP ports.");
+    assert.equal((await (await request("/api/health")).json()).ok, true);
+  } finally {
+    clearTimeout(duplicateTimeout);
+    if (duplicate.exitCode === null) duplicate.kill("SIGKILL");
+    await duplicateClosed;
+  }
   assert.equal((await (await request("/api/health")).json()).routes.ideogram45, true);
   assert.equal((await (await request("/api/health")).json()).routes.nanoBanana21, true);
   assert.equal((await (await request("/api/health")).json()).routes.explore, true);

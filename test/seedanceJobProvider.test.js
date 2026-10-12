@@ -152,3 +152,10 @@ test("Atlas polling rejects mismatched jobs, preserves temporary failures, and r
   const wrongKey = createSeedanceJobAdapter({ getKey: async () => "other-key", fetchImpl: () => assert.fail("Must not access another account") });
   await assert.rejects(wrongKey(atlasSpec()), (error) => error.waitingForCredential);
 });
+
+test("Atlas asynchronous parameter rejections stop recovery while generic connection errors remain recoverable", async () => {
+  for (const [message, terminal] of [["InvalidParameter.AspectRatioTooLarge: Aspect ratio must be between 0.4 and 2.5.", true], ["For first-frame or first-last-frame generation the output aspect ratio follows the first-frame image. Set ratio to adaptive or omit it.", true], ["Temporary gateway error", false]]) {
+    const client = await adapter([{ status: 400, body: { message } }])(atlasSpec());
+    await assert.rejects(client.poll({ requestId: "original" }), error => Boolean(error.confirmedFailure) === terminal);
+  }
+});

@@ -161,7 +161,7 @@ export function buildAtlasVideoRequest({
     const is25 = spec.version === "2.5";
     request.duration = normalizedDuration(duration, 4, is25 ? 30 : 15, 5, true);
     request.resolution = normalizedSeedanceResolution(resolution, is25);
-    request.ratio = normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
+    request.ratio = is25 && startImage ? "adaptive" : normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
     request.generate_audio = generateAudio !== false;
     if (seed !== undefined && seed !== null && seed !== "") {
       if (is25) fail("Atlas Cloud Seedance 2.5 does not document a seed setting.");

@@ -4,12 +4,17 @@ import {
   estimateAtlasImageCost,
   estimateAtlasVideoCost
 } from "../src/atlasMedia.js";
+import { prepareAtlasSeedanceImageAsset } from "./atlas-video-input.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null, quoteInput = async () => null }) {
-  async function uploadSource(source, key, kind = "") {
-    const asset = kind === "videos" && typeof prepareVideoSource === "function"
+  async function uploadSource(source, key, kind = "", model = "", onReferencePrepared) {
+    let asset = kind === "videos" && typeof prepareVideoSource === "function"
       ? await prepareVideoSource(source)
       : typeof source === "string" ? await readLocalAsset(source) : source;
+    if (["images", "start", "end"].includes(kind) && /^Seedance 2\.[05]$/i.test(model) && asset?.buffer) {
+      asset = await prepareAtlasSeedanceImageAsset(asset);
+      if (asset.atlasNormalization) onReferencePrepared?.({ role: kind, source: typeof source === "string" ? source : asset.fileName, ...asset.atlasNormalization });
+    }
     return client.upload(asset, key);
   }
 
@@ -81,6 +86,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     images = [],
     videos = [],
     audios = [],
+    onReferencePrepared,
     ...options
   }, key) {
     const placeholder = "https://reference.invalid/media";
@@ -96,15 +102,15 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     });
     const uploaded = { images: [], videos: [], audios: [] };
     for (const [kind, sources] of Object.entries({ images, videos, audios })) {
-      for (const source of sources) uploaded[kind].push(await uploadSource(source, key, kind));
+      for (const source of sources) uploaded[kind].push(await uploadSource(source, key, kind, model, onReferencePrepared));
     }
     const input = buildAtlasVideoRequest({
       model,
       prompt,
       ...options,
       ...uploaded,
-      startImage: startImage ? await uploadSource(startImage, key) : "",
-      endImage: endImage ? await uploadSource(endImage, key) : ""
+      startImage: startImage ? await uploadSource(startImage, key, "start", model, onReferencePrepared) : "",
+      endImage: endImage ? await uploadSource(endImage, key, "end", model, onReferencePrepared) : ""
     });
     return input;
   }

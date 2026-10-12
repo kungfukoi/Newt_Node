@@ -19,6 +19,13 @@ async function withTempOutputDir(callback) {
   }
 }
 
+test("simultaneous window exports reserve distinct filenames in a shared output directory", async () => {
+  await withTempOutputDir(async directory => {
+    const targets = await Promise.all(Array.from({ length: 12 }, () => createOutputTargetAsset({ outputTargetPath: directory, outputTargetFileName: "take" }, "video", ".mp4", "", { rootDir: directory })));
+    assert.equal(new Set(targets.map(target => target.filePath)).size, 12);
+  });
+});
+
 test("Output filename tokens use the input node name, date, and timestamp", async () => {
   await withTempOutputDir(async (directory) => {
     const target = await createOutputTargetAsset(

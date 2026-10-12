@@ -21,6 +21,25 @@ const spec = {
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
 
+test("two windows submit concurrently with isolated workflow progress and results", async t => {
+  const submitted = [];
+  const f = await fixture(t, { providerLimits: { krea: 2 },
+    adapter: async jobSpec => ({ submit: async () => { submitted.push(jobSpec.body.projectId); return { requestId: `provider-${jobSpec.body.projectId}` }; }, poll: async () => ({ remote: video }) }),
+    finalize: async job => ({ generationRunId: job.runId, video: { localUrl: `/outputs/${job.spec.body.projectId}.mp4` } }) });
+  const service = await f.open();
+  const a = { ...spec, body: { ...spec.body, projectId: "shot6", generationGroupId: "window-a" } };
+  const b = { ...spec, body: { ...spec.body, projectId: "shot7", generationGroupId: "window-b" } };
+  await Promise.all([service.create("run-a", a, "hash-a"), service.create("run-b", b, "hash-b")]);
+  await Promise.all([service.step("run-a"), service.step("run-b")]);
+  assert.deepEqual(submitted.sort(), ["shot6", "shot7"]);
+  assert.deepEqual(service.list(remoteVideoScope(a.body)).map(job => job.runId), ["run-a"]);
+  assert.deepEqual(service.list(remoteVideoScope(b.body)).map(job => job.runId), ["run-b"]);
+  await Promise.all([service.step("run-a"), service.step("run-b")]);
+  await Promise.all([service.step("run-a"), service.step("run-b")]);
+  assert.equal(service.get("run-a").result.video.localUrl, "/outputs/shot6.mp4");
+  assert.equal(service.get("run-b").result.video.localUrl, "/outputs/shot7.mp4");
+});
+
 test("Atlas HTTP 402 is a failed billing rejection, not uncertain acceptance, across restart", async (t) => {
   let submits = 0;
   const key = "test-atlas-key";

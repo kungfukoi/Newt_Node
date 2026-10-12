@@ -121,7 +121,17 @@ function atlasJobAdapter(spec, key, fetchImpl) {
       }
     },
     async poll(job) {
-      const response = await client.pollVideo(job.requestId, key);
+      let response;
+      try { response = await client.pollVideo(job.requestId, key); }
+      catch (error) {
+        error.message = safeMessage(error.message);
+        // Some Atlas tasks report an asynchronous input rejection as HTTP 400
+        // instead of a JSON failed status. These are terminal, not disconnections.
+        if (error.status === 400 && /InvalidParameter(?:[.:])|For first-frame or first-last-frame generation.*(?:aspect ratio|ratio)/i.test(error.message)) {
+          error.confirmedFailure = true; error.providerStatus = "failed";
+        }
+        throw error;
+      }
       const data = response?.data || response;
       if (!data?.status || (data.id && data.id !== job.requestId) || (data.model && data.model !== spec.endpoint)) {
         throw new Error("Atlas Cloud returned a mismatched or invalid job status.");

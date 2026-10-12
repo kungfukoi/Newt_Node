@@ -53,6 +53,12 @@ Provider credentials should be entered and selected in Settings. Do not put real
 
 Use `npm.cmd` instead of `npm` in PowerShell only when the machine's script-execution policy blocks `npm.ps1`.
 
+### Multiple Newt Windows
+
+Run the normal launcher again to open a second window. Windows and macOS launchers reuse the existing API/client services; each window keeps its own session draft. Separate workflows can submit generations simultaneously through the shared backend. Provider admission limits are shared across windows, so a queued run may wait for a slot rather than conflict. Use separate workflows when editing in parallel; two windows saving edits to the same workflow still target the same document.
+
+One backend owns a checkout's `server/data` directory. An OS-held loopback UDP lease prevents a second backend—even on different HTTP ports—from opening that job/history store, and releases automatically when the process exits or is killed. A duplicate supervisor stops on ownership failure instead of restarting in a loop. This does not create an additional generation server or increase provider/account limits. Output reservations are claimed before filesystem checks so concurrent windows receive distinct filenames.
+
 ### Browser And Platform Checks
 
 Install the test browser once after `npm ci` or `deps:ensure`:

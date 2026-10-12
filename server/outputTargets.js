@@ -254,16 +254,20 @@ async function reserveOutputFile(filePath) {
     throw error;
   }
 
+  // Claim before awaiting filesystem checks: concurrent windows must not both
+  // observe a missing file and reserve the same path.
+  reservedOutputFilePaths.set(reservationKey, Date.now() + outputReservationLifetimeMs);
   try {
     await stat(filePath);
     const error = new Error("Output file already exists.");
     error.code = "EEXIST";
     throw error;
   } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+    if (error?.code !== "ENOENT") {
+      reservedOutputFilePaths.delete(reservationKey);
+      throw error;
+    }
   }
-
-  reservedOutputFilePaths.set(reservationKey, Date.now() + outputReservationLifetimeMs);
 }
 
 function outputHttpError(status, message) {

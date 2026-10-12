@@ -123,6 +123,7 @@ import { generateIdeogram45 } from "./ideogram45.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { acquireRuntimeOwner } from "./runtime-owner.js";
 import { registerImageBoxNameRoutes } from "./routes/imageBoxNames.js";
 import { registerObjectSelectionRoutes } from "./routes/objectSelection.js";
 import { createObjectSelectionCache } from "./object-selection-cache.js";
@@ -348,6 +349,9 @@ const workflowPackageMetadataDirName = ".newtnode";
 const workflowPackageManifestFileName = "manifest.json";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
 const dataDir = path.join(__dirname, "data");
+const runtimeOwner = await acquireRuntimeOwner(dataDir).catch(error => {
+  console.error(error.message); process.exit(error.exitCode || 1);
+});
 const newtPresetsDir = path.join(dataDir, "newt-presets");
 const newtPresetAssetsDir = path.join(outputsDir, "Newt-Presets", "dependencies");
 const newtPresetAssetsUrl = "/outputs/Newt-Presets/dependencies";
@@ -6722,6 +6726,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     let runtimeAspectRatio = aspectRatio;
     let runtimeDurationSeconds = durationToSeconds(duration);
 
+    const atlasReferencePreparation = [];
     function seedanceJobSpec(input) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
@@ -6743,7 +6748,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           resolution, duration, aspectRatio, generateAudio, seed: requestedSeed ?? null, runtimeProvider,
           startFrameCount: startFrameUrl ? 1 : 0, endFrameCount: endFrameUrl ? 1 : 0,
           referenceImageCount: referenceImageUrls.length, referenceImageNames,
-          referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length
+          referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length,
+          ...(atlasReferencePreparation.length ? { atlasReferencePreparation } : {})
         }
       };
     }
@@ -6757,6 +6763,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by Atlas Cloud.` });
       }
       const atlasOptions = {
+        onReferencePrepared: entry => atlasReferencePreparation.push(entry),
         model: selectedVideoModel.displayName,
         prompt: submittedPrompt,
         startImage: startFrameUrl,
@@ -6796,6 +6803,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           aspectRatio,
           generateAudio,
           runtimeProvider: "atlas",
+          ...(atlasReferencePreparation.length ? { atlasReferencePreparation } : {}),
           startFrameCount: startFrameUrl ? 1 : 0,
           endFrameCount: endFrameUrl ? 1 : 0,
           referenceImageCount: referenceImageUrls.length,

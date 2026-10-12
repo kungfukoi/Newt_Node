@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+import sharp from "sharp";
 
 import { createAtlasMedia } from "../server/atlas-media.js";
-import { prepareAtlasVideoReferenceAsset } from "../server/atlas-video-input.js";
+import { prepareAtlasVideoReferenceAsset, prepareAtlasSeedanceImageAsset } from "../server/atlas-video-input.js";
 
 function dependencies({ width, height }) {
   const calls = { ffmpeg: [], removed: [] };
@@ -43,6 +44,7 @@ test("Atlas video references below the provider minimum are upscaled without cro
 });
 
 test("Atlas upload preparation applies only to video references", async () => {
+  const image = await sharp({ create: { width: 600, height: 400, channels: 4, background: "white" } }).png().toBuffer();
   const uploaded = [];
   const atlas = createAtlasMedia({
     client: {
@@ -52,7 +54,7 @@ test("Atlas upload preparation applies only to video references", async () => {
       },
       generate: async () => ({ requestId: "request-1", url: "https://example.com/result.mp4" })
     },
-    readLocalAsset: async (source) => ({ fileName: path.basename(source), buffer: Buffer.from(source), mimeType: "application/octet-stream" }),
+    readLocalAsset: async (source) => ({ fileName: path.basename(source), buffer: source.endsWith(".png") ? image : Buffer.from(source), mimeType: source.endsWith(".png") ? "image/png" : "application/octet-stream" }),
     prepareVideoSource: async () => ({ fileName: "prepared-reference.mp4", buffer: Buffer.from("prepared"), mimeType: "video/mp4" }),
     imageSize: () => "1024x1024",
     labelPrompt: (prompt) => prompt
@@ -70,4 +72,25 @@ test("Atlas upload preparation applies only to video references", async () => {
   }, "atlas-key");
 
   assert.deepEqual(uploaded, ["reference.png", "prepared-reference.mp4", "reference.wav"]);
+});
+
+test("Atlas pads the Shot 6 crop without cutting or stretching its pixels", async () => {
+  const original = await sharp({ create: { width: 2752, height: 308, channels: 4, background: "#123456" } }).png().toBuffer();
+  const asset = await prepareAtlasSeedanceImageAsset({ buffer: original, mimeType: "image/png", fileName: "paddles.png" });
+  const info = await sharp(asset.buffer).metadata();
+  assert.equal(info.width, 2752); assert.equal(info.height, 1101); assert.ok(info.width / info.height <= 2.5);
+  const restored = await sharp(asset.buffer).extract({ left: 0, top: Math.floor((1101 - 308) / 2), width: 2752, height: 308 }).raw().toBuffer();
+  assert.deepEqual(restored, await sharp(original).raw().toBuffer());
+  assert.equal(asset.atlasNormalization.padded, true);
+});
+
+test("Atlas keeps valid images byte-identical and fits tiny, tall and oversized references", async () => {
+  for (const [width, height] of [[2000, 2000], [80, 60], [308, 2752], [6500, 300]]) {
+    const original = await sharp({ create: { width, height, channels: 4, background: "white" } }).png().toBuffer();
+    const asset = { fileName: "reference.png", buffer: original, mimeType: "image/png" };
+    const result = await prepareAtlasSeedanceImageAsset(asset), info = await sharp(result.buffer).metadata();
+    assert.ok(info.width / info.height >= .4 && info.width / info.height <= 2.5);
+    assert.ok(Math.min(info.width, info.height) >= 300 && Math.max(info.width, info.height) <= 6000);
+    if (width === 2000) assert.equal(result, asset);
+  }
 });

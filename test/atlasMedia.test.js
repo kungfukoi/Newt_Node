@@ -97,6 +97,16 @@ test("Atlas Seedance uses native request field names without dropping references
   assert.equal(input.omni_reference_task_type, "reference");
 });
 
+test("Atlas Seedance 2.5 frame routes preserve frame aspect even with an explicit output ratio", () => {
+  for (const aspectRatio of ["1:1", "16:9", "auto"]) {
+    const input = buildAtlasVideoRequest({ model: "Seedance 2.5", prompt: "Animate", startImage: "https://example.com/first.png", endImage: "https://example.com/last.png", aspectRatio });
+    assert.equal(input.ratio, "adaptive"); assert.equal(input.model, "bytedance/seedance-2.5/image-to-video");
+    assert.equal(input.last_image, "https://example.com/last.png");
+  }
+  const reference = buildAtlasVideoRequest({ model: "Seedance 2.5", prompt: "Animate", images: ["https://example.com/ref.png"], aspectRatio: "1:1" });
+  assert.equal(reference.ratio, "1:1");
+});
+
 test("Atlas MiniMax H3 emits typed references", () => {
   const input = buildAtlasVideoRequest({
     model: "MiniMax H3",
