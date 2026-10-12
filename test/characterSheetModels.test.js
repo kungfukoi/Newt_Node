@@ -8,10 +8,10 @@ import {
 } from "../src/characterSheetModels.js";
 import { imageModelNames } from "../src/modelOptions.js";
 
-test("character sheets default to Nano Banana 2 at 4K", () => {
-  assert.equal(normalizeCharacterSheetModel(""), imageModelNames.nanoBanana2);
+test("new character sheets default to Nano Banana Pro at 4K", () => {
+  assert.equal(normalizeCharacterSheetModel(""), imageModelNames.nanoBananaPro);
   assert.deepEqual(characterSheetGenerationSettings(""), {
-    model: imageModelNames.nanoBanana2,
+    model: imageModelNames.nanoBananaPro,
     resolution: "4K"
   });
 });
@@ -24,20 +24,21 @@ test("character sheets support Nano Banana Pro at 4K", () => {
   });
 });
 
-test("character sheets expose the mirrored choices and reject removed Seedream selections", () => {
+test("character sheets add Seedream without removing local model choices", () => {
   assert.deepEqual(characterSheetModelOptions, [
     imageModelNames.nanoBanana2,
     imageModelNames.nanoBananaPro,
+    imageModelNames.seedream5Pro,
     imageModelNames.openAiImage2,
     imageModelNames.openAiImage25Sunburst,
     imageModelNames.ideogram45,
     imageModelNames.flux3,
     imageModelNames.nanoBanana21
   ]);
-  assert.equal(characterSheetModelOptions.includes(imageModelNames.seedream5Pro), false);
+  assert.equal(characterSheetModelOptions.includes(imageModelNames.seedream5Pro), true);
   assert.deepEqual(characterSheetGenerationSettings(imageModelNames.seedream5Pro), {
-    model: imageModelNames.nanoBanana2,
-    resolution: "4K"
+    model: imageModelNames.seedream5Pro,
+    resolution: "2K"
   });
 });
 

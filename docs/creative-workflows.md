@@ -95,6 +95,15 @@ Visual QC reports reviewed results normally. If review cannot run, the board is 
 
 ## Character Reliability
 
+New Character nodes prefer Nano Banana Pro; existing model selections are preserved.
+Seedream 5.0 Pro is available for 2K sheets. Standard Base Identity and CU sheets
+share the plain charcoal foundation outfit, while Stylized preserves source
+coverings. Wardrobe edits now explicitly transfer referenced headwear, eyewear,
+footwear and layered outerwear consistently, preserving identity and crops.
+The library labels Base and numbered Sheets, including assets stored only with a
+managed local URL. Existing sheets are retained until you explicitly generate or
+regenerate them; opening a workflow does not regenerate anything.
+
 Character generation checkpoints its Base Identity and CU Video sheets independently. A successful sheet is retained immediately, so a later failure does not erase completed work. Wardrobe image and CU Video variants are also preserved independently and can be regenerated per wardrobe.
 
 Enable **Stylized Character** for a stylized, creature, mechanical, toy-like, illustrated, or otherwise non-standard character whose source design must remain authoritative. The alternate prompt path preserves the required Character and CU Video sheet layouts while locking the source feature inventory, silhouette, proportions, materials, textures, colors, construction, and rendering style. It preserves a feature when present and keeps it absent when absent rather than assuming any particular anatomy. Combine it with **Cinematic Sheet** to retain that strict design lock while using one consistent realistic neutral-gray studio cyclorama across Base Identity, CU Video, and wardrobe-derived sheets.

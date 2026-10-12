@@ -296,14 +296,14 @@ export async function runCharacterWardrobeEdit({
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
     ...(identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
-    { url: wardrobeUrl, label: "Selected wardrobe reference; clothing only" },
+    { url: wardrobeUrl, label: "Selected wardrobe reference; complete clothing, footwear and wearable accessories" },
     ...(consistencyUrl ? [{
       url: consistencyUrl,
       label: "Matching Full Character Sheet; wardrobe and identity continuity only; ignore its layout, crops, poses, and head visibility"
     }] : [])
   ];
   const { response, data } = await nodeApi.generateImage({
-    prompt: [prompt, node.data.characterReferenceNotes || ""].filter(Boolean).join("\\n\\n"),
+    prompt: [prompt, node.data.characterReferenceNotes || ""].filter(Boolean).join("\n\n"),
     ...generationSettings,
     aspectRatio: "16:9",
     imagePromptUrls: references.map((item) => item.url),

@@ -41,7 +41,7 @@ export function normalizeCharacterCustomSheets(data = {}) {
 
 export function customCharacterSheetVariant(sheet) {
   if (!sheet) return null;
-  const url = sheet.url || sheet.localUrl || "";
+  const url = sheet.localUrl || sheet.url || "";
   if (!url) return null;
   const selectionId = customCharacterSheetId(sheet.id);
   return {
@@ -58,7 +58,7 @@ export function customCharacterSheetVariant(sheet) {
       mediaType: "image",
       label: sheet.label || sheet.fileName || "Custom character sheet"
     },
-    ...(sheet.videoGenerated?.url ? { videoGenerated: sheet.videoGenerated } : {})
+    ...(sheet.videoGenerated?.url || sheet.videoGenerated?.localUrl ? { videoGenerated: sheet.videoGenerated } : {})
   };
 }
 
@@ -108,7 +108,7 @@ export function characterSheetChoices(data = {}) {
   const customSheets = normalizeCharacterCustomSheets(data);
   const customUrls = new Set(customSheets.flatMap((sheet) => [sheet.localUrl, sheet.url].filter(Boolean)));
   const generated = (Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [])
-    .filter((variant) => variant?.generated?.url)
+    .filter((variant) => variant?.generated?.url || variant?.generated?.localUrl)
     .filter((variant) => {
       const generatedUrl = variant.generated.localUrl || variant.generated.url;
       return !customUrls.has(generatedUrl);
@@ -116,9 +116,10 @@ export function characterSheetChoices(data = {}) {
     .map((variant) => ({
       id: generatedCharacterSheetId(variant.wardrobeId),
       source: "generated",
-      label: variant.wardrobeFileName || "Generated character sheet",
+      isBase: variant.wardrobeId === characterDefaultWardrobeId || Boolean(variant.isBase),
+      label: variant.wardrobeId === characterDefaultWardrobeId || variant.isBase ? "Base Identity" : variant.wardrobeFileName || "Generated character sheet",
       variant,
-      item: variant.generated
+      item: { ...variant.generated, url: variant.generated.localUrl || variant.generated.url }
     }));
   const custom = customSheets
     .map((sheet) => {
@@ -134,5 +135,17 @@ export function characterSheetChoices(data = {}) {
     })
     .filter((choice) => choice.item?.url);
 
-  return [...generated, ...custom];
+  let sheetNumber = 0;
+  return [...generated, ...custom].map(choice => ({ ...choice, tabLabel: choice.isBase ? "Base" : `Sheet ${++sheetNumber}` }));
+}
+
+// Select the exact active sheet, including Base Identity for local workflow compatibility.
+export function characterOutputReference(data = {}, { video = false } = {}) {
+  const variant = activeCharacterSheetVariant(data);
+  const cu = video && data.cuVideoGeneration ? variant?.videoGenerated : null;
+  const usesCuVideoSheet = Boolean(cu?.localUrl || cu?.url);
+  const item = usesCuVideoSheet ? cu : variant?.generated;
+  const hasLibrary = Boolean(data.characterSheetVariants?.length || data.characterCustomSheets?.length || data.customCharacterSheet);
+  const url = item?.localUrl || item?.url || (!hasLibrary ? data.resultUrl : "") || "";
+  return url ? { ...(item || {}), url, usesCuVideoSheet } : null;
 }

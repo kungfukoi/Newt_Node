@@ -33,6 +33,8 @@ for (const model of ["OpenAI Image 2", "OpenAI Image 2.5"]) {
     assert.equal(request.editMaskDataUrl, undefined);
     assert.equal(request.characterWardrobeEdit, true);
     assert.match(request.prompt, /Keep the scar/);
+    assert.equal(request.prompt, "Change clothing only\n\nKeep the scar");
+    assert.match(request.imagePromptLabels[1], /clothing, footwear and wearable accessories/);
     assert.equal(request.projectId, "project");
     assert.deepEqual(request.imagePromptUrls, ["/outputs/base.png", "/uploads/outfit.png"]);
   });

@@ -26,7 +26,7 @@ import {
 
 test("the identity base uses a neutral reference garment instead of a designed wardrobe", () => {
   assert.match(characterNeutralBaseWardrobePrompt, /identity foundation/i);
-  assert.match(characterNeutralBaseWardrobePrompt, /no styling, branding, patterns/i);
+  assert.match(characterNeutralBaseWardrobePrompt, /(?:no|do not add) styling, branding, patterns/i);
   assert.match(characterNeutralBaseWardrobePrompt, /no nudity/i);
 });
 
@@ -40,6 +40,22 @@ test("wardrobe edits lock identity and composition to the base sheet", () => {
   assert.match(characterVideoWardrobeEditPrompt, /not a layout, framing, crop, pose, or camera reference/i);
 });
 
+test("upstream foundation and accessory rules apply without weakening stylized design locks", () => {
+  assert.equal(characterVideoNeutralBaseWardrobePrompt, characterNeutralBaseWardrobePrompt);
+  assert.match(characterNeutralBaseWardrobePrompt, /tank top that fully covers the chest, abdomen, and back/);
+  for (const stylizedCharacter of [false, true]) {
+    for (const sheetKind of ["image", "video"]) {
+      const prompt = characterWardrobeEditPromptForData({ stylizedCharacter, cinematicCharacterSheet: true }, sheetKind);
+      assert.match(prompt, /Accessories visible in that reference are explicitly requested/);
+      assert.match(prompt, /goggles mounted as shown and wear the separate eyewear over the eyes/);
+      assert.match(prompt, /do not substitute clear lenses for referenced sunglasses/);
+      assert.match(prompt, /do not show coat-off alternatives/);
+      assert.match(prompt, /gray cyc continuity/i);
+      if (stylizedCharacter) assert.match(prompt, /do not invent human skin, anatomy, proportions/i);
+    }
+  }
+});
+
 test("Stylized Character is opt-in while Cinematic adds the gray cyc treatment", () => {
   assert.equal(characterBaseSheetPromptForData({}), characterSheetPrompt);
   assert.equal(characterBaseSheetPromptForData({ cinematicCharacterSheet: true }), cinematicCharacterSheetWithGrayCycPrompt);
@@ -47,8 +63,8 @@ test("Stylized Character is opt-in while Cinematic adds the gray cyc treatment",
   assert.match(cinematicCharacterSheetWithGrayCycPrompt, new RegExp(cinematicCharacterSheetPrompt.slice(0, 40)));
   assert.equal(characterBaseAppearancePromptForData({}), characterNeutralBaseWardrobePrompt);
   assert.equal(characterVideoBaseAppearancePromptForData({}), characterVideoNeutralBaseWardrobePrompt);
-  assert.equal(characterWardrobeEditPromptForData({}), characterWardrobeEditPrompt);
-  assert.equal(characterWardrobeEditPromptForData({}, "video"), characterVideoWardrobeEditPrompt);
+  assert.ok(characterWardrobeEditPromptForData({}).startsWith(characterWardrobeEditPrompt));
+  assert.ok(characterWardrobeEditPromptForData({}, "video").startsWith(characterVideoWardrobeEditPrompt));
   assert.match(characterWardrobeEditPromptForData({ cinematicCharacterSheet: true }), /gray cyc continuity/i);
   assert.match(characterWardrobeEditPromptForData({ cinematicCharacterSheet: true }, "video"), /gray cyc continuity/i);
 });

@@ -34,7 +34,7 @@ function generationOptions(data = {}) {
   };
 }
 
-for (const model of [imageModelNames.nanoBanana2, imageModelNames.nanoBananaPro, imageModelNames.openAiImage2]) {
+for (const model of [imageModelNames.nanoBanana2, imageModelNames.nanoBananaPro, imageModelNames.openAiImage2, imageModelNames.seedream5Pro]) {
   for (const sheetKind of ["image", "video"]) {
     test(`Character Notes reach the ${model} ${sheetKind} sheet request`, async (t) => {
       const requests = captureGeneration(t);
@@ -51,7 +51,7 @@ for (const model of [imageModelNames.nanoBanana2, imageModelNames.nanoBananaPro,
       assert.ok(request.prompt.endsWith("Keep the freckles.\nUse scuffed boots."));
       assert.equal(request.prompt.split("Character reference notes").length, 2);
       assert.equal(request.model, model);
-      assert.equal(request.resolution, "4K");
+      assert.equal(request.resolution, model === imageModelNames.seedream5Pro ? "2K" : "4K");
       assert.equal(request.quality, model === imageModelNames.openAiImage2 ? "high" : undefined);
       assert.equal(request.aspectRatio, "16:9");
       assert.deepEqual(request.imagePromptUrls, [options.portrait.localUrl, options.wardrobe.localUrl]);

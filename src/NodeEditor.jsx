@@ -240,6 +240,7 @@ import {
   activeCharacterSheetId,
   activeCharacterSheetVariant,
   characterDefaultWardrobeId,
+  characterOutputReference,
   characterSheetChoices,
   characterSheetVariantForSelection,
   customCharacterSheetId,
@@ -11889,7 +11890,7 @@ function NodeBody({
                         title={`Use ${choice.label}`}
                       >
                         <img {...fullResolutionImageProps(choice.item)} src={displayMediaUrl(previewImageUrl(choice.item))} alt={choice.label} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
-                        <span className="character-sheet-source">{choice.source === "custom" ? "Custom" : "Generated"}</span>
+                        <span className="character-sheet-source">{choice.tabLabel} · {choice.source === "custom" ? "Custom" : "Generated"}</span>
                         <span className="character-sheet-name">{choice.label}</span>
                         {choice.source === "custom" && (
                           <span
@@ -18024,7 +18025,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
-      characterSheetModel: imageModelNames.openAiImage2,
+      characterSheetModel: imageModelNames.nanoBananaPro,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
       stylizedCharacter: false,
@@ -23025,9 +23026,10 @@ function characterSheetVariantForWardrobeId(data = {}, wardrobeId = "") {
 
 function characterVariantDisplayPatch(variant) {
   const generated = variant?.generated || {};
+  const url = generated.localUrl || generated.url || "";
   return {
-    resultUrl: generated.url || "",
-    resultItems: generated.url ? [generated] : [],
+    resultUrl: url,
+    resultItems: url ? [{ ...generated, url }] : [],
     selectedResultIndex: 0,
     fileName: generated.fileName || "",
     compiledWardrobeUrl: variant?.wardrobeUrl || ""
@@ -23608,7 +23610,7 @@ function normalizeCurrentNode(node) {
       characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
-      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
+      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel || imageModelNames.nanoBanana2),
       stylizedCharacter: data.stylizedCharacter === true,
       characterSheetVariants,
       characterCustomSheets,
@@ -24759,7 +24761,10 @@ function normalizeComposerData(data = {}) {
 
 function normalizeCharacterSheetVariants(data = {}) {
   const existing = Array.isArray(data.characterSheetVariants)
-    ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && variant?.generated?.url)
+    ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && (variant?.generated?.localUrl || variant?.generated?.url)).map(variant => ({
+        ...variant, generated: { ...variant.generated, url: variant.generated.localUrl || variant.generated.url },
+        ...(variant.videoGenerated?.localUrl || variant.videoGenerated?.url ? { videoGenerated: { ...variant.videoGenerated, url: variant.videoGenerated.localUrl || variant.videoGenerated.url } } : {})
+      }))
     : [];
   if (existing.length || !data.resultUrl) return existing;
 

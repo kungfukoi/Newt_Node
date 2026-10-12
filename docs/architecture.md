@@ -137,6 +137,14 @@ Generated and custom sheets coexist. New Character generation first creates a ne
 
 `runCharacterSheetGeneration` in `src/nodeRunners/mediaModels.js` appends the Character node's nonblank `characterReferenceNotes` to both image and CU Video sheet requests. Existing layout, wardrobe, and physical-detail prompts remain intact; no separate runtime skill file is loaded. Missing notes preserve legacy requests, and Storyboard character preparation does not inherit Character Notes.
 
+The Character upstream port at `8104597` adds shared foundation/accessory rules,
+portrait-led CU guidance, Seedream 2K sheet routing and Base/Sheet labels.
+`characterSheetLibrary.js` also owns `characterOutputReference`, shared by video
+reference selection and Storyboard. Local-only generated/CU sheets survive editor
+normalization; managed local URLs win over provider URLs. Base outputs, Stylized,
+gray-cyc treatment, Notes and matching full-sheet CU wardrobe references remain
+local compatibility adaptations. See [Character upstream comparison](character-upstream.md).
+
 ## Director And Storyboard Flow
 
 Director is the visible product name; `skillDirector` remains the saved node type and the focused implementation modules retain their `filmDirector*` names. Load normalization changes only legacy default titles such as `Film Director` and `Film Director 3` to `Director` and `Director 3`. User-authored titles remain unchanged.

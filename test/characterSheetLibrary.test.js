@@ -5,6 +5,7 @@ import {
   activeCharacterSheetId,
   activeCharacterSheetVariant,
   characterSheetChoices,
+  characterOutputReference,
   customCharacterSheetId,
   generatedCharacterSheetId,
   normalizeCharacterCustomSheets
@@ -24,6 +25,27 @@ function libraryData(patch = {}) {
     ...patch
   };
 }
+
+test("managed local-only sheets retain selection, Base labels, and downstream CU pairing", () => {
+  const data = { cuVideoGeneration: true, activeCharacterSheetId: "generated:outfit", characterSheetVariants: [
+    { wardrobeId: "__default-wardrobe__", isBase: true, generated: { localUrl: "/outputs/base.png" } },
+    { wardrobeId: "outfit", wardrobeFileName: "Coat", generated: { url: "https://provider.example/expired.png", localUrl: "/outputs/coat.png" }, videoGenerated: { localUrl: "/outputs/cu-coat.png" } }
+  ] };
+  const before = structuredClone(data);
+  const choices = characterSheetChoices(data);
+  assert.deepEqual(choices.map(choice => choice.tabLabel), ["Base", "Sheet 1"]);
+  assert.equal(choices[0].label, "Base Identity");
+  assert.equal(choices[1].item.url, "/outputs/coat.png");
+  assert.equal(characterOutputReference(data).url, "/outputs/coat.png");
+  assert.equal(characterOutputReference(data, { video: true }).url, "/outputs/cu-coat.png");
+  assert.equal(characterOutputReference({ ...data, activeCharacterSheetId: "generated:__default-wardrobe__" }).url, "/outputs/base.png");
+  assert.deepEqual(data, before);
+});
+
+test("modern invalid libraries never forward a stale result, while pre-library sheets remain usable", () => {
+  assert.equal(characterOutputReference({ characterSheetVariants: [{ wardrobeId: "outfit", generated: {} }], resultUrl: "/outputs/stale.png" }), null);
+  assert.equal(characterOutputReference({ resultUrl: "/outputs/legacy.png" }).url, "/outputs/legacy.png");
+});
 
 test("generated and custom character sheets coexist as selectable choices", () => {
   const choices = characterSheetChoices(libraryData());

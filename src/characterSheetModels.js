@@ -1,9 +1,11 @@
 import { imageModelNames, normalizeGptImage25Model, isGptImage25Model } from "./modelOptions.js";
 import { openAiImage2Quality } from "./openAiImage2.js";
+export const characterSheetDefaultModel = imageModelNames.nanoBananaPro;
 
 export const characterSheetModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
+  imageModelNames.seedream5Pro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.ideogram45,
@@ -13,14 +15,14 @@ export const characterSheetModelOptions = [
 
 export function normalizeCharacterSheetModel(value) {
   const model = normalizeGptImage25Model(value);
-  return characterSheetModelOptions.includes(model) ? model : imageModelNames.nanoBanana2;
+  return characterSheetModelOptions.includes(model) ? model : characterSheetDefaultModel;
 }
 
 export function characterSheetGenerationSettings(value) {
   const model = normalizeCharacterSheetModel(value);
   return {
     model,
-    resolution: model === imageModelNames.ideogram45 ? "2K" : "4K",
+    resolution: model === imageModelNames.ideogram45 || model === imageModelNames.seedream5Pro ? "2K" : "4K",
     ...(isGptImage25Model(model) ? { quality: openAiImage2Quality } : {})
   };
 }

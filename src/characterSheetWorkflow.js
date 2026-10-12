@@ -1,9 +1,9 @@
 import { characterDefaultWardrobeId } from "./characterSheetLibrary.js";
 import { normalizeCharacterSheetModel } from "./characterSheetModels.js";
 
-export const characterBaseSheetPromptVersion = 2;
-export const characterVideoSheetPromptVersion = 5;
-export const characterWardrobeEditVersion = 4;
+export const characterBaseSheetPromptVersion = 3;
+export const characterVideoSheetPromptVersion = 6;
+export const characterWardrobeEditVersion = 5;
 
 export const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
@@ -36,13 +36,12 @@ export const stylizedCinematicCharacterSheetPrompt =
   )}\n\n${cinematicCharacterSheetBackgroundPrompt}`;
 
 export const characterNeutralBaseWardrobePrompt =
-  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in a minimal, seamless, form-fitting matte charcoal reference bodysuit with no styling, branding, patterns, accessories, jewelry, outerwear, layers, or fashion details. Keep this same neutral reference garment in every panel. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
+  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in simple, seamless, form-fitting, plain matte charcoal swimwear. For a male character, use men's tight swim trunks with a matching opaque, form-fitting tank top that fully covers the chest, abdomen, and back. For a female character, use a one-piece swimsuit. Keep the same foundation clothing consistently across all views wherever it is visible within the existing panel crops; do not reframe a close-up to show the clothing. Do not change the character's anatomy or body proportions to fit the garment. Do not add styling, branding, patterns, accessories, jewelry, hats, outerwear, additional layers, or fashion details. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
 
 export const stylizedCharacterBaseAppearancePrompt =
   "Foundation appearance rule: preserve the character exactly as shown in the Original Character Portrait, including its existing silhouette, proportions, feature inventory, surfaces, materials, textures, colors, construction, and visible wardrobe or integrated coverings. Do not replace the source appearance with a generic bodysuit, human body, exposed anatomy, or newly designed base layer. Treat ambiguous clothing, armor, plating, fur, scales, skin, shells, mechanical parts, painted surfaces, and integrated accessories as part of the character identity and preserve them. This is the locked identity master; later wardrobe edits may change only clearly requested removable clothing.";
 
-export const characterVideoNeutralBaseWardrobePrompt =
-  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Use one minimal, seamless, form-fitting matte charcoal reference bodysuit wherever clothing is visible within the existing panel crops. Do not reframe a close-up to show the garment. Do not add styling, branding, patterns, accessories, jewelry, outerwear, layers, or fashion details. This is an identity and body-proportion reference, not a wardrobe look. No nudity.";
+export const characterVideoNeutralBaseWardrobePrompt = characterNeutralBaseWardrobePrompt;
 
 export const stylizedCharacterVideoBaseAppearancePrompt =
   "Foundation appearance rule: preserve the exact source character and its existing visible wardrobe or integrated coverings in every panel. Preserve the original silhouette, proportions, feature presence or absence, surfaces, materials, textures, colors, construction, and rendering style. Do not replace the source appearance with a generic bodysuit, human body, exposed anatomy, or newly designed base layer. Reframing for the required panels must not redesign the character.";
@@ -53,11 +52,15 @@ export const characterVideoIdentityContinuityPrompt =
 export const stylizedCharacterIdentityContinuityPrompt =
   "Strict identity continuity rule: the Original Character Portrait is the sole authority for the finished character design. Preserve the exact presence or absence, count, shape, scale, placement, spacing, and relationships of every feature, together with the original silhouette, proportions, surfaces, materials, textures, colors, and rendering style. Do not humanize, anatomically normalize, beautify, mature, or substitute the design. Never add a feature that is absent or remove a feature that is present.";
 
-export const characterWardrobeEditPrompt = `Edit the provided Base Identity Character Sheet. Treat that first image as the locked master image and preserve its exact canvas dimensions, panel layout, dividers, background, crop, camera views, poses, eyelines, facial identity, hair, skin, anatomy, body proportions, expressions, lighting, color treatment, texture, and image quality.
+export const characterWardrobeTransferPrompt = `Change only the character's clothing, footwear, and referenced wearable accessories, including the local occlusion and contact shadows needed to wear them naturally. Study the selected wardrobe reference as the complete outfit: transfer its garments, materials, colors, construction, fit, footwear, and wearable accessories. Accessories visible in that reference are explicitly requested even when no accompanying text names them. Include hats, caps, glasses, sunglasses, and other headwear or eyewear whether shown separately in a flat lay or worn by a person. Ignore the reference person's identity, face, body, pose, environment, background, text, labels, and unrelated objects, not the accessories they are wearing.
 
-Change only the character's clothing, footwear, and requested wearable accessories. Study the selected wardrobe reference and transfer only its garments, materials, colors, construction, fit, footwear, and styling onto the locked character. Ignore every person, face, body, pose, environment, background, text, label, and unrelated object in the wardrobe reference. The Base Identity Character Sheet remains the sole authority for identity, anatomy, composition, and rendering.
+Headwear and eyewear are part of the outfit in every view where their wearing position is visible, including close-ups. Match their shape, placement, material, color, and lens tint/opacity consistently. Wear hats on the head and separately displayed glasses or sunglasses over the eyes by default, unless the reference explicitly shows a different wearing position. Do not omit eyewear, move it onto the forehead, or hold it in a hand just to uncover the base's eyes; do not substitute clear lenses for referenced sunglasses. Keep distinct accessories separate: do not merge, hybridize, or substitute one for another. When goggles are mounted on a hat or helmet and separate glasses or sunglasses are also supplied, keep the goggles mounted as shown and wear the separate eyewear over the eyes, rather than merging them or stacking both over the eyes. Referenced headwear may naturally cover hair, and eyewear may naturally cover the eyes or parts of the face. Preserve the underlying facial identity, anatomy, hairstyle, head angle, eyeline, and expression, not the visibility of pixels covered by an accessory. The bare head or uncovered eyes of the base are not instructions to leave accessories off. Keep the existing panel crops: show only the portion of an accessory that falls within each crop, never zoom out or reposition the character to reveal it. Do not invent garments or accessories absent from the reference.`;
 
-Apply exactly one consistent wardrobe across all six views, including any clothing visible near the neckline in close-up panels. Replace the neutral charcoal reference bodysuit completely where clothing should appear. Return one complete, seamless sheet with naturally connected heads, necks, shoulders, and clothing, never an isolated edit patch or pasted face cutouts. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
+export const characterWardrobeEditPrompt = `Edit the provided Base Identity Character Sheet. Treat that first image as the locked master image and preserve its exact canvas dimensions, panel layout, dividers, background, crop, camera views, poses, eyelines, facial identity, underlying hair and skin, anatomy, body proportions, expressions, lighting, color treatment, texture, and image quality. Allow only the wardrobe and accessory changes specified below. The Base Identity Character Sheet remains the sole authority for identity, anatomy, composition, and rendering.
+
+${characterWardrobeTransferPrompt}
+
+Apply exactly one complete, consistent outfit across all six views, including clothing visible near the neckline in close-up panels. The wardrobe reference is a single layered outfit, not a menu of alternatives: wear its inner layers, outerwear, footwear, and wearable accessories together in every view where visible. If the reference includes a coat or jacket, keep it on in both body panels and the close-ups; do not show coat-off alternatives or different stages of dressing. Replace the neutral foundation swimwear or existing reference garment completely wherever the selected outfit should cover the body. Return one complete, seamless sheet with naturally connected heads, necks, shoulders, and clothing, never an isolated edit patch or pasted face cutouts. Do not redesign, reframe, relight, retouch, beautify, or regenerate any other part of the sheet. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 
 export const characterVideoWardrobeEditPrompt = `Edit the provided Base Identity CU Video Sheet. Treat that first image as the pixel-locked master composition and preserve its exact canvas dimensions, three-panel layout, dividers, background, crop, camera views, body positions, portrait pose, eyeline, facial identity, hair, skin, anatomy, body proportions, expression, lighting, color treatment, texture, and image quality.
 
@@ -122,9 +125,11 @@ export function characterWardrobeEditPromptForData(data = {}, sheetKind = "image
   const prompt = sheetKind === "video"
     ? data.stylizedCharacter ? stylizedCharacterVideoWardrobeEditPrompt : characterVideoWardrobeEditPrompt
     : data.stylizedCharacter ? stylizedCharacterWardrobeEditPrompt : characterWardrobeEditPrompt;
-  return data.cinematicCharacterSheet
-    ? `${prompt}\n\n${cinematicCharacterSheetBackgroundContinuityPrompt}`
-    : prompt;
+  const transfer = prompt.includes(characterWardrobeTransferPrompt) ? "" : characterWardrobeTransferPrompt;
+  return [prompt, transfer,
+    "One consistent layered outfit: keep referenced inner layers, outerwear, footwear and wearable accessories together across every view where visible. If the reference includes a coat or jacket, keep it on in the body and close-up panels; do not show coat-off alternatives or different stages of dressing. Transfer the outfit onto the existing character form without changing it.",
+    data.cinematicCharacterSheet ? cinematicCharacterSheetBackgroundContinuityPrompt : ""
+  ].filter(Boolean).join("\n\n");
 }
 
 export function characterBaseGenerationSignature(data = {}) {
