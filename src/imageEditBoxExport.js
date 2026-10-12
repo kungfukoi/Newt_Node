@@ -1,4 +1,4 @@
-import { boxCorners, editBoxTags, editBoxModes, validateEditBoxes } from "./imageEditBoxes.js";
+import { boxCorners, editBoxTags, validateEditBoxes } from "./imageEditBoxes.js";
 import { validateBoxObject } from "./imageEditBoxModels.js";
 
 export const selectionMetadataKeyword = "NewtNodeSelections";
@@ -83,10 +83,10 @@ export async function exportBoxSelections({ boxes, size, base, prompt }) {
     };
     if (box.mode === "move") {
       const source = draw(box.source, "#ff3344", true);
-      label(`${box.tag} source`, source);
+      label(box.tag, source);
     }
     const p = draw(["keep", "remove"].includes(box.mode) ? box.source : box.target, box.mode === "keep" ? "#ffee22" : box.mode === "remove" ? "#ff3344" : "#00eeee", false);
-    label(`${box.tag} · ${editBoxModes[box.mode]}`, p);
+    label(box.tag, p);
   });
   function label(text, point) {
     const x = Math.max(0, Math.min(point.x, size.width - context.measureText(text).width)), y = Math.max(font, Math.min(size.height - 2, point.y - 4));
