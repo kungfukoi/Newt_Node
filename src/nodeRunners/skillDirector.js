@@ -1,4 +1,5 @@
 import { nodeApi } from "../api/newtApi.js";
+import { directorDialoguePackage, directorDialogueBrief } from "../characterDialogue.js";
 import { filmDirectorReferenceVideoMode, filmDirectorUsesReference } from "../filmDirectorScenes.js";
 import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
 import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
@@ -37,6 +38,7 @@ export async function runSkillDirectorNode({
     action,
     sceneName: node.data.sceneName,
     sceneOverview: node.data.sceneOverview ?? node.data.text,
+    dialogueBrief: directorDialogueBrief(directorDialoguePackage(node.data, incoming.characterIn || [], node.id)),
     motionBrief: node.data.motionBrief || node.data.motionDirection,
     styleDirection: action === "style"
       ? filmDirectorStageDraftForRequest("style", node.data.styleDirection, node.data)

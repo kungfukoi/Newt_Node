@@ -15,6 +15,9 @@ import { storyboardSpatialPrompt, invalidateStoryboardStaging } from "./storyboa
 import { storyboardPlannedCastPatch, currentStoryboardCast, resolveStoryboardFrameCast, storyboardCastPrompt, assertStoryboardCharacterTags } from "./storyboardCast.js";
 import { storyboardImageModelOptions } from "./modelOptions.js";
 import { storyboardImageSettings } from "./storyboardImageModels.js";
+import { CharacterElevenLabsVoice } from "./components/CharacterElevenLabsVoice.jsx";
+import { directorDialoguePackage } from "./characterDialogue.js";
+import "./characterDialogue.css";
 import { storyboardSkillVersion, storyboardPlanningSettings, storyboardFrameContext, storyboardApproachDetails, storyboardPacing, storyboardPanelEditingLocked, validateStoryboardRevision as validateStoryboardRevisionV2 } from "./storyboardWorkflow.js";
 import { storyboardPromptPolicy } from "./storyboardPromptPolicy.js";
 import "./storyboardUpstream.css";
@@ -11956,13 +11959,14 @@ function NodeBody({
                     />
                   </div>
                 </details>
-                <details className="character-section character-collapsible voice drop-enabled" defaultOpen={Boolean(voices.length)} onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "voice")}>
+                <details className="character-section character-collapsible voice drop-enabled" open={Boolean(voices.length || node.data.characterElevenLabsVoiceId)} onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "voice")}>
                   <summary>
                     <span className="character-section-label">Voice <span className="character-optional-label">(Optional)</span></span>
-                    <span className="character-summary-meta">{activeVoice ? activeVoice.fileName : "None"}</span>
+                    <span className="character-summary-meta">{node.data.characterVoiceProvider === "elevenlabs" ? node.data.characterElevenLabsVoiceName || "ElevenLabs" : activeVoice ? activeVoice.fileName : "None"}</span>
                     <ChevronDown size={13} />
                   </summary>
                   <div className="character-collapsible-body">
+                    <CharacterElevenLabsVoice node={node} onUpdate={onUpdate} disabled={compiling} />
                     <div className="character-section-head">
                       <small>Dialogue references</small>
                       {voices.length < maxCharacterVoices && (
@@ -18035,6 +18039,9 @@ function createDefaultNodeData(type, label, count) {
       activeCharacterSheetId: "",
       characterVoices: [],
       activeVoiceId: "",
+      characterVoiceProvider: "uploaded",
+      characterElevenLabsVoiceId: "",
+      characterElevenLabsVoiceName: "",
       characterTab: "build",
       activated: false,
       locked: false,
@@ -20517,6 +20524,7 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
     shotListNotes: source.data.shotListNotes || "",
     finalPrompt,
     references,
+    dialogue: directorDialoguePackage(source.data, characterItems.filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character", characterItems.length)), source.id),
     referenceVideoMode,
     referenceVideo,
     musicReference
@@ -23037,6 +23045,7 @@ function characterVariantDisplayPatch(variant) {
 }
 
 function activeCharacterVoice(node) {
+  if (node?.data?.characterVoiceProvider === "elevenlabs") return null;
   const voices = Array.isArray(node?.data?.characterVoices) ? node.data.characterVoices : [];
   return voices.find((voice) => voice.id === node.data.activeVoiceId) || null;
 }

@@ -248,7 +248,8 @@ export function normalizeVideoGenerationResult(data, index) {
     mimeType: data.video.mimeType || "",
     seed: data.seed,
     cost: data.cost,
-    ...(data.generationRunId ? { generationRunId: data.generationRunId } : {})
+    ...(data.generationRunId ? { generationRunId: data.generationRunId } : {}),
+    ...(data.directorDialogueAudio ? { directorDialogueAudio: data.directorDialogueAudio } : {})
   };
 }
 

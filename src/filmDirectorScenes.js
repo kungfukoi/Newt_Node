@@ -124,6 +124,8 @@ export function isFilmDirectorSceneTransitionPatch(patch = {}) {
 const sceneStateKeys = [
   "sceneName",
   "sceneOverview",
+  "directorDialogue",
+  "directorDialogueAudioVersion",
   "text",
   "skillShotCount",
   "shotCount",
@@ -202,6 +204,8 @@ function sceneDefaults(sceneName = "") {
   return {
     sceneName,
     sceneOverview: "",
+    directorDialogue: [],
+    directorDialogueAudioVersion: 0,
     text: "",
     skillShotCount: "3",
     shotCount: "3",

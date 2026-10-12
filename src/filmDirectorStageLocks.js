@@ -88,6 +88,7 @@ export function filmDirectorInputSourceSignature(items = [], scope = "setup") {
         }),
         title: data.title || item?.label || "",
         characterName: data.characterName || "",
+        ...(data.characterVoiceProvider === "elevenlabs" ? { elevenLabsVoiceId: data.characterElevenLabsVoiceId || "" } : {}),
         activeResultIndex: data.activeResultIndex ?? data.resultIndex ?? item?.activeResultIndex ?? "",
         activeSheetId: data.activeCharacterSheetId || data.characterActiveSheetId || data.activeSheetId || item?.activeSheetId || "",
         sourceItems: sourceItems.map(stableFilmDirectorAssetIdentity)
@@ -209,6 +210,7 @@ export function applyFilmDirectorReferenceChanges(text = "", changes = {}) {
 export function filmDirectorShotListSourceSignature(data = {}) {
   const source = stableFilmDirectorValue({
     sceneOverview: data.sceneOverview ?? data.text ?? "",
+    ...(data.directorDialogue?.length ? { dialogue: data.directorDialogue } : {}),
     motionDirection: data.motionDirection || data.motionBrief || "",
     shotCount: data.skillShotCount || data.shotCount || "3",
     referenceNotes: data.skillReferenceNotes || {}

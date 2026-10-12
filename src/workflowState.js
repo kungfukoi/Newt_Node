@@ -1,3 +1,5 @@
+import { remapDirectorDialogueData } from "./characterDialogue.js";
+
 export function cloneGraphState(state) {
   return {
     nodes: (state.nodes || []).map(cloneNode),
@@ -183,7 +185,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y),
       data: {
-        ...clonedNode.data,
+        ...remapDirectorDialogueData(clonedNode.data || {}, idMap),
         ...(Object.keys(remappedBindings).length ? { nodeReferenceBindings: remappedBindings } : {})
       }
     };

@@ -121,6 +121,10 @@ The project rail uses `useProjectOutputCatalog.js` and `projectOutputLoader.js` 
 
 ## Character Identity Flow
 
+`src/characterDialogue.js` owns assigned ElevenLabs voice validation, Director dialogue packages, exact-line planning briefs, and node-ID remapping. `CharacterElevenLabsVoice.jsx` uses the existing paginated server-side voice catalog; credentials never enter persisted Character data. `DirectorDialogueControls.jsx` edits scene-specific rows, saved by `filmDirectorScenes.js`. Uploaded samples remain available when the Character switches back to the uploaded-audio mode.
+
+`server/director-dialogue.js` validates connected speaker images and available voices, checkpoints paid speech requests, reuses managed clips through a durable cache, records costs in History, and assembles timed audio references for Seedance 2.0/2.5 and MiniMax H3. Ambiguous requests require explicit regeneration instead of automatic replay. The shared video downloader replaces native audio with the exact prepared speech and rejects output that truncates a spoken cue. `directorDialogueAudio` in video results keeps derived tracks and clips portable through workflow asset collection. See [assigned dialogue workflow](creative-workflows.md#assigned-dialogue-voices).
+
 CU wardrobe edits receive the matching completed full Character sheet as the finished wardrobe authority, together with the original portrait for identity and the neutral CU base for panel composition. CU-only retries reuse the completed wardrobe image rather than interpreting the outfit independently.
 
 Character wardrobe edits request complete sheets without rectangular edit masks. `server/character-wardrobe.js` also removes obsolete masks from recognized requests made by older open tabs before Fal/Atlas routing. Base and CU panel crops, reference notes, managed outputs, and partial-success reconciliation remain owned by the existing Character helpers.

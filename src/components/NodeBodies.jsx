@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import ModelProviderOption from "./ModelProviderOption.jsx";
+import { DirectorDialogueControls } from "./DirectorDialogueControls.jsx";
 import { Box, ChevronDown, ChevronLeft, ChevronRight, History, Lock, MessageSquareText, Plus, Send, Trash2, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, displayMediaUrl, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { concatenatePlainTextInputs } from "../plainText.js";
@@ -1360,6 +1361,7 @@ export function SkillDirectorNodeBody({
           </div>
         </div>
         {!isStageCollapsed("scene") && (
+          <>
           <label className="text-field-group">
             <span>Scene Overview</span>
             <textarea
@@ -1370,6 +1372,8 @@ export function SkillDirectorNodeBody({
               onChange={(event) => updateUnlocked({ sceneOverview: event.target.value, text: event.target.value }, ["shotList"])}
             />
           </label>
+          <DirectorDialogueControls node={node} incoming={incoming} disabled={running || !locks.motion || locks.scene} onChange={(rows, revision) => updateUnlocked({ directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) }, ["shotList"])} />
+          </>
         )}
       </div>
 

@@ -102,6 +102,10 @@ try {
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardPlanningV2, true);
+  assert.equal((await (await request("/api/health")).json()).routes.directorCharacterDialogue, true);
+  const invalidDialogue = await fetch(api + "/api/node/generate-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Kling O3 Pro", prompt: "Two people talk", generationRunId: "smoke-dialogue-unsupported", filmDirector: { dialogue: { lines: [{ id: "one", characterNodeId: "actor", text: "Hi" }] } } }) });
+  assert.equal(invalidDialogue.status, 400);
+  assert.match((await invalidDialogue.json()).error, /does not accept assigned Character dialogue audio/);
   for (const route of ["plan-v2", "revise-v2", "review-v2"]) {
     const invalid = await fetch(api + `/api/node/storyboard-${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
     assert.equal(invalid.status, 400);

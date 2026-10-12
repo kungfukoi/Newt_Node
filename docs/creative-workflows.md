@@ -95,6 +95,20 @@ Visual QC reports reviewed results normally. If review cannot run, the board is 
 
 ## Character Reliability
 
+### Assigned dialogue voices
+
+In **Character Build → Voice**, select an ElevenLabs voice from the account's custom and default voices. Configure the ElevenLabs key in Settings first. Refresh reloads the catalog; selecting a voice does not generate paid speech and preserves uploaded voice samples. Choose **Use uploaded dialogue audio** to return to the existing sample workflow.
+
+Connect the locked, activated Character to Director. In **Scene Overview → Character dialogue**, add the exact lines, select each connected speaker, and set the pause after each line. Dialogue is saved per Director scene and binds to Character node IDs, so renaming, copying, and importing do not exchange speakers. Rebuild the Director, connect it to Video Model, enable audio, and run a reference-to-video route.
+
+Assigned dialogue currently supports Seedance 2.0, Seedance 2.5, and MiniMax H3. Models whose current adapters cannot consume this speech reject assigned dialogue before synthesis. Seedance 2.5 allows a combined dialogue track up to 30.2 seconds; the other supported routes use a 15-second ceiling. Speech must also fit the chosen video duration. Start/end-frame routes require moving the images to Reference Images.
+
+At Video Run, ElevenLabs generates each exact line with its selected voice. The combined track and timed speaker instructions become model references for lip sync. The downloaded video receives that exact speech track to preserve voice identity; this replaces model-generated sound and does not mix background music or ambience. Visual lip-sync accuracy still depends on the video model.
+
+Successful speech clips are saved as managed assets, recorded in History, and reused across retries. Changing a line or assigned voice generates only that changed speech. If a request has an uncertain outcome, check History and ElevenLabs before using **Regenerate dialogue audio on next run**, which explicitly permits new paid requests. An overlong dialogue error retains completed speech for reuse after adjusting duration.
+
+Provider contracts: [ElevenLabs voice catalog](https://elevenlabs.io/docs/api-reference/voices/search), [Seedance 2.5 reference-to-video](https://fal.ai/models/bytedance/seedance-2.5/reference-to-video/api).
+
 New Character nodes prefer Nano Banana Pro; existing model selections are preserved.
 Seedream 5.0 Pro is available for 2K sheets. Standard Base Identity and CU sheets
 share the plain charcoal foundation outfit, while Stylized preserves source

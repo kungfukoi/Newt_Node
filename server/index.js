@@ -4,6 +4,7 @@ import { generateNanoBanana21 } from "./nano-banana-21.js";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint } from "../src/nanoBanana21.js";
 import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
+import { createDirectorDialoguePreparation } from "./director-dialogue.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
 import { statsCredentialIdentities } from "./stats-credentials.js";
@@ -1046,6 +1047,27 @@ app.post("/api/system/performance-diagnostics", async (req, res) => {
   res.json(await runtimeDiagnostics.snapshot());
 });
 
+const prepareDirectorDialogue = createDirectorDialoguePreparation({
+  cacheDir: path.join(dataDir, "director-dialogue-cache"),
+  getKey: () => process.env.ELEVENLABS_API_KEY,
+  readAudio: readLocalAsset,
+  recordHistory: appendHistory,
+  progress: message => updateCurrentGenerationProgress({ status: "running", phase: "generating", message }),
+  saveAudio: async (req, buffer) => {
+    const target = await createManagedAssetTarget(req, "character-dialogue", ".mp3");
+    await writeFile(target.filePath, buffer);
+    return { url: target.publicPath, fileName: target.fileName, durationSeconds: (await probeVideoFile(target.filePath)).duration };
+  },
+  assembleAudio: async (req, clips, durationSeconds) => {
+    const target = await createManagedAssetTarget(req, "director-dialogue", ".mp3");
+    const inputs = await Promise.all(clips.map(clip => resolveLocalAssetPathFromUrl(clip.url)));
+    const filters = clips.map((clip, index) => `[${index}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=mono,asetpts=PTS-STARTPTS,apad=pad_dur=${clip.pauseAfter}[line${index}]`);
+    filters.push(clips.map((_clip, index) => `[line${index}]`).join("") + `concat=n=${clips.length}:v=0:a=1,apad=whole_dur=${durationSeconds}[dialogue]`);
+    await runFfmpeg(["-y", ...inputs.flatMap(input => ["-i", input.filePath]), "-filter_complex", filters.join(";"), "-map", "[dialogue]", "-c:a", "libmp3lame", "-b:a", "192k", target.filePath], "Assemble Director character dialogue");
+    return { url: target.publicPath, fileName: target.fileName, durationSeconds: (await probeVideoFile(target.filePath)).duration };
+  }
+});
+
 registerAudioModelRoutes(app, {
   getKey: () => process.env.ELEVENLABS_API_KEY,
   readAudio: async (url) => {
@@ -1118,6 +1140,7 @@ function buildHealthPayload() {
       explore: true,
       storyboardRevisions: true,
       storyboardPlanningV2: true,
+      directorCharacterDialogue: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -3728,7 +3751,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const result = await runFilmDirector({
       action,
       sceneName,
-      sceneOverview,
+      sceneOverview: [sceneOverview, String(req.body.dialogueBrief || "").slice(0, 16000)].filter(Boolean).join("\n\n"),
       motionBrief,
       styleDirection,
       motionDirection,
@@ -3825,7 +3848,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       motionDirection: result.motionDirection,
       shotList: result.shotList,
       shotListNotes: result.shotListNotes,
-      sceneOverview: result.sceneOverview || sceneOverview,
+      sceneOverview: req.body.dialogueBrief && action !== "revise" ? sceneOverview : result.sceneOverview || sceneOverview,
       sceneName: Object.prototype.hasOwnProperty.call(result, "sceneName") ? result.sceneName : sceneName,
       revisionSummary: result.revisionSummary || "",
       referenceVideoMode: result.referenceVideoMode || referenceVideoMode,
@@ -6401,12 +6424,26 @@ async function runTransitionBuilderUtilityVideo(req, res, { startFrameUrls, endF
 app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res) => {
   try {
     updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing video generation" });
-    const prompt = String(req.body.prompt || "").trim();
+    let prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
     }
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
+    delete req.body.directorDialogueAudio;
+    if (req.body.filmDirector?.dialogue?.lines?.length) {
+      const model = selectedVideoModel.displayName;
+      const group = /minimax.*h3/i.test(model) ? "minimaxH3" : /seedance/i.test(model) ? "seedance" : "";
+      if (!group) return res.status(400).json({ error: `${model} does not accept assigned Character dialogue audio. Choose Seedance or MiniMax H3.` });
+      const provider = runtimeModelProviderPreferences[group];
+      if (!(group === "minimaxH3" ? ["fal", "atlas", "krea", "local"] : ["fal", "atlas", "krea"]).includes(provider)) return res.status(400).json({ error: "Choose a supported video provider before generating dialogue." });
+      if (provider !== "local" && !(provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY)) return res.status(400).json({ error: missingModelProviderApiKeyMessage(model, provider) });
+      const dialogueAudio = await prepareDirectorDialogue(req);
+      prompt = req.body.prompt;
+      req.body.directorDialogueAudio = dialogueAudio;
+      const json = res.json.bind(res);
+      res.json = value => json({ ...value, directorDialogueAudio: dialogueAudio });
+    }
     const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
     const generalVideoModels = providerSupportedModels("veo", "fal");
     if (generalVideoModels.includes(selectedVideoModel.displayName)) {
@@ -6617,7 +6654,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       routeKind === "reference-to-video"
         ? rewriteReferenceMentions(prompt, {
             imageNames: referenceImageNames,
-            videoNames: referenceVideoNames
+            videoNames: referenceVideoNames,
+            audioNames: normalizeReferenceNames(req.body.referenceAudioLabels, referenceAudioUrls.length, "Audio")
           }, { bracketSyntax: seedance25 && runtimeProvider === "fal" })
         : prompt;
     if (seedance25) {
@@ -6661,7 +6699,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           generationGroupId: req.body.generationGroupId,
           generationStartedAt: listGenerationProgress().find((entry) => entry.runId === req.body.generationRunId)?.startedAt,
           generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal,
-          generationSubmittedAt: req.body.generationSubmittedAt
+          generationSubmittedAt: req.body.generationSubmittedAt,
+          ...(req.body.directorDialogueAudio ? { directorDialogueAudio: req.body.directorDialogueAudio } : {})
         },
         prompt, submittedPrompt, routeKind, seedance25, cost,
         pricingSnapshot: generationPricingScope.getStore() || pricingRefresh.snapshot(),
@@ -6888,6 +6927,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   return {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
     submittedPrompt: spec.submittedPrompt, cost,
+    ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
   };
 }
@@ -10829,12 +10869,16 @@ function rewriteReferenceMentions(prompt, referenceNames, { bracketSyntax = fals
   const mentionMap = new Map();
   const imageNames = referenceNames?.imageNames || [];
   const videoNames = referenceNames?.videoNames || [];
+  const audioNames = referenceNames?.audioNames || [];
 
   imageNames.forEach((name, index) => {
     mentionMap.set(name.toLowerCase(), bracketSyntax ? `[Image${index + 1}]` : `@Image${index + 1}`);
   });
   videoNames.forEach((name, index) => {
     mentionMap.set(name.toLowerCase(), bracketSyntax ? `[Video${index + 1}]` : `@Video${index + 1}`);
+  });
+  audioNames.forEach((name, index) => {
+    mentionMap.set(name.toLowerCase(), bracketSyntax ? `[Audio${index + 1}]` : `@Audio${index + 1}`);
   });
 
   return prompt.replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
@@ -12777,7 +12821,14 @@ async function downloadVideo(req, url, kind, { stripAudio = false, extension: re
     const output = target || await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
     const bytes = Buffer.from(await response.arrayBuffer());
     await writeFileWithRetry(output.filePath, bytes);
-    const outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
+    let outputBytes = stripAudio ? await removeVideoAudioTrack(output.filePath) : bytes.length;
+    if (!stripAudio && req.body.directorDialogueAudio?.url) {
+      const videoDuration = (await probeVideoFile(output.filePath)).duration;
+      const lastSpeech = Math.max(...req.body.directorDialogueAudio.cues.map(cue => cue.endSeconds));
+      if (!videoDuration || videoDuration + 0.1 < lastSpeech) throw new Error("Generated video is shorter than the prepared dialogue. Increase the scene duration; existing speech remains saved.");
+      const audio = await resolveLocalAssetPathFromUrl(req.body.directorDialogueAudio.url);
+      outputBytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
+    }
 
     return {
       fileName: output.fileName,

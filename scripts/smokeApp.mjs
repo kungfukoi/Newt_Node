@@ -14,6 +14,7 @@ const requiredHealthRoutes = [
   "explore",
   "storyboardRevisions",
   "storyboardPlanningV2",
+  "directorCharacterDialogue",
   "storyboardSequenceReview",
   "providerPricing",
   "spendAnalytics",
