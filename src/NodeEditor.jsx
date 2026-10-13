@@ -5977,6 +5977,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoModel: ["characterIn"],
         storyboard: ["characterIn"],
         skillDirector: ["characterIn"],
+        audioModel: ["characterIn"],
         composer: composerCharacterInputPortIdsForNode(target),
         preview: ["sourceIn"]
       },
@@ -6029,6 +6030,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const outputPort = portDefinitionForNode(source, from.port, "output");
       return outputPort?.disabled ? outputPort.disabledReason || "Generate this output before connecting it" : "";
     }
+    if (target.type === "audioModel" && to.port === "characterIn") return target.data.audioMode !== "dialogue" ? "Select Dialogue mode for Character input" : source.type === "character" && from.port !== "voiceOut" ? "" : "Dialogue Character input accepts Character nodes";
     if (target.type === "audioModel") return audioInputEnabled(target.data.audioMode, to.port) ? "" : "Select Speech to Speech for an audio input, or a text-driven mode for a prompt input";
     if (target.type === "explore") {
       if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
@@ -7502,7 +7504,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const sourceAudioUrl = incoming.audioIn?.length ? connectedAudioUrls(incoming.audioIn)[0] || "" : currentNode.data.sourceAudioUrl;
         const settled = await settleSequential(nodeRunIndexes(batchCount), async (index) => {
           try {
-            return await runAudioModelGeneration({ node: currentNode, prompt: basePrompt, sourceAudioUrl, workflowContext: requestContext, index, generationGroupId, batchTotal: batchCount });
+            return await runAudioModelGeneration({ node: currentNode, incoming, prompt: basePrompt, sourceAudioUrl, workflowContext: requestContext, index, generationGroupId, batchTotal: batchCount });
           } catch (error) { throw new Error(`Run ${index + 1}: ${error.message}`); }
         });
         const successes = fulfilledRunValues(settled);
@@ -11432,7 +11434,7 @@ function NodeBody({
       modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
   }
   if (node.type === "audioModel") {
-    return <AudioModelNodeBody node={node} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
+    return <AudioModelNodeBody node={node} incoming={incoming} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
       showApiCosts={showPriceSnapshot} generationScope={generationScope}
       promptConnected={Boolean(connectedText(incoming.promptIn))} sourceAudio={connectedAssetItems(incoming.audioIn)[0]}
       audioConnected={Boolean(incoming.audioIn?.length)} onUpdate={onUpdate} onRun={onRun} onUpload={onUpload} onPreviewOpen={onPreviewOpen}
@@ -15965,13 +15967,6 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
           />
         </NodeRow>
-        {(incoming.characterIn?.length || incoming.directorIn?.length || node.data.directorDialogue?.length) && <>
-          <NodeRow label="Character voices"><select aria-label="Character voice handoff mode" value={node.data.characterVoiceMode || "dialogue"} onChange={event => onUpdate(node.id, { characterVoiceMode: event.target.value })} disabled={running || node.data.characterVoiceBusy}><option value="dialogue">Exact dialogue audio</option><option value="samples">Voice samples (model dialogue)</option></select></NodeRow>
-          <DirectorDialogueControls node={node} incoming={incoming} disabled={running || node.data.characterVoiceBusy} onChange={(rows, revision) => onUpdate(node.id, { directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) })} />
-          {node.data.characterVoiceMode !== "samples" && <button type="button" className="character-sample-generate" disabled={running || node.data.characterVoiceBusy} onClick={() => onCharacterVoiceAction(node, "dialogue")}>{node.data.characterVoiceBusy ? "Preparing speech…" : "Prepare ElevenLabs dialogue"}</button>}
-          <small className="character-voice-handoff-status" role="status">{node.data.characterVoiceError || (node.data.characterVoiceMode === "samples" ? "Voice sample references; video model generates dialogue." : preparedSpeechCurrent ? "ElevenLabs audio ready. Video Run reuses this speech." : node.data.preparedCharacterDialogue ? "Lines or voices changed. Prepare speech again; unchanged clips are reused." : "Add exact speaker lines and prepare speech before Video Run.")}</small>
-          {node.data.preparedCharacterDialogue?.url && node.data.characterVoiceMode !== "samples" && <audio aria-label="Prepared Character dialogue" controls preload="none" src={displayMediaUrl(node.data.preparedCharacterDialogue.url)} />}
-        </>}
         {supportsDirectorInput && (
           <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
@@ -17717,7 +17712,7 @@ function getNodeConfig(type) {
     },
     audioModel: {
       icon: Volume2,
-      input: [{ id: "promptIn", label: "Prompt", color: portColors.prompt }, { id: "audioIn", label: "Audio", color: portColors.audio }],
+      input: [{ id: "promptIn", label: "Prompt", color: portColors.prompt }, { id: "audioIn", label: "Audio", color: portColors.audio }, { id: "characterIn", label: "Character", color: portColors.character }],
       output: [{ id: "audioOut", label: "Audio", color: portColors.audio }]
     },
     preview: {
@@ -21746,7 +21741,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
     characterReferenceUrls: characterReferences.map(item => item.url), characterReferenceLabels: characterReferences.map(item => item.label),
     referenceVideoUrls: referenceVideoItems.map(item => item.url), referenceVideoLabels: referenceVideoItems.map(item => item.label),
     referenceAudioUrls: referenceAudioItems.map(item => item.url), referenceAudioLabels: referenceAudioItems.map(item => item.label),
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: directorDialoguePackage(node.data, incoming.characterIn || [], node.id), outputTargetIndex: String(index + 1) });
+    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: node.data.directorDialogue?.length || node.data.characterVoiceMode === "samples" ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {

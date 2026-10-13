@@ -42,7 +42,7 @@ export function CharacterElevenLabsVoice({ node, onUpdate, onGenerateSample, dis
     <div className="character-voice-field">
     <label className="character-section-label" htmlFor={`character-voice-${node.id}`}>ElevenLabs</label>
     <div className="character-voice-controls">
-    <select id={`character-voice-${node.id}`} aria-label="Character ElevenLabs voice" title="Director or Video Model dialogue uses this voice. Uploaded samples are retained." value={selected} disabled={disabled || loading} onChange={event => {
+    <select id={`character-voice-${node.id}`} aria-label="Character ElevenLabs voice" title="Audio Model dialogue uses this voice. Uploaded samples are retained." value={selected} disabled={disabled || loading} onChange={event => {
       const voice = voices.find(item => item.id === event.target.value);
       onUpdate(node.id, { characterVoiceProvider: voice ? "elevenlabs" : "uploaded", characterElevenLabsVoiceId: voice?.id || "", characterElevenLabsVoiceName: voice?.name || "" });
     }}>

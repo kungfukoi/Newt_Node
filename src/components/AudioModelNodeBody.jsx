@@ -1,3 +1,4 @@
+import { DirectorDialogueControls } from "./DirectorDialogueControls.jsx";
 import { GenerationProgress } from "./GenerationProgress.jsx";
 import React from "react";
 import { RefreshCw, Upload, X } from "lucide-react";
@@ -7,7 +8,7 @@ import { isLocalDraggableMediaUrl, outputItemFromDataTransfer } from "../mediaAs
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 import { ResultPane } from "./MediaViews.jsx";
 
-export function AudioModelNodeBody({ node, config, prompt, promptConnected, sourceAudio, audioConnected, onUpdate, onRun, onUpload, onPreviewOpen, showApiCosts = false, generationScope = "", ...ports }) {
+export function AudioModelNodeBody({ node, config, incoming = {}, prompt, promptConnected, sourceAudio, audioConnected, onUpdate, onRun, onUpload, onPreviewOpen, showApiCosts = false, generationScope = "", ...ports }) {
   const d = normalizeAudioModelData(node.data);
   const [catalog, setCatalog] = React.useState(null);
   const [voiceError, setVoiceError] = React.useState("");
@@ -75,12 +76,12 @@ export function AudioModelNodeBody({ node, config, prompt, promptConnected, sour
     <details className="model-settings-drawer" open={open} onToggle={(event) => { if (event.currentTarget.open !== open) patch({ settingsOpen: event.currentTarget.open }); }}>
       <summary>Settings</summary>
       <NodeRow label="Mode"><select aria-label="Audio mode" value={d.audioMode} disabled={busy} onChange={(event) => patch({ audioMode: event.target.value })}>{audioModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}</select></NodeRow>
-      <NodeRow label={d.audioMode === "tts" ? "Text" : "Prompt"} node={node} inputPort={open ? inputPorts[0] : null} {...ports}>
+      {d.audioMode !== "dialogue" && <NodeRow label={d.audioMode === "tts" ? "Text" : "Prompt"} node={node} inputPort={open ? inputPorts[0] : null} {...ports}>
         <textarea aria-label="Audio prompt" value={prompt || ""} readOnly={promptConnected} disabled={busy || d.audioMode === "sts"} className={promptConnected ? "connected-field" : ""}
           placeholder={d.audioMode === "tts" ? "Text to speak" : d.audioMode === "sfx" ? "Describe the sound" : d.audioMode === "music" ? "Describe the music, mood, instruments or lyrics" : "Source recording controls speech"}
           onChange={(event) => patch({ prompt: event.target.value })} />
-      </NodeRow>
-      <NodeRow label="Audio" node={node} inputPort={open ? inputPorts[1] : null} {...ports}>
+      </NodeRow>}
+      {d.audioMode !== "dialogue" && <NodeRow label="Audio" node={node} inputPort={open ? inputPorts[1] : null} {...ports}>
         <div className="audio-source-controls" onDragOver={(event) => { if (d.audioMode === "sts" && !busy && !audioConnected) { event.preventDefault(); event.stopPropagation(); } }}
           onDrop={(event) => {
             if (d.audioMode !== "sts" || busy || audioConnected) return;
@@ -97,9 +98,14 @@ export function AudioModelNodeBody({ node, config, prompt, promptConnected, sour
           </label>
           {!audioConnected && d.sourceAudioUrl && <button type="button" aria-label="Remove source audio" title="Remove source audio" disabled={busy} onClick={() => patch({ sourceAudioUrl: "", sourceAudioName: "" })}><X size={14} /></button>}
         </div>
-      </NodeRow>
+      </NodeRow>}
       {d.audioMode === "sts" && audioUrl && <audio key={audioUrl} className="audio-source-player" src={audioUrl} controls preload="metadata" onLoadedMetadata={(event) => setSourceDuration(Number.isFinite(event.target.duration) ? event.target.duration : null)} />}
-      <NodeRow label="Model"><select aria-label="Audio model" disabled={busy} value={model} onChange={(event) => patch({ [d.audioMode === "sts" ? "stsModel" : d.audioMode === "music" ? "musicModel" : "ttsModel"]: event.target.value })}>{audioModels[d.audioMode].map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></NodeRow>
+      {d.audioMode === "dialogue" && <>
+        <NodeRow label="Character" node={node} inputPort={open ? inputPorts[2] : null} {...ports}><span>{(incoming.characterIn || []).map(({ source }) => `${source.data.characterName || source.data.title} — ${source.data.characterElevenLabsVoiceName || "Choose voice in Character"}`).join(", ") || "Optional: sets speaker name and voice"}</span></NodeRow>
+        <DirectorDialogueControls node={node} incoming={incoming} manual voices={catalog?.voices || []} disabled={busy} onChange={(rows, revision) => patch({ directorDialogue: rows, ...(revision ? { directorDialogueAudioVersion: revision } : {}) })} />
+        {voiceError && <small role="alert">{voiceError}</small>}
+      </>}
+      {d.audioMode !== "dialogue" && <NodeRow label="Model"><select aria-label="Audio model" disabled={busy} value={model} onChange={(event) => patch({ [d.audioMode === "sts" ? "stsModel" : d.audioMode === "music" ? "musicModel" : "ttsModel"]: event.target.value })}>{audioModels[d.audioMode].map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></NodeRow>}
       {voiceMode && <>
         <NodeRow label="Voice">
           <div className="audio-voice-controls">

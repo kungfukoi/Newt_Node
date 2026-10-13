@@ -1,5 +1,6 @@
 export const audioModes = Object.freeze([
   { value: "tts", label: "Text to Speech" },
+  { value: "dialogue", label: "Dialogue and character voices" },
   { value: "sts", label: "Speech to Speech" },
   { value: "sfx", label: "Sound Effects" },
   { value: "music", label: "Music" }
@@ -29,7 +30,7 @@ export const audioModelDefaults = Object.freeze({
   autoDuration: false, loop: false, forceInstrumental: true, promptInfluence: 0.3,
   stability: 0.5, similarityBoost: 0.75, style: 0, speed: 1, speakerBoost: true,
   removeBackgroundNoise: false, seed: "", batchCount: "1", outputFormat: "mp3_44100_128",
-  settingsOpen: true, resultType: "audio"
+  directorDialogue: [], directorDialogueAudioVersion: 0, settingsOpen: true, resultType: "audio"
 });
 
 const bounded = (value, min, max, fallback) => Number.isFinite(Number(value)) && value !== "" && value != null
@@ -63,7 +64,7 @@ export function audioModelId(data) {
 }
 
 export function audioInputEnabled(mode, port) {
-  return port === "audioIn" ? mode === "sts" : mode !== "sts";
+  return port === "characterIn" ? mode === "dialogue" : port === "audioIn" ? mode === "sts" : mode !== "sts" && mode !== "dialogue";
 }
 
 export function buildAudioRequest(data, { prompt = data.prompt, sourceAudioUrl = data.sourceAudioUrl } = {}) {

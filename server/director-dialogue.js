@@ -47,6 +47,7 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
 
   return async function prepare(req) {
     const body = req.body;
+    const audioOnly = body.audioMode === "dialogue";
     const dialogue = body.characterDialogue || body.filmDirector?.dialogue;
     if (dialogue?.mode === "samples") {
       if (!directorDialogueModelSupported(body.model)) throw new Error("This video adapter cannot consume Character voice samples.");
@@ -76,13 +77,13 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
     }
     if (!dialogue?.lines?.length && body.generateAudio !== false && dialogue?.characters?.some(character => character.voice?.id)) throw new Error("Selected ElevenLabs voices need exact dialogue lines or Voice samples mode. Add lines in Dialogue and character voices; the video was not submitted.");
     if (!dialogue?.lines?.length) return null;
-    if (!directorDialogueModelSupported(body.model)) throw new Error("The selected video model cannot use Character dialogue audio. Choose Seedance 2.0, Seedance 2.5 or MiniMax H3.");
+    if (!audioOnly && !directorDialogueModelSupported(body.model)) throw new Error("The selected video model cannot use Character dialogue audio. Choose Seedance 2.0, Seedance 2.5 or MiniMax H3.");
     if (body.generateAudio === false || body.filmDirector?.audioMode === "silent") throw new Error("Enable Generate Audio and a speaking Director audio mode to use assigned character voices.");
     if (body.startFrameUrls?.length || body.endFrameUrls?.length) throw new Error("Character dialogue requires reference-to-video. Move start/end frames to Reference Images so the speech is not ignored.");
     const audioLimit = /seedance.*2[ .-]?5/i.test(body.model) ? 10 : 3;
     if ((body.referenceAudioUrls || []).length >= audioLimit) throw new Error("There are too many audio references for Character dialogue. Remove unused audio inputs before generating speech.");
-    const lines = validateDirectorDialogue(dialogue);
-    for (const character of dialogue.characters.filter(character => lines.some(line => line.characterNodeId === character.nodeId))) {
+    const lines = validateDirectorDialogue(dialogue, { audioOnly });
+    for (const character of (audioOnly ? [] : dialogue.characters).filter(character => lines.some(line => line.characterNodeId === character.nodeId))) {
       if (!/^\/(?:outputs|uploads|workflow-assets|saved_workflows)\//.test(character.imageUrl || "") || character.imageUrl.includes("..")) throw new Error("Dialogue speakers require managed Character reference images.");
       const asset = await readAudio(character.imageUrl);
       if (!asset.mimeType?.startsWith("image/")) throw new Error("The dialogue speaker's Character reference is not a readable image.");
@@ -143,7 +144,7 @@ export function createDirectorDialoguePreparation({ cacheDir, getKey, saveAudio,
     }
     const maxSeconds = /seedance.*2[ .-]?5/i.test(body.model) ? 30.2 : 15;
     const requestedSeconds = Number(String(body.duration || "").match(/\d+(?:\.\d+)?/)?.[0]);
-    if (duration > maxSeconds || (requestedSeconds > 0 && duration > requestedSeconds)) throw new Error(`Prepared dialogue is ${duration.toFixed(1)} seconds long. Increase the video duration or shorten the dialogue; saved speech will be reused.`);
+    if (!audioOnly && (duration > maxSeconds || (requestedSeconds > 0 && duration > requestedSeconds))) throw new Error(`Prepared dialogue is ${duration.toFixed(1)} seconds long. Increase the video duration or shorten the dialogue; saved speech will be reused.`);
     progress("Assembling character dialogue audio");
     const track = await cached(hash([scope, "track", clips.map(clip => [clip.url, clip.pauseAfter])]), () => assembleAudio(req, clips, Math.max(2, duration)));
     const audioUrls = [...(body.referenceAudioUrls || []), track.url];

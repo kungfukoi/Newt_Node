@@ -312,3 +312,5 @@ Image editor model synchronization is owned by src/imageEditorPreference.js. Bot
 ### Submission and reference safeguards
 
 The browser API wrapper does not replay POST requests under `/api/node/` after connection failures. Interrupted responses direct users to History/provider status before retrying. Ideogram validates all source and mask sizes before upload, losslessly recompresses oversized provider copies without changing geometry, and rejects copies still above 25 MB before submission. Original managed assets remain unchanged.
+
+Audio Model offers Dialogue and character voices mode with a stable characterIn input. Connected Characters supply current names and ElevenLabs voices without requiring image sheets; manual dialogue rows require a speaker name and voice. Run creates one managed audio track with ordered lines and pauses, reusing the existing cached speech engine and per-line History accounting. Connect audioOut to a Video Model audio reference input to use the track. Video Model no longer exposes dialogue controls; existing saved dialogue remains runnable for compatibility.

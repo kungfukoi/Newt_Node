@@ -20,7 +20,7 @@ export function directorDialoguePackage(data = {}, connections = [], directorNod
   };
 }
 
-export function validateDirectorDialogue(value = {}) {
+export function validateDirectorDialogue(value = {}, { audioOnly = false } = {}) {
   const lines = value.lines;
   if (!Array.isArray(lines) || !lines.length || lines.length > 24) throw new Error("Director dialogue needs between 1 and 24 lines.");
   const characters = Array.isArray(value.characters) ? value.characters : [];
@@ -29,8 +29,8 @@ export function validateDirectorDialogue(value = {}) {
   const resolved = lines.map(line => {
     if (!line || !line.id || ids.has(line.id)) throw new Error("Every dialogue line needs a unique ID.");
     ids.add(line.id);
-    const character = characters.find(item => item.nodeId === line.characterNodeId);
-    if (!character || !character.imageUrl) throw new Error("Reconnect and lock the speaker's Character sheet before generating dialogue.");
+    const character = characters.find(item => item.nodeId === line.characterNodeId) || (audioOnly && !line.characterNodeId ? { nodeId: `manual:${line.speakerName}`, tag: String(line.speakerName || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 28), voice: { id: line.voiceId, name: line.voiceName || line.voiceId } } : null);
+    if (!character || (!audioOnly && !character.imageUrl)) throw new Error("Reconnect and lock the speaker's Character sheet before generating dialogue.");
     if (!/^[A-Za-z0-9_-]{1,28}$/.test(character.tag)) throw new Error("Give each dialogue character a valid name tag.");
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(character.voice?.id || "")) throw new Error(`Choose an ElevenLabs voice for @${character.tag} in Character Build.`);
     const text = String(line.text || "").trim();
@@ -41,7 +41,7 @@ export function validateDirectorDialogue(value = {}) {
   });
   if (resolved.reduce((sum, line) => sum + line.text.length, 0) > 10000) throw new Error("Director dialogue accepts up to 10,000 characters per scene.");
   const speakers = new Set(resolved.map(line => line.characterNodeId));
-  const tags = characters.filter(character => speakers.has(character.nodeId)).map(character => character.tag.toLowerCase());
+  const tags = [...new Map(resolved.map(line => [line.characterNodeId, line.tag.toLowerCase()])).values()];
   if (new Set(tags).size !== tags.length) throw new Error("Dialogue speakers need distinct character name tags.");
   return resolved;
 }
