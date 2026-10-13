@@ -15967,6 +15967,14 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
           />
         </NodeRow>
+        {(/seedance/i.test(node.data.model) || isMinimaxH3) && <>
+          <NodeRow label="Character voices"><select aria-label="Character voice handoff mode" value={node.data.characterVoiceMode || (node.data.directorDialogue?.length ? "dialogue" : "off")} onChange={event => onUpdate(node.id, { characterVoiceMode: event.target.value })} disabled={running || node.data.characterVoiceBusy}>
+            <option value="off">Off</option>
+            <option value="samples">Voice samples (model dialogue)</option>
+            {node.data.directorDialogue?.length > 0 && <option value="dialogue">Saved exact dialogue audio</option>}
+          </select></NodeRow>
+          {node.data.characterVoiceMode === "samples" && <small className="character-voice-handoff-status" role="status">Connect locked, active Characters with current ElevenLabs voice samples. Enable Generate Audio and use Reference Images instead of start/end frames. Seedance receives each sample with instructions assigning it to that Character; write the spoken lines in the prompt.</small>}
+        </>}
         {supportsDirectorInput && (
           <NodeRow label="Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add director")}</button>
@@ -21741,7 +21749,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
     characterReferenceUrls: characterReferences.map(item => item.url), characterReferenceLabels: characterReferences.map(item => item.label),
     referenceVideoUrls: referenceVideoItems.map(item => item.url), referenceVideoLabels: referenceVideoItems.map(item => item.label),
     referenceAudioUrls: referenceAudioItems.map(item => item.url), referenceAudioLabels: referenceAudioItems.map(item => item.label),
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: node.data.directorDialogue?.length || node.data.characterVoiceMode === "samples" ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
+    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: node.data.characterVoiceMode !== "off" && (node.data.directorDialogue?.length || node.data.characterVoiceMode === "samples") ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
