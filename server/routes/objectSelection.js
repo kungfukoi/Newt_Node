@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { objectSelectionEndpoints, objectSelectionInput, validateSam2Settings } from "../../src/objectSelection.js";
 import { prepareObjectSource, encodeObjectMask, readObjectMask } from "../object-selection.js";
 import { objectSourceHash, objectQueryKey } from "../object-selection-cache.js";
+import { normalizeImageEditSelectionState } from "../../src/imageEditSelectionState.js";
 
 export function registerObjectSelectionRoutes(app, { limiter, available, readSource, upload, subscribe, recordHistory, sendError, readMask = readObjectMask, cache }) {
   const jobs = new Map();
@@ -11,6 +12,15 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
       const { sourceUrl, targetUrl } = req.body;
       if (typeof sourceUrl !== "string" || (targetUrl !== undefined && typeof targetUrl !== "string")) throw Object.assign(new Error("An image source is required."), { status: 400 });
       const source = await readSource(sourceUrl);
+      const hash = objectSourceHash(source.buffer);
+      if (req.body.selectionState !== undefined) {
+        if (targetUrl !== undefined || !cache?.saveSelection) throw Object.assign(new Error("Cannot save selections for this image."), { status: 400 });
+        let state;
+        try { state = normalizeImageEditSelectionState(req.body.selectionState); }
+        catch (error) { throw Object.assign(error, { status: 400 }); }
+        await cache.saveSelection(hash, state);
+        return res.json({ saved: true });
+      }
       const entries = cache ? await cache.get(objectSourceHash(source.buffer)) : [];
       if (targetUrl !== undefined) {
         const target = await readSource(targetUrl);
@@ -19,7 +29,7 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
         if (cache && entries.length) await cache.inherit(objectSourceHash(target.buffer), entries);
         return res.json({ inherited: Boolean(entries.length) });
       }
-      res.json({ entries });
+      res.json({ entries, selectionState: await cache?.getSelection?.(hash) || null });
     } catch (error) { sendError(res, error, "Could not restore the object scan."); }
   });
   app.post("/api/node/image-objects", limiter, async (req, res) => {

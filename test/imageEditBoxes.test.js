@@ -5,6 +5,20 @@ import { boxFromDrag, boxCorners, boxContextRect, transformEditBox, validateEdit
 import { prepareImageEdit, finishImageEdit } from "../server/image-edit.js";
 const box = (id = "cat") => boxFromDrag({ x: .1, y: .1 }, { x: .3, y: .3 }, id);
 const solid = color => sharp({ create: { width: 200, height: 300, channels: 4, background: color } }).png().toBuffer();
+test("Ideogram box edits allow full scene integration and protect Keep regions", async () => {
+  const source = await solid("#123456");
+  const removed = { ...box(), mode: "remove" };
+  const prepared = await prepareImageEdit({ source, boxes: [removed], mode: "edit", model: "Ideogram 4.5" });
+  assert.equal(prepared.mask, null);
+  assert.match(prepared.submittedPrompt, /SCENE INTEGRATION CHECK/);
+  assert.match(prepared.submittedPrompt, /For replacement, completely remove the old subject/);
+  const keep = { ...boxFromDrag({ x: .7, y: .7 }, { x: .9, y: .9 }, "keep"), mode: "keep" };
+  const protectedEdit = await prepareImageEdit({ source, boxes: [removed, keep], mode: "edit", model: "Ideogram 4.5" });
+  assert.equal((await pixel(protectedEdit.mask, 100, 150))[0], 0, "scene outside object context remains editable");
+  assert.equal((await pixel(protectedEdit.mask, 160, 240))[0], 255, "Keep is protected in provider mask");
+  const finished = await finishImageEdit(protectedEdit, await solid("#ff0000"));
+  assert.deepEqual(await pixel(finished, 160, 240), await pixel(source, 160, 240));
+});
 async function pixel(buffer, x, y) {
   const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return [...data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 4)];

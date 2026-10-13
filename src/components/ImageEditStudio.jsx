@@ -93,6 +93,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const objectCache = React.useRef(new Map()), hoverRef = React.useRef(null);
   const scanRevision = React.useRef(0);
   const [inheritedScan, setInheritedScan] = React.useState(false);
+  const [selectionSaved, setSelectionSaved] = React.useState("");
+  const [restoringSelections, setRestoringSelections] = React.useState(true);
+  const skipSelectionRestore = React.useRef(false);
   const mounted = React.useRef(true);
   const drawingRef = React.useRef(null), selectionRef = React.useRef(null), stageRef = React.useRef(null), surfaceRef = React.useRef(null);
   const dragRef = React.useRef(null), busyRef = React.useRef(false), rootRef = React.useRef(null);
@@ -127,6 +130,16 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     finally { if (mounted.current) setSaving(false); }
   }
 
+  async function saveSelections() {
+    if (busyRef.current || saving || restoringSelections || namingBoxes.length) return;
+    setSaving(true); setError("");
+    try {
+      await nodeApi.imageObjectCache({ sourceUrl: base.url, selectionState: { marks: history.marks.filter(mark => ["selection", "boxes"].includes(mark.layer)), sam2Settings, selectedBoxId, selectionName: selectionName.current } });
+      setSelectionSaved("Selections and boxes saved for this image.");
+    } catch (failure) { setError(failure.message || "Could not save selections and boxes."); }
+    finally { if (mounted.current) setSaving(false); }
+  }
+
   React.useEffect(() => { rootRef.current?.focus(); }, []);
   React.useEffect(() => {
     const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
@@ -143,24 +156,34 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   React.useEffect(() => {
     const revision = ++scanRevision.current;
+    const restoreMarks = !skipSelectionRestore.current;
+    skipSelectionRestore.current = false;
+    setRestoringSelections(true); setSelectionSaved("");
     objectCache.current.clear(); setObjectMasks([]); setHoverObject(null); setObjectStatus(""); setInheritedScan(false);
     let cancelled = false;
     nodeApi.imageObjectCache({ sourceUrl: base.url }).then(data => {
       if (cancelled || !mounted.current || revision !== scanRevision.current) return;
       const entries = data.entries || [];
+      if (data.selectionState && restoreMarks) {
+        const saved = data.selectionState;
+        setHistory(current => ({ past: [], marks: [...current.marks.filter(mark => !["selection", "boxes"].includes(mark.layer)), ...saved.marks], future: [] }));
+        setSelectedBoxId(saved.selectedBoxId); selectionName.current = saved.selectionName;
+        setSam2Settings(saved.sam2Settings);
+        setSelectionSaved("Saved selections and boxes restored.");
+      }
       for (const entry of entries) objectCache.current.set(entry.key, entry.data);
       const auto = entries.filter(entry => entry.options.sam2).at(-1);
       if (entries.length) {
         const active = auto ? entries.slice(entries.indexOf(auto)) : entries;
         const masks = [...new Map(active.flatMap(entry => entry.data.masks).map(mask => [mask.id, mask])).values()].slice(-256);
-        if (auto) setSam2Settings(auto.options.sam2);
+        if (auto && !data.selectionState && restoreMarks) setSam2Settings(auto.options.sam2);
         setObjectMasks(masks);
         setInheritedScan(active.some(entry => entry.data.inherited));
         setObjectStatus(`${masks.length} objects ready. Saved scan restored; hover to preview, click to select.`);
       }
     }).catch(() => {
       if (!cancelled && revision === scanRevision.current) setWarning("Could not restore the saved object scan. Object Selection can try again; no segmentation was submitted.");
-    });
+    }).finally(() => { if (!cancelled && mounted.current) setRestoringSelections(false); });
     return () => { cancelled = true; };
   }, [base.url]);
   React.useLayoutEffect(() => {
@@ -333,7 +356,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   }
   function pointerDown(event) {
     if (tool === "boxes" && !reviewing) return;
-    if (event.button !== 0 || busyRef.current || !size || dragRef.current) return;
+    if (event.button !== 0 || busyRef.current || saving || restoringSelections || !size || dragRef.current) return;
     event.preventDefault(); event.stopPropagation();
     const start = point(event);
     if (!reviewing && tool === "object" && !blank) {
@@ -447,6 +470,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   function adjustBoxes() {
     const saved = versionDrafts.current[resultIndex];
     if (!saved || busyRef.current || saving) return;
+    if (saved.base.url !== base.url) skipSelectionRestore.current = true;
     setBase(saved.base); setSize(saved.size); setHistory({ past: [], marks: saved.marks, future: [] });
     setPrompt(saved.prompt); setMode(saved.mode); setBlank(saved.blank);
     const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
@@ -470,7 +494,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
           <div className="ies-segment" role="group" aria-label="Editing layer"><IconButton icon={Pencil} label="Drawing layer" active={layer === "drawing"} disabled={busy || reviewing} onClick={() => setActiveLayer("drawing")} /><IconButton icon={Scan} label="Selection layer" active={layer === "selection"} disabled={busy || reviewing || blank} onClick={() => setActiveLayer("selection")} /></div>
           {tools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy || (reviewing && id !== "hand") || (layer === "selection" && ["text", "arrow"].includes(id))} onClick={() => { setTool(id); if (layer === "boxes" && id !== "hand") setLayer("drawing"); }} />)}
-          <IconButton icon={ScanSearch} label="Object Selection" active={tool === "object" && !reviewing} disabled={busy || reviewing || blank || !size} onClick={() => findObjects()} />
+          <IconButton icon={ScanSearch} label="Object Selection" active={tool === "object" && !reviewing} disabled={busy || reviewing || blank || !size || restoringSelections} onClick={() => { setTool("object"); setLayer("selection"); setHoverObject(null); }} />
           <IconButton icon={Boxes} label="Boxes" active={tool === "boxes" && !reviewing} disabled={busy || reviewing || !size} onClick={activateBoxes} />
           <div className="ies-divider" />
           <IconButton icon={Undo2} label="Undo stroke" onClick={undo} disabled={busy || reviewing || !history.past.length} /><IconButton icon={Redo2} label="Redo stroke" onClick={redo} disabled={busy || reviewing || !history.future.length} />
@@ -498,22 +522,25 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         </div>
       </div>
       <aside className="ies-sidebar">
-        {!reviewing && <fieldset disabled={busy || saving}>
+        {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
+          <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
+          {selectionSaved && <p role="status">{selectionSaved}</p>}
+          <small>Save before closing to restore selections and boxes when you reopen this image. Saving an empty selection clears the saved regions.</small>
           {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} namingBoxes={namingBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
           {tool !== "boxes" && <div className="ies-object-controls">
             {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
               <strong>SAM 2 detection</strong>
               {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
-              <button type="button" disabled={!size || blank || !falAvailable} onClick={() => findObjects({}, {}, true)}>Rescan objects</button>
+              <button type="button" disabled={!size || blank || !falAvailable} onClick={() => findObjects({}, {}, true)}>Scan image for objects</button>
               <button type="button" onClick={() => setSam2Settings(sam2Defaults)}>Reset detection settings</button>
-              <small>Apply changes with Rescan (a new Fal request). Your current selection is kept.</small>
+              <small>Scan image for objects submits a new Fal request. Your current selection is kept.</small>
             </div>}
             <label>Select by prompt<textarea aria-label="Object selection prompt" rows={2} maxLength={300} placeholder="The jacket, all people…" value={selectionPrompt} onChange={e => setSelectionPrompt(e.target.value)} /></label>
             <button type="button" disabled={!size || blank || !selectionPrompt.trim()} onClick={() => findObjects({ prompt: selectionPrompt.trim() })}>Select</button>
             <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
             {tool === "object" && <small>Click selects · Shift adds · Alt subtracts</small>}
             {objectStatus && <p role="status">{objectStatus}</p>}
-            {inheritedScan && <p role="status">Using scan from before this edit. Boundaries may have changed; Rescan objects updates them.</p>}
+            {inheritedScan && <p role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
           </div>}
           <label>Method<select aria-label="Edit method" disabled={boxes.length > 0} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}

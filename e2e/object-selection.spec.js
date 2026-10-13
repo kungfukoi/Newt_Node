@@ -39,6 +39,10 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   });
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  expect(calls).toHaveLength(0);
+  await expect(editor.getByLabel("Sampling density", { exact: true })).toHaveValue("8");
+  await expect(editor.getByLabel("Confidence threshold", { exact: true })).toHaveValue("0.75");
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toBeVisible();
   const selection = editor.getByLabel("Selection canvas"), hover = editor.getByLabel("Object hover preview");
@@ -80,11 +84,45 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   expect(errors).toEqual([]);
 });
 
+test("saved selection and moved box restore after closing without rescanning", async ({ page }) => {
+  const { editor } = await openEditor(page);
+  let state = null, paid = 0;
+  await page.route("**/api/node/image-object-cache", async route => {
+    const body = route.request().postDataJSON();
+    if (body.selectionState) { state = body.selectionState; return route.fulfill({ json: { saved: true } }); }
+    return route.fulfill({ json: { entries: [], selectionState: state } });
+  });
+  await page.route("**/api/node/image-objects", async route => { paid++; await route.fulfill({ json: { masks: [masks[0]] } }); });
+  await editor.getByLabel("Object selection prompt").fill("red jacket");
+  await editor.getByRole("button", { name: "Select", exact: true }).click();
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
+  await expect(editor.getByText("Selections and boxes saved for this image.")).toBeVisible();
+  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
+  await expect(editor.getByText("Saved selections and boxes restored.")).toBeVisible();
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("red jacket");
+  await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
+  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
+  await expect.poll(() => state.marks.find(mark => mark.layer === "boxes")?.target.x).toBe(.65);
+  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
+  await expect(editor.getByText("Saved selections and boxes restored.")).toBeVisible();
+  await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await expect(editor.getByLabel("Translate X (%)", { exact: true })).toHaveValue("65");
+  expect(paid).toBe(1);
+});
+
 test("selection failure is visible, preserves draft, and never automatically retries", async ({ page }) => {
   const { editor } = await openEditor(page);
   let calls = 0;
   await page.route("**/api/node/image-objects", async route => { calls++; await route.fulfill({ status: 502, json: { error: "SAM 2 unavailable. Check Fal history." } }); });
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByRole("alert")).toContainText("SAM 2 unavailable");
   await move(page, editor, .2, .3);
   await move(page, editor, .7, .3);
@@ -96,6 +134,7 @@ test("SAM 2 controls only appear in object mode and apply on explicit rescan", a
   const calls = [];
   await page.route("**/api/node/image-objects", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { masks } }); });
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
   for (const [label, value] of [["Sampling density", "64"], ["Confidence threshold", "0.70"], ["Stability threshold", "0.80"], ["Minimum region area", "20"]]) {
     await editor.getByLabel(label, { exact: true }).evaluate((element, next) => {
@@ -104,10 +143,10 @@ test("SAM 2 controls only appear in object mode and apply on explicit rescan", a
     }, value);
   }
   expect(calls).toHaveLength(1);
-  await editor.getByRole("button", { name: "Rescan objects", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect.poll(() => calls.length).toBe(2);
   expect(calls[1].sam2).toEqual({ pointsPerSide: 64, confidence: .7, stability: .8, minRegionArea: 20 });
-  await expect(editor.getByRole("button", { name: "Rescan objects", exact: true })).toBeEnabled();
+  await expect(editor.getByRole("button", { name: "Scan image for objects", exact: true })).toBeEnabled();
   await editor.getByRole("button", { name: "Draw", exact: true }).click();
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
 });
@@ -151,6 +190,7 @@ test("Shift-selected objects stay one named selection through rename, undo and t
     await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", type: "image" } } });
   });
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
   await move(page, editor, .2, .3, true);
   await move(page, editor, .7, .3, true, "Shift");
@@ -221,12 +261,13 @@ test("saved objects survive Continue Editing, reopen, and explicit rescan withou
   await page.route("**/api/node/image-objects", async route => {
     const body = route.request().postDataJSON(); scans.push(body);
     const options = { sam2: body.sam2 };
-    const data = { masks: body.rescan ? [masks[1]] : masks, inherited: false };
+    const data = { masks: scans.length > 1 ? [masks[1]] : masks, inherited: false };
     saved.set(body.sourceUrl, [{ key: JSON.stringify(options), options, data }]);
     await route.fulfill({ json: data });
   });
   await page.route("**/api/node/edit-image", route => route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", type: "image" } } }));
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
   await editor.getByLabel("Edit prompt").fill("Change the colors");
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
@@ -243,7 +284,7 @@ test("saved objects survive Continue Editing, reopen, and explicit rescan withou
   await expect.poll(() => alpha(selection, .2, .3)).toBe(255);
   expect(scans).toHaveLength(1);
   await page.screenshot({ path: testInfo.outputPath("object-scan-inherited.png") });
-  await editor.getByRole("button", { name: "Rescan objects", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("1 objects ready.", { exact: false })).toBeVisible();
   await expect(editor.getByText("Using scan from before this edit.", { exact: false })).toHaveCount(0);
   expect(scans).toHaveLength(2); expect(scans[1].rescan).toBe(true);

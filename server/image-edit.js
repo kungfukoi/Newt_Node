@@ -34,7 +34,14 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   const staged = await prepareMoveCutouts({ original, boxes, model, objects: boxObjects, width, height });
   const boxEdit = await prepareEditBoxes({ boxes, original, width, height, selection, guideIndex, referenceIndices, staged, objects: boxObjects });
   selection = boxEdit.selection;
-  const sendSelection = selection && !(boxes.length && isFlux3Model(model));
+  // Box edits need scene-wide lighting/reflection integration. Ideogram's hard
+  // mask otherwise clips those effects to the detection/context footprint.
+  // With Keep boxes, preserve exactly those regions; otherwise use an unmasked edit.
+  let sendSelection = boxes.length && isFlux3Model(model) ? null : selection;
+  if (boxes.length && isIdeogram45Model(model)) {
+    const protectedRegions = boxes.some(box => box.mode === "keep");
+    sendSelection = protectedRegions ? boxEdit.compositeSelection : null;
+  }
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
   let submittedPrompt = buildImageEditPrompt({ prompt: [prompt, boxEdit.prompt].filter(Boolean).join("\n\n"), mode, blank, hasDrawing: Boolean(drawing), hasSelection: Boolean(sendSelection), contextualSelection: Boolean(boxes.length), model });
   if (staged.ids.length) submittedPrompt = "Image 1 is a prepared composite with the selected objects already moved. Neutral gray source vacancies need background reconstruction. All scene guides show this same prepared state. The move requested in the user brief has already been applied geometrically; do not repeat it. Remove the neutral gray placeholders and reconstruct background only at each vacated source. Never restore or duplicate the moved subject at its old location. Remove the original object completely, including its contact/cast shadows, ambient occlusion, reflections and color spill; reconstruct the supporting surface from the surrounding scene. The source and destination context margins are editable for these effects. Regenerate and relight destination cutouts at their specified geometry, inferring light direction, softness, color, exposure, supporting surface, perspective and depth from the full scene. Add new contact shadows, cast shadows, reflections and color interaction appropriate to their new location. Preserve subject identity and unrelated objects, including their shadows. Where regions overlap, the destination placement takes precedence.\n\n" + submittedPrompt.replace("Edit image 1, the clean original.", "Finish image 1, the prepared composite.");
@@ -42,6 +49,7 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     const structured = fluxBoxInstructions(boxes, width, height, referenceIndices, staged.ids);
     submittedPrompt += "\n\n" + structured.caption + "\n" + JSON.stringify(structured.rows);
   }
+  if (isIdeogram45Model(model)) submittedPrompt += "\n\nSCENE INTEGRATION CHECK: Complete every requested move, removal or replacement as a finished scene edit. A positioned cutout is only a geometry guide, not a finished result: regenerate its lighting, edge transitions, texture, focus, contact and cast shadows, ambient occlusion, reflections and color spill to match its destination. Remove obsolete effects at the old location and reconstruct the exposed background. For replacement, completely remove the old subject and its associated effects before integrating the requested replacement; do not retain fragments or a second instance. Resolve depth and foreground occlusion naturally. Preserve unrelated scene content and all explicit Keep regions. Inspect source and destination before returning: no pasted edges, halos, gray holes, duplicate subjects or guide graphics; shadows and reflections must continue naturally beyond the object footprint where the editable scene permits.";
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : staged.base;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   // Annotation ink is an instruction, never output artwork. Restore the clean
@@ -67,10 +75,10 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     if (imageEditUsesSelectionGuide(model)) {
       mask = await decode(selection).extractChannel(3).png().toBuffer();
     } else if (isIdeogram45Model(model)) {
-      const pixels = await decode(selection).extractChannel(3).raw().toBuffer();
+      const pixels = await decode(sendSelection).extractChannel(3).raw().toBuffer();
       if (!pixels.some((value) => value < 128) || !pixels.some((value) => value >= 128))
         throw new Error("Ideogram requires both selected and unselected areas. Clear the selection to edit the entire image.");
-      mask = await decode(selection).extractChannel(3).threshold(128).negate().png().toBuffer();
+      mask = await decode(sendSelection).extractChannel(3).threshold(128).negate().png().toBuffer();
     } else mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
   }
   return { original: staged.base, width, height, size, selection, compositeSelection: boxEdit.compositeSelection, mask, annotationMask, submittedPrompt, boxStrategy: staged.ids.length ? "cutout-cleanup" : boxes.length && isFlux3Model(model) ? "flux-structured" : Object.keys(boxObjects).length ? "object-guided" : "guide", boxes: boxEdit.boxes,

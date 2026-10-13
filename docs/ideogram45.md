@@ -9,6 +9,7 @@ NewtNode uses Fal. Enable an active Fal key. For image generation, select Fal (o
 - Reference edits: `ideogram/v4.5/edit`, primary source followed by up to four references. Excess references are rejected, never truncated.
 - Preview editor: high edit precision, source geometry, low/medium/high quality, annotations, sketches, and selected-area removal. Masked edits allow a source plus three references; editor drawings use only one guide reference.
 - Masks: black edits and white preserves. Completely selected masks are rejected with an instruction to clear the selection for a whole-image edit. Local compositing preserves unselected pixels.
+- Box moves, removals and reference/new-object replacements use scene-wide integration so lighting, shadows and reflections can extend beyond the object footprint. Explicit Keep boxes remain protected by both the provider mask and local compositing. Hidden instructions require source cleanup, destination relighting, natural edges/occlusion and removal of obsolete replacement effects; moved cutouts specify geometry rather than finished lighting.
 - Character sheets: 2K. Existing character/model selections retain their defaults.
 - History records endpoint, settings, source/reference metadata, and managed local output. Price is explicitly unpriced until a verified Fal rate is configured; no zero-cost claim is made.
 

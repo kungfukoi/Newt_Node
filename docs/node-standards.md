@@ -8,6 +8,8 @@ Before starting any new feature, read this document first. If the feature change
 
 ## Goals
 
+The image editor enters Object Selection without submitting inference. Scan image for objects in the right panel starts an explicit SAM 2 scan; defaults are 8 × 8 sampling and 0.75 confidence. Save selections and boxes persists selected/subtracted regions, brush selections, box source masks/transforms and detection settings locally by image content identity, and restores them on reopening without paid work. Saving empty regions clears the saved selection. Records remain local to this installation and are not packaged with workflows. Ideogram box operations must allow scene-wide cleanup and destination integration beyond object footprints; explicit Keep boxes remain protected. Hidden instructions cover move/removal/replacement effects, relighting, contact/cast shadows, reflections, natural edges, occlusion and source reconstruction.
+
 Storyboard now follows upstream directing skill 2.2.0 for independent plans:
 Auto selects the needed panel count; explicit counts must match exactly. Approach,
 pacing and optional duration guide planning. Generate Missing only fills panels

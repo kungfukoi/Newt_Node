@@ -24,6 +24,31 @@ async function fixture(run, overrides = {}) {
   const cachePost = body => fetch(`http://127.0.0.1:${server.address().port}/api/node/image-object-cache`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   try { await run({ post, cachePost, calls, histories }); } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }
+test("saved selections and boxes survive reopening and never submit inference", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "newt-selection-state-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const rect = { x: .5, y: .5, w: .2, h: .2, rotation: 0 };
+  const mask = { id: "object", width: 10, height: 10, runs: [22, 3], area: 3 };
+  const state = { marks: [{ layer: "selection", tool: "object", mask, subtract: true }, { layer: "boxes", tool: "box", id: "box-1", label: "Cup", mode: "move", source: rect, target: { ...rect, x: .7 }, sourceMask: mask, selectionDerived: true }], selectedBoxId: "box-1", selectionName: "Cup" };
+  await fixture(async ({ cachePost, calls }) => {
+    const saved = await cachePost({ sourceUrl: "/uploads/one.png", selectionState: state });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).saved, true);
+    assert.equal((await cachePost({ sourceUrl: "/uploads/one.png", selectionState: { marks: [{ layer: "drawing" }] } })).status, 400);
+    assert.equal(calls.length, 0);
+  }, { cache: createObjectSelectionCache(directory), available: () => false });
+  await fixture(async ({ cachePost, calls }) => {
+    const result = await (await cachePost({ sourceUrl: "/uploads/copied.png" })).json();
+    assert.equal(result.selectionState.marks[0].subtract, true);
+    assert.deepEqual(result.selectionState.marks[1].target, state.marks[1].target);
+    assert.deepEqual(result.selectionState.marks[1].sourceMask.runs, mask.runs);
+    assert.equal(result.selectionState.sam2Settings.pointsPerSide, 8);
+    await cachePost({ sourceUrl: "/uploads/copied.png", selectionState: { marks: [] } });
+    assert.deepEqual((await (await cachePost({ sourceUrl: "/uploads/copied.png" })).json()).selectionState.marks, []);
+    assert.equal(calls.length, 0);
+  }, { cache: createObjectSelectionCache(directory), available: () => false });
+});
+
 test("object map and prompt/point selection use explicit Fal endpoints and record usage", () => fixture(async ({ post, calls, histories }) => {
   const result = await (await post({})).json();
   assert.equal(result.masks[0].area, 128);

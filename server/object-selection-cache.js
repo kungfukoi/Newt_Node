@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { stat } from "node:fs/promises";
 import { readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { normalizeImageEditSelectionState } from "../src/imageEditSelectionState.js";
 
 const version = 1;
 export const objectSourceHash = buffer => createHash("sha256").update(buffer).digest("hex");
@@ -52,6 +53,14 @@ export function createObjectSelectionCache(directory) {
   }
   return {
     get,
+    getSelection: async hash => {
+      const target = file(hash).replace(/\.json$/, ".selection.json");
+      if ((await stat(target).catch(() => null))?.size > 64 * 1024 * 1024) return null;
+      const saved = await readJsonFile(target, null);
+      if (!saved) return null;
+      try { return normalizeImageEditSelectionState(saved); } catch { return null; }
+    },
+    saveSelection: async (hash, state) => writeJsonAtomic(file(hash).replace(/\.json$/, ".selection.json"), normalizeImageEditSelectionState(state)),
     put: (hash, options, data) => update(hash, entries => {
       const key = objectQueryKey(options);
       return [...entries.filter(entry => entry.key !== key), { key, options, data, scannedAt: new Date().toISOString() }];
