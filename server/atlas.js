@@ -52,7 +52,7 @@ export function createAtlasClient({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   onProgress = () => {}
 } = {}) {
-  async function request(path, key, options = {}) {
+  async function request(path, key, options = {}, predictionId = "") {
     if (!String(key || "").trim()) throw fail(400, "Add and enable an Atlas Cloud API key in Settings first.");
     try {
       const response = await fetchImpl(`${apiBase}/${path}`, {
@@ -68,7 +68,13 @@ export function createAtlasClient({
         : Number.isFinite(providerCode) && providerCode >= 400
           ? providerCode
           : null;
-      if (errorStatus) throw fail(errorStatus, atlasError(data, errorStatus), { retryable: transientStatus(errorStatus) });
+      // Atlas can wrap a terminal prediction in HTTP/code 400. Preserve that
+      // prediction for the adapter's identity/model validation, not its raw body
+      // on a generic error. Auth/gateway errors remain recoverable status errors.
+      const prediction = data?.data || data;
+      const terminalPrediction = predictionId && prediction?.id === predictionId &&
+        ["failed", "canceled", "cancelled", "timeout"].includes(String(prediction.status || "").toLowerCase());
+      if (errorStatus && !terminalPrediction) throw fail(errorStatus, atlasError(data, errorStatus), { retryable: transientStatus(errorStatus) });
       return data;
     } catch (error) {
       if (error.status) throw error;
@@ -157,6 +163,6 @@ export function createAtlasClient({
     submitVideo: (input, key) => request("generateVideo", key, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input)
     }),
-    pollVideo: (requestId, key) => request(`prediction/${encodeURIComponent(requestId)}`, key)
+    pollVideo: (requestId, key) => request(`prediction/${encodeURIComponent(requestId)}`, key, {}, requestId)
   };
 }

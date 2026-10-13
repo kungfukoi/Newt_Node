@@ -106,6 +106,39 @@ test("switching provider keys pauses recovery instead of silently using another 
 
 const atlasSpec = () => ({ ...spec("atlas"), endpoint: "bytedance/seedance-2.5/text-to-video", input: { model: "bytedance/seedance-2.5/text-to-video", prompt: "test" } });
 
+test("Atlas wrapped terminal predictions validate identity and retain task guidance", async () => {
+  for (const httpStatus of [200, 400]) {
+    const client = await adapter([{ status: httpStatus, body: { code: 400, data: {
+      id: "original", model: atlasSpec().endpoint, status: "failed",
+      error: `omni_reference_task_type does not match inferred task ${key} https://secret.test/x`
+    } } }])(atlasSpec());
+    await assert.rejects(client.poll({ requestId: "original" }), error => {
+      assert.equal(error.confirmedFailure, true);
+      assert.equal(error.providerStatus, "failed");
+      assert.match(error.message, /Edit Existing Video/);
+      assert.doesNotMatch(error.message, /test-only-not-a-real-key|secret.test/);
+      return true;
+    });
+  }
+  for (const data of [
+    { id: "different", status: "failed" },
+    { id: "original", model: "different", status: "failed" },
+    { id: "original", status: "processing" }
+  ]) {
+    const client = await adapter([{ status: 400, body: { code: 400, data } }])(atlasSpec());
+    await assert.rejects(client.poll({ requestId: "original" }), error => !error.confirmedFailure);
+  }
+});
+
+test("Atlas completion exposes only valid reported latency", async () => {
+  for (const [latency_ms, expected] of [[1136712, 1136712], [null, null], ["bad", null], [-1, null]]) {
+    const client = await adapter([{ body: { data: {
+      id: "original", status: "completed", latency_ms, outputs: ["https://example.test/out.mp4"]
+    } } }])(atlasSpec());
+    assert.equal((await client.poll({ requestId: "original" })).providerLatencyMs, expected);
+  }
+});
+
 test("Atlas submits once, tracks its original prediction, and retrieves completed video", async () => {
   const calls = [];
   const client = await adapter([

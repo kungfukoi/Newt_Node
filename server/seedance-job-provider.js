@@ -138,7 +138,11 @@ function atlasJobAdapter(spec, key, fetchImpl) {
       }
       const status = String(data.status).toLowerCase();
       if (["failed", "canceled", "cancelled", "timeout"].includes(status)) {
-        throw Object.assign(confirmedProviderFailure(safeMessage(providerFailureText(data, `Atlas Cloud ${status} this generation.`))), { providerStatus: status });
+        const detail = safeMessage(providerFailureText(data, `Atlas Cloud ${status} this generation.`));
+        const guidance = /omni_reference_task_type/i.test(detail)
+          ? " For video edits, select Edit Existing Video before starting a new run. The existing request cannot be changed."
+          : "";
+        throw Object.assign(confirmedProviderFailure(detail + guidance), { providerStatus: status });
       }
       if (["completed", "succeeded"].includes(status)) {
         const url = Array.isArray(data.outputs) ? data.outputs.find((value) => {
@@ -146,7 +150,10 @@ function atlasJobAdapter(spec, key, fetchImpl) {
           catch { return false; }
         }) : "";
         if (!url) throw new Error("Completed Atlas Cloud job has no downloadable video yet.");
-        return { providerStatus: status, remote: { video: { url, content_type: "video/mp4" }, seed: data.seed ?? null } };
+        const latencyMs = Number(data.latency_ms);
+        return { providerStatus: status,
+          providerLatencyMs: data.latency_ms != null && Number.isFinite(latencyMs) && latencyMs >= 0 ? latencyMs : null,
+          remote: { video: { url, content_type: "video/mp4" }, seed: data.seed ?? null } };
       }
       if (!["created", "pending", "queued", "starting", "processing", "running", "in_queue", "in_progress"].includes(status)) {
         throw new Error("Atlas Cloud returned an unrecognized job status; tracking the original request.");

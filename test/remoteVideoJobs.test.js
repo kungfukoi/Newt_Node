@@ -21,6 +21,57 @@ const spec = {
 };
 const video = { video: { url: "https://example.test/video.mp4" } };
 
+test("an Atlas HTTP 400 failed prediction releases tracking and stays terminal after restart", async t => {
+  let posts = 0, gets = 0;
+  const key = "test-atlas-key";
+  const f = await fixture(t, { adapter: createSeedanceJobAdapter({ getKey: async () => key,
+    fetchImpl: async (_url, options) => {
+      if (options.method === "POST") {
+        posts++;
+        return new Response(JSON.stringify({ data: { id: "original", status: "created" } }));
+      }
+      gets++;
+      return new Response(JSON.stringify({ code: 400, data: {
+        id: "original", status: "failed", error: "omni_reference_task_type mismatch"
+      } }), { status: 400 });
+    }
+  }) });
+  let service = await f.open();
+  await service.create("failed-atlas", { ...spec, provider: "atlas", credentialFingerprint: providerKeyFingerprint(key) });
+  await service.step("failed-atlas");
+  const failed = service.get("failed-atlas");
+  assert.equal(failed.state, "failed");
+  assert.match(failed.message, /Edit Existing Video/);
+  const elapsed = failed.timings.totalMs;
+  await service.close();
+  f.advance(600000);
+  service = await f.open();
+  await service.step("failed-atlas");
+  assert.equal(service.get("failed-atlas").timings.totalMs, elapsed);
+  assert.equal(posts, 1);
+  assert.equal(gets, 1);
+});
+
+test("output timing survives failed local save and restart independently of Atlas latency", async t => {
+  const f = await fixture(t, {
+    adapter: async () => ({ submit: async () => ({ requestId: "original" }),
+      poll: async () => ({ remote: video, providerLatencyMs: 12345 }) }),
+    finalize: async () => { throw new Error("disk temporarily unavailable"); }
+  });
+  let service = await f.open();
+  await service.create("save-timing", spec);
+  await service.step("save-timing");
+  const tracking = service.get("save-timing").timings.providerTrackingMs;
+  await service.close();
+  f.advance(5000);
+  service = await f.open({ finalize: async () => ({ video: { localUrl: "/outputs/done.mp4" } }) });
+  await service.step("save-timing");
+  const completed = service.get("save-timing");
+  assert.equal(completed.timings.providerTrackingMs, tracking);
+  assert.equal(completed.timings.localSaveMs, 5000);
+  assert.equal(completed.timings.providerReportedLatencyMs, 12345);
+});
+
 test("two windows submit concurrently with isolated workflow progress and results", async t => {
   const submitted = [];
   const f = await fixture(t, { providerLimits: { krea: 2 },

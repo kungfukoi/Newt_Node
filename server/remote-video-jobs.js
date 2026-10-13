@@ -1,6 +1,6 @@
 import { openRemoteJobStore } from "./remote-job-store.js";
 import { randomUUID } from "node:crypto";
-import { appendJobEvent, jobErrorDiagnostic } from "./job-diagnostics.js";
+import { appendJobEvent, jobErrorDiagnostic, jobTimingDiagnostic } from "./job-diagnostics.js";
 import { concurrencyLimit } from "../src/workScheduler.js";
 import {
   remoteVideoScope,
@@ -115,6 +115,8 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
         job = await commit(runId, {
           state: status.remote ? "downloading" : status.state || "running",
           remote: status.remote || null,
+          ...(status.remote ? { outputAvailableAt: job.outputAvailableAt || iso() } : {}),
+          ...(Number.isFinite(status.providerLatencyMs) ? { providerLatencyMs: status.providerLatencyMs } : {}),
           providerStatus: status.providerStatus || "",
           percent: status.percent ?? null,
           queuePosition: status.queuePosition ?? null,
@@ -183,6 +185,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       providerAcceptedAt: job.providerAcceptedAt || job.submissionStartedAt || null,
       needsAttention: remoteVideoNeedsAttention(job), retryCount: job.retryCount || 0,
       lastError: job.lastError || null, events: job.events || [],
+      timings: jobTimingDiagnostic(job, now()),
       result: job.result || null, outputTargetNodeId: body.outputTargetNodeId || ""
     };
   }

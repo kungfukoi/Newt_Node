@@ -10,6 +10,7 @@ The elapsed timer retains the original run start across acceptance retries and t
 - Queued or processing jobs remain pending. A responsive status endpoint does not prove that inference is advancing; the UI reports what the provider actually says, without claiming it can reliably detect an internal stall.
 - Status/network failures retry with backoff. Delayed jobs poll less frequently. No new paid request is submitted to recover an accepted job.
 - Explicit Atlas HTTP 400 parameter rejections (including InvalidParameter.AspectRatioTooLarge and non-adaptive first-frame ratios) are confirmed task failures and stop polling. They must not appear as perpetual reconnecting jobs. Correct future inputs and submit only through a new explicit Run; existing request IDs are never replayed.
+- Atlas predictions explicitly reporting failed/cancelled/timeout also stop tracking when wrapped in an HTTP or provider-code error. The original prediction ID and model are validated first. Generic HTTP 400, authentication, missing-status and connection errors alone do not prove an accepted job failed. Task-type mismatch errors explain how to select Edit Existing Video for a future run; saved requests remain immutable.
 - Completed clips appear individually, updating connected Preview nodes, the generation's Output target, and project history while other batch clips are still running.
 - Restarting Newt resumes jobs with saved provider IDs. Reopening the original workflow restores pending state and applies new results once. Save As copies and unrelated workflows do not adopt those jobs.
 - Changing or disabling the provider key pauses provider access until the original key is enabled and selected again. There is no silent provider or account fallback.
@@ -72,6 +73,21 @@ The node progress display includes the provider's latest state and a job-specifi
 Run `npm test`, `npm run build`, `npm run test:browser`, `npm run smoke:isolated`, and `node --check server/index.js`. Targeted tests cover independent long-running batches, restart/migration, duplicate acceptance/ID attachment, original credentials, ambiguous submissions, recovery actions, provider terminal errors, expired links, save checkpoints, delta cursors, and client/result reconciliation. The isolated real API test imports a synthetic uncertain run into managed output/history/catalog. Tests use fake providers and temporary stores, not paid generations or production history.
 
 For a live check, start a small authorized Seedance batch, confirm each result appears separately, and reload the workflow while another job is pending. Restart the backend only after its provider IDs are recorded. Verify that IDs remain unchanged, one history/cost record exists per completed generation, and Preview/Output use local media. Native macOS runtime checks still require a Mac; no Windows-specific APIs are used by the recovery modules.
+
+## Timing diagnostics
+
+Job status responses include allowlisted `timings`: preparation, local admission,
+submission, provider tracking, local save and total milliseconds. Unknown stages
+are null for older records. Tracking includes polling/network delay; it does not
+separate provider queue time from inference. Atlas's reported `latency_ms` is
+retained separately as `providerReportedLatencyMs`. The first observed output
+time survives save retries and restart. Terminal timing stops advancing.
+Completed History and result records include `generationTimings`, measured when
+finalization writes them (before the final completed checkpoint).
+
+Atlas Seedance 2.5 records individual reference-video durations and their total
+in settings. Unreadable duration metadata is null rather than a misleading zero.
+This does not apply Fal-specific duration limits to Atlas or alter saved requests.
 
 ## Draft previews and completion
 

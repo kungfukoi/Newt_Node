@@ -77,6 +77,7 @@ import {
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { createRemoteVideoJobs } from "./remote-video-jobs.js";
+import { jobTimingDiagnostic } from "./job-diagnostics.js";
 import { createSeedanceJobAdapter, providerKeyFingerprint } from "./seedance-job-provider.js";
 import { durableVideoRequestHandler, registerRemoteVideoJobRoutes } from "./routes/remote-video-jobs.js";
 import { workflowContextPayload } from "../src/workflowContext.js";
@@ -6762,7 +6763,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     if (seedance25) {
       submittedPrompt = compactSeedancePrompt(submittedPrompt);
     }
-    const referenceVideoDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
+    const referenceVideoDurations = seedance25 && ["fal", "atlas"].includes(runtimeProvider) && routeKind === "reference-to-video"
       ? await localVideoDurations(referenceVideoUrls)
       : [];
     const referenceAudioDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
@@ -6770,13 +6771,13 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       : [];
     const referenceVideoDurationSeconds = referenceVideoDurations.reduce((total, seconds) => total + seconds, 0);
     const referenceAudioDurationSeconds = referenceAudioDurations.reduce((total, seconds) => total + seconds, 0);
-    if (referenceVideoDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
+    if (runtimeProvider === "fal" && referenceVideoDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
       return res.status(400).json({ error: `Seedance 2.5 reference videos must be at least ${seedance25ReferenceLimits.minimumMediaSeconds} seconds long.` });
     }
     if (referenceAudioDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
       return res.status(400).json({ error: `Seedance 2.5 reference audio must be at least ${seedance25ReferenceLimits.minimumMediaSeconds} seconds long.` });
     }
-    if (referenceVideoDurationSeconds > seedance25ReferenceLimits.videoSeconds) {
+    if (runtimeProvider === "fal" && referenceVideoDurationSeconds > seedance25ReferenceLimits.videoSeconds) {
       return res.status(400).json({ error: `Seedance 2.5 reference videos can be up to ${seedance25ReferenceLimits.videoSeconds} seconds total.` });
     }
     if (referenceAudioDurationSeconds > seedance25ReferenceLimits.audioSeconds) {
@@ -6815,6 +6816,9 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           startFrameCount: startFrameUrl ? 1 : 0, endFrameCount: endFrameUrl ? 1 : 0,
           referenceImageCount: referenceImageUrls.length, referenceImageNames,
           referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length,
+          referenceVideoDurations: referenceVideoDurations.map(seconds => seconds > 0 ? seconds : null),
+          referenceVideoDurationSeconds: referenceVideoUrls.length && referenceVideoDurations.some(seconds => !(seconds > 0))
+            ? null : referenceVideoDurations.length === referenceVideoUrls.length ? referenceVideoDurationSeconds : null,
           ...(atlasReferencePreparation.length ? { atlasReferencePreparation } : {})
         }
       };
@@ -7047,10 +7051,11 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
     project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed },
     cost, keyIdentity: { fingerprint: spec.credentialFingerprint }, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
-    ...(job.runId ? { generationRunId: job.runId } : {})
+    ...(job.runId ? { generationRunId: job.runId, generationTimings: jobTimingDiagnostic(job) } : {})
   }, { deduplicate: Boolean(job.runId) });
   return {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
+    ...(job.runId ? { generationTimings: jobTimingDiagnostic(job) } : {}),
     submittedPrompt: spec.submittedPrompt, cost,
     ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
     ...(draftWarning ? { warning: draftWarning } : {}),

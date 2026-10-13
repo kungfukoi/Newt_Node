@@ -89,6 +89,13 @@ Generation progress is request-scoped in `server/generation-progress.js`, aggreg
 
 Atlas Seedance uses the same durable worker as Fal/Krea. `server/atlas-media.js` prepares uploaded references separately from submission; `server/seedance-job-provider.js` uses bounded Atlas submission/prediction calls, and the shared finalizer preserves Atlas provider and cost metadata.
 
+`server/job-diagnostics.js` derives allowlisted stage timings from durable checkpoints.
+The worker retains first output availability and Atlas reported latency; status
+responses expose timings and finalization records them in History/results. Atlas
+reference-video durations are probed before submission and stored in settings,
+with unknown values represented as null. Terminal prediction envelopes survive
+HTTP errors for original-ID/model validation before tracking stops.
+
 `server/runtime-owner.js` acquires an exclusive loopback UDP lease keyed by the canonical data-directory path before backend state stores initialize. Reopening the normal launcher reuses the existing backend/client; it opens another window with an independent session draft. A second backend with the same data directory exits with ownership code 73, and its supervisor stops instead of retrying. OS ownership is released on process termination. `server/outputTargets.js` claims in-memory filename reservations before awaiting filesystem checks, preventing collisions among simultaneous window exports. Durable jobs retain shared provider limits and separate workflow scopes.
 
 `prepareAtlasSeedanceImageAsset` in `server/atlas-video-input.js` pads/scales provider-only image copies to the supported aspect/side-size bounds before upload, retaining valid source bytes and never modifying managed originals. `server/atlas-media.js` prepares reference images and first/last frames and reports changed dimensions/padding for History settings. `src/atlasMedia.js` forces adaptive ratio on Seedance 2.5 frame routes. The Atlas job adapter treats explicit asynchronous InvalidParameter or first-frame ratio rejections as terminal failures rather than endlessly recovering; generic HTTP/network failures remain recoverable, and no failed job is resubmitted.
