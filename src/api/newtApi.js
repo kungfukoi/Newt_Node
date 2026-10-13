@@ -665,6 +665,10 @@ export const audioModelApi = {
   },
   voices: (refresh = false) => getJson(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`, "Could not load ElevenLabs voices."),
   async generate(body) {
+    if (body.audioMode === "tts" && body.ttsModel === "eleven_v4") {
+      const health = await getJson("/api/health", "Could not verify Eleven v4 support.");
+      if (health.routes?.elevenLabsV4 !== true) throw new Error("Restart the NewtNode backend to activate Eleven v4. No generation was submitted.");
+    }
     // A paid audio POST must never be replayed by the generic localhost fallback.
     let response;
     try {

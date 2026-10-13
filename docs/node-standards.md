@@ -1092,3 +1092,7 @@ Video Model Exact dialogue audio now consumes one connected Audio Model or Audio
 ## Explore look controls
 
 Explore Mode defaults on; off requests restrained execution. Random style and grade choices resolve once per batch, persist per result and queue, and stay fixed on Resume and refinements. Image/Product references preserve scene content and composition unless the brief explicitly asks to change them. These are generative instructions, not a pixel lock. Planning locally normalizes palettes and unused echoed metadata, validates all required creative fields, and never makes an extra paid request to repair malformed output. Legacy queue settings, image model choices, and provider selections remain intact.
+
+## ElevenLabs v4
+
+Eleven v4 is available only for Text to Speech, with up to 10,000 characters including literal audio tags. Multilingual v2 remains the default. Only Stability and Similarity are sent for v4; switching models preserves hidden Style, Speed and Speaker boost settings. v4 estimates use a separate $0.08/1,000 character rate with an optional environment override; missing tariffs stay unknown. A health capability prevents stale backends substituting another model. Dialogue preparation and Character voices retain their existing contracts.

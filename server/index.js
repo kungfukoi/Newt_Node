@@ -1172,6 +1172,7 @@ function buildHealthPayload() {
       flux3: true,
       nanoBanana21: true,
       exploreLookVariation: true,
+      elevenLabsV4: true,
       explore: true,
       storyboardRevisions: true,
       storyboardPlanningV2: true,
