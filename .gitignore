@@ -45,3 +45,4 @@ public/models/poses/.*.tmp
 playwright-report/
 test-results/
 e2e/.generated/
+server/data/director-dialogue-cache/
