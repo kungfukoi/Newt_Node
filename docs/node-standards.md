@@ -1100,3 +1100,13 @@ Eleven v4 is available only for Text to Speech, with up to 10,000 characters inc
 ## Nano Banana 2.1 provider coverage
 
 Nano Banana 2.1 is offered across Image workspace, Image Model, Explore, Character, Storyboard, Coverage and Auto Aspect. Krea uses `/generate/image/google/nano-banana-2.1`, high thinking, 1K/2K/4K and up to 14 ordered references; it excludes 8:1 and native pixel masks/transparency. Validate complete labeled prompts, all local assets and settings before uploads. Krea estimates are $0.03/$0.0505/$0.0755 per image. Existing Fal contracts and selection-guide image editing remain supported. Atlas 2.1 remains unsupported. Nano Banana 2 and Ideogram generation are retained by user decision, with no model-retirement migration.
+
+## Seedance 2.5 drafts, editing and references
+
+Draft is opt-in and Fal-only on Video Model and per Director scene. It displays and requests 480p while preserving the normal resolution. A draft retains its provider ID, private receipt and conservative seven-day deadline. Finish at 1080p uses only the original draft ID and completion settings, preserves the preview, and appends the completed clip. Finishing remains available after prompt/model changes and requires the original enabled key. Receipts are local to the originating installation. Preview and completion have separate History entries; unverified prices remain unknown.
+
+Both previews and completion use the shared durable worker for single submission, original-key checks, restart/polling/download recovery, Output propagation and idempotent History. Never resubmit an uncertain paid request. Receipt IDs are deterministic for the provider draft and credential fingerprint, so repeated finalization cannot create alternate completion jobs. Missing draft IDs preserve the preview with a warning.
+
+Edit Existing Video is an explicit Seedance 2.5 task on Fal or Atlas, accepts exactly one managed 4–30 second source video, optional images/audio, and no Director or Start/End Frames. Duration and framing display Source video without replacing saved settings. Fal receives task editing and auto duration/aspect; Atlas receives edit, duration -1 and adaptive ratio. Krea edits reject before uploads or billing. Unknown editing prices stay unknown.
+
+Video reference consumers use visible node/Character tags when the prompt names them; other consumers retain output labels. Seedance 2.5 maps to numbered @ImageN, @VideoN and @AudioN tags and rejects unmatched tags before submitting video generation. Older regular-generation workflows and existing exact-dialogue/audio behavior remain intact. Mocked tests validate contracts, not live generation quality.

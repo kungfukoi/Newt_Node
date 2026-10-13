@@ -39,7 +39,7 @@ test("Seedance finalization after restart passes and returns the saved dialogue 
   const names = ["runtimeProvider", "selectedVideoModel", "endpoint", "providerKeyFingerprint", "workflowContextPayload", "req", "listGenerationProgress", "prompt", "submittedPrompt", "routeKind", "seedance25", "cost", "generationPricingScope", "pricingRefresh", "runtimeAspectRatio", "runtimeDurationSeconds", "referenceVideoDurationSeconds", "resolution", "duration", "aspectRatio", "generateAudio", "requestedSeed", "startFrameUrl", "endFrameUrl", "referenceImageUrls", "referenceImageNames", "referenceVideoUrls", "referenceVideoNames", "referenceAudioUrls"];
   const values = ["fal", { displayName: "Seedance 2.5" }, "endpoint", () => "fingerprint", () => ({}), { body: { directorDialogueAudio: dialogue } }, () => [], "prompt", "submitted", "reference-to-video", true, {}, { getStore: () => ({}) }, { snapshot: () => ({}) }, "16:9", 5, 0, "720p", "5s", "16:9", true, null, "", "", [], [], [], [], [dialogue.url]];
   const referencePreparation = [{ role: "images", originalWidth: 2752, originalHeight: 308, width: 2752, height: 1101, padded: true }];
-  names.push("atlasReferencePreparation"); values.push(referencePreparation);
+  names.push("atlasReferencePreparation", "draftKey", "editing", "sourceDurationSeconds", "draftMode"); values.push(referencePreparation, "", false, undefined, false);
   const spec = new Function(...names, `${specFunction}; return seedanceJobSpec({});`)(...values);
   assert.deepEqual(spec.body.directorDialogueAudio, dialogue);
   assert.deepEqual(spec.settings.atlasReferencePreparation, referencePreparation);

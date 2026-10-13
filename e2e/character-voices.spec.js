@@ -46,27 +46,24 @@ test("Director dialogue controls bind lines to Character IDs and retain them aft
   expect(errors).toEqual([]);
 });
 
-test("direct Character to Video uses assigned voices without a Director", async ({ page }) => {
-  const video = { id: "video", type: "videoModel", x: 10, y: 0, data: { title: "Video", model: "Seedance 2.5", prompt: "Alex and Bea greet each other", generateAudio: true, settingsOpen: true, directorDialogue: lines } };
-  const { errors } = await setup(page, { nodes: [video, actor("alex", "Alex", "voiceA"), { ...actor("bea", "Bea", "voiceB"), y: 700 }], edges: ["alex", "bea"].map(id => ({ id: id + "-video", from: { nodeId: id, port: "characterOut" }, to: { nodeId: "video", port: "characterIn" } })) });
+test("Video exact dialogue uses connected completed Audio Model speech", async ({ page }) => {
+  const video = { id: "video", type: "videoModel", x: 10, y: 0, data: { title: "Video", model: "Seedance 2.5", prompt: "Alex and Bea greet each other", generateAudio: true, characterVoiceMode: "dialogue", settingsOpen: true } };
+  const speech = { id: "speech", type: "audioModel", x: 800, y: 600, data: { title: "Speech", audioMode: "tts", resultUrl: "/outputs/e2e/dialogue.mp3", resultItems: [{ type: "audio", url: "/outputs/e2e/dialogue.mp3" }] } };
+  const { errors } = await setup(page, { nodes: [video, actor("alex", "Alex", "voiceA"), { ...actor("bea", "Bea", "voiceB"), y: 700 }, speech], edges: [
+    ...["alex", "bea"].map(id => ({ id: id + "-video", from: { nodeId: id, port: "characterOut" }, to: { nodeId: "video", port: "characterIn" } })),
+    { id: "speech-video", from: { nodeId: "speech", port: "audioOut" }, to: { nodeId: "video", port: "referenceAudioIn" } }
+  ] });
   const card = page.locator('[data-node-card-id="video"]');
-  await expect(card.getByLabel("Dialogue line 1 character")).toHaveValue("alex");
-  await card.getByLabel("Dialogue line 1 text").fill("Good morning, Bea.");
-  let request;
-  let preparations = 0;
-  await page.route("**/api/node/prepare-character-dialogue", route => { preparations++; return route.fulfill({ json: { directorDialogueAudio: { url: "/outputs/e2e/dialogue.mp3", cues: [], durationSeconds: 3 } } }); });
-  await card.getByRole("button", { name: "Prepare ElevenLabs dialogue", exact: true }).click();
-  await expect(card.getByText("ElevenLabs audio ready. Video Run reuses this speech.", { exact: true })).toBeVisible();
-  expect(preparations).toBe(1);
+  await expect(card.getByLabel("Character voice handoff mode")).toHaveValue("dialogue");
+  let request, preparations = 0;
+  await page.route("**/api/node/prepare-character-dialogue", route => { preparations++; return route.fulfill({ json: {} }); });
   await page.route("**/api/node/generate-video", route => { request = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/motion.mp4" } } }); });
   await card.locator(".run-node-button").first().click();
-  await expect.poll(() => request?.characterDialogue?.lines?.length || 0).toBe(2);
-  expect(request.filmDirector).toBeNull();
-  expect(request.characterDialogue.characters.map(character => character.voice.id)).toEqual(["voiceA", "voiceB"]);
-  expect(request.characterDialogue.lines[0].text).toBe("Good morning, Bea.");
-  expect(request.referenceAudioUrls).not.toContain("/outputs/e2e/old.mp3");
+  await expect.poll(() => request?.exactDialogueAudio).toBe(true);
+  expect(request.exactDialogueAudioUrl).toBe("/outputs/e2e/dialogue.mp3");
+  expect(preparations).toBe(0);
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
-  await expect(card.getByLabel("Dialogue line 1 text")).toHaveValue("Good morning, Bea.");
+  await expect(card.getByLabel("Character voice handoff mode")).toHaveValue("dialogue");
   expect(errors).toEqual([]);
 });
 

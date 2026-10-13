@@ -92,7 +92,7 @@ export function createSeedanceJobAdapter({ getKey, fetchImpl = fetch, extractKre
           }
           const video = falProvider ? result.video : { url: extractKreaVideo(result), content_type: "video/mp4", file_name: "video.mp4" };
           if (!video?.url) throw new Error("Completed job has no downloadable video yet.");
-          return { providerStatus: data.status, remote: { video, seed: result.seed ?? null } };
+          return { providerStatus: data.status, remote: { video, seed: result.seed ?? null, ...(result.draft_id ? { draft_id: result.draft_id } : {}) } };
         }
         const queued = ["queued", "pending", "in_queue"].includes(status);
         return {

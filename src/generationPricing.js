@@ -146,6 +146,7 @@ export function estimateImageRunCost({
 }
 
 export function estimateVideoRunCost({
+  seedanceTask, seedanceDraft,
   model,
   duration = "5 seconds",
   resolution = "720p",
@@ -157,6 +158,7 @@ export function estimateVideoRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  if (seedanceDraft || seedanceTask === "edit") return null;
   const cached = getGenerationQuote({kind:"video",model,duration,resolution,aspectRatio,generateAudio,hasVideoReference,referenceImageCount,startFrameCount,endFrameCount,audioReferenceCount,batchCount,provider});
   if(cached) return cached.amountUsd;
   if (String(duration || "").trim().toLowerCase() === "auto") return null;
@@ -265,6 +267,7 @@ function roundCurrency(value) {
 
 export function generationEstimate(raw) {
   const options = generationQuoteSettings(raw);
+  if (options.seedanceDraft || options.seedanceTask === "edit") return { amountUsd: null, currency: "USD", estimated: true, pricingStatus: "unavailable", pricingBasis: "Draft preview, completion and video editing require separate provider charges; no verified estimate is available." };
   if (!raw.provider) return { amountUsd: null, pricingStatus: "unavailable", pricingBasis: "No supported provider selected." };
   const cached = getGenerationQuote(options);
   if (cached) return cached;

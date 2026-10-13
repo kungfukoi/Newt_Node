@@ -29,6 +29,7 @@ const filmDirectorRevisionSnapshotKeys = [
   "durationSeconds",
   "skillVideoModel",
   "skillResolution",
+  "skillSeedanceDraft",
   "skillAspectRatio",
   "skillDirectorAudioMode",
   "skillApproach",

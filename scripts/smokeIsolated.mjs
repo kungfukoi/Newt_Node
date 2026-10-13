@@ -12,6 +12,7 @@ import ffprobe from "@ffprobe-installer/ffprobe";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const sandbox = await mkdtemp(path.join(os.tmpdir(), "newt-isolated-smoke-"));
+let clientChild, clientExited;
 let child;
 let exited;
 let output = "";
@@ -69,6 +70,24 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
+  const health = await (await request("/api/health")).json();
+  for (const flag of ["seedanceDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
+  assert.equal(missingReceipt.status, 404);
+  const clientPort = await freePort();
+  clientChild = spawn(process.execPath, [path.join(root, "node_modules", "vite", "bin", "vite.js"), "preview", "--host", "127.0.0.1", "--port", String(clientPort), "--strictPort"], { cwd: root, windowsHide: true, stdio: "ignore" });
+  clientExited = once(clientChild, "exit");
+  const clientUrl = "http://127.0.0.1:" + clientPort + "/";
+  let clientReady = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { clientReady = (await fetch(clientUrl)).ok; } catch {}
+    if (clientReady) break;
+    if (clientChild.exitCode !== null) throw new Error("Owned preview server exited before smoke check.");
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert(clientReady, "Owned preview server did not become ready.");
+  const { stdout: shellSmoke } = await promisify(execFile)(process.execPath, [path.join(root, "scripts", "smokeApp.mjs"), clientUrl, api + "/api/health"], { windowsHide: true, timeout: 30000 });
+  console.log(shellSmoke.trim());
   const duplicatePort = await freePort();
   const duplicate = spawn(process.execPath, [path.join(sandbox, "server", "index.js")], { cwd: sandbox,
     env: { ...env, PORT: String(duplicatePort), NEWTNODE_CONTROL_PORT: String(duplicatePort) }, windowsHide: true, stdio: "ignore" });
@@ -193,7 +212,7 @@ try {
   assert.equal(kreaSettings.modelProviderPreferences.veo, "krea");
   for (const [route, model, message] of [
     ["generate-image", "Ideogram 4.5", /not supported/],
-    ["generate-image", "Nano Banana 2.1", /Nano Banana 2.1.*not supported/],
+    ["generate-image", "Nano Banana 2.1", /Krea API key/],
     ["generate-image", "Nano Banana 2", /Krea API key/],
     ["generate-video", "Wan 2.7 Reference-to-Video", /not supported/],
     ["generate-video", "Kling O3 Pro", /Krea API key/],
@@ -309,6 +328,8 @@ try {
   assert.ok(legacyComposite.video.localUrl);
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");
 } finally {
+  if (clientChild && clientChild.exitCode === null) clientChild.kill("SIGTERM");
+  if (clientExited) await clientExited;
   if (child && child.exitCode === null) child.kill("SIGTERM");
   if (exited) await exited;
   // The junction is removed separately; recursive cleanup can only reach this test-owned temp root.

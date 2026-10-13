@@ -12,6 +12,7 @@ async function editorFixture(page) {
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   await page.route("**/api/node/image-objects", route => route.fulfill({ json: { masks: [{ id: "object", width: 10, height: 10, runs: [21, 2, 31, 2], area: 4 }] } }));
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("1 objects ready.", { exact: false })).toBeVisible();
   const rect = await editor.locator(".ies-surface").boundingBox();
   await page.mouse.click(rect.x + rect.width * .2, rect.y + rect.height * .3);

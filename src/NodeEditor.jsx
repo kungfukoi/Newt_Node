@@ -1,3 +1,4 @@
+import { videoReferenceLabel } from "./videoReferenceLabels.js";
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import ImageModelAdvancedOptions from "./components/ImageModelAdvancedOptions.jsx";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
@@ -390,6 +391,8 @@ import {
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
+import { selectedSeedanceDraft } from "./seedanceDraft.js";
+import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45ResolutionOptions } from "./ideogram45.js";
@@ -1245,6 +1248,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const distantZoomRef = React.useRef(shouldUseDistantCanvasVisuals(savedDraft.viewport.scale));
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
+  const draftFinishesRef = React.useRef(new Set());
   const storyboardRevisionRunsRef = React.useRef(new Set());
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
@@ -6833,6 +6837,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function runNode(node, runOptions = {}) {
+    if (runOptions === "finish-seedance-draft") {
+      const current = nodesRef.current.find(item => item.id === node.id);
+      if (current?.type !== "videoModel" || draftFinishesRef.current.has(node.id)) return { status: "skipped" };
+      draftFinishesRef.current.add(node.id);
+      try {
+        const result = await finishSeedanceDraft({ node: current, workflowContext: workflowRequestContext(),
+          getCurrent: () => nodesRef.current.find(item => item.id === node.id), update: patch => updateNode(node.id, patch) });
+        loadOutputHistory();
+        return result;
+      } finally { draftFinishesRef.current.delete(node.id); }
+    }
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     let currentNode =
       storedNode
@@ -7653,7 +7668,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         resultItems,
         selectedResultIndex: firstNewIndex,
         resultText: "",
-        error: batchRunError("video", batchCount, successes, failures)
+        error: [batchRunError("video", batchCount, successes, failures), ...successes.map(item => item.warning)].filter(Boolean).join(" ")
       });
       markOutputTargetSaved(outputTarget, successes, "video");
       loadOutputHistory();
@@ -8752,7 +8767,7 @@ function NodeCard({
     onUpdate(nodeId, patch);
   }
 
-  function handleNodeRun(runNode) {
+  function handleNodeRun(runNode, action) {
     commitDraftUpdates();
     onRun({
       ...runNode,
@@ -8761,7 +8776,7 @@ function NodeCard({
         ...draftDataRef.current,
         ...pendingDraftPatchRef.current
       }
-    });
+    }, action);
   }
 
   function handleBlurCapture(event) {
@@ -11495,6 +11510,7 @@ function NodeBody({
   if (node.type === "skillDirector") {
     return (
       <SkillDirectorNodeBody
+        generationProvider={modelProviderPreferences.seedance || "fal"}
         providerOptionProps={providerOptionProps}
         node={node}
         config={config}
@@ -12512,7 +12528,7 @@ function NodeBody({
                 </NodeRow>
                 <NodeRow label="Aspect Ratio">
                   <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                    {storyboardAspectRatioOptions.map((ratio) => (
+                    {storyboardAspectRatioOptions.filter(ratio => !isNanoBanana21Model(node.data.model) || nanoBanana21Ratios(modelProviderPreferences.imageGeneration).includes(ratio)).map((ratio) => (
                       <option key={ratio}>{ratio}</option>
                     ))}
                   </select>
@@ -13478,7 +13494,7 @@ function NodeBody({
           <button type="button" className={sourceConnected ? "connected-field" : ""} title={sourceConnected ? sourceSummary : ""}>{sourceSummary}</button>
         </NodeRow>
         <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
-          {openAiImageAspectRatios.map((ratio) => {
+          {openAiImageAspectRatios.filter(ratio => !isNanoBanana21Model(model) || nanoBanana21Ratios(modelProviderPreferences.imageGeneration).includes(ratio) || selectedAspectRatios.includes(ratio)).map((ratio) => {
             const selected = selectedAspectRatios.includes(ratio);
             const targets = autoAspectTargetsForRatio(ratio);
             const targetResults = targets.map((target) => autoAspectResultForTarget(node, target)).filter(Boolean);
@@ -15144,7 +15160,7 @@ function NodeBody({
                   {isAutoAspect ? (
                     <>
                       <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
-                        {openAiImageAspectRatios.map((ratio) => {
+                        {openAiImageAspectRatios.filter(ratio => !isNanoBanana21Model(utilityGenerationModel) || nanoBanana21Ratios(modelProviderPreferences.imageGeneration).includes(ratio) || normalizedAutoAspectRatios(node.data).includes(ratio)).map((ratio) => {
                           const selectedAspectRatios = normalizedAutoAspectRatios(node.data);
                           const selected = selectedAspectRatios.includes(ratio);
                           const outputCount = autoAspectTargetsForRatio(ratio).length;
@@ -15869,10 +15885,18 @@ function NodeBody({
   const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
   const directorConnected = supportsDirectorInput && Boolean(incoming.directorIn?.length);
   const hasVideoPrompt = Boolean(String(promptValue || "").trim());
-  const preparedSpeechCurrent = Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
+  const seedanceProvider = generationProviderForModel({ model: node.data.model, mediaType: "video", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
+  const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
+  const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
+  const draftUnavailable = seedanceDraft && seedanceProvider !== "fal";
+  const editingUnavailable = seedanceEditing && (!["fal", "atlas"].includes(seedanceProvider) || directorConnected);
+  const selectedDraft = selectedSeedanceDraft(node.data);
+  const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
+  const preparedSpeechCurrent = !seedanceEditing && Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
   const characterConnected = supportsCharacterInput && Boolean(displayIncoming.characterIn?.length);
   const videoRunOptions = {
+    seedanceDraft, seedanceTask: seedanceEditing ? "edit" : "reference",
     model: node.data.model,
     duration: node.data.duration,
     resolution: node.data.resolution,
@@ -15925,10 +15949,17 @@ function NodeBody({
       />
       <GenerationProgress scope={generationScope} nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
-      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt}>
+      {selectedDraft && <div className="seedance-draft-actions">
+        <small title={"Finish with the original Fal key before " + new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}>Draft / 480p</small>
+        <button type="button" disabled={running} onClick={() => onRun(node, "finish-seedance-draft")}
+          title={completedDraft ? "Select the saved 1080p render" : "Separately billed completion using the original draft inputs; requires the original Fal key within seven days"}>
+          {completedDraft ? "View 1080p" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
+        </button>
+      </div>}
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt || draftUnavailable || editingUnavailable}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : <RunPriceLabel label="Run Video" options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}
+          : <RunPriceLabel label={seedanceDraft ? "Run Draft (480p)" : seedanceEditing ? "Edit Video" : "Run Video"} options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
@@ -15949,6 +15980,17 @@ function NodeBody({
       )}
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
+        {isSeedance25 && <>
+          <NodeRow label="Draft (480p)"><input type="checkbox" aria-label="Seedance Draft mode" checked={seedanceDraft}
+            disabled={running || directorConnected || (!seedanceDraft && seedanceProvider !== "fal")}
+            onChange={event => onUpdate(node.id, { seedanceDraft: event.target.checked })} /></NodeRow>
+          <NodeRow label="Task"><select aria-label="Seedance task" value={node.data.seedanceTask || "reference"} disabled={running || directorConnected}
+            onChange={event => onUpdate(node.id, { seedanceTask: event.target.value })}>
+            <option value="reference">Generate Video</option><option value="edit" disabled={!["fal", "atlas"].includes(seedanceProvider)}>Edit Existing Video</option>
+          </select></NodeRow>
+          {draftUnavailable && <small role="status">Draft mode requires Fal. Change the provider in Settings or turn Draft off.</small>}
+          {editingUnavailable && <small role="status">Editing requires Fal or Atlas and no connected Director.</small>}
+        </>}
         <NodeRow label="Model">
           <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
             {videoModelOptions.map((model) => (
@@ -16325,22 +16367,22 @@ function NodeBody({
               <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Add character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
-              <select value={node.data.duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {(isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
+              <select aria-label="Seedance duration" value={seedanceEditing ? "source-video" : node.data.duration} disabled={seedanceEditing} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
+                {seedanceEditing ? <option value="source-video">Source video</option> : (isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
                   <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
-              <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+              <select aria-label="Seedance resolution" value={seedanceDraft ? "480p" : node.data.resolution} disabled={seedanceDraft} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 {(isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
-              <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {(isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
+              <select aria-label="Seedance aspect ratio" value={seedanceEditing ? "source-video" : node.data.aspectRatio} disabled={seedanceEditing} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {seedanceEditing ? <option value="source-video">Source video</option> : (isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
                   <option key={option}>{isSeedance25 && option === "auto" ? "Auto" : option}</option>
                 ))}
               </select>
@@ -20556,6 +20598,7 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
     audioMode: usesMusic ? "full" : normalizeFilmDirectorAudioMode(source.data.skillDirectorAudioMode),
     approach: normalizeFilmDirectorApproach(source.data.skillApproach),
     resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
+    seedanceDraft: source.data.skillSeedanceDraft === true,
     aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
     styleDirection: source.data.styleDirection || "",
     cameraDirection: source.data.motionDirection || "",
@@ -21016,7 +21059,7 @@ function assemblyConnectedMediaInputs(incoming = {}) {
   }).filter(Boolean));
 }
 
-function connectedAssetItems(items = []) {
+function connectedAssetItems(items = [], { prompt } = {}) {
   return items
     .map(({ source, edge }) => {
       const outputItem = connectedOutputItem(source, edge);
@@ -21025,7 +21068,7 @@ function connectedAssetItems(items = []) {
       return {
         url,
         type: outputItem?.type || previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
-        label: outputItem?.label || sourceLabel(source)
+        label: prompt === undefined ? outputItem?.label || sourceLabel(source) : videoReferenceLabel(prompt, source.data?.title || sourceLabel(source), outputItem?.label || sourceLabel(source))
       };
     })
     .filter(Boolean);
@@ -21204,7 +21247,7 @@ function currentOrNewestResultItemForType(source, items = [], type, labelPattern
   return [...items].reverse().find(matchesType) || null;
 }
 
-function connectedCharacterReferences(items = []) {
+function connectedCharacterReferences(items = [], { prompt } = {}) {
   return items
     .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
     .map(({ source }) => {
@@ -21212,7 +21255,7 @@ function connectedCharacterReferences(items = []) {
       if (!reference?.url) return null;
       return {
         url: reference.url,
-        label: reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)
+        label: prompt !== undefined ? videoReferenceLabel(prompt, characterTag(source), reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)) : reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)
       };
     })
     .filter(Boolean);
@@ -21732,15 +21775,15 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
   const exactAudioInputs = (incoming.referenceAudioIn || []).filter(({ source }) => ["audio", "audioModel"].includes(source.type));
   const exactDialogueAudioUrl = exactDialogue ? connectedAudioUrls(exactAudioInputs)[0] || "" : "";
 
-  const characterReferences = connectedCharacterReferences(characterConnections);
+  const characterReferences = connectedCharacterReferences(characterConnections, { prompt });
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
   const referenceImageItems = uniqueAssetItems([
-    ...connectedAssetItems(incoming.referenceImageIn),
+    ...connectedAssetItems(incoming.referenceImageIn, { prompt }),
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
-  const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
+  const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn, { prompt }));
   const referenceAudioItems = uniqueAssetItems([
-    ...connectedAssetItems(incoming.referenceAudioIn),
+    ...connectedAssetItems(incoming.referenceAudioIn, { prompt }),
     ...(exactDialogue ? [] : characterVoices).map((url, voiceIndex) => ({
       url,
       label: characterReferences[voiceIndex]?.label || `Character audio ${voiceIndex + 1}`,
@@ -23472,6 +23515,7 @@ function normalizeCurrentNode(node) {
         durationSeconds: normalizedDuration,
         skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
+        skillSeedanceDraft: data.skillSeedanceDraft === true,
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
         skillDirectorAudioMode: normalizeFilmDirectorAudioMode(data.skillDirectorAudioMode),
         skillApproach: normalizeFilmDirectorApproach(data.skillApproach),

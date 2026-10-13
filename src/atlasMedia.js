@@ -1,3 +1,4 @@
+import { validateSeedance25Task } from "./seedance25.js";
 import { getPricingCatalog } from "./pricingCatalog.js";
 import { estimateAtlasImageCost as catalogImageCost, estimateAtlasVideoCost as catalogVideoCost } from "./atlasPricing.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
@@ -138,10 +139,11 @@ export function buildAtlasVideoRequest({
   duration,
   resolution,
   generateAudio = true,
-  seed
+  seed, seedanceTask = "reference"
 } = {}) {
   const spec = videoModels.get(String(model || "").trim().toLowerCase());
   if (!spec) fail(`Atlas Cloud does not support ${model || "this video model"}.`);
+  const editing = validateSeedance25Task({ model, seedanceTask, provider: "atlas", videos, startFrames: startImage ? [startImage] : [], endFrames: endImage ? [endImage] : [] });
   const refs = { images, videos, audios };
   if (endImage && !startImage) fail("Atlas Cloud End Frame requires a Start Frame.");
   const hasReferences = Object.values(refs).some((items) => items.length);
@@ -159,9 +161,9 @@ export function buildAtlasVideoRequest({
 
   if (spec.family === "seedance") {
     const is25 = spec.version === "2.5";
-    request.duration = normalizedDuration(duration, 4, is25 ? 30 : 15, 5, true);
+    request.duration = editing ? -1 : normalizedDuration(duration, 4, is25 ? 30 : 15, 5, true);
     request.resolution = normalizedSeedanceResolution(resolution, is25);
-    request.ratio = is25 && startImage ? "adaptive" : normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
+    request.ratio = editing ? "adaptive" : is25 && startImage ? "adaptive" : normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
     request.generate_audio = generateAudio !== false;
     if (seed !== undefined && seed !== null && seed !== "") {
       if (is25) fail("Atlas Cloud Seedance 2.5 does not document a seed setting.");
@@ -172,7 +174,7 @@ export function buildAtlasVideoRequest({
     if (images.length) request.reference_images = images;
     if (videos.length) request.reference_videos = videos;
     if (audios.length) request.reference_audios = audios;
-    if (is25 && hasReferences) request.omni_reference_task_type = "reference";
+    if (is25 && hasReferences) request.omni_reference_task_type = editing ? "edit" : "reference";
     return request;
   }
 

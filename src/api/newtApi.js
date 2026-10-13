@@ -407,7 +407,12 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/generate-3d", jsonBody(body), label);
   },
 
-  generateVideo(body, label = "Video generation") {
+  async generateVideo(body, label = "Video generation") {
+    if (body.seedanceDraft || body.seedanceTask === "edit") {
+      const health = await getJson("/api/health", "Could not verify Seedance support.");
+      if (body.seedanceDraft && health.routes?.seedanceDrafts !== true) throw new Error("Restart the backend to activate Draft mode. No generation was submitted.");
+      if (body.seedanceTask === "edit" && health.routes?.seedanceVideoEditing !== true) throw new Error("Restart the backend to activate video editing. No generation was submitted.");
+    }
     if (supportsDurableVideo(body.model)) {
       const request = {
         ...body, durableGeneration: true,
@@ -421,6 +426,16 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/generate-video", jsonBody(body), label);
   },
 
+  async completeSeedanceDraft(body) {
+    const health = await getJson("/api/health", "Could not verify draft finishing support.");
+    if (health.routes?.seedanceDrafts !== true) throw new Error("Restart the backend to activate draft finishing. No generation was submitted.");
+    const request = { ...body, generationRunId: "seedance-finish-" + body.receiptId };
+    const { response, data } = await waitForRemoteVideo(request, {
+      submit: payload => fetchJsonApi("/api/node/seedance-draft/complete", jsonBody(payload), "Draft completion", { retryLocalApi: false, timeoutMs: 120000 }),
+      get: remoteVideoJobsApi.get
+    });
+    return ensureOk(response, data, "Could not finish the draft.");
+  },
   utilityVideo(body, label = "Utility video generation") {
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
   },

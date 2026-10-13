@@ -78,6 +78,7 @@ test("Film Director settings control the effective video request without droppin
   const data = filmDirectorVideoSettings(baseData, director);
   assert.deepEqual(data, {
     model: "Seedance 2.5",
+    seedanceDraft: false,
     duration: "12 seconds",
     resolution: "1080p",
     aspectRatio: "9:16 (Portrait)",

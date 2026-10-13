@@ -91,6 +91,7 @@ export class ProviderPricing {
   async resolve(options, accountRevision) {
     this.pricing.ensureFresh().catch(() => {});
     const fallback = this.fallback(options, accountRevision);
+    if (options.seedanceDraft || options.seedanceTask === "edit") return fallback;
     const key = this.getKey(options.provider);
     if (!key || !this.pricing.getEnabledProviders()[options.provider]) return fallback;
     let quote = null;

@@ -1,3 +1,7 @@
+import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
+import { validateSeedanceDraft, seedanceDraftCost } from "../src/seedanceDraft.js";
+import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
+import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { generateFlux3 } from "./flux3.js";
 import { videoCropFilter, normalizeVideoCropSettings } from "../src/videoCrop.js";
 import { generateNanoBanana21 } from "./nano-banana-21.js";
@@ -877,6 +881,8 @@ app.get("/api/generation-progress", (req, res) => {
     : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
   res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
+const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: () => process.env.FAL_KEY, jobs: remoteVideoJobs });
+registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
   safeRelativeAssetPath,
@@ -1171,6 +1177,8 @@ function buildHealthPayload() {
       ideogram45: true,
       flux3: true,
       nanoBanana21: true,
+      seedanceDrafts: true,
+      seedanceVideoEditing: true,
       exploreLookVariation: true,
       elevenLabsV4: true,
       explore: true,
@@ -6479,6 +6487,23 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     }
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
+    const requestedSeedanceProvider = runtimeModelProviderPreferences.seedance;
+    if (isSeedance25Model(selectedVideoModel.displayName)) {
+      for (const field of ["referenceImageUrls", "referenceVideoUrls", "referenceAudioUrls", "startFrameUrls", "endFrameUrls"]) {
+        if (req.body[field] !== undefined && (!Array.isArray(req.body[field]) || req.body[field].some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Seedance 2.5 requires valid managed references; no generation was submitted.");
+      }
+    }
+    const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: requestedSeedanceProvider });
+    const draftKey = draftMode ? String(process.env.FAL_KEY || "").trim() : "";
+    if (draftMode && !draftKey) throw httpError(400, "Enable the selected Fal key before generating a Seedance draft.");
+    const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
+      provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });
+    let sourceDurationSeconds;
+    if (editing) {
+      if (!isLocalAssetUrl(req.body.referenceVideoUrls[0])) throw httpError(400, "Edit Existing Video requires a managed Reference Video.");
+      const source = await resolveLocalAssetPathFromUrl(req.body.referenceVideoUrls[0]);
+      sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
+    }
     delete req.body.directorDialogueAudio;
     delete req.body.characterVoiceReferences;
     if (req.body.exactDialogueAudio === true) {
@@ -6686,14 +6711,14 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       }
     }
     const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
-    const resolution = seedance25
+    const resolution = draftMode ? "480p" : seedance25
       ? normalizeSeedance25Resolution(req.body.resolution)
       : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
-    const duration = seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
+    const duration = editing ? "auto" : seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
     const generateAudio = req.body.generateAudio !== false;
     const requestedSeed = optionalInteger(req.body.seed);
-    const runtimeProvider = resolveSeedanceRuntimeProvider({
-      preferredProvider: runtimeModelProviderPreferences.seedance,
+    const runtimeProvider = draftMode ? "fal" : resolveSeedanceRuntimeProvider({
+      preferredProvider: requestedSeedanceProvider,
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY,
       atlasKey: process.env.ATLAS_API_KEY
@@ -6709,7 +6734,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     } else if (referenceImageUrls.length || referenceVideoUrls.length || referenceAudioUrls.length) {
       routeKind = "reference-to-video";
     }
-    const aspectRatio = seedance25 && runtimeProvider === "fal"
+    const aspectRatio = editing ? "auto" : seedance25 && runtimeProvider === "fal"
       ? normalizeSeedance25AspectRatio(req.body.aspectRatio, routeKind)
       : seedance25
         ? normalizeSeedance25AspectRatio(req.body.aspectRatio)
@@ -6732,7 +6757,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
             imageNames: referenceImageNames,
             videoNames: referenceVideoNames,
             audioNames: normalizeReferenceNames(req.body.referenceAudioLabels, referenceAudioUrls.length, "Audio")
-          }, { bracketSyntax: seedance25 && runtimeProvider === "fal" })
+          }, { bracketSyntax: false })
         : prompt;
     if (seedance25) {
       submittedPrompt = compactSeedancePrompt(submittedPrompt);
@@ -6757,6 +6782,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     if (referenceAudioDurationSeconds > seedance25ReferenceLimits.audioSeconds) {
       return res.status(400).json({ error: `Seedance 2.5 reference audio can be up to ${seedance25ReferenceLimits.audioSeconds} seconds total.` });
     }
+    if (seedance25) validateSeedance25ReferenceTags(submittedPrompt, { images: referenceImageUrls.length, videos: referenceVideoUrls.length, audio: referenceAudioUrls.length });
     let endpoint;
     let requestId;
     let resultSeed = requestedSeed ?? null;
@@ -6769,7 +6795,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     function seedanceJobSpec(input) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
-        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
+        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? draftKey || process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
         body: {
           ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
           outputFileNameBase: req.body.outputFileNameBase,
@@ -6785,6 +6811,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
         settings: {
           resolution, duration, aspectRatio, generateAudio, seed: requestedSeed ?? null, runtimeProvider,
+          ...(seedance25 ? { seedanceTask: editing ? "edit" : "reference", sourceDurationSeconds, seedanceDraft: draftMode } : {}),
           startFrameCount: startFrameUrl ? 1 : 0, endFrameCount: endFrameUrl ? 1 : 0,
           referenceImageCount: referenceImageUrls.length, referenceImageNames,
           referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length,
@@ -6814,15 +6841,16 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         resolution,
         aspectRatio,
         generateAudio,
-        seed: requestedSeed
+        seed: requestedSeed, seedanceTask: editing ? "edit" : "reference"
       };
       if (req.durableRequestHash) {
         const input = await atlasMedia.prepareVideo(atlasOptions, process.env.ATLAS_API_KEY);
         endpoint = input.model;
-        cost = { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
+        cost = editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." } : { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
         return await acceptSeedanceJob(input);
       }
       const atlasResult = await atlasMedia.video(atlasOptions, process.env.ATLAS_API_KEY);
+      if (editing) atlasResult.cost = { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." };
       const output = await downloadVideo(req, atlasResult.remoteVideo.url, `atlas-${routeKind}`, { stripAudio: !generateAudio });
       await appendHistory({
         id: atlasResult.requestId || randomUUID(),
@@ -6842,6 +6870,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           aspectRatio,
           generateAudio,
           runtimeProvider: "atlas",
+          ...(seedance25 ? { seedanceTask: editing ? "edit" : "reference", sourceDurationSeconds } : {}),
           ...(atlasReferencePreparation.length ? { atlasReferencePreparation } : {}),
           startFrameCount: startFrameUrl ? 1 : 0,
           endFrameCount: endFrameUrl ? 1 : 0,
@@ -6869,7 +6898,13 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     }
 
     if (runtimeProvider === "fal") {
+      const draftClient = draftMode ? createSingleSubmissionFalClient({ credentials: draftKey, endpoint: seedance25Endpoint(routeKind), model: "Seedance 2.5 draft" }) : null;
+      const uploadReference = draftClient ? async url => {
+        const asset = await readLocalAsset(url);
+        return draftClient.storage.upload(new File([asset.buffer], asset.fileName, { type: asset.mimeType }));
+      } : uploadLocalOutputToFal;
       const input = {
+        ...(draftMode ? { draft: true } : {}), ...(editing ? { task: "editing" } : {}),
         prompt: submittedPrompt,
         resolution,
         duration,
@@ -6879,20 +6914,21 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       if (Number.isInteger(requestedSeed)) input.seed = requestedSeed;
 
       if (routeKind === "image-to-video") {
-        input.image_url = await uploadLocalOutputToFal(startFrameUrl);
-        if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
+        input.image_url = await uploadReference(startFrameUrl);
+        if (endFrameUrl) input.end_image_url = await uploadReference(endFrameUrl);
       }
 
       if (routeKind === "reference-to-video") {
-        if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
-        if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, seedance25 ? seedance25ReferenceLimits.audios : 3).map(uploadLocalOutputToFal));
+        if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadReference));
+        if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadReference));
+        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, seedance25 ? seedance25ReferenceLimits.audios : 3).map(uploadReference));
       }
 
       endpoint = seedance25 ? seedance25Endpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
-      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, modelName: selectedVideoModel.displayName, inputVideoDurationSeconds: referenceVideoDurationSeconds });
+      cost = draftMode ? seedanceDraftCost() : editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on provider usage." } : estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, modelName: selectedVideoModel.displayName, inputVideoDurationSeconds: referenceVideoDurationSeconds });
       if (req.durableRequestHash) return await acceptSeedanceJob(input);
-      const result = await subscribeFal(endpoint, { input, logs: true });
+      const result = draftClient ? await draftClient.subscribe(endpoint, { input, logs: true }) : await subscribeFal(endpoint, { input, logs: true });
+      if (draftMode) req.seedanceDraftId = result.data?.draft_id;
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? requestedSeed ?? null;
       remoteVideo = result?.data?.video;
@@ -6945,7 +6981,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       remoteVideo = kreaResult.remoteVideo;
     }
 
-    res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(), requestId, remote: { video: remoteVideo, seed: resultSeed } }));
+    res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(), requestId, remote: { video: remoteVideo, seed: resultSeed, draft_id: req.seedanceDraftId } }));
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Video generation failed.");
@@ -6977,7 +7013,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   }
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-    cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
+    if (!settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
@@ -6991,10 +7027,18 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
-  if (spec.provider === "atlas" && recordedCostAmount(cost) === null &&
+  if (spec.provider === "atlas" && settings.seedanceTask !== "edit" && recordedCostAmount(cost) === null &&
       spec.credentialFingerprint === providerKeyFingerprint(process.env.ATLAS_API_KEY)) {
     const quote = await providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
     if (quote) cost = { ...cost, ...quote };
+  }
+  let draftMetadata = job.seedanceDraft || null;
+  let draftWarning = "";
+  if (settings.seedanceDraft && !draftMetadata) {
+    draftMetadata = await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint,
+      startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec });
+    if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
+    else draftWarning = "Fal returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.";
   }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
@@ -7008,6 +7052,9 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   return {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
     submittedPrompt: spec.submittedPrompt, cost,
+    ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
+    ...(draftWarning ? { warning: draftWarning } : {}),
+    ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
