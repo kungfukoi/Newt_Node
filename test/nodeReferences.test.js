@@ -21,6 +21,40 @@ test("findNodeReferenceMentions matches exact node names with spaces", () => {
   ]);
 });
 
+const edge = (from, to) => ({ from: { nodeId: from }, to: { nodeId: to } });
+
+test("scoped tags require a directed upstream path, not canvas membership or position", () => {
+  const graph = [...nodes, { id: "consumer", data: { title: "Model" } }, { id: "relay", data: { title: "Relay" } }];
+  const edges = [edge("node-a", "relay"), edge("relay", "consumer"), edge("consumer", "node-b")];
+  const options = { currentNodeId: "consumer", edges };
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product @Shot Notes @Hero", graph, options).map(x => x.nodeId), ["node-a"]);
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product", graph, { ...options, edges: [] }), []);
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product", graph, { ...options, edges: [edge("node-a", "missing"), edge("missing", "consumer")] }), []);
+});
+
+test("saved disconnected bindings cannot bypass scope or jump to an upstream duplicate", () => {
+  const graph = [{ id: "bound", data: { title: "Renamed" } }, { id: "duplicate", data: { title: "Hero" } }, { id: "consumer", data: {} }];
+  const options = { currentNodeId: "consumer", bindings: { hero: "bound" }, edges: [edge("duplicate", "consumer")] };
+  assert.deepEqual(findNodeReferenceMentions("@Hero", graph, options), []);
+  assert.deepEqual(findNodeReferenceMentions("@Hero", graph, { ...options, edges: [...options.edges, edge("bound", "consumer")] }).map(x => x.nodeId), ["bound"]);
+});
+
+test("upstream scope follows the consumer of connected prompt text and handles cycles", () => {
+  const graph = [...nodes, { id: "consumer", data: {} }, { id: "prompt", data: {} }];
+  const edges = [edge("node-a", "consumer"), edge("prompt", "consumer"), edge("consumer", "node-a")];
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product", graph, { currentNodeId: "prompt", scopeNodeId: "consumer", edges }).map(x => x.nodeId), ["node-a"]);
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product", graph, { currentNodeId: "prompt", edges }), []);
+  assert.deepEqual(findNodeReferenceMentions("@Hero Product", graph, { currentNodeId: "node-a", edges }), []);
+});
+
+test("disconnected saved multiword tags cannot resolve as a shorter connected tag", () => {
+  const graph = [...nodes, { id: "consumer", data: {} }];
+  const matches = findNodeReferenceMentions("Use @Hero Product, then @Hero.", graph, {
+    currentNodeId: "consumer", edges: [edge("node-c", "consumer")], bindings: { "hero product": "node-a" }
+  });
+  assert.deepEqual(matches.map(x => [x.nodeId, x.mention]), [["node-c", "@Hero"]]);
+});
+
 test("findNodeReferenceMentions prefers longest node names", () => {
   const matches = findNodeReferenceMentions("Use @Hero Product, not only @Hero.", nodes);
   assert.deepEqual(matches.map((match) => match.nodeId), ["node-a", "node-c"]);

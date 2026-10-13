@@ -43,6 +43,11 @@ React Flow owns viewport transforms, selection, movement, handles, and edge path
 
 Stable opaque node ids are the graph identity. Titles are editable display metadata. Edges, groups, `@` bindings, Output routing, dependencies, and copied graph remapping must resolve by id.
 
+`src/nodeReferences.js` indexes directed upstream reachability per immutable graph
+snapshot. NodeEditor passes real edges and the consuming node's scope into tag
+resolution, highlights, prompt media collection and text-model context. Existing
+bindings survive disconnection but cannot bypass upstream eligibility.
+
 `workflowState.js` caches persisted serialization by immutable node/edge/group references. Unchanged objects reuse their serialized fragments; undo still compares document content, not a monotonically increasing edit counter. `flowNodeGeometry.js` observes actual card/port layout changes and coalesces handle measurements per animation frame. Progress-only mutations do not invalidate all handle geometry.
 
 ## Node Lifecycle

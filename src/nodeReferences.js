@@ -2,6 +2,40 @@ export function defaultNodeReferenceLabel(node) {
   return String(node?.data?.title || node?.type || "").trim();
 }
 
+const upstreamIndexes = new WeakMap();
+
+// Cache per immutable graph snapshot; groups/positions never establish access.
+export function upstreamReferenceNodeIds(nodes = [], edges = [], currentNodeId = "") {
+  if (!currentNodeId || !Array.isArray(nodes) || !Array.isArray(edges)) return new Set();
+  let byNodes = upstreamIndexes.get(edges);
+  if (!byNodes) { byNodes = new WeakMap(); upstreamIndexes.set(edges, byNodes); }
+  let index = byNodes.get(nodes);
+  if (!index) {
+    const ids = new Set(nodes.map(node => node?.id).filter(Boolean));
+    const parents = new Map();
+    for (const edge of edges) {
+      const source = edge?.from?.nodeId, target = edge?.to?.nodeId;
+      if (!ids.has(source) || !ids.has(target)) continue;
+      if (!parents.has(target)) parents.set(target, []);
+      parents.get(target).push(source);
+    }
+    index = { parents, ancestors: new Map() };
+    byNodes.set(nodes, index);
+  }
+  if (!index.ancestors.has(currentNodeId)) {
+    const visited = new Set([currentNodeId]), pending = [currentNodeId];
+    while (pending.length) {
+      for (const parent of index.parents.get(pending.pop()) || []) {
+        if (visited.has(parent)) continue;
+        visited.add(parent); pending.push(parent);
+      }
+    }
+    visited.delete(currentNodeId);
+    index.ancestors.set(currentNodeId, visited);
+  }
+  return index.ancestors.get(currentNodeId);
+}
+
 export function nodeReferenceNameVariants(node, labelForNode = defaultNodeReferenceLabel) {
   const rawLabel = normalizeReferenceWhitespace(labelForNode(node));
   if (!rawLabel) return [];
@@ -18,13 +52,17 @@ export function findNodeReferenceMentions(text, nodes = [], {
   currentNodeId = "",
   labelForNode = defaultNodeReferenceLabel,
   bindings = {},
-  rankForNode = null
+  rankForNode = null,
+  edges = [],
+  scopeNodeId = currentNodeId
 } = {}) {
   const sourceText = String(text || "");
   if (!sourceText || !Array.isArray(nodes) || !nodes.length) return [];
 
-  const availableNodes = nodes.filter((node) => node?.id && node.id !== currentNodeId);
+  const upstream = scopeNodeId ? upstreamReferenceNodeIds(nodes, edges, scopeNodeId) : null;
+  const availableNodes = nodes.filter((node) => node?.id && node.id !== currentNodeId && (!upstream || upstream.has(node.id)));
   const nodesById = new Map(availableNodes.map((node) => [node.id, node]));
+  const boundIds = new Map(Object.entries(bindings || {}).map(([alias, id]) => [nodeReferenceBindingKey(alias), id]));
   const boundCandidates = Object.entries(bindings || {}).flatMap(([name, nodeId]) => {
     const node = nodesById.get(nodeId);
     if (!node || !normalizeReferenceWhitespace(name)) return [];
@@ -38,12 +76,14 @@ export function findNodeReferenceMentions(text, nodes = [], {
   const candidates = [
     ...boundCandidates,
     ...availableNodes.flatMap((node, nodeIndex) =>
-      nodeReferenceNameVariants(node, labelForNode).map((name) => ({
-        node,
-        nodeIndex,
-        name,
-        bound: false
-      }))
+      nodeReferenceNameVariants(node, labelForNode)
+        .filter(name => !boundIds.has(nodeReferenceBindingKey(name)) || boundIds.get(nodeReferenceBindingKey(name)) === node.id)
+        .map((name) => ({
+          node,
+          nodeIndex,
+          name,
+          bound: false
+        }))
     )
   ].sort((first, second) => {
     if (second.name.length !== first.name.length) return second.name.length - first.name.length;
@@ -53,6 +93,17 @@ export function findNodeReferenceMentions(text, nodes = [], {
     return secondRank - firstRank || first.nodeIndex - second.nodeIndex;
   });
   const occupied = [];
+  // Reserve disconnected bound tokens so a shorter connected title cannot
+  // reinterpret part of the saved token (e.g. @Hero inside @Hero Product).
+  for (const [alias, nodeId] of Object.entries(bindings || {})) {
+    if (nodesById.has(nodeId) || !nodeReferenceBindingKey(alias)) continue;
+    const pattern = nodeReferencePattern(normalizeReferenceWhitespace(alias).replace(/^@/, ""));
+    let match;
+    while ((match = pattern.exec(sourceText))) {
+      const start = match.index + (match[1] || "").length;
+      occupied.push({ start, end: match.index + match[0].length });
+    }
+  }
   const mentions = [];
 
   candidates.forEach((candidate) => {
