@@ -131,12 +131,21 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   }
 
   async function saveSelections() {
+    return exportBoxes();
+  }
+
+  function selectionState() {
+    return { marks: history.marks.filter(mark => ["selection", "boxes"].includes(mark.layer)), sam2Settings, selectedBoxId, selectionName: selectionName.current,
+      editorDraft: { drawingMarks: history.marks.filter(mark => mark.layer === "drawing"), prompt, mode, blank } };
+  }
+
+  async function done() {
     if (busyRef.current || saving || restoringSelections || namingBoxes.length) return;
     setSaving(true); setError("");
     try {
-      await nodeApi.imageObjectCache({ sourceUrl: base.url, selectionState: { marks: history.marks.filter(mark => ["selection", "boxes"].includes(mark.layer)), sam2Settings, selectedBoxId, selectionName: selectionName.current } });
-      setSelectionSaved("Selections and boxes saved for this image.");
-    } catch (failure) { setError(failure.message || "Could not save selections and boxes."); }
+      await nodeApi.imageObjectCache({ sourceUrl: base.url, selectionState: selectionState() });
+      onClose();
+    } catch (failure) { setError(failure.message || "Could not save the editor draft."); }
     finally { if (mounted.current) setSaving(false); }
   }
 
@@ -166,7 +175,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
       const entries = data.entries || [];
       if (data.selectionState && restoreMarks) {
         const saved = data.selectionState;
-        setHistory(current => ({ past: [], marks: [...current.marks.filter(mark => !["selection", "boxes"].includes(mark.layer)), ...saved.marks], future: [] }));
+        setHistory(current => ({ past: [], marks: [...(saved.editorDraft?.drawingMarks || current.marks.filter(mark => mark.layer === "drawing")), ...saved.marks], future: [] }));
+        if (saved.editorDraft) { setPrompt(saved.editorDraft.prompt); setMode(saved.editorDraft.mode); setBlank(saved.editorDraft.blank); }
         setSelectedBoxId(saved.selectedBoxId); selectionName.current = saved.selectionName;
         setSam2Settings(saved.sam2Settings);
         setSelectionSaved("Saved selections and boxes restored.");
@@ -260,10 +270,22 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   }
   async function exportBoxes() {
-    if (busyRef.current || saving || !size || namingBoxes.length) return;
+    if (busyRef.current || saving || restoringSelections || !size || blank || namingBoxes.length) return;
     setSaving(true); setError("");
     try {
-      const png = await exportBoxSelections({ boxes, size, base, prompt, drawingMarks: history.marks });
+      const exportBoxes = [...boxes];
+      if (hasSelection) {
+        const canvas = document.createElement("canvas"), scale = Math.min(1, 1024 / Math.max(size.width, size.height));
+        canvas.width = Math.round(size.width * scale); canvas.height = Math.round(size.height * scale);
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        drawImageEditMarks(context, history.marks, canvas.width, canvas.height, "selection");
+        try {
+          exportBoxes.push(boxFromSelectionPixels({ data: context.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height, id: crypto.randomUUID(), label: selectionName.current || `Selection ${boxes.length + 1}` }));
+        } catch (failure) { if (failure.message !== "The selection is empty. Select an object before creating its box.") throw failure; }
+      }
+      if (!exportBoxes.length) throw new Error("Select an object or draw a box before saving an Image Selection node. Use Done to save the draft and close.");
+      await nodeApi.imageObjectCache({ sourceUrl: base.url, selectionState: selectionState() });
+      const png = await exportBoxSelections({ boxes: exportBoxes, size, base, prompt, drawingMarks: history.marks });
       const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
       form.append("sourceUrl", base.url);
       form.append("nodeId", item.editContext?.nodeId || "");
@@ -488,7 +510,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
   const setActiveLayer = (value) => { setLayer(value); if (tool === "boxes" || (value === "selection" && ["text", "arrow"].includes(tool)) || (value === "drawing" && tool === "object")) setTool("pen"); };
 
   return <section ref={rootRef} tabIndex={-1} className="image-edit-studio" aria-label="Image Edit" role="dialog" aria-modal="true" onKeyDownCapture={keyboard} onPointerDown={(event) => event.stopPropagation()}>
-<header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><div className="ies-header-actions"><label className="ies-model-select" title="Shared with User Preferences"><span>Edit model</span><select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving} onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>{modelSaving && <span role="status" className="ies-model-saving">Saving…</span>}<IconButton icon={Save} label="Save image to disk" onClick={saveToDisk} disabled={busy || saving || !size || namingBoxes.length > 0} /><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} /></div></header>
+<header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><div className="ies-header-actions"><label className="ies-model-select" title="Shared with User Preferences"><span>Edit model</span><select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving} onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>{modelSaving && <span role="status" className="ies-model-saving">Saving…</span>}<IconButton icon={Save} label="Save image to disk" onClick={saveToDisk} disabled={busy || saving || !size || namingBoxes.length > 0} /><button type="button" disabled={busy || saving || modelSaving || restoringSelections || namingBoxes.length > 0} onClick={done}><Check size={17} />Done</button><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} /></div></header>
     <div className="ies-workspace">
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
@@ -525,7 +547,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
         {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
           <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
           {selectionSaved && <p role="status">{selectionSaved}</p>}
-          <small>Save before closing to restore selections and boxes when you reopen this image. Saving an empty selection clears the saved regions.</small>
+          <small>Save creates an Image Selection node with visible boxes, @tags and embedded metadata. Done saves your draft and closes the editor.</small>
           {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} namingBoxes={namingBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
           {tool !== "boxes" && <div className="ies-object-controls">
             {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">

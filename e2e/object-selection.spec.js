@@ -94,27 +94,48 @@ test("saved selection and moved box restore after closing without rescanning", a
   });
   await page.route("**/api/node/image-objects", async route => { paid++; await route.fulfill({ json: { masks: [masks[0]] } }); });
   await editor.getByLabel("Object selection prompt").fill("red jacket");
+  await editor.getByLabel("Edit prompt").fill("Make the jacket green");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
-  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
-  await expect(editor.getByText("Selections and boxes saved for this image.")).toBeVisible();
-  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
-  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await editor.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(editor).toHaveCount(0);
   await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
   await expect(editor.getByText("Saved selections and boxes restored.")).toBeVisible();
+  await expect(editor.getByLabel("Edit prompt")).toHaveValue("Make the jacket green");
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("red jacket");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
-  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
+  await editor.getByRole("button", { name: "Done", exact: true }).click();
   await expect.poll(() => state.marks.find(mark => mark.layer === "boxes")?.target.x).toBe(.65);
-  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
-  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await expect(editor).toHaveCount(0);
   await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
   await expect(editor.getByText("Saved selections and boxes restored.")).toBeVisible();
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   await expect(editor.getByLabel("Translate X (%)", { exact: true })).toHaveValue("65");
   expect(paid).toBe(1);
+});
+
+test("Save selections and boxes exports selected objects as a tagged Image node", async ({ page }) => {
+  const { editor } = await openEditor(page);
+  let document;
+  await page.route("**/api/node/image-object-cache", route => route.fulfill({ json: { entries: [], saved: true } }));
+  await page.route("**/api/node/image-objects", route => route.fulfill({ json: { masks: [masks[0]] } }));
+  await page.route("**/api/node/save-image-selection", async route => {
+    const req = route.request();
+    const form = await new Response(req.postDataBuffer(), { headers: { "content-type": req.headers()["content-type"] } }).formData();
+    const { readSelectionMetadata } = await import("../src/imageEditBoxExport.js");
+    document = readSelectionMetadata(await form.get("selection").arrayBuffer());
+    await route.fulfill({ json: { item: { url: "/outputs/e2e/landscape.png", label: "Image Selection", fileName: "selection.png", type: "image", selectionMetadata: document } } });
+  });
+  await editor.getByLabel("Object selection prompt").fill("red jacket");
+  await editor.getByRole("button", { name: "Select", exact: true }).click();
+  await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator('[data-node-card-id]')).toHaveCount(2);
+  expect(document.boxes[0].tag).toBe("@red-jacket");
+  expect(document.boxes[0].sourceMask.area).toBeGreaterThan(0);
 });
 
 test("selection failure is visible, preserves draft, and never automatically retries", async ({ page }) => {

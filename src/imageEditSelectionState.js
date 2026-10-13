@@ -15,5 +15,15 @@ export function normalizeImageEditSelectionState(value) {
     return { layer: "selection", tool: mark.tool, points: mark.points.map(({ x, y }) => ({ x, y })), size: mark.size, opacity: 1, color: "#ffffff" };
   });
   validateEditBoxes(marks.filter(mark => mark.layer === "boxes"));
-  return { version: 1, marks, sam2Settings: validateSam2Settings(value.sam2Settings), selectedBoxId: String(value.selectedBoxId || "").slice(0, 80), selectionName: String(value.selectionName || "").slice(0, 300) };
+  let editorDraft;
+  if (value.editorDraft) {
+    const draft = value.editorDraft;
+    if (typeof draft.prompt !== "string" || draft.prompt.length > 16000 || !["edit", "remove", "sketch"].includes(draft.mode) || typeof draft.blank !== "boolean" || !Array.isArray(draft.drawingMarks) || draft.drawingMarks.length > 256) throw new Error("Invalid saved editor draft.");
+    const drawingMarks = draft.drawingMarks.map(mark => {
+      if (mark.layer !== "drawing" || !["pen", "eraser", "rectangle", "ellipse", "arrow", "text"].includes(mark.tool) || !Array.isArray(mark.points) || !mark.points.length || mark.points.length > 12000 || !mark.points.every(p => [p.x, p.y].every(n => Number.isFinite(n) && n >= 0 && n <= 1)) || !Number.isFinite(mark.size) || mark.size <= 0 || mark.size > 1 || !/^#[a-f0-9]{6}$/i.test(mark.color) || !Number.isFinite(mark.opacity) || mark.opacity < 0 || mark.opacity > 1) throw new Error("Invalid saved drawing.");
+      return { layer: "drawing", tool: mark.tool, points: mark.points.map(({ x, y }) => ({ x, y })), size: mark.size, color: mark.color, opacity: mark.opacity, text: String(mark.text || "").slice(0, 500) };
+    });
+    editorDraft = { prompt: draft.prompt, mode: draft.mode, blank: draft.blank, drawingMarks };
+  }
+  return { version: 1, marks, sam2Settings: validateSam2Settings(value.sam2Settings), selectedBoxId: String(value.selectedBoxId || "").slice(0, 80), selectionName: String(value.selectionName || "").slice(0, 300), ...(editorDraft ? { editorDraft } : {}) };
 }

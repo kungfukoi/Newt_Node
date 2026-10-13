@@ -3,7 +3,19 @@ import assert from "node:assert/strict";
 import { boxFromDrag, editBoxTags, editBoxesPrompt } from "../src/imageEditBoxes.js";
 import sharp from "sharp";
 import { boxSelectionDocument, embedSelectionMetadata, readSelectionMetadata } from "../src/imageEditBoxExport.js";
+import { appendImageSelectionReferences } from "../server/image-selection-references.js";
 const box = (id, label) => ({ ...boxFromDrag({ x: .1, y: .1 }, { x: .3, y: .3 }, id), label });
+test("downstream image prompts resolve portable selection tags and coordinates", async () => {
+  const png = await sharp({ create: { width: 200, height: 300, channels: 4, background: "white" } }).png().toBuffer();
+  const document = boxSelectionDocument([box("cup", "Red cup")], { width: 200, height: 300 }, {}, "");
+  const tagged = Buffer.from(embedSelectionMetadata(png, document));
+  const prompt = await appendImageSelectionReferences("Move @red-cup", ["plain", "tagged"], async url => ({ buffer: url === "tagged" ? tagged : png }));
+  assert.match(prompt, /Image 2 contains selection guides/);
+  assert.match(prompt, /"tag":"@red-cup"/);
+  assert.match(prompt, /"source":\{"x":0.2/);
+  assert.match(prompt, /remove them from finished scene output/);
+  assert.equal(await appendImageSelectionReferences("No guides", ["plain"], async () => ({ buffer: png })), "No guides");
+});
 test("description tags remain unique even when descriptions already contain suffixes", () => {
   const boxes = [box("a", "Water bottle"), box("b", "Water bottle"), box("c", "water-bottle-2"), box("d", "猫")];
   assert.deepEqual(editBoxTags(boxes), ["@water-bottle", "@water-bottle-2", "@water-bottle-2-2", "@猫"]);

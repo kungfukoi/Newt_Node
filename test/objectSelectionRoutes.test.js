@@ -29,7 +29,8 @@ test("saved selections and boxes survive reopening and never submit inference", 
   t.after(() => rm(directory, { recursive: true, force: true }));
   const rect = { x: .5, y: .5, w: .2, h: .2, rotation: 0 };
   const mask = { id: "object", width: 10, height: 10, runs: [22, 3], area: 3 };
-  const state = { marks: [{ layer: "selection", tool: "object", mask, subtract: true }, { layer: "boxes", tool: "box", id: "box-1", label: "Cup", mode: "move", source: rect, target: { ...rect, x: .7 }, sourceMask: mask, selectionDerived: true }], selectedBoxId: "box-1", selectionName: "Cup" };
+  const state = { marks: [{ layer: "selection", tool: "object", mask, subtract: true }, { layer: "boxes", tool: "box", id: "box-1", label: "Cup", mode: "move", source: rect, target: { ...rect, x: .7 }, sourceMask: mask, selectionDerived: true }], selectedBoxId: "box-1", selectionName: "Cup",
+    editorDraft: { prompt: "Move the cup", mode: "edit", blank: false, drawingMarks: [{ tool: "text", layer: "drawing", points: [{ x: .2, y: .3 }], size: .02, color: "#ff0000", opacity: .5, text: "Move here" }] } };
   await fixture(async ({ cachePost, calls }) => {
     const saved = await cachePost({ sourceUrl: "/uploads/one.png", selectionState: state });
     assert.equal(saved.status, 200);
@@ -42,6 +43,7 @@ test("saved selections and boxes survive reopening and never submit inference", 
     assert.equal(result.selectionState.marks[0].subtract, true);
     assert.deepEqual(result.selectionState.marks[1].target, state.marks[1].target);
     assert.deepEqual(result.selectionState.marks[1].sourceMask.runs, mask.runs);
+    assert.deepEqual(result.selectionState.editorDraft, state.editorDraft);
     assert.equal(result.selectionState.sam2Settings.pointsPerSide, 32);
     await cachePost({ sourceUrl: "/uploads/copied.png", selectionState: { marks: [] } });
     assert.deepEqual((await (await cachePost({ sourceUrl: "/uploads/copied.png" })).json()).selectionState.marks, []);

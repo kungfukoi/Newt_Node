@@ -15,6 +15,12 @@ export function boxSelectionDocument(boxes, size, base, prompt = "") {
     prompt, boxes: clean.map((box, i) => ({ ...box, tag: tags[i], selectionDerived: Boolean(boxes[i].selectionDerived), ...(boxes[i].sourceMask ? { sourceMask: validateBoxObject(boxes[i].sourceMask) } : {}) })) };
 }
 
+export function selectionReferencePrompt(metadata, imageIndex) {
+  const document = boxSelectionDocument(metadata.boxes, metadata.source, {}, metadata.prompt || "");
+  return [`Image ${imageIndex} contains selection guides. Its @tags refer to the following objects and regions, not node references. Use these tags to resolve the user's instructions. Visible boxes, tags and selection outlines are annotations only; remove them from finished scene output. Preserve unrelated content. ${document.coordinates}`,
+    ...document.boxes.map(({ sourceMask: _mask, selectionDerived: _derived, ...box }) => JSON.stringify(box))].join("\n");
+}
+
 function crc32(bytes) {
   let crc = 0xffffffff;
   for (const byte of bytes) {
@@ -77,7 +83,7 @@ export async function exportBoxSelections({ boxes, size, base, prompt, drawingMa
   const font = Math.max(12, Math.min(size.width, size.height) / 65);
   context.font = `${font}px sans-serif`; context.lineWidth = Math.max(2, font / 8);
   saved.boxes.forEach((box, index) => {
-    const name = `${index + 1}. ${box.label}`;
+    const name = `${index + 1}. ${box.tag}`;
     const draw = (rect, color, dashed) => {
       const corners = boxCorners(rect, size.width, size.height);
       context.strokeStyle = color; context.setLineDash(dashed ? [font / 2, font / 3] : []);

@@ -99,7 +99,7 @@ test("Save Selection creates a tagged PNG output and canvas copy with more than 
     await fs.writeFile(testInfo.outputPath("image-selection.png"), png);
     await route.fulfill({ json: { item: { url: "/outputs/e2e/landscape.png", label: "Image Selection", fileName: "image-selection.png", type: "image", provider: "local", width: info.width, height: info.height } } });
   });
-  await editor.getByRole("button", { name: "Save Selection", exact: true }).click();
+  await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
   await expect(editor).toHaveCount(0);
   await expect(page.locator('[data-node-card-id]')).toHaveCount(2);
   await expect(page.locator('[data-node-card-id="edit-source"] img').first()).toHaveAttribute("src", /landscape.png/);

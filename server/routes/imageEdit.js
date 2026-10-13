@@ -31,7 +31,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       await readSource(req.body.sourceUrl);
       const output = await save(req, req.file.buffer);
       const cost = { amountUsd: 0, currency: "USD", source: "Local selection export", estimated: false };
-      const item = { ...output, type: "image", mimeType: "image/png", label: "Image Selection", provider: "local", sourceUrl: req.body.sourceUrl, width: image.width, height: image.height, cost };
+      const item = { ...output, type: "image", mimeType: "image/png", label: "Image Selection", provider: "local", sourceUrl: req.body.sourceUrl, width: image.width, height: image.height, selectionMetadata: metadata, cost };
       let warning = "";
       try {
         await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: "local", modelName: "Image Selection", endpoint: "local/image-selection", mode: "Image Selection", prompt: metadata.prompt,

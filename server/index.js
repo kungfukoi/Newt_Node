@@ -120,6 +120,7 @@ import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { generateIdeogram45 } from "./ideogram45.js";
+import { appendImageSelectionReferences } from "./image-selection-references.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45TextEndpoint } from "../src/ideogram45.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
@@ -3928,7 +3929,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
   try {
     req.body = normalizeCharacterWardrobeRequest(req.body);
     updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing image generation" });
-    const prompt = String(req.body.prompt || "").trim();
+    let prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
     }
@@ -3941,6 +3942,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     if (selectedModel.provider === "disabled") {
       return res.status(400).json({ error: `${selectedModel.displayName} is temporarily disabled.` });
     }
+
+    prompt = await appendImageSelectionReferences(prompt, imagePromptUrls, readLocalAsset);
 
     if (selectedModel.provider === "fal-sam3-image") {
       return runSam3ImageSegmentation(req, res, {

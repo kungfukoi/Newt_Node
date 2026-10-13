@@ -86,6 +86,7 @@ test("Save Selection preserves embedded PNG metadata in managed outputs with no 
   const { item } = await response.json();
   assert.equal(item.label, "Image Selection"); assert.equal(item.provider, "local"); assert.equal(item.cost.amountUsd, 0);
   assert.equal(item.url, "/workflow-assets/test/outputs/edit.png");
+  assert.deepEqual(item.selectionMetadata, document);
   assert.equal(calls.length, 0); assert.deepEqual(readSelectionMetadata(saves[0].buffer), document);
   assert.equal(saves[0].body.workflowPackageId, "package");
   assert.equal(histories[0].localImage, item.url); assert.equal(histories[0].settings.boxes.length, 12);
