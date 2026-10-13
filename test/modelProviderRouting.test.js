@@ -93,7 +93,7 @@ test("model provider labels are human readable", () => {
 
 test("Krea image routing is explicit and lists only implemented Krea endpoints", () => {
   assert.equal(normalizeModelProviderPreferences({ imageGeneration: "krea" }, { fal: true }).imageGeneration, "krea");
-  assert.deepEqual(providerSupportedModels("imageGeneration", "krea"), ["Z-Image", "Seedream 5.0 Pro", "Nano Banana 2", "Nano Banana Pro", "OpenAI Image 2.5 Flare", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2", "Krea 2 Large"]);
+  assert.deepEqual(providerSupportedModels("imageGeneration", "krea"), ["Z-Image", "Seedream 5.0 Pro", "Nano Banana 2", "Nano Banana 2.1", "Nano Banana Pro", "OpenAI Image 2.5 Flare", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2", "Krea 2 Large"]);
   assert.ok(missingModelProviderCredentials({ imageGeneration: "krea" }, { fal: true, google: true }).includes("krea"));
 });
 

@@ -1096,3 +1096,7 @@ Explore Mode defaults on; off requests restrained execution. Random style and gr
 ## ElevenLabs v4
 
 Eleven v4 is available only for Text to Speech, with up to 10,000 characters including literal audio tags. Multilingual v2 remains the default. Only Stability and Similarity are sent for v4; switching models preserves hidden Style, Speed and Speaker boost settings. v4 estimates use a separate $0.08/1,000 character rate with an optional environment override; missing tariffs stay unknown. A health capability prevents stale backends substituting another model. Dialogue preparation and Character voices retain their existing contracts.
+
+## Nano Banana 2.1 provider coverage
+
+Nano Banana 2.1 is offered across Image workspace, Image Model, Explore, Character, Storyboard, Coverage and Auto Aspect. Krea uses `/generate/image/google/nano-banana-2.1`, high thinking, 1K/2K/4K and up to 14 ordered references; it excludes 8:1 and native pixel masks/transparency. Validate complete labeled prompts, all local assets and settings before uploads. Krea estimates are $0.03/$0.0505/$0.0755 per image. Existing Fal contracts and selection-guide image editing remain supported. Atlas 2.1 remains unsupported. Nano Banana 2 and Ideogram generation are retained by user decision, with no model-retirement migration.

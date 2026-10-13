@@ -1,5 +1,6 @@
+import { generationProviderForModel } from "./generationPricing.js";
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
-import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions } from "./nanoBanana21.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import { usePricingSync } from "./usePricing.js";
 import { isOpenAiImage25Model } from "./openAiImageModels.js";
 import React from "react";
@@ -244,9 +245,10 @@ function App() {
     return "Text";
   }, [references.length, startFrame]);
 
+  const imageProvider = generationProviderForModel({ model: imageModel, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
   const activeImageAspectRatios = React.useMemo(
-    () => imageAspectRatiosForModel(imageModel),
-    [imageModel]
+    () => isNanoBanana21Model(imageModel) ? nanoBanana21Ratios(imageProvider) : imageAspectRatiosForModel(imageModel),
+    [imageModel, imageProvider]
   );
   const activeVideoSettings = React.useMemo(
     () => videoSettingsForModel(videoModel, modelProviderPreferences),

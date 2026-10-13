@@ -1,6 +1,6 @@
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import ImageModelAdvancedOptions from "./components/ImageModelAdvancedOptions.jsx";
-import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions } from "./nanoBanana21.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
 import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
@@ -6942,7 +6942,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           if (modelProviderAvailability[provider] === false) throw new Error(`Configure the ${provider} API key in Settings before running Explore.`);
           if (resuming && settings.provider && settings.provider !== provider) throw new Error("Restore the original image provider before resuming this Explore batch.");
           if (!enabledImageModels.includes(settings.model) || !exploreModels.includes(settings.model)) throw new Error("Enable the saved Explore image model in Settings before running.");
-          if (!imageModelResolutionOptions(settings.model).includes(settings.resolution) || !imageModelSupportedAspectRatios(settings.model).includes(settings.aspectRatio)) throw new Error("Choose a supported Explore image format before running.");
+          if (!imageModelResolutionOptions(settings.model).includes(settings.resolution) || !imageModelSupportedAspectRatios(settings.model, provider).includes(settings.aspectRatio)) throw new Error("Choose a supported Explore image format before running.");
         }
         const references = (resuming ? [] : ["imageIn", "characterIn", "transferIn"]).flatMap(port => {
           const connections = incoming[port] || [];
@@ -11429,7 +11429,7 @@ function NodeBody({
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
       imageModels={imageModelOptions} showApiCosts={showPriceSnapshot} providerOptionProps={providerOptionProps}
       provider={generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability })}
-      ratios={imageModelSupportedAspectRatios(node.data.model)} resolutions={imageModelResolutionOptions(node.data.model)}
+      ratios={imageModelSupportedAspectRatios(node.data.model, generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability }))} resolutions={imageModelResolutionOptions(node.data.model)}
       qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
   }
@@ -15791,7 +15791,7 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Aspect Ratio">
                 <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                  {imageModelAspectRatioOptions(node.data.model).map((option) => (
+                  {imageModelAspectRatioOptions(node.data.model, generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability })).map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
@@ -18404,12 +18404,12 @@ function isModel3DImageInputPort(portId) {
   return model3DInputPortIds().includes(portId) || portId === "imageIn";
 }
 
-function imageModelAspectRatioOptions(model) {
-  return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model)];
+function imageModelAspectRatioOptions(model, provider) {
+  return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model, provider)];
 }
 
-function imageModelSupportedAspectRatios(model) {
-  if (isNanoBanana21Model(model)) return nanoBanana21AspectRatios;
+function imageModelSupportedAspectRatios(model, provider = "fal") {
+  if (isNanoBanana21Model(model)) return nanoBanana21Ratios(provider);
   if (isFlux3Model(model)) return flux3AspectRatios;
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;

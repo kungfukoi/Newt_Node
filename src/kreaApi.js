@@ -1,3 +1,4 @@
+import { isNanoBanana21Model, nanoBanana21KreaEndpoint, nanoBanana21KreaPrices, buildNanoBanana21KreaInput } from "./nanoBanana21.js";
 import { applyPricingQuote } from "./pricingCatalog.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
 export const kreaApiBaseUrl = "https://api.krea.ai";
@@ -7,6 +8,7 @@ export const kreaEndpoints = Object.freeze({
     "Z-Image": "/generate/image/z-image/z-image",
     "Seedream 5.0 Pro": "/generate/image/bytedance/seedream-5-pro",
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
+    "Nano Banana 2.1": nanoBanana21KreaEndpoint,
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare",
     "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
@@ -32,6 +34,7 @@ export const kreaEndpoints = Object.freeze({
 const kreaImagePrices = Object.freeze({
   "Z-Image": Object.freeze({ "1K": 0.003 }),
   "Nano Banana 2": Object.freeze({ "1K": 0.08, "2K": 0.12, "4K": 0.16 }),
+  "Nano Banana 2.1": nanoBanana21KreaPrices,
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
   "Krea 2 Large": Object.freeze({ "1K": 0.06 })
 });
@@ -80,6 +83,7 @@ export function buildKreaImageInput({
   creativity = "raw",
   background = "auto"
 } = {}) {
+  if (isNanoBanana21Model(modelName)) return buildNanoBanana21KreaInput({ prompt, images: referenceUrls, aspectRatio, resolution, background });
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const normalizedAspectRatio = normalizeKreaImageAspectRatio(modelName, aspectRatio);
   const refs = referenceUrls.filter(Boolean);

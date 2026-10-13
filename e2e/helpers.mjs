@@ -31,7 +31,7 @@ export async function openFixture(page, options = {}) {
     }
     if (path.startsWith("/api/")) {
       requests.push({ path, method: request.method() });
-      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, exploreLookVariation: true, elevenLabsV4: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
+      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, exploreLookVariation: true, elevenLabsV4: true, nanoBanana21: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" }, ...options.settings });
       if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });
       if (path === "/api/node/generate-image") return json({ images: [{ localUrl: "/outputs/e2e/generated.png", fileName: "generated.png", mimeType: "image/png" }] });

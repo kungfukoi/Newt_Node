@@ -326,3 +326,5 @@ Video Model Exact dialogue audio now consumes one connected Audio Model or Audio
 Explore look selection and planning normalization live in `src/explore.js`; `src/nodeRunners/explore.js` snapshots resolved looks alongside existing provider/background settings. `server/creative-llm.js` validates normalized plans and `server/routes/explore.js` preserves usage and existing work on failure. The `exploreLookVariation` capability prevents stale backend submissions.
 
 ElevenLabs v4 is owned by the existing `src/audioModel.js` request/estimate contract, Audio Model controls, and `server/elevenlabs.js` rate overrides. It uses the normal managed audio route, History, and output propagation.
+
+`src/nanoBanana21.js` owns the added Krea input contract, ratio list and tariff. The existing Krea adapter and image route handle uploads, managed output, History and pricing; provider support derives from `kreaEndpoints`. Explicit 8:1 requests reject before upload while Auto maps to a supported ratio.

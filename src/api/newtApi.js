@@ -1,3 +1,4 @@
+import { isNanoBanana21Model } from "../nanoBanana21.js";
 import { apiErrorMessage } from "../apiErrors.js";
 import { supportsDurableVideo } from "../remoteVideoJobs.js";
 import { waitForRemoteVideo } from "../remoteVideoJobClient.js";
@@ -30,6 +31,10 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
+  if (path === "/api/node/generate-image" && isNanoBanana21Model(JSON.parse(options.body || "{}").model)) {
+    const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 support.");
+    if (health.routes?.nanoBanana21 !== true) throw new Error("Restart the NewtNode backend to activate Nano Banana 2.1. No generation was submitted.");
+  }
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
   const generationMutation = String(path).startsWith("/api/node/") && !["GET", "HEAD"].includes(String(options.method || "GET").toUpperCase());

@@ -30,3 +30,17 @@ export function estimateNanoBanana21Cost({ resolution = "2K", endpoint = nanoBan
     pricingSource: "https://fal.ai/models/google/nano-banana-2.1", pricingCheckedAt: "2026-10-06",
     pricingBasis: "Fal published resolution rate plus $0.002 high thinking; web search disabled. Account charges may differ." };
 }
+
+export const nanoBanana21KreaEndpoint = "/generate/image/google/nano-banana-2.1";
+export const nanoBanana21KreaPrices = Object.freeze({ "1K": 0.03, "2K": 0.0505, "4K": 0.0755 });
+export function nanoBanana21Ratios(provider = "fal") {
+  return provider === "krea" ? nanoBanana21AspectRatios.filter(ratio => ratio !== "8:1") : nanoBanana21AspectRatios;
+}
+export function buildNanoBanana21KreaInput({ prompt, images = [], aspectRatio = "16:9", resolution = "2K", background = "auto", maskUrl } = {}) {
+  const fail = message => { throw Object.assign(new Error(message), { status: 400 }); };
+  if (!nanoBanana21Ratios("krea").includes(aspectRatio)) fail("Choose a supported Nano Banana 2.1 aspect ratio for Krea.");
+  if (!Array.isArray(images) || images.length > 14 || images.some(url => typeof url !== "string" || !url.trim())) fail("Nano Banana 2.1 through Krea accepts up to 14 valid image references.");
+  if (maskUrl || !["auto", "opaque"].includes(background)) fail("Nano Banana 2.1 does not support pixel masks or transparent backgrounds through Krea.");
+  const request = buildNanoBanana21Request({ prompt, imageUrls: images, aspectRatio, resolution });
+  return { prompt: request.submittedPrompt, aspect_ratio: aspectRatio, resolution: request.input.resolution, thinking_level: "high", ...(images.length ? { image_urls: images } : {}) };
+}

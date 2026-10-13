@@ -24,9 +24,9 @@ test("Nano Banana 2.1 is a distinct Fal model across catalogs and saved settings
   assert.deepEqual(characterSheetGenerationSettings(model), { model, resolution: "4K" });
   assert.equal(imageModelReferenceLimit(model), null);
   for (const provider of ["fal", "atlas", "krea", "google"]) {
-    assert.equal(providerSupportedModels("imageGeneration", provider).includes(model), provider === "fal");
-    assert.equal(modelProviderOptionState(model, "image", { imageGeneration: provider }).disabled, ["atlas", "krea"].includes(provider));
-    assert.equal(generationProviderForModel({ model, mediaType: "image", providerPreferences: { imageGeneration: provider } }), ["atlas", "krea"].includes(provider) ? null : "fal");
+    assert.equal(providerSupportedModels("imageGeneration", provider).includes(model), ["fal", "krea"].includes(provider));
+    assert.equal(modelProviderOptionState(model, "image", { imageGeneration: provider }).disabled, provider === "atlas");
+    assert.equal(generationProviderForModel({ model, mediaType: "image", providerPreferences: { imageGeneration: provider } }), provider === "atlas" ? null : provider === "krea" ? "krea" : "fal");
   }
   const request = buildImageGenerationRequest({ node: { id: "image", data: { model, resolution: "4K", aspectRatio: "8:1" } }, prompt: "A panorama", imagePromptItems: [{ url: "/outputs/ref.png", label: "Subject" }] });
   assert.equal(request.model, model);

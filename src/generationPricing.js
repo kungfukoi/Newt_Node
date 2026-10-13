@@ -71,7 +71,7 @@ export function generationProviderForModel({
   }
 
   if (mediaType === "image") {
-    if (isNanoBanana21Model(model)) return ["atlas", "krea"].includes(preferences.imageGeneration) ? null : "fal";
+    if (isNanoBanana21Model(model)) return preferences.imageGeneration === "atlas" ? null : preferences.imageGeneration === "krea" ? "krea" : "fal";
     if (preferences.imageGeneration === "krea") return supportsKreaModel("image", model) ? "krea" : null;
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage25Model(model)) return "fal";
@@ -99,6 +99,8 @@ export function estimateImageRunCost({
 
   if (provider === "fal" && isNanoBanana21Model(model)) {
     unitCost = estimateNanoBanana21Cost({ resolution }).amountUsd;
+  } else if (provider === "krea" && isNanoBanana21Model(model)) {
+    unitCost = estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd;
   } else if (provider === "fal" && isFlux3Model(model)) {
     unitCost = estimateFlux3Cost({ resolution }).amountUsd;
   } else if (provider === "atlas" && supportsAtlasImageModel(model)) {

@@ -1,7 +1,7 @@
 import { generateFlux3 } from "./flux3.js";
 import { videoCropFilter, normalizeVideoCropSettings } from "../src/videoCrop.js";
 import { generateNanoBanana21 } from "./nano-banana-21.js";
-import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint } from "../src/nanoBanana21.js";
+import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint, nanoBanana21Ratios, buildNanoBanana21KreaInput } from "../src/nanoBanana21.js";
 import { isFlux3Model, flux3AspectRatios, flux3TextEndpoint } from "../src/flux3.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { createDirectorDialoguePreparation } from "./director-dialogue.js";
@@ -3937,6 +3937,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const selectedModel = resolveImageModel(normalizeOpenAiImage25Model(req.body.model, req.body.openAiImageVariant));
+    if (isNanoBanana21Model(selectedModel.displayName) && req.body.imagePromptUrls !== undefined && (!Array.isArray(req.body.imagePromptUrls) || req.body.imagePromptUrls.some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Nano Banana 2.1 requires valid managed image references; none were submitted.");
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
     const cleanReferenceLabels = imagePromptUrls.map((_, index) => cleanImagePromptLabel(imagePromptLabels[index])).filter(Boolean);
@@ -3984,12 +3985,15 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const requestedAspectRatio = req.body.requestedAspectRatio || req.body.aspectRatio;
-    const aspectRatio = await resolveImageGenerationAspectRatio({
+    let aspectRatio = await resolveImageGenerationAspectRatio({
       value: req.body.aspectRatio,
       imagePromptUrls,
       provider: selectedModel.provider
     });
 
+    if (usesKreaImageFallback && isNanoBanana21Model(selectedModel.displayName) && String(req.body.aspectRatio).toLowerCase() === "auto") {
+      aspectRatio = nanoBanana21Ratios("krea").includes(aspectRatio) ? aspectRatio : "4:1";
+    }
     if (runtimeModelProviderPreferences.imageGeneration === "atlas") {
       if (!supportsAtlasImageModel(selectedModel.displayName)) {
         return res.status(400).json({
@@ -4719,6 +4723,12 @@ async function runKreaImageModel(
     return res.status(400).json({ error: `${selectedModel.displayName} is not available through Krea.` });
   }
 
+  if (isNanoBanana21Model(selectedModel.displayName)) {
+    const labeled = promptWithReferenceLabels(prompt, imagePromptUrls.map((url, index) => ({ url, label: cleanImagePromptLabel(imagePromptLabels[index]) })));
+    buildNanoBanana21KreaInput({ prompt: labeled, images: imagePromptUrls, aspectRatio, resolution: req.body.resolution || "2K", background: req.body.imageBackground || "auto", maskUrl: req.body.maskUrl });
+    // Decode every reference before the first upload; invalid local assets never reach paid work.
+    await Promise.all(imagePromptUrls.map(readLocalAsset));
+  }
   const referenceUrls = await Promise.all(imagePromptUrls.map(uploadLocalOutputToKrea));
   const submittedPrompt = promptWithReferenceLabels(
     prompt,
