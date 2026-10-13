@@ -32,6 +32,8 @@ function ensureOk(response, data, fallbackMessage) {
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
   const requestUrl = preferClientProxy ? path : preferControlServer ? `${localControlApiBaseUrl}${path}` : localApiFetchUrl(path);
   let response;
+  const generationMutation = String(path).startsWith("/api/node/") && !["GET", "HEAD"].includes(String(options.method || "GET").toUpperCase());
+  if (generationMutation) retryLocalApi = false;
   if (/^\/api\/node\/storyboard-(?:review|qc|plan|revise)(?:-v2)?$/.test(path) || path === "/api/node/explore-plan" || (path === "/api/node/generate-video" && typeof options.body === "string" && (JSON.parse(options.body).characterDialogue?.lines?.length || JSON.parse(options.body).filmDirector?.dialogue?.lines?.length)) || (path === "/api/node/generate-image" && typeof options.body === "string" && (JSON.parse(options.body).exploreGeneration || JSON.parse(options.body).storyboardRevision))) {
     try {
       response = await fetchWithTimeout(requestUrl, options, timeoutMs);
@@ -50,6 +52,8 @@ export async function fetchJsonApi(path, options = {}, label = "Request", { retr
       } catch {
         throw new Error(`${label} failed. Could not reach the local app server. Restart npm run dev and try again. ${error.message || ""}`.trim());
       }
+    } else if (generationMutation) {
+      throw new Error(`${label}: response interrupted. The request may still be running. Check History and the provider before retrying; no request was resubmitted.`);
     } else if (requestUrl !== path && retryLocalApi) {
       try {
         response = await fetchWithTimeout(path, options, timeoutMs);

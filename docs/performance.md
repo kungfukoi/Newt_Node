@@ -133,3 +133,7 @@ The script checks exact equality against the full-clone reference, a single-node
 After a build and `npx playwright install chromium`, run `npm run test:browser`. Fixtures include 271 full-detail nodes at all five zoom levels, attached edge endpoints within 2 screen pixels after pan/zoom, live node/text resizing, immediate multi-select/copy/paste, proportional rail posters and page refresh, generation-to-Preview propagation, Save As/reload, inline recovery, opt-in diagnostics, and actual decoded Timeline pixels changing on scrub without turning black after an Out marker.
 
 All media is generated locally and all provider APIs are mocked. The suite guards measurable interactions, not every GPU/driver condition or perceptual frame pacing. Use Settings > Diagnostics for opt-in long-task, decode/drop, and event-loop measurements when profiling a real workflow. Windows/macOS CI runs the same fixtures; native dialogs and paid generations require separate authorized verification.
+
+### Open-window build compatibility
+
+Production builds retain existing hashed assets in `dist/assets` so windows opened before a rebuild can still load Settings and editor chunks. Bundle reports include retained assets; remove dist only when all app windows are closed if measuring a clean-build baseline. Retained chunks consume disk space but are not eagerly loaded.

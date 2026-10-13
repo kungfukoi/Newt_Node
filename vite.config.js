@@ -20,6 +20,8 @@ const apiProxy = {
 export default defineConfig({
   plugins: [react()],
   build: {
+    // Open windows may still request hashed chunks from the previous build.
+    emptyOutDir: false,
     rollupOptions: {
       input: process.env.NEWTNODE_STATS_DEMO === "1" ? { app: "index.html", statsDemo: "stats-demo.html" } : undefined,
       output: {
