@@ -322,3 +322,5 @@ Video Model retains an explicit Character voices selector for Seedance and MiniM
 Video Model supports both voice-sample handoff and exact dialogue authoring through DirectorDialogueControls and the existing speech preparation action; Audio Model also retains its standalone dialogue mode.
 
 Video Model Exact dialogue audio now consumes one connected Audio Model or Audio node through Reference Audio. Inline dialogue authoring and Prepare ElevenLabs controls are removed. Overlength speech receives a managed first-15-second copy, preserving originals, and is submitted as the sole audio reference with lip-sync instructions and retained in the video output.
+
+Explore look selection and planning normalization live in `src/explore.js`; `src/nodeRunners/explore.js` snapshots resolved looks alongside existing provider/background settings. `server/creative-llm.js` validates normalized plans and `server/routes/explore.js` preserves usage and existing work on failure. The `exploreLookVariation` capability prevents stale backend submissions.

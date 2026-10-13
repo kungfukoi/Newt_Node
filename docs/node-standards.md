@@ -1088,3 +1088,7 @@ Video Model ignores empty legacy dialogue placeholders when inferring its Charac
 Video Model exposes Off, Voice samples (model dialogue), and Exact dialogue audio for Seedance and MiniMax H3. Exact mode supports speaker-bound line editing and explicit speech preparation with cached reuse. Explicit mode selection takes precedence; untouched legacy placeholders without a mode remain inactive. Audio Model retains independent dialogue generation.
 
 Video Model Exact dialogue audio now consumes one connected Audio Model or Audio node through Reference Audio. Inline dialogue authoring and Prepare ElevenLabs controls are removed. Overlength speech receives a managed first-15-second copy, preserving originals, and is submitted as the sole audio reference with lip-sync instructions and retained in the video output.
+
+## Explore look controls
+
+Explore Mode defaults on; off requests restrained execution. Random style and grade choices resolve once per batch, persist per result and queue, and stay fixed on Resume and refinements. Image/Product references preserve scene content and composition unless the brief explicitly asks to change them. These are generative instructions, not a pixel lock. Planning locally normalizes palettes and unused echoed metadata, validates all required creative fields, and never makes an extra paid request to repair malformed output. Legacy queue settings, image model choices, and provider selections remain intact.

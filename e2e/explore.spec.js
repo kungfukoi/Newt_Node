@@ -20,6 +20,10 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
   await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.5 Flare");
   await card.getByLabel("Explore image model").selectOption("OpenAI Image 2.5 Sunburst");
   await expect(card.getByLabel("Variant", { exact: true })).toHaveCount(0);
+  await expect(card.getByLabel("Explore Mode")).toBeChecked();
+  await card.getByLabel("Explore Mode").uncheck();
+  await card.getByLabel("Style family").selectOption("Random");
+  await card.getByLabel("Grade", { exact: true }).selectOption("Random");
   let plans = [], images = [], release;
   await page.route("**/api/node/explore-plan", async route => {
     const request = route.request().postDataJSON(); plans.push(request);
@@ -40,6 +44,9 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
   await card.getByRole("button", { name: "Resume 2" }).click();
   await expect(card.locator(".explore-result")).toHaveCount(3);
   await expect(card.getByRole("button", { name: /^More Like This/ })).toBeEnabled();
+  expect(plans[0].exploreMode).toBe(false);
+  expect(plans[0].directionLooks).toHaveLength(3);
+  expect(new Set(plans[0].directionLooks.map(look => look.styleFamily)).size).toBe(3);
   expect(plans).toHaveLength(1);
   expect(images).toHaveLength(3);
   await card.getByRole("button", { name: /^More Like This/ }).click();

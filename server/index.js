@@ -1171,6 +1171,7 @@ function buildHealthPayload() {
       ideogram45: true,
       flux3: true,
       nanoBanana21: true,
+      exploreLookVariation: true,
       explore: true,
       storyboardRevisions: true,
       storyboardPlanningV2: true,
@@ -16873,7 +16874,8 @@ function checkedCreativeLlmResult(result, data, route) {
   }
   creativeUsageContext.getStore()?.push(result);
   try {
-    validateCreativeResponse(data, { ...result, route });
+    const normalized = validateCreativeResponse(data, { ...result, route });
+    if (route === "explore-plan" && normalized) result = { ...result, text: JSON.stringify(normalized) };
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
   } catch (error) {

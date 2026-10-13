@@ -1,7 +1,7 @@
 import { imageReferenceLimitError } from "../imageReferenceLimits.js";
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
-import { normalizeExploreData, exploreRequest, validateExplorePlan, exploreImagePrompt, exploreSelectionPatch, exploreMaxDirections } from "../explore.js";
+import { normalizeExploreData, exploreRequest, exploreDirectionRequest, validateExplorePlan, exploreImagePrompt, exploreSelectionPatch, exploreMaxDirections } from "../explore.js";
 import { appendedNodeResultState } from "../nodeRunner.js";
 import { runImageModelGeneration } from "./mediaModels.js";
 
@@ -34,10 +34,14 @@ export async function runExploreGeneration({ node, prompt, references, style, ca
     const batchId = crypto.randomUUID();
     planned = planned.map((direction, index) => ({ ...direction, id: `${batchId}:${index}`, parentUrls: parents.map(item => item.url) }));
     directions.push(...planned);
-    queue = planned.flatMap(direction => Array.from({ length: data.variations }, (_, variation) => ({
-      id: `${direction.id}:${variation}`, direction, variation, request, status: "pending",
-      settings: { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality, imageBackground: data.imageBackground, openAiImageVariant: data.openAiImageVariant, kreaCreativity: data.kreaCreativity, provider: data.exploreProvider, gradePreset: data.gradePreset }
-    })));
+    queue = planned.flatMap((direction, index) => {
+      const resolved = exploreDirectionRequest(request, index);
+      return Array.from({ length: data.variations }, (_, variation) => ({
+        id: `${direction.id}:${variation}`, direction, variation, request: resolved, status: "pending",
+        settings: { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality, imageBackground: data.imageBackground, openAiImageVariant: data.openAiImageVariant, kreaCreativity: data.kreaCreativity, provider: data.exploreProvider,
+          styleFamily: resolved.styleFamily, gradePreset: resolved.gradePreset, exploreMode: resolved.exploreMode }
+      }));
+    });
     update({ exploreDirections: directions, exploreQueue: queue });
   }
   const eligible = queue.filter(item => ["pending", "failed"].includes(item.status));

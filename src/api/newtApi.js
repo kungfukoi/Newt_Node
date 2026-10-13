@@ -295,7 +295,13 @@ export const nodeApi = {
     }
     return ensureOk(response, await readJsonResponse(response, "Object Selection"), "Object Selection failed.");
   },
-  planExplore: body => postJson("/api/node/explore-plan", body, "Explore planning"),
+  async planExplore(body) {
+    if (body.version >= 2) {
+      const health = await getJson("/api/health", "Could not verify Explore look controls.");
+      if (health.routes?.exploreLookVariation !== true) throw new Error("Restart the NewtNode backend to activate Explore's new look controls. No planning or generation was submitted.");
+    }
+    return postJson("/api/node/explore-plan", body, "Explore planning");
+  },
   async editImage(form) {
     // A paid edit must never be replayed through the generic fallback transport.
     let response;
