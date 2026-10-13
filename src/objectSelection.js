@@ -1,7 +1,7 @@
 // Independent selection geometry; masks are compact row-major [start, length] runs.
 export const objectSelectionEndpoints = { auto: "fal-ai/sam2/auto-segment", point: "fal-ai/sam-3/image" };
 
-export const sam2Defaults = Object.freeze({ pointsPerSide: 8, confidence: 0.75, stability: 0.95, minRegionArea: 100 });
+export const sam2Defaults = Object.freeze({ pointsPerSide: 32, confidence: 0.75, stability: 0.95, minRegionArea: 100 });
 export function validateSam2Settings(settings = {}) {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Invalid SAM 2 settings.");
   const result = { ...sam2Defaults, ...settings };

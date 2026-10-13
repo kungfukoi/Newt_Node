@@ -40,7 +40,7 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   expect(calls).toHaveLength(0);
-  await expect(editor.getByLabel("Sampling density", { exact: true })).toHaveValue("8");
+  await expect(editor.getByLabel("Sampling density", { exact: true })).toHaveValue("32");
   await expect(editor.getByLabel("Confidence threshold", { exact: true })).toHaveValue("0.75");
   await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();

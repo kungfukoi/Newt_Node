@@ -19,7 +19,7 @@ test("normal object click replaces selection, Shift adds, Alt subtracts without 
   assert.equal(selectObjectMarks([previous], small, { shiftKey: true, altKey: true }).at(-1).subtract, true);
 });
 test("Fal inputs distinguish auto masks, pixel point prompts, and text selection", () => {
-  assert.equal(objectSelectionInput({ imageUrl: "source" }).points_per_side, 8);
+  assert.equal(objectSelectionInput({ imageUrl: "source" }).points_per_side, 32);
   assert.equal(objectSelectionInput({ imageUrl: "source" }).pred_iou_thresh, .75);
   const point = objectSelectionInput({ imageUrl: "source", point: { x: 1, y: .5 }, width: 640, height: 360 });
   assert.equal(point.prompt, "");

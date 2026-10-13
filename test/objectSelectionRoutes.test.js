@@ -42,7 +42,7 @@ test("saved selections and boxes survive reopening and never submit inference", 
     assert.equal(result.selectionState.marks[0].subtract, true);
     assert.deepEqual(result.selectionState.marks[1].target, state.marks[1].target);
     assert.deepEqual(result.selectionState.marks[1].sourceMask.runs, mask.runs);
-    assert.equal(result.selectionState.sam2Settings.pointsPerSide, 8);
+    assert.equal(result.selectionState.sam2Settings.pointsPerSide, 32);
     await cachePost({ sourceUrl: "/uploads/copied.png", selectionState: { marks: [] } });
     assert.deepEqual((await (await cachePost({ sourceUrl: "/uploads/copied.png" })).json()).selectionState.marks, []);
     assert.equal(calls.length, 0);
