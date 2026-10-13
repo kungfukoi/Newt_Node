@@ -74,3 +74,9 @@ export function remapDirectorDialogueData(data, idMap) {
     ...(Array.isArray(data.skillDirectorScenes) ? { skillDirectorScenes: data.skillDirectorScenes.map(scene => ({ ...scene, ...(scene.state ? { state: remapDirectorDialogueData(scene.state, idMap) } : {}), ...(Array.isArray(scene.directorDialogue) ? { directorDialogue: remap(scene.directorDialogue) } : {}) })) } : {})
   };
 }
+
+// An untouched Add-line placeholder must not enable legacy paid dialogue preparation.
+export function videoCharacterVoiceMode(data = {}) {
+  if (["off", "samples", "dialogue"].includes(data.characterVoiceMode)) return data.characterVoiceMode;
+  return Array.isArray(data.directorDialogue) && data.directorDialogue.some(line => String(line?.text || "").trim()) ? "dialogue" : "off";
+}

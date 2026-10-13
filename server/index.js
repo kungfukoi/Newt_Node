@@ -6466,6 +6466,30 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     const selectedVideoModel = resolveVideoModel(req.body.model);
     delete req.body.directorDialogueAudio;
     delete req.body.characterVoiceReferences;
+    if (req.body.exactDialogueAudio === true) {
+      if (!/seedance|minimax.*h3/i.test(selectedVideoModel.displayName)) throw new Error("Exact dialogue audio requires Seedance or MiniMax H3.");
+      if (req.body.generateAudio === false) throw new Error("Enable Generate Audio for exact dialogue lip sync.");
+      if (req.body.startFrameUrls?.length || req.body.endFrameUrls?.length) throw new Error("Exact dialogue uses Reference Images, not start/end frames.");
+      const sourceUrl = req.body.exactDialogueAudioUrl;
+      if (!sourceUrl || !isLocalAssetUrl(sourceUrl)) throw new Error("Connect one completed Audio Model or Audio node to Reference Audio.");
+      const asset = await readLocalAsset(sourceUrl);
+      if (!asset.mimeType?.startsWith("audio/")) throw new Error("Exact dialogue requires an audio recording.");
+      const source = await resolveLocalAssetPathFromUrl(sourceUrl);
+      const duration = (await probeVideoFile(source.filePath)).duration;
+      if (!(duration > 0)) throw new Error("Could not measure exact dialogue audio duration.");
+      let url = sourceUrl, fileName = path.basename(source.filePath), durationSeconds = duration;
+      if (duration > 15) {
+        const target = await createManagedAssetTarget(req, "exact-dialogue-15s", ".wav");
+        await runFfmpeg(["-y", "-i", source.filePath, "-t", "15", "-vn", "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le", target.filePath], "Trim exact dialogue audio to 15 seconds");
+        url = target.publicPath; fileName = target.fileName; durationSeconds = 15;
+      }
+      req.body.referenceAudioUrls = [url]; req.body.referenceAudioLabels = ["ExactDialogue"];
+      req.body.directorDialogueAudio = { url, fileName, durationSeconds, cues: [], sourceAudioUrl: sourceUrl, trimmed: duration > 15 };
+      req.body.characterDialogue = null;
+      if (req.body.filmDirector) req.body.filmDirector = { ...req.body.filmDirector, dialogue: null };
+      prompt = [prompt, "EXACT DIALOGUE AUDIO: Use @ExactDialogue as the spoken performance. Preserve its words, voices, pacing and pauses. Lip-sync the visible speaking characters to their corresponding voices. Do not invent or paraphrase dialogue. Keep listeners silent during other speakers' lines."].join("\n\n");
+      req.body.prompt = prompt;
+    }
     const characterSpeech = req.body.characterDialogue || req.body.filmDirector?.dialogue;
     if (characterSpeech?.lines?.length || characterSpeech?.mode === "samples" || (req.body.generateAudio !== false && characterSpeech?.characters?.some(character => character.voice?.id))) {
       const model = selectedVideoModel.displayName;

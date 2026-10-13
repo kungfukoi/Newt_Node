@@ -173,6 +173,8 @@ export function buildVideoGenerationRequest({
   referenceAudioLabels = [],
   filmDirector = null,
   characterDialogue = null,
+  exactDialogueAudioUrl = "",
+  exactDialogueAudio = false,
   outputTargetIndex = ""
 }) {
   node = { ...node, data: filmDirectorVideoSettings(node.data, filmDirector) };
@@ -214,6 +216,7 @@ export function buildVideoGenerationRequest({
     referenceAudioUrls: generateAudio ? referenceAudioUrls : [],
     referenceAudioLabels: generateAudio ? referenceAudioLabels : [],
     filmDirector: effectiveFilmDirector,
+    ...(exactDialogueAudio ? { exactDialogueAudio: true, exactDialogueAudioUrl } : {}),
     ...(characterDialogue || filmDirector?.dialogue?.lines?.length ? { characterDialogue: videoCharacterDialogue(characterDialogue || {}, filmDirector?.dialogue) } : {}),
     minimaxH3: {
       enablePromptExpansion: node.data.minimaxH3EnablePromptExpansion !== false

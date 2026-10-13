@@ -17,7 +17,7 @@ import { storyboardImageModelOptions } from "./modelOptions.js";
 import { storyboardImageSettings } from "./storyboardImageModels.js";
 import { CharacterElevenLabsVoice } from "./components/CharacterElevenLabsVoice.jsx";
 import { DirectorDialogueControls } from "./components/DirectorDialogueControls.jsx";
-import { directorDialoguePackage } from "./characterDialogue.js";
+import { directorDialoguePackage, videoCharacterVoiceMode } from "./characterDialogue.js";
 import "./characterDialogue.css";
 import { storyboardSkillVersion, storyboardPlanningSettings, storyboardFrameContext, storyboardApproachDetails, storyboardPacing, storyboardPanelEditingLocked, validateStoryboardRevision as validateStoryboardRevisionV2 } from "./storyboardWorkflow.js";
 import { storyboardPromptPolicy } from "./storyboardPromptPolicy.js";
@@ -15968,11 +15968,12 @@ function NodeBody({
           />
         </NodeRow>
         {(/seedance/i.test(node.data.model) || isMinimaxH3) && <>
-          <NodeRow label="Character voices"><select aria-label="Character voice handoff mode" value={node.data.characterVoiceMode || (node.data.directorDialogue?.length ? "dialogue" : "off")} onChange={event => onUpdate(node.id, { characterVoiceMode: event.target.value })} disabled={running || node.data.characterVoiceBusy}>
+          <NodeRow label="Character voices"><select aria-label="Character voice handoff mode" value={videoCharacterVoiceMode(node.data)} onChange={event => onUpdate(node.id, { characterVoiceMode: event.target.value })} disabled={running || node.data.characterVoiceBusy}>
             <option value="off">Off</option>
             <option value="samples">Voice samples (model dialogue)</option>
-            {node.data.directorDialogue?.length > 0 && <option value="dialogue">Saved exact dialogue audio</option>}
+            <option value="dialogue">Exact dialogue audio</option>
           </select></NodeRow>
+          {videoCharacterVoiceMode(node.data) === "dialogue" && <small className="character-voice-handoff-status" role="status">Connect one Audio Model or Audio node to Reference Audio. Its speech drives lip sync and is kept in the finished video. Recordings longer than 15 seconds are cut to their first 15 seconds; the original stays intact. Choose a video duration long enough for the speech.</small>}
           {node.data.characterVoiceMode === "samples" && <small className="character-voice-handoff-status" role="status">Connect locked, active Characters with current ElevenLabs voice samples. Enable Generate Audio and use Reference Images instead of start/end frames. Seedance receives each sample with instructions assigning it to that Character; write the spoken lines in the prompt.</small>}
         </>}
         {supportsDirectorInput && (
@@ -21727,6 +21728,10 @@ function connected3DViewUrls(incoming = {}) {
 
 function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index = 0 }) {
   const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
+  const exactDialogue = videoCharacterVoiceMode(node.data) === "dialogue";
+  const exactAudioInputs = (incoming.referenceAudioIn || []).filter(({ source }) => ["audio", "audioModel"].includes(source.type));
+  const exactDialogueAudioUrl = exactDialogue ? connectedAudioUrls(exactAudioInputs)[0] || "" : "";
+
   const characterReferences = connectedCharacterReferences(characterConnections);
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
   const referenceImageItems = uniqueAssetItems([
@@ -21736,7 +21741,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
   const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
   const referenceAudioItems = uniqueAssetItems([
     ...connectedAssetItems(incoming.referenceAudioIn),
-    ...characterVoices.map((url, voiceIndex) => ({
+    ...(exactDialogue ? [] : characterVoices).map((url, voiceIndex) => ({
       url,
       label: characterReferences[voiceIndex]?.label || `Character audio ${voiceIndex + 1}`,
       type: "audio"
@@ -21749,7 +21754,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
     characterReferenceUrls: characterReferences.map(item => item.url), characterReferenceLabels: characterReferences.map(item => item.label),
     referenceVideoUrls: referenceVideoItems.map(item => item.url), referenceVideoLabels: referenceVideoItems.map(item => item.label),
     referenceAudioUrls: referenceAudioItems.map(item => item.url), referenceAudioLabels: referenceAudioItems.map(item => item.label),
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: node.data.characterVoiceMode !== "off" && (node.data.directorDialogue?.length || node.data.characterVoiceMode === "samples") ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
+    exactDialogueAudioUrl: exactAudioInputs.length === 1 ? exactDialogueAudioUrl : "", exactDialogueAudio: exactDialogue, filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: videoCharacterVoiceMode(node.data) === "samples" ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {

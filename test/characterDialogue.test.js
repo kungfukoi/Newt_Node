@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { characterElevenLabsVoice, directorDialoguePackage, validateDirectorDialogue, remapDirectorDialogueData, directorDialogueBrief, videoCharacterDialogue } from "../src/characterDialogue.js";
+import { characterElevenLabsVoice, directorDialoguePackage, validateDirectorDialogue, remapDirectorDialogueData, directorDialogueBrief, videoCharacterDialogue, videoCharacterVoiceMode } from "../src/characterDialogue.js";
 import { remapImportedGraph } from "../src/workflowState.js";
 import { addFilmDirectorScene, switchFilmDirectorScene } from "../src/filmDirectorScenes.js";
 import { nodeApi } from "../src/api/newtApi.js";
@@ -59,4 +59,12 @@ test("voice-bound video requests are not automatically replayed after transport 
   t.mock.method(globalThis, "fetch", async () => { calls++; throw new Error("Connection closed"); });
   await assert.rejects(nodeApi.generateVideo({ filmDirector: { dialogue: { lines } } }), /no request was resubmitted/);
   assert.equal(calls, 1);
+});
+
+test("Whiskerwood empty legacy dialogue row does not activate exact speech", () => {
+  const data = { directorDialogue: [{ id: "placeholder", characterNodeId: "", text: "", pauseAfter: 0.3 }] };
+  assert.equal(videoCharacterVoiceMode(data), "off");
+  assert.equal(videoCharacterVoiceMode({ ...data, characterVoiceMode: "samples" }), "samples");
+  assert.equal(videoCharacterVoiceMode({ directorDialogue: [{ id: "line", characterNodeId: "a", text: "Hello" }] }), "dialogue");
+  assert.equal(videoCharacterVoiceMode({ ...data, characterVoiceMode: "dialogue" }), "dialogue");
 });
