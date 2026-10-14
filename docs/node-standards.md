@@ -1112,3 +1112,7 @@ Both previews and completion use the shared durable worker for single submission
 Edit Existing Video is an explicit Seedance 2.5 task on Fal or Atlas, accepts exactly one managed 4–30 second source video, optional images/audio, and no Director or Start/End Frames. Duration and framing display Source video without replacing saved settings. Fal receives task editing and auto duration/aspect; Atlas receives edit, duration -1 and adaptive ratio. Krea edits reject before uploads or billing. Unknown editing prices stay unknown.
 
 Video reference consumers use visible node/Character tags when the prompt names them; other consumers retain output labels. Seedance 2.5 maps to numbered @ImageN, @VideoN and @AudioN tags and rejects unmatched tags before submitting video generation. Older regular-generation workflows and existing exact-dialogue/audio behavior remain intact. Mocked tests validate contracts, not live generation quality.
+
+Seedance 2.5 Draft is toggleable for any selected provider, but draft Run remains disabled unless Fal is explicitly selected. Provider requirements are visible even before Draft is enabled; a connected Director owns its Draft setting. Never silently change providers for drafts.
+
+Seedance Draft mirrors SugerMilks: a switch enables 480p previews only with Fal selected; saved enabled drafts route explicitly through the enabled Fal key even after the general provider changes. Completion remains at 1080p within seven days, with separate billing per stage.

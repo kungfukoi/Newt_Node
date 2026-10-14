@@ -31,7 +31,7 @@ test("draft previews finish through the shared job and preserve outputs across r
     expect(route.request().postDataJSON().receiptId).toBe(receipt.receiptId);
     return route.fulfill({ status: 202, json: { job: { runId: finished.generationRunId, state: "completed", result: finished } } });
   });
-  await video.getByLabel("Seedance Draft mode").check();
+  await video.getByLabel("Seedance Draft mode").click();
   await expect(video.getByLabel("Seedance resolution")).toHaveValue("480p");
   await expect(video.getByLabel("Seedance resolution")).toBeDisabled();
   await video.locator(".run-node-button").first().click();
@@ -42,7 +42,7 @@ test("draft previews finish through the shared job and preserve outputs across r
   await expect(video.locator("video").first()).toHaveAttribute("src", /finished/);
   await expect(page.locator('[data-node-card-id="preview"] video').first()).toHaveAttribute("src", /finished/);
   expect(completions).toBe(1);
-  await video.getByLabel("Seedance Draft mode").uncheck();
+  await video.getByLabel("Seedance Draft mode").click();
   await expect(video.getByLabel("Seedance resolution")).toHaveValue("1080p");
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(video.locator("video").first()).toHaveAttribute("src", /finished/);
@@ -73,4 +73,10 @@ test("Krea cannot enable drafts or run a saved edit", async ({ page }) => {
   await expect(card(page).getByLabel("Seedance Draft mode")).toBeDisabled();
   await expect(card(page).locator(".run-node-button").first()).toBeDisabled();
   expect(errors).toEqual([]);
+});
+
+test("Atlas requires selecting Fal before enabling Draft", async ({ page }) => {
+  await setup(page, "atlas");
+  await expect(card(page).getByRole("switch", { name: "Seedance Draft mode" })).toBeDisabled();
+  await expect(card(page).getByText(/Seedance currently uses atlas/)).toBeVisible();
 });

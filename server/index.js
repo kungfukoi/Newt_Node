@@ -6494,8 +6494,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         if (req.body[field] !== undefined && (!Array.isArray(req.body[field]) || req.body[field].some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Seedance 2.5 requires valid managed references; no generation was submitted.");
       }
     }
-    const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: requestedSeedanceProvider });
-    const draftKey = draftMode ? String(process.env.FAL_KEY || "").trim() : "";
+    const draftKey = String(process.env.FAL_KEY || "").trim();
+    const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: draftKey ? "fal" : "" });
     if (draftMode && !draftKey) throw httpError(400, "Enable the selected Fal key before generating a Seedance draft.");
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });

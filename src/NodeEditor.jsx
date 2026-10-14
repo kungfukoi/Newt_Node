@@ -15888,7 +15888,7 @@ function NodeBody({
   const seedanceProvider = generationProviderForModel({ model: node.data.model, mediaType: "video", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
   const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
-  const draftUnavailable = seedanceDraft && seedanceProvider !== "fal";
+  const draftUnavailable = false; // Saved drafts explicitly route through Fal, matching upstream.
   const editingUnavailable = seedanceEditing && (!["fal", "atlas"].includes(seedanceProvider) || directorConnected);
   const selectedDraft = selectedSeedanceDraft(node.data);
   const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
@@ -15981,14 +15981,16 @@ function NodeBody({
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
         {isSeedance25 && <>
-          <NodeRow label="Draft (480p)"><input type="checkbox" aria-label="Seedance Draft mode" checked={seedanceDraft}
+          <NodeRow label="Draft (480p)"><button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
             disabled={running || directorConnected || (!seedanceDraft && seedanceProvider !== "fal")}
-            onChange={event => onUpdate(node.id, { seedanceDraft: event.target.checked })} /></NodeRow>
+            title={directorConnected ? "Controlled by Director" : "Fal preview. Finish selected drafts at 1080p within seven days; each stage is billed separately."}
+            onClick={() => onUpdate(node.id, { seedanceDraft: !seedanceDraft })}><span /></button></NodeRow>
           <NodeRow label="Task"><select aria-label="Seedance task" value={node.data.seedanceTask || "reference"} disabled={running || directorConnected}
             onChange={event => onUpdate(node.id, { seedanceTask: event.target.value })}>
             <option value="reference">Generate Video</option><option value="edit" disabled={!["fal", "atlas"].includes(seedanceProvider)}>Edit Existing Video</option>
           </select></NodeRow>
-          {draftUnavailable && <small role="status">Draft mode requires Fal. Change the provider in Settings or turn Draft off.</small>}
+          {seedanceProvider !== "fal" && <small role="status">Draft generation requires Fal. Seedance currently uses {seedanceProvider || "an unavailable provider"}. Choose Fal for Seedance in Settings before running a draft.</small>}
+          {directorConnected && <small role="status">Draft mode is controlled by the connected Director.</small>}
           {editingUnavailable && <small role="status">Editing requires Fal or Atlas and no connected Director.</small>}
         </>}
         <NodeRow label="Model">
