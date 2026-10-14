@@ -3,6 +3,7 @@ export function createNodeRunControl() {
   const runs = new Map();
   return {
     get: id => runs.get(id),
+    ids: () => [...runs.keys()],
     async run(id, operation) {
       if (runs.has(id)) return { status: 'skipped' };
       let release;

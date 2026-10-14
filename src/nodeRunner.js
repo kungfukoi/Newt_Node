@@ -144,6 +144,10 @@ export async function runRunnableNodesByDependencyOrder(
   const scheduler = createWorkScheduler({ maxConcurrent, limits: { localGpu: 1, localMedia: 2, ...providerLimits } });
 
   while (pending.size) {
+    if (signal?.aborted) {
+      for (const nodeId of pending) { const message = "Stopped at user request."; skipped.set(nodeId, message); onNodeSkipped?.(nodeId, message); }
+      pending.clear(); break;
+    }
     const blocked = [...pending].filter((nodeId) =>
       (dependencies.get(nodeId) || []).some((dependencyId) => failed.has(dependencyId) || skipped.has(dependencyId))
     );
@@ -199,7 +203,8 @@ export async function runRunnableNodesByDependencyOrder(
   return {
     completed: completed.size,
     failed: failed.size,
-    skipped: skipped.size
+    skipped: skipped.size,
+    ...(signal?.aborted ? { cancelled: true } : {})
   };
 }
 

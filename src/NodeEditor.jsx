@@ -144,7 +144,8 @@ import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import ModelProviderOption from "./components/ModelProviderOption.jsx";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
-import { createNodeRunControl, ejectableNodeTypes } from "./nodeRunControl.js";
+import { activeCanvasNodes, stoppedCanvasNodePatch } from "./canvasStop.js";
+import { createNodeRunControl } from "./nodeRunControl.js";
 import { runTrackedGeneration, stopGenerationProgress } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
@@ -1251,6 +1252,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const exploreRunsRef = React.useRef(new Set());
   const draftFinishesRef = React.useRef(new Set());
   const nodeRunControlRef = React.useRef(createNodeRunControl());
+  const canvasBatchControllersRef = React.useRef(new Set());
   const storyboardRevisionRunsRef = React.useRef(new Set());
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
@@ -3225,7 +3227,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
-  async function runCharacterVoiceAction(node, kind) {
+  function runCharacterVoiceAction(node, kind) {
+    return runCanvasAction(node, token => executeCharacterVoiceAction(node, kind, token, updateNode));
+  }
+  async function executeCharacterVoiceAction(node, kind, token, update) {
+    const updateNode = (...args) => { if (!token.stopped) update(...args); };
+    if (token.stopped) return;
     const current = nodesRef.current.find(item => item.id === node.id);
     if (!current || current.data.characterVoiceBusy) return;
     updateNode(node.id, { characterVoiceBusy: true, characterVoiceError: "" });
@@ -3828,7 +3835,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateTransferNode(node) {
+  function activateTransferNode(node) {
+    return runCanvasAction(node, token => executeTransferNode(node, token, updateNode));
+  }
+  async function executeTransferNode(node, token, update) {
+    const updateNode = (...args) => { if (!token.stopped) update(...args); };
     const transferImages = Array.isArray(node.data.transferImages) ? node.data.transferImages.filter((image) => image.localUrl) : [];
     if (!transferImages.length) {
       updateNode(node.id, { error: "Upload at least one image." });
@@ -3839,6 +3850,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       setCompilingTransferNodeId(node.id);
       updateNode(node.id, { status: "compiling", error: "" });
       const collageBlob = await createTransferCollageBlob(transferImages);
+      if (token.stopped) return;
       const transferFile = new File([collageBlob], moodBoardOutputFileName, { type: "image/png" });
       const form = new FormData();
       appendWorkflowContextToForm(form);
@@ -3863,7 +3875,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
     } finally {
-      setCompilingTransferNodeId(null);
+      if (!token.stopped) setCompilingTransferNodeId(null);
     }
   }
 
@@ -4093,7 +4105,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function ensureStoryboardCharactersReady(node) {
+  async function ensureStoryboardCharactersReady(node, token = nodeRunControlRef.current.get(node.id)) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     if (!storyboardUsesInternalCharacters(currentNode)) return currentNode;
     const characters = normalizedStoryboardCharacters(currentNode.data.storyboardCharacters);
@@ -4122,6 +4134,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     updateNode(currentNode.id, { status: "compiling-characters", storyboardTab: "view", error: "" });
     let latestCharacters = characters;
     for (const character of pendingCharacters) {
+      if (token?.stopped) throw new Error("Stopped at user request.");
       updateStoryboardCharacter(currentNode.id, character.id, { status: "compiling", error: "" });
       try {
         const generationNode = {
@@ -4139,6 +4152,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           workflowContext: workflowRequestContext(),
           characterTag: storyboardCharacterTag(character)
         });
+        if (token?.stopped) throw new Error("Stopped at user request.");
         latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
           item.id === character.id
             ? {
@@ -4161,6 +4175,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         preparedNode = syncStoryboardPreparedCharacters(currentNode.id, latestCharacters) || preparedNode;
         updateNode(currentNode.id, { error: "" });
       } catch (error) {
+        if (token?.stopped) throw error;
         latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
           item.id === character.id ? { ...item, status: "error", error: error.message || "Character sheet failed." } : item
         ));
@@ -4172,7 +4187,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return preparedNode;
   }
 
-  async function planStoryboardNode(node) {
+  function planStoryboardNode(node) {
+    return runCanvasAction(node, token => executeplanStoryboardNode(node, token, { updateNode, updateStoryboardNodeFrames, patchStoryboardFrame }));
+  }
+
+  async function executeplanStoryboardNode(node, token, actions) {
+    const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
+    const updateStoryboardNodeFrames = (...args) => { if (!token.stopped) actions.updateStoryboardNodeFrames(...args); };
+    const patchStoryboardFrame = (...args) => { if (!token.stopped) actions.patchStoryboardFrame(...args); };
+    if (token.stopped) return { status: "error" };
+
     if (storyboardRevisionRunsRef.current.has(node.id)) return null;
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
@@ -4207,6 +4231,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         props: storyboardPropReferenceSources(incoming.propsIn || [], currentIncomingByNode),
         directorShotList: directorSource?.data?.shotList || directorSource?.data?.resultText || ""
       }, "Storyboard planning");
+      if (token.stopped) return null;
       const plan = requireStoryboardPlanResponse(response, data);
       const plannedFrames = storyboardFramesFromPlan(plan.frames, Boolean(data.skillVersion));
 
@@ -4231,7 +4256,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
-  async function reviewStoryboardSequence(node) {
+  function reviewStoryboardSequence(node) {
+    return runCanvasAction(node, token => executereviewStoryboardSequence(node, token, { updateNode, updateStoryboardNodeFrames, patchStoryboardFrame }));
+  }
+
+  async function executereviewStoryboardSequence(node, token, actions) {
+    const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
+    const updateStoryboardNodeFrames = (...args) => { if (!token.stopped) actions.updateStoryboardNodeFrames(...args); };
+    const patchStoryboardFrame = (...args) => { if (!token.stopped) actions.patchStoryboardFrame(...args); };
+    if (token.stopped) return { status: "error" };
+
     const current = nodesRef.current.find(item => item.id === node.id);
     if (!current || storyboardRevisionRunsRef.current.has(node.id)) return;
     storyboardRevisionRunsRef.current.add(node.id);
@@ -4244,14 +4278,24 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const incoming = expandStoryboardDirectorIncoming(incomingByNode[node.id] || {}, incomingByNode);
       const reviewRequest = current.data.storyboardSkillVersion === storyboardSkillVersion ? nodeApi.reviewStoryboardSequenceV2 : nodeApi.reviewStoryboardSequence;
       const { response, data } = await reviewRequest({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming), continuity: current.data.storyboardContinuity, useStoryboardStyle: current.data.useStoryboardStyle !== false, characters: storyboardCharacterSummariesForNode(current, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }) });
+      if (token.stopped) return;
       if (!response.ok) throw new Error(data.error || "Sequence review failed.");
       updateNode(node.id, { status: "complete", storyboardSequenceReview: { ...data.review, signature }, storyboardRevisionWarning: data.warning || "" });
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
-    } finally { storyboardRevisionRunsRef.current.delete(node.id); loadOutputHistory(); }
+    } finally { if (!token.stopped) storyboardRevisionRunsRef.current.delete(node.id); loadOutputHistory(); }
   }
 
-  async function reviseStoryboardPanels(node, frameIds, instruction) {
+  function reviseStoryboardPanels(node, frameIds, instruction) {
+    return runCanvasAction(node, token => executereviseStoryboardPanels(node, frameIds, instruction, token, { updateNode, updateStoryboardNodeFrames, patchStoryboardFrame }));
+  }
+
+  async function executereviseStoryboardPanels(node, frameIds, instruction, token, actions) {
+    const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
+    const updateStoryboardNodeFrames = (...args) => { if (!token.stopped) actions.updateStoryboardNodeFrames(...args); };
+    const patchStoryboardFrame = (...args) => { if (!token.stopped) actions.patchStoryboardFrame(...args); };
+    if (token.stopped) return { status: "error" };
+
     const currentNode = nodesRef.current.find(item => item.id === node.id);
     if (!currentNode || storyboardRevisionRunsRef.current.has(node.id) || ["running", "planning", "revising", "compiling"].includes(currentNode.data.status)) return;
     storyboardRevisionRunsRef.current.add(node.id);
@@ -4270,6 +4314,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         frames, frameIds, instruction, sceneDescription, notes: currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }),
         locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], incomingByNode), props: storyboardPropReferenceSummaries(incoming.propsIn || [], incomingByNode) });
+      if (token.stopped) return;
       if (!response.ok) throw new Error(data.error || "Storyboard revision failed.");
       const revisions = currentNode.data.storyboardSkillVersion === storyboardSkillVersion
         ? validateStoryboardRevisionV2(data.revision, frames, frameIds, storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }))
@@ -4282,7 +4327,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(node.id, { status: "error", error: error.message || "Revision failed. Existing panels preserved." });
     } finally {
       updateNode(node.id, { storyboardRevisionActive: false });
-      storyboardRevisionRunsRef.current.delete(node.id);
+      if (!token.stopped) storyboardRevisionRunsRef.current.delete(node.id);
       loadOutputHistory();
     }
   }
@@ -4291,7 +4336,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return generateStoryboardNode(node, [frameId]);
   }
 
-  async function generateStoryboardNode(node, frameIds = null, revisionOptions = {}) {
+  function generateStoryboardNode(node, frameIds = null, revisionOptions = {}) {
+    return runCanvasAction(node, token => executegenerateStoryboardNode(node, frameIds, revisionOptions, token, { updateNode, updateStoryboardNodeFrames, patchStoryboardFrame }));
+  }
+
+  async function executegenerateStoryboardNode(node, frameIds, revisionOptions, token, actions) {
+    const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
+    const updateStoryboardNodeFrames = (...args) => { if (!token.stopped) actions.updateStoryboardNodeFrames(...args); };
+    const patchStoryboardFrame = (...args) => { if (!token.stopped) actions.patchStoryboardFrame(...args); };
+    if (token.stopped) return { status: "error" };
+
     if (storyboardRevisionRunsRef.current.has(node.id) && !revisionOptions.revisions) return;
     let currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     let currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
@@ -4321,6 +4375,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     } catch (error) {
       return { status: "error", error };
     }
+    if (token.stopped) return { status: "error" };
     currentNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
     currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     incoming = expandStoryboardDirectorIncoming(currentIncomingByNode[currentNode.id] || {}, currentIncomingByNode);
@@ -4387,6 +4442,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const maxAttempts = qcEnabled ? 2 : 1;
 
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          if (token.stopped) return { status: "error" };
           patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "", qcWarning: "" });
           const generatedItems = await runImageModelGeneration({
             node: {
@@ -4404,6 +4460,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             workflowContext,
             index: frame.number - 1
           });
+          if (token.stopped) return { status: "error" };
           generated = Array.isArray(generatedItems) ? generatedItems[0] || null : generatedItems;
 
           if (!qcEnabled) break;
@@ -4419,6 +4476,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             continuityReferenceItems
           });
 
+          if (token.stopped) return { status: "error" };
           if (qcResult.pass || !qcResult.shouldRetry || attempt >= maxAttempts - 1) break;
 
           qcRetryCount += 1;
@@ -4435,6 +4493,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           generated,
           workflowContext
         });
+        if (token.stopped) return { status: "error" };
         const nextFrame = {
           resultUrl: generated.url,
           exportUrl: exported.url,
@@ -6845,7 +6904,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const message = "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish.";
     const scope = generationScope;
     stopGenerationProgress(scope, node.id, token?.groupId);
-    updateNode(node.id, { status: "error", error: message });
+    updateNode(node.id, stoppedCanvasNodePatch(node, message));
+    exploreRunsRef.current.delete(node.id);
+    storyboardRevisionRunsRef.current.delete(node.id);
+    draftFinishesRef.current.delete(node.id);
     if (token?.outputTarget) markOutputTargetFailed(token.outputTarget, message);
     if (node.type === "videoModel") {
       try {
@@ -6856,6 +6918,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (current?.data.error === message) updateNode(node.id, { error: message + " Local tracking could not be stopped on the server: " + error.message });
       }
     }
+  }
+
+  async function stopCanvasNodes() {
+    for (const controller of canvasBatchControllersRef.current) controller.abort(new Error("Stopped at user request."));
+    const active = activeCanvasNodes(nodesRef.current, nodeRunControlRef.current.ids());
+    setCompilingTransferNodeId(null);
+    await Promise.allSettled(active.map(stopNode));
+    setSaveStatus(active.length ? "Stopped " + active.length + " active canvas node(s)." : "No active canvas nodes.");
+  }
+
+  function runCanvasAction(node, operation) {
+    const existing = nodeRunControlRef.current.get(node.id);
+    return existing ? operation(existing) : nodeRunControlRef.current.run(node.id, operation);
   }
 
   function runNode(node, runOptions = {}) {
@@ -6877,7 +6952,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           getCurrent: () => nodesRef.current.find(item => item.id === node.id), update: patch => updateNode(node.id, patch) });
         loadOutputHistory();
         return result;
-      } finally { draftFinishesRef.current.delete(node.id); }
+      } finally { if (!token.stopped) draftFinishesRef.current.delete(node.id); }
     }
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     let currentNode =
@@ -6971,6 +7046,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, {
         status: "running",
         error: "",
+        ...(currentNode.type === "explore" ? { exploreStopRequested: false } : {}),
         ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {}),
         ...(currentNode.type === "skillDirector" ? {
           skillDirectorAction: currentNode.data.skillDirectorAction || "build",
@@ -7005,7 +7081,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           camera: (incoming.cameraIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
           workflowContext: requestContext, generationGroupId,
           update: patch => { if (patch.resultItems) newResults.splice(0, newResults.length, ...patch.resultItems.slice(previousImageResults.length)); updateNode(currentNode.id, patch); },
-          shouldStop: () => { const live = nodesRef.current.find(item => item.id === currentNode.id); return !live || Boolean(live.data.exploreStopRequested); } });
+          shouldStop: () => { if (token.stopped) return true; const live = nodesRef.current.find(item => item.id === currentNode.id); return !live || Boolean(live.data.exploreStopRequested); } });
         if (newResults.length) markOutputTargetSaved(outputTarget, newResults, "image");
         else markOutputTargetFailed(outputTarget, outcome.error?.message || "No new Explore images were saved.");
         loadOutputHistory();
@@ -7713,7 +7789,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       markOutputTargetFailed(outputTarget || (error?.outputTargetNodeId ? { node: { id: error.outputTargetNodeId } } : null), message);
       return { status: "error", error: error instanceof Error ? error : new Error(message) };
     } finally {
-      exploreRunsRef.current.delete(currentNode.id);
+      if (!token.stopped) exploreRunsRef.current.delete(currentNode.id);
     }
   }
 
@@ -7807,6 +7883,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       `${playablePreviewNodes.length ? `Playing ${playablePreviewNodes.length} preview video${playablePreviewNodes.length === 1 ? "" : "s"}; ` : ""}Running ${runnable.length} selected node${runnable.length === 1 ? "" : "s"}...`
     );
     const result = await runNodesByDependencyOrder(runnable);
+    if (result.cancelled) { setSaveStatus("Stopped canvas run."); return; }
     if (previewPlayback) await previewPlayback;
     const failedCount = result.failed + result.skipped;
     setSaveStatus(
@@ -7817,8 +7894,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function runNodesByDependencyOrder(runnableNodes) {
-    return runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
-      runNode,
+    const controller = new AbortController();
+    canvasBatchControllersRef.current.add(controller);
+    try { return await runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
+      runNode, signal: controller.signal,
       maxConcurrent: import.meta.env?.VITE_NEWTNODE_RUN_CONCURRENCY || 4,
       providerLimits: {
         fal: import.meta.env?.VITE_NEWTNODE_FAL_CONCURRENCY || 2,
@@ -7833,7 +7912,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       resourceKey: (node) => nodeSchedulingKey(node, modelProviderPreferences),
       onStatus: setSaveStatus,
       onNodeSkipped: (nodeId, message) => updateNode(nodeId, { status: "error", error: message })
-    });
+    }); } finally { canvasBatchControllersRef.current.delete(controller); }
   }
 
   flowNodeRenderRef.current = (node, selected) => (
@@ -8250,6 +8329,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="canvas-stop-button" onClick={stopCanvasNodes} title="Stop all active nodes on this canvas and cancel queued runs. Cloud jobs already accepted may still finish." aria-label="Stop all active canvas nodes"><X size={16} /></button>
           <button type="button" aria-label="Snap to grid" aria-pressed={snapToGrid} title={`Snap to grid: ${snapToGrid ? "On" : "Off"}. Hold Alt while dragging to bypass.`} onClick={() => { const enabled = !snapToGrid; setSnapToGrid(enabled); rememberCanvasSnapToGrid(enabled); }}>
             <Grid3X3 size={14} />
           </button>
@@ -8974,7 +9054,6 @@ function NodeCard({
               </div>
             )}
           </span>
-          {running && ejectableNodeTypes.has(node.type) && <button type="button" className="node-stop-button" onClick={() => onRun(node, "stop-node")} title="Stop local tracking and release this node. A cloud job already accepted may still finish." aria-label="Stop node">Stop</button>}
           <button type="button" className="node-remove-button" onClick={() => onRemove(node.id)} title="Remove node" aria-label="Remove node">
             <X size={14} />
           </button>
@@ -15995,7 +16074,6 @@ function NodeBody({
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
           : <RunPriceLabel label={seedanceDraft ? "Run Draft (480p)" : seedanceEditing ? "Edit Video" : "Run Video"} options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}
       </button>
-      {running && <button type="button" className="stop-node-button" onClick={() => onRun(node, "stop-node")} title="Stop local tracking and release this node. A cloud job already accepted may still finish.">Stop this run</button>}
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (

@@ -22,9 +22,12 @@ function getFunction(source, name, deps = {}) {
   return new Function(...Object.keys(deps), `${end < 0 ? rest : rest.slice(0, end)}; return ${name};`)(...Object.values(deps));
 }
 function editorHandler(name, nextName, deps) {
-  const body = editor.slice(editor.indexOf(`  async function ${name}(`), editor.indexOf(`  async function ${nextName}(`));
+  const start = editor.search(new RegExp(`\n  (?:async )?function ${name}\\(`));
+  const end = editor.search(new RegExp(`\n  (?:async )?function ${nextName}\\(`));
+  const body = editor.slice(start, end);
   assert.ok(body.length);
-  return new Function(...Object.keys(deps), `${body}; return ${name};`)(...Object.values(deps));
+  const guardedDeps = { runCanvasAction: (_node, operation) => operation({ stopped: false }), updateStoryboardNodeFrames: () => {}, patchStoryboardFrame: () => {}, ...deps };
+  return new Function(...Object.keys(guardedDeps), `${body}; return ${name};`)(...Object.values(guardedDeps));
 }
 const styleConstants = new Function(`${editor.slice(editor.indexOf("const storyboardBaseInstruction ="), editor.indexOf("const storyboardCharacterSheetStyleInstruction ="))}; return { storyboardBaseInstruction, storyboardReferenceStyleGuard, storyboardMoodBoardStyleInstruction, storyboardFinalStyleClamp, storyboardContinuityInstruction };`)();
 const sceneReferenceMap = getFunction(editor, "storyboardSceneReferenceMapPrompt");

@@ -230,8 +230,8 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
       exportStoryboardFrameResult: async () => ({ url: "/outputs/export.png" }),
       updateStoryboardNodeFrames: (_id, frames, patch) => updateNode("board", { storyboardFrames: frames, ...patch }), loadOutputHistory: () => {}
     };
-    const handler = editor.slice(editor.indexOf("  async function generateStoryboardNode("), editor.indexOf("  async function reviewStoryboardGeneratedFrame("));
-    const run = new Function(...Object.keys(deps), `${handler}\nreturn generateStoryboardNode;`)(...Object.values(deps));
+    const handler = editor.slice(editor.indexOf("  function generateStoryboardNode("), editor.indexOf("  async function reviewStoryboardGeneratedFrame("));
+    const run = new Function("runCanvasAction", ...Object.keys(deps), `${handler}\nreturn generateStoryboardNode;`)((_node, operation) => operation({ stopped: false }), ...Object.values(deps));
     const result = await run(node);
     if (scenario !== "correct swapped identities") {
       assert.equal(result.status, "error");

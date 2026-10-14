@@ -10,13 +10,13 @@ test('Stop releases a running image node and ignores a late successful response'
   });
   const node = page.locator('[data-node-card-id="model"]');
   await node.locator('.run-node-button').click();
-  await expect(node.getByRole('button', { name: 'Stop node', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop all active canvas nodes', exact: true })).toBeVisible();
   await expect.poll(() => Boolean(finish)).toBe(true);
-  await node.getByRole('button', { name: 'Stop node', exact: true }).click();
+  await page.getByRole('button', { name: 'Stop all active canvas nodes', exact: true }).click();
   await expect(node.getByText('Stopped at user request.', { exact: false })).toBeVisible();
   await expect(node.locator('.run-node-button')).toBeEnabled();
   finish();
-  await expect(node.getByRole('button', { name: 'Stop node', exact: true })).toHaveCount(0);
+  await expect(node.locator('.node-stop-button, .stop-node-button')).toHaveCount(0);
   await expect(node.locator('.run-node-button')).toBeEnabled();
   await expect(node.locator('img[src*="late.png"]')).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -35,13 +35,13 @@ test('Stop dismisses a recovered video job without submitting paid work', async 
     return route.fulfill({ json: { jobs: [] } });
   });
   const node = page.locator('[data-node-card-id="model"]');
-  const stop = node.getByRole('button', { name: 'Stop node', exact: true });
+  const stop = page.getByRole('button', { name: 'Stop all active canvas nodes', exact: true });
   await expect(stop).toBeVisible();
-  await expect(node.getByRole('button', { name: 'Stop this run', exact: true })).toBeVisible();
-  await node.getByRole('button', { name: 'Stop this run', exact: true }).click();
+  await expect(node.locator('.run-node-button')).toBeDisabled();
+  await stop.click();
   await expect.poll(() => sent?.nodeId).toBe('model');
   expect(JSON.parse(sent.scope)[0]).toBe('browser-regression-project');
-  await expect(stop).toHaveCount(0);
+  await expect(node.locator('.run-node-button')).toBeEnabled();
   await expect(node.locator('.run-node-button')).toBeEnabled();
   expect(errors).toEqual([]);
 });
@@ -64,4 +64,31 @@ test('completed video with blocked fallback offers local recovery without a new 
   await expect.poll(() => recovery?.action).toBe('save-to-workflow');
   expect(recovery.acknowledged).toBe(true);
   await expect(node.locator('.run-node-button')).toBeEnabled();
+});
+
+
+test('red canvas X stops two active nodes together and sits beside Snap and zoom', async ({ page }) => {
+  const { fixture } = await openFixture(page, { generation: true, scale: 1 });
+  const model = fixture.nodes.find(node => node.id === 'model');
+  const twins = { ...fixture, nodes: [model, { ...model, id: 'second', x: 600, y: 30, data: { ...model.data, title: 'Second generator' } }], edges: [] };
+  await page.addInitScript(value => sessionStorage.setItem('seedance-node-editor-draft-v1', JSON.stringify(value)), twins);
+  const finish = [];
+  await page.route('**/api/node/generate-image', async route => {
+    await new Promise(resolve => finish.push(resolve));
+    await route.fulfill({ json: { images: [{ localUrl: '/outputs/e2e/late.png' }] } });
+  });
+  await page.reload(); await page.getByRole('button', { name: 'Nodes', exact: true }).click();
+  const first = page.locator('[data-node-card-id="model"]'), second = page.locator('[data-node-card-id="second"]');
+  await first.locator('.run-node-button').click(); await second.locator('.run-node-button').click();
+  await expect.poll(() => finish.length).toBe(2);
+  const controls = page.locator('.zoom-controls');
+  await expect(controls.getByRole('button', { name: 'Snap to grid', exact: true })).toBeVisible();
+  const stop = controls.getByRole('button', { name: 'Stop all active canvas nodes', exact: true });
+  await expect(stop).toHaveCSS('color', 'rgb(255, 92, 92)');
+  await expect(page.locator('.node-stop-button, .stop-node-button')).toHaveCount(0);
+  await stop.click();
+  await expect(first.locator('.run-node-button')).toBeEnabled(); await expect(second.locator('.run-node-button')).toBeEnabled();
+  finish.forEach(resolve => resolve());
+  await expect(first.getByText('Stopped at user request.', { exact: false })).toBeVisible();
+  await expect(second.getByText('Stopped at user request.', { exact: false })).toBeVisible();
 });
