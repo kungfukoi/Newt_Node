@@ -4,6 +4,30 @@ import assert from "node:assert/strict";
 import { generateCharacterWardrobeVariant } from "../src/characterWardrobeGeneration.js";
 import { characterWardrobeEditVersion } from "../src/characterSheetWorkflow.js";
 
+test("completed wardrobe images are checkpointed before their CU edit finishes", async () => {
+  const checkpoints = [];
+  let releaseVideo;
+  const gate = new Promise(resolve => { releaseVideo = resolve; });
+  let videoStarted;
+  const started = new Promise(resolve => { videoStarted = resolve; });
+  const work = generateCharacterWardrobeVariant({ data: { cuVideoGeneration: true } }, { id: "coat" }, {
+    baseSheet: { url: "/base.png" }, baseVideoSheet: { url: "/base-cu.png" },
+    onCheckpoint: variant => checkpoints.push(variant),
+    runWardrobeEdit: async request => {
+      if (request.sheetKind === "video") { videoStarted(); await gate; return { url: "/coat-cu.png" }; }
+      return { url: "/coat.png" };
+    }
+  });
+  await started;
+  assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0].generated.url, "/coat.png");
+  assert.equal(checkpoints[0].videoGenerated, undefined);
+  releaseVideo();
+  const { variant } = await work;
+  assert.equal(checkpoints.length, 2);
+  assert.equal(variant.videoGenerated.url, "/coat-cu.png");
+});
+
 test("character wardrobe edits never submit a provider mask", async () => {
   const requests = [];
   const node = {

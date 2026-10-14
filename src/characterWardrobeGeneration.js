@@ -15,9 +15,22 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
     regenerateImage = false,
     regenerateVideo = false,
     runWardrobeEdit = runCharacterWardrobeEdit,
-    onGenerationComplete = () => {}
+    onGenerationComplete = () => {},
+    onCheckpoint = () => {}
   } = {}) {
     let generated = regenerateImage ? null : existingVariant?.generated || null;
+    let videoGenerated = regenerateVideo ? null : existingVariant?.videoGenerated || null;
+    const makeVariant = () => ({
+      wardrobeId: wardrobe.id,
+      wardrobeUrl: wardrobe.localUrl || wardrobe.url || "",
+      wardrobeFileName: wardrobe.fileName || "Wardrobe",
+      baseSheetUrl: baseSheet.url || baseSheet.localUrl || "",
+      baseSignature,
+      wardrobeEditVersion: characterWardrobeEditVersion,
+      ...(videoGenerated && baseVideoSignature ? { baseVideoSignature } : {}),
+      generated,
+      ...(videoGenerated ? { videoGenerated } : {})
+    });
     if (!(generated?.url || generated?.localUrl)) {
       generated = await runWardrobeEdit({
         node,
@@ -27,10 +40,10 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
         workflowContext: workflowContext,
         characterTag: characterTag
       });
+      await onCheckpoint(makeVariant());
       onGenerationComplete();
     }
 
-    let videoGenerated = regenerateVideo ? null : existingVariant?.videoGenerated || null;
     let videoError = "";
     if (
       node.data.cuVideoGeneration
@@ -49,6 +62,7 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
           characterTag: characterTag,
           sheetKind: "video"
         });
+        await onCheckpoint(makeVariant());
       } catch (error) {
         videoError = error.message || "CU video wardrobe edit failed.";
       } finally {
@@ -57,17 +71,7 @@ export async function generateCharacterWardrobeVariant(node, wardrobe, {
     }
 
     return {
-      variant: {
-        wardrobeId: wardrobe.id,
-        wardrobeUrl: wardrobe.localUrl || wardrobe.url || "",
-        wardrobeFileName: wardrobe.fileName || "Wardrobe",
-        baseSheetUrl: baseSheet.url || baseSheet.localUrl || "",
-        baseSignature,
-        wardrobeEditVersion: characterWardrobeEditVersion,
-        ...(videoGenerated && baseVideoSignature ? { baseVideoSignature } : {}),
-        generated,
-        ...(videoGenerated ? { videoGenerated } : {})
-      },
+      variant: makeVariant(),
       videoError
     };
   }

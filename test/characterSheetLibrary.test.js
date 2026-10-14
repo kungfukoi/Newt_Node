@@ -5,11 +5,22 @@ import {
   activeCharacterSheetId,
   activeCharacterSheetVariant,
   characterSheetChoices,
+  characterSheetPreviewChoices,
   characterOutputReference,
   customCharacterSheetId,
   generatedCharacterSheetId,
   normalizeCharacterCustomSheets
 } from "../src/characterSheetLibrary.js";
+
+test("the sheet library lists image and local-only CU previews with stable selection ids", () => {
+  const choices = characterSheetPreviewChoices({ characterSheetVariants: [
+    { wardrobeId: "coat", wardrobeFileName: "Coat", generated: { localUrl: "/coat.png" }, videoGenerated: { localUrl: "/cu.png", url: "https://expired.example/cu" } }
+  ] });
+  assert.deepEqual(choices.map(c => [c.id, c.previewKind, c.item.url]), [
+    ["generated:coat", "image", "/coat.png"], ["generated:coat", "video", "/cu.png"]
+  ]);
+  assert.match(choices[1].label, /CU Video/);
+});
 
 function libraryData(patch = {}) {
   return {

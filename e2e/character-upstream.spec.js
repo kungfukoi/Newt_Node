@@ -1,6 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 
+test("completed image and CU wardrobe sheets remain viewable during character generation", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
+    nodes: [{ id: "alex", type: "character", x: 10, y: 10, data: {
+      title: "Alex", characterName: "Alex", status: "compiling", characterTab: "build", cuVideoGeneration: true,
+      characterBatchProgress: { completed: 3, total: 4 },
+      characterSheetVariants: [{ wardrobeId: "coat", wardrobeFileName: "Coat", generated: { localUrl: "/outputs/e2e/coat.png" }, videoGenerated: { localUrl: "/outputs/e2e/cu-coat.png" } }]
+    } }], edges: [], groups: [], viewport: { x: 0, y: 0, scale: .8 }
+  })));
+  const { errors } = await openFixture(page, { count: 1 });
+  const character = page.locator('[data-node-card-id="alex"]');
+  const cu = character.locator('[title="Use Coat · CU Video"]');
+  await expect(cu).toBeEnabled();
+  await expect(character.locator('[title="Use Coat"]')).toBeEnabled();
+  await cu.click();
+  await expect(character.getByRole("tab", { name: "CU Video Sheet", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(character.locator('.character-sheet-drag-source img')).toHaveAttribute("src", /cu-coat/);
+  expect(errors).toEqual([]);
+});
+
 test("local-only Character sheets survive reload and supply the active reference to Storyboard", async ({ page }) => {
   const graph = { nodes: [
     { id: "alex", type: "character", x: 10, y: 10, data: {

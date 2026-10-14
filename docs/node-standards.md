@@ -8,6 +8,8 @@ Before starting any new feature, read this document first. If the feature change
 
 ## Goals
 
+Character Sheets lists completed image and CU video sheets separately, including Base Identity and each wardrobe. Completed sheets remain viewable during generation. Wardrobe images checkpoint into the library before the matching CU request finishes so a slow or failed CU request does not hide a completed image.
+
 The image editor enters Object Selection without submitting inference. Scan image for objects in the right panel starts an explicit SAM 2 scan; defaults are 32 × 32 sampling and 0.75 confidence. Save selections and boxes creates an Image Selection node with visible boxes and @tags, plus portable PNG metadata containing descriptions, coordinates and exact source masks. Image generation reads the embedded metadata and includes tag mappings in model prompts; guide graphics must not become output artwork. Done saves selected/subtracted regions, brush selections, boxes, drawing marks, prompt and edit method locally by image content identity and closes without a discard prompt. Reopening restores the draft without paid work. Done with empty regions clears the saved selection. Draft records remain local; exported PNG records travel with managed workflow assets. Ideogram box operations must allow scene-wide cleanup and destination integration beyond object footprints; explicit Keep boxes remain protected. Hidden instructions cover move/removal/replacement effects, relighting, contact/cast shadows, reflections, natural edges, occlusion and source reconstruction.
 
 Storyboard now follows upstream directing skill 2.2.0 for independent plans:
@@ -55,6 +57,10 @@ Before completion:
 - Do not commit, merge, pull, push, switch branches, or discard work unless the user explicitly requests it.
 
 ## Current Product Snapshot
+
+- Coverage checkpoints each completed angle into the node and refreshes output history during the batch. Completed images remain visible if later angles fail or the run is stopped; stopping prevents submission of remaining angles.
+
+- Canvas groups repeat their editable name inside the upper-left corner in a large label. Compact up/down arrows beside the group name adjust label size in 8-pixel steps from 24 to 320 canvas pixels (64 by default), without a visible size caption or numeric field. The size persists with workflows and copied groups, and follows the React Flow zoom transform.
 
 - Composite Video shows a local live thumbnail before rendering. Blend, mix, layer wiring and image/video masks (invert, blur and expansion) update the sampled frame immediately; muted playback and seeking preview video layers. Work is bounded to a 320-pixel thumbnail and approximately 12 fps, and playback pauses while hidden. The browser thumbnail is an approximation; Run creates the full-quality FFmpeg result, available through Rendered output, with existing downloads and preview actions. Live preview never replaces persisted results or submits a render.
 

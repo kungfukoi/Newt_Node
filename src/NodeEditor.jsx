@@ -249,6 +249,7 @@ import {
   characterDefaultWardrobeId,
   characterOutputReference,
   characterSheetChoices,
+  characterSheetPreviewChoices,
   characterSheetVariantForSelection,
   customCharacterSheetId,
   generatedCharacterSheetId,
@@ -2510,6 +2511,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const group = {
       id: `group-${Date.now()}`,
       name: `Group ${groups.length + 1}`,
+      labelFontSize: 64,
       color,
       x: Math.round(bounds.left - groupPadding.x),
       y: Math.round(bounds.top - groupPadding.top),
@@ -3667,6 +3669,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             existingVariant,
             regenerateImage: needsImage,
             regenerateVideo: needsVideo,
+            onCheckpoint: (variant) => {
+              variants = upsertCharacterWardrobeVariant(variants, variant);
+              updateNode(node.id, { characterSheetVariants: variants });
+            },
             onGenerationComplete: markGenerationComplete
           });
           variants = upsertCharacterWardrobeVariant(variants, variant);
@@ -7415,16 +7421,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...resetCoverageOutputPatch(),
           status: "running"
         });
+        const completedCoverage = [];
         const settled = await settleSequential(
           shots,
-          (shot, index) => runCoverageGeneration({
+          async (shot, index) => {
+            if (token.stopped) throw new Error("Stopped at user request.");
+            const item = await runCoverageGeneration({
             node: currentNode,
             sourceImageUrl,
             shot,
             aspectRatio,
             workflowContext: requestContext,
             index
-          }),
+            });
+            completedCoverage.push(item);
+            const { resultItems } = appendedNodeResultState([], completedCoverage, "image");
+            updateNode(currentNode.id, { resultItems, coverageResults: resultItems, resultUrl: resultItems[0]?.url || "", selectedResultIndex: 0, resultType: "image" });
+            loadOutputHistory();
+            return item;
+          },
           imageRunStaggerMs
         );
         const successes = fulfilledRunValues(settled, { flatten: true });
@@ -7507,16 +7522,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               { imagePromptIn: incoming.imageIn || [] }
             );
             updateNode(currentNode.id, { ...resetCoverageOutputPatch(), status: "running" });
+            const completedCoverage = [];
             const settled = await settleSequential(
               shots,
-              (shot, index) => runCoverageGeneration({
+              async (shot, index) => {
+                if (token.stopped) throw new Error("Stopped at user request.");
+                const item = await runCoverageGeneration({
                 node: currentNode,
                 sourceImageUrl,
                 shot,
                 aspectRatio,
                 workflowContext: requestContext,
                 index
-              }),
+                });
+                completedCoverage.push(item);
+                const { resultItems } = appendedNodeResultState([], completedCoverage, "image");
+                updateNode(currentNode.id, { resultItems, coverageResults: resultItems, resultUrl: resultItems[0]?.url || "", selectedResultIndex: 0, resultType: "image" });
+                loadOutputHistory();
+                return item;
+              },
               imageRunStaggerMs
             );
             const successes = fulfilledRunValues(settled, { flatten: true });
@@ -8483,6 +8507,9 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
         "--group-color": color
       }}
     >
+      <div className="group-canvas-name" style={{ fontSize: group.labelFontSize || 64 }}>
+        {group.name || "Group"}
+      </div>
       <div className="group-header" onPointerDown={(event) => onDragStart(event, group)}>
         <input
           value={group.name || ""}
@@ -8493,6 +8520,26 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
           onPointerDown={(event) => event.stopPropagation()}
           aria-label="Group name"
         />
+        <div className="group-label-size" onPointerDown={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            aria-label="Increase group label size"
+            title="Increase group label size"
+            disabled={(group.labelFontSize || 64) >= 320}
+            onClick={() => onUpdate(group.id, { labelFontSize: Math.min(320, (group.labelFontSize || 64) + 8) })}
+          >
+            <ChevronDown size={12} style={{ transform: "rotate(180deg)" }} />
+          </button>
+          <button
+            type="button"
+            aria-label="Decrease group label size"
+            title="Decrease group label size"
+            disabled={(group.labelFontSize || 64) <= 24}
+            onClick={() => onUpdate(group.id, { labelFontSize: Math.max(24, (group.labelFontSize || 64) - 8) })}
+          >
+            <ChevronDown size={12} />
+          </button>
+        </div>
         <div className="group-color-row" onPointerDown={(event) => event.stopPropagation()}>
           {groupPalette.map((swatch) => (
             <button
@@ -11780,10 +11827,11 @@ function NodeBody({
     const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
     const characterVariants = Array.isArray(node.data.characterSheetVariants) ? node.data.characterSheetVariants : [];
     const sheetChoices = characterSheetChoices(node.data);
+    const sheetPreviewChoices = characterSheetPreviewChoices(node.data);
     const selectedSheetId = activeCharacterSheetId(node.data);
     const variantCount = characterVariants.length;
-    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url).length;
-    const targetVariantCount = Math.max(1, wardrobes.length);
+    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.localUrl || variant?.videoGenerated?.url).length;
+    const targetVariantCount = 1 + wardrobes.length;
     const batchProgress = node.data.characterBatchProgress;
     const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
     const compiling = node.data.status === "compiling";
@@ -11837,7 +11885,8 @@ function NodeBody({
         ...(choice.source === "generated" && variant.wardrobeId !== characterDefaultWardrobeId
           ? { activeWardrobeId: variant.wardrobeId }
           : {}),
-        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image",
+        characterSheetPreviewKind: choice.previewKind || (node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image"),
+        characterTab: "sheet",
         ...(locked ? characterVariantDisplayPatch(variant) : {})
       });
     }
@@ -12042,19 +12091,18 @@ function NodeBody({
                     )}
                   </div>
                   <div className="character-sheet-library-strip">
-                    {sheetChoices.map((choice) => (
+                    {sheetPreviewChoices.map((choice) => (
                       <button
-                        key={choice.id}
+                        key={`${choice.id}:${choice.previewKind}`}
                         type="button"
-                        className={`character-sheet-library-item ${choice.id === selectedSheetId ? "active" : ""}`}
-                        disabled={compiling}
+                        className={`character-sheet-library-item ${choice.id === selectedSheetId && choice.previewKind === characterSheetPreviewKind ? "active" : ""}`}
                         onClick={() => selectCharacterSheet(choice)}
                         title={`Use ${choice.label}`}
                       >
                         <img {...fullResolutionImageProps(choice.item)} src={displayMediaUrl(previewImageUrl(choice.item))} alt={choice.label} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                         <span className="character-sheet-source">{choice.tabLabel} · {choice.source === "custom" ? "Custom" : "Generated"}</span>
                         <span className="character-sheet-name">{choice.label}</span>
-                        {choice.source === "custom" && (
+                        {choice.source === "custom" && !compiling && choice.previewKind === "image" && (
                           <span
                             className="character-remove"
                             role="button"
@@ -12069,7 +12117,7 @@ function NodeBody({
                             <X size={10} />
                           </span>
                         )}
-                        {choice.source === "generated" && (
+                        {choice.source === "generated" && !compiling && choice.previewKind === "image" && (
                           <span
                             className="character-remove"
                             role="button"
@@ -23478,6 +23526,7 @@ function normalizeGroups(groups = [], nodeMap = new Map()) {
       return {
         id: String(group?.id || `group-${index + 1}`),
         name: String(group?.name || `Group ${index + 1}`),
+        labelFontSize: Math.min(320, Math.max(24, finiteNumber(group?.labelFontSize, 64))),
         color: groupPalette.includes(group?.color) ? group.color : groupPalette[index % groupPalette.length],
         x: finiteNumber(group?.x, 120 + index * 30),
         y: finiteNumber(group?.y, 120 + index * 30),
