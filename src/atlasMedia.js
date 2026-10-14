@@ -1,4 +1,5 @@
 import { validateSeedance25Task } from "./seedance25.js";
+import { validateSeedanceDraft } from "./seedanceDraft.js";
 import { getPricingCatalog } from "./pricingCatalog.js";
 import { estimateAtlasImageCost as catalogImageCost, estimateAtlasVideoCost as catalogVideoCost } from "./atlasPricing.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
@@ -139,10 +140,11 @@ export function buildAtlasVideoRequest({
   duration,
   resolution,
   generateAudio = true,
-  seed, seedanceTask = "reference"
+  seed, seedanceTask = "reference", seedanceDraft
 } = {}) {
   const spec = videoModels.get(String(model || "").trim().toLowerCase());
   if (!spec) fail(`Atlas Cloud does not support ${model || "this video model"}.`);
+  const draft = validateSeedanceDraft({ model, seedanceDraft, provider: "atlas" });
   const editing = validateSeedance25Task({ model, seedanceTask, provider: "atlas", videos, startFrames: startImage ? [startImage] : [], endFrames: endImage ? [endImage] : [] });
   const refs = { images, videos, audios };
   if (endImage && !startImage) fail("Atlas Cloud End Frame requires a Start Frame.");
@@ -162,7 +164,8 @@ export function buildAtlasVideoRequest({
   if (spec.family === "seedance") {
     const is25 = spec.version === "2.5";
     request.duration = editing ? -1 : normalizedDuration(duration, 4, is25 ? 30 : 15, 5, true);
-    request.resolution = normalizedSeedanceResolution(resolution, is25);
+    request.resolution = draft ? "480p" : normalizedSeedanceResolution(resolution, is25);
+    if (draft) request.draft = true;
     request.ratio = editing ? "adaptive" : is25 && startImage ? "adaptive" : normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
     request.generate_audio = generateAudio !== false;
     if (seed !== undefined && seed !== null && seed !== "") {

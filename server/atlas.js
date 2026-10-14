@@ -113,6 +113,7 @@ export function createAtlasClient({
     }
 
     let job = initial?.data || initial;
+    let draftId = job?.draft_id;
     const requestId = typeof job?.id === "string" ? job.id : "";
     if (!requestId) {
       throw fail(502, "Atlas Cloud returned no job ID. Check provider history before retrying; NewtNode did not resubmit it.");
@@ -129,7 +130,7 @@ export function createAtlasClient({
       if (["completed", "succeeded"].includes(status)) {
         const url = Array.isArray(job.outputs) ? job.outputs.map(secureUrl).find(Boolean) : "";
         if (!url) throw fail(502, `Atlas Cloud job ${requestId} completed without a usable output.`);
-        return { requestId, url, job };
+        return { requestId, url, job: { ...job, ...(job.draft_id || draftId ? { draft_id: job.draft_id || draftId } : {}) } };
       }
       if (["failed", "canceled", "cancelled", "timeout"].includes(status)) {
         throw fail(502, `Atlas Cloud job ${requestId} ${status}: ${providerDetail(job.error) || providerDetail(job.message) || "The provider ended this generation."}`);
@@ -145,6 +146,7 @@ export function createAtlasClient({
           throw fail(502, "Atlas Cloud returned an invalid job status.", { retryable: true });
         }
         job = nextJob;
+        draftId = job.draft_id || draftId;
         errors = 0;
         notFound = 0;
       } catch (error) {

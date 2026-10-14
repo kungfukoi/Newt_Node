@@ -1,5 +1,5 @@
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
-import { validateSeedanceDraft, seedanceDraftCost } from "../src/seedanceDraft.js";
+import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { generateFlux3 } from "./flux3.js";
@@ -886,7 +886,7 @@ app.get("/api/generation-progress", (req, res) => {
     : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
   res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
-const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: () => process.env.FAL_KEY, jobs: remoteVideoJobs });
+const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
@@ -1183,6 +1183,7 @@ function buildHealthPayload() {
       flux3: true,
       nanoBanana21: true,
       seedanceDrafts: true,
+      seedanceMultiProviderDrafts: true,
       seedanceVideoEditing: true,
       exploreLookVariation: true,
       elevenLabsV4: true,
@@ -6494,18 +6495,19 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const requestedSeedanceProvider = runtimeModelProviderPreferences.seedance;
-    if (/^Seedance 2\.[05]$/i.test(selectedVideoModel.displayName)) {
-      const packagePath = String(req.body.workflowPackagePath || "");
-      req.videoStorageFallback = (await verifyVideoOutputDestination(req.body, { rootDir, fallbackDirectory: packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(req.body)) }))?.fallback === true;
-    }
+    const draftProvider = resolveSeedanceRuntimeProvider({ preferredProvider: requestedSeedanceProvider,
+      falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY, atlasKey: process.env.ATLAS_API_KEY });
     if (isSeedance25Model(selectedVideoModel.displayName)) {
       for (const field of ["referenceImageUrls", "referenceVideoUrls", "referenceAudioUrls", "startFrameUrls", "endFrameUrls"]) {
         if (req.body[field] !== undefined && (!Array.isArray(req.body[field]) || req.body[field].some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Seedance 2.5 requires valid managed references; no generation was submitted.");
       }
     }
-    const draftKey = String(process.env.FAL_KEY || "").trim();
-    const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: draftKey ? "fal" : "" });
-    if (draftMode && !draftKey) throw httpError(400, "Enable the selected Fal key before generating a Seedance draft.");
+    const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: draftProvider });
+    const draftKey = draftMode ? String(({ fal: process.env.FAL_KEY, atlas: process.env.ATLAS_API_KEY, krea: process.env.KREA_API_KEY })[draftProvider] || "").trim() : "";
+    if (/^Seedance 2\.[05]$/i.test(selectedVideoModel.displayName)) {
+      const packagePath = String(req.body.workflowPackagePath || "");
+      req.videoStorageFallback = (await verifyVideoOutputDestination(req.body, { rootDir, fallbackDirectory: packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(req.body)) }))?.fallback === true;
+    }
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });
     let sourceDurationSeconds;
@@ -6727,7 +6729,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     const duration = editing ? "auto" : seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
     const generateAudio = req.body.generateAudio !== false;
     const requestedSeed = optionalInteger(req.body.seed);
-    const runtimeProvider = draftMode ? "fal" : resolveSeedanceRuntimeProvider({
+    const runtimeProvider = draftMode ? draftProvider : resolveSeedanceRuntimeProvider({
       preferredProvider: requestedSeedanceProvider,
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY,
@@ -6806,7 +6808,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     function seedanceJobSpec(input) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
-        credentialFingerprint: providerKeyFingerprint(runtimeProvider === "fal" ? draftKey || process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
+        credentialFingerprint: providerKeyFingerprint(draftMode ? draftKey : runtimeProvider === "fal" ? process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
         body: {
           ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
           outputFileNameBase: req.body.outputFileNameBase,
@@ -6855,15 +6857,21 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         resolution,
         aspectRatio,
         generateAudio,
-        seed: requestedSeed, seedanceTask: editing ? "edit" : "reference"
+        seed: requestedSeed, seedanceTask: editing ? "edit" : "reference", ...(draftMode ? { seedanceDraft: true } : {})
       };
       if (req.durableRequestHash) {
-        const input = await atlasMedia.prepareVideo(atlasOptions, process.env.ATLAS_API_KEY);
+        const input = await atlasMedia.prepareVideo(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
         endpoint = input.model;
-        cost = editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." } : { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
+        cost = draftMode ? seedanceDraftCost("preview", "atlas") : editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." } : { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
         return await acceptSeedanceJob(input);
       }
-      const atlasResult = await atlasMedia.video(atlasOptions, process.env.ATLAS_API_KEY);
+      const atlasResult = await atlasMedia.video(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
+      if (draftMode) {
+        endpoint = atlasResult.endpoint;
+        cost = seedanceDraftCost("preview", "atlas");
+        return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+          remote: { video: atlasResult.remoteVideo, draft_id: atlasResult.job?.draft_id } }));
+      }
       if (editing) atlasResult.cost = { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." };
       endpoint = atlasResult.endpoint;
       cost = atlasResult.cost;
@@ -6923,25 +6931,26 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
         resolution,
         duration: runtimeDurationSeconds,
         aspect_ratio: kreaAspectRatio,
-        generate_audio: generateAudio
+        generate_audio: generateAudio,
+        ...(draftMode ? { draft: true } : {})
       };
       if (Number.isInteger(requestedSeed)) input.seed = requestedSeed;
 
       if (routeKind === "image-to-video") {
-        input.start_image = await uploadKreaReferenceImage(startFrameUrl);
-        if (endFrameUrl) input.end_image = await uploadKreaReferenceImage(endFrameUrl);
+        input.start_image = await uploadKreaReferenceImage(startFrameUrl, draftMode ? draftKey : undefined);
+        if (endFrameUrl) input.end_image = await uploadKreaReferenceImage(endFrameUrl, draftMode ? draftKey : undefined);
       }
 
       if (routeKind === "reference-to-video") {
         const imageLimit = seedance25 ? seedance25ReferenceLimits.images : 9;
         const videoLimit = seedance25 ? seedance25ReferenceLimits.videos : 3;
         const audioLimit = seedance25 ? seedance25ReferenceLimits.audios : 3;
-        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, imageLimit).map(uploadKreaReferenceImage));
-        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, videoLimit).map(uploadLocalOutputToKrea));
-        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, audioLimit).map(uploadLocalOutputToKrea));
+        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, imageLimit).map(url => uploadKreaReferenceImage(url, draftMode ? draftKey : undefined)));
+        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, videoLimit).map(url => uploadLocalOutputToKrea(url, draftMode ? draftKey : undefined)));
+        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, audioLimit).map(url => uploadLocalOutputToKrea(url, draftMode ? draftKey : undefined)));
       }
 
-      cost = estimateKreaSeedanceCost({
+      cost = draftMode ? seedanceDraftCost("preview", "krea") : estimateKreaSeedanceCost({
         modelName: selectedVideoModel.displayName,
         durationSeconds: runtimeDurationSeconds,
         resolution,
@@ -6950,7 +6959,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       cost.aspectRatio = kreaAspectRatio;
       cost.routeKind = routeKind;
       if (req.durableRequestHash) return await acceptSeedanceJob(input);
-      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
+      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input, apiKey: draftMode ? draftKey : undefined });
       requestId = kreaResult.requestId;
       remoteVideo = kreaResult.remoteVideo;
     }
@@ -6995,7 +7004,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
-  if (spec.provider === "atlas" && settings.seedanceTask !== "edit" && recordedCostAmount(cost) === null &&
+  if (spec.provider === "atlas" && !settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit" && recordedCostAmount(cost) === null &&
       spec.credentialFingerprint === providerKeyFingerprint(process.env.ATLAS_API_KEY)) {
     const quote = await providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
     if (quote) cost = { ...cost, ...quote };
@@ -7003,17 +7012,18 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   let draftMetadata = job.seedanceDraft || null;
   let draftWarning = "";
   if (settings.seedanceDraft && !draftMetadata) {
-    draftMetadata = await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint,
-      startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec });
+    draftMetadata = spec.provider === "krea" ? { provider: "krea", resolution: "480p", completionSupported: false }
+      : await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint, provider: spec.provider,
+        startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec });
     if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
-    else draftWarning = "Fal returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.";
+    else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.`;
   }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
     id: job.requestId || job.runId || randomUUID(), createdAt: job.createdAt || new Date().toISOString(),
     mediaType: "video", provider, modelName, endpoint, mode: routeKindLabel(routeKind),
     prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
-    project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed },
+    project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed, ...(draftMetadata ? { draft: draftMetadata } : {}) },
     cost, keyIdentity: { fingerprint: spec.credentialFingerprint }, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
     ...(job.runId ? { generationRunId: job.runId, generationTimings: jobTimingDiagnostic(job) } : {})
   }, { deduplicate: Boolean(job.runId) });
@@ -21674,9 +21684,9 @@ async function uploadLocalOutputToFal(publicPath) {
   return fal.storage.upload(falFile);
 }
 
-async function uploadLocalOutputToKrea(publicPath) {
+async function uploadLocalOutputToKrea(publicPath, capturedKey) {
   const { fileName, buffer, mimeType } = await readLocalAsset(publicPath);
-  return uploadAssetBufferToKrea({ fileName, buffer, mimeType });
+  return uploadAssetBufferToKrea({ fileName, buffer, mimeType }, capturedKey);
 }
 
 async function uploadToKrea(file) {
@@ -21687,8 +21697,9 @@ async function uploadToKrea(file) {
   });
 }
 
-async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
-  if (!process.env.KREA_API_KEY) {
+async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }, capturedKey) {
+  const apiKey = typeof capturedKey === "string" ? capturedKey : process.env.KREA_API_KEY;
+  if (!apiKey) {
     throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
   }
 
@@ -21697,7 +21708,7 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
   form.append("description", "NewtNode generation reference");
   const response = await fetch(`${kreaApiBaseUrl}/assets`, {
     method: "POST",
-    headers: kreaAuthorizationHeaders(),
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: form
   });
   const data = await responseJson(response);
@@ -21711,8 +21722,8 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
   return normalizeKreaUploadedAssetUrl(data.image_url);
 }
 
-async function runKreaSeedanceGeneration({ endpoint, input }) {
-  const result = await runKreaGeneration({ endpoint, input, label: "Seedance" });
+async function runKreaSeedanceGeneration({ endpoint, input, apiKey }) {
+  const result = await runKreaGeneration({ endpoint, input, label: "Seedance", apiKey });
   const videoUrl = extractKreaJobResultUrl(result.job);
   if (!videoUrl) {
     throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: result.job });
@@ -21728,14 +21739,14 @@ async function runKreaSeedanceGeneration({ endpoint, input }) {
   };
 }
 
-async function runKreaGeneration({ endpoint, input, label = "generation" }) {
-  if (!process.env.KREA_API_KEY) {
+async function runKreaGeneration({ endpoint, input, label = "generation", apiKey = process.env.KREA_API_KEY }) {
+  if (!apiKey) {
     throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
   }
   const response = await fetch(`${kreaApiBaseUrl}${endpoint}`, {
     method: "POST",
     headers: {
-      ...kreaAuthorizationHeaders(),
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(input)
@@ -21760,16 +21771,16 @@ async function runKreaGeneration({ endpoint, input, label = "generation" }) {
 
   return {
     requestId: jobId,
-    job: await waitForKreaJob(jobId, label)
+    job: await waitForKreaJob(jobId, label, apiKey)
   };
 }
 
-async function waitForKreaJob(jobId, label = "generation") {
+async function waitForKreaJob(jobId, label = "generation", apiKey = process.env.KREA_API_KEY) {
   const maxAttempts = 600;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (attempt > 0) await delay(2000);
     const response = await fetch(`${kreaApiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
-      headers: kreaAuthorizationHeaders()
+      headers: { Authorization: `Bearer ${apiKey}` }
     });
     const job = await responseJson(response);
     if (!response.ok) {
@@ -21832,11 +21843,11 @@ function kreaErrorMessage(data, fallback) {
   return apiErrorMessage(data?.error ?? data?.message ?? data?.detail ?? data?.errors, fallback);
 }
 
-async function uploadKreaReferenceImage(publicPath) {
+async function uploadKreaReferenceImage(publicPath, capturedKey) {
   const asset = await resolveLocalAssetPath(publicPath);
   const metadata = await probeLocalImageFile(asset.filePath, asset.fileName);
   const target = kreaReferenceImageTarget(metadata.width, metadata.height);
-  if (!target.needsNormalization) return uploadLocalOutputToKrea(publicPath);
+  if (!target.needsNormalization) return uploadLocalOutputToKrea(publicPath, capturedKey);
 
   const temporaryPath = path.join(tmpdir(), `newtnode-krea-reference-${randomUUID()}.jpg`);
   try {
@@ -21855,7 +21866,7 @@ async function uploadKreaReferenceImage(publicPath) {
       fileName: `${path.basename(asset.fileName, path.extname(asset.fileName))}-krea-reference.jpg`,
       buffer: await readFile(temporaryPath),
       mimeType: "image/jpeg"
-    });
+    }, capturedKey);
   } finally {
     await rm(temporaryPath, { force: true }).catch(() => {});
   }

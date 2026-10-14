@@ -116,7 +116,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
             await commit(runId, { state: "uncertain", health: "attention", message: "Needs attention: provider returned no job ID. Check the provider; no automatic resubmission." });
             return;
           }
-          job = await commit(runId, { requestId: accepted.requestId, providerAcceptedAt: iso(), state: "queued", message: "Queued with provider" });
+          job = await commit(runId, { requestId: accepted.requestId, ...(accepted.draftId ? { providerDraftId: accepted.draftId } : {}), providerAcceptedAt: iso(), state: "queued", message: "Queued with provider" });
         }
         if (job.state === "dismissed") return;
         const status = await client.poll(job);
@@ -127,6 +127,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
         job = await commit(runId, {
           state: status.remote ? "downloading" : status.state || "running",
           remote: status.remote || null,
+          ...(status.draftId ? { providerDraftId: status.draftId } : {}),
           ...(status.remote ? { outputAvailableAt: job.outputAvailableAt || iso() } : {}),
           ...(Number.isFinite(status.providerLatencyMs) ? { providerLatencyMs: status.providerLatencyMs } : {}),
           providerStatus: status.providerStatus || "",

@@ -393,7 +393,7 @@ import {
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
-import { selectedSeedanceDraft } from "./seedanceDraft.js";
+import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
@@ -16001,9 +16001,11 @@ function NodeBody({
   const seedanceProvider = generationProviderForModel({ model: node.data.model, mediaType: "video", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
   const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
-  const draftUnavailable = false; // Saved drafts explicitly route through Fal, matching upstream.
+  const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(seedanceProvider);
   const editingUnavailable = seedanceEditing && (!["fal", "atlas"].includes(seedanceProvider) || directorConnected);
   const selectedDraft = selectedSeedanceDraft(node.data);
+  const previewOnlyDraft = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft?.completionSupported === false;
+  const draftProviderName = seedanceDraftProviderName(selectedDraft?.seedanceDraft.provider);
   const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
   const preparedSpeechCurrent = !seedanceEditing && Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
@@ -16063,12 +16065,13 @@ function NodeBody({
       <GenerationProgress scope={generationScope} nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       {selectedDraft && <div className="seedance-draft-actions">
-        <small title={"Finish with the original Fal key before " + new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}>Draft / 480p</small>
+        <small title={`Finish with the original ${draftProviderName} key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
         <button type="button" disabled={running} onClick={() => onRun(node, "finish-seedance-draft")}
-          title={completedDraft ? "Select the saved 1080p render" : "Separately billed completion using the original draft inputs; requires the original Fal key within seven days"}>
+          title={completedDraft ? "Select the saved 1080p render" : `Separately billed completion using the original draft inputs; requires the original ${draftProviderName} key within seven days`}>
           {completedDraft ? "View 1080p" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
         </button>
       </div>}
+      {previewOnlyDraft && <div className="seedance-draft-actions"><small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small></div>}
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt || draftUnavailable || editingUnavailable}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
@@ -16095,14 +16098,14 @@ function NodeBody({
         <summary>Settings</summary>
         {isSeedance25 && <>
           <NodeRow label="Draft (480p)"><button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
-            disabled={running || directorConnected || (!seedanceDraft && seedanceProvider !== "fal")}
-            title={directorConnected ? "Controlled by Director" : "Fal preview. Finish selected drafts at 1080p within seven days; each stage is billed separately."}
+            disabled={running || directorConnected || (!seedanceDraft && !supportsSeedanceDraft(seedanceProvider))}
+            title={directorConnected ? "Controlled by Director" : seedanceDraftHint(seedanceProvider)}
             onClick={() => onUpdate(node.id, { seedanceDraft: !seedanceDraft })}><span /></button></NodeRow>
           <NodeRow label="Task"><select aria-label="Seedance task" value={node.data.seedanceTask || "reference"} disabled={running || directorConnected}
             onChange={event => onUpdate(node.id, { seedanceTask: event.target.value })}>
             <option value="reference">Generate Video</option><option value="edit" disabled={!["fal", "atlas"].includes(seedanceProvider)}>Edit Existing Video</option>
           </select></NodeRow>
-          {seedanceProvider !== "fal" && <small role="status">Draft generation requires Fal. Seedance currently uses {seedanceProvider || "an unavailable provider"}. Choose Fal for Seedance in Settings before running a draft.</small>}
+          {!supportsSeedanceDraft(seedanceProvider) && <small role="status">Enable Fal, Atlas Cloud or Krea for Seedance in Settings before running a draft.</small>}
           {directorConnected && <small role="status">Draft mode is controlled by the connected Director.</small>}
           {editingUnavailable && <small role="status">Editing requires Fal or Atlas and no connected Director.</small>}
         </>}
