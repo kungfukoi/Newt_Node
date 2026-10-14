@@ -851,6 +851,22 @@
   opacity: 0.45;
 }
 
+.output-lightbox .video-crop-toolbar { gap: 8px; font-size: 12px; color: rgba(244, 240, 232, 0.78); }
+.output-lightbox .video-crop-toolbar select,
+.output-lightbox .video-crop-toolbar input[type="number"] {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.88);
+  background: #202020;
+  color-scheme: dark;
+  font: inherit;
+}
+.output-lightbox .video-crop-toolbar select:focus-visible,
+.output-lightbox .video-crop-toolbar input:focus-visible { outline: 2px solid #ddc631; outline-offset: 2px; }
+.output-lightbox-edit-status { display: flex; align-items: center; gap: 8px; padding: 10px 14px; color: #ddc631; }
+
 .output-adjust-panel {
   display: grid;
   grid-template-columns: minmax(380px, 0.84fr) minmax(420px, 1fr);

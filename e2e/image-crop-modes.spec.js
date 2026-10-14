@@ -6,10 +6,13 @@ test("image editor locks ratios and exports the entered pixel size", async ({ pa
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [{ id: "source", type: "image", x: 30, y: 30, data: { resultUrl: "/outputs/e2e/landscape.png", status: "complete" } }], edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 } })));
   const { errors } = await openFixture(page, { count: 1 });
   let savedSize;
+  let releaseUpload;
+  const uploadGate = new Promise(resolve => { releaseUpload = resolve; });
   await page.route("**/api/node/upload-asset", async route => {
     const request = route.request();
     const form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
     savedSize = await sharp(Buffer.from(await form.get("asset").arrayBuffer())).metadata();
+    await uploadGate;
     await route.fulfill({ json: { asset: { localUrl: "/outputs/e2e/cropped.png", fileName: "cropped.png", mimeType: "image/png", mediaType: "image" } } });
   });
   await page.locator('[data-node-card-id="source"] img').first().dblclick();
@@ -26,7 +29,12 @@ test("image editor locks ratios and exports the entered pixel size", async ({ pa
   await page.getByLabel("Crop fixed width").fill("2");
   await page.getByLabel("Crop fixed height").fill("3");
   await page.getByRole("button", { name: "Apply crop", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Applying crop" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply crop", exact: true })).toBeDisabled();
+  releaseUpload();
   await expect.poll(() => savedSize?.width).toBe(2);
+  await expect(box).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Applying crop" })).toHaveCount(0);
   expect(savedSize.height).toBe(3);
   expect(errors).toEqual([]);
 });
