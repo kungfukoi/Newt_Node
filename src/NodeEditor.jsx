@@ -3202,6 +3202,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function uploadCharacterWardrobes(node, fileList) {
+    if (["compiling", "uploading"].includes(node.data.status)) return;
     const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const files = Array.from(fileList || [])
       .filter((file) => file.type.startsWith("image/"))
@@ -3218,14 +3219,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         assets.push({ ...asset, id: `character-wardrobe-${Date.now()}-${assets.length}` });
       }
       const nextWardrobes = [...existing, ...assets].slice(0, maxCharacterWardrobes);
-      updateNode(node.id, {
-        characterWardrobes: nextWardrobes,
-        activeWardrobeId: node.data.activeWardrobeId || nextWardrobes[0]?.id || "",
-        status: "ready",
-        error: ""
-      });
+      await applyCharacterWardrobes(node, nextWardrobes);
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  async function applyCharacterWardrobes(node, wardrobes) {
+    const patch = {
+      characterWardrobes: wardrobes,
+      activeWardrobeId: node.data.activeWardrobeId || wardrobes[0]?.id || "",
+      status: "ready",
+      error: ""
+    };
+    updateNode(node.id, patch);
+    if (node.data.locked) {
+      const existingIds = new Set((node.data.characterWardrobes || []).map(wardrobe => wardrobe.id));
+      await activateCharacterNode({ ...node, data: { ...node.data, ...patch } }, {
+        addedWardrobeIds: wardrobes.filter(wardrobe => !existingIds.has(wardrobe.id)).map(wardrobe => wardrobe.id)
+      });
     }
   }
 
@@ -3395,6 +3407,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function importOutputAssetToCharacterWardrobes(node, item) {
+    if (["compiling", "uploading"].includes(node.data.status)) return;
     if (item?.type !== "image") {
       updateNode(node.id, { error: "Wardrobe accepts image outputs." });
       setSaveStatus("Wardrobe accepts image outputs");
@@ -3414,12 +3427,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const nextWardrobes = [...existing, wardrobe].slice(0, maxCharacterWardrobes);
 
     pushUndoSnapshot({ nodeDataIds: [node.id] });
-    updateNode(node.id, {
-      characterWardrobes: nextWardrobes,
-      activeWardrobeId: node.data.activeWardrobeId || wardrobe.id,
-      status: "ready",
-      error: ""
-    });
+    void applyCharacterWardrobes(node, nextWardrobes);
     setSaveStatus("Added output image as wardrobe reference");
   }
 
@@ -3502,7 +3510,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "" } = {}) {
+  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null } = {}) {
     if (node.data.status === "compiling") return;
     const existingVariants = normalizeCharacterSheetVariants(node.data);
     const portrait = node.data.characterPortrait;
@@ -3538,7 +3546,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       node.data.characterBaseVideoSignature === expectedBaseVideoSignature
     );
 
-    const shouldLockExistingSheet = !forceRegenerateBase && (
+    const shouldLockExistingSheet = !forceRegenerateBase && !addedWardrobeIds && (
       (!wardrobeId && !node.data.characterBaseSignature && selectedExistingVariant?.generated?.url)
       || selectedExistingVariant?.source === "custom"
       || !(portrait?.localUrl || portrait?.url)
@@ -3565,6 +3573,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       const wardrobePlans = wardrobes.map((wardrobe) => {
         const existingVariant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
+        if (addedWardrobeIds && !addedWardrobeIds.includes(wardrobe.id)) {
+          return { wardrobe, existingVariant, needsImage: false, needsVideo: false };
+        }
         const imageCurrent = wardrobe.id !== wardrobeId && canReuseBase && characterWardrobeVariantIsCurrent(existingVariant, wardrobe, baseSignature);
         const videoCurrent = wardrobe.id !== wardrobeId && canReuseBaseVideo && generateCuVideoSheet && characterWardrobeVariantIsCurrent(
           existingVariant,
@@ -3594,6 +3605,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       };
       updateNode(node.id, {
         status: "compiling",
+        locked: false,
+        activated: false,
         characterBatchProgress: { completed: 0, total: generationCount },
         characterVariantNotice: "",
         error: ""

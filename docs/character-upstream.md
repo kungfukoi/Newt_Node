@@ -1,5 +1,12 @@
 # Character upstream comparison
 
+Rechecked the current upstream Character source on 2026-10-14 for wardrobe additions.
+Uploads and output-image drops now automatically generate newly added wardrobes here,
+preserving existing wardrobe variants. Unlike upstream's retained lock flag, this app
+unlocks during generation and locks again afterward as requested. The local runner
+also prepares missing or outdated bases when needed and checkpoints each completed
+wardrobe image before its CU request finishes.
+
 Checked 2026-10-12 against SugerMilks/NewtNode main `8104597` (2026-10-06).
 
 Already present: neutral identity masters, separate regular/CU checkpoints,
