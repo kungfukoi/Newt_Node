@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import ffmpeg from "ffmpeg-static";
+import { saveGeneratedVideoWithFallback } from "../server/video-save-fallback.js";
 
 const run = promisify(execFile);
 const source = (await readFile(new URL("../server/index.js", import.meta.url), "utf8")).replace(/\r/g, "");
@@ -22,7 +23,7 @@ test("Seedance finalization after restart passes and returns the saved dialogue 
   const dialogue = { url: "/outputs/dialogue.mp3", cues: [{ endSeconds: 1.2 }] };
   let downloadedBody;
   const finalize = extract("finalizeSeedanceVideo", {
-    path, existsSync: () => false,
+    path, saveGeneratedVideoWithFallback, existsSync: () => false,
     createManagedAssetTarget: async () => ({ filePath: "mock.mp4" }),
     downloadVideo: async request => { downloadedBody = request.body; return { filePath: "mock.mp4", publicPath: "/outputs/mock.mp4" }; },
     appendHistory: async () => {}, projectFromBody: () => ({}), nodeFromBody: () => ({}), routeKindLabel: value => value

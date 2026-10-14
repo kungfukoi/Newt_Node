@@ -9,6 +9,10 @@ const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
+export function stopRemoteVideoNode(input) {
+  return fetchJsonApi('/api/remote-video-jobs/stop-node', jsonBody(input), 'Stop video tracking', { preferControlServer: true, timeoutMs: 15000, retryLocalApi: false });
+}
+
 export function recoverRemoteVideoJob(runId, input) {
   return fetchJsonApi(`/api/remote-video-jobs/${encodeURIComponent(runId)}/recover`, jsonBody(input), "Generation recovery", { preferControlServer: true, timeoutMs: 120000, retryLocalApi: false });
 }

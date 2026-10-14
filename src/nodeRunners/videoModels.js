@@ -257,6 +257,7 @@ export function normalizeVideoGenerationResult(data, index) {
     ...(data.seedanceDraft ? { seedanceDraft: data.seedanceDraft } : {}),
     ...(data.seedanceDraftSource ? { seedanceDraftSource: data.seedanceDraftSource } : {}),
     ...(data.warning ? { warning: data.warning } : {}),
+    ...(data.storageFallback ? { storageFallback: true } : {}),
     fileName: data.video.fileName || "",
     filePath: data.video.filePath || "",
     mimeType: data.video.mimeType || "",

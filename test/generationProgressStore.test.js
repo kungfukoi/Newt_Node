@@ -45,3 +45,20 @@ test("progress subscriptions with the same node ID stay isolated by workflow", a
     globalThis.window = originalWindow;
   }
 });
+
+
+test("stop freezes progress and blocks later members of the stopped batch", async () => {
+  const store = await import('../src/generationProgressStore.js?stop=' + Date.now());
+  let finish;
+  const run = store.runTrackedGeneration({ scope: 's', nodeId: 'n', groupId: 'g' }, () => new Promise(resolve => { finish = resolve; }));
+  store.stopGenerationProgress('s', 'n', 'g');
+  const snapshot = store.generationProgressSnapshot('s', 'n');
+  assert.equal(snapshot.phase, 'failed');
+  finish({ response: { ok: true }, data: {} }); await run;
+  assert.equal(store.generationProgressSnapshot('s', 'n').phase, 'failed');
+  let sent = false;
+  await assert.rejects(store.runTrackedGeneration({ scope: 's', nodeId: 'n', groupId: 'g', batchIndex: 2 }, () => { sent = true; }), /Stopped/);
+  assert.equal(sent, false);
+  await store.runTrackedGeneration({ scope: 's', nodeId: 'n', groupId: 'new' }, async () => ({ response: { ok: true } }));
+  assert.equal(store.generationProgressSnapshot('s', 'n').phase, 'complete');
+});

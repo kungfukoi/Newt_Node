@@ -99,6 +99,10 @@ import { createAtlasLlmRequest } from "./atlas-llm-request.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
+import { saveGeneratedVideoWithFallback } from "./video-save-fallback.js";
+import { verifyVideoOutputDestination } from "./video-output-preflight.js";
+import { validateAtlasSeedanceDurations } from "../src/atlasSeedanceLimits.js";
+import { seedanceSubmittedPrompt } from "../src/seedancePrompt.js";
 import { prepareAtlasVideoReferenceAsset } from "./atlas-video-input.js";
 import {
   falSinglePartUploadMaximumBytes,
@@ -1213,6 +1217,7 @@ function buildHealthPayload() {
       characterWardrobeFullSheet: true,
       remoteVideoJobs: true,
       remoteVideoRecovery: true,
+      remoteVideoStop: true,
       projectOutputs: true,
       videoPoster: true,
       performanceDiagnostics: true,
@@ -6489,6 +6494,10 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const requestedSeedanceProvider = runtimeModelProviderPreferences.seedance;
+    if (/^Seedance 2\.[05]$/i.test(selectedVideoModel.displayName)) {
+      const packagePath = String(req.body.workflowPackagePath || "");
+      req.videoStorageFallback = (await verifyVideoOutputDestination(req.body, { rootDir, fallbackDirectory: packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(req.body)) }))?.fallback === true;
+    }
     if (isSeedance25Model(selectedVideoModel.displayName)) {
       for (const field of ["referenceImageUrls", "referenceVideoUrls", "referenceAudioUrls", "startFrameUrls", "endFrameUrls"]) {
         if (req.body[field] !== undefined && (!Array.isArray(req.body[field]) || req.body[field].some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Seedance 2.5 requires valid managed references; no generation was submitted.");
@@ -6761,14 +6770,15 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           }, { bracketSyntax: false })
         : prompt;
     if (seedance25) {
-      submittedPrompt = compactSeedancePrompt(submittedPrompt);
+      submittedPrompt = seedanceSubmittedPrompt(submittedPrompt, runtimeProvider);
     }
     const referenceVideoDurations = seedance25 && ["fal", "atlas"].includes(runtimeProvider) && routeKind === "reference-to-video"
       ? await localVideoDurations(referenceVideoUrls)
       : [];
-    const referenceAudioDurations = seedance25 && runtimeProvider === "fal" && routeKind === "reference-to-video"
+    const referenceAudioDurations = seedance25 && ["fal", "atlas"].includes(runtimeProvider) && routeKind === "reference-to-video"
       ? await localVideoDurations(referenceAudioUrls)
       : [];
+    if (seedance25 && runtimeProvider === "atlas") validateAtlasSeedanceDurations(referenceVideoDurations, referenceAudioDurations);
     const referenceVideoDurationSeconds = referenceVideoDurations.reduce((total, seconds) => total + seconds, 0);
     const referenceAudioDurationSeconds = referenceAudioDurations.reduce((total, seconds) => total + seconds, 0);
     if (runtimeProvider === "fal" && referenceVideoDurations.some((seconds) => seconds > 0 && seconds < seedance25ReferenceLimits.minimumMediaSeconds)) {
@@ -6807,7 +6817,7 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           ...(req.body.directorDialogueAudio ? { directorDialogueAudio: req.body.directorDialogueAudio } : {}),
           ...(req.body.characterVoiceReferences ? { characterVoiceReferences: req.body.characterVoiceReferences } : {})
         },
-        prompt, submittedPrompt, routeKind, seedance25, cost,
+        prompt, submittedPrompt, routeKind, seedance25, cost, storageFallback: req.videoStorageFallback === true,
         pricingSnapshot: generationPricingScope.getStore() || pricingRefresh.snapshot(),
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
         settings: {
@@ -6855,50 +6865,10 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       }
       const atlasResult = await atlasMedia.video(atlasOptions, process.env.ATLAS_API_KEY);
       if (editing) atlasResult.cost = { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." };
-      const output = await downloadVideo(req, atlasResult.remoteVideo.url, `atlas-${routeKind}`, { stripAudio: !generateAudio });
-      await appendHistory({
-        id: atlasResult.requestId || randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "video",
-        provider: "Atlas Cloud",
-        modelName: selectedVideoModel.displayName,
-        endpoint: atlasResult.endpoint,
-        mode: routeKindLabel(routeKind),
-        prompt,
-        submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          resolution,
-          duration,
-          aspectRatio,
-          generateAudio,
-          runtimeProvider: "atlas",
-          ...(seedance25 ? { seedanceTask: editing ? "edit" : "reference", sourceDurationSeconds } : {}),
-          ...(atlasReferencePreparation.length ? { atlasReferencePreparation } : {}),
-          startFrameCount: startFrameUrl ? 1 : 0,
-          endFrameCount: endFrameUrl ? 1 : 0,
-          referenceImageCount: referenceImageUrls.length,
-          referenceImageNames,
-          referenceVideoCount: referenceVideoUrls.length,
-          referenceVideoNames,
-          referenceAudioCount: referenceAudioUrls.length
-        },
-        cost: atlasResult.cost,
-        remoteVideo: atlasResult.remoteVideo,
-        localVideo: output.publicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes
-      });
-      return res.json({
-        requestId: atlasResult.requestId,
-        endpoint: atlasResult.endpoint,
-        provider: "Atlas Cloud",
-        modelName: selectedVideoModel.displayName,
-        submittedPrompt,
-        cost: atlasResult.cost,
-        video: { ...atlasResult.remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
-      });
+      endpoint = atlasResult.endpoint;
+      cost = atlasResult.cost;
+      return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+        remote: { video: atlasResult.remoteVideo, seed: atlasResult.job?.seed ?? null } }));
     }
 
     if (runtimeProvider === "fal") {
@@ -6995,26 +6965,20 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
 async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const spec = job.spec;
   const { body, settings, endpoint, routeKind, modelName } = spec;
-  const request = { body };
   let remoteVideo = job.remote.video;
   const resultSeed = job.remote.seed ?? settings.seed;
   let cost = spec.cost;
-  let target = job.target;
-  if (!target) {
-    target = await createManagedAssetTarget(request, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4");
-    if (job.runId) {
-      // Persist the reservation on disk too: in-memory Output reservations expire
-      // and disappear on restart while a durable download can still be pending.
-      await writeFile(target.filePath, "", { flag: "wx" });
-    }
-    await checkpoint({ target });
-  }
-  // Reserve the output once, then overwrite that same target on save retries.
-  let output = job.savedOutput;
-  if (!output || !existsSync(output.filePath)) {
-    output = await downloadVideo(request, remoteVideo.url, routeKind, { stripAudio: !settings.generateAudio, target, timeoutMs: 5 * 60 * 1000 });
-    await checkpoint({ savedOutput: output });
-  }
+  const availableOutput = job.savedOutput && existsSync(job.savedOutput.filePath) ? job.savedOutput : null;
+  const storage = await saveGeneratedVideoWithFallback({ ...job, savedOutput: availableOutput }, {
+    checkpoint,
+    reserve: async storageBody => {
+      const target = await createManagedAssetTarget({ body: storageBody }, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4");
+      if (job.runId) await writeFile(target.filePath, "", { flag: "wx" });
+      return target;
+    },
+    download: (storageBody, target) => downloadVideo({ body: storageBody }, remoteVideo.url, routeKind, { stripAudio: !settings.generateAudio, target, timeoutMs: 5 * 60 * 1000 })
+  });
+  const output = storage.output;
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
     if (!settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
@@ -7058,7 +7022,8 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     ...(job.runId ? { generationTimings: jobTimingDiagnostic(job) } : {}),
     submittedPrompt: spec.submittedPrompt, cost,
     ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
-    ...(draftWarning ? { warning: draftWarning } : {}),
+    ...([draftWarning, storage.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning].filter(Boolean).join(" ") } : {}),
+    ...(storage.fallback ? { storageFallback: true } : {}),
     ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
@@ -13037,7 +13002,7 @@ async function probeVideoFile(filePath) {
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames:format=duration",
+        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,codec_name,pix_fmt:format=duration",
         "-of",
         "json",
         filePath
@@ -13051,7 +13016,9 @@ async function probeVideoFile(filePath) {
       height: positiveNumber(stream.height),
       duration: positiveNumber(stream.duration) || positiveNumber(data.format?.duration),
       fps: frameRateFromRatio(stream.avg_frame_rate || stream.r_frame_rate),
-      num_frames: positiveNumber(stream.nb_frames)
+      num_frames: positiveNumber(stream.nb_frames),
+      codecName: stream.codec_name || null,
+      pixelFormat: stream.pix_fmt || null
     };
     return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== null));
   } catch {

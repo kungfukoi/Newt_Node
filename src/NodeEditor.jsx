@@ -105,7 +105,7 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { audioModelApi, composerApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { audioModelApi, composerApi, nodeApi, systemApi, stopRemoteVideoNode } from "./api/newtApi.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
 import { nodeSchedulingKey } from "./nodeScheduling.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
@@ -144,7 +144,8 @@ import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import ModelProviderOption from "./components/ModelProviderOption.jsx";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
-import { runTrackedGeneration } from "./generationProgressStore.js";
+import { createNodeRunControl, ejectableNodeTypes } from "./nodeRunControl.js";
+import { runTrackedGeneration, stopGenerationProgress } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
 import {
@@ -1249,6 +1250,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
   const draftFinishesRef = React.useRef(new Set());
+  const nodeRunControlRef = React.useRef(createNodeRunControl());
   const storyboardRevisionRunsRef = React.useRef(new Set());
   const nodeMapRef = React.useRef(new Map(savedDraft.nodes.map((node) => [node.id, node])));
   const edgesRef = React.useRef(savedDraft.edges);
@@ -6754,9 +6756,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const items = (Array.isArray(generatedItems) ? generatedItems : [generatedItems]).filter((item) => item?.url);
     const primary = items[0] || null;
     const mediaType = resultType || primary?.type || "";
+    const fallbackWarning = items.find(item => item.storageFallback)?.warning || "";
     updateNode(outputTarget.node.id, {
       status: "complete",
       error: "",
+      ...(fallbackWarning ? { status: "error", error: fallbackWarning } : {}),
       resultUrl: primary?.url || "",
       resultType: mediaType,
       resultItems: items,
@@ -6836,7 +6840,34 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return data.media || null;
   }
 
-  async function runNode(node, runOptions = {}) {
+  async function stopNode(node) {
+    const token = nodeRunControlRef.current.stop(node.id);
+    const message = "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish.";
+    const scope = generationScope;
+    stopGenerationProgress(scope, node.id, token?.groupId);
+    updateNode(node.id, { status: "error", error: message });
+    if (token?.outputTarget) markOutputTargetFailed(token.outputTarget, message);
+    if (node.type === "videoModel") {
+      try {
+        const { response, data } = await stopRemoteVideoNode({ scope, nodeId: node.id, groupIds: token?.groupId ? [token.groupId] : [] });
+        if (!response.ok) throw new Error(data?.error || "Stop request failed.");
+      } catch (error) {
+        const current = nodesRef.current.find(item => item.id === node.id);
+        if (current?.data.error === message) updateNode(node.id, { error: message + " Local tracking could not be stopped on the server: " + error.message });
+      }
+    }
+  }
+
+  function runNode(node, runOptions = {}) {
+    if (runOptions === "stop-node") return stopNode(node);
+    return nodeRunControlRef.current.run(node.id, token => executeNode(node, runOptions, token, { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved }));
+  }
+
+  async function executeNode(node, runOptions = {}, token, actions) {
+    const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
+    const markOutputTargetRunning = (...args) => { token.outputTarget = args[0]; if (!token.stopped) actions.markOutputTargetRunning(...args); };
+    const markOutputTargetFailed = (...args) => { if (!token.stopped) actions.markOutputTargetFailed(...args); };
+    const markOutputTargetSaved = (...args) => { if (!token.stopped) actions.markOutputTargetSaved(...args); };
     if (runOptions === "finish-seedance-draft") {
       const current = nodesRef.current.find(item => item.id === node.id);
       if (current?.type !== "videoModel" || draftFinishesRef.current.has(node.id)) return { status: "skipped" };
@@ -6915,6 +6946,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const generationGroupId = ["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type)
       ? createGenerationGroupId(currentNode.type)
       : "";
+    token.groupId = generationGroupId;
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
@@ -6935,6 +6967,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       outputTarget = outputTargetForSourceNode(currentNode, currentIncomingByNode);
       requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
+      if (token.stopped) return { status: "error" };
       updateNode(currentNode.id, {
         status: "running",
         error: "",
@@ -7636,7 +7669,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           batchTotal: batchCount
         }).then((generated) => {
           completedVideos.push(generated);
-          if (currentVideoScopeRef.current !== runScope) return generated;
+          if (token.stopped || currentVideoScopeRef.current !== runScope) return generated;
           const resultItems = appendUniqueVideoResults(previousVideoResults, completedVideos);
           updateNode(currentNode.id, {
             status: "running", resultItems, resultUrl: generated.url,
@@ -7651,7 +7684,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const settled = await Promise.allSettled(runs);
       const successes = fulfilledRunValues(settled);
       const failures = rejectedRunResults(settled);
-      if (currentVideoScopeRef.current !== runScope) return { status: "complete" };
+      if (token.stopped || currentVideoScopeRef.current !== runScope) return { status: "error" };
       const remoteVideoRunIds = [...new Set([
         ...(currentNode.data.remoteVideoRunIds || []),
         ...successes.map((item) => item.generationRunId),
@@ -8941,6 +8974,7 @@ function NodeCard({
               </div>
             )}
           </span>
+          {running && ejectableNodeTypes.has(node.type) && <button type="button" className="node-stop-button" onClick={() => onRun(node, "stop-node")} title="Stop local tracking and release this node. A cloud job already accepted may still finish." aria-label="Stop node">Stop</button>}
           <button type="button" className="node-remove-button" onClick={() => onRemove(node.id)} title="Remove node" aria-label="Remove node">
             <X size={14} />
           </button>
@@ -15961,6 +15995,7 @@ function NodeBody({
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
           : <RunPriceLabel label={seedanceDraft ? "Run Draft (480p)" : seedanceEditing ? "Edit Video" : "Run Video"} options={{ ...videoRunOptions, kind: "video" }} visible={showPriceSnapshot} />}
       </button>
+      {running && <button type="button" className="stop-node-button" onClick={() => onRun(node, "stop-node")} title="Stop local tracking and release this node. A cloud job already accepted may still finish.">Stop this run</button>}
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <OutputPortRow node={node} port={config.output.find((port) => port.id === embeddedAudioOutputPortId)} label="Audio output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (

@@ -47,8 +47,9 @@ export function validateDirectorDialogue(value = {}, { audioOnly = false } = {})
 }
 
 export function directorDialogueBrief(value = {}) {
-  if (!value.lines?.length) return "";
-  return "AUTHORITATIVE DIALOGUE: Preserve every exact spoken line and its assigned speaker, in this order. Plan readable speaking coverage and lip-sync; do not invent, paraphrase, reassign or add dialogue.\n" + value.lines.map(line => {
+  const lines = (value.lines || []).filter(line => String(line?.text || "").trim());
+  if (!lines.length) return "";
+  return "AUTHORITATIVE DIALOGUE: Preserve every exact spoken line and its assigned speaker, in this order. Plan readable speaking coverage and lip-sync; do not invent, paraphrase, reassign or add dialogue.\n" + lines.map(line => {
     const character = value.characters?.find(item => item.nodeId === line.characterNodeId);
     return `${character ? "@" + character.tag : "Unbound character"}: ${JSON.stringify(String(line.text || ""))}`;
   }).join("\n");

@@ -27,7 +27,7 @@ export function remoteVideoTerminal(job) {
 }
 
 export function remoteVideoNeedsAttention(job) {
-  return job?.state === "uncertain";
+  return job?.state === "uncertain" || job?.state === "save_blocked";
 }
 
 export function appendUniqueVideoResults(previous = [], incoming = []) {

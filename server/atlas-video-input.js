@@ -41,7 +41,16 @@ export async function prepareAtlasVideoReferenceAsset(source, {
   const asset = await resolveLocalAssetPath(source);
   const metadata = await probeVideoFile(asset.filePath);
   const target = atlasVideoInputDimensions(metadata.width, metadata.height);
-  if (!target.needsNormalization) return readLocalAsset(source);
+  const supportedCodec = ["h264", "hevc"].includes(metadata.codecName);
+  const fps = Number(metadata.fps);
+  const normalizeFps = Number.isFinite(fps) && fps > 0 && (fps < 24 || fps > 60);
+  const normalizeCodec = metadata.codecName && !supportedCodec;
+  const normalizeContainer = ![".mp4", ".mov"].includes(path.extname(asset.fileName).toLowerCase());
+  if (!target.needsNormalization && !normalizeFps && !normalizeCodec && !normalizeContainer) {
+    const original = await readLocalAsset(source);
+    if (original.buffer.length > 200 * 1024 * 1024) throw Object.assign(new Error("Atlas video reference exceeds 200 MB. Use a smaller source before generating."), { status: 400 });
+    return original;
+  }
 
   const temporaryPath = path.join(temporaryDirectory, `newtnode-atlas-video-reference-${randomId()}.mp4`);
   try {
@@ -52,7 +61,7 @@ export async function prepareAtlasVideoReferenceAsset(source, {
       "-i", asset.filePath,
       "-map", "0:v:0",
       "-map", "0:a?",
-      "-vf", `scale=${target.width}:${target.height}:flags=lanczos,setsar=1`,
+      "-vf", `scale=${target.width}:${target.height}:flags=lanczos,setsar=1${normalizeFps ? ",fps=" + Math.max(24, Math.min(60, fps)) : ""}`,
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-crf", "16",
@@ -63,9 +72,11 @@ export async function prepareAtlasVideoReferenceAsset(source, {
       "-map_metadata", "-1",
       temporaryPath
     ], "Atlas video reference normalization", 600000);
+    const buffer = await readFile(temporaryPath);
+    if (buffer.length > 200 * 1024 * 1024) throw Object.assign(new Error("Prepared Atlas video reference exceeds 200 MB. Use a smaller source before generating."), { status: 400 });
     return {
       fileName: `${path.basename(asset.fileName, path.extname(asset.fileName))}-atlas-reference.mp4`,
-      buffer: await readFile(temporaryPath),
+      buffer,
       mimeType: "video/mp4"
     };
   } finally {

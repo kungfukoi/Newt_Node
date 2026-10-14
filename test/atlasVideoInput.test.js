@@ -94,3 +94,14 @@ test("Atlas keeps valid images byte-identical and fits tiny, tall and oversized 
     if (width === 2000) assert.equal(result, asset);
   }
 });
+
+
+test('Atlas normalizes unsupported codecs and out-of-range FPS without changing playback speed', async () => {
+  const { calls, values } = dependencies({ width: 1280, height: 720 });
+  values.probeVideoFile = async () => ({ width: 1280, height: 720, fps: 12, codecName: 'prores' });
+  const result = await prepareAtlasVideoReferenceAsset('/workflow-assets/p/inputs/motion.mov', values);
+  assert.equal(result.mimeType, 'video/mp4');
+  assert.ok(calls.ffmpeg[0].includes('libx264'));
+  assert.ok(calls.ffmpeg[0].some(value => String(value).includes('fps=24')));
+  assert.equal(calls.ffmpeg[0].some(value => /setpts|atempo/.test(String(value))), false);
+});

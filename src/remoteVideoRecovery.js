@@ -23,8 +23,8 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
     const terminal = unseen.filter(remoteVideoTerminal);
     const patch = {
       status: pending ? "running" : attention || errors.length ? "error" : resultItems.length ? "complete" : "ready",
-      error: errors.join(" "),
-      remoteVideoAttention: group.filter(remoteVideoNeedsAttention).map(({ runId, scope, provider, batchIndex }) => ({ runId, scope, provider, batchIndex })),
+      error: [...errors, ...group.map(job => job.result?.warning).filter(Boolean)].join(" "),
+      remoteVideoAttention: group.filter(remoteVideoNeedsAttention).map(({ runId, scope, provider, batchIndex, state }) => ({ runId, scope, provider, batchIndex, state })),
       remoteVideoRunIds: [...seen, ...terminal.map((job) => job.runId)]
     };
     if (resultItems.length > previous.length) {
@@ -38,7 +38,7 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
       const items = completed.filter((job) => job.outputTargetNodeId === outputId).map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
       const outputItems = appendUniqueVideoResults(existingResultItemsForNode(output, "video"), items);
       patches.push({ nodeId: outputId, patch: {
-        status: "complete", error: "", resultType: "video", resultItems: outputItems,
+        status: items.some(item => item.storageFallback) ? "error" : "complete", error: items.filter(item => item.storageFallback).map(item => item.warning).join(" "), resultType: "video", resultItems: outputItems,
         resultUrl: outputItems.at(-1).url, selectedResultIndex: outputItems.length - 1,
         lastSavedAt: completed.at(-1).updatedAt, lastSavedFileName: outputItems.at(-1).fileName, lastSavedPath: outputItems.at(-1).filePath
       } });

@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { supportsDurableVideo } from "../../src/remoteVideoJobs.js";
 
 export function registerRemoteVideoJobRoutes(app, jobs) {
+  app.post("/api/remote-video-jobs/stop-node", async (req, res) => {
+    try { res.json(await jobs.stopNode(req.body)); }
+    catch (error) { res.status(error.statusCode || 500).json({ error: error.message }); }
+  });
   app.post("/api/remote-video-jobs/:runId/recover", async (req, res) => {
     try { res.json({ job: await jobs.recover(req.params.runId, req.body) }); }
     catch (error) {

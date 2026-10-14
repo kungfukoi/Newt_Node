@@ -1,3 +1,4 @@
+import { localStorageFailure } from "./video-save-fallback.js";
 import { openRemoteJobStore } from "./remote-job-store.js";
 import { randomUUID } from "node:crypto";
 import { appendJobEvent, jobErrorDiagnostic, jobTimingDiagnostic } from "./job-diagnostics.js";
@@ -27,11 +28,19 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
   const submissionReservations = new Set();
   const recoveryActions = new Map();
   const recoveryIds = new Set();
+  const stoppedGroups = new Set();
   const iso = () => new Date(now()).toISOString();
 
   function commit(runId, patch, { heartbeat = false } = {}) {
     const operation = writes.then(async () => {
       const previous = jobs.get(runId);
+      // A worker may finish after the user has dismissed tracking.
+      if (previous?.state === "dismissed" && patch.state !== "dismissed") {
+        // Retain an acceptance ID or generated reference that arrives after Stop.
+        const retained = Object.fromEntries(["requestId", "providerAcceptedAt", "remote"].filter(key => patch[key] != null).map(key => [key, patch[key]]));
+        if (!Object.keys(retained).length) return previous;
+        patch = { ...retained, state: "dismissed" };
+      }
       const next = { ...previous, ...patch, runId, updatedAt: iso() };
       if (remoteVideoTerminal(next) && !next.finishedAt) next.finishedAt = next.updatedAt;
       const transitioned = next.state !== previous?.state || next.providerStatus !== previous?.providerStatus;
@@ -83,8 +92,10 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
     try {
       if (!job.remote) {
         const client = await adapter(job.spec);
+        if (jobs.get(runId)?.state === "dismissed") return;
         if (!job.requestId) {
           job = await commit(runId, { state: "submitting", submissionStartedAt: iso(), message: "Submitting to provider" });
+          if (job.state === "dismissed") return;
           let accepted;
           try {
             accepted = await client.submit(job.spec);
@@ -107,6 +118,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
           }
           job = await commit(runId, { requestId: accepted.requestId, providerAcceptedAt: iso(), state: "queued", message: "Queued with provider" });
         }
+        if (job.state === "dismissed") return;
         const status = await client.poll(job);
         const providerElapsedMs = now() - providerTrackingStartedAt(job);
         const delayed = providerElapsedMs >= remoteVideoWarningMsFor(job.spec.provider, job.spec.modelName);
@@ -128,6 +140,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
             : status.message || "Generating with provider"
         }, { heartbeat: !status.remote });
       }
+      if (jobs.get(runId)?.state === "dismissed") return;
       if (job.remote) {
         const checkpoint = (patch) => commit(runId, patch);
         const result = await finalize(job, checkpoint);
@@ -136,9 +149,10 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
     } catch (error) {
       job = jobs.get(runId);
       const confirmedFailure = Boolean(error.confirmedFailure);
+      const storageBlocked = Boolean(job.remote) && localStorageFailure(error);
       await commit(runId, {
-        state: confirmedFailure ? "failed" : "recovering",
-        health: confirmedFailure ? "failed" : "reconnecting",
+        state: storageBlocked ? "save_blocked" : confirmedFailure ? "failed" : "recovering",
+        health: storageBlocked ? "attention" : confirmedFailure ? "failed" : "reconnecting",
         retryCount: confirmedFailure ? (job.retryCount || 0) : (job.retryCount || 0) + 1,
         lastError: jobErrorDiagnostic(error),
         ...(confirmedFailure ? {
@@ -146,7 +160,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
           lastContactAt: iso()
         } : {}),
         ...(error.refreshRemote ? { remote: null } : {}),
-        message: confirmedFailure ? error.message : error.waitingForCredential
+        message: storageBlocked ? "Video generated, but the output folder is not writable or has no free space. Save the existing video to workflow outputs; no regeneration is needed." : confirmedFailure ? error.message : error.waitingForCredential
           ? "Waiting for the original provider key to be enabled and selected in Settings."
           : job.remote ? "Video generated; retrying local save. " + (error.safeMessage || "Check storage and network access.")
             : "Status temporarily unavailable; reconnecting to the original job."
@@ -161,7 +175,7 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
     const work = advance(runId).finally(() => {
       workers.delete(runId);
       const job = jobs.get(runId);
-      if (!job || job.state === "uncertain") return;
+      if (!job || remoteVideoNeedsAttention(job)) return;
       const retryMs = job.retryCount ? Math.min(60000, 2000 * 2 ** Math.min(job.retryCount, 5)) : 0;
       const pollMs = now() - providerTrackingStartedAt(job) >= remoteVideoWarningMsFor(job.spec.provider, job.spec.modelName) ? 15000 : 3000;
       schedule(runId, retryMs || pollMs);
@@ -191,6 +205,19 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
   }
 
   const api = {
+    async stopNode({ scope, nodeId, groupIds = [] } = {}) {
+      if (typeof scope !== "string" || !scope || typeof nodeId !== "string" || !nodeId || !Array.isArray(groupIds) || groupIds.some(id => typeof id !== "string" || id.length > 180)) {
+        throw Object.assign(new Error("A workflow scope and node ID are required."), { statusCode: 400 });
+      }
+      groupIds.forEach(id => stoppedGroups.add(JSON.stringify([scope, nodeId, id])));
+      const owned = [...jobs.values()].filter(job => remoteVideoScope(job.spec.body) === scope && job.spec.body.nodeId === nodeId && (!groupIds.length || groupIds.includes(job.spec.body.generationGroupId || job.runId)) && !remoteVideoTerminal(job));
+      for (const job of owned) {
+        stoppedGroups.add(JSON.stringify([scope, nodeId, job.spec.body.generationGroupId || job.runId]));
+        clearTimeout(timers.get(job.runId)); timers.delete(job.runId);
+        await commit(job.runId, { state: "dismissed", health: "attention", message: "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish." });
+      }
+      return { jobs: owned.map(job => api.get(job.runId)) };
+    },
     recover(runId, input = {}) {
       const job = jobs.get(runId);
       const reject = (message, statusCode = 409) => Promise.reject(Object.assign(new Error(message), { statusCode }));
@@ -199,7 +226,13 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       if (!input.acknowledged) return reject("Confirm that this action matches the original provider job.", 400);
       if (!remoteVideoNeedsAttention(job) || workers.has(runId) || recoveryActions.has(runId)) return reject("Only an idle, uncertain submission can be recovered here.");
       const operation = Promise.resolve().then(async () => {
-        if (input.action === "dismiss") {
+        if (input.action === "save-to-workflow" && job.state === "save_blocked" && job.remote) {
+          if (!job.spec.body.workflowPackagePath) throw Object.assign(new Error("This run has no attached workflow package."), { statusCode: 400 });
+          // Keep immutable paid input intact; only local persistence is redirected.
+          await commit(runId, { storageBody: { ...job.spec.body, outputTargetPath: "", outputTargetFileName: "", outputTargetNodeId: "", outputDirectory: "", outputFileName: "" }, target: null, savedOutput: null, state: "downloading", health: "healthy", lastError: null, message: "Saving the existing generated video to workflow outputs. No generation resubmitted." });
+        } else if (input.action === "retry-save" && job.state === "save_blocked" && job.remote) {
+          await commit(runId, { state: "downloading", health: "healthy", lastError: null, message: "Retrying the original output folder. No generation resubmitted." });
+        } else if (input.action === "dismiss") {
           await commit(runId, { state: "dismissed", health: "attention", message: "Local tracking dismissed. This does not cancel a remote generation or refund a charge." });
         } else if (input.action === "attach") {
           const requestId = String(input.requestId || "").trim();
@@ -237,6 +270,9 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
         creation.finally(() => creations.delete(runId)).catch(() => {});
       }
       await creations.get(runId);
+      if (stoppedGroups.has(JSON.stringify([remoteVideoScope(spec.body), spec.body.nodeId, spec.body.generationGroupId || runId]))) {
+        await commit(runId, { state: "dismissed", health: "attention", message: "Stopped at user request before provider submission." });
+      }
       if (!workers.has(runId)) schedule(runId);
       return api.get(runId);
     },

@@ -122,3 +122,14 @@ test("durable opt-in is limited to Seedance 2.0/2.5 and result merging is idempo
   const item = { url: "/outputs/a.mp4", generationRunId: "one" };
   assert.deepEqual(appendUniqueVideoResults([item], [item, { ...item, url: "/outputs/b.mp4" }]), [item]);
 });
+
+
+test('automatic fallback keeps a playable result and exposes the failed requested Output destination', () => {
+  const nodes = [{ id: 'video', type: 'videoModel', data: {} }, { id: 'output', type: 'output', data: {} }];
+  const jobs = [{ runId: 'fallback', nodeId: 'video', groupId: 'g', state: 'completed', batchIndex: 1, createdAt: '2026-10-13T00:00:00Z', updatedAt: '2026-10-13T00:01:00Z', outputTargetNodeId: 'output', result: { ...result, storageFallback: true, warning: 'Saved to workflow outputs after Output folder failed.' } }];
+  const patches = recoveredVideoPatches(nodes, jobs, new Set(), [{ from: { nodeId: 'video' }, to: { nodeId: 'output' } }]);
+  assert.equal(patches.find(p => p.nodeId === 'video').patch.status, 'complete');
+  assert.match(patches.find(p => p.nodeId === 'video').patch.error, /Saved to workflow/);
+  const output = patches.find(p => p.nodeId === 'output').patch;
+  assert.equal(output.status, 'error'); assert.equal(output.resultUrl, result.video.localUrl);
+});

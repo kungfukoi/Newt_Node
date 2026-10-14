@@ -11,6 +11,9 @@ import {
 } from "./generationProgress.js";
 
 const entriesByRunId = new Map();
+const stoppedRunIds = new Set();
+const stoppedGroups = new Set();
+const progressGroupKey = (scope, nodeId, groupId) => JSON.stringify([scope, nodeId, groupId]);
 const snapshotsByNodeKey = new Map();
 const listenersByNodeKey = new Map();
 let pollTimer = null;
@@ -38,8 +41,21 @@ export function generationProgressSnapshot(scope, nodeId) {
   return snapshotsByNodeKey.get(progressNodeKey(scope, nodeId)) || null;
 }
 
+export function stopGenerationProgress(scope, nodeId, groupId = "") {
+  if (groupId) stoppedGroups.add(progressGroupKey(scope, nodeId, groupId));
+  const finishedAt = new Date().toISOString();
+  for (const [runId, entry] of entriesByRunId) {
+    if (progressEntryScope(entry) !== scope || entry.nodeId !== nodeId) continue;
+    if (isTerminalProgressStatus(entry.status)) continue;
+    upsertProgressEntry({ ...entry, status: "failed", phase: "failed", finishedAt, updatedAt: finishedAt, message: "Stopped at user request." });
+    stoppedRunIds.add(runId);
+    stoppedGroups.add(progressGroupKey(scope, nodeId, entry.groupId));
+  }
+}
+
 export async function runTrackedGeneration(metadata, request) {
   const requestMetadata = generationRequestMetadata(metadata);
+  if (stoppedGroups.has(progressGroupKey(requestMetadata.generationScope, requestMetadata.nodeId, requestMetadata.generationGroupId))) throw new Error("Stopped at user request before submission.");
   discardSupersededNodeProgress(requestMetadata);
   upsertProgressEntry(progressEntryFromRequestMetadata(requestMetadata));
   scheduleProgressPoll(0);
@@ -99,7 +115,7 @@ async function refreshGenerationProgress() {
 function reconcileProgressEntries(serverEntries, scope) {
   const serverRunIds = new Set();
   serverEntries.forEach((entry) => {
-    if (!entry?.runId || !entry?.nodeId) return;
+    if (!entry?.runId || !entry?.nodeId || stoppedRunIds.has(entry.runId)) return;
     serverRunIds.add(entry.runId);
     upsertProgressEntry({ ...entry, scope: progressEntryScope(entry) || scope });
   });
@@ -127,7 +143,7 @@ function scheduleProgressPoll(delay) {
 }
 
 function upsertProgressEntry(entry) {
-  if (!entry?.runId || !entry?.nodeId) return;
+  if (!entry?.runId || !entry?.nodeId || stoppedRunIds.has(entry.runId)) return;
   const previous = entriesByRunId.get(entry.runId);
   const next = mergeGenerationProgressEntry(previous, entry);
   entriesByRunId.set(entry.runId, next);

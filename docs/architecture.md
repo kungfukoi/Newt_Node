@@ -342,3 +342,7 @@ ElevenLabs v4 is owned by the existing `src/audioModel.js` request/estimate cont
 `src/nanoBanana21.js` owns the added Krea input contract, ratio list and tariff. The existing Krea adapter and image route handle uploads, managed output, History and pricing; provider support derives from `kreaEndpoints`. Explicit 8:1 requests reject before upload while Auto maps to a supported ratio.
 
 `src/seedanceDraft.js` and `src/nodeRunners/seedanceDraft.js` own draft result selection and completion. `server/seedance-drafts.js` stores private receipts and creates a stable completion run in `remote-video-jobs`; the existing Seedance adapter/finalizer retain draft IDs, output reservations, costs, dialogue tracks and restart recovery. `src/seedance25.js` owns edit and numbered-reference validation; `src/atlasMedia.js` adds the explicit Atlas edit request. Director scenes persist the draft preference without rebuilding their plan.
+
+Node ejection is coordinated by `src/nodeRunControl.js`; NodeEditor gates run-owned state writes with the run token. The durable video stop-node route owns persistent tracking dismissal, scopes it to workflow/node, and guards against late worker transitions.
+
+`server/video-output-preflight.js` verifies Seedance storage before submission. `src/seedancePrompt.js` owns provider-specific prompt cleanup. Durable save_blocked recovery persists a separate storageBody rather than modifying immutable provider inputs.

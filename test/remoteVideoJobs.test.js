@@ -423,3 +423,117 @@ test("job change cursors return only new revisions and reset safely after restar
   assert.equal(service.changes(scope, first.cursor).reset, true);
   assert.equal(service.changes(scope, first.cursor).jobs[0].requestId, "provider-1");
 });
+
+
+test("stop is workflow isolated, preserves completed results and survives restart", async t => {
+  const f = await fixture(t);
+  let service = await f.open();
+  await service.create("active", spec);
+  await service.create("other", { ...spec, body: { ...spec.body, projectId: "other" } });
+  await service.step("active");
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n" });
+  assert.equal(service.get("active").state, "dismissed");
+  assert.equal(service.get("active").requestId, "provider-1");
+  assert.equal(service.get("other").state, "accepted");
+  await service.close();
+  service = await f.open();
+  await service.step("active");
+  assert.equal(service.get("active").state, "dismissed");
+  assert.equal(f.counts().submits, 1);
+  await assert.rejects(service.stopNode({ scope: "", nodeId: "n" }), /workflow scope/);
+});
+
+test("stop during local saving cannot be overwritten by late success", async t => {
+  let entered, finish;
+  const started = new Promise(resolve => { entered = resolve; });
+  const f = await fixture(t, {
+    adapter: async () => ({ submit: async () => ({ requestId: "paid-once" }), poll: async () => ({ remote: video }) }),
+    finalize: async () => { entered(); return new Promise(resolve => { finish = resolve; }); }
+  });
+  const service = await f.open();
+  await service.create("one", spec);
+  const worker = service.step("one");
+  await started;
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n" });
+  finish({ video: { localUrl: "/outputs/late.mp4" } });
+  await worker;
+  assert.equal(service.get("one").state, "dismissed");
+  assert.equal(service.get("one").result, null);
+});
+
+test("stop before acceptance blocks delayed submission from the same group", async t => {
+  const f = await fixture(t);
+  const service = await f.open();
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n", groupIds: ["g"] });
+  await service.create("late", spec);
+  await service.step("late");
+  assert.equal(service.get("late").state, "dismissed");
+  assert.equal(f.counts().submits, 0);
+  await service.create("new", { ...spec, body: { ...spec.body, generationGroupId: "new" } });
+  await service.step("new");
+  assert.equal(f.counts().submits, 1);
+});
+
+
+test("stop retains an acceptance ID arriving after ejection and skips polling", async t => {
+  let entered, accept; let polls = 0;
+  const started = new Promise(resolve => { entered = resolve; });
+  const f = await fixture(t, { adapter: async () => ({
+    submit: async () => { entered(); return new Promise(resolve => { accept = resolve; }); },
+    poll: async () => { polls++; return { state: "running" }; }
+  }) });
+  const service = await f.open();
+  await service.create("late-id", spec);
+  const worker = service.step("late-id"); await started;
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n" });
+  accept({ requestId: "paid-original-id" }); await worker;
+  assert.equal(service.get("late-id").state, "dismissed");
+  assert.equal(service.get("late-id").requestId, "paid-original-id");
+  assert.equal(polls, 0);
+});
+
+test("stopping peers does not discard an already completed result", async t => {
+  const f = await fixture(t, { adapter: async () => ({ submit: async () => ({ requestId: "paid" }), poll: async () => ({ remote: video }) }) });
+  const service = await f.open();
+  await service.create("done", spec); await service.step("done");
+  const result = service.get("done").result;
+  await service.create("pending", { ...spec, body: { ...spec.body, generationBatchIndex: 2 } });
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n" });
+  assert.equal(service.get("done").state, "completed");
+  assert.deepEqual(service.get("done").result, result);
+  assert.equal(service.get("pending").state, "dismissed");
+});
+
+
+test("a delayed Stop request does not stop a newer run on the same node", async t => {
+  const f = await fixture(t); const service = await f.open();
+  await service.create("old", spec);
+  await service.create("newer", { ...spec, body: { ...spec.body, generationGroupId: "newer" } });
+  await service.stopNode({ scope: remoteVideoScope(spec.body), nodeId: "n", groupIds: ["g"] });
+  assert.equal(service.get("old").state, "dismissed");
+  assert.equal(service.get("newer").state, "accepted");
+});
+
+
+test("permission-failed saves pause and resume the same generated video without another POST", async t => {
+  let saves = 0, submissions = 0, storage;
+  const f = await fixture(t, { adapter: async () => ({ submit: async () => { submissions++; return { requestId: 'original-generated' }; }, poll: async () => ({ remote: video }) }),
+    finalize: async job => { if (++saves === 1) throw Object.assign(Error('private output path'), { code: 'EPERM' }); storage = job.storageBody; return { video: { localUrl: '/outputs/recovered.mp4' } }; }
+  });
+  let service = await f.open();
+  const input = { ...spec, body: { ...spec.body, workflowPackagePath: '/fixture/package', outputTargetPath: '/inaccessible/share' } };
+  await service.create('blocked', input); await service.step('blocked');
+  assert.equal(service.get('blocked').state, 'save_blocked');
+  assert.equal(service.get('blocked').needsAttention, true);
+  await service.step('blocked'); assert.equal(saves, 1);
+  await service.close(); service = await f.open();
+  await service.step('blocked'); assert.equal(saves, 1);
+  await assert.rejects(service.recover('blocked', { action: 'save-to-workflow', scope: 'other', acknowledged: true }), /different workflow/);
+  await service.recover('blocked', { action: 'save-to-workflow', scope: remoteVideoScope(input.body), acknowledged: true });
+  await service.step('blocked');
+  assert.equal(service.get('blocked').state, 'completed'); assert.equal(submissions, 1);
+  assert.equal(storage.outputTargetPath, ''); assert.equal(storage.workflowPackagePath, '/fixture/package');
+  const files = await readdir(f.filePath + '.d');
+  const immutable = JSON.parse(await readFile(path.join(f.filePath + '.d', files.find(name => name.endsWith('.spec.json'))), 'utf8'));
+  assert.equal(immutable.body.outputTargetPath, '/inaccessible/share');
+});

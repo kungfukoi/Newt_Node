@@ -27,6 +27,7 @@ const requiredHealthRoutes = [
   "spendAnalytics",
   "objectSelectionCache",
   "remoteVideoJobs",
+  "remoteVideoStop",
   "atlasDurableVideo",
   "characterWardrobeFullSheet",
   "settingsKeyValidation",

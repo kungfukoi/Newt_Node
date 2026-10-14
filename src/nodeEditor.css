@@ -10581,3 +10581,9 @@ video.newtnode-video-fallback {
 .seedance-draft-actions button:hover:not(:disabled) { background: #3c3c3c; }
 .seedance-draft-actions button:disabled { opacity: 0.55; cursor: wait; }
 .seedance-draft-actions svg { flex: 0 0 14px; }
+
+.node-title .node-stop-button { width: auto; padding: 2px 6px; border: 1px solid #b65a50; border-radius: 4px; color: #efaaa1; background: transparent; font-size: 11px; cursor: pointer; }
+.node-title .node-stop-button:hover { background: #703a34; color: white; }
+
+.stop-node-button { width: 100%; min-height: 34px; border: 1px solid #b65a50; border-radius: 8px; color: #efaaa1; background: #392523; font-weight: 600; cursor: pointer; }
+.stop-node-button:hover { background: #703a34; color: white; }

@@ -16,7 +16,7 @@ function RecoveryRow({ job, onRecovered }) {
   const [error, setError] = React.useState("");
   const fileInput = React.useRef(null);
   async function recover(action, file) {
-    if (!confirmed || busy) return;
+    if ((!confirmed && job.state !== "save_blocked") || busy) return;
     setBusy(true); setError("");
     try {
       let assetUrl;
@@ -33,7 +33,12 @@ function RecoveryRow({ job, onRecovered }) {
     finally { setBusy(false); }
   }
   return <details className="remote-video-attention nodrag nopan" onPointerDown={(event) => event.stopPropagation()}>
-    <summary>Run {job.batchIndex}: Needs attention</summary>
+    <summary>Run {job.batchIndex}: {job.state === "save_blocked" ? "Video generated — save blocked" : "Needs attention"}</summary>
+    {job.state === "save_blocked" && <div className="remote-video-recovery-actions">
+      <button type="button" disabled={busy} onClick={() => recover("save-to-workflow")}>Save to workflow outputs</button>
+      <button type="button" disabled={busy} onClick={() => recover("retry-save")}>Retry original folder</button>
+      <small>Uses the already-generated video. No new generation or charge.</small>
+    </div>}
     <a href={job.provider === "fal" ? "https://fal.ai/dashboard/requests" : job.provider === "atlas" ? "https://www.atlascloud.ai/" : "https://www.krea.ai/"} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open {job.provider === "fal" ? "Fal" : job.provider === "atlas" ? "Atlas Cloud" : "Krea"}</a>
     <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I checked the original provider run.</label>
     <input aria-label="Original provider job ID" placeholder="Provider job ID" value={requestId} onChange={(event) => setRequestId(event.target.value)} />
