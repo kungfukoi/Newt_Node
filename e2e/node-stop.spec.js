@@ -24,12 +24,11 @@ test('Stop releases a running image node and ignores a late successful response'
 
 
 test('Stop dismisses a recovered video job without submitting paid work', async ({ page }) => {
-  const { errors } = await openFixture(page, { videoProgress: true, scale: 1 });
   let stopped = false, sent = null;
-  await page.route('**/api/remote-video-jobs?**', route => {
+  const { errors, requests } = await openFixture(page, { videoProgress: true, scale: 1, remoteVideoJobs: route => {
     const scope = new URL(route.request().url()).searchParams.get('scope');
     return route.fulfill({ json: { jobs: [{ runId: 'stuck', nodeId: 'model', groupId: 'old', batchIndex: 1, scope, state: stopped ? 'dismissed' : 'recovering', createdAt: '2026-10-13T12:00:00Z', message: stopped ? 'Stopped at user request.' : 'Retrying local save' }], cursor: 'fixture:1', reset: true, pollAfterMs: 3000 } });
-  });
+  } });
   await page.route('**/api/remote-video-jobs/stop-node', route => {
     sent = route.request().postDataJSON(); stopped = true;
     return route.fulfill({ json: { jobs: [] } });
@@ -42,18 +41,17 @@ test('Stop dismisses a recovered video job without submitting paid work', async 
   await expect.poll(() => sent?.nodeId).toBe('model');
   expect(JSON.parse(sent.scope)[0]).toBe('browser-regression-project');
   await expect(node.locator('.run-node-button')).toBeEnabled();
-  await expect(node.locator('.run-node-button')).toBeEnabled();
+  expect(requests.filter(request => request.method === 'POST' && request.path.startsWith('/api/node/'))).toEqual([]);
   expect(errors).toEqual([]);
 });
 
 
 test('completed video with blocked fallback offers local recovery without a new generation', async ({ page }) => {
-  await openFixture(page, { videoProgress: true, scale: 1 });
   let recovered = false, recovery = null;
-  await page.route('**/api/remote-video-jobs?**', route => {
+  await openFixture(page, { videoProgress: true, scale: 1, remoteVideoJobs: route => {
     const scope = new URL(route.request().url()).searchParams.get('scope');
     return route.fulfill({ json: { jobs: [{ runId: 'saved-video', nodeId: 'model', groupId: 'blocked', batchIndex: 1, scope, state: recovered ? 'dismissed' : 'save_blocked', createdAt: '2026-10-13T12:00:00Z', message: 'Video generated; storage blocked.' }], cursor: 'fixture:1', reset: true, pollAfterMs: 3000 } });
-  });
+  } });
   await page.route('**/api/remote-video-jobs/saved-video/recover', route => {
     recovery = route.request().postDataJSON(); recovered = true;
     return route.fulfill({ json: { job: { state: 'downloading' } } });
