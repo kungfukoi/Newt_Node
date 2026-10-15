@@ -57,6 +57,22 @@ For image-editor work, always consider [Scumble](https://github.com/DenRakEiw/sc
 
 Do not commit, merge, pull, push, switch branches, or discard local work unless the user asks. When those actions are requested, follow the repository's existing remote and branch configuration rather than guessing.
 
+## Automatic Versioning For Published Commits
+
+The user has requested automatic version increments; do not require a reminder or ask which increment to use for routine changes. Whenever creating a change commit intended for GitHub, include its version update in that same commit.
+
+- Use standard SemVer: `MAJOR.MINOR.PATCH-beta.N` (for example, `4.0.1-beta.0`), with a leading `v` in commit titles or release names only.
+- Default to a patch increment for bug fixes, polish, small improvements, and documentation/instruction changes: `4.0.0-beta.0` -> `4.0.1-beta.0`.
+- Increment the minor version for new features or substantial enhancements, resetting patch and beta to zero: `4.0.1-beta.0` -> `4.1.0-beta.0`.
+- Increment the major version for breaking changes requiring migration or breaking existing workflows, resetting minor, patch, and beta to zero.
+- Reserve beta counter increments for explicitly identified test revisions of the same unreleased release candidate: `4.1.0-beta.0` -> `4.1.0-beta.1`. Ordinary bug fixes use the patch increment.
+- Remove the beta suffix only when the user explicitly requests a stable release.
+- Update `package.json` and both root version fields in `package-lock.json` together. Never change dependency versions as part of this step.
+- Use commit titles such as `v4.0.1-beta.0: Fix sidebar spacing`. Do not create a separate version-only commit when the version can accompany the change.
+- Before publishing, compare with the current remote version and integrate newer work without lowering or duplicating a published version. Merge-only integration commits do not need another bump when the included change commit already has a unique version.
+
+This convention authorizes automatic version selection and metadata updates when committing; commit and push actions still follow the user's requested scope.
+
 ## Definition Of Done
 
 A feature is not complete because its primary control renders. It is complete when:
