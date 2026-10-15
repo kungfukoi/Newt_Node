@@ -113,7 +113,7 @@ function atlasJobAdapter(spec, key, fetchImpl) {
       try {
         const data = await client.submitVideo(spec.input, key);
         const job = data?.data || data;
-        return { requestId: typeof job?.id === "string" ? job.id : "" };
+        return { requestId: typeof job?.id === "string" ? job.id : "", ...(job?.draft_id ? { draftId: job.draft_id } : {}) };
       } catch (error) {
         error.message = safeMessage(error.message);
         if ([400, 401, 402, 403, 404, 422].includes(error.status)) error.confirmedFailure = true;
@@ -153,13 +153,14 @@ function atlasJobAdapter(spec, key, fetchImpl) {
         const latencyMs = Number(data.latency_ms);
         return { providerStatus: status,
           providerLatencyMs: data.latency_ms != null && Number.isFinite(latencyMs) && latencyMs >= 0 ? latencyMs : null,
-          remote: { video: { url, content_type: "video/mp4" }, seed: data.seed ?? null } };
+          remote: { video: { url, content_type: "video/mp4" }, seed: data.seed ?? null,
+            ...(data.draft_id || job.providerDraftId ? { draft_id: data.draft_id || job.providerDraftId } : {}) } };
       }
       if (!["created", "pending", "queued", "starting", "processing", "running", "in_queue", "in_progress"].includes(status)) {
         throw new Error("Atlas Cloud returned an unrecognized job status; tracking the original request.");
       }
       const queued = ["created", "pending", "queued", "in_queue"].includes(status);
-      return { state: queued ? "queued" : "running", providerStatus: status, percent: providerProgressPercent(data), queuePosition: data.queue_position ?? null, message: queued ? "Queued with Atlas Cloud" : "Generating with Atlas Cloud" };
+      return { state: queued ? "queued" : "running", providerStatus: status, ...(data.draft_id ? { draftId: data.draft_id } : {}), percent: providerProgressPercent(data), queuePosition: data.queue_position ?? null, message: queued ? "Queued with Atlas Cloud" : "Generating with Atlas Cloud" };
     }
   };
 }

@@ -139,6 +139,15 @@ export function characterSheetChoices(data = {}) {
   return [...generated, ...custom].map(choice => ({ ...choice, tabLabel: choice.isBase ? "Base" : `Sheet ${++sheetNumber}` }));
 }
 
+export function characterSheetPreviewChoices(data = {}) {
+  return characterSheetChoices(data).flatMap(choice => {
+    const image = { ...choice, previewKind: "image" };
+    const cu = choice.variant?.videoGenerated;
+    const url = cu?.localUrl || cu?.url;
+    return url ? [image, { ...choice, previewKind: "video", label: `${choice.label} · CU Video`, tabLabel: `${choice.tabLabel} CU`, item: { ...cu, url } }] : [image];
+  });
+}
+
 // Select the exact active sheet, including Base Identity for local workflow compatibility.
 export function characterOutputReference(data = {}, { video = false } = {}) {
   const variant = activeCharacterSheetVariant(data);

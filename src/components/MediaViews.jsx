@@ -1808,6 +1808,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
               <audio src={displayMediaUrl(displayItem.url)} controls />
             </div>
           )}
+          {editBusy && <small className="output-lightbox-edit-status" role="status"><Loader2 size={15} className="spin" />{cropMode ? "Applying crop…" : "Applying image edit…"} Saving the image; closing this window will not cancel the save.</small>}
           {editError && <small className="output-lightbox-error">{editError}</small>}
         </div>
       </section>

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
+import { applyFilmDirectorAudioPolicyToPrompt } from "../src/filmDirectorAudio.js";
 
 const card = page => page.locator('[data-node-card-id="video"]');
 async function setup(page, provider = "fal", edit = false) {
@@ -16,11 +17,11 @@ async function setup(page, provider = "fal", edit = false) {
   return openFixture(page, { count: 3, settings: { falKeyConfigured: true, kreaKeyConfigured: true, atlasKeyConfigured: true, modelProviderPreferences: { seedance: provider, imageGeneration: "fal" } } });
 }
 
-test("draft previews finish through the shared job and preserve outputs across reload", async ({ page }) => {
-  const { errors } = await setup(page);
+for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish through the shared job and preserve outputs across reload`, async ({ page }) => {
+  const { errors } = await setup(page, provider);
   const video = card(page);
   let submitted, completions = 0;
-  const receipt = { receiptId: "12345678-1234-1234-1234-123456789012", draftId: "draft-provider", expiresAt: "2099-10-20T00:00:00Z" };
+  const receipt = { receiptId: "12345678-1234-1234-1234-123456789012", draftId: "draft-provider", provider, expiresAt: "2099-10-20T00:00:00Z" };
   await page.route("**/api/node/generate-video", route => {
     submitted = route.request().postDataJSON();
     return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/draft.mp4" }, seedanceDraft: receipt } });
@@ -68,15 +69,50 @@ test("editing sends the explicit task and restores saved duration and framing", 
   expect(errors).toEqual([]);
 });
 
-test("Krea cannot enable drafts or run a saved edit", async ({ page }) => {
+test("Krea can enable drafts but cannot run a saved edit", async ({ page }) => {
   const { errors } = await setup(page, "krea", true);
-  await expect(card(page).getByLabel("Seedance Draft mode")).toBeDisabled();
+  await expect(card(page).getByLabel("Seedance Draft mode")).toBeEnabled();
   await expect(card(page).locator(".run-node-button").first()).toBeDisabled();
   expect(errors).toEqual([]);
 });
 
-test("Atlas requires selecting Fal before enabling Draft", async ({ page }) => {
-  await setup(page, "atlas");
-  await expect(card(page).getByRole("switch", { name: "Seedance Draft mode" })).toBeDisabled();
-  await expect(card(page).getByText(/Seedance currently uses atlas/)).toBeVisible();
+test("Krea drafts stay preview-only after reload and preserve normal resolution", async ({ page }) => {
+  const { errors } = await setup(page, "krea");
+  const video = card(page);
+  let submitted;
+  await page.route("**/api/node/generate-video", route => {
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/draft.mp4" }, seedanceDraft: { provider: "krea", resolution: "480p", completionSupported: false } } });
+  });
+  const toggle = video.getByLabel("Seedance Draft mode");
+  await expect(toggle).toHaveAttribute("title", /Krea preview only/);
+  await toggle.click();
+  await video.locator(".run-node-button").first().click();
+  await expect(video.getByText("Krea draft / Preview only")).toBeVisible();
+  expect(submitted.seedanceDraft).toBe(true); expect(submitted.resolution).toBe("480p");
+  await expect(video.getByRole("button", { name: /^Finish at 1080p/ })).toHaveCount(0);
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(video.getByText("Krea draft / Preview only")).toBeVisible();
+  await expect(video.getByRole("button", { name: /^Finish at 1080p/ })).toHaveCount(0);
+  await video.getByLabel("Seedance Draft mode").click();
+  await expect(video.getByLabel("Seedance resolution")).toHaveValue("1080p");
+  expect(errors).toEqual([]);
+});
+
+for (const provider of ["atlas", "krea"]) test(`${provider} Director draft preference persists without rebuilding the plan`, async ({ page }) => {
+  const plan = applyFilmDirectorAudioPolicyToPrompt("Keep this plan");
+  await page.addInitScript(plan => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
+    { id: "director", type: "skillDirector", x: 10, y: 10, data: { title: "Director", skillVideoModel: "Seedance 2.5", skillResolution: "1080p", skillDirectorBuilt: true, resultText: plan, skillDirectorCollapsed: { setup: false } } }
+  ], edges: [], groups: [], viewport: { x: 0, y: 0, scale: .8 } })), plan);
+  const { errors, requests } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, kreaKeyConfigured: true, atlasKeyConfigured: true, modelProviderPreferences: { seedance: provider } } });
+  const toggle = page.getByLabel("Director Draft mode");
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("title", provider === "krea" ? /Krea preview only/ : /same provider and key/);
+  const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data);
+  await toggle.check();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.skillSeedanceDraft)).toBe(true);
+  const data = await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data);
+  expect(data.resultText).toBe(before.resultText); expect(data.skillResolution).toBe("1080p");
+  expect(requests.filter(request => request.method === "POST" && request.path.startsWith("/api/node/"))).toHaveLength(0);
+  expect(errors).toEqual([]);
 });

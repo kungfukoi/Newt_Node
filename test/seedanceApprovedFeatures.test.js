@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createSeedanceDraftStore } from "../server/seedance-drafts.js";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
 import { providerKeyFingerprint, createSeedanceJobAdapter } from "../server/seedance-job-provider.js";
-import { validateSeedanceDraft, seedanceDraftLifetimeMs } from "../src/seedanceDraft.js";
+import { validateSeedanceDraft, seedanceDraftLifetimeMs, seedanceAtlasDraftCompletionEndpoint } from "../src/seedanceDraft.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { buildVideoGenerationRequest } from "../src/nodeRunners/videoModels.js";
 import { buildAtlasVideoRequest } from "../src/atlasMedia.js";
@@ -23,7 +23,8 @@ test("draft and edit contracts preserve normal saved settings and reject incompa
   const edit = buildVideoGenerationRequest({ node: { ...node, data: { ...node.data, seedanceDraft: false, seedanceTask: "edit" } }, prompt: "Repaint the room", referenceVideoUrls: ["/outputs/room.mp4"] });
   assert.equal(edit.duration, "auto"); assert.equal(edit.aspectRatio, "auto");
   assert.deepEqual(node, before);
-  for (const provider of ["krea", "atlas"]) assert.throws(() => validateSeedanceDraft({ model: node.data.model, seedanceDraft: true, provider }), /requires Fal/);
+  for (const provider of ["fal", "krea", "atlas"]) assert.equal(validateSeedanceDraft({ model: node.data.model, seedanceDraft: true, provider }), true);
+  for (const provider of ["", "google"]) assert.throws(() => validateSeedanceDraft({ model: node.data.model, seedanceDraft: true, provider }), /Draft mode requires/);
   for (const patch of [{ provider: "krea" }, { videos: [] }, { startFrames: ["frame"] }, { filmDirector: {} }, { model: "Seedance 2.0" }]) assert.throws(() => validateSeedance25Task({ model: node.data.model, seedanceTask: "edit", videos: ["video"], ...patch }));
   for (const duration of [3.9, 30.1, NaN]) assert.throws(() => validateSeedance25EditDuration(duration));
   assert.equal(validateSeedance25EditDuration(30), 30);
@@ -37,7 +38,7 @@ test("draft and edit contracts preserve normal saved settings and reject incompa
   assert.notDeepEqual(generationQuoteSettings({ kind: "video", seedanceDraft: true }), generationQuoteSettings({ kind: "video" }));
 });
 
-test("durable receipts deduplicate completion across copies, local failures and restart", async t => {
+for (const provider of ["fal", "atlas"]) test(`${provider} durable receipts deduplicate completion across copies, local failures and restart`, async t => {
   const scratch = await mkdtemp(path.join(tmpdir(), "newt-seedance-approved-"));
   t.after(() => {
     assert.equal(path.dirname(path.resolve(scratch)), path.resolve(tmpdir()));
@@ -53,18 +54,28 @@ test("durable receipts deduplicate completion across copies, local failures and 
   let jobs = await createRemoteVideoJobs(options);
   let store = createSeedanceDraftStore({ directory: path.join(scratch, "receipts"), jobs, getKey: () => key, now: () => now });
   const original = { body: { projectId: "project", nodeId: "video" }, settings: { generateAudio: true, resolution: "480p", seedanceDraft: true }, prompt: "original prompt", submittedPrompt: "original prompt" };
-  const input = { draftId: "provider-draft", keyFingerprint: providerKeyFingerprint(key), startedAt: now, original };
+  const input = { provider, draftId: "provider-draft", keyFingerprint: providerKeyFingerprint(key), startedAt: now, original };
   const receipt = await store.recordDraft(input);
   assert.deepEqual(await store.recordDraft({ ...input, startedAt: now + 1000 }), receipt);
+  assert.equal(receipt.provider, provider);
+  if (provider === "fal") {
+    // Simulate an existing receipt written before provider metadata was added.
+    const receiptPath = path.join(scratch, "receipts", receipt.receiptId + ".json");
+    const legacy = JSON.parse(await readFile(receiptPath, "utf8"));
+    delete legacy.provider;
+    await writeFile(receiptPath, JSON.stringify(legacy));
+    assert.deepEqual(await store.recordDraft(input), receipt);
+  }
   assert(!(await readFile(path.join(scratch, "receipts", receipt.receiptId + ".json"), "utf8")).includes(key));
   key = "other-account";
-  await assert.rejects(store.complete(receipt.receiptId), /original Fal/); assert.equal(submits, 0);
+  await assert.rejects(store.complete(receipt.receiptId), /original (Fal|Atlas Cloud)/); assert.equal(submits, 0);
   key = "fake-original";
   const [a,b] = await Promise.all([store.complete(receipt.receiptId), store.complete(receipt.receiptId)]);
   assert.equal(a.runId, b.runId);
   await jobs.step(a.runId);
   assert.equal(submits, 1); assert.equal(saves, 1);
-  assert.deepEqual(calls[0].input, { draft_id: "provider-draft", resolution: "1080p", codec: "auto" });
+  assert.deepEqual(calls[0].input, provider === "atlas" ? { model: seedanceAtlasDraftCompletionEndpoint, draft_id: "provider-draft" } : { draft_id: "provider-draft", resolution: "1080p", codec: "auto" });
+  assert.equal(calls[0].provider, provider);
   assert.equal(calls[0].prompt, "original prompt"); assert.equal(calls[0].cost.amountUsd, null);
   await jobs.close();
   now += seedanceDraftLifetimeMs + 1000; failSave = false;

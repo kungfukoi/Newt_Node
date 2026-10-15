@@ -5,6 +5,7 @@ import {
   estimateAtlasVideoCost
 } from "../src/atlasMedia.js";
 import { prepareAtlasSeedanceImageAsset } from "./atlas-video-input.js";
+import { seedanceDraftCost } from "../src/seedanceDraft.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null, quoteInput = async () => null }) {
   async function uploadSource(source, key, kind = "", model = "", onReferencePrepared) {
@@ -118,14 +119,14 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
   async function video(options, key) {
     const input = await prepareVideo(options, key);
     const { model, images = [] } = options;
-    let quote = await quoteInput(input, key).catch(() => null);
+    let quote = options.seedanceDraft ? null : await quoteInput(input, key).catch(() => null);
     const result = await client.generate({ mediaType: "video", input, key });
-    if (!quote) quote = await quoteInput(input, key).catch(() => null);
+    if (!quote && !options.seedanceDraft) quote = await quoteInput(input, key).catch(() => null);
     return {
       ...result,
       endpoint: input.model,
       provider: "Atlas Cloud",
-      cost: { ...estimateAtlasVideoCost({
+      cost: options.seedanceDraft ? seedanceDraftCost("preview", "atlas") : { ...estimateAtlasVideoCost({
         model,
         duration: options.duration,
         resolution: options.resolution,

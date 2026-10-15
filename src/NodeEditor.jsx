@@ -249,6 +249,7 @@ import {
   characterDefaultWardrobeId,
   characterOutputReference,
   characterSheetChoices,
+  characterSheetPreviewChoices,
   characterSheetVariantForSelection,
   customCharacterSheetId,
   generatedCharacterSheetId,
@@ -393,7 +394,7 @@ import {
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
-import { selectedSeedanceDraft } from "./seedanceDraft.js";
+import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
@@ -2510,6 +2511,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const group = {
       id: `group-${Date.now()}`,
       name: `Group ${groups.length + 1}`,
+      labelFontSize: 64,
       color,
       x: Math.round(bounds.left - groupPadding.x),
       y: Math.round(bounds.top - groupPadding.top),
@@ -3200,6 +3202,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function uploadCharacterWardrobes(node, fileList) {
+    if (["compiling", "uploading"].includes(node.data.status)) return;
     const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const files = Array.from(fileList || [])
       .filter((file) => file.type.startsWith("image/"))
@@ -3216,14 +3219,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         assets.push({ ...asset, id: `character-wardrobe-${Date.now()}-${assets.length}` });
       }
       const nextWardrobes = [...existing, ...assets].slice(0, maxCharacterWardrobes);
-      updateNode(node.id, {
-        characterWardrobes: nextWardrobes,
-        activeWardrobeId: node.data.activeWardrobeId || nextWardrobes[0]?.id || "",
-        status: "ready",
-        error: ""
-      });
+      await applyCharacterWardrobes(node, nextWardrobes);
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  async function applyCharacterWardrobes(node, wardrobes) {
+    const patch = {
+      characterWardrobes: wardrobes,
+      activeWardrobeId: node.data.activeWardrobeId || wardrobes[0]?.id || "",
+      status: "ready",
+      error: ""
+    };
+    updateNode(node.id, patch);
+    if (node.data.locked) {
+      const existingIds = new Set((node.data.characterWardrobes || []).map(wardrobe => wardrobe.id));
+      await activateCharacterNode({ ...node, data: { ...node.data, ...patch } }, {
+        addedWardrobeIds: wardrobes.filter(wardrobe => !existingIds.has(wardrobe.id)).map(wardrobe => wardrobe.id)
+      });
     }
   }
 
@@ -3393,6 +3407,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function importOutputAssetToCharacterWardrobes(node, item) {
+    if (["compiling", "uploading"].includes(node.data.status)) return;
     if (item?.type !== "image") {
       updateNode(node.id, { error: "Wardrobe accepts image outputs." });
       setSaveStatus("Wardrobe accepts image outputs");
@@ -3412,12 +3427,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const nextWardrobes = [...existing, wardrobe].slice(0, maxCharacterWardrobes);
 
     pushUndoSnapshot({ nodeDataIds: [node.id] });
-    updateNode(node.id, {
-      characterWardrobes: nextWardrobes,
-      activeWardrobeId: node.data.activeWardrobeId || wardrobe.id,
-      status: "ready",
-      error: ""
-    });
+    void applyCharacterWardrobes(node, nextWardrobes);
     setSaveStatus("Added output image as wardrobe reference");
   }
 
@@ -3500,7 +3510,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "" } = {}) {
+  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null } = {}) {
     if (node.data.status === "compiling") return;
     const existingVariants = normalizeCharacterSheetVariants(node.data);
     const portrait = node.data.characterPortrait;
@@ -3536,7 +3546,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       node.data.characterBaseVideoSignature === expectedBaseVideoSignature
     );
 
-    const shouldLockExistingSheet = !forceRegenerateBase && (
+    const shouldLockExistingSheet = !forceRegenerateBase && !addedWardrobeIds && (
       (!wardrobeId && !node.data.characterBaseSignature && selectedExistingVariant?.generated?.url)
       || selectedExistingVariant?.source === "custom"
       || !(portrait?.localUrl || portrait?.url)
@@ -3563,6 +3573,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       const wardrobePlans = wardrobes.map((wardrobe) => {
         const existingVariant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
+        if (addedWardrobeIds && !addedWardrobeIds.includes(wardrobe.id)) {
+          return { wardrobe, existingVariant, needsImage: false, needsVideo: false };
+        }
         const imageCurrent = wardrobe.id !== wardrobeId && canReuseBase && characterWardrobeVariantIsCurrent(existingVariant, wardrobe, baseSignature);
         const videoCurrent = wardrobe.id !== wardrobeId && canReuseBaseVideo && generateCuVideoSheet && characterWardrobeVariantIsCurrent(
           existingVariant,
@@ -3592,6 +3605,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       };
       updateNode(node.id, {
         status: "compiling",
+        locked: false,
+        activated: false,
         characterBatchProgress: { completed: 0, total: generationCount },
         characterVariantNotice: "",
         error: ""
@@ -3667,6 +3682,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             existingVariant,
             regenerateImage: needsImage,
             regenerateVideo: needsVideo,
+            onCheckpoint: (variant) => {
+              variants = upsertCharacterWardrobeVariant(variants, variant);
+              updateNode(node.id, { characterSheetVariants: variants });
+            },
             onGenerationComplete: markGenerationComplete
           });
           variants = upsertCharacterWardrobeVariant(variants, variant);
@@ -7415,16 +7434,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...resetCoverageOutputPatch(),
           status: "running"
         });
+        const completedCoverage = [];
         const settled = await settleSequential(
           shots,
-          (shot, index) => runCoverageGeneration({
+          async (shot, index) => {
+            if (token.stopped) throw new Error("Stopped at user request.");
+            const item = await runCoverageGeneration({
             node: currentNode,
             sourceImageUrl,
             shot,
             aspectRatio,
             workflowContext: requestContext,
             index
-          }),
+            });
+            completedCoverage.push(item);
+            const { resultItems } = appendedNodeResultState([], completedCoverage, "image");
+            updateNode(currentNode.id, { resultItems, coverageResults: resultItems, resultUrl: resultItems[0]?.url || "", selectedResultIndex: 0, resultType: "image" });
+            loadOutputHistory();
+            return item;
+          },
           imageRunStaggerMs
         );
         const successes = fulfilledRunValues(settled, { flatten: true });
@@ -7507,16 +7535,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               { imagePromptIn: incoming.imageIn || [] }
             );
             updateNode(currentNode.id, { ...resetCoverageOutputPatch(), status: "running" });
+            const completedCoverage = [];
             const settled = await settleSequential(
               shots,
-              (shot, index) => runCoverageGeneration({
+              async (shot, index) => {
+                if (token.stopped) throw new Error("Stopped at user request.");
+                const item = await runCoverageGeneration({
                 node: currentNode,
                 sourceImageUrl,
                 shot,
                 aspectRatio,
                 workflowContext: requestContext,
                 index
-              }),
+                });
+                completedCoverage.push(item);
+                const { resultItems } = appendedNodeResultState([], completedCoverage, "image");
+                updateNode(currentNode.id, { resultItems, coverageResults: resultItems, resultUrl: resultItems[0]?.url || "", selectedResultIndex: 0, resultType: "image" });
+                loadOutputHistory();
+                return item;
+              },
               imageRunStaggerMs
             );
             const successes = fulfilledRunValues(settled, { flatten: true });
@@ -8483,6 +8520,9 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
         "--group-color": color
       }}
     >
+      <div className="group-canvas-name" style={{ fontSize: group.labelFontSize || 64 }}>
+        {group.name || "Group"}
+      </div>
       <div className="group-header" onPointerDown={(event) => onDragStart(event, group)}>
         <input
           value={group.name || ""}
@@ -8493,6 +8533,26 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
           onPointerDown={(event) => event.stopPropagation()}
           aria-label="Group name"
         />
+        <div className="group-label-size" onPointerDown={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            aria-label="Increase group label size"
+            title="Increase group label size"
+            disabled={(group.labelFontSize || 64) >= 320}
+            onClick={() => onUpdate(group.id, { labelFontSize: Math.min(320, (group.labelFontSize || 64) + 8) })}
+          >
+            <ChevronDown size={12} style={{ transform: "rotate(180deg)" }} />
+          </button>
+          <button
+            type="button"
+            aria-label="Decrease group label size"
+            title="Decrease group label size"
+            disabled={(group.labelFontSize || 64) <= 24}
+            onClick={() => onUpdate(group.id, { labelFontSize: Math.max(24, (group.labelFontSize || 64) - 8) })}
+          >
+            <ChevronDown size={12} />
+          </button>
+        </div>
         <div className="group-color-row" onPointerDown={(event) => event.stopPropagation()}>
           {groupPalette.map((swatch) => (
             <button
@@ -11780,10 +11840,11 @@ function NodeBody({
     const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
     const characterVariants = Array.isArray(node.data.characterSheetVariants) ? node.data.characterSheetVariants : [];
     const sheetChoices = characterSheetChoices(node.data);
+    const sheetPreviewChoices = characterSheetPreviewChoices(node.data);
     const selectedSheetId = activeCharacterSheetId(node.data);
     const variantCount = characterVariants.length;
-    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url).length;
-    const targetVariantCount = Math.max(1, wardrobes.length);
+    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.localUrl || variant?.videoGenerated?.url).length;
+    const targetVariantCount = 1 + wardrobes.length;
     const batchProgress = node.data.characterBatchProgress;
     const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
     const compiling = node.data.status === "compiling";
@@ -11837,7 +11898,8 @@ function NodeBody({
         ...(choice.source === "generated" && variant.wardrobeId !== characterDefaultWardrobeId
           ? { activeWardrobeId: variant.wardrobeId }
           : {}),
-        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image",
+        characterSheetPreviewKind: choice.previewKind || (node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image"),
+        characterTab: "sheet",
         ...(locked ? characterVariantDisplayPatch(variant) : {})
       });
     }
@@ -12042,19 +12104,18 @@ function NodeBody({
                     )}
                   </div>
                   <div className="character-sheet-library-strip">
-                    {sheetChoices.map((choice) => (
+                    {sheetPreviewChoices.map((choice) => (
                       <button
-                        key={choice.id}
+                        key={`${choice.id}:${choice.previewKind}`}
                         type="button"
-                        className={`character-sheet-library-item ${choice.id === selectedSheetId ? "active" : ""}`}
-                        disabled={compiling}
+                        className={`character-sheet-library-item ${choice.id === selectedSheetId && choice.previewKind === characterSheetPreviewKind ? "active" : ""}`}
                         onClick={() => selectCharacterSheet(choice)}
                         title={`Use ${choice.label}`}
                       >
                         <img {...fullResolutionImageProps(choice.item)} src={displayMediaUrl(previewImageUrl(choice.item))} alt={choice.label} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                         <span className="character-sheet-source">{choice.tabLabel} · {choice.source === "custom" ? "Custom" : "Generated"}</span>
                         <span className="character-sheet-name">{choice.label}</span>
-                        {choice.source === "custom" && (
+                        {choice.source === "custom" && !compiling && choice.previewKind === "image" && (
                           <span
                             className="character-remove"
                             role="button"
@@ -12069,7 +12130,7 @@ function NodeBody({
                             <X size={10} />
                           </span>
                         )}
-                        {choice.source === "generated" && (
+                        {choice.source === "generated" && !compiling && choice.previewKind === "image" && (
                           <span
                             className="character-remove"
                             role="button"
@@ -16001,9 +16062,11 @@ function NodeBody({
   const seedanceProvider = generationProviderForModel({ model: node.data.model, mediaType: "video", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
   const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
-  const draftUnavailable = false; // Saved drafts explicitly route through Fal, matching upstream.
+  const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(seedanceProvider);
   const editingUnavailable = seedanceEditing && (!["fal", "atlas"].includes(seedanceProvider) || directorConnected);
   const selectedDraft = selectedSeedanceDraft(node.data);
+  const previewOnlyDraft = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft?.completionSupported === false;
+  const draftProviderName = seedanceDraftProviderName(selectedDraft?.seedanceDraft.provider);
   const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
   const preparedSpeechCurrent = !seedanceEditing && Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
   const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
@@ -16063,12 +16126,13 @@ function NodeBody({
       <GenerationProgress scope={generationScope} nodeId={node.id} nodeStatus={node.data.status} />
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       {selectedDraft && <div className="seedance-draft-actions">
-        <small title={"Finish with the original Fal key before " + new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}>Draft / 480p</small>
+        <small title={`Finish with the original ${draftProviderName} key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
         <button type="button" disabled={running} onClick={() => onRun(node, "finish-seedance-draft")}
-          title={completedDraft ? "Select the saved 1080p render" : "Separately billed completion using the original draft inputs; requires the original Fal key within seven days"}>
+          title={completedDraft ? "Select the saved 1080p render" : `Separately billed completion using the original draft inputs; requires the original ${draftProviderName} key within seven days`}>
           {completedDraft ? "View 1080p" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
         </button>
       </div>}
+      {previewOnlyDraft && <div className="seedance-draft-actions"><small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small></div>}
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt || draftUnavailable || editingUnavailable}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
@@ -16095,14 +16159,14 @@ function NodeBody({
         <summary>Settings</summary>
         {isSeedance25 && <>
           <NodeRow label="Draft (480p)"><button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
-            disabled={running || directorConnected || (!seedanceDraft && seedanceProvider !== "fal")}
-            title={directorConnected ? "Controlled by Director" : "Fal preview. Finish selected drafts at 1080p within seven days; each stage is billed separately."}
+            disabled={running || directorConnected || (!seedanceDraft && !supportsSeedanceDraft(seedanceProvider))}
+            title={directorConnected ? "Controlled by Director" : seedanceDraftHint(seedanceProvider)}
             onClick={() => onUpdate(node.id, { seedanceDraft: !seedanceDraft })}><span /></button></NodeRow>
           <NodeRow label="Task"><select aria-label="Seedance task" value={node.data.seedanceTask || "reference"} disabled={running || directorConnected}
             onChange={event => onUpdate(node.id, { seedanceTask: event.target.value })}>
             <option value="reference">Generate Video</option><option value="edit" disabled={!["fal", "atlas"].includes(seedanceProvider)}>Edit Existing Video</option>
           </select></NodeRow>
-          {seedanceProvider !== "fal" && <small role="status">Draft generation requires Fal. Seedance currently uses {seedanceProvider || "an unavailable provider"}. Choose Fal for Seedance in Settings before running a draft.</small>}
+          {!supportsSeedanceDraft(seedanceProvider) && <small role="status">Enable Fal, Atlas Cloud or Krea for Seedance in Settings before running a draft.</small>}
           {directorConnected && <small role="status">Draft mode is controlled by the connected Director.</small>}
           {editingUnavailable && <small role="status">Editing requires Fal or Atlas and no connected Director.</small>}
         </>}
@@ -23475,6 +23539,7 @@ function normalizeGroups(groups = [], nodeMap = new Map()) {
       return {
         id: String(group?.id || `group-${index + 1}`),
         name: String(group?.name || `Group ${index + 1}`),
+        labelFontSize: Math.min(320, Math.max(24, finiteNumber(group?.labelFontSize, 64))),
         color: groupPalette.includes(group?.color) ? group.color : groupPalette[index % groupPalette.length],
         x: finiteNumber(group?.x, 120 + index * 30),
         y: finiteNumber(group?.y, 120 + index * 30),

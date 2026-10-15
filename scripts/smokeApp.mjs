@@ -14,6 +14,7 @@ const requiredHealthRoutes = [
   "ideogram45",
   "nanoBanana21",
   "seedanceDrafts",
+  "seedanceMultiProviderDrafts",
   "seedanceVideoEditing",
   "elevenLabsV4",
   "exploreLookVariation",
