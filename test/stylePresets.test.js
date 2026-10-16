@@ -9,6 +9,7 @@ const addedStylePresetNames = [
   "Cinematic Standard",
   "Cinematic Commercial",
   "UGC Device",
+  "Found Footage",
   "Photography Color",
   "Photography B&W",
   "Photography Film",
