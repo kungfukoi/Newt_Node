@@ -346,3 +346,5 @@ ElevenLabs v4 is owned by the existing `src/audioModel.js` request/estimate cont
 Node ejection is coordinated by `src/nodeRunControl.js`; NodeEditor gates run-owned state writes with the run token. The durable video stop-node route owns persistent tracking dismissal, scopes it to workflow/node, and guards against late worker transitions.
 
 `server/video-output-preflight.js` verifies Seedance storage before submission. `src/seedancePrompt.js` owns provider-specific prompt cleanup. Durable save_blocked recovery persists a separate storageBody rather than modifying immutable provider inputs.
+
+Location scouting prompts and backward-compatible Subject/Location settings live in `src/coveragePresets.js`; `src/components/CoverageSettings.jsx` shares controls between legacy Coverage and Utility Coverage. Both run paths use the same single-image request runner and result checkpoints.

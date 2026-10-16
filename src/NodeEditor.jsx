@@ -266,7 +266,8 @@ import {
   openAiImage2QualityOptions,
   openAiImage2Variant
 } from "./openAiImage2.js";
-import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
+import CoverageSettings from "./components/CoverageSettings.jsx";
+import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod, normalizeCoverageSettings } from "./coveragePresets.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -7418,7 +7419,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
         if (!sourceImageUrl) throw new Error("Connect an image to Coverage.");
         const method = normalizeCoverageMethod(currentNode.data.coverageMethod);
-        const shots = coverageShotsForMethod(method);
+        const shots = coverageShotsForMethod(method, currentNode.data);
         const aspectRatio = await resolveImageModelAspectRatio(
           {
             ...currentNode,
@@ -7526,7 +7527,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           if (isUtilityCoverageModel(utilityImageModel)) {
             const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
             if (!sourceImageUrl) throw new Error("Connect an image to Utility Coverage.");
-            const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod));
+            const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod), currentNode.data);
             const aspectRatio = await resolveImageModelAspectRatio(
               {
                 ...currentNode,
@@ -14475,7 +14476,8 @@ function NodeBody({
               ))}
             </select>
           </NodeRow>
-          <NodeRow label="Method">
+          <CoverageSettings node={node} running={running} onUpdate={onUpdate} rowComponent={NodeRow} resetOutput={resetCoverageOutputPatch} />
+          {normalizeCoverageSettings(node.data).coverageSubject === "Subject" && <NodeRow label="Method">
             <select
               value={method}
               disabled={running}
@@ -14485,7 +14487,7 @@ function NodeBody({
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
-          </NodeRow>
+          </NodeRow>}
         </div>
         <OutputPortRow node={node} port={coverageOutputPort} label="Coverage output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
@@ -15404,11 +15406,12 @@ function NodeBody({
                           {utilityGenerationModelChoices.map((option) => <option key={option} value={option}>{coverageModelLabel(option)}</option>)}
                         </select>
                       </NodeRow>
-                      <NodeRow label="Method">
+                      <CoverageSettings node={node} running={running} onUpdate={onUpdate} rowComponent={NodeRow} resetOutput={resetCoverageOutputPatch} />
+                      {normalizeCoverageSettings(node.data).coverageSubject === "Subject" && <NodeRow label="Method">
                         <select value={normalizeCoverageMethod(node.data.coverageMethod)} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetCoverageOutputPatch(), coverageMethod: normalizeCoverageMethod(event.target.value) })}>
                           {coverageMethods.map((option) => <option key={option} value={option}>{option}</option>)}
                         </select>
-                      </NodeRow>
+                      </NodeRow>}
                     </>
                   ) : isColorIdMatte ? (
                     <React.Suspense fallback={<small className="upload-status color-id-status">Loading picker...</small>}>
@@ -18147,6 +18150,7 @@ function createDefaultNodeData(type, label, count) {
       title,
       model: imageModelNames.openAiImage2,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       resolution: "2K",
       quality: openAiImage2Quality,
       coverageResults: [],
@@ -18347,6 +18351,7 @@ function createDefaultNodeData(type, label, count) {
       removeTextGraphics: false,
       advancedOpen: false,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       coverageResults: [],
       ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
@@ -19260,6 +19265,7 @@ function utilityImageModelSelectionPatch(model) {
       ...patch,
       model: imageModelNames.openAiImage2,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       resolution: "2K",
       quality: openAiImage2Quality,
       coverageResults: []
@@ -24973,6 +24979,7 @@ function normalizeCoverageData(data = {}) {
     title: data.title || "Coverage",
     model,
     coverageMethod: normalizeCoverageMethod(data.coverageMethod),
+    ...normalizeCoverageSettings(data),
     resolution: normalizeImageModelResolutionForModel(data.resolution || "2K", model),
     quality: openAiImage2Quality,
     coverageResults: resultItems,

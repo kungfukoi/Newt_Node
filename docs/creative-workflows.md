@@ -142,3 +142,7 @@ Preview/Layout and Edit share the same curve, brightness, contrast, and saturati
 - If Music Video cannot run, connect an Audio node to Music and confirm the chosen downstream model supports reference audio.
 - If a stage becomes stale, review the changed dependency and rebuild from that stage rather than recreating the node.
 - If Storyboard planning fails validation, the previous frames are intentionally preserved; revise the Director shot list or scene request and run planning again.
+
+## Location Coverage
+
+Coverage offers Subject (the existing Standard/Dynamic/Insane presets) and Location. Location scouts nine cinematic shooting positions from one connected image: establishing wide, opposite corner/alternate approach, reverse, left, right, entrance/arrival, elevated overview, primary feature, and detail. Interior/Exterior adapts the geography. Stay near reference favors supported geography and partial reverse views; Explore unseen space permits conservative inference. Unseen areas are inferred, not verified. Location uses its own scouting presets, independently of the retained Subject method. Settings persist with the node; old workflows default to Subject. Existing checkpoint, Stop, history, and result routing remain shared.
