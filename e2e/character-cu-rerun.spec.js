@@ -38,6 +38,8 @@ for (const fails of [false, true]) {
     expect(completed.locked).toBe(true);
     expect(requests[0].imagePromptUrls[0]).toBe("/outputs/e2e/cu-base.png");
     expect(requests[0].imagePromptUrls).toContain("/outputs/e2e/coat.png");
+    expect(requests[0].imagePromptUrls).toEqual(["/outputs/e2e/cu-base.png", "/outputs/e2e/coat.png"]);
+    expect(requests[0].prompt).toContain("sole source for identity and wardrobe");
     if (!fails) {
       expect(completed.characterSheetPreviewKind).toBe("video");
       await expect(character.locator('[title="Use Coat · CU Video"]')).toHaveClass(/active/);

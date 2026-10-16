@@ -64,8 +64,8 @@ test("character wardrobe edits never submit a provider mask", async () => {
   assert.equal(variant.generated.url, "/outputs/workwear.png");
   assert.equal(variant.videoGenerated.url, "/outputs/workwear-video.png");
   assert.strictEqual(requests[1].consistencySheet, variant.generated);
-  assert.strictEqual(requests[1].identityReference, node.data.characterPortrait);
-  assert.match(requests[1].prompt, /authority for the finished wardrobe/i);
+  assert.equal(requests[1].identityReference, undefined);
+  assert.match(requests[1].prompt, /sole source for identity and wardrobe/i);
 });
 
 test("CU-only retries carry the existing completed wardrobe sheet", async () => {
@@ -83,5 +83,5 @@ test("CU-only retries carry the existing completed wardrobe sheet", async () => 
   });
   assert.equal(requests.length, 1);
   assert.strictEqual(requests[0].consistencySheet, generated);
-  assert.match(requests[0].prompt, /authority for the finished wardrobe/i);
+  assert.match(requests[0].prompt, /sole source for identity and wardrobe/i);
 });

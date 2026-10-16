@@ -292,15 +292,16 @@ export async function runCharacterWardrobeEdit({
   const identityUrl = identityReference?.localUrl || identityReference?.url || "";
   const consistencyUrl = consistencySheet?.localUrl || consistencySheet?.url || "";
   if (!baseUrl) throw new Error("Generate the Base Identity sheet before applying wardrobe.");
-  if (!wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
+  if (isVideoSheet && !consistencyUrl) throw new Error("A completed Character Sheet is required before generating its matching CU sheet.");
+  if (!isVideoSheet && !wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
 
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
-    ...(identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
-    { url: wardrobeUrl, label: "Selected wardrobe reference; complete clothing, footwear and wearable accessories" },
+    ...(!isVideoSheet && identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
+    ...(!isVideoSheet ? [{ url: wardrobeUrl, label: "Selected wardrobe reference; complete clothing, footwear and wearable accessories" }] : []),
     ...(consistencyUrl ? [{
       url: consistencyUrl,
-      label: "Matching Full Character Sheet; wardrobe and identity continuity only; ignore its layout, crops, poses, and head visibility"
+      label: "Matching Full Character Sheet; sole identity and finished wardrobe authority; copy its exact outfit, ignore its layout, crops, poses, and head visibility"
     }] : [])
   ];
   const { response, data } = await nodeApi.generateImage({

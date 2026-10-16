@@ -244,6 +244,7 @@ import {
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoSheetPromptForData,
+  characterVideoSheetPromptForCompletedSheet,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import {
@@ -3551,8 +3552,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
         videoGenerated = await runCharacterSheetGeneration({
           node,
-          prompt: [characterVideoSheetPromptForData(node.data), characterVideoBaseAppearancePromptForData(node.data), characterVideoIdentityContinuityPromptForData(node.data), characterPhysicalDetailsPrompt(node.data)].filter(Boolean).join("\n\n"),
-          portrait: variant.source === "custom" ? variant.generated : node.data.characterPortrait,
+          prompt: characterVideoSheetPromptForCompletedSheet(node.data),
+          portrait: variant.generated,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
           characterTag: characterTag(node),

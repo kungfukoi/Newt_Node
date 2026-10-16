@@ -46,9 +46,15 @@ test("upstream foundation and accessory rules apply without weakening stylized d
   for (const stylizedCharacter of [false, true]) {
     for (const sheetKind of ["image", "video"]) {
       const prompt = characterWardrobeEditPromptForData({ stylizedCharacter, cinematicCharacterSheet: true }, sheetKind);
-      assert.match(prompt, /Accessories visible in that reference are explicitly requested/);
-      assert.match(prompt, /goggles mounted as shown and wear the separate eyewear over the eyes/);
-      assert.match(prompt, /do not substitute clear lenses for referenced sunglasses/);
+      if (sheetKind === "video") {
+        assert.match(prompt, /sole source for identity and wardrobe/);
+        assert.match(prompt, /headwear, eyewear, footwear/);
+        assert.doesNotMatch(prompt, /Original Character Portrait/);
+      } else {
+        assert.match(prompt, /Accessories visible in that reference are explicitly requested/);
+        assert.match(prompt, /goggles mounted as shown and wear the separate eyewear over the eyes/);
+        assert.match(prompt, /do not substitute clear lenses for referenced sunglasses/);
+      }
       assert.match(prompt, /do not show coat-off alternatives/);
       assert.match(prompt, /gray cyc continuity/i);
       if (stylizedCharacter) assert.match(prompt, /do not invent human skin, anatomy, proportions/i);
