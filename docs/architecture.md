@@ -153,6 +153,8 @@ Video Model also reuses `DirectorDialogueControls.jsx` for direct Character inpu
 
 CU wardrobe edits receive the matching completed full Character sheet as the finished wardrobe authority, together with the original portrait for identity and the neutral CU base for panel composition. CU-only retries reuse the completed wardrobe image rather than interpreting the outfit independently.
 
+Character library CU thumbnails expose a separate rerun action. It replaces only the selected CU result, reuses the existing full sheet and wardrobe/base references, and retains the previous result on failure. Base CU reruns preserve existing wardrobe sheets; custom CU reruns use their uploaded full sheet as the reference. Success keeps the regenerated CU selected. Requests use the existing tracked sheet runners without automatic retries.
+
 Character wardrobe edits request complete sheets without rectangular edit masks. `server/character-wardrobe.js` also removes obsolete masks from recognized requests made by older open tabs before Fal/Atlas routing. Base and CU panel crops, reference notes, managed outputs, and partial-success reconciliation remain owned by the existing Character helpers.
 
 Character nodes persist generated wardrobe variants in `characterSheetVariants`, uploaded completed sheets in `characterCustomSheets`, and the selected library entry in `activeCharacterSheetId`. `src/characterSheetLibrary.js` normalizes legacy single-sheet data, assigns namespaced generated/custom selection ids, builds the combined library, and resolves deterministic fallbacks without making filenames or display order authoritative.

@@ -3520,7 +3520,68 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null } = {}) {
+  async function regenerateCharacterCuSheet(node, selectionId) {
+    if (node.data.status === "compiling") return;
+    const variant = characterSheetVariantForSelection(node.data, selectionId);
+    if (!variant?.generated) return;
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
+    updateNode(node.id, { status: "compiling", characterBatchProgress: { completed: 0, total: 1 }, error: "" });
+    try {
+      const wardrobe = (node.data.characterWardrobes || []).find((item) => item.id === variant.wardrobeId);
+      let videoGenerated;
+      if (wardrobe) {
+        if (!(node.data.characterBaseSheet?.url || node.data.characterBaseSheet?.localUrl) || !(node.data.characterBaseVideoSheet?.url || node.data.characterBaseVideoSheet?.localUrl)) {
+          throw new Error("Restore the Base Identity and Base CU sheets before regenerating this wardrobe CU sheet.");
+        }
+        const result = await generateCharacterWardrobeVariant({ ...node, data: { ...node.data, cuVideoGeneration: true } }, wardrobe, {
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          baseSheet: node.data.characterBaseSheet,
+          baseVideoSheet: node.data.characterBaseVideoSheet,
+          baseSignature: variant.baseSignature,
+          baseVideoSignature: node.data.characterBaseVideoSignature,
+          existingVariant: variant,
+          regenerateVideo: true
+        });
+        if (result.videoError) throw new Error(result.videoError);
+        videoGenerated = result.variant.videoGenerated;
+      } else {
+        if (variant.source !== "custom" && variant.wardrobeId !== characterDefaultWardrobeId) {
+          throw new Error("Restore this sheet's wardrobe reference before regenerating its CU sheet.");
+        }
+        videoGenerated = await runCharacterSheetGeneration({
+          node,
+          prompt: [characterVideoSheetPromptForData(node.data), characterVideoBaseAppearancePromptForData(node.data), characterVideoIdentityContinuityPromptForData(node.data), characterPhysicalDetailsPrompt(node.data)].filter(Boolean).join("\n\n"),
+          portrait: variant.source === "custom" ? variant.generated : node.data.characterPortrait,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          sheetKind: "video"
+        });
+      }
+      if (!(videoGenerated?.url || videoGenerated?.localUrl)) throw new Error("A Base Identity CU sheet is required before regenerating this wardrobe CU sheet.");
+      const nextVariant = { ...variant, videoGenerated };
+      const libraryPatch = variant.source === "custom"
+        ? { characterCustomSheets: normalizeCharacterCustomSheets(node.data).map((sheet) => customCharacterSheetId(sheet.id) === selectionId ? { ...sheet, videoGenerated } : sheet) }
+        : { characterSheetVariants: upsertCharacterWardrobeVariant(normalizeCharacterSheetVariants(node.data), nextVariant) };
+      updateNode(node.id, {
+        ...libraryPatch,
+        ...(variant.wardrobeId === characterDefaultWardrobeId ? { characterBaseVideoSheet: videoGenerated, characterBaseVideoSignature: characterBaseVideoGenerationSignature(node.data) } : {}),
+        activeCharacterSheetId: selectionId,
+        activeWardrobeId: wardrobe?.id || "",
+        characterSheetPreviewKind: "video",
+        ...characterVariantDisplayPatch(nextVariant),
+        status: "ready",
+        characterBatchProgress: null,
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", characterBatchProgress: null, error: error.message });
+    }
+  }
+
+  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null, cuSheetId = "" } = {}) {
+    if (cuSheetId) return regenerateCharacterCuSheet(node, cuSheetId);
     if (node.data.status === "compiling") return;
     const existingVariants = normalizeCharacterSheetVariants(node.data);
     const portrait = node.data.characterPortrait;
@@ -12148,16 +12209,18 @@ function NodeBody({
                             <X size={10} />
                           </span>
                         )}
-                        {choice.source === "generated" && !compiling && choice.previewKind === "image" && (
+                        {!compiling && (choice.source === "generated" || choice.previewKind === "video") && (
                           <span
                             className="character-remove"
                             role="button"
-                            aria-label={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity" : `Regenerate ${choice.label}`}
-                            title={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity and dependent wardrobe sheets" : `Regenerate ${choice.label} from the current Base Identity`}
+                            aria-label={choice.previewKind === "video" ? `Regenerate ${choice.label}` : choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity" : `Regenerate ${choice.label}`}
+                            title={choice.previewKind === "video" ? `Regenerate ${choice.label} only` : choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity and dependent wardrobe sheets" : `Regenerate ${choice.label} from the current Base Identity`}
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              onCharacterActivate(node, choice.variant?.wardrobeId === characterDefaultWardrobeId
+                              onCharacterActivate(node, choice.previewKind === "video"
+                                ? { cuSheetId: choice.id }
+                                : choice.variant?.wardrobeId === characterDefaultWardrobeId
                                 ? { forceRegenerateBase: true }
                                 : { wardrobeId: choice.variant?.wardrobeId });
                             }}
