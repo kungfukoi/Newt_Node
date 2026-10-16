@@ -267,7 +267,7 @@ import {
   openAiImage2Variant
 } from "./openAiImage2.js";
 import CoverageSettings from "./components/CoverageSettings.jsx";
-import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod, normalizeCoverageSettings } from "./coveragePresets.js";
+import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod, normalizeCoverageSettings, coveragePromptForInputs } from "./coveragePresets.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -5983,6 +5983,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
       return normalizeCompositeLayers(target.data).map(compositeLayerPortId).filter((port) => !edgesRef.current.some((edge) => edge.to.nodeId === target.id && edge.to.port === port));
     }
+    if (target.type === "utility" && target.data?.utilityMode === "image" && isUtilityCoverageModel(target.data?.utilityImageModel) && ["style", "transfer", "character"].includes(outputKind)) return { style: ["styleIn"], transfer: ["transferIn"], character: ["characterIn"] }[outputKind];
     if (target.type === "explore") return ({ prompt: ["promptIn"], image: ["imageIn"], character: ["characterIn"], transfer: ["transferIn"], style: ["styleIn"], camera: ["cameraIn"] })[outputKind] || [];
     if (isOutputSinkConnection(target.type, "sourceIn", outputKind)) {
       return ["sourceIn"];
@@ -6206,6 +6207,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         && !customGradePromptPiece(source.data)
         && (!source.data.stylePreset || source.data.stylePreset === "None")
       ) return "Add custom grade colors before connecting";
+      if (target.type === "utility" && activeInputPortIdsForNode(target).includes("styleIn") && to.port === "styleIn") return "";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -6218,6 +6220,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "transfer") {
       if (!source.data.activated || !source.data.resultUrl) return `Lock Mood Board to enable ${moodBoardOutputFileName} output`;
       if (
+        (target.type === "utility" && activeInputPortIdsForNode(target).includes("transferIn") && to.port === "transferIn") ||
         (target.type === "imageModel" && to.port === "transferIn") ||
         (target.type === "storyboard" && to.port === "transferIn" && target.data.useStoryboardStyle === false) ||
         (target.type === "composer" && to.port === "imageIn") ||
@@ -6244,6 +6247,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
         return "";
       }
+      if (target.type === "utility" && activeInputPortIdsForNode(target).includes("characterIn") && to.port === "characterIn") return "";
       if (target.type === "imageModel" && to.port === "characterIn") return "";
       if (target.type === "videoModel" && to.port === "characterIn") return "";
       if (target.type === "composer" && isComposerCharacterInputPort(to.port, target)) return "";
@@ -6252,7 +6256,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Character connects to Character inputs or previews";
     }
 
-    if ((["imageModel", "videoModel", "skillDirector"].includes(target.type) || target.type === "storyboard") && to.port === "characterIn") {
+    if ((["imageModel", "videoModel", "skillDirector"].includes(target.type) || target.type === "storyboard" || target.type === "utility") && to.port === "characterIn") {
       return "Character inputs accept locked Character nodes";
     }
 
@@ -7527,6 +7531,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           if (isUtilityCoverageModel(utilityImageModel)) {
             const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
             if (!sourceImageUrl) throw new Error("Connect an image to Utility Coverage.");
+            const instructionSources = [...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
+            const imagePromptItems = connectedImagePromptItems([...(incoming.transferIn || []), ...(incoming.characterIn || [])], currentIncomingByNode);
             const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod), currentNode.data);
             const aspectRatio = await resolveImageModelAspectRatio(
               {
@@ -7544,7 +7550,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 const item = await runCoverageGeneration({
                 node: currentNode,
                 sourceImageUrl,
-                shot,
+                imagePromptItems,
+                shot: instructionSources.length ? { ...shot, prompt: buildEffectiveImagePrompt(coveragePromptForInputs(shot, { hasStyle: Boolean(incoming.styleIn?.length), hasMoodBoard: Boolean(incoming.transferIn?.length), hasCharacters: Boolean(incoming.characterIn?.length) }), instructionSources, aspectRatio, currentIncomingByNode) + "\n\nThe Coverage base image defines the location geometry. The requested Coverage camera direction remains authoritative: " + shot.direction } : shot,
                 aspectRatio,
                 workflowContext: requestContext,
                 index
@@ -15394,6 +15401,12 @@ function NodeBody({
                     </>
                   ) : isCoverage ? (
                     <>
+                      {["styleIn", "transferIn", "characterIn"].map(portId => {
+                        const port = config.input.find(item => item.id === portId);
+                        return <NodeRow key={portId} label={port.label} inputPort={settingsOpen ? port : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                          <button className={incoming[portId]?.length ? "connected-field" : ""}>{connectedSummary(incoming[portId], "Optional " + port.label.toLowerCase())}</button>
+                        </NodeRow>;
+                      })}
                       <NodeRow label="Generation Model">
                         <select
                           value={utilityGenerationModel}
@@ -17893,6 +17906,9 @@ function getNodeConfig(type) {
     utility: {
       icon: Wrench,
       input: [
+        { id: "styleIn", label: "Style", color: portColors.style },
+        { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "characterIn", label: "Character", color: portColors.character },
         { id: "imageIn", label: "Image", color: portColors.image },
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
@@ -19486,6 +19502,7 @@ function utilityVideoModelSelectionPatch(model) {
 
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wan22VaceDepth, data = {}) {
   if (mode === "image") {
+    if (isUtilityCoverageModel(imageModel)) return ["imageIn", "styleIn", "transferIn", "characterIn"];
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
     if (isUtilityQwenCameraEditModel(imageModel)) return ["imageIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];

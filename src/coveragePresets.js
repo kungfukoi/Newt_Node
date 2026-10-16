@@ -199,3 +199,19 @@ export function coveragePreviewItems(items = []) {
     .filter((item) => item?.url)
     .map((item) => ({ ...item, sourceUrl: item.url }));
 }
+
+export function coveragePromptForInputs(shot, { hasStyle = false, hasMoodBoard = false, hasCharacters = false } = {}) {
+  let prompt = shot.prompt;
+  if (hasStyle || hasMoodBoard) {
+    prompt = prompt.replace("same lighting, and same color grade", "same physical lighting setup")
+      .replace("lighting conditions, time of day, and color grade", "physical lighting conditions and time of day");
+    prompt += " Connected Style and Mood Board inputs may change the rendering treatment, palette, and grade while preserving location geometry, recognizable materials, and the requested camera composition. Explicit Style instructions take precedence over conflicting Mood Board treatment. Mood Board imagery is treatment reference only: do not copy its subjects, geography, text, borders, or collage layout.";
+  }
+  if (hasCharacters) {
+    prompt = prompt.replace("Do not add people.", "Include the connected referenced characters naturally within this location. Do not add unreferenced people.")
+      .replace("Scout this location for compelling film shots without talent.", "Scout this location for compelling film shots with the connected characters.")
+      .replace("the same exact subject or subjects with the same pose, same eyeline", "the subjects' existing pose, eyeline, and blocking, using the connected Character references as identity and wardrobe authority");
+    prompt += " Use the connected Character sheets for identity and selected wardrobe only, never their sheet layout or studio background. Preserve existing blocking and world-space positions when present in the base image; otherwise place the connected characters naturally and consistently in the location. Character references override conflicting base-image identity. Do not rearrange the location to match a character sheet.";
+  }
+  return prompt;
+}

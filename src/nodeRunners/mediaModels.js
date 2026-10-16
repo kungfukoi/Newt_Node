@@ -82,6 +82,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
 export async function runCoverageGeneration({
   node,
   sourceImageUrl,
+  imagePromptItems = [],
   shot,
   aspectRatio,
   workflowContext,
@@ -95,8 +96,8 @@ export async function runCoverageGeneration({
     resolution: node.data.resolution,
     quality: node.data.quality,
     seedreamLayers: false,
-    imagePromptUrls: [sourceImageUrl],
-    imagePromptLabels: ["Coverage base image"],
+    imagePromptUrls: [sourceImageUrl, ...imagePromptItems.map(item => item.url)],
+    imagePromptLabels: ["Coverage base image", ...imagePromptItems.map(item => item.label)],
     ...workflowContextPayload(workflowContext),
     outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
