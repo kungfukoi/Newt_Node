@@ -13572,9 +13572,7 @@ function NodeBody({
                         onError={useNewtNodeVideoFallback}
                       />}
                       <figcaption>{index + 1}</figcaption>
-                      <span className="preview-layout-kind" title={item.type === "video" ? "Video" : "Image"}>
-                        {item.type === "video" ? <Film size={11} /> : <FileImage size={11} />}
-                      </span>
+                      {item.type === "video" && <span className="preview-layout-kind" title="Video"><Film size={11} /></span>}
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
                       </button>
