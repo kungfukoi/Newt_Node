@@ -4817,7 +4817,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function exportPreviewLayoutBoard(node) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
-    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems).filter((item) => item.type === "image");
+    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
     const frames = layoutItems.map((item, index) => {
       const description = previewLayoutExportCaption(item, index);
       return {
@@ -4836,7 +4836,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!frames.length) {
       updateNode(currentNode.id, {
         previewLayoutExportStatus: "",
-        previewLayoutExportError: "Add at least one image to the Layout tab before exporting."
+        previewLayoutExportError: "Add at least one image or video to the Layout tab before exporting."
       });
       return;
     }
@@ -4849,7 +4849,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       const folderSelection = await systemApi.selectFolder({
-        title: "Choose where to save preview layout boards",
+        title: "Choose where to save preview layout images and videos",
         defaultPath: projectPackagePath || ""
       });
       if (!folderSelection.response.ok) {
@@ -13346,7 +13346,7 @@ function NodeBody({
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
-    const layoutImageCount = layoutItems.filter((item) => item.type === "image").length;
+    const layoutMediaCount = layoutItems.length;
     const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
     const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -13594,8 +13594,8 @@ function NodeBody({
               <button
                 type="button"
                 onClick={() => onPreviewLayoutExport?.(node)}
-                disabled={!layoutImageCount || layoutExporting}
-                title="Export layout images"
+                disabled={!layoutMediaCount || layoutExporting}
+                title="Export layout images and videos into a new folder"
               >
                 {layoutExporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
                 <span>{layoutExporting ? "Exporting" : "Export"}</span>
@@ -13652,7 +13652,7 @@ function NodeBody({
             </div>
             {(node.data.previewLayoutExportError || layoutExport?.folderPath) && (
               <small className={`preview-layout-export-status ${node.data.previewLayoutExportError ? "error" : ""}`} title={layoutExport?.folderPath || ""}>
-                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutImageCount} frame${(layoutExport.frameCount || layoutImageCount) === 1 ? "" : "s"}`}
+                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutMediaCount} file${(layoutExport.frameCount || layoutMediaCount) === 1 ? "" : "s"}`}
               </small>
             )}
           </section>

@@ -1,6 +1,6 @@
 # Creative Workflows
 
-This guide covers the current Director, Storyboard, Character, and shared image-adjustment workflow in NewtNode `3.0.0-beta.0`.
+Audited against checkout `4.5.0-beta.0` on 2026-10-15. This guide covers Director, Storyboard, Character/audio handoff, Style, Coverage, Preview Layout, and shared image adjustments. See the [complete feature reference](features-and-workflows.md) for all nodes and provider routing.
 
 ## Director
 
@@ -40,6 +40,7 @@ Director does not silently cut off a reference when there are more than six in o
 | --- | --- |
 | Cinematic | Grounded live-action direction, restrained coverage, continuity, and motivated camera movement. |
 | Vintage | Practical vintage capture with an 8mm-inspired texture and cadence. |
+| Camcorder | Suspenseful first-person VHS horror, POV flashlight lighting, searching holds, and motivated whip pans into physically staged extreme close-ups. |
 | Animation | Coherent cel, CGI, digital-animation, or motion-graphics treatment. |
 | Stop-Motion | Tactile miniature, puppet, or clay treatment with deliberate stepped posing. |
 | Commercial | Polished premium advertising, beauty, product, or editorial presentation. |
@@ -95,27 +96,15 @@ Visual QC reports reviewed results normally. If review cannot run, the board is 
 
 ## Character Reliability
 
-### Assigned dialogue voices
+### Dialogue and character voices
 
-Video Model offers two explicit **Character voices** modes. **Exact dialogue audio** is the default: author speaker rows, click **Prepare ElevenLabs dialogue**, and listen to the combined track before **Run Video**. Preparation makes paid speech requests but submits no video. The **ElevenLabs audio ready** status applies only to the current model, lines and voice assignments; changes mark the preview stale, and preparation reuses unchanged cached clips. Video Run still validates current assignments. With audio enabled, selected custom voices without exact rows or explicit sample mode produce a local error instead of silently generating native speech.
+Create speech in **Audio Model**. Choose **Text to Speech** for one voice or **Dialogue and character voices** for ordered speaker rows and pauses. Dialogue mode accepts Character connections for names and ElevenLabs voices; a generated identity sheet is not required for that audio input. Manual rows need a speaker name and voice. Generate and listen to the completed managed audio track before submitting video. Speech generation and video generation are separate paid operations.
 
-For **Voice samples (model dialogue)**, first open **Character Build → Voice → Voice sample**, edit the short paragraph if needed, and click **Generate voice sample**. The generated clip is playable and saved with its voice ID. Choose Voice samples mode in Video Model; Character samples from direct inputs and connected Director speakers are submitted with separate speaker labels. Keep the desired dialogue in the video prompt or speaker rows. Instructions identify the sample as a voice reference and prohibit reciting its paragraph. This mode lets the video model generate speech; it does not replace the finished soundtrack with sample paragraphs, and exact voice matching is not guaranteed. Changing the Character voice requires a new sample. All samples share the model's audio duration and reference-count limits, so shorter samples or fewer speakers may be required.
+For exact speech, connect that Audio Model output (or an uploaded Audio node) to **Video Model → Reference Audio**, choose **Character voices → Exact dialogue audio**, and enable Generate Audio. Use a supported Seedance or MiniMax H3 route with Reference Images rather than Start/End Frames. Exactly one completed audio source drives the words, voices, pacing, and lip sync and is retained in the finished video. Recordings longer than 15 seconds use a managed first-15-second copy; the original stays intact. Choose a video duration long enough for the speech. Visual lip-sync quality depends on the generation model.
 
-In **Character Build → Voice**, select an ElevenLabs voice from the account's custom and default voices. Configure the ElevenLabs key in Settings first. Refresh reloads the catalog; selecting a voice does not generate paid speech and preserves uploaded voice samples. Choose **Use uploaded dialogue audio** to return to the existing sample workflow.
+The current Video node does not expose the former inline dialogue editor or **Prepare ElevenLabs dialogue** button. Existing saved dialogue data retains compatibility handling; it is not the recommended authoring path.
 
-Connect the locked, activated Character to Director. In **Scene Overview → Dialogue and character voices**, add the exact lines, select each connected speaker, and set the pause after each line. Dialogue is saved per Director scene and binds to Character node IDs, so renaming, copying, and importing do not exchange speakers. Rebuild the Director, connect it to Video Model, enable audio, and run a reference-to-video route.
-
-You can also connect Character directly to **Video Model → Character**. Open Video Model Settings, expand **Dialogue and character voices**, and add the exact lines and speakers there. A Director is optional. The Character's current voice assignment accompanies the direct connection; it is not inferred from freeform prompt text. If both routes contain authored lines, Director lines play first, then Video Model lines, with speakers deduplicated by node ID. The same voice, timing, saved-audio, and model-support rules apply. Image-only consumers continue using the Character sheet without making speech calls.
-
-The Character voice picker shares the Character Sheet Model dropdown's font, colors, height, focus and disabled states. Its compact label and refresh icon follow the existing Character controls; contextual guidance is a tooltip, with visible text reserved for errors. Dialogue controls reuse node form styling and accessible icon actions.
-
-Assigned dialogue currently supports Seedance 2.0, Seedance 2.5, and MiniMax H3. Models whose current adapters cannot consume this speech reject assigned dialogue before synthesis. Seedance 2.5 allows a combined dialogue track up to 30.2 seconds; the other supported routes use a 15-second ceiling. Speech must also fit the chosen video duration. Start/end-frame routes require moving the images to Reference Images.
-
-At Video Run, ElevenLabs generates each exact line with its selected voice. The combined track and timed speaker instructions become model references for lip sync. The downloaded video receives that exact speech track to preserve voice identity; this replaces model-generated sound and does not mix background music or ambience. Visual lip-sync accuracy still depends on the video model.
-
-Successful speech clips are saved as managed assets, recorded in History, and reused across retries. Changing a line or assigned voice generates only that changed speech. If a request has an uncertain outcome, check History and ElevenLabs before using **Regenerate dialogue audio on next run**, which explicitly permits new paid requests. An overlong dialogue error retains completed speech for reuse after adjusting duration.
-
-Provider contracts: [ElevenLabs voice catalog](https://elevenlabs.io/docs/api-reference/voices/search), [Seedance 2.5 reference-to-video](https://fal.ai/models/bytedance/seedance-2.5/reference-to-video/api).
+**Voice samples (model dialogue)** is the alternative when the video model should generate the spoken performance. In Character Build → Voice, select an ElevenLabs voice and explicitly generate its sample, or use uploaded dialogue audio. Connect the locked active Character to the video/directing workflow and select sample mode. Put desired dialogue in scene instructions; the sample is a voice reference and must not be recited. Voice identity and lip sync are model-dependent, and reference count/duration limits still apply. Selecting a voice alone does not generate speech. **Off** disables this handoff.
 
 New Character nodes prefer Nano Banana Pro; existing model selections are preserved.
 Seedream 5.0 Pro is available for 2K sheets. Standard Base Identity and CU sheets
@@ -143,14 +132,32 @@ Preview/Layout and Edit share the same curve, brightness, contrast, and saturati
 - If a stage becomes stale, review the changed dependency and rebuild from that stage rather than recreating the node.
 - If Storyboard planning fails validation, the previous frames are intentionally preserved; revise the Director shot list or scene request and run planning again.
 
-## Location Coverage
+## Style and Mood Board
 
-Coverage offers Subject (the existing Standard/Dynamic/Insane presets) and Location. Location scouts nine cinematic shooting positions from one connected image: establishing wide, opposite corner/alternate approach, reverse, left, right, entrance/arrival, elevated overview, primary feature, and detail. Interior/Exterior adapts the geography. Stay near reference favors supported geography and partial reverse views; Explore unseen space permits conservative inference. Unseen areas are inferred, not verified. Location uses its own scouting presets, independently of the retained Subject method. Settings persist with the node; old workflows default to Subject. Existing checkpoint, Stop, history, and result routing remain shared.
+Style presets are written instructions, not LUTs, image filters, or LoRAs. Style combines a selected visual-treatment prompt with optional Grade instructions. Custom Grade builds its direction from the chosen/extracted palette. Found Footage describes consumer camcorder, body-cam/POV, handheld framing, VHS artifacts, and available-light capture without unrequested recording graphics. Results vary by model.
 
-Utility Coverage accepts optional Style, Mood Board, and locked active Character inputs in both Subject and Location modes. Every shot includes the existing Style/grade instructions, Mood Board treatment prompt and image, and active Character sheet and identity/wardrobe instructions. Style overrides conflicting Mood Board treatment; the base image owns geography and the Coverage preset owns camera composition. Connecting Characters permits talent in Location scouting and replaces conflicting source identity without copying sheet backgrounds/layouts. Without optional inputs, existing prompts and references are preserved. These ports use stable styleIn/transferIn/characterIn ids and remain available when the Image drawer is collapsed.
+Mood Board builds a locked visual reference collage. Connect its output where a Mood Board input is offered; its image and treatment instructions guide the result without copying the collage layout. Character sheets supply identity and wardrobe, not the sheet background. Direct Style instructions override conflicting treatment in Director-derived Image Model prompts. A directly connected Camera overrides conflicting camera instructions. Approach is the broader directing plan: Camcorder combines horror pacing, POV flashlight lighting, spatially motivated whip pans and VHS treatment; it does not require the Found Footage Style.
 
-Preview Layout tiles drag before or after another tile with a visible insertion edge, retaining order through save/reopen and export. Dragging a tile onto the canvas creates a media node using its full-resolution asset while preserving the Layout item. Double-click opens a Layout-scoped gallery; Left/Right wraps through images and videos in current layout order, preserving each image's own edit context. Typing/editing shortcuts retain their existing guards.
+## Coverage and location scouting
 
-Style includes Found Footage: the shared prompt preset describes consumer camcorder/VHS/body-cam capture, first-person handheld composition, available light, limited dynamic range, analog video artifacts, and recording imperfections. Recording icons and timestamps are excluded unless requested. It uses the existing Style prompt path across connected consumers.
+1. Add **Utility**, select **Image → Coverage**, and connect the source image.
+2. Open Image settings and choose **Coverage: Subject** or **Location**.
+3. Subject retains Standard, Dynamic, and Insane nine-shot methods. Location uses its own scouting set; choose Interior/Exterior and Stay near reference or Explore unseen space.
+4. Optionally connect Style, a locked Mood Board, and locked active Characters. Each request carries the applicable instructions plus labeled board/character images. The base image owns geography, the Coverage preset owns camera direction, Style takes priority over conflicting board treatment, and Characters own identity/wardrobe. Connected Characters allow talent in Location shots; otherwise Location requests no people.
+5. Generate Coverage, then connect the output to Preview and open Layout. Each completed shot is retained immediately, including after partial failure or Stop. The global red X stops new submissions; it does not promise provider cancellation or a refund.
 
-Director Approach includes Camcorder: suspenseful first-person handheld VHS horror lit by the unseen operator's POV flashlight. Planning emphasizes searching holds, motivated whip pans into physically staged extreme close-ups, spatial continuity, readable reveals, analog video artifacts, and the selected audio policy. Still remains one drawable instant. Camcorder uses the shared Approach dropdown, normalization, scene persistence, planning schema, Style Direction, default Camera Direction, and final scene rules. Existing approaches remain unchanged.
+Location's nine views are establishing wide, opposite-corner/alternate approach wide, reverse, left-side, right-side, entrance/arrival, elevated overview, primary feature, and material/detail. Stay near reference favors supported geography and partial reverse views. Explore unseen space permits conservative invention. A single photograph cannot verify hidden geometry; scouting is generative, not a reconstructed 3D survey.
+
+Legacy standalone Coverage nodes still load; new workflows use Utility. Optional Style/Mood Board/Character inputs are a Utility Coverage feature.
+
+## Preview Layout
+
+Connect source results to Preview, then open Layout to collect images/videos. Drag to the left or right half of a tile to insert before or after it; the highlighted edge shows placement. Layout order persists and controls image-export order. Removing a tile hides it from that Layout without deleting the underlying asset.
+
+Drag a tile onto empty canvas to create a matching media node using the full-resolution asset. The Layout copy remains. Double-click a tile to open its gallery; Left/Right wraps through images and videos in the current Layout order. Image editing targets the currently viewed Layout item. Typing and editor shortcut guards remain active. Image tiles show their number without an image badge; video tiles retain a video badge. Resizing preserves the complete image with contain/letterbox behavior.
+
+Export collects Layout images; mixed video tiles are not a rendered movie. Use Timeline for video assembly and export. The project output rail has its own gallery and catalog; it is separate from this Layout order.
+
+## Camcorder Approach
+
+Choose **Director → Approach → Camcorder** before locking Scene Setup. It directs first-person handheld horror with the unseen operator's flashlight as the motivated light, searching holds, hesitant movement, and motivated whip pans into close subjects/details. It preserves scene identity and geography. An extreme close-up needs a nearby subject or an explicit approach; rotation alone does not change distance. VHS texture describes the look, not a forced encoded frame rate. Still remains one drawable instant, and the selected audio policy controls sound. Changing Approach invalidates affected planning stages; rebuild the scene package before downstream use.

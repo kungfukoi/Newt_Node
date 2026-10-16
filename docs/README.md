@@ -20,7 +20,15 @@ This directory separates the current product contract from architecture, build g
 
 ## User Guides
 
-- `creative-workflows.md`: Director approaches and inputs, staged scene building, Storyboard validation, Character checkpoint behavior, and shared image adjustments.
+- `features-and-workflows.md`: current palette, legacy types, practical recipes, model/provider catalog, local versus hosted tools, and verification limits.
+- `documentation-audit-2026-10-15.md`: dated source audit, corrected documentation drift, validation results, and remaining boundaries.
+
+- `creative-workflows.md`: Director approaches (including Camcorder), Storyboard, Character/audio handoff, Style/Mood Board, Coverage/location scouting, Preview Layout, and shared image adjustments.
+- `explore-node.md`: look development, reference influence, favorites, refinements, and resumable queues.
+- `character-upstream.md`: Character generation contracts and upstream adaptations.
+- `storyboard-upstream.md`: Storyboard upstream behavior, protection, revisions, and review.
+- `stats-analytics.md`: Local/Global accounting scope, filters, pricing gaps, and isolated playtesting.
+- `ideogram45.md`: provider-specific generation/editing contracts and limits.
 - `newt-presets.md`: creating, inserting, binding, deleting, storing, and troubleshooting user-created Newt Presets.
 
 ## Operational

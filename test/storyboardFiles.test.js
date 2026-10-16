@@ -27,6 +27,23 @@ test("storyboard frame filenames normalize invalid numbers and extensions", () =
   assert.equal(storyboardFrameFileName("", 0, "../png"), "Scene_1_Frame_01.png");
 });
 
+test("Layout exports preserve original video formats and bytes", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "newtnode-layout-export-"));
+  try {
+    for (const [index, extension] of [".mp4", ".mov", ".webm"].entries()) {
+      const source = path.join(directory, `source${extension}`);
+      const bytes = Buffer.from([0, 1, 2, 255, index]);
+      await writeFile(source, bytes);
+      const name = storyboardFrameFileName("Selects", index + 1, extension);
+      const result = await copyStoryboardFrameWithVersion(source, path.join(directory, "export"), name);
+      assert.equal(path.extname(result.fileName), extension);
+      assert.deepEqual(await readFile(result.filePath), bytes);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("storyboard frame versions start at v02 and retain the extension", () => {
   assert.equal(versionedStoryboardFrameFileName("Scene_01_Frame_01.png", 1), "Scene_01_Frame_01.png");
   assert.equal(versionedStoryboardFrameFileName("Scene_01_Frame_01.png", 2), "Scene_01_Frame_01_v02.png");

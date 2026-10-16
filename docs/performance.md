@@ -40,7 +40,7 @@ The smoke harness fetches the client HTML, its referenced module/style assets, a
 
 ## Current Baseline
 
-Measured for package version `3.0.0-beta.0` on `main` with uncommitted reliability improvements, using `npm.cmd run build` and `npm.cmd run bundle:report` on 2026-09-04. Branch names are not part of the performance contract; refresh this snapshot after architecture or loading changes.
+Measured on Windows with Node 22.16.0 on 2026-10-15 from checkout 4.5.0-beta.0, using an isolated fresh Vite output directory and the existing reportBundle.mjs against that directory. A concurrent uncommitted Character change was present during measurement; these sizes describe that local source snapshot, not a published artifact.
 
 | Area | Current behavior |
 | --- | --- |
@@ -55,33 +55,40 @@ Measured for package version `3.0.0-beta.0` on `main` with uncommitted reliabili
 | 3D result viewer | `src/components/Model3DViewer.jsx` loads only when a 3D preview/result renders. |
 | Three.js runtime | `vendor-three` is generated as an async chunk from `src/threeRuntime.js`; it is not referenced by `dist/index.html`. |
 
-Recent production build summary:
+Single-build asset summary (reportBundle.mjs units; hashes omitted):
 
 | Asset | Role | Size | Gzip |
 | --- | --- | ---: | ---: |
-| `index.html` | document | 0.66 kB | 0.36 kB |
-| `assets/index-*.js` | entry script | 76.74 kB | 25.98 kB |
-| `assets/index-*.css` | entry style | 26.33 kB | 5.56 kB |
-| `assets/vendor-icons-*.js` | modulepreload | 22.64 kB | 7.29 kB |
-| `assets/vendor-react-*.js` | modulepreload | 188.00 kB | 58.94 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 940.54 kB | 258.86 kB |
-| `assets/NodeEditor-*.css` | lazy editor style | 173.91 kB | 29.36 kB |
-| `assets/vendor-*.js` | lazy shared/editor vendor | 175.46 kB | 57.52 kB |
-| `assets/vendor-*.css` | lazy shared/editor vendor style | 15.50 kB | 2.61 kB |
-| `assets/Model3DViewer-*.js` | lazy 3D viewer | 4.65 kB | 2.10 kB |
-| `assets/ColorIdMatteControls-*.js` | lazy Utility controls | 13.35 kB | 3.38 kB |
-| `assets/openAiImage2-*.js` | lazy OpenAI Image 2.5 helper | 4.23 kB | 1.63 kB |
-| `assets/SettingsPage-*.js` | lazy Settings page | 23.27 kB | 7.13 kB |
-| `assets/StatsDashboard-*.js` | lazy Stats page | 25.56 kB | 7.98 kB |
-| `assets/vendor-three-*.js` | lazy Three.js runtime | 795.88 kB | 207.12 kB |
+| index.html | document | 0.66 kB | 0.36 kB |
+| assets/index-*.js | entry script | 129.78 kB | 42.31 kB |
+| assets/index-*.css | entry style | 29.83 kB | 6.05 kB |
+| assets/vendor-icons-*.js | modulepreload | 27.54 kB | 8.61 kB |
+| assets/vendor-react-*.js | modulepreload | 188.00 kB | 58.94 kB |
+| assets/ColorIdMatteControls-*.js | lazy/generated | 13.31 kB | 3.36 kB |
+| assets/ExploreNodeBody-*.js | lazy/generated | 12.06 kB | 4.21 kB |
+| assets/ExploreNodeBody-*.css | lazy/generated | 5.64 kB | 1.61 kB |
+| assets/imageEditorPreference-*.js | lazy/generated | 0.43 kB | 0.30 kB |
+| assets/ImageEditStudio-*.css | lazy/generated | 10.07 kB | 2.74 kB |
+| assets/ImageEditStudio-*.js | lazy/generated | 52.82 kB | 18.24 kB |
+| assets/Model3DViewer-*.js | lazy/generated | 4.62 kB | 2.08 kB |
+| assets/NodeEditor-*.css | lazy/generated | 189.66 kB | 32.26 kB |
+| assets/NodeEditor-*.js | lazy/generated | 1186.19 kB | 336.43 kB |
+| assets/SettingsPage-*.js | lazy/generated | 33.96 kB | 9.90 kB |
+| assets/StatsDashboard-*.js | lazy/generated | 27.27 kB | 8.94 kB |
+| assets/StatsDashboard-*.css | lazy/generated | 7.40 kB | 2.07 kB |
+| assets/vendor-*.js | lazy/generated | 175.46 kB | 57.52 kB |
+| assets/vendor-*.css | lazy/generated | 15.50 kB | 2.61 kB |
+| assets/vendor-three-*.js | lazy/generated | 795.88 kB | 207.12 kB |
 
-Current totals:
+Single-build totals:
 
-- Initial shell: 314.36 kB, 98.13 kB gzip.
-- Lazy/generated: 2172.33 kB, 577.68 kB gzip.
-- All assets: 2486.70 kB, 675.81 kB gzip.
+- Initial shell: 375.80 kB (116.27 kB gzip)
+- Lazy/generated: 2530.27 kB (689.39 kB gzip)
+- All assets: 2906.07 kB (805.66 kB gzip)
 
-Vite currently reports the expected large-chunk warning for the node editor and Three.js runtime. Treat the editor chunk as the next code-splitting target; do not move node-editor dependencies into the initial shell to hide the warning.
+Production builds intentionally set emptyOutDir: false so already-open windows can request prior hashed chunks. The ordinary bundle:report command counts every file retained in dist; its lazy/all-assets aggregate is accumulated disk usage, not the current build payload. Do not delete active dist assets to measure a release. Use a new isolated output directory and run the report with that directory as its working root (it expects dist/index.html).
+
+Vite still reports expected large chunks for the node editor and Three.js. These measurements do not change the lazy-loading contract or establish a new pass/fail threshold. The dated September timing benchmarks below remain historical, not freshly rerun values.
 
 ## Guardrails
 
