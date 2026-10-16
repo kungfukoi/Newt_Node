@@ -10637,3 +10637,6 @@ video.newtnode-video-fallback {
 
 .zoom-controls .canvas-stop-button { color: #ff5c5c; background: rgba(220, 40, 40, 0.14); }
 .zoom-controls .canvas-stop-button:hover { color: #fff; background: #c92c2c; }
+
+.preview-layout-item.drop-before { border-left: 3px solid #ddc631; box-shadow: inset 4px 0 0 rgba(221, 198, 49, 0.35); }
+.preview-layout-item.drop-after { border-right: 3px solid #ddc631; box-shadow: inset -4px 0 0 rgba(221, 198, 49, 0.35); }

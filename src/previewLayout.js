@@ -165,3 +165,21 @@ function isUsefulPreviewLayoutCaption(label = "", item = {}) {
   if (/\bgenerated\s+(image|video)\s*,?\s+unique\s+id\b/i.test(label)) return false;
   return true;
 }
+
+export function previewLayoutDropBeforeId(items, targetId, after = false) {
+  if (!after) return targetId;
+  const index = items.findIndex(item => item.id === targetId);
+  return index >= 0 ? items[index + 1]?.id || "" : "";
+}
+
+export function previewLayoutLightboxItem(item, nodeId) {
+  return { ...item, ...(item.type === "image" ? { editContext: { type: "previewLayout", nodeId, itemId: item.id } } : {}) };
+}
+
+export function adjacentPreviewLayoutItem(items, currentId, direction, nodeId) {
+  const media = normalizedPreviewLayoutItems(items);
+  if (!media.length) return null;
+  const index = media.findIndex(item => item.id === currentId);
+  const nextIndex = index < 0 ? 0 : (index + (direction < 0 ? -1 : 1) + media.length) % media.length;
+  return previewLayoutLightboxItem(media[nextIndex], nodeId);
+}

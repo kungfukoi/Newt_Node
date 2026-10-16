@@ -350,3 +350,5 @@ Node ejection is coordinated by `src/nodeRunControl.js`; NodeEditor gates run-ow
 Location scouting prompts and backward-compatible Subject/Location settings live in `src/coveragePresets.js`; `src/components/CoverageSettings.jsx` shares controls between legacy Coverage and Utility Coverage. Both run paths use the same single-image request runner and result checkpoints.
 
 Utility Coverage resolves optional Style/Mood Board/Character connections through the shared effective-image prompt and active-sheet reference helpers. coveragePromptForInputs in coveragePresets.js reconciles scouting/identity/treatment constraints; runCoverageGeneration sends the base image first, followed by labeled board/character references through the existing image generation API.
+
+PreviewLayoutTile owns Layout drag feedback; previewLayout.js owns insertion and mixed-media gallery ordering/edit contexts. NodeEditor coordinates existing media drag payloads and live Layout gallery navigation through OutputPreviewLightbox.

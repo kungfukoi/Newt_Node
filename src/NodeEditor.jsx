@@ -225,6 +225,9 @@ import { appendResultItems, existingResultItemsForNode, normalizedResultItems, r
 import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
 import { previewSelectionForNode } from "./previewSelection.js";
 import {
+  adjacentPreviewLayoutItem,
+  previewLayoutDropBeforeId,
+  previewLayoutLightboxItem,
   createPreviewLayoutItem,
   mergePreviewMediaIntoLayout,
   movePreviewLayoutItem,
@@ -266,6 +269,7 @@ import {
   openAiImage2QualityOptions,
   openAiImage2Variant
 } from "./openAiImage2.js";
+import PreviewLayoutTile from "./components/PreviewLayoutTile.jsx";
 import CoverageSettings from "./components/CoverageSettings.jsx";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod, normalizeCoverageSettings, coveragePromptForInputs } from "./coveragePresets.js";
 import {
@@ -1477,8 +1481,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => buildProjectOutputItems({ nodes, catalog: outputCatalog.items, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
     [nodes, outputCatalog.items, projectId, projectName]
   );
-  const openPreviewLightbox = React.useCallback((item) => {
-    setPreviewLightboxSource("");
+  const openPreviewLightbox = React.useCallback((item, context = {}) => {
+    setPreviewLightboxSource(context.layoutNodeId ? "previewLayout:" + context.layoutNodeId : "");
     setPreviewLightboxItem(item);
   }, []);
   const openProjectOutputPreview = React.useCallback((item) => {
@@ -1489,6 +1493,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setPreviewLightboxItem(null);
     setPreviewLightboxSource("");
   }, []);
+  const navigatePreviewLayout = React.useCallback((direction) => {
+    const nodeId = previewLightboxSource.slice("previewLayout:".length);
+    const source = nodesRef.current.find(node => node.id === nodeId);
+    setPreviewLightboxItem(current => adjacentPreviewLayoutItem(source?.data.previewLayoutItems || [], current?.id, direction, nodeId) || current);
+  }, [previewLightboxSource]);
   const navigateProjectOutputPreview = React.useCallback((direction) => {
     setPreviewLightboxItem((current) => adjacentProjectOutputImage(projectOutputs, current, direction) || current);
   }, [projectOutputs]);
@@ -8071,8 +8080,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {previewLightboxItem && (
         <OutputPreviewLightbox
           item={previewLightboxItem}
-          navigationKey={previewLightboxSource === "projectOutputs" ? previewLightboxItem.id || previewLightboxItem.url : ""}
-          onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : undefined}
+          navigationKey={previewLightboxSource ? previewLightboxItem.id || previewLightboxItem.url : ""}
+          allowVideoNavigation={previewLightboxSource.startsWith("previewLayout:")}
+          onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : previewLightboxSource.startsWith("previewLayout:") ? navigatePreviewLayout : undefined}
           onApplyImageEdit={applyPreviewLayoutImageEdit}
           onRestoreImageEdit={restorePreviewLayoutImageEdit}
           onAcceptAiEdit={acceptAiImageEdit}
@@ -13351,12 +13361,14 @@ function NodeBody({
       onUpdate(node.id, { previewLayoutItems: nextItems });
     }
 
-    function handleLayoutDrop(event, beforeId = "") {
+    function handleLayoutDrop(event, targetId = "", after = false) {
       if (!previewLayoutDropAllowed(event)) return;
       allowFileDrop(event);
+      const beforeId = previewLayoutDropBeforeId(layoutItems, targetId, after);
       const layoutItemId = event.dataTransfer.getData(previewLayoutDragMime);
       if (layoutItemId) {
         moveLayoutItem(layoutItemId, beforeId);
+        clearOutputItemDragData();
         return;
       }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer);
@@ -13418,15 +13430,7 @@ function NodeBody({
       const media = event?.currentTarget?.querySelector?.(item.type === "video" ? "video" : "img");
       const width = previewLayoutDimension(item.width || media?.naturalWidth || media?.videoWidth);
       const height = previewLayoutDimension(item.height || media?.naturalHeight || media?.videoHeight);
-      onPreviewOpen?.({
-        ...item,
-        ...(width && height ? { width, height } : {}),
-        ...(item.type === "image" ? { editContext: {
-          type: "previewLayout",
-          nodeId: node.id,
-          itemId: item.id
-        } } : {})
-      });
+      onPreviewOpen?.(previewLayoutLightboxItem({ ...item, ...(width && height ? { width, height } : {}) }, node.id), { layoutNodeId: node.id });
     }
 
     return (
@@ -13520,7 +13524,7 @@ function NodeBody({
             )}
           </>
         ) : (
-          <section className="preview-layout-panel" onPointerDown={(event) => event.stopPropagation()}>
+          <section className="preview-layout-panel nodrag nopan" onPointerDown={(event) => event.stopPropagation()}>
             <div className="preview-layout-toolbar">
               <span>{layoutItems.length ? `${layoutItems.length} item${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
               <button
@@ -13541,17 +13545,12 @@ function NodeBody({
               {layoutItems.length ? (
                 <div className="preview-layout-grid" style={{ "--preview-layout-column-count": layoutColumnCount }}>
                   {layoutItems.map((item, index) => (
-                    <figure
-                      key={item.id}
+                    <PreviewLayoutTile
+                      key={item.id} item={item} index={index}
                       className={`preview-layout-item ${item.type} ${item.width && item.height ? "has-dimensions" : ""}`}
                       style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
-                      draggable
-                      onDragStart={(event) => startLayoutItemDrag(event, item)}
-                      onDragEnd={(event) => finishOutputItemDragData(item, event)}
-                      onDragOver={handleLayoutDragOver}
-                      onDrop={(event) => handleLayoutDrop(event, item.id)}
-                      onDoubleClick={(event) => openLayoutItem(item, event)}
-                      title={`${item.label || `Layout ${item.type} ${index + 1}`}\nDrag to reorder, double-click to preview`}
+                      canDrop={previewLayoutDropAllowed} onStart={startLayoutItemDrag} onEnd={finishOutputItemDragData}
+                      onOver={handleLayoutDragOver} onDrop={handleLayoutDrop} onOpen={openLayoutItem}
                     >
                       {item.type === "image" && <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
@@ -13579,7 +13578,7 @@ function NodeBody({
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
                       </button>
-                    </figure>
+                    </PreviewLayoutTile>
                   ))}
                 </div>
               ) : (
