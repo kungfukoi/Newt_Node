@@ -1,5 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import ffmpeg from "ffmpeg-static";
+import ffprobe from "@ffprobe-installer/ffprobe";
+import { assemblyRenderPayload } from "../src/assembly/assemblyState.js";
 import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "../server/assembly-render.js";
 import { assemblyActiveClips, createAssemblyState, insertAssemblyMediaClip, normalizeAssemblyState, retimeAssemblyClip, setAssemblyView, syncAssemblyInputs, updateAssemblyClip, updateAssemblyMedia } from "../src/assembly/assemblyState.js";
 
@@ -8,6 +15,41 @@ test("render audio defaults on for older timelines and preserves an explicit off
   assert.equal(normalizeAssemblyState({}).renderAudio, true);
   const silent = setAssemblyView(createAssemblyState(), { renderAudio: false });
   assert.equal(normalizeAssemblyState(JSON.parse(JSON.stringify(silent))).renderAudio, false);
+  assert.equal(assemblyRenderPayload(silent).renderAudio, false);
+  assert.equal(assemblyRenderPayload(createAssemblyState()).renderAudio, true);
+});
+
+test("real timeline render mixes different audio sample rates with valid timestamps and audible samples", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "newt-timeline-audio-"));
+  try {
+    const sources = [32000, 44100].map((rate, index) => {
+      const filePath = path.join(directory, `tone-${rate}.wav`);
+      execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=${440 + index * 220}:sample_rate=${rate}:duration=2`, filePath], { windowsHide: true });
+      return { id: `audio-${index}`, filePath, hasAudio: true };
+    });
+    let state = createAssemblyState({ outputWidth: 64, outputHeight: 64 });
+    state = syncAssemblyInputs(state, sources.map(source => ({ id: source.id, url: source.filePath, type: "audio", duration: 2 })));
+    const track = state.tracks.find(item => item.type === "audio");
+    sources.forEach((source, index) => { state = insertAssemblyMediaClip(state, source.id, track.id, index * 0.5); });
+    const output = path.join(directory, "render.mp4");
+    execFileSync(ffmpeg, buildAssemblyFfmpegArgs(createAssemblyRenderPlan(assemblyRenderPayload(state), sources), output), { windowsHide: true });
+    const metadata = JSON.parse(execFileSync(ffprobe.path, ["-v", "error", "-show_streams", "-of", "json", output], { encoding: "utf8", windowsHide: true }));
+    const audio = metadata.streams.find(stream => stream.codec_type === "audio");
+    assert.ok(audio);
+    assert.ok(Math.abs(Number(audio.start_time)) < 0.1);
+    assert.ok(Number(audio.duration) >= 2.4 && Number(audio.duration) < 2.7);
+    const samples = execFileSync(ffmpeg, ["-v", "error", "-i", output, "-vn", "-f", "s16le", "-ac", "1", "pipe:1"], { windowsHide: true });
+    assert.ok(samples.length > 200000);
+    let peak = 0;
+    for (let offset = 0; offset < samples.length; offset += 2) peak = Math.max(peak, Math.abs(samples.readInt16LE(offset)));
+    assert.ok(peak > 1000, `Expected audible samples, peak was ${peak}`);
+    const silentOutput = path.join(directory, "silent.mp4");
+    execFileSync(ffmpeg, buildAssemblyFfmpegArgs(createAssemblyRenderPlan(assemblyRenderPayload({ ...state, renderAudio: false }), sources), silentOutput), { windowsHide: true });
+    const silent = JSON.parse(execFileSync(ffprobe.path, ["-v", "error", "-show_streams", "-of", "json", silentOutput], { encoding: "utf8", windowsHide: true }));
+    assert.equal(silent.streams.some(stream => stream.codec_type === "audio"), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("disabling render audio excludes embedded and separate audio while retaining preview audio", () => {

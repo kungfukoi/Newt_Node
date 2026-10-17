@@ -120,19 +120,21 @@ export function buildAssemblyFfmpegArgs(plan, outputPath) {
     const sourceSpan = assemblyClipSourceSpan(item.clip);
     const timing = [
       `atrim=duration=${ffmpegSeconds(sourceSpan)}`,
-      "asetpts=PTS-STARTPTS",
+      "aresample=48000",
+      "aformat=sample_fmts=fltp:channel_layouts=stereo",
+      "asetpts=N/SR/TB",
       item.clip.reverse ? "areverse" : "",
       ...assemblyAtempoFilters(playbackRate),
       `atrim=duration=${ffmpegSeconds(item.clip.duration)}`
     ].filter(Boolean).join(",");
     filters.push(
       `[${item.inputIndex}:a:0]${timing},` +
-      `adelay=${delay}:all=1,apad=whole_dur=${ffmpegSeconds(plan.duration)},atrim=duration=${ffmpegSeconds(plan.duration)}[${label}]`
+      `adelay=${delay}:all=1,apad=whole_dur=${ffmpegSeconds(plan.duration)},atrim=duration=${ffmpegSeconds(plan.duration)},asetpts=N/SR/TB[${label}]`
     );
     audioLabels.push(`[${label}]`);
   });
   if (audioLabels.length) {
-    filters.push(`${audioLabels.join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0,atrim=duration=${ffmpegSeconds(plan.duration)}[assembly-audio]`);
+    filters.push(`${audioLabels.join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0,atrim=duration=${ffmpegSeconds(plan.duration)},asetpts=N/SR/TB[assembly-audio]`);
   }
 
   args.push("-filter_complex", filters.join(";"), "-map", "[assembly-video]");

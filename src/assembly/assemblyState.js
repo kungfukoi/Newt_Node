@@ -633,6 +633,7 @@ export function assemblyRenderPayload(state) {
     frameRate: normalized.frameRate,
     outputWidth: normalized.outputWidth,
     outputHeight: normalized.outputHeight,
+    renderAudio: normalized.renderAudio,
     inPoint: normalized.inPoint,
     outPoint: normalized.outPoint,
     duration: assemblyContentDuration(normalized),

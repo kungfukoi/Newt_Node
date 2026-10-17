@@ -62,6 +62,8 @@ Before completion:
 
 - Timeline offers Include audio beside Render, enabled by default for new and older workflows. The setting persists with the timeline and controls rendered outputs only. Enabled renders mix unmuted audio tracks and embedded video audio; disabling it writes a video without an audio stream. Preview playback and track mute settings remain independent.
 
+- Timeline render requests carry the audio setting explicitly. FFmpeg normalizes audio clips to 48 kHz stereo and rebuilds timestamps from sample counts before and after mixing so source time bases cannot corrupt the output audio stream.
+
 - Preview Layout Export copies every collected image and video in Layout order into a new folder beneath the selected destination, including video-only Selects. Export preserves original video files without transcoding.
 
 - Coverage checkpoints each completed angle into the node and refreshes output history during the batch. Completed images remain visible if later angles fail or the run is stopped; stopping prevents submission of remaining angles.
