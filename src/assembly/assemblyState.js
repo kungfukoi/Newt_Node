@@ -50,6 +50,7 @@ export function normalizeAssemblyState(value = {}) {
     frameRate: clampNumber(source.frameRate, 1, 120, defaultFrameRate),
     outputWidth: evenDimension(source.outputWidth, 1920),
     outputHeight: evenDimension(source.outputHeight, 1080),
+    renderAudio: source.renderAudio !== false,
     zoom: normalizeAssemblyZoom(source.zoom),
     ripple: Boolean(source.ripple),
     tool: ["select", "blade", "slip"].includes(source.tool) ? source.tool : "select",
