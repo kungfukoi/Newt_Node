@@ -15826,12 +15826,12 @@ function NodeBody({
 
   if (node.type === "imageModel") {
     const directorPromptValue = connectedDirectorPackageText(incoming.directorIn, incomingByNode);
-    const promptValue = composeFilmDirectorPrompt({
+    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    const promptValue = promptConnected ? composeFilmDirectorPrompt({
       directorPrompt: directorPromptValue,
       connectedPrompt: resolvedPromptText(incoming.promptIn),
       fallbackPrompt: node.data.prompt
-    });
-    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    }) : (node.data.prompt || "");
     const directorConnected = Boolean(incoming.directorIn?.length);
     const displayIncoming = expandImageDirectorPackageIncoming(incoming, incomingByNode);
     const isSam3Image = isSam3ImageModel(node.data.model);

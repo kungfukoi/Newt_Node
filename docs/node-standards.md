@@ -60,6 +60,8 @@ Before completion:
 
 ## Current Product Snapshot
 
+- Editable model prompts preserve whitespace as typed, including trailing and repeated spaces. Prompt composition and request normalization must not trim the value displayed in an editable field.
+
 - Canvas node copy/paste uses native clipboard events so selections can move between workflows and app windows without clipboard-read permission. Incoming node clipboard data takes precedence over older local storage; local storage and memory remain fallbacks. Text controls retain normal text copy/paste.
 
 - Timeline offers Include audio beside Render, enabled by default for new and older workflows. The setting persists with the timeline and controls rendered outputs only. Enabled renders mix unmuted audio tracks and embedded video audio; disabling it writes a video without an audio stream. Preview playback and track mute settings remain independent.
