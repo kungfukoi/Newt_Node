@@ -515,6 +515,8 @@ import { appendUniqueVideoResults, remoteVideoScope } from "./remoteVideoJobs.js
 import {
   createWorkflowClipboardPayload,
   normalizeWorkflowClipboardPayload,
+  parseWorkflowClipboardText,
+  serializeWorkflowClipboardPayload,
   readWorkflowClipboardFromStorage,
   readWorkflowClipboardFromSystemClipboard,
   workflowClipboardStorageKey,
@@ -1821,18 +1823,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
-      if (commandKey && key === "c") {
-        event.preventDefault();
-        copySelection();
-        return;
-      }
-
-      if (commandKey && key === "v") {
-        event.preventDefault();
-        void pasteSelection();
-        return;
-      }
-
       if (event.key === "Backspace" || event.key === "Delete") {
         const selectedIds = currentSelectedNodeIds();
         if (selectedIds.length) {
@@ -1842,8 +1832,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    function handleClipboard(event) {
+      if (!active || event.defaultPrevented || event.target.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='textbox']")) return;
+      if (event.type === "copy") {
+        const clipboard = copySelection(event.clipboardData);
+        if (!clipboard) return;
+        event.preventDefault();
+      } else {
+        const clipboard = parseWorkflowClipboardText(event.clipboardData?.getData("text/plain"));
+        event.preventDefault();
+        void pasteSelection(clipboard);
+      }
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("copy", handleClipboard);
+    window.addEventListener("paste", handleClipboard);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("copy", handleClipboard);
+      window.removeEventListener("paste", handleClipboard);
+    };
   }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, workflowFilePath]);
 
   React.useEffect(() => {
@@ -6661,7 +6670,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return flowNodes.filter((node) => node.selected).map((node) => node.id);
   }
 
-  function copySelection() {
+  function copySelection(clipboardData) {
     const selectedIds = currentSelectedNodeIds();
     if (!selectedIds.length) return;
 
@@ -6678,22 +6687,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     clipboardRef.current = clipboard;
     writeWorkflowClipboardToStorage(clipboard);
-    void writeWorkflowClipboardToSystemClipboard(clipboard);
+    if (clipboardData) clipboardData.setData("text/plain", serializeWorkflowClipboardPayload(clipboard));
+    else void writeWorkflowClipboardToSystemClipboard(clipboard);
     setSaveStatus(`${selectedIds.length} node${selectedIds.length === 1 ? "" : "s"} copied`);
+    return clipboard;
   }
 
   async function readWorkflowClipboardSelection() {
+    const systemClipboard = await readWorkflowClipboardFromSystemClipboard();
+    if (systemClipboard?.nodes?.length) return systemClipboard;
+
     const storageClipboard = readWorkflowClipboardFromStorage();
     if (storageClipboard?.nodes?.length) return storageClipboard;
 
     const memoryClipboard = normalizeWorkflowClipboardPayload(clipboardRef.current);
     if (memoryClipboard?.nodes?.length) return memoryClipboard;
 
-    return readWorkflowClipboardFromSystemClipboard();
+    return null;
   }
 
-  async function pasteSelection() {
-    const clipboard = await readWorkflowClipboardSelection();
+  async function pasteSelection(eventClipboard) {
+    const clipboard = eventClipboard || await readWorkflowClipboardSelection();
     if (!clipboard?.nodes?.length) return;
 
     clipboardRef.current = clipboard;
