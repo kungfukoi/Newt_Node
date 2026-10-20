@@ -40,6 +40,8 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect(editor.getByRole("group", { name: "SAM 2 settings" })).toHaveCount(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   expect(calls).toHaveLength(0);
+  await expect(editor.getByLabel("Sampling density", { exact: true })).not.toBeVisible();
+  await expandSection(editor, "Detection settings");
   await expect(editor.getByLabel("Sampling density", { exact: true })).toHaveValue("32");
   await expect(editor.getByLabel("Confidence threshold", { exact: true })).toHaveValue("0.75");
   await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
@@ -67,6 +69,7 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect.poll(() => calls.length).toBe(2);
   await expect.poll(() => alpha(selection, .55, .75)).toBe(255);
   expect(calls[1].point.x).toBeCloseTo(.55, 2);
+  if (!await editor.getByLabel("Object selection prompt").isVisible()) await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByLabel("Object selection prompt").fill("the jacket");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
@@ -93,6 +96,7 @@ test("saved selection and moved box restore after closing without rescanning", a
     return route.fulfill({ json: { entries: [], selectionState: state } });
   });
   await page.route("**/api/node/image-objects", async route => { paid++; await route.fulfill({ json: { masks: [masks[0]] } }); });
+  if (!await editor.getByLabel("Object selection prompt").isVisible()) await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByLabel("Object selection prompt").fill("red jacket");
   await editor.getByLabel("Edit prompt").fill("Make the jacket green");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
@@ -105,6 +109,7 @@ test("saved selection and moved box restore after closing without rescanning", a
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("red jacket");
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
   await editor.getByRole("button", { name: "Done", exact: true }).click();
   await expect.poll(() => state.marks.find(mark => mark.layer === "boxes")?.target.x).toBe(.65);
@@ -128,9 +133,11 @@ test("Save selections and boxes exports selected objects as a tagged Image node"
     document = readSelectionMetadata(await form.get("selection").arrayBuffer());
     await route.fulfill({ json: { item: { url: "/outputs/e2e/landscape.png", label: "Image Selection", fileName: "selection.png", type: "image", selectionMetadata: document } } });
   });
+  if (!await editor.getByLabel("Object selection prompt").isVisible()) await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByLabel("Object selection prompt").fill("red jacket");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
+  await expandSection(editor, "Save selection draft");
   await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
   await expect(editor).toHaveCount(0);
   await expect(page.locator('[data-node-card-id]')).toHaveCount(2);
@@ -157,6 +164,7 @@ test("SAM 2 controls only appear in object mode and apply on explicit rescan", a
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByRole("button", { name: "Scan image for objects", exact: true }).click();
   await expect(editor.getByText("2 objects ready.", { exact: false })).toBeVisible();
+  await expandSection(editor, "Detection settings");
   for (const [label, value] of [["Sampling density", "64"], ["Confidence threshold", "0.70"], ["Stability threshold", "0.80"], ["Minimum region area", "20"]]) {
     await editor.getByLabel(label, { exact: true }).evaluate((element, next) => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(element, next);
@@ -181,6 +189,7 @@ test("Object Selection converts to a named Move box with its exact mask and no e
     form = await new Response(request.postDataBuffer(), { headers: { "content-type": request.headers()["content-type"] } }).formData();
     await route.fulfill({ json: { item: { url: "/outputs/e2e/edited.png", fileName: "edited.png", type: "image" } } });
   });
+  if (!await editor.getByLabel("Object selection prompt").isVisible()) await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByLabel("Object selection prompt").fill("the red jacket");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
@@ -192,6 +201,7 @@ test("Object Selection converts to a named Move box with its exact mask and no e
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveCount(0);
   await expect.poll(() => alpha(editor.getByLabel("Selection canvas"), .2, .3)).toBe(255);
   await editor.getByRole("button", { name: "Redo stroke" }).click();
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
   await expect.poll(() => Boolean(form)).toBe(true);
@@ -222,7 +232,8 @@ test("Shift-selected objects stay one named selection through rename, undo and t
   expect(await alpha(editor.getByLabel("Selection canvas"), .7, .3)).toBe(255);
   await editor.getByRole("button", { name: "Redo stroke" }).click();
   await editor.getByLabel("Box description", { exact: true }).fill("People");
-  await expect(editor.getByText("All selected regions share", { exact: false })).toBeVisible();
+  await expect(editor.getByText("Selected regions move together", { exact: false })).toBeVisible();
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("55");
   await editor.getByLabel("Width (%)", { exact: true }).fill("60");
   await editor.getByLabel(/^Rotation /).fill("20");
@@ -259,6 +270,7 @@ test("native Flux boxes identify by description without a segmentation request",
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   await move(page, editor, .2, .2); await page.mouse.down(); await move(page, editor, .4, .4); await page.mouse.up();
   await editor.getByLabel("Box description", { exact: true }).fill("Cat");
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
   await expect.poll(() => Boolean(form)).toBe(true);
@@ -348,10 +360,12 @@ test("box versions rerun their original setup, preserve masks after failure, and
     if (forms.length === 2) return route.fulfill({ status: 503, json: { error: "Cleanup attempt failed" } });
     await route.fulfill({ json: { item: { url: `/outputs/e2e/edited-${forms.length}.png`, fileName: `edited-${forms.length}.png`, type: "image" } } });
   });
+  if (!await editor.getByLabel("Object selection prompt").isVisible()) await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   await editor.getByLabel("Object selection prompt").fill("pizza box");
   await editor.getByRole("button", { name: "Select", exact: true }).click();
   await expect(editor.getByText("Selected 1 matching regions.", { exact: false })).toBeVisible();
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("70");
   await editor.getByLabel("Edit resolution").selectOption("4K");
   await editor.getByLabel("Edit prompt").fill("Move the pizza box; repair the tabletop where it was.");
@@ -369,6 +383,7 @@ test("box versions rerun their original setup, preserve masks after failure, and
   await expect(editor.getByLabel("Translate X (%)", { exact: true })).toHaveValue("70");
   await expect(editor.getByLabel("Edit resolution")).toHaveValue("4K");
   await expect(editor.getByLabel("Edit prompt")).toHaveValue(forms[0].get("prompt"));
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("80");
   await editor.getByLabel("Edit prompt").fill("Move farther right.");
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
@@ -391,3 +406,8 @@ test("box versions rerun their original setup, preserve masks after failure, and
   await expect(editor.getByLabel("Edit prompt")).toHaveValue("");
   expect(errors).toEqual([]);
 });
+
+async function expandSection(editor, title) {
+  const summary = editor.locator("summary").filter({ hasText: new RegExp(`^${title}$`) });
+  if (await summary.evaluate(element => !element.parentElement.open)) await summary.click();
+}

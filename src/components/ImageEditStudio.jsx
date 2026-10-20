@@ -332,7 +332,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
     if (event.key === "Tab") {
       const container = confirmClose ? rootRef.current.querySelector(".ies-confirm") : rootRef.current;
-      const controls = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [role="slider"][tabindex="0"]')].filter((element) => element.offsetParent && !element.matches(":disabled"));
+      const controls = [...container.querySelectorAll('button:not(:disabled), summary, a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [role="slider"][tabindex="0"]')].filter((element) => {
+        const closed = element.closest("details:not([open])");
+        return element.offsetParent && !element.matches(":disabled") && (!closed || element === closed.firstElementChild);
+      });
       const first = controls[0], last = controls.at(-1);
       if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first?.focus(); }
@@ -543,43 +546,47 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           <div className="ies-zoom"><IconButton icon={Minus} label="Zoom out" onClick={() => setZoom((v) => Math.max(0.5, v - 0.25))} /><output>{Math.round(zoom * 100)}%</output><IconButton icon={Plus} label="Zoom in" onClick={() => setZoom((v) => Math.min(5, v + 0.25))} /><IconButton icon={Maximize} label="Fit image" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} /></div>
         </div>
       </div>
-      <aside className="ies-sidebar">
+      <aside className="ies-sidebar" aria-label="Edit details">
+        <div className="ies-sidebar-scroll">
         {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
-          <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
-          {selectionSaved && <p role="status">{selectionSaved}</p>}
-          <small>Save creates an Image Selection node with visible boxes, @tags and embedded metadata. Done saves your draft and closes the editor.</small>
+          {selectionSaved && <p className="ies-selection-notice" role="status">{selectionSaved}</p>}
+          {tool !== "object" && objectStatus && <p className="ies-selection-notice" role="status">{objectStatus}</p>}
+          {tool !== "object" && inheritedScan && <p className="ies-selection-notice" role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
           {tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} namingBoxes={namingBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
-          {tool !== "boxes" && <div className="ies-object-controls">
-            {tool === "object" && <div className="ies-sam2-controls" role="group" aria-label="SAM 2 settings">
-              <strong>SAM 2 detection</strong>
-              {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
-              <button type="button" disabled={!size || blank || !falAvailable} onClick={() => findObjects({}, {}, true)}>Scan image for objects</button>
-              <button type="button" onClick={() => setSam2Settings(sam2Defaults)}>Reset detection settings</button>
-              <small>Scan image for objects submits a new Fal request. Your current selection is kept.</small>
-            </div>}
+          {tool === "object" && <section className="ies-object-controls ies-panel-section"><div className="ies-section-heading"><h3>Object selection</h3></div>
             <label>Select by prompt<textarea aria-label="Object selection prompt" rows={2} maxLength={300} placeholder="The jacket, all people…" value={selectionPrompt} onChange={e => setSelectionPrompt(e.target.value)} /></label>
             <button type="button" disabled={!size || blank || !selectionPrompt.trim()} onClick={() => findObjects({ prompt: selectionPrompt.trim() })}>Select</button>
-            <small>Fal · SAM 2 finds objects; SAM 3 selects by prompt or a click on an unhighlighted area. Hovering cached objects makes no API calls.</small>
-            {tool === "object" && <small>Click selects · Shift adds · Alt subtracts</small>}
+            <small>Click selects · Shift adds · Alt subtracts. Scan and Select use Fal.</small>
+            <button type="button" disabled={!size || blank || !falAvailable} onClick={() => findObjects({}, {}, true)}>Scan image for objects</button>
+
             {objectStatus && <p role="status">{objectStatus}</p>}
             {inheritedScan && <p role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
-          </div>}
+            <details className="ies-disclosure"><summary>Detection settings</summary><div className="ies-sam2-controls ies-section-body" role="group" aria-label="SAM 2 settings">
+
+              {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
+
+              <button type="button" onClick={() => setSam2Settings(sam2Defaults)}>Reset detection settings</button>
+              <small>Scan image for objects submits a new Fal request. Your current selection is kept.</small>
+            </div></details>
+          </section>}
+          {!["boxes", "object", "hand"].includes(tool) && <section className="ies-panel-section"><div className="ies-section-heading"><h3>{layer === "selection" ? "Selection brush" : "Drawing"}</h3></div>{layer === "drawing" && <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>}
+          <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
+          {layer === "drawing" && <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>}
+          {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
+          </section>}
+          <section className="ies-panel-section"><div className="ies-section-heading"><h3>Edit instructions</h3></div>
           <label>Method<select aria-label="Edit method" disabled={boxes.length > 0} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
-          {tool !== "boxes" && <><div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
-          <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
-          <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
-          {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
-          </>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
+          </section>
+          <section className="ies-panel-section"><div className="ies-section-heading"><h3>Output</h3></div>
           {imageEditUsesSelectionGuide(model) ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={e => setResolution(e.target.value)}>{resolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>}
+          </section>
+          <details className="ies-disclosure ies-panel-section"><summary>Save selection draft</summary><div className="ies-section-body">
+            <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
+          <small>Create an Image Selection node to reuse this draft. Done saves the draft on the source image.</small>
+          </div></details>
         </fieldset>}
-        <div className="ies-run-section">
-          <small>{reviewing ? result.modelName || model : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
-          {!reviewing && <button className="ies-primary" type="button" onClick={() => generate()} disabled={busy || saving || namingBoxes.length > 0 || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
-          {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
-          {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
-        </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">
           {versionDrafts.current[resultIndex]?.marks.some(mark => mark.layer === "boxes") && <>
@@ -593,6 +600,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider:
           <a href={result.url} download={result.fileName}><Download size={17} />Download</a>
         </div>}
         {warning && <p className="ies-warning" role="status">{warning}</p>}
+        </div>
+        <div className="ies-run-section">
+          <small>{reviewing ? result.modelName || model : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
+          {!reviewing && <button className="ies-primary" type="button" onClick={() => generate()} disabled={busy || saving || namingBoxes.length > 0 || modelSaving || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !boxes.some(box => box.mode !== "keep") && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
+          {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
+          {!providerAvailable && <p role="status" className="ies-warning">{imageEditRequiresFal(model) ? `Enable a Fal key in Settings to use ${model}.` : "Enable Fal or Atlas Cloud in Settings to edit images."}</p>}
+        </div>
       </aside>
     </div>
     {confirmClose && <div className="ies-confirm"><div role="alertdialog" aria-label="Discard edit draft"><h3>Discard this draft?</h3><p>Generated edits are kept in History. Unsaved drawing marks will be discarded.</p><div><button onClick={() => setConfirmClose(false)}>Keep Editing</button><button className="ies-primary" onClick={onClose}>Discard Draft</button></div></div></div>}

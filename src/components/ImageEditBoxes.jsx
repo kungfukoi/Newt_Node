@@ -92,23 +92,18 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
     onCommit({ ...box, target, ...(sourceOnly ? { source: target, sourceMask: undefined } : {}) });
   }
   return <div className="ies-box-controls" role="group" aria-label="Boxes settings">
-    <strong>Boxes</strong><small>Draw around an object or its destination. Drag to translate, corners to scale, and the round handle above to rotate. Double-click a box or its label to rename it. Shift-select objects, then click Boxes to combine them into one named selection.</small>
-    <small>Reference tags in your prompt, for example @lamp. Tags follow descriptions; duplicate names receive a numeric suffix.</small>
-    <small>New boxes are named automatically. You can edit any name. Uncertain selections stay “Object”.</small>
+    <div className="ies-section-heading"><h3>Boxes</h3><span>{boxes.length}</span></div>
+    {!boxes.length && <p className="ies-hint">Draw a box on the image, or turn an object selection into a box.</p>}
     {namingBoxes.length > 0 && <small role="status">Naming {namingBoxes.length} {namingBoxes.length === 1 ? "box" : "boxes"}…</small>}
-    <button type="button" disabled={busy || namingBoxes.length > 0 || !boxes.length} onClick={onSaveSelection}>Save Selection</button>
-    <small>Saves a PNG copy to outputs and adds it to the canvas, with visible tagged boxes and embedded descriptions, coordinates and selection metadata.</small>
-    {boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}
+    <div className="ies-field-pair">{boxes.length > 0 && <label>Active box<select aria-label="Active box" value={box?.id || ""} onChange={event => onSelect(event.target.value)}><option value="" disabled>Choose a box</option>{boxes.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.label}</option>)}</select></label>}{box && <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}</div>
     {box && <>
-      <label>Mode<select aria-label="Box mode" value={box.mode} onChange={event => onCommit({ ...box, mode: event.target.value, ...(["keep", "remove"].includes(event.target.value) ? { target: { ...box.source } } : {}) })}>{Object.entries(editBoxModes).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-      <label>Description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
-      <small>Tag: {editBoxTags(boxes)[boxes.indexOf(box)]}</small>
+      <label>Name / description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
+      <small className="ies-box-tag">Use {editBoxTags(boxes)[boxes.indexOf(box)]} in your edit prompt</small>
       {boxNeedsObject(box) && <>
-        <small>{boxNeedsIdentification(box, model) ? "Generate identifies the named object with SAM 3 when no selection exists (a separate Fal request), then uses its shape as the placement reference." : "FLUX 3 identifies the named subject using native source/destination instructions. Select object for a precise shape if needed."} The full generated scene is kept for continuous lighting; Keep boxes protect exact pixels.</small>
+        {boxNeedsIdentification(box, model) && !box.sourceMask && <small>Automatic object selection adds a Fal SAM 3 request.</small>}
         <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>
-        {box.sourceMask && <small role="status">Object selected. Check the highlighted source and destination preview before generating.{box.selectionDerived && " All selected regions share the box name and transform; renaming keeps the selection."}</small>}
+        {box.sourceMask && <small role="status">Object selected. Check the highlighted shape.{box.selectionDerived && " Selected regions move together."}</small>}
       </>}
-      {box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the context around the object for shadows and lighting. Dashed boxes indicate approximate reach; blending follows the selected shape. Keep boxes protect nearby objects.</small></label>}
       {box.mode === "text" && <label>Text to render<textarea aria-label="Box text" rows={2} maxLength={500} value={box.text || ""} onChange={event => onCommit({ ...box, text: event.target.value })} /></label>}
       {box.mode === "reference" && <>
         <label>Reference image<input aria-label="Box reference image" type="file" accept="image/*" disabled={busy} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUploadReference(box, file); }} /></label>
@@ -116,13 +111,24 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
         {reference && box.referenceUrl !== reference && <button type="button" onClick={() => onCommit({ ...box, referenceUrl: reference })}>Use existing reference</button>}
         <small>One shared reference image per edit.</small>
       </>}
+      <details className="ies-disclosure"><summary>Transform</summary><div className="ies-section-body">
       <div className="ies-box-numbers">
-        {[["x", "Translate X (%)", 0, 100], ["y", "Translate Y (%)", 0, 100], ["w", "Width (%)", .5, sourceOnly ? 100 : 200], ["h", "Height (%)", .5, sourceOnly ? 100 : 200], ["rotation", "Rotation (°)", -180, 180]].filter(([key]) => !sourceOnly || key !== "rotation").map(([key, label, min, max]) => <label key={key}>{label}<input aria-label={label} type="number" step="1" min={min} max={max} value={Number((box.target[key] * (key === "rotation" ? 1 : 100)).toFixed(2))} onChange={event => { if (event.target.value !== "" && Number.isFinite(event.target.valueAsNumber)) setTarget({ [key]: clampBoxValue(event.target.valueAsNumber, min, max) / (key === "rotation" ? 1 : 100) }); }} /></label>)}
+        {[["x", "Translate X (%)", 0, 100], ["y", "Translate Y (%)", 0, 100], ["w", "Width (%)", .5, sourceOnly ? 100 : 200], ["h", "Height (%)", .5, sourceOnly ? 100 : 200], ["rotation", "Rotation (°)", -180, 180]].filter(([key]) => !sourceOnly || key !== "rotation").map(([key, label, min, max]) => <label key={key}>{{ x: "X (%)", y: "Y (%)", w: "Width (%)", h: "Height (%)", rotation: "Rotation (°)" }[key]}<input aria-label={label} type="number" step="1" min={min} max={max} value={Number((box.target[key] * (key === "rotation" ? 1 : 100)).toFixed(2))} onChange={event => { if (event.target.value !== "" && Number.isFinite(event.target.valueAsNumber)) setTarget({ [key]: clampBoxValue(event.target.valueAsNumber, min, max) / (key === "rotation" ? 1 : 100) }); }} /></label>)}
       </div>
       <button type="button" onClick={() => onCommit({ ...box, target: { ...box.source } })}>Reset transform</button>
-      <button type="button" onClick={() => onDelete(box.id)}>Delete box</button>
+      </div></details>
+      {box.mode !== "keep" && <details className="ies-disclosure"><summary>Blending</summary><div className="ies-section-body">{box.mode !== "keep" && <label>Shadow / lighting area ({Math.round((box.contextPadding ?? .35) * 100)}%)<input aria-label="Shadow / lighting area" type="range" min="0" max="100" step="5" value={Math.round((box.contextPadding ?? .35) * 100)} onChange={event => onCommit({ ...box, contextPadding: Number(event.target.value) / 100 })} /><small>Expand the context around the object for shadows and lighting. Dashed boxes indicate approximate reach; blending follows the selected shape. Keep boxes protect nearby objects.</small></label>}</div></details>}
+      <button className="ies-subtle ies-danger" type="button" onClick={() => onDelete(box.id)}>Delete box</button>
     </>}
-    <small>{boxes.length} boxes · Uses your preferred image-edit model. Results may vary by model.</small>
+    <details className="ies-disclosure ies-help"><summary>How to use boxes</summary><div className="ies-section-body">
+      <p>Drag to move, corners to scale, and the round handle to rotate. Double-click a label to rename it. Shift-select objects before activating Boxes to move them together.</p>
+      <p>Use @tags in your prompt to refer to boxes. New boxes are named automatically; you can edit their names.</p>
+      <p>{box && boxNeedsIdentification(box, model) ? "Generate uses SAM 3 to identify an unselected object. This is a separate Fal request." : "FLUX uses named placement instructions. Select object when you need a precise shape."} Keep protects original pixels inside its box.</p>
+    </div></details>
+    {boxes.length > 0 && <details className="ies-disclosure"><summary>Export box image</summary><div className="ies-section-body">
+      <small>Create a PNG with visible boxes, tags and embedded selection data.</small>
+      <button type="button" disabled={busy || namingBoxes.length > 0} onClick={onSaveSelection}>Save Selection</button>
+    </div></details>}
   </div>;
 }
 

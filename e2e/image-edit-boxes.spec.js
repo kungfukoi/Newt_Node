@@ -99,6 +99,7 @@ test("Save Selection creates a tagged PNG output and canvas copy with more than 
     await fs.writeFile(testInfo.outputPath("image-selection.png"), png);
     await route.fulfill({ json: { item: { url: "/outputs/e2e/landscape.png", label: "Image Selection", fileName: "image-selection.png", type: "image", provider: "local", width: info.width, height: info.height } } });
   });
+  await expandSection(editor, "Save selection draft");
   await editor.getByRole("button", { name: "Save selections and boxes", exact: true }).click();
   await expect(editor).toHaveCount(0);
   await expect(page.locator('[data-node-card-id]')).toHaveCount(2);
@@ -129,8 +130,11 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("Cat");
   const corner = editor.locator(".ies-box-corner").first(), hit = editor.locator(".ies-box-scale-hit").first();
   expect(Number(await corner.getAttribute("r"))).toBe(Number(await hit.getAttribute("r")) / 4);
+  await expect(editor.getByLabel("Shadow / lighting area", { exact: true })).not.toBeVisible();
+  await expandSection(editor, "Blending");
   await expect(editor.getByLabel("Shadow / lighting area", { exact: true })).toHaveValue("35");
   await editor.getByLabel("Shadow / lighting area", { exact: true }).fill("60");
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("60");
   await editor.getByLabel("Rotation (°)", { exact: true }).fill("35");
   await editor.getByRole("button", { name: "Undo stroke" }).click();
@@ -157,10 +161,31 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
       await expect(editor.getByAltText("Box reference", { exact: true })).toBeVisible();
     }
   }
+  await expandSection(editor, "Transform");
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("65");
   await editor.getByLabel("Rotation (°)", { exact: true }).fill("25");
   await editor.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await editor.locator("summary").filter({ hasText: /^Transform$/ }).click();
+  const blending = editor.locator("summary").filter({ hasText: /^Blending$/ });
+  if (await blending.evaluate(element => element.parentElement.open)) await blending.click();
+  await expect(editor.getByLabel("Translate X (%)", { exact: true })).not.toBeVisible();
+  await editor.locator("summary").filter({ hasText: /^Transform$/ }).focus();
+  await page.keyboard.press("Tab");
+  await expect(blending).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(editor.getByLabel("Shadow / lighting area", { exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(editor.getByLabel("Shadow / lighting area", { exact: true })).not.toBeVisible();
+  await expect(editor.getByRole("button", { name: "Generate Edit", exact: true })).toBeInViewport();
+  await editor.locator(".ies-sidebar-scroll").evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(editor.getByRole("button", { name: "Generate Edit", exact: true })).toBeInViewport();
+  await editor.locator(".ies-sidebar-scroll").evaluate(element => { element.scrollTop = 0; });
   await page.screenshot({ path: testInfo.outputPath("boxes.png") });
+  await page.setViewportSize({ width: 640, height: 800 });
+  await expect(editor.getByRole("button", { name: "Generate Edit", exact: true })).toBeInViewport();
+  expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("boxes-narrow.png") });
+  await page.setViewportSize({ width: 1600, height: 1100 });
   let form, edits = 0;
   await page.route("**/api/node/edit-image", async route => {
     edits++;
@@ -216,3 +241,8 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await expect(divider).toHaveAttribute("aria-valuenow", "0");
   expect(errors).toEqual([]);
 });
+
+async function expandSection(editor, title) {
+  const summary = editor.locator("summary").filter({ hasText: new RegExp(`^${title}$`) });
+  if (await summary.evaluate(element => !element.parentElement.open)) await summary.click();
+}
