@@ -472,6 +472,10 @@ export const nodeApi = {
 
   assemblyRender(body, label = "Timeline render") {
     return fetchJsonApi("/api/node/assembly-render", jsonBody(body), label);
+  },
+
+  assemblyExtractFrame(body, label = "Timeline frame extraction") {
+    return fetchJsonApi("/api/node/assembly-render", jsonBody(body), label);
   }
 };
 

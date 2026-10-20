@@ -81,6 +81,7 @@ export function AssemblyNodeBody({
   outputPorts = [],
   onUpdate,
   onRun,
+  onExtractFrame,
   onProbeMedia,
   onRemoveMediaConnection,
   running,
@@ -92,6 +93,9 @@ export function AssemblyNodeBody({
   const [timeline, setTimeline] = React.useState(initialState);
   const [playing, setPlaying] = React.useState(false);
   const [probeStatus, setProbeStatus] = React.useState("");
+  const [extractingFrame, setExtractingFrame] = React.useState(false);
+  const [extractionError, setExtractionError] = React.useState("");
+  const extractionPendingRef = React.useRef(false);
   const [dragTargetTrackId, setDragTargetTrackId] = React.useState("");
   const [draggingClipId, setDraggingClipId] = React.useState("");
   const [clipClipboard, setClipClipboard] = React.useState(null);
@@ -302,6 +306,23 @@ export function AssemblyNodeBody({
     else {
       syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
       clockRef.current?.play();
+    }
+  }
+
+  async function extractPlayheadFrame() {
+    if (extractionPendingRef.current || !onExtractFrame) return;
+    extractionPendingRef.current = true;
+    clockRef.current?.pause();
+    const snapshot = normalizeAssemblyState(timelineRef.current);
+    setExtractingFrame(true);
+    setExtractionError("");
+    try {
+      await onExtractFrame(node, snapshot, snapshot.playhead);
+    } catch (error) {
+      setExtractionError(error.message || "Timeline frame extraction failed.");
+    } finally {
+      extractionPendingRef.current = false;
+      setExtractingFrame(false);
     }
   }
 
@@ -1024,6 +1045,7 @@ export function AssemblyNodeBody({
             <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
           ) : <span>{timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
           {probeStatus && <small>{probeStatus}</small>}
+          {extractionError && <small role="alert">{extractionError}</small>}
         </div>
         <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
           <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
@@ -1038,7 +1060,10 @@ export function AssemblyNodeBody({
             onChange={(event) => commitTimeline(setAssemblyView(timelineRef.current, { renderAudio: event.target.checked }))} />
           <span>Include audio</span>
         </label>
-        <button type="button" className="run-node-button assembly-render-button" disabled={running || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
+        <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !onExtractFrame || !timeline.media.length} onClick={extractPlayheadFrame}>
+          {extractingFrame ? "Extracting..." : "Extract Frame"}
+        </button>
+        <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
           {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}
         </button>
       </div>

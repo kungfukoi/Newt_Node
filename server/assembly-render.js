@@ -1,4 +1,18 @@
-import { assemblyClipPlaybackRate, assemblyClipSourceSpan, assemblyContentDuration, normalizeAssemblyState } from "../src/assembly/assemblyState.js";
+import { assemblyActiveClips, assemblyClipSourceTime, assemblyClipPlaybackRate, assemblyClipSourceSpan, assemblyContentDuration, normalizeAssemblyState } from "../src/assembly/assemblyState.js";
+
+export function createAssemblyFramePlan(assembly, resolvedMedia = [], frameTime) {
+  if (typeof frameTime !== "number" || !Number.isFinite(frameTime) || frameTime < 0) throw new Error("Timeline frame time must be a nonnegative number.");
+  const timeline = normalizeAssemblyState(assembly);
+  const active = new Map(assemblyActiveClips(timeline, frameTime).map(clip => [clip.id, clip]));
+  const snapshot = { ...timeline, inPoint: null, outPoint: null, renderAudio: false,
+    tracks: timeline.tracks.filter(track => track.type === "video").map(track => ({ ...track, clips: track.clips.filter(clip => active.has(clip.id)).map(clip => {
+      const item = active.get(clip.id);
+      const media = resolvedMedia.find(media => media.id === clip.mediaId) || item.media;
+      const lastFrameTime = Math.max(0, (Number(media.duration) || Number(clip.sourceDuration) || Infinity) - 1 / (Number(media.fps || media.frameRate) || timeline.frameRate));
+      return { ...clip, start: 0, duration: 1 / timeline.frameRate, sourceIn: Math.min(assemblyClipSourceTime(clip, frameTime), lastFrameTime), reverse: false, speed: 100 };
+    }) })) };
+  return { ...createAssemblyRenderPlan(snapshot, resolvedMedia), frameTime };
+}
 
 export function createAssemblyRenderPlan(assembly, resolvedMedia = []) {
   const timeline = normalizeAssemblyState(assembly);
@@ -68,8 +82,8 @@ function assemblyClipForRenderRange(clip, rangeStart, rangeEnd) {
   };
 }
 
-export function buildAssemblyFfmpegArgs(plan, outputPath) {
-  if (!plan?.inputs?.length) throw new Error("Timeline has no resolved media inputs.");
+export function buildAssemblyFfmpegArgs(plan, outputPath, { stillFrame = false } = {}) {
+  if (!plan?.inputs?.length && !stillFrame) throw new Error("Timeline has no resolved media inputs.");
   const args = ["-hide_banner", "-loglevel", "error", "-y"];
   plan.inputs.forEach(({ clip, media }) => {
     if (media.type === "image") {
@@ -110,7 +124,7 @@ export function buildAssemblyFfmpegArgs(plan, outputPath) {
     );
     videoLabel = outputLabel;
   });
-  filters.push(`[${videoLabel}]format=yuv420p[assembly-video]`);
+  filters.push(`[${videoLabel}]format=${stillFrame ? "rgb24" : "yuv420p"}[assembly-video]`);
 
   const audioLabels = [];
   plan.audioClips.forEach((item, index) => {
@@ -138,6 +152,10 @@ export function buildAssemblyFfmpegArgs(plan, outputPath) {
   }
 
   args.push("-filter_complex", filters.join(";"), "-map", "[assembly-video]");
+  if (stillFrame) {
+    args.push("-an", "-frames:v", "1", "-c:v", "png", "-update", "1", outputPath);
+    return args;
+  }
   if (audioLabels.length) args.push("-map", "[assembly-audio]", "-c:a", "aac", "-b:a", "192k");
   else args.push("-an");
   args.push(

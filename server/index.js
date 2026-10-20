@@ -177,7 +177,8 @@ import {
   rodin25MaxInputImages,
   rodin25QualityMeshOption
 } from "../src/model3D.js";
-import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "./assembly-render.js";
+import { assemblyActiveClips } from "../src/assembly/assemblyState.js";
+import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyFramePlan, createAssemblyRenderPlan } from "./assembly-render.js";
 import { defaultModelProviderPreferences, missingModelProviderApiKeyMessage, normalizeModelProviderPreferences, providerSupportedModels } from "../src/modelProviderRouting.js";
 import { imageReferenceLimitError } from "../src/imageReferenceLimits.js";
 import { defaultUserPreferences, directorProcessingModelIds, textAgentModelIds, normalizeUserPreferences } from "../src/userPreferences.js";
@@ -13783,13 +13784,20 @@ async function probeAssemblyMediaFile(filePath) {
 async function createAssemblyRenderResult(req, res) {
   const assembly = req.body?.assembly && typeof req.body.assembly === "object" ? req.body.assembly : null;
   if (!assembly) return res.status(400).json({ error: "Timeline render needs timeline data." });
-  const requestedMedia = Array.isArray(assembly.media) ? assembly.media : [];
-  if (!requestedMedia.length) return res.status(400).json({ error: "Timeline has no media to render." });
+  const stillFrame = req.body.frameTime !== undefined;
+  if (stillFrame && (typeof req.body.frameTime !== "number" || !Number.isFinite(req.body.frameTime) || req.body.frameTime < 0)) return res.status(400).json({ error: "Timeline frame time must be a nonnegative number." });
+  const allMedia = Array.isArray(assembly.media) ? assembly.media : [];
+  const activeMediaIds = stillFrame ? new Set(assemblyActiveClips(assembly, req.body.frameTime).map(clip => clip.mediaId)) : null;
+  const requestedMedia = stillFrame ? allMedia.filter(media => activeMediaIds.has(media.id)) : allMedia;
+  if (!stillFrame && !requestedMedia.length) return res.status(400).json({ error: "Timeline has no media to render." });
 
   const resolvedMedia = [];
   for (const media of requestedMedia) {
     const url = firstLocalOutput(media.url);
-    if (!url) continue;
+    if (!url) {
+      if (stillFrame) throw httpError(400, "Timeline frame extraction needs managed local media.");
+      continue;
+    }
     const source = await resolveLocalAssetPathFromUrl(url);
     const metadata = media.type === "image"
       ? await probeLocalImageFile(source.filePath, source.fileName)
@@ -13803,55 +13811,57 @@ async function createAssemblyRenderResult(req, res) {
     });
   }
 
-  const plan = createAssemblyRenderPlan(assembly, resolvedMedia);
-  if (!plan.inputs.length) return res.status(400).json({ error: "Timeline has no accessible local media clips." });
-  const output = await createManagedAssetTarget(req, "timeline-render", ".mp4", workflowPackageOutputDirName);
+  const plan = stillFrame ? createAssemblyFramePlan(assembly, resolvedMedia, req.body.frameTime) : createAssemblyRenderPlan(assembly, resolvedMedia);
+  if (!stillFrame && !plan.inputs.length) return res.status(400).json({ error: "Timeline has no accessible local media clips." });
+  const mediaType = stillFrame ? "image" : "video";
+  const endpoint = stillFrame ? "local/timeline-extract-frame" : "local/timeline-render";
+  const output = await createManagedAssetTarget(req, stillFrame ? "timeline-frame" : "timeline-render", stillFrame ? ".png" : ".mp4", workflowPackageOutputDirName);
   try {
-    const args = buildAssemblyFfmpegArgs(plan, output.filePath);
+    const args = buildAssemblyFfmpegArgs(plan, output.filePath, { stillFrame });
     await runFfmpeg(args, "Timeline render", 1800000);
     const outputStats = await stat(output.filePath);
-    const metadata = await probeAssemblyMediaFile(output.filePath);
+    const metadata = stillFrame ? await probeLocalImageFile(output.filePath, output.fileName) : await probeAssemblyMediaFile(output.filePath);
     const summary = assemblyRenderSummary(plan);
-    const text = "Timeline render: " + summary.visualClipCount + " visual and " + summary.audioClipCount + " audio clip" + (summary.audioClipCount === 1 ? "" : "s") + ".";
+    const text = stillFrame ? `Timeline frame at ${req.body.frameTime.toFixed(3)}s` : "Timeline render: " + summary.visualClipCount + " visual and " + summary.audioClipCount + " audio clip" + (summary.audioClipCount === 1 ? "" : "s") + ".";
     const cost = {
       amountUsd: 0,
       currency: "USD",
       unitRateUsd: 0,
       units: 1,
       unit: "local render",
-      mediaType: "video",
+      mediaType,
       pricingBasis: "Local FFmpeg timeline render",
       pricingSource: "local-ffmpeg"
     };
     await appendHistory({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
-      mediaType: "video",
+      mediaType,
       provider: "local",
       modelName: "Timeline",
-      endpoint: "local/timeline-render",
-      mode: "FFmpeg multi-track timeline",
+      endpoint,
+      mode: stillFrame ? "Extract playhead frame" : "FFmpeg multi-track timeline",
       prompt: text,
       submittedPrompt: text,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
-      settings: { ...summary, ffmpeg: path.basename(ffmpegBinaryPath) },
+      settings: { ...summary, ...(stillFrame ? { frameTime: req.body.frameTime } : {}), ffmpeg: path.basename(ffmpegBinaryPath) },
       cost,
-      localVideo: output.publicPath,
+      ...(stillFrame ? { localImage: output.publicPath } : { localVideo: output.publicPath }),
       outputFileName: output.fileName,
       outputBytes: outputStats.size,
       text
     });
     return res.json({
-      endpoint: "local/timeline-render",
+      endpoint,
       modelName: "Timeline",
       text,
       cost,
-      video: {
-        label: "Timeline render",
+      [mediaType]: {
+        label: stillFrame ? text : "Timeline render",
         localUrl: output.publicPath,
         fileName: output.fileName,
-        mimeType: "video/mp4",
+        mimeType: stillFrame ? "image/png" : "video/mp4",
         bytes: outputStats.size,
         metadata
       }

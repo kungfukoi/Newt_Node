@@ -310,6 +310,19 @@ try {
   assert.ok(audioData.sourceAudioUrl.includes(audioCopy.id));
   assert.ok(audioData.resultItems[0].url.includes(audioCopy.id));
   assert.equal((await request(audioData.sourceAudioUrl)).status, 200);
+  const timelineStill = await (await request("/api/node/assembly-render", { nodeId: "timeline-still", nodeTitle: "Timeline", frameTime: 0.125, assembly: {
+    outputWidth: 320, outputHeight: 180, frameRate: 24, inPoint: 1, outPoint: 2,
+    media: [{ id: "still", type: "image", url: "/outputs/panel.png", duration: 5 }, { id: "unused", type: "video", url: "/outputs/does-not-exist.mp4" }],
+    tracks: [{ id: "v1", type: "video", clips: [{ id: "still-clip", mediaId: "still", start: 0, duration: 5 }] }]
+  } })).json();
+  assert.equal(timelineStill.endpoint, "local/timeline-extract-frame");
+  assert.equal(timelineStill.image.mimeType, "image/png");
+  assert.equal(timelineStill.image.metadata.width, 320);
+  assert.equal(timelineStill.image.metadata.height, 180);
+  assert.equal(timelineStill.cost.amountUsd, 0);
+  assert.equal((await request(timelineStill.image.localUrl)).headers.get("content-type"), "image/png");
+  const invalidTimelineTime = await fetch(api + "/api/node/assembly-render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ frameTime: -1, assembly: {} }) });
+  assert.equal(invalidTimelineTime.status, 400);
   const composite = await (await request("/api/node/utility-video", { model: "Composite Video", compositeVideo: { duration: 0.2, layers: [
     { id: "base", url: "/outputs/panel.png", type: "image", blendMode: "normal", mixAmount: 100 },
     { id: "layer1", url: "/outputs/clip.mp4", type: "video", blendMode: "screen", mixAmount: 50, maskUrl: "/outputs/panel.png", maskType: "image", maskBlur: 1, maskExpand: 1 },

@@ -77,7 +77,7 @@ The enlarged image editor provides object selection, boxes, drawing, contextual 
 
 ### Assemble, composite and deliver
 
-Video/image/audio sources → Timeline bin → tracks → edit and preview → local FFmpeg render. Connected bin items track their upstream source/port; direct drops are independent snapshots. Timeline owns transport/playhead and can feed Preview. Use Utility Composite Video for an ordered 2–32 layer stack with blend, opacity and optional masks; its live thumbnail is an approximation, while Run renders the result. Use Output for PNG/JPEG stills or H.264 MP4/ProRes 422 HQ MOV video. A 10-bit ProRes transcode does not restore missing source precision or create HDR.
+Video/image/audio sources → Timeline bin → tracks → edit and preview → local FFmpeg render. Connected bin items track their upstream source/port; direct drops are independent snapshots. Timeline owns transport/playhead and can feed Preview. Extract Frame saves the composition at the current playhead as a full-resolution PNG in a new Image node, independently of In/Out render markers. Use Utility Composite Video for an ordered 2–32 layer stack with blend, opacity and optional masks; its live thumbnail is an approximation, while Run renders the result. Use Output for PNG/JPEG stills or H.264 MP4/ProRes 422 HQ MOV video. A 10-bit ProRes transcode does not restore missing source precision or create HDR.
 
 ### Save and reuse
 

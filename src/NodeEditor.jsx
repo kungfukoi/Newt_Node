@@ -6999,6 +6999,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
+  async function extractAssemblyFrame(node, assembly, frameTime) {
+    const context = workflowRequestContext();
+    const scope = remoteVideoScope(context);
+    const { response, data } = await nodeApi.assemblyExtractFrame({
+      ...context, nodeId: node.id, nodeTitle: node.data?.title || "Timeline",
+      assembly: assemblyRenderPayload(assembly), frameTime
+    });
+    if (!response.ok) throw new Error(data.error || "Timeline frame extraction failed.");
+    if (!data.image?.localUrl) throw new Error("Timeline extraction returned no image.");
+    if (remoteVideoScope(workflowRequestContext()) !== scope) return;
+    const current = nodesRef.current.find(item => item.id === node.id);
+    if (!current) return;
+    createMediaNodeFromOutputItem({
+      url: data.image.localUrl, type: "image", label: data.image.label || `Timeline frame at ${frameTime.toFixed(3)}s`,
+      fileName: data.image.fileName, mimeType: data.image.mimeType || "image/png"
+    }, { x: current.x + estimatedNodeWidth(current.type, current.data) + 60, y: current.y });
+    loadOutputHistory();
+  }
+
   async function probeAssemblyMedia(node, media) {
     const { response, data } = await nodeApi.assemblyProbe({
       ...workflowRequestContext(),
@@ -8103,6 +8122,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onOpenComposer={setComposerEditorNodeId}
         onFrameItCapture={captureFrameItFrame}
         onFrameItGenerate={generateFrameItMedia}
+        onAssemblyExtractFrame={extractAssemblyFrame}
         onAssemblyProbe={probeAssemblyMedia}
         onAssemblyMediaDisconnect={disconnectAssemblyMedia}
         onCanvasPanStart={beginCanvasPan}
@@ -8413,6 +8433,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onOpenComposer={setComposerEditorNodeId}
                 onFrameItCapture={captureFrameItFrame}
                 onFrameItGenerate={generateFrameItMedia}
+                onAssemblyExtractFrame={extractAssemblyFrame}
                 onCanvasPanStart={beginCanvasPan}
                 running={node.data?.status === "running"}
                 transferCompiling={compilingTransferNodeId === node.id}
@@ -8917,6 +8938,7 @@ function NodeCard({
   onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
+  onAssemblyExtractFrame,
   onAssemblyProbe,
   onAssemblyMediaDisconnect,
   onCanvasPanStart,
@@ -9266,6 +9288,7 @@ function NodeCard({
         onOpenComposer={onOpenComposer}
         onFrameItCapture={onFrameItCapture}
         onFrameItGenerate={onFrameItGenerate}
+        onAssemblyExtractFrame={onAssemblyExtractFrame}
         onAssemblyProbe={onAssemblyProbe}
         onAssemblyMediaDisconnect={onAssemblyMediaDisconnect}
         onCanvasPanStart={onCanvasPanStart}
@@ -11665,6 +11688,7 @@ function NodeBody({
   onOpenComposer,
   onFrameItCapture,
   onFrameItGenerate,
+  onAssemblyExtractFrame,
   onAssemblyProbe,
   onAssemblyMediaDisconnect,
   onCanvasPanStart,
@@ -11821,6 +11845,7 @@ function NodeBody({
         outputPorts={config.output}
         onUpdate={onUpdate}
         onRun={onRun}
+        onExtractFrame={onAssemblyExtractFrame}
         onProbeMedia={onAssemblyProbe}
         onRemoveMediaConnection={onAssemblyMediaDisconnect}
         running={running}

@@ -492,3 +492,8 @@
     grid-template-columns: 142px minmax(420px, 1fr) 210px;
   }
 }
+
+.assembly-footer .assembly-render-button {
+  min-width: 150px;
+  white-space: nowrap;
+}
