@@ -52,3 +52,23 @@ test("Preview Layout video tiles use an explicit poster or the cached poster rou
   assert.equal(previewLayoutVideoPosterUrl({ url: "/outputs/clip.mp4", thumbnailUrl: "/outputs/poster.jpg" }), "/outputs/poster.jpg");
   assert.equal(previewLayoutVideoPosterUrl({ url: "/outputs/clip.mp4" }), "/api/video-poster?url=%2Foutputs%2Fclip.mp4");
 });
+
+test("Layout gallery wraps mixed media and assigns the correct image edit target", async () => {
+  const { adjacentPreviewLayoutItem, previewLayoutDropBeforeId } = await import("../src/previewLayout.js");
+  const items = [
+    { id: "A", url: "/outputs/a.png", type: "image" },
+    { id: "B", url: "/outputs/b.mp4", type: "video" },
+    { id: "C", url: "/outputs/c.png", type: "image" }
+  ];
+  assert.equal(previewLayoutDropBeforeId(items, "B", true), "C");
+  assert.equal(previewLayoutDropBeforeId(items, "C", true), "");
+  assert.equal(previewLayoutDropBeforeId(items, "B", false), "B");
+  const video = adjacentPreviewLayoutItem(items, "A", 1, "preview");
+  assert.equal(video.id, "B");
+  assert.equal(video.editContext, undefined);
+  const image = adjacentPreviewLayoutItem(items, "B", 1, "preview");
+  assert.deepEqual(image.editContext, { type: "previewLayout", nodeId: "preview", itemId: "C" });
+  assert.equal(adjacentPreviewLayoutItem(items, "C", 1, "preview").id, "A");
+  assert.equal(adjacentPreviewLayoutItem(items, "A", -1, "preview").id, "C");
+  assert.equal(adjacentPreviewLayoutItem([], "A", 1, "preview"), null);
+});

@@ -62,3 +62,45 @@ test("Standard frame one uses the low upward camera direction", () => {
   assert.match(frameOne.prompt, /camera positioned low, pointing up from the ground/i);
   assert.doesNotMatch(frameOne.prompt, /directly below the subject/i);
 });
+
+test("Location scouting preserves geography and adapts interior/exterior views", () => {
+  for (const coverageLocationType of ["Interior", "Exterior"]) {
+    const shots = coverageShotsForMethod("Insane", { coverageSubject: "Location", coverageLocationType });
+    assert.equal(shots.length, 9);
+    assert.equal(new Set(shots.map(shot => shot.prompt)).size, 9);
+    for (const shot of shots) {
+      assert.match(shot.prompt, /Move the camera rather than rearranging/);
+      assert.match(shot.prompt, /Do not add people/);
+      assert.match(shot.prompt, /Stay close to the visible reference geography/);
+      assert.doesNotMatch(shot.prompt, /same pose|same eyeline|Drastically break/);
+    }
+    assert.match(shots[1].label, coverageLocationType === "Interior" ? /Opposite-Corner/ : /Alternate Approach/);
+    assert.match(shots[6].prompt, coverageLocationType === "Interior" ? /below its ceiling/ : /nearby terrain/);
+  }
+});
+
+test("Location exploration is explicit and legacy subject methods remain unchanged", () => {
+  const data = { coverageSubject: "Location", coverageExploration: "Explore unseen space" };
+  const shots = coverageShotsForMethod("Standard", data);
+  assert.match(shots[2].prompt, /Explore unseen areas/);
+  assert.doesNotMatch(shots[2].prompt, /Stay close to the visible reference geography/);
+  assert.deepEqual(coverageShotsForMethod("Dynamic", { coverageSubject: "invalid" }), coverageShotsForMethod("Dynamic"));
+  assert.deepEqual(coverageShotsForMethod("Insane", data), shots);
+  assert.deepEqual(coverageShotsForMethod("Standard", JSON.parse(JSON.stringify(data))), shots);
+});
+
+test("Coverage input policy keeps old prompts and resolves optional input conflicts", async () => {
+  const { coveragePromptForInputs } = await import("../src/coveragePresets.js");
+  for (const coverageSubject of ["Subject", "Location"]) {
+    const shot = coverageShotsForMethod("Standard", { coverageSubject })[0];
+    assert.equal(coveragePromptForInputs(shot), shot.prompt);
+    const styled = coveragePromptForInputs(shot, { hasStyle: true, hasMoodBoard: true });
+    assert.match(styled, /Explicit Style instructions take precedence/);
+    assert.match(styled, /Mood Board imagery is treatment reference only/);
+    const cast = coveragePromptForInputs(shot, { hasCharacters: true });
+    assert.doesNotMatch(cast, /Do not add people|without talent/);
+    assert.match(cast, /identity and selected wardrobe only/);
+    assert.match(cast, /Preserve existing blocking/);
+    if (coverageSubject === "Location") assert.match(styled, /Do not add people/);
+  }
+});

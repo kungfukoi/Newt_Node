@@ -225,6 +225,9 @@ import { appendResultItems, existingResultItemsForNode, normalizedResultItems, r
 import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
 import { previewSelectionForNode } from "./previewSelection.js";
 import {
+  adjacentPreviewLayoutItem,
+  previewLayoutDropBeforeId,
+  previewLayoutLightboxItem,
   createPreviewLayoutItem,
   mergePreviewMediaIntoLayout,
   movePreviewLayoutItem,
@@ -241,6 +244,7 @@ import {
 import { findNodeReferenceMentions, nodeReferenceBindingKey, renameBoundNodeReferenceTokenInData } from "./nodeReferences.js";
 import {
   characterVideoSheetPromptForData,
+  characterVideoSheetPromptForCompletedSheet,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import {
@@ -266,7 +270,9 @@ import {
   openAiImage2QualityOptions,
   openAiImage2Variant
 } from "./openAiImage2.js";
-import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
+import PreviewLayoutTile from "./components/PreviewLayoutTile.jsx";
+import CoverageSettings from "./components/CoverageSettings.jsx";
+import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod, normalizeCoverageSettings, coveragePromptForInputs } from "./coveragePresets.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -510,6 +516,8 @@ import { appendUniqueVideoResults, remoteVideoScope } from "./remoteVideoJobs.js
 import {
   createWorkflowClipboardPayload,
   normalizeWorkflowClipboardPayload,
+  parseWorkflowClipboardText,
+  serializeWorkflowClipboardPayload,
   readWorkflowClipboardFromStorage,
   readWorkflowClipboardFromSystemClipboard,
   workflowClipboardStorageKey,
@@ -1477,8 +1485,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => buildProjectOutputItems({ nodes, catalog: outputCatalog.items, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
     [nodes, outputCatalog.items, projectId, projectName]
   );
-  const openPreviewLightbox = React.useCallback((item) => {
-    setPreviewLightboxSource("");
+  const openPreviewLightbox = React.useCallback((item, context = {}) => {
+    setPreviewLightboxSource(context.layoutNodeId ? "previewLayout:" + context.layoutNodeId : "");
     setPreviewLightboxItem(item);
   }, []);
   const openProjectOutputPreview = React.useCallback((item) => {
@@ -1489,6 +1497,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setPreviewLightboxItem(null);
     setPreviewLightboxSource("");
   }, []);
+  const navigatePreviewLayout = React.useCallback((direction) => {
+    const nodeId = previewLightboxSource.slice("previewLayout:".length);
+    const source = nodesRef.current.find(node => node.id === nodeId);
+    setPreviewLightboxItem(current => adjacentPreviewLayoutItem(source?.data.previewLayoutItems || [], current?.id, direction, nodeId) || current);
+  }, [previewLightboxSource]);
   const navigateProjectOutputPreview = React.useCallback((direction) => {
     setPreviewLightboxItem((current) => adjacentProjectOutputImage(projectOutputs, current, direction) || current);
   }, [projectOutputs]);
@@ -1811,18 +1824,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
-      if (commandKey && key === "c") {
-        event.preventDefault();
-        copySelection();
-        return;
-      }
-
-      if (commandKey && key === "v") {
-        event.preventDefault();
-        void pasteSelection();
-        return;
-      }
-
       if (event.key === "Backspace" || event.key === "Delete") {
         const selectedIds = currentSelectedNodeIds();
         if (selectedIds.length) {
@@ -1832,8 +1833,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    function handleClipboard(event) {
+      if (!active || event.defaultPrevented || event.target.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='textbox']")) return;
+      if (event.type === "copy") {
+        const clipboard = copySelection(event.clipboardData);
+        if (!clipboard) return;
+        event.preventDefault();
+      } else {
+        const clipboard = parseWorkflowClipboardText(event.clipboardData?.getData("text/plain"));
+        event.preventDefault();
+        void pasteSelection(clipboard);
+      }
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("copy", handleClipboard);
+    window.addEventListener("paste", handleClipboard);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("copy", handleClipboard);
+      window.removeEventListener("paste", handleClipboard);
+    };
   }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath, workflowFilePath]);
 
   React.useEffect(() => {
@@ -3511,7 +3531,68 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null } = {}) {
+  async function regenerateCharacterCuSheet(node, selectionId) {
+    if (node.data.status === "compiling") return;
+    const variant = characterSheetVariantForSelection(node.data, selectionId);
+    if (!variant?.generated) return;
+    pushUndoSnapshot({ nodeDataIds: [node.id] });
+    updateNode(node.id, { status: "compiling", characterBatchProgress: { completed: 0, total: 1 }, error: "" });
+    try {
+      const wardrobe = (node.data.characterWardrobes || []).find((item) => item.id === variant.wardrobeId);
+      let videoGenerated;
+      if (wardrobe) {
+        if (!(node.data.characterBaseSheet?.url || node.data.characterBaseSheet?.localUrl) || !(node.data.characterBaseVideoSheet?.url || node.data.characterBaseVideoSheet?.localUrl)) {
+          throw new Error("Restore the Base Identity and Base CU sheets before regenerating this wardrobe CU sheet.");
+        }
+        const result = await generateCharacterWardrobeVariant({ ...node, data: { ...node.data, cuVideoGeneration: true } }, wardrobe, {
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          baseSheet: node.data.characterBaseSheet,
+          baseVideoSheet: node.data.characterBaseVideoSheet,
+          baseSignature: variant.baseSignature,
+          baseVideoSignature: node.data.characterBaseVideoSignature,
+          existingVariant: variant,
+          regenerateVideo: true
+        });
+        if (result.videoError) throw new Error(result.videoError);
+        videoGenerated = result.variant.videoGenerated;
+      } else {
+        if (variant.source !== "custom" && variant.wardrobeId !== characterDefaultWardrobeId) {
+          throw new Error("Restore this sheet's wardrobe reference before regenerating its CU sheet.");
+        }
+        videoGenerated = await runCharacterSheetGeneration({
+          node,
+          prompt: characterVideoSheetPromptForCompletedSheet(node.data),
+          portrait: variant.generated,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          sheetKind: "video"
+        });
+      }
+      if (!(videoGenerated?.url || videoGenerated?.localUrl)) throw new Error("A Base Identity CU sheet is required before regenerating this wardrobe CU sheet.");
+      const nextVariant = { ...variant, videoGenerated };
+      const libraryPatch = variant.source === "custom"
+        ? { characterCustomSheets: normalizeCharacterCustomSheets(node.data).map((sheet) => customCharacterSheetId(sheet.id) === selectionId ? { ...sheet, videoGenerated } : sheet) }
+        : { characterSheetVariants: upsertCharacterWardrobeVariant(normalizeCharacterSheetVariants(node.data), nextVariant) };
+      updateNode(node.id, {
+        ...libraryPatch,
+        ...(variant.wardrobeId === characterDefaultWardrobeId ? { characterBaseVideoSheet: videoGenerated, characterBaseVideoSignature: characterBaseVideoGenerationSignature(node.data) } : {}),
+        activeCharacterSheetId: selectionId,
+        activeWardrobeId: wardrobe?.id || "",
+        characterSheetPreviewKind: "video",
+        ...characterVariantDisplayPatch(nextVariant),
+        status: "ready",
+        characterBatchProgress: null,
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", characterBatchProgress: null, error: error.message });
+    }
+  }
+
+  async function activateCharacterNode(node, { forceRegenerateBase = false, wardrobeId = "", addedWardrobeIds = null, cuSheetId = "" } = {}) {
+    if (cuSheetId) return regenerateCharacterCuSheet(node, cuSheetId);
     if (node.data.status === "compiling") return;
     const existingVariants = normalizeCharacterSheetVariants(node.data);
     const portrait = node.data.characterPortrait;
@@ -4746,7 +4827,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function exportPreviewLayoutBoard(node) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
-    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems).filter((item) => item.type === "image");
+    const layoutItems = normalizedPreviewLayoutItems(currentNode.data.previewLayoutItems);
     const frames = layoutItems.map((item, index) => {
       const description = previewLayoutExportCaption(item, index);
       return {
@@ -4765,7 +4846,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!frames.length) {
       updateNode(currentNode.id, {
         previewLayoutExportStatus: "",
-        previewLayoutExportError: "Add at least one image to the Layout tab before exporting."
+        previewLayoutExportError: "Add at least one image or video to the Layout tab before exporting."
       });
       return;
     }
@@ -4778,7 +4859,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       const folderSelection = await systemApi.selectFolder({
-        title: "Choose where to save preview layout boards",
+        title: "Choose where to save preview layout images and videos",
         defaultPath: projectPackagePath || ""
       });
       if (!folderSelection.response.ok) {
@@ -5984,6 +6065,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
       return normalizeCompositeLayers(target.data).map(compositeLayerPortId).filter((port) => !edgesRef.current.some((edge) => edge.to.nodeId === target.id && edge.to.port === port));
     }
+    if (target.type === "utility" && target.data?.utilityMode === "image" && isUtilityCoverageModel(target.data?.utilityImageModel) && ["style", "transfer", "character"].includes(outputKind)) return { style: ["styleIn"], transfer: ["transferIn"], character: ["characterIn"] }[outputKind];
     if (target.type === "explore") return ({ prompt: ["promptIn"], image: ["imageIn"], character: ["characterIn"], transfer: ["transferIn"], style: ["styleIn"], camera: ["cameraIn"] })[outputKind] || [];
     if (isOutputSinkConnection(target.type, "sourceIn", outputKind)) {
       return ["sourceIn"];
@@ -6207,6 +6289,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         && !customGradePromptPiece(source.data)
         && (!source.data.stylePreset || source.data.stylePreset === "None")
       ) return "Add custom grade colors before connecting";
+      if (target.type === "utility" && activeInputPortIdsForNode(target).includes("styleIn") && to.port === "styleIn") return "";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -6219,6 +6302,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "transfer") {
       if (!source.data.activated || !source.data.resultUrl) return `Lock Mood Board to enable ${moodBoardOutputFileName} output`;
       if (
+        (target.type === "utility" && activeInputPortIdsForNode(target).includes("transferIn") && to.port === "transferIn") ||
         (target.type === "imageModel" && to.port === "transferIn") ||
         (target.type === "storyboard" && to.port === "transferIn" && target.data.useStoryboardStyle === false) ||
         (target.type === "composer" && to.port === "imageIn") ||
@@ -6245,6 +6329,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
         return "";
       }
+      if (target.type === "utility" && activeInputPortIdsForNode(target).includes("characterIn") && to.port === "characterIn") return "";
       if (target.type === "imageModel" && to.port === "characterIn") return "";
       if (target.type === "videoModel" && to.port === "characterIn") return "";
       if (target.type === "composer" && isComposerCharacterInputPort(to.port, target)) return "";
@@ -6253,7 +6338,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Character connects to Character inputs or previews";
     }
 
-    if ((["imageModel", "videoModel", "skillDirector"].includes(target.type) || target.type === "storyboard") && to.port === "characterIn") {
+    if ((["imageModel", "videoModel", "skillDirector"].includes(target.type) || target.type === "storyboard" || target.type === "utility") && to.port === "characterIn") {
       return "Character inputs accept locked Character nodes";
     }
 
@@ -6587,7 +6672,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return flowNodes.filter((node) => node.selected).map((node) => node.id);
   }
 
-  function copySelection() {
+  function copySelection(clipboardData) {
     const selectedIds = currentSelectedNodeIds();
     if (!selectedIds.length) return;
 
@@ -6604,22 +6689,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     clipboardRef.current = clipboard;
     writeWorkflowClipboardToStorage(clipboard);
-    void writeWorkflowClipboardToSystemClipboard(clipboard);
+    if (clipboardData) clipboardData.setData("text/plain", serializeWorkflowClipboardPayload(clipboard));
+    else void writeWorkflowClipboardToSystemClipboard(clipboard);
     setSaveStatus(`${selectedIds.length} node${selectedIds.length === 1 ? "" : "s"} copied`);
+    return clipboard;
   }
 
   async function readWorkflowClipboardSelection() {
+    const systemClipboard = await readWorkflowClipboardFromSystemClipboard();
+    if (systemClipboard?.nodes?.length) return systemClipboard;
+
     const storageClipboard = readWorkflowClipboardFromStorage();
     if (storageClipboard?.nodes?.length) return storageClipboard;
 
     const memoryClipboard = normalizeWorkflowClipboardPayload(clipboardRef.current);
     if (memoryClipboard?.nodes?.length) return memoryClipboard;
 
-    return readWorkflowClipboardFromSystemClipboard();
+    return null;
   }
 
-  async function pasteSelection() {
-    const clipboard = await readWorkflowClipboardSelection();
+  async function pasteSelection(eventClipboard) {
+    const clipboard = eventClipboard || await readWorkflowClipboardSelection();
     if (!clipboard?.nodes?.length) return;
 
     clipboardRef.current = clipboard;
@@ -7420,7 +7510,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
         if (!sourceImageUrl) throw new Error("Connect an image to Coverage.");
         const method = normalizeCoverageMethod(currentNode.data.coverageMethod);
-        const shots = coverageShotsForMethod(method);
+        const shots = coverageShotsForMethod(method, currentNode.data);
         const aspectRatio = await resolveImageModelAspectRatio(
           {
             ...currentNode,
@@ -7528,7 +7618,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           if (isUtilityCoverageModel(utilityImageModel)) {
             const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
             if (!sourceImageUrl) throw new Error("Connect an image to Utility Coverage.");
-            const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod));
+            const instructionSources = [...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
+            const imagePromptItems = connectedImagePromptItems([...(incoming.transferIn || []), ...(incoming.characterIn || [])], currentIncomingByNode);
+            const shots = coverageShotsForMethod(normalizeCoverageMethod(currentNode.data.coverageMethod), currentNode.data);
             const aspectRatio = await resolveImageModelAspectRatio(
               {
                 ...currentNode,
@@ -7545,7 +7637,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 const item = await runCoverageGeneration({
                 node: currentNode,
                 sourceImageUrl,
-                shot,
+                imagePromptItems,
+                shot: instructionSources.length ? { ...shot, prompt: buildEffectiveImagePrompt(coveragePromptForInputs(shot, { hasStyle: Boolean(incoming.styleIn?.length), hasMoodBoard: Boolean(incoming.transferIn?.length), hasCharacters: Boolean(incoming.characterIn?.length) }), instructionSources, aspectRatio, currentIncomingByNode) + "\n\nThe Coverage base image defines the location geometry. The requested Coverage camera direction remains authoritative: " + shot.direction } : shot,
                 aspectRatio,
                 workflowContext: requestContext,
                 index
@@ -8065,8 +8158,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {previewLightboxItem && (
         <OutputPreviewLightbox
           item={previewLightboxItem}
-          navigationKey={previewLightboxSource === "projectOutputs" ? previewLightboxItem.id || previewLightboxItem.url : ""}
-          onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : undefined}
+          navigationKey={previewLightboxSource ? previewLightboxItem.id || previewLightboxItem.url : ""}
+          allowVideoNavigation={previewLightboxSource.startsWith("previewLayout:")}
+          onNavigate={previewLightboxSource === "projectOutputs" ? navigateProjectOutputPreview : previewLightboxSource.startsWith("previewLayout:") ? navigatePreviewLayout : undefined}
           onApplyImageEdit={applyPreviewLayoutImageEdit}
           onRestoreImageEdit={restorePreviewLayoutImageEdit}
           onAcceptAiEdit={acceptAiImageEdit}
@@ -12132,16 +12226,18 @@ function NodeBody({
                             <X size={10} />
                           </span>
                         )}
-                        {choice.source === "generated" && !compiling && choice.previewKind === "image" && (
+                        {!compiling && (choice.source === "generated" || choice.previewKind === "video") && (
                           <span
                             className="character-remove"
                             role="button"
-                            aria-label={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity" : `Regenerate ${choice.label}`}
-                            title={choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity and dependent wardrobe sheets" : `Regenerate ${choice.label} from the current Base Identity`}
+                            aria-label={choice.previewKind === "video" ? `Regenerate ${choice.label}` : choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity" : `Regenerate ${choice.label}`}
+                            title={choice.previewKind === "video" ? `Regenerate ${choice.label} only` : choice.variant?.wardrobeId === characterDefaultWardrobeId ? "Regenerate Base Identity and dependent wardrobe sheets" : `Regenerate ${choice.label} from the current Base Identity`}
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              onCharacterActivate(node, choice.variant?.wardrobeId === characterDefaultWardrobeId
+                              onCharacterActivate(node, choice.previewKind === "video"
+                                ? { cuSheetId: choice.id }
+                                : choice.variant?.wardrobeId === characterDefaultWardrobeId
                                 ? { forceRegenerateBase: true }
                                 : { wardrobeId: choice.variant?.wardrobeId });
                             }}
@@ -13266,7 +13362,7 @@ function NodeBody({
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
-    const layoutImageCount = layoutItems.filter((item) => item.type === "image").length;
+    const layoutMediaCount = layoutItems.length;
     const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
     const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -13345,12 +13441,14 @@ function NodeBody({
       onUpdate(node.id, { previewLayoutItems: nextItems });
     }
 
-    function handleLayoutDrop(event, beforeId = "") {
+    function handleLayoutDrop(event, targetId = "", after = false) {
       if (!previewLayoutDropAllowed(event)) return;
       allowFileDrop(event);
+      const beforeId = previewLayoutDropBeforeId(layoutItems, targetId, after);
       const layoutItemId = event.dataTransfer.getData(previewLayoutDragMime);
       if (layoutItemId) {
         moveLayoutItem(layoutItemId, beforeId);
+        clearOutputItemDragData();
         return;
       }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer);
@@ -13412,15 +13510,7 @@ function NodeBody({
       const media = event?.currentTarget?.querySelector?.(item.type === "video" ? "video" : "img");
       const width = previewLayoutDimension(item.width || media?.naturalWidth || media?.videoWidth);
       const height = previewLayoutDimension(item.height || media?.naturalHeight || media?.videoHeight);
-      onPreviewOpen?.({
-        ...item,
-        ...(width && height ? { width, height } : {}),
-        ...(item.type === "image" ? { editContext: {
-          type: "previewLayout",
-          nodeId: node.id,
-          itemId: item.id
-        } } : {})
-      });
+      onPreviewOpen?.(previewLayoutLightboxItem({ ...item, ...(width && height ? { width, height } : {}) }, node.id), { layoutNodeId: node.id });
     }
 
     return (
@@ -13514,14 +13604,14 @@ function NodeBody({
             )}
           </>
         ) : (
-          <section className="preview-layout-panel" onPointerDown={(event) => event.stopPropagation()}>
+          <section className="preview-layout-panel nodrag nopan" onPointerDown={(event) => event.stopPropagation()}>
             <div className="preview-layout-toolbar">
               <span>{layoutItems.length ? `${layoutItems.length} item${layoutItems.length === 1 ? "" : "s"}` : "Layout board"}</span>
               <button
                 type="button"
                 onClick={() => onPreviewLayoutExport?.(node)}
-                disabled={!layoutImageCount || layoutExporting}
-                title="Export layout images"
+                disabled={!layoutMediaCount || layoutExporting}
+                title="Export layout images and videos into a new folder"
               >
                 {layoutExporting ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
                 <span>{layoutExporting ? "Exporting" : "Export"}</span>
@@ -13535,17 +13625,12 @@ function NodeBody({
               {layoutItems.length ? (
                 <div className="preview-layout-grid" style={{ "--preview-layout-column-count": layoutColumnCount }}>
                   {layoutItems.map((item, index) => (
-                    <figure
-                      key={item.id}
+                    <PreviewLayoutTile
+                      key={item.id} item={item} index={index}
                       className={`preview-layout-item ${item.type} ${item.width && item.height ? "has-dimensions" : ""}`}
                       style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
-                      draggable
-                      onDragStart={(event) => startLayoutItemDrag(event, item)}
-                      onDragEnd={(event) => finishOutputItemDragData(item, event)}
-                      onDragOver={handleLayoutDragOver}
-                      onDrop={(event) => handleLayoutDrop(event, item.id)}
-                      onDoubleClick={(event) => openLayoutItem(item, event)}
-                      title={`${item.label || `Layout ${item.type} ${index + 1}`}\nDrag to reorder, double-click to preview`}
+                      canDrop={previewLayoutDropAllowed} onStart={startLayoutItemDrag} onEnd={finishOutputItemDragData}
+                      onOver={handleLayoutDragOver} onDrop={handleLayoutDrop} onOpen={openLayoutItem}
                     >
                       {item.type === "image" && <img ref={(image) => {
                         if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
@@ -13567,13 +13652,11 @@ function NodeBody({
                         onError={useNewtNodeVideoFallback}
                       />}
                       <figcaption>{index + 1}</figcaption>
-                      <span className="preview-layout-kind" title={item.type === "video" ? "Video" : "Image"}>
-                        {item.type === "video" ? <Film size={11} /> : <FileImage size={11} />}
-                      </span>
+                      {item.type === "video" && <span className="preview-layout-kind" title="Video"><Film size={11} /></span>}
                       <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
                         <X size={12} />
                       </button>
-                    </figure>
+                    </PreviewLayoutTile>
                   ))}
                 </div>
               ) : (
@@ -13585,7 +13668,7 @@ function NodeBody({
             </div>
             {(node.data.previewLayoutExportError || layoutExport?.folderPath) && (
               <small className={`preview-layout-export-status ${node.data.previewLayoutExportError ? "error" : ""}`} title={layoutExport?.folderPath || ""}>
-                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutImageCount} frame${(layoutExport.frameCount || layoutImageCount) === 1 ? "" : "s"}`}
+                {node.data.previewLayoutExportError || `Exported ${layoutExport.frameCount || layoutMediaCount} file${(layoutExport.frameCount || layoutMediaCount) === 1 ? "" : "s"}`}
               </small>
             )}
           </section>
@@ -14477,7 +14560,8 @@ function NodeBody({
               ))}
             </select>
           </NodeRow>
-          <NodeRow label="Method">
+          <CoverageSettings node={node} running={running} onUpdate={onUpdate} rowComponent={NodeRow} resetOutput={resetCoverageOutputPatch} />
+          {normalizeCoverageSettings(node.data).coverageSubject === "Subject" && <NodeRow label="Method">
             <select
               value={method}
               disabled={running}
@@ -14487,7 +14571,7 @@ function NodeBody({
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
-          </NodeRow>
+          </NodeRow>}
         </div>
         <OutputPortRow node={node} port={coverageOutputPort} label="Coverage output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
@@ -15394,6 +15478,12 @@ function NodeBody({
                     </>
                   ) : isCoverage ? (
                     <>
+                      {["styleIn", "transferIn", "characterIn"].map(portId => {
+                        const port = config.input.find(item => item.id === portId);
+                        return <NodeRow key={portId} label={port.label} inputPort={settingsOpen ? port : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                          <button className={incoming[portId]?.length ? "connected-field" : ""}>{connectedSummary(incoming[portId], "Optional " + port.label.toLowerCase())}</button>
+                        </NodeRow>;
+                      })}
                       <NodeRow label="Generation Model">
                         <select
                           value={utilityGenerationModel}
@@ -15406,11 +15496,12 @@ function NodeBody({
                           {utilityGenerationModelChoices.map((option) => <option key={option} value={option}>{coverageModelLabel(option)}</option>)}
                         </select>
                       </NodeRow>
-                      <NodeRow label="Method">
+                      <CoverageSettings node={node} running={running} onUpdate={onUpdate} rowComponent={NodeRow} resetOutput={resetCoverageOutputPatch} />
+                      {normalizeCoverageSettings(node.data).coverageSubject === "Subject" && <NodeRow label="Method">
                         <select value={normalizeCoverageMethod(node.data.coverageMethod)} disabled={running} onChange={(event) => onUpdate(node.id, { ...resetCoverageOutputPatch(), coverageMethod: normalizeCoverageMethod(event.target.value) })}>
                           {coverageMethods.map((option) => <option key={option} value={option}>{option}</option>)}
                         </select>
-                      </NodeRow>
+                      </NodeRow>}
                     </>
                   ) : isColorIdMatte ? (
                     <React.Suspense fallback={<small className="upload-status color-id-status">Loading picker...</small>}>
@@ -15737,12 +15828,12 @@ function NodeBody({
 
   if (node.type === "imageModel") {
     const directorPromptValue = connectedDirectorPackageText(incoming.directorIn, incomingByNode);
-    const promptValue = composeFilmDirectorPrompt({
+    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    const promptValue = promptConnected ? composeFilmDirectorPrompt({
       directorPrompt: directorPromptValue,
       connectedPrompt: resolvedPromptText(incoming.promptIn),
       fallbackPrompt: node.data.prompt
-    });
-    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
+    }) : (node.data.prompt || "");
     const directorConnected = Boolean(incoming.directorIn?.length);
     const displayIncoming = expandImageDirectorPackageIncoming(incoming, incomingByNode);
     const isSam3Image = isSam3ImageModel(node.data.model);
@@ -17920,6 +18011,9 @@ function getNodeConfig(type) {
     utility: {
       icon: Wrench,
       input: [
+        { id: "styleIn", label: "Style", color: portColors.style },
+        { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "characterIn", label: "Character", color: portColors.character },
         { id: "imageIn", label: "Image", color: portColors.image },
         { id: "promptIn", label: "Prompt", color: portColors.prompt },
         { id: "startFrameIn", label: "Start Frame", color: portColors.image },
@@ -18177,6 +18271,7 @@ function createDefaultNodeData(type, label, count) {
       title,
       model: imageModelNames.openAiImage2,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       resolution: "2K",
       quality: openAiImage2Quality,
       coverageResults: [],
@@ -18377,6 +18472,7 @@ function createDefaultNodeData(type, label, count) {
       removeTextGraphics: false,
       advancedOpen: false,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       coverageResults: [],
       ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
@@ -19293,6 +19389,7 @@ function utilityImageModelSelectionPatch(model) {
       ...patch,
       model: imageModelNames.openAiImage2,
       coverageMethod: "Standard",
+      ...normalizeCoverageSettings(),
       resolution: "2K",
       quality: openAiImage2Quality,
       coverageResults: []
@@ -19513,6 +19610,7 @@ function utilityVideoModelSelectionPatch(model) {
 
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wan22VaceDepth, data = {}) {
   if (mode === "image") {
+    if (isUtilityCoverageModel(imageModel)) return ["imageIn", "styleIn", "transferIn", "characterIn"];
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
     if (isUtilityQwenCameraEditModel(imageModel)) return ["imageIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
@@ -25013,6 +25111,7 @@ function normalizeCoverageData(data = {}) {
     title: data.title || "Coverage",
     model,
     coverageMethod: normalizeCoverageMethod(data.coverageMethod),
+    ...normalizeCoverageSettings(data),
     resolution: normalizeImageModelResolutionForModel(data.resolution || "2K", model),
     quality: openAiImage2Quality,
     coverageResults: resultItems,

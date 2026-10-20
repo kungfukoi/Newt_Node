@@ -73,6 +73,15 @@ export function characterVideoSheetPromptForData(data = {}) {
   return data.cinematicCharacterSheet ? cinematicCharacterVideoSheetPrompt : characterVideoSheetPrompt;
 }
 
+export function characterVideoSheetPromptForCompletedSheet(data = {}) {
+  const layout = characterVideoSheetPromptForData(data)
+    .replaceAll("Original Character Portrait", "Matching Full Character Sheet")
+    .replaceAll("Portrait image", "Matching Full Character Sheet")
+    .replaceAll("from the Portrait", "from the Matching Full Character Sheet")
+    .replaceAll("neutral foundation garment", "finished outfit from the Matching Full Character Sheet");
+  return `${layout}\n\n${characterVideoCustomSheetWardrobePrompt}\nThe Matching Full Character Sheet is the sole identity and wardrobe reference. Copy all visible layers, outerwear, headwear and eyewear exactly, including in the close-up. Do not replace the outfit with foundation clothing. Ignore the source sheet's layout and use the required three-panel CU layout.`;
+}
+
 export { activeCharacterSheetVariant };
 
 export function characterVideoSheetForNode(node) {

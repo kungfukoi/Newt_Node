@@ -1033,6 +1033,11 @@ export function AssemblyNodeBody({
         <AssemblyFrameSizeControls width={timeline.outputWidth} height={timeline.outputHeight}
           onChange={patch => commitTimeline(setAssemblyView(timelineRef.current, patch))} />
         <label><span>FPS</span><input type="number" min="1" max="120" value={timeline.frameRate} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { frameRate: Number(event.target.value) }), true)} /></label>
+        <label title="Include unmuted timeline audio in rendered outputs">
+          <input type="checkbox" style={{ width: "auto" }} checked={timeline.renderAudio} disabled={running}
+            onChange={(event) => commitTimeline(setAssemblyView(timelineRef.current, { renderAudio: event.target.checked }))} />
+          <span>Include audio</span>
+        </label>
         <button type="button" className="run-node-button assembly-render-button" disabled={running || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
           {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}
         </button>

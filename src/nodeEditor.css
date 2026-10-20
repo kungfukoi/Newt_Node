@@ -10644,3 +10644,6 @@ video.newtnode-video-fallback {
 .flux-keyframe-actions { display: flex; gap: 6px; }
 .flux-keyframe-actions button { width: 30px; height: 30px; border: 0; border-radius: 7px; color: #f6f1e8; background: rgba(0, 0, 0, 0.34); cursor: pointer; }
 .flux-keyframe-actions button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.preview-layout-item.drop-before { border-left: 3px solid #ddc631; box-shadow: inset 4px 0 0 rgba(221, 198, 49, 0.35); }
+.preview-layout-item.drop-after { border-right: 3px solid #ddc631; box-shadow: inset -4px 0 0 rgba(221, 198, 49, 0.35); }

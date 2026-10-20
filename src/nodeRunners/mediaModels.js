@@ -82,6 +82,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
 export async function runCoverageGeneration({
   node,
   sourceImageUrl,
+  imagePromptItems = [],
   shot,
   aspectRatio,
   workflowContext,
@@ -95,8 +96,8 @@ export async function runCoverageGeneration({
     resolution: node.data.resolution,
     quality: node.data.quality,
     seedreamLayers: false,
-    imagePromptUrls: [sourceImageUrl],
-    imagePromptLabels: ["Coverage base image"],
+    imagePromptUrls: [sourceImageUrl, ...imagePromptItems.map(item => item.url)],
+    imagePromptLabels: ["Coverage base image", ...imagePromptItems.map(item => item.label)],
     ...workflowContextPayload(workflowContext),
     outputTargetIndex: workflowContext?.outputTargetPath ? String((Number(index) || 0) + 1) : "",
     nodeId: node.id,
@@ -291,15 +292,16 @@ export async function runCharacterWardrobeEdit({
   const identityUrl = identityReference?.localUrl || identityReference?.url || "";
   const consistencyUrl = consistencySheet?.localUrl || consistencySheet?.url || "";
   if (!baseUrl) throw new Error("Generate the Base Identity sheet before applying wardrobe.");
-  if (!wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
+  if (isVideoSheet && !consistencyUrl) throw new Error("A completed Character Sheet is required before generating its matching CU sheet.");
+  if (!isVideoSheet && !wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
 
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
-    ...(identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
-    { url: wardrobeUrl, label: "Selected wardrobe reference; complete clothing, footwear and wearable accessories" },
+    ...(!isVideoSheet && identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
+    ...(!isVideoSheet ? [{ url: wardrobeUrl, label: "Selected wardrobe reference; complete clothing, footwear and wearable accessories" }] : []),
     ...(consistencyUrl ? [{
       url: consistencyUrl,
-      label: "Matching Full Character Sheet; wardrobe and identity continuity only; ignore its layout, crops, poses, and head visibility"
+      label: "Matching Full Character Sheet; sole identity and finished wardrobe authority; copy its exact outfit, ignore its layout, crops, poses, and head visibility"
     }] : [])
   ];
   const { response, data } = await nodeApi.generateImage({

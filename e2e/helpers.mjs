@@ -59,6 +59,8 @@ export async function openFixture(page, options = {}) {
     if (!["127.0.0.1", "localhost"].includes(url.hostname)) return route.abort();
     return route.continue();
   });
+  // Register job overrides before navigation so the initial recovery poll sees them.
+  if (options.remoteVideoJobs) await page.route("**/api/remote-video-jobs?**", options.remoteVideoJobs);
   await page.goto("/");
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(fixture.nodes.length);

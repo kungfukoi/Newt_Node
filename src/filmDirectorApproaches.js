@@ -1,6 +1,7 @@
 export const filmDirectorApproachOptions = Object.freeze([
   { value: "cinematic", label: "Cinematic" },
   { value: "vintage", label: "Vintage" },
+  { value: "camcorder", label: "Camcorder" },
   { value: "animation", label: "Animation" },
   { value: "stop-motion", label: "Stop-Motion" },
   { value: "commercial", label: "Commercial" },
@@ -20,6 +21,7 @@ export function filmDirectorApproachChanged(data = {}) {
 
 export function filmDirectorDefaultCameraDirection(approach = "cinematic") {
   const additionalDirections = {
+    camcorder: "Keep the camera in first-person POV at the operator's eye level, facing forward through the location. Use unstable but readable handheld camcorder movement, hesitant advances, searching pauses, and small nervous corrections. A flashlight held by the unseen operator provides the scene lighting; its beam follows the operator with plausible hand lag, revealing fragments amid deep darkness. Build suspense with long searching holds, then motivated sudden whip pans from the forward view into an extreme close-up of a nearby established detail, face, or threat. Stage the close-up within physically reachable distance; a pan changes direction, not distance, so explicitly motivate any approach or subject movement. Retain spatial continuity through motion blur and brief autofocus/exposure recovery, then settle long enough to read the reveal. Never switch to an external observer or reverse selfie view unless requested. For Still, describe one static POV frame rather than a whip-pan sequence.",
     photography: "Compose a decisive still frame with intentional camera position, lens perspective, depth of field, subject pose, clean silhouettes, balanced visual hierarchy and precise control of light. Treat camera direction as framing and capture decisions rather than temporal movement.",
     "stop-motion": "Use readable miniature-set staging and deliberate locked-off compositions or small frame-by-frame camera increments. Preserve handmade pose changes, clean silhouettes and consistent spatial direction within each action.",
     commercial: "Use precise premium cinema coverage, controlled dolly and tracking moves, polished macro and hero details, sculpted beauty lighting and deliberate editorial framing appropriate to the advertised subject.",
@@ -41,6 +43,8 @@ export const filmDirectorVisualSceneRules =
 
 export function filmDirectorSceneRules(approach = "cinematic") {
   switch (normalizeFilmDirectorApproach(approach)) {
+    case "camcorder":
+      return "Scene rules: Suspenseful first-person found-footage horror recorded on an old consumer VHS camcorder. The unseen operator's POV flashlight is the scene's only motivated light, with a narrow moving hotspot, harsh near-field falloff, clipped beam highlights, deep crushed shadows, and darkness beyond its reach. Low-resolution interlaced video, chroma noise, color bleeding, subdued tracking instability, occasional tape dropout, inconsistent white balance, autofocus hunting, uneven auto-exposure, wide-angle barrel distortion, and smeared handheld motion. Preserve readable reveals, real geography, asset identity, and plausible physical movement. No polished cinema lighting, beauty fill, artificial film grain, visible recording device, decorative glitch overlays, timestamps, REC icons, subtitles, or unrequested text. Keep the selected audio policy.";
     case "photography":
       return "Scene rules: Professional still photography, one decisive drawable instant, intentional composition and visual hierarchy, precise camera position and lens perspective, controlled depth of field, natural subject pose and expression, motivated photographic lighting, coherent production design, recognizable asset identity, physically plausible detail, no implied edit sequence, no unrequested text or subtitles.";
     case "stop-motion":
@@ -62,6 +66,8 @@ export function filmDirectorSceneRules(approach = "cinematic") {
 
 export function filmDirectorApproachDirective(approach = "cinematic") {
   switch (normalizeFilmDirectorApproach(approach)) {
+    case "camcorder":
+      return "Selected approach: Camcorder. Direct suspenseful first-person POV found-footage horror as if the viewer is the unseen person carrying an old handheld consumer VHS camcorder and flashlight. Preserve the user's scene, supplied characters, location, and props rather than inventing a monster or unrelated scare. Reveal the location through a narrow POV flashlight beam that follows the operator's hand with believable lag, bright close hotspots, rapid light falloff, clipped highlights, and deep surrounding darkness; do not introduce cinematic fill or unexplained light sources. Build dread through hesitant forward movement, prolonged searching holds, partial occlusion, uncertain negative space, and delayed visual reveals. At motivated scares or discoveries, whip-pan from the forward-facing view to an extreme close-up of a nearby established subject or detail, using abrupt handheld rotation, directional motion smear, brief focus hunting and exposure recovery, then a readable settling hold. A whip pan does not change camera distance: stage the subject close by or explicitly describe the operator approaching or the subject entering close range. Keep the same first-person operator and coherent geography across shots; do not cut to an external camera, aerial coverage, or selfie view unless requested. Use authentic aged VHS video texture: low resolution, subtle interlacing, chroma noise, color bleeding, restrained tracking wobble and occasional tape dropout. Avoid 8mm/35mm film grain, pristine digital cinema, decorative glitch graphics, timestamps, REC icons, or unrequested text. Recording artifacts describe appearance, not a change to encoded frame rate, resolution, or duration. Keep visual texture and flashlight treatment in Style Direction, POV movement and whip-pan choreography in Camera Direction, and motivated setup/reveal timing in Scene Overview and the Shot List. Respect explicit shot count and runtime; for Still, describe one drawable POV instant with no temporal whip-pan sequence. Obey the selected audio policy: VHS texture does not authorize tape hiss, breathing, screams, jump-scare stings, music, or added dialogue.";
     case "photography":
       return "Selected approach: Photography. Plan a production-ready still photograph rather than a moving scene. Use professional photographic composition, camera placement, lens and depth-of-field choices, subject pose, expression, gesture, prop placement, environment, lighting, color and texture to communicate the complete story in one decisive frame. Camera Direction should describe the framing and capture setup, not a move over time. When Still duration is selected, the Shot List must contain exactly one static CUT describing one drawable instant with no temporal progression, edits, montage, before-and-after states or audio direction. Preserve connected asset identity and use the selected audio policy only for non-still variants.";
     case "stop-motion":
@@ -83,7 +89,7 @@ export function filmDirectorApproachDirective(approach = "cinematic") {
 
 export function filmDirectorSceneTreatment(approach = "cinematic") {
   const value = normalizeFilmDirectorApproach(approach);
-  return ({ cinematic: "cinematic", vintage: "vintage 8mm", animation: "animated", photography: "photographic" })[value]
+  return ({ cinematic: "cinematic", vintage: "vintage 8mm", camcorder: "first-person VHS camcorder horror", animation: "animated", photography: "photographic" })[value]
     || filmDirectorApproachOptions.find((option) => option.value === value).label.toLowerCase();
 }
 

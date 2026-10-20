@@ -2,7 +2,7 @@
 
 This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
-Snapshot verified against package version `3.0.0-beta.0` on 2026-09-07. Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
+Documentation audited against checkout version `4.5.0-beta.0` on 2026-10-15; see [audit scope and evidence](documentation-audit-2026-10-15.md). Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.
 
 Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
 
@@ -60,6 +60,16 @@ Before completion:
 
 ## Current Product Snapshot
 
+- Editable model prompts preserve whitespace as typed, including trailing and repeated spaces. Prompt composition and request normalization must not trim the value displayed in an editable field.
+
+- Canvas node copy/paste uses native clipboard events so selections can move between workflows and app windows without clipboard-read permission. Incoming node clipboard data takes precedence over older local storage; local storage and memory remain fallbacks. Text controls retain normal text copy/paste.
+
+- Timeline offers Include audio beside Render, enabled by default for new and older workflows. The setting persists with the timeline and controls rendered outputs only. Enabled renders mix unmuted audio tracks and embedded video audio; disabling it writes a video without an audio stream. Preview playback and track mute settings remain independent.
+
+- Timeline render requests carry the audio setting explicitly. FFmpeg normalizes audio clips to 48 kHz stereo and rebuilds timestamps from sample counts before and after mixing so source time bases cannot corrupt the output audio stream.
+
+- Preview Layout Export copies every collected image and video in Layout order into a new folder beneath the selected destination, including video-only Selects. Export preserves original video files without transcoding.
+
 - Coverage checkpoints each completed angle into the node and refreshes output history during the batch. Completed images remain visible if later angles fail or the run is stopped; stopping prevents submission of remaining angles.
 
 - Canvas groups repeat their editable name inside the upper-left corner in a large label. Compact up/down arrows beside the group name adjust label size in 8-pixel steps from 24 to 320 canvas pixels (64 by default), without a visible size caption or numeric field. The size persists with workflows and copied groups, and follows the React Flow zoom transform.
@@ -83,7 +93,7 @@ These are durable current surfaces independent of the checked-out branch name:
 - Generation elapsed time must remain monotonic for the full run, including runs longer than three minutes, unchanged provider status, acceptance retries, and transitions into durable background tracking. A retry with the same run ID must retain its original start time. The latest terminal elapsed time remains visible on its node until that node submits another run; completion freezes the elapsed time rather than continuing to count.
 - The File menu owns New, Save, Save As, Open, and Import. New and the New Project button start an untitled blank canvas with no nodes, edges, or groups at 100% zoom, through the same unsaved-change guard as Open and Import. Fresh sessions without a saved draft also start blank.
 - Text Model defaults to GPT-5.6 Terra through Fal OpenRouter unless environment variables override it. Text Agent follows Settings > User Preferences > Text Agent Model: GPT-5.6 Sol (default) or GPT-6 Astra. Saving applies to subsequent messages through Fal, OpenAI, or Atlas Cloud; the preference is independent of Director and takes precedence over generic text-model environment defaults. Settings can route text processing through Fal, direct OpenAI, or Atlas Cloud. For Text Model, direct OpenAI and Atlas Cloud use the configured OpenAI text model, currently GPT-5.6 Luna by default. Connected videos still use Gemini 3.1 Pro Preview through Fal's native-video OpenRouter route because Atlas Responses does not accept native video. Director processing separately follows the User Preferences choice between GPT-6 Astra and GPT-5.6 Sol.
-- Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2.5 Flare` and `OpenAI Image 2.5 Sunburst`, `OpenAI Image 2`, `REVE 2.1`, `Ideogram 4.5`, and `Krea 2 Large`. New Image Model nodes prefer `OpenAI Image 2.5 Flare`, while `OpenAI Image 2` remains available as an explicit legacy selection. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `MiniMax H3`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `FLUX 3 Max`, `Wan 2.7 Reference-to-Video`, and `Creatify Aurora`. New Video Model nodes prefer `Seedance 2.5` when it is enabled. Callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
+- Current Image Model labels are `Z-Image`, `Seedream 5.0 Pro`, `Nano Banana 2`, `Nano Banana Pro`, `OpenAI Image 2.5 Flare` and `OpenAI Image 2.5 Sunburst`, `OpenAI Image 2`, `REVE 2.1`, `Ideogram 4.5`, `Flux 3`, `Nano Banana 2.1`, and `Krea 2 Large`. New Image Model nodes prefer `OpenAI Image 2.5 Flare`, while `OpenAI Image 2` remains available as an explicit legacy selection. Current Video Model catalog labels are `Seedance 2.0`, `Seedance 2.5`, `MiniMax H3`, `Kling O3 Pro`, `Kling O3 4K`, `Gemini Omni Flash`, `FLUX 3 Max`, `Wan 2.7 Reference-to-Video`, and `Creatify Aurora`. New Video Model nodes prefer `Seedance 2.5` when it is enabled. Callable labels, enabled preferences, and workspace filtering remain owned by `src/modelOptions.js`.
 - Utility coverage includes local media transforms, pose/depth/matte tools, hosted Wan/VACE and upscaling models, and local ComfyUI WanBlend/WanSegment/WanWarp workflows. SAM 3 options remain hidden while `sam3SegmentationModelsEnabled` is false.
 - Stable node ids are the canonical graph identity. Visible titles and `@tokens` may change, but saved edges, reference bindings, Output routing, and dependency scheduling must continue to resolve by id.
 - An attached Output node redirects generated files to its configured target without replacing the source node's playable result URLs or breaking Preview nodes after save/reopen.
@@ -228,13 +238,14 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 
 ## Current Node Catalog
 
-`src/nodeRegistry.js` is the canonical catalog and order. Keep this list aligned when a node type is added, removed, renamed, or reordered.
+`src/nodeRegistry.js` is the canonical catalog and order. The table below groups roles; it is not palette order. Explore is also a current node (see the [complete reference](features-and-workflows.md)). Keep this list aligned when a node type is added, removed, renamed, or reordered.
 
 | Internal type | UI label | Primary role |
 | --- | --- | --- |
 | `plainText` | Text | Lightweight prompt text |
 | `text` | Text Model | Legacy load-only AI text processing; hidden from new-node interfaces |
 | `textAgent` | Text Agent | Persistent conversational text assistance |
+| `explore` | Explore | Brief-driven art directions, favorites, refinements, and resumable image queues |
 | `image` | Image | Uploaded or connected image media |
 | `video` | Video | Uploaded or connected video media |
 | `preview` | Preview | Multi-result image, video, and 3D inspection |
@@ -253,6 +264,7 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 | `edit` | Edit | Local ffmpeg image/video editing |
 | `assembly` | Timeline | Multi-track nonlinear video and audio editing timeline |
 | `audio` | Audio | Uploaded or connected audio media |
+| `audioModel` | Audio Model | ElevenLabs speech, dialogue/Character voices, conversion, effects, and music |
 | `model3d` | 3D | Multi-view GLB generation |
 | `imageModel` | Image Model | Remote image generation |
 | `videoModel` | Video Model | Remote video generation |
@@ -1096,7 +1108,7 @@ Video Model retains an explicit Character voices selector for Seedance and MiniM
 
 Video Model ignores empty legacy dialogue placeholders when inferring its Character voice mode. Only nonblank saved speech enables implicit exact dialogue; explicit Off and samples choices remain authoritative; saved exact-dialogue mode with only blank rows is inactive. Placeholder data remains preserved.
 
-Video Model exposes Off, Voice samples (model dialogue), and Exact dialogue audio for Seedance and MiniMax H3. Exact mode supports speaker-bound line editing and explicit speech preparation with cached reuse. Explicit mode selection takes precedence; untouched legacy placeholders without a mode remain inactive. Audio Model retains independent dialogue generation.
+Video Model exposes Off, Voice samples (model dialogue), and Exact dialogue audio for Seedance and MiniMax H3. Exact mode consumes one completed Audio Model or Audio node through Reference Audio; author dialogue in Audio Model, not removed inline Video controls. Explicit mode selection takes precedence; legacy saved dialogue data remains supported for compatibility. See [creative workflow](creative-workflows.md#dialogue-and-character-voices).
 
 Video Model Exact dialogue audio now consumes one connected Audio Model or Audio node through Reference Audio. Inline dialogue authoring and Prepare ElevenLabs controls are removed. Overlength speech receives a managed first-15-second copy, preserving originals, and is submitted as the sole audio reference with lip-sync instructions and retained in the video output.
 
@@ -1131,3 +1143,15 @@ Seedance output directories must be write-tested before paid submission. A compl
 When a Seedance Output destination fails locally, automatically preserve the generated video in managed workflow outputs and surface the actual file path and fallback warning. The producing node remains playable; Output retains an error describing the failed requested destination. Paid input/specification remains immutable and no video is regenerated. If both storage locations fail, pause local saving with recovery actions rather than spin indefinitely.
 
 FLUX 3 Max Keyframes reuses the stable referenceImageIn image port. Rows persist as flux3MaxKeyframes with stable port IDs and individual frameIndex values. Each row shows an image dot beside its Frame Indices field, +/− adds/removes the final row (1–10), and helper text sits at the bottom of the node. FLUX 3 Max exposes only Keyframe image inputs; separate Start/End ports and legacy frame request formats are unsupported. Boundary frames are optional. The adapter validates unique integer positions and a maximum of ten total frames before uploading or submitting. History records the keyframes endpoint, count and positions.
+
+## Location Coverage
+
+Coverage offers Subject (the existing Standard/Dynamic/Insane presets) and Location. Location scouts nine cinematic shooting positions from one connected image: establishing wide, opposite corner/alternate approach, reverse, left, right, entrance/arrival, elevated overview, primary feature, and detail. Interior/Exterior adapts the geography. Stay near reference favors supported geography and partial reverse views; Explore unseen space permits conservative inference. Unseen areas are inferred, not verified. Location uses its own scouting presets, independently of the retained Subject method. Settings persist with the node; old workflows default to Subject. Existing checkpoint, Stop, history, and result routing remain shared.
+
+Utility Coverage accepts optional Style, Mood Board, and locked active Character inputs in both Subject and Location modes. Every shot includes the existing Style/grade instructions, Mood Board treatment prompt and image, and active Character sheet and identity/wardrobe instructions. Style overrides conflicting Mood Board treatment; the base image owns geography and the Coverage preset owns camera composition. Connecting Characters permits talent in Location scouting and replaces conflicting source identity without copying sheet backgrounds/layouts. Without optional inputs, existing prompts and references are preserved. These ports use stable styleIn/transferIn/characterIn ids and remain available when the Image drawer is collapsed.
+
+Preview Layout tiles drag before or after another tile with a visible insertion edge, retaining order through save/reopen and export. Dragging a tile onto the canvas creates a media node using its full-resolution asset while preserving the Layout item. Double-click opens a Layout-scoped gallery; Left/Right wraps through images and videos in current layout order, preserving each image's own edit context. Typing/editing shortcuts retain their existing guards.
+
+Style includes Found Footage: the shared prompt preset describes consumer camcorder/VHS/body-cam capture, first-person handheld composition, available light, limited dynamic range, analog video artifacts, and recording imperfections. Recording icons and timestamps are excluded unless requested. It uses the existing Style prompt path across connected consumers.
+
+Director Approach includes Camcorder: suspenseful first-person handheld VHS horror lit by the unseen operator's POV flashlight. Planning emphasizes searching holds, motivated whip pans into physically staged extreme close-ups, spatial continuity, readable reveals, analog video artifacts, and the selected audio policy. Still remains one drawable instant. Camcorder uses the shared Approach dropdown, normalization, scene persistence, planning schema, Style Direction, default Camera Direction, and final scene rules. Existing approaches remain unchanged.

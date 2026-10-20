@@ -64,8 +64,9 @@ test("regular and CU variants generate whole sheets without creating canvas mask
   });
   assert.equal(generate.mock.callCount(), 2);
   const cuRequest = generate.mock.calls[1].arguments[0];
-  assert.deepEqual(cuRequest.imagePromptUrls, ["/outputs/cu.png", "/uploads/outfit.png", "/outputs/dressed.png"]);
-  assert.match(cuRequest.imagePromptLabels[2], /Matching Full Character Sheet/);
+  assert.deepEqual(cuRequest.imagePromptUrls, ["/outputs/cu.png", "/outputs/dressed.png"]);
+  assert.match(cuRequest.imagePromptLabels[1], /Matching Full Character Sheet/);
+  assert.match(cuRequest.prompt, /sole source for identity and wardrobe/);
   for (const call of generate.mock.calls) {
     assert.equal(call.arguments[0].characterWardrobeEdit, true);
     assert.equal(call.arguments[0].editMaskDataUrl, undefined);
@@ -73,4 +74,17 @@ test("regular and CU variants generate whole sheets without creating canvas mask
   assert.equal(result.videoError, "");
   assert.ok(result.variant.generated);
   assert.ok(result.variant.videoGenerated);
+});
+
+test("CU requests exclude competing portrait and raw wardrobe references", async (t) => {
+  const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/outputs/cu.png" } } }));
+  const options = {
+    node: { id: "character-1", data: {} }, prompt: "Match the completed outfit", sheetKind: "video",
+    baseSheet: { url: "/outputs/cu-base.png" }, wardrobe: { url: "/uploads/outfit.png" },
+    identityReference: { url: "/uploads/portrait.png" }, consistencySheet: { url: "/outputs/completed.png" }
+  };
+  await runCharacterWardrobeEdit(options);
+  assert.deepEqual(generate.mock.calls[0].arguments[0].imagePromptUrls, ["/outputs/cu-base.png", "/outputs/completed.png"]);
+  await assert.rejects(runCharacterWardrobeEdit({ ...options, consistencySheet: null }), /completed Character Sheet is required/);
+  assert.equal(generate.mock.callCount(), 1);
 });

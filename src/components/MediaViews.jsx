@@ -471,7 +471,7 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", imageEditorModel, imageEditFalAvailable, showApiCosts = false }) {
+export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavigation = false, onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", imageEditorModel, imageEditFalAvailable, showApiCosts = false }) {
   const [aiMode, setAiMode] = React.useState(false);
   const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
@@ -744,7 +744,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
         !commandKey &&
         !event.altKey &&
         !event.shiftKey &&
-        displayItem.type === "image" &&
+        (displayItem.type === "image" || (allowVideoNavigation && displayItem.type === "video")) &&
         typeof onNavigate === "function" &&
         !previewEditorKeyTargetIsTyping(event.target)
       ) {
@@ -780,7 +780,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", onNavigate, on
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, cropStyleSettings, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
+  }, [allowVideoNavigation, canEditImage, cropMode, cropRect, cropStyleSettings, curvePoints, curvesMode, displayItem.type, editBusy, onClose, onNavigate, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
 
   React.useEffect(() => {
     setAiMode(false);
