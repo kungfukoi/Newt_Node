@@ -7011,11 +7011,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (remoteVideoScope(workflowRequestContext()) !== scope) return;
     const current = nodesRef.current.find(item => item.id === node.id);
     if (!current) return;
-    createMediaNodeFromOutputItem({
-      url: data.image.localUrl, type: "image", label: data.image.label || `Timeline frame at ${frameTime.toFixed(3)}s`,
-      fileName: data.image.fileName, mimeType: data.image.mimeType || "image/png"
-    }, { x: current.x + estimatedNodeWidth(current.type, current.data) + 60, y: current.y });
     loadOutputHistory();
+    return {
+      url: data.image.localUrl, type: "image", label: data.image.label || `Timeline frame at ${frameTime.toFixed(3)}s`,
+      fileName: data.image.fileName, mimeType: data.image.mimeType || "image/png",
+      width: data.image.metadata?.width, height: data.image.metadata?.height, duration: 5
+    };
   }
 
   async function probeAssemblyMedia(node, media) {

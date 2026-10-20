@@ -1,14 +1,19 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { Film, Image as ImageIcon, Music2, X } from "lucide-react";
-import { displayMediaUrl, hasOutputItemDragData, outputItemFromDataTransfer } from "../mediaAssets.js";
+import { clearOutputItemDragData, displayMediaUrl, hasOutputItemDragData, outputItemFromDataTransfer, setOutputItemDragData } from "../mediaAssets.js";
 
 const mediaDragType = "application/x-newtnode-assembly-media";
 
 export function AssemblyMediaBin({ media = [], connectionControls = null, onOutputDrop = null, onRemove = null }) {
   const [viewerMediaId, setViewerMediaId] = React.useState("");
   const [outputDropActive, setOutputDropActive] = React.useState(false);
+  const listRef = React.useRef(null);
   const viewerMedia = media.find((item) => item.id === viewerMediaId) || null;
+
+  React.useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [media[0]?.id]);
 
   React.useEffect(() => {
     if (!viewerMediaId) return undefined;
@@ -61,7 +66,7 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
           <span>{media.length}</span>
         </header>
         {connectionControls && <div className="assembly-media-bin-inputs">{connectionControls}</div>}
-        <div className="assembly-media-bin-list">
+        <div ref={listRef} className="assembly-media-bin-list">
           {media.map((item) => (
             <div
               key={item.id}
@@ -69,8 +74,9 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
               draggable
               role="button"
               tabIndex={0}
-              title="Drag to a compatible track. Double-click to preview."
+              title="Drag to a compatible track or onto the canvas. Double-click to preview."
               onDragStart={(event) => beginMediaDrag(event, item)}
+              onDragEnd={() => clearOutputItemDragData()}
               onDoubleClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -123,6 +129,7 @@ export function assemblyMediaDragType() {
 
 function beginMediaDrag(event, media) {
   event.stopPropagation();
+  setOutputItemDragData(event.dataTransfer, media);
   event.dataTransfer.setData(mediaDragType, media.id);
   event.dataTransfer.effectAllowed = "copy";
 }

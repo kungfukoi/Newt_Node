@@ -13,6 +13,7 @@ const requiredHealthRoutes = [
   "generate3d",
   "ideogram45",
   "flux3Max",
+  "timelineExtractFrame",
   "nanoBanana21",
   "seedanceDrafts",
   "seedanceMultiProviderDrafts",

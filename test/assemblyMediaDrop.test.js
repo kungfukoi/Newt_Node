@@ -60,3 +60,17 @@ test("removing Timeline bin media also removes every clip that uses it", () => {
   assert.equal(removed.tracks.flatMap((track) => track.clips).length, 0);
   assert.equal(removed.selectedClipId, "");
 });
+
+test("extracted stills prepend to the bin without changing clips or playhead", () => {
+  let state = importAssemblyOutputItem(createAssemblyState(), videoOutput);
+  state = insertAssemblyMediaClip(state, state.media[0].id, state.tracks[0].id, 2);
+  const before = structuredClone(state);
+  const first = importAssemblyOutputItem(state, { url: "/outputs/frame-one.png", type: "image", width: 1920, height: 1080 }, { prepend: true });
+  const second = importAssemblyOutputItem(first, { url: "/outputs/frame-two.png", type: "image" }, { prepend: true });
+  assert.deepEqual(second.media.map(media => media.url), ["/outputs/frame-two.png", "/outputs/frame-one.png", videoOutput.url]);
+  assert.deepEqual(second.tracks, state.tracks);
+  assert.equal(second.playhead, state.playhead);
+  assert.equal(second.media[1].width, 1920);
+  assert.equal(second.media[1].linkedSource, false);
+  assert.deepEqual(state, before);
+});

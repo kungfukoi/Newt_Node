@@ -317,7 +317,8 @@ export function AssemblyNodeBody({
     setExtractingFrame(true);
     setExtractionError("");
     try {
-      await onExtractFrame(node, snapshot, snapshot.playhead);
+      const item = await onExtractFrame(node, snapshot, snapshot.playhead);
+      if (item) commitTimeline(importAssemblyOutputItem(timelineRef.current, item, { prepend: true }));
     } catch (error) {
       setExtractionError(error.message || "Timeline frame extraction failed.");
     } finally {
@@ -919,6 +920,7 @@ export function AssemblyNodeBody({
           <IconButton active={timeline.loopInOut} title="Loop playback between In and Out" disabled={timeline.inPoint === null || timeline.outPoint === null || timeline.outPoint <= timeline.inPoint} onClick={toggleLoopInOut}><Repeat2 size={15} /></IconButton>
           <IconButton title={playing ? "Pause" : "Play"} onClick={togglePlayback}>{playing ? <Pause size={15} /> : <Play size={15} />}</IconButton>
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
+          <span className="assembly-frame-number" aria-label="Timeline frame number" title="Frame index from the start of the timeline (first frame is 0)">Frame {Math.round(timeline.playhead * Math.max(1, Math.round(timeline.frameRate)))}</span>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
         </div>
         <div className="assembly-track-actions">

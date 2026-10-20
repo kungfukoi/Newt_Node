@@ -283,7 +283,7 @@ export function pasteAssemblyClip(state, clipboard, start = state?.playhead || 0
   return next;
 }
 
-export function importAssemblyOutputItem(state, item = {}) {
+export function importAssemblyOutputItem(state, item = {}, { prepend = false } = {}) {
   const current = normalizeAssemblyState(state);
   if (!item?.url || !knownMediaTypes.has(item.type)) return current;
   const requestedId = String(item.id || createAssemblyId("media"));
@@ -306,7 +306,8 @@ export function importAssemblyOutputItem(state, item = {}) {
   });
   if (current.media.some((existing) => assemblyMediaKey(existing) === assemblyMediaKey(media))) return current;
   const next = cloneAssemblyState(current);
-  next.media.push(media);
+  if (prepend) next.media.unshift(media);
+  else next.media.push(media);
   return next;
 }
 

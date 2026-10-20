@@ -474,8 +474,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/assembly-render", jsonBody(body), label);
   },
 
-  assemblyExtractFrame(body, label = "Timeline frame extraction") {
-    return fetchJsonApi("/api/node/assembly-render", jsonBody(body), label);
+  async assemblyExtractFrame(body, label = "Timeline frame extraction") {
+    const health = await getJson("/api/health", "Could not verify Timeline extraction support.");
+    if (health.routes?.timelineExtractFrame !== true) throw new Error("Restart NewtNode to activate Timeline frame extraction. No render was submitted.");
+    return fetchJsonApi("/api/node/assembly-extract-frame", jsonBody(body), label);
   }
 };
 

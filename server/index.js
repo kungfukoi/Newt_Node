@@ -1186,6 +1186,7 @@ function buildHealthPayload() {
       imageObjectSelection: true,
       ideogram45: true,
       flux3Max: true,
+      timelineExtractFrame: true,
       flux3: true,
       nanoBanana21: true,
       seedanceDrafts: true,
@@ -6202,6 +6203,15 @@ app.post("/api/node/assembly-probe", async (req, res) => {
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Timeline could not read this media source.");
+  }
+});
+
+app.post("/api/node/assembly-extract-frame", async (req, res) => {
+  try {
+    if (req.body?.frameTime === undefined) return res.status(400).json({ error: "Timeline extraction needs a frame time." });
+    return await createAssemblyRenderResult(req, res);
+  } catch (error) {
+    sendApiError(res, error, "Timeline frame extraction failed.");
   }
 });
 

@@ -71,7 +71,7 @@ try {
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   const health = await (await request("/api/health")).json();
-  for (const flag of ["flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  for (const flag of ["timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   const clientPort = await freePort();
@@ -310,7 +310,7 @@ try {
   assert.ok(audioData.sourceAudioUrl.includes(audioCopy.id));
   assert.ok(audioData.resultItems[0].url.includes(audioCopy.id));
   assert.equal((await request(audioData.sourceAudioUrl)).status, 200);
-  const timelineStill = await (await request("/api/node/assembly-render", { nodeId: "timeline-still", nodeTitle: "Timeline", frameTime: 0.125, assembly: {
+  const timelineStill = await (await request("/api/node/assembly-extract-frame", { nodeId: "timeline-still", nodeTitle: "Timeline", frameTime: 0.125, assembly: {
     outputWidth: 320, outputHeight: 180, frameRate: 24, inPoint: 1, outPoint: 2,
     media: [{ id: "still", type: "image", url: "/outputs/panel.png", duration: 5 }, { id: "unused", type: "video", url: "/outputs/does-not-exist.mp4" }],
     tracks: [{ id: "v1", type: "video", clips: [{ id: "still-clip", mediaId: "still", start: 0, duration: 5 }] }]
@@ -321,7 +321,7 @@ try {
   assert.equal(timelineStill.image.metadata.height, 180);
   assert.equal(timelineStill.cost.amountUsd, 0);
   assert.equal((await request(timelineStill.image.localUrl)).headers.get("content-type"), "image/png");
-  const invalidTimelineTime = await fetch(api + "/api/node/assembly-render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ frameTime: -1, assembly: {} }) });
+  const invalidTimelineTime = await fetch(api + "/api/node/assembly-extract-frame", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ frameTime: -1, assembly: {} }) });
   assert.equal(invalidTimelineTime.status, 400);
   const composite = await (await request("/api/node/utility-video", { model: "Composite Video", compositeVideo: { duration: 0.2, layers: [
     { id: "base", url: "/outputs/panel.png", type: "image", blendMode: "normal", mixAmount: 100 },
