@@ -1,3 +1,5 @@
+import { createVideoOutpaintService } from "./video-outpaint.js";
+import { registerVideoOutpaintPromptRoute } from "./routes/videoOutpaintPrompt.js";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
 import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
@@ -1220,6 +1222,9 @@ function buildHealthPayload() {
       newtPresets: true,
       mediaThumbnail: true,
       generationProgress: true,
+      videoOutpaintPrompt: true,
+      videoOutpaint: true,
+      videoOutpaintFraming: true,
       generateAudio: true,
       atlasDurableVideo: true,
       characterWardrobeFullSheet: true,
@@ -3687,6 +3692,25 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
   }
 });
 
+const videoOutpaintService = createVideoOutpaintService({
+  resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile,
+  createTarget: (body, kind, extension, dependency) => createManagedAssetTarget({ body }, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName),
+  runFfmpeg, statFile: stat
+});
+app.post("/api/node/video-outpaint-prepare", async (req, res) => {
+  try {
+    if (!isLocalAssetUrl(req.body.sourceVideoUrl)) return res.status(400).json({ error: "Connect a local source video." });
+    const prepared = await videoOutpaintService.prepare(req.body, req.body.sourceVideoUrl);
+    res.json(prepared);
+  } catch (error) { res.status(error.status || 400).json({ error: error.message || "Could not prepare outpainting." }); }
+});
+
+registerVideoOutpaintPromptRoute(app, {
+  isLocalAssetUrl,
+  analyze: options => runMediaDescriptionLlm({ ...options, mediaType: "video", preferredProvider: "fal", falModel: falVideoTextModel, route: "video-outpaint-prompt", reasoningEffort: "high" }),
+  estimateCost: estimateTextProcessingCost, appendHistory, projectFromBody, nodeFromBody
+});
+
 app.post("/api/node/process-text", async (req, res) => {
   try {
     const mode = req.body.mode === "agent" ? "agent" : "process";
@@ -6022,6 +6046,24 @@ app.post("/api/node/utility-video", async (req, res) => {
         maskVideoUrls,
         selectedVideoModel
       });
+    }
+
+    if (selectedVideoModel.provider === "fal-video-outpaint") {
+      updateCurrentGenerationProgress({ phase: "preparing", message: "Preparing source canvas and expansion mask" });
+      const prepared = await videoOutpaintService.prepare(req.body, firstLocalOutput(referenceVideoUrls));
+      if (!prepared.plan.needsOutpaint) {
+        const asset = await resolveLocalAssetPathFromUrl(prepared.videoUrl);
+        const output = await videoOutpaintService.finish(req.body, prepared, asset);
+        const metadata = await probeVideoFile(output.filePath);
+        const cost = { amountUsd: 0, currency: "USD", mediaType: "video", pricingBasis: "Local crop; no provider request" };
+        const videoOutpaint = { prepared, rawVideoUrl: prepared.videoUrl, localCrop: true, restoredSource: prepared.plan.settings.restoreSource, outputFormat: "8-bit SDR H.264" };
+        await appendHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "video", provider: "local", modelName: "Video Outpaint", endpoint: "local/video-outpaint-crop", mode: "Video crop", prompt, project: projectFromBody(req.body), node: nodeFromBody(req.body), settings: { videoOutpaint }, videoOutpaint, cost, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes, video: metadata });
+        return res.json({ modelName: "Video Outpaint", video: { ...metadata, localUrl: output.publicPath, fileName: output.fileName, mimeType: "video/mp4" }, videoOutpaint, cost });
+      }
+      if (!process.env.FAL_KEY) return res.status(400).json({ error: "Video Outpaint is a Fal-only utility and needs an enabled Fal API key in Settings." });
+      if (!prompt) return res.status(400).json({ error: "Enter or draft an outpainting prompt before Run." });
+      req.body.wanVaceInpainting = { ...req.body.wanVaceInpainting, resolution: "auto", aspectRatio: prepared.plan.settings.aspectRatio, matchInputNumFrames: true, matchInputFps: true, preprocess: false, enablePromptExpansion: false, numInterpolatedFrames: 0 };
+      return runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls: [prepared.videoUrl], maskVideoUrls: [prepared.maskVideoUrl], selectedVideoModel, outpaintContext: prepared });
     }
 
     const kreaUtilitySupported =
@@ -9572,7 +9614,7 @@ async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUr
   });
 }
 
-async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
+async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel, outpaintContext = null }) {
   const videoUrl = firstLocalOutput(referenceVideoUrls);
   if (!videoUrl) {
     return res.status(400).json({ error: "Wan VACE Inpainting requires a connected source video." });
@@ -9639,8 +9681,8 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     return res.status(502).json({ error: "Fal returned no Wan VACE video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(req, remoteVideo.url, "wan-vace-inpainting");
-  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  let output = await downloadVideo(req, remoteVideo.url, "wan-vace-inpainting");
+  let outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateWanVaceInpaintingCost({
     endpoint,
     resolution,
@@ -9651,6 +9693,22 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     fps: input.frames_per_second
   });
 
+  const rawOutput = output;
+  const nativeVideo = outputVideo;
+  let warning = "";
+  if (outpaintContext) {
+    updateCurrentGenerationProgress({ phase: "finalizing", message: "Restoring original source and finishing outpainting" });
+    try {
+      const finished = await videoOutpaintService.finish(req.body, outpaintContext, rawOutput);
+      const finishedVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(finished.filePath));
+      output = finished;
+      outputVideo = finishedVideo;
+    } catch (error) {
+      warning = "Outpainting generated, but source restoration/export failed. The raw paid result is preserved: " + error.message;
+    }
+  }
+  const outpaintDetails = outpaintContext ? { prepared: outpaintContext, rawVideoUrl: rawOutput.publicPath, nativeWidth: nativeVideo.width, nativeHeight: nativeVideo.height, restoredSource: !warning && outpaintContext.plan.settings.restoreSource, outputFormat: "8-bit SDR H.264", warning } : null;
+
   await appendHistory({
     id: result.requestId || randomUUID(),
     createdAt: new Date().toISOString(),
@@ -9658,12 +9716,13 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     provider: "fal.ai",
     modelName: selectedVideoModel.displayName,
     endpoint,
-    mode: isWan22VaceInpainting ? "Wan 2.2 VACE Fun A14B inpainting" : "Wan VACE inpainting",
+    mode: outpaintContext ? "Video outpainting" : isWan22VaceInpainting ? "Wan 2.2 VACE Fun A14B inpainting" : "Wan VACE inpainting",
     prompt,
     submittedPrompt: prompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
+      ...(outpaintDetails ? { videoOutpaint: outpaintDetails } : {}),
       matchInputNumFrames,
       numFrames: input.num_frames || null,
       matchInputFps,
@@ -9694,13 +9753,15 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
       seed: result?.data?.seed ?? input.seed ?? null
     },
     cost,
-    remoteVideo: outputVideo,
+    remoteVideo: nativeVideo,
+    ...(outpaintDetails ? { videoOutpaint: outpaintDetails, warning } : {}),
     localVideo: output.publicPath,
     outputFileName: output.fileName,
     outputBytes: output.bytes
   });
 
   return res.json({
+    ...(outpaintDetails ? { videoOutpaint: outpaintDetails, ...(warning ? { warning } : {}) } : {}),
     requestId: result.requestId,
     endpoint,
     modelName: selectedVideoModel.displayName,
@@ -9710,7 +9771,8 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
       ...outputVideo,
       label: selectedVideoModel.displayName,
       localUrl: output.publicPath,
-      fileName: output.fileName
+      fileName: output.fileName,
+      mimeType: "video/mp4"
     }
   });
 }
@@ -19089,6 +19151,7 @@ function resolveUtilityImageModel(model) {
 }
 
 function resolveUtilityVideoModel(model) {
+  if (String(model).toLowerCase() === "video outpaint") return { provider: "fal-video-outpaint", displayName: "Video Outpaint", id: "fal-ai/wan-vace-14b/inpainting", requiresPrompt: true };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) {
     return {

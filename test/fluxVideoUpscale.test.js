@@ -51,9 +51,9 @@ test("Flux Video Upscale estimates published 10-second prices from source dimens
     creativity: 1
   });
 
-  assert.equal(precise.amountUsd, 1.4);
+  assert.equal(precise.amountUsd, 0.84);
   assert.equal(precise.billingResolutionTier, "1080p");
-  assert.equal(creative.amountUsd, 2);
+  assert.equal(creative.amountUsd, 1.2);
   assert.equal(creative.mode, "creative");
 });
 
@@ -69,5 +69,19 @@ test("Flux Video Upscale uses delivered dimensions when available", () => {
   });
 
   assert.equal(cost.billingResolutionTier, "2k");
-  assert.equal(cost.amountUsd, 1);
+  assert.equal(cost.amountUsd, 0.6);
+});
+
+test("Flux Video Upscale prices all delivered tiers at current Fal rates", () => {
+  for (const [width, height, precise, creative] of [
+    [1920, 1080, 0.84, 1.2],
+    [2560, 1440, 1.5, 2.1],
+    [3840, 2160, 3.3, 4.74]
+  ]) {
+    for (const [creativity, expected] of [[0, precise], [1, creative]]) {
+      const cost = estimateFluxVideoUpscaleCost({ durationSeconds: 10, outputWidth: width, outputHeight: height, creativity });
+      assert.equal(cost.amountUsd, expected);
+      assert.equal(cost.pricingSource, "fal-model-page-2026-10-20");
+    }
+  }
 });

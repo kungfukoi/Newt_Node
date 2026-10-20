@@ -1,3 +1,4 @@
+import { normalizeVideoOutpaintSettings } from "../videoOutpaint.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { videoCharacterDialogue } from "../characterDialogue.js";
 import { normalizeFilmDirectorVideoModel } from "../filmDirectorVideoModels.js";
@@ -259,6 +260,7 @@ export function normalizeVideoGenerationResult(data, index) {
     ...(data.seedanceDraft ? { seedanceDraft: data.seedanceDraft } : {}),
     ...(data.seedanceDraftSource ? { seedanceDraftSource: data.seedanceDraftSource } : {}),
     ...(data.warning ? { warning: data.warning } : {}),
+    ...(data.videoOutpaint ? { videoOutpaint: data.videoOutpaint } : {}),
     ...(data.storageFallback ? { storageFallback: true } : {}),
     fileName: data.video.fileName || "",
     filePath: data.video.filePath || "",
@@ -305,6 +307,7 @@ export function buildUtilityVideoRequest({
     startFrameVideoUrls,
     maskVideoUrls,
     wanWarpSegments,
+    videoOutpaint: normalizeVideoOutpaintSettings(node.data.videoOutpaint),
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,
       format: node.data.extractFrameFormat || "png"
@@ -597,7 +600,9 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
       type: "image",
       label: data.image.label || data.modelName || `Frame ${index + 1}`,
       text: data.text || "",
-      cost: data.cost
+      cost: data.cost,
+    ...(data.videoOutpaint ? { videoOutpaint: data.videoOutpaint } : {}),
+    ...(data.warning ? { warning: data.warning } : {})
     };
   }
 
@@ -617,6 +622,8 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
   }
 
   return {
+    ...(data.videoOutpaint ? { videoOutpaint: data.videoOutpaint } : {}),
+    ...(data.warning ? { warning: data.warning } : {}),
     url: data.video.localUrl,
     type: "video",
     label: data.modelName || `Video ${index + 1}`,

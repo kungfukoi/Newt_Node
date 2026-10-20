@@ -1,3 +1,4 @@
+import ffmpeg from "ffmpeg-static";
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -77,6 +78,9 @@ try {
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   const health = await (await request("/api/health")).json();
+  assert.equal(health.routes.videoOutpaintPrompt, true);
+  const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
+  assert.equal(invalidOutpaint.status, 400);
   for (const flag of ["timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
@@ -345,6 +349,24 @@ try {
   assert.ok(Math.abs(stillComposite.video.duration - 5) < 0.1, "Image-only stacks must default to five seconds");
   const legacyComposite = await (await request("/api/node/utility-video", { model: "Composite Video", referenceVideoUrls: ["/outputs/clip.mp4", "/outputs/clip.mp4"], compositeVideo: { blendMode: "screen", mixAmount: 50 } }, localRenderTimeout)).json();
   assert.ok(legacyComposite.video.localUrl);
+  assert.equal(health.routes.videoOutpaint, true);
+  assert.equal(health.routes.videoOutpaintFraming, true);
+  await promisify(execFile)(ffmpeg, ["-y", "-stream_loop", "-1", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-t", "4", "-c:v", "copy", path.join(sandbox, "outputs", "outpaint-source.mp4")], { windowsHide: true, timeout: 30000 });
+  const outpaintPrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/outpaint-source.mp4", projectName: "Outpaint smoke", videoOutpaint: { aspectRatio: "9:16", duration: 3.375 } }, { timeoutMs: 120000 })).json();
+  assert.equal(outpaintPrepared.plan.frames, 81);
+  assert.equal(outpaintPrepared.plan.width, 432);
+  assert.ok(outpaintPrepared.videoUrl && outpaintPrepared.maskVideoUrl && outpaintPrepared.previewUrl);
+  assert.equal((await fetch(api + outpaintPrepared.maskVideoUrl)).ok, true);
+  const noOutpaintKey = await fetch(api + "/api/node/utility-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Video Outpaint", prompt: "Extend scene", referenceVideoUrls: ["/outputs/outpaint-source.mp4"] }) });
+  assert.equal(noOutpaintKey.status, 400);
+  assert.match((await noOutpaintKey.json()).error, /Fal-only/);
+  const localOutpaintCrop = await (await request("/api/node/utility-video", { model: "Video Outpaint", referenceVideoUrls: ["/outputs/outpaint-source.mp4"], videoOutpaint: { aspectRatio: "16:9", frame: { x: 0.1, y: 0.1, width: 0.5 }, duration: 3.375, outputSize: "720p" } }, { timeoutMs: 120000 })).json();
+  assert.equal(localOutpaintCrop.cost.amountUsd, 0);
+  assert.equal(localOutpaintCrop.videoOutpaint.localCrop, true);
+  assert.equal(localOutpaintCrop.video.width, 1280);
+  assert.equal(localOutpaintCrop.video.height, 720);
+
+
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");
 } finally {
   if (clientChild && clientChild.exitCode === null) clientChild.kill("SIGTERM");

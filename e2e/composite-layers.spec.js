@@ -23,6 +23,8 @@ test("Composite migrates shared inputs, manages layer dots, and saves independen
   expect(await dotColor("compositeLayer:layer1")).toBe("#58ce63");
   expect(await dotColor("maskVideoIn")).toBe("#3d85ff");
   expect(await dotColor("compositeMask:base")).toBe("#8d8d8d");
+  await expect(composite.getByLabel("Layer 1 blend method")).toBeHidden();
+  await composite.locator(".model-settings-drawer > summary").click();
   await expect(composite.getByLabel("Layer 1 blend method")).toHaveValue("screen");
   await expect(composite.getByLabel("Layer 1 opacity")).toHaveValue("37");
   await expect(composite.getByLabel("Invert layer 1 mask")).toBeVisible();
@@ -99,6 +101,7 @@ test("live thumbnail updates blend, mix and masks without rendering", async ({ p
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   const composite = page.locator('[data-node-card-id="c"]');
+  await composite.locator(".model-settings-drawer > summary").click();
   const canvas = composite.getByLabel("Live composite thumbnail");
   const pixel = () => canvas.evaluate((element) => [...element.getContext("2d").getImageData(0, 0, 1, 1).data]);
   await expect.poll(pixel).toEqual([0, 0, 255, 255]);

@@ -1,3 +1,7 @@
+import { VideoOutpaintControls } from "./components/VideoOutpaintControls.jsx";
+import { normalizeVideoOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
+import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
+import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
 import { videoReferenceLabel } from "./videoReferenceLabels.js";
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import ImageModelAdvancedOptions from "./components/ImageModelAdvancedOptions.jsx";
@@ -6921,6 +6925,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     updateNode(outputTarget.node.id, { status: "error", error: message || "Output save failed." });
   }
 
+  async function prepareOutpaintCanvas(node, request) {
+    const { response, data } = await nodeApi.prepareVideoOutpaint({ ...request, ...workflowContextPayload(workflowRequestContext()), nodeId: node.id, nodeTitle: node.data.title });
+    if (!response.ok) throw new Error(data.error || "Could not prepare outpainting canvas.");
+    return data;
+  }
+
+  async function analyzeOutpaintPrompt(node, request) {
+    const context = workflowRequestContext();
+    const { response, data } = await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "text", label: "Outpainting prompt analysis" }, progress => nodeApi.videoOutpaintPrompt({ ...request, ...workflowContextPayload(context), nodeId: node.id, nodeTitle: node.data.title, ...progress }));
+    if (!response.ok) throw new Error(data.error || "Outpainting analysis failed.");
+    return data;
+  }
+
   function markOutputTargetSaved(outputTarget, generatedItems = [], resultType = "") {
     if (!outputTarget?.node?.id) return;
     const items = (Array.isArray(generatedItems) ? generatedItems : [generatedItems]).filter((item) => item?.url);
@@ -8125,6 +8142,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onFrameItGenerate={generateFrameItMedia}
         onAssemblyExtractFrame={extractAssemblyFrame}
         onAssemblyProbe={probeAssemblyMedia}
+        onOutpaintAnalyze={analyzeOutpaintPrompt}
+        onOutpaintPrepare={prepareOutpaintCanvas}
         onAssemblyMediaDisconnect={disconnectAssemblyMedia}
         onCanvasPanStart={beginCanvasPan}
         running={node.data?.status === "running"}
@@ -8435,6 +8454,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 onFrameItCapture={captureFrameItFrame}
                 onFrameItGenerate={generateFrameItMedia}
                 onAssemblyExtractFrame={extractAssemblyFrame}
+                onOutpaintAnalyze={analyzeOutpaintPrompt}
+        onOutpaintPrepare={prepareOutpaintCanvas}
                 onCanvasPanStart={beginCanvasPan}
                 running={node.data?.status === "running"}
                 transferCompiling={compilingTransferNodeId === node.id}
@@ -8941,6 +8962,8 @@ function NodeCard({
   onFrameItGenerate,
   onAssemblyExtractFrame,
   onAssemblyProbe,
+  onOutpaintAnalyze,
+  onOutpaintPrepare,
   onAssemblyMediaDisconnect,
   onCanvasPanStart,
   running,
@@ -9291,6 +9314,8 @@ function NodeCard({
         onFrameItGenerate={onFrameItGenerate}
         onAssemblyExtractFrame={onAssemblyExtractFrame}
         onAssemblyProbe={onAssemblyProbe}
+        onOutpaintAnalyze={onOutpaintAnalyze}
+        onOutpaintPrepare={onOutpaintPrepare}
         onAssemblyMediaDisconnect={onAssemblyMediaDisconnect}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
@@ -11691,6 +11716,8 @@ function NodeBody({
   onFrameItGenerate,
   onAssemblyExtractFrame,
   onAssemblyProbe,
+  onOutpaintAnalyze,
+  onOutpaintPrepare,
   onAssemblyMediaDisconnect,
   onCanvasPanStart,
   incomingByNode,
@@ -14644,6 +14671,7 @@ function NodeBody({
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
     const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
     const isCompositeVideo = isUtilityCompositeVideoModel(utilityVideoModel);
+    const isOutpaintVideo = utilityVideoModel === videoOutpaintModelName;
     const isWanBlend = isUtilityWanBlendModel(utilityVideoModel);
     const isVideoStitch = isUtilityVideoStitchModel(utilityVideoModel);
     const isTransitionBuilder = isUtilityTransitionBuilderModel(utilityVideoModel);
@@ -14680,14 +14708,17 @@ function NodeBody({
     const endFramesOutputPort = config.output.find((port) => port.id === "endFramesOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
+    const isOutpaintCropOnly = isOutpaintVideo && node.data.videoOutpaintPrepared?.fingerprint === videoOutpaintFingerprint(connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", node.data.videoOutpaint) && node.data.videoOutpaintPrepared?.plan?.needsOutpaint === false;
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
-    const collapsedPorts = isVideoMode
-      ? activeUtilityInputPortIds
-          .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
-          .filter(Boolean)
-      : activeUtilityInputPortIds
-          .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
-          .filter(Boolean);
+    const collapsedPorts = (isVideoMode && isCompositeVideo ? compositeInputPorts(node.data, portColors.preview) : activeUtilityInputPortIds
+      .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
+      .filter(Boolean))
+      .map((port) => {
+        if (!isCompositeVideo) return port;
+        const connection = incoming[port.id]?.at(-1);
+        const type = connection ? previewMediaType(connection.source, connection.edge) : "";
+        return { ...port, color: type === "image" ? portColors.image : type === "video" ? portColors.video : portColors.preview };
+      });
     const resultType = node.data.resultType || utilityOutputMediaType;
     const hasReferenceVideoInput = activeUtilityInputPortIds.includes("referenceVideoIn");
     const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length);
@@ -14719,6 +14750,7 @@ function NodeBody({
           isVideoStitch ||
           isTransitionBuilder ||
           isWanVaceMaskToVideo ||
+          isOutpaintCropOnly ||
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
@@ -14736,7 +14768,7 @@ function NodeBody({
         : isCoverage
           ? Boolean(incoming.imageIn?.length)
         : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
-    const utilityRunLabel = isVideoMode
+    const utilityRunLabel = isOutpaintVideo ? (isOutpaintCropOnly ? "Export crop" : "Run Outpaint") : isVideoMode
       ? isSam3Video
         ? "Run SAM 3 Video"
         : isVoidVideo
@@ -14812,7 +14844,7 @@ function NodeBody({
         ? "WanBlend / Segments"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isSam3Video || isBirefnetVideo || isDWPoseVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
+        : isOutpaintVideo || isSam3Video || isBirefnetVideo || isDWPoseVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
           ? "Video"
           : isVoidVideo
             ? "Source Video"
@@ -14876,8 +14908,7 @@ function NodeBody({
         ) : (
           <OutputPortRow node={node} port={utilityOutputPort} label={utilityOutputPort.label} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         )}
-        {isVideoMode && isCompositeVideo && <CompositeLayerControls node={node} incoming={incoming} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} colors={portColors} mediaType={previewMediaType} connectedSummary={connectedSummary} />}
-        {!settingsOpen && !isCompositeVideo && (
+        {!settingsOpen && (
           <div className="model-input-port-stack utility-input-port-stack" aria-label="Utility inputs">
             {collapsedPorts.filter(Boolean).map((port) => (
               <PortHandle
@@ -14907,12 +14938,14 @@ function NodeBody({
                   {!utilityVideoModelOptions.includes(utilityVideoModel) && <option hidden>{utilityVideoModel}</option>}
                 </select>
               </NodeRow>
+              {settingsOpen && isCompositeVideo && <CompositeLayerControls node={node} incoming={incoming} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} colors={portColors} mediaType={previewMediaType} connectedSummary={connectedSummary} />}
               {!isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {(isWanVaceInpaintingVideo || isUtilityWan22VaceInpaintingModel(utilityVideoModel)) && <VideoOutpaintPromptControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} maskVideoUrl={connectedAssetUrls(incoming.maskVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onAnalyze={onOutpaintAnalyze} />}
+              {!isOutpaintVideo && !isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -14928,7 +14961,9 @@ function NodeBody({
                   <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
                 </NodeRow>
               )}
-              {isDWPoseVideo ? (
+              {isOutpaintVideo ? (
+                <VideoOutpaintControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
+              ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
                   <select
                     value={node.data.dwposeDrawMode || "body-pose"}
@@ -18488,6 +18523,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       utilityMode: "video",
+      settingsOpen: true,
       model: videoModelNames.wanFunControl,
       utilityImageModel: utilityImageModelNames.dwpose,
       utilityVideoModel: utilityVideoModelNames.extractFrame,
@@ -18600,6 +18636,10 @@ function createDefaultNodeData(type, label, count) {
       transitionVaceAutoDownsampleMinFps: 15,
       transitionVaceInterpolatorModel: "film",
       transitionVaceTransparencyMode: "content_aware",
+      videoOutpaint: normalizeVideoOutpaintSettings(),
+      videoOutpaintSnap: true,
+      outpaintPromptMode: "guided",
+      outpaintGuidance: "",
       wanVaceNegativePrompt: "",
       wanVaceMatchInputNumFrames: true,
       wanVaceNumFrames: 81,
@@ -19458,6 +19498,8 @@ function utilityVideoModelSelectionPatch(model) {
     error: ""
   };
 
+  if (model === videoOutpaintModelName) return { ...patch, settingsOpen: true, batchCount: "1", wanVaceNumInferenceSteps: 30, wanVaceGuidanceScale: 5, wanVaceResolution: "auto", wanVacePreprocess: false, wanVaceEnablePromptExpansion: false, outpaintPromptMode: "guided" };
+
   if (isUtilityWan22VaceInpaintingModel(model) || isUtilityWan22VaceControlModel(model)) {
     return {
       ...patch,
@@ -19642,6 +19684,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
+  if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDwposeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -19680,6 +19723,7 @@ function normalizedUtilityImageModelName(model) {
 }
 
 function normalizedUtilityVideoModelName(model) {
+  if (String(model).toLowerCase() === "video outpaint") return videoOutpaintModelName;
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
   if (normalized.includes("composite")) return utilityVideoModelNames.compositeVideo;
@@ -25351,6 +25395,10 @@ function normalizeUtilityData(data = {}) {
     transitionVaceAutoDownsampleMinFps: Math.max(1, Math.min(30, Number(data.transitionVaceAutoDownsampleMinFps || 15))),
     transitionVaceInterpolatorModel: normalizeChoice(data.transitionVaceInterpolatorModel, wanVaceInterpolatorOptions, "film"),
     transitionVaceTransparencyMode: normalizeChoice(data.transitionVaceTransparencyMode, wanVaceTransparencyOptions, "content_aware"),
+    videoOutpaint: normalizeVideoOutpaintSettings(data.videoOutpaint),
+    videoOutpaintSnap: data.videoOutpaintSnap !== false,
+    outpaintPromptMode: data.outpaintPromptMode ? normalizeOutpaintPromptMode(data.outpaintPromptMode) : (data.prompt ? "manual" : "guided"),
+    outpaintGuidance: String(data.outpaintGuidance || ""),
     wanVaceNegativePrompt: String(data.wanVaceNegativePrompt || ""),
     wanVaceMatchInputNumFrames: data.wanVaceMatchInputNumFrames !== false,
     wanVaceNumFrames: data.wanVaceNumFrames || 81,

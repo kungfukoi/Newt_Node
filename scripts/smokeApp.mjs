@@ -36,6 +36,9 @@ const requiredHealthRoutes = [
   "settingsKeyValidation",
   "minimaxH3LocalStatus",
   "utilityImage",
+  "videoOutpaintPrompt",
+  "videoOutpaint",
+  "videoOutpaintFraming",
   "utilityVideo"
 ];
 

@@ -353,6 +353,12 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/composer-frame", jsonBody(body), label);
   },
 
+  async videoOutpaintPrompt(body) {
+    const health = await getJson("/api/health", "Could not verify outpainting prompt support.");
+    if (health.routes?.videoOutpaintPrompt !== true) throw new Error("Restart the NewtNode backend to activate outpainting prompt analysis. No analysis was submitted.");
+    return fetchJsonApi("/api/node/video-outpaint-prompt", jsonBody(body), "Outpainting prompt analysis");
+  },
+
   processText(body, label = "Text processing") {
     return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
@@ -446,7 +452,18 @@ export const nodeApi = {
     });
     return ensureOk(response, data, "Could not finish the draft.");
   },
-  utilityVideo(body, label = "Utility video generation") {
+  async prepareVideoOutpaint(body) {
+    const health = await getJson("/api/health", "Could not verify video outpaint support.");
+    if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No paid generation was submitted.");
+    if (body.videoOutpaint?.frame && health.routes?.videoOutpaintFraming !== true) throw new Error("Restart the NewtNode backend to activate edited outpainting frames. No generation was submitted.");
+    return fetchJsonApi("/api/node/video-outpaint-prepare", jsonBody(body), "Prepare outpaint canvas");
+  },
+  async utilityVideo(body, label = "Utility video generation") {
+    if (body.model === "Video Outpaint") {
+      const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No generation was submitted.");
+      if (body.videoOutpaint?.frame && health.routes?.videoOutpaintFraming !== true) throw new Error("Restart the NewtNode backend to activate edited outpainting frames. No generation was submitted.");
+    }
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
   },
 

@@ -11,16 +11,17 @@ export const fluxVideoUpscaleCreativityOptions = [
 ];
 export const fluxVideoUpscaleSafetyToleranceOptions = [0, 1, 2, 3, 4];
 
+// Published output-second rates: https://fal.ai/models/blackforestlabs/flux-video-upscale
 export const fluxVideoUpscaleCostPerSecond = Object.freeze({
   precise: Object.freeze({
-    "1080p": 0.14,
-    "2k": 0.25,
-    "4k": 0.55
+    "1080p": 0.084,
+    "2k": 0.15,
+    "4k": 0.33
   }),
   creative: Object.freeze({
-    "1080p": 0.2,
-    "2k": 0.35,
-    "4k": 0.79
+    "1080p": 0.12,
+    "2k": 0.21,
+    "4k": 0.474
   })
 });
 
@@ -92,7 +93,7 @@ export function estimateFluxVideoUpscaleCost({
     pricingBasis: hasDuration && hasRate
       ? `Flux Video Upscale fal.ai per-second estimate for ${billingResolutionTier} ${mode} output`
       : "Flux Video Upscale fal.ai estimate; output duration or resolution unavailable",
-    pricingSource: "fal-model-page-2026-08-20",
+    pricingSource: "fal-model-page-2026-10-20",
     endpoint
   };
 }
