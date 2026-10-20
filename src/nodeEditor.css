@@ -10637,3 +10637,10 @@ video.newtnode-video-fallback {
 
 .zoom-controls .canvas-stop-button { color: #ff5c5c; background: rgba(220, 40, 40, 0.14); }
 .zoom-controls .canvas-stop-button:hover { color: #fff; background: #c92c2c; }
+
+.flux-keyframe-position { min-width: 0; }
+.flux-keyframe-position label { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.flux-keyframe-position input { flex: 1; width: 50px; min-width: 0; min-height: 34px; border: 0; border-radius: 7px; color: #f6f1e8; background: rgba(0, 0, 0, 0.34); padding: 4px 6px; font: inherit; }
+.flux-keyframe-actions { display: flex; gap: 6px; }
+.flux-keyframe-actions button { width: 30px; height: 30px; border: 0; border-radius: 7px; color: #f6f1e8; background: rgba(0, 0, 0, 0.34); cursor: pointer; }
+.flux-keyframe-actions button:disabled { opacity: 0.35; cursor: not-allowed; }

@@ -3,6 +3,8 @@ import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } f
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { generateFlux3 } from "./flux3.js";
+import { isFlux3MaxModel, flux3MaxCost } from "../src/flux3Max.js";
+import { generateFlux3Max } from "./flux3Max.js";
 import { videoCropFilter, normalizeVideoCropSettings } from "../src/videoCrop.js";
 import { generateNanoBanana21 } from "./nano-banana-21.js";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21TextEndpoint, nanoBanana21Ratios, buildNanoBanana21KreaInput } from "../src/nanoBanana21.js";
@@ -544,6 +546,7 @@ const videoModelNames = {
   minimaxH3: minimaxH3ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
+  flux3Max: "FLUX 3 Max",
   geminiOmni: "Gemini Omni Flash",
   wan27Reference: "Wan 2.7 Reference-to-Video",
   happyHorse: "Happy Horse",
@@ -555,6 +558,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
+  videoModelNames.flux3Max,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
@@ -1180,6 +1184,7 @@ function buildHealthPayload() {
       objectSelectionCache: true,
       imageObjectSelection: true,
       ideogram45: true,
+      flux3Max: true,
       flux3: true,
       nanoBanana21: true,
       seedanceDrafts: true,
@@ -6587,6 +6592,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
       req.body.generateAudio = true;
     }
 
+    if (selectedVideoModel.provider === "fal-flux-3-max") return await runFlux3MaxVideo(req, res);
+
     if (selectedVideoModel.provider === "google-gemini-omni") {
       if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY && !process.env.KREA_API_KEY) {
         return res.status(400).json({ error: "Gemini Omni Flash needs an enabled Google, Fal, or Krea API key in Settings." });
@@ -8204,6 +8211,31 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
       fileName: output.fileName
     }
   });
+}
+
+async function runFlux3MaxVideo(req, res) {
+  const { endpoint, input, result, remoteVideo } = await generateFlux3Max(req.body, {
+    isManagedUrl: isLocalAssetUrl,
+    upload: async url => {
+      const asset = await readLocalAsset(url);
+      if (!["image/png", "image/jpeg", "image/webp"].includes(asset.mimeType)) throw httpError(400, "FLUX 3 Max frames must be PNG, JPEG, or WebP images.");
+      return uploadLocalOutputToFal(url);
+    },
+    subscribe: (endpoint, options) => subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.flux3Max })
+  });
+  const output = await downloadVideo(req, remoteVideo.url, "flux-3-max", { stripAudio: !input.generate_audio });
+  const cost = flux3MaxCost(endpoint, input.duration);
+  await appendHistory({
+    id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "video",
+    provider: "fal.ai", modelName: videoModelNames.flux3Max, endpoint,
+    mode: input.keyframes ? "keyframes-to-video" : "text-to-video", prompt: input.prompt, submittedPrompt: input.prompt,
+    project: projectFromBody(req.body), node: nodeFromBody(req.body),
+    settings: { duration: input.duration, resolution: input.resolution, aspectRatio: input.aspect_ratio, generateAudio: input.generate_audio,
+      keyframeCount: input.keyframes?.length || 0, keyframeIndices: input.keyframes?.map(frame => frame.frame_index) || [], reasoningLevel: input.reasoning_level, seed: result.data.seed ?? input.seed },
+    cost, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes
+  });
+  return res.json({ requestId: result.requestId, endpoint, modelName: videoModelNames.flux3Max, provider: "fal.ai", submittedPrompt: input.prompt,
+    seed: result.data.seed, cost, video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath } });
 }
 
 async function runKreaKlingO3Video(
@@ -19291,6 +19323,7 @@ function resolveUtilityVideoModel(model) {
 }
 
 function resolveVideoModel(model) {
+  if (isFlux3MaxModel(model)) return { provider: "fal-flux-3-max", displayName: videoModelNames.flux3Max, id: "blackforestlabs/flux-3-max/text-to-video" };
   const normalized = String(model || "").toLowerCase();
   if (isMinimaxH3Model(model)) {
     return {

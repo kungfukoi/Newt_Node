@@ -1,3 +1,4 @@
+import { isFlux3MaxModel } from "../flux3Max.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
 import { apiErrorMessage } from "../apiErrors.js";
 import { supportsDurableVideo } from "../remoteVideoJobs.js";
@@ -412,6 +413,11 @@ export const nodeApi = {
   },
 
   async generateVideo(body, label = "Video generation") {
+    if (isFlux3MaxModel(body.model)) {
+      const health = await getJson("/api/health", "Could not verify FLUX 3 Max support.");
+      if (health.routes?.flux3Max !== true) throw new Error("Restart the NewtNode backend to activate FLUX 3 Max. No generation was submitted.");
+      return fetchJsonApi("/api/node/generate-video", jsonBody(body), label, { retryLocalApi: false });
+    }
     if (body.seedanceDraft || body.seedanceTask === "edit") {
       const health = await getJson("/api/health", "Could not verify Seedance support.");
       if (body.seedanceDraft && (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true)) throw new Error("Restart the backend to activate multi-provider Draft mode. No generation was submitted.");

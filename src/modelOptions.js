@@ -186,6 +186,7 @@ export const videoModelNames = {
   minimaxH3: minimaxH3ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
+  flux3Max: "FLUX 3 Max",
   geminiOmni: "Gemini Omni Flash",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
@@ -199,11 +200,12 @@ export const videoModelOptions = [
   videoModelNames.minimaxH3,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
+  videoModelNames.flux3Max,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.aurora
 ];
-export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
+export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => ![videoModelNames.aurora, videoModelNames.flux3Max].includes(model));
 export const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
 export const wan27ReferenceResolutionOptions = ["1080p", "720p"];
 export const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];

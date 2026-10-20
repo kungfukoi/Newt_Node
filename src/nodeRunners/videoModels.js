@@ -2,6 +2,7 @@ import { workflowContextPayload } from "../workflowContext.js";
 import { videoCharacterDialogue } from "../characterDialogue.js";
 import { normalizeFilmDirectorVideoModel } from "../filmDirectorVideoModels.js";
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorGenerateAudio } from "../filmDirectorAudio.js";
+import { isFlux3MaxModel } from "../flux3Max.js";
 import { isGeminiOmniModel } from "../geminiOmni.js";
 import {
   geminiOmniDurationOptions,
@@ -206,9 +207,10 @@ export function buildVideoGenerationRequest({
       ? filmDirectorVideoAspectRatio(node.data.model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
     generateAudio,
+    ...(isFlux3MaxModel(node.data.model) ? { flux3MaxReasoningLevel: node.data.flux3MaxReasoningLevel || "high" } : {}),
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
-    seed: node.data.seed || "",
+    seed: node.data.seed ?? "",
     enableSafetyChecker: node.data.enableSafetyChecker !== false,
     startFrameUrls,
     endFrameUrls,

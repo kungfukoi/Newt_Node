@@ -379,6 +379,7 @@ import {
   rodin25MeshOptions,
   rodin25QualityMeshOption
 } from "./model3D.js";
+import { isFlux3MaxModel, flux3MaxKeyframeRows, flux3MaxKeyframePorts, flux3MaxSelectionPatch, flux3MaxUnsupportedPorts, flux3MaxDurationOptions, flux3MaxResolutionOptions, flux3MaxAspectRatioOptions } from "./flux3Max.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import {
   isMinimaxH3Model,
@@ -5979,6 +5980,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (target.type === "videoModel" && isFlux3MaxModel(target.data?.model) && outputKind === "image") return flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id).filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
       return normalizeCompositeLayers(target.data).map(compositeLayerPortId).filter((port) => !edgesRef.current.some((edge) => edge.to.nodeId === target.id && edge.to.port === port));
     }
@@ -6141,7 +6143,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
@@ -6157,7 +6159,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
@@ -6172,7 +6174,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
@@ -6187,7 +6189,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-        if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+        if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
         if (target.type === "edit" && to.port === "imageIn") return "";
         return "Camera image output connects to image inputs";
@@ -6274,7 +6276,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && isUtilityVideoStitchModel(target.data?.utilityVideoModel) && to.port === "referenceVideoIn") return "";
       if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
@@ -6298,7 +6300,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
@@ -6385,7 +6387,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-        if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+        if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && utilityImageInputPortIds.includes(to.port)) return "";
         if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
         if (target.type === "edit" && to.port === "imageIn") return "";
@@ -16018,6 +16020,7 @@ function NodeBody({
   const isKlingO34k = isKlingO34kModel(node.data.model);
   const isKlingO3Pro = isKlingO3ProModel(node.data.model);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
+  const isFlux3Max = isFlux3MaxModel(node.data.model);
   const isGeminiOmni = isGeminiOmniModel(node.data.model);
   const isMinimaxH3 = isMinimaxH3Model(node.data.model);
   const minimaxH3Provider = normalizeModelProviderPreferences(modelProviderPreferences).minimaxH3;
@@ -16092,7 +16095,9 @@ function NodeBody({
     })
   };
   const settingsOpen = node.data.settingsOpen !== false;
-  const collapsedPorts = isWanFunControl
+  const collapsedPorts = isFlux3Max
+    ? [promptPort, ...flux3MaxKeyframePorts(node.data, portColors.image)]
+    : isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
     : isWan27Reference
       ? [promptPort, activeDirectorPort, referenceImagePort, referenceVideoPort, characterPort]
@@ -16435,6 +16440,30 @@ function NodeBody({
               </button>
             </NodeRow>
           </>
+        ) : isFlux3Max ? (
+          <>
+            {flux3MaxKeyframeRows(node.data).map((frame, index) => <NodeRow key={frame.id} label={`Keyframe ${index + 1}`} inputPort={settingsOpen ? { id: frame.id, label: `Keyframe ${index + 1}`, color: portColors.image } : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <div className="flux-keyframe-position" title={connectedSummary(incoming[frame.id], "Connect one image")}>
+                <label>Frame Indices<input aria-label={`Keyframe ${index + 1} frame index`} type="number" min="0" max={Number.parseInt(node.data.duration || "5", 10) * 24} step="1" value={frame.frameIndex} onChange={event => onUpdate(node.id, { flux3MaxKeyframes: flux3MaxKeyframeRows(node.data).map(item => item.id === frame.id ? { ...item, frameIndex: event.target.value } : item) })} /></label>
+              </div>
+            </NodeRow>)}
+            <NodeRow label="Keyframes"><div className="flux-keyframe-actions">
+              <button type="button" aria-label="Add keyframe" disabled={flux3MaxKeyframeRows(node.data).length >= 10} onClick={() => onUpdate(node.id, { flux3MaxKeyframes: [...flux3MaxKeyframeRows(node.data), { id: `fluxKeyframe_${crypto.randomUUID()}`, frameIndex: "" }] })}>+</button>
+              <button type="button" aria-label="Remove keyframe" disabled={flux3MaxKeyframeRows(node.data).length <= 1} onClick={event => { const rows = flux3MaxKeyframeRows(node.data); onDisconnectInput(event, node.id, rows.at(-1).id); onUpdate(node.id, { flux3MaxKeyframes: rows.slice(0, -1) }); }}>−</button></div>
+            </NodeRow>
+            {[ ["Duration", "duration", flux3MaxDurationOptions], ["Resolution", "resolution", flux3MaxResolutionOptions], ["Aspect Ratio", "aspectRatio", flux3MaxAspectRatioOptions], ["Reasoning", "flux3MaxReasoningLevel", ["high", "low"]] ].map(([label, field, options]) => (
+              <NodeRow key={field} label={label}>
+                <select value={node.data[field]} onChange={event => onUpdate(node.id, { [field]: event.target.value })}>
+                  {options.map(option => <option key={option}>{option}</option>)}
+                </select>
+              </NodeRow>
+            ))}
+            <NodeRow label="Generate Audio">
+              <button className={`node-toggle ${node.data.generateAudio !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: node.data.generateAudio === false })}><span /></button>
+            </NodeRow>
+            <NodeRow label="Seed"><input value={node.data.seed ?? ""} placeholder="Random" onChange={event => onUpdate(node.id, { seed: event.target.value })} /></NodeRow>
+
+          </>
         ) : isGeminiOmni ? (
           <>
             <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -16579,6 +16608,7 @@ function NodeBody({
           </>
         )}
       </details>
+      {isFlux3Max && <small className="upload-status model-status-note">Connect one image per keyframe. Frame indices use 24 fps, from 0 to duration × 24; up to 10 total, with unique positions. Fal · Pricing unverified</small>}
       {isAurora && <small className="upload-status model-status-note">lipsync model</small>}
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
@@ -18797,7 +18827,7 @@ function isKlingO3ProModel(model) {
 }
 
 function videoModelSupportsCharacterInput(model) {
-  return !isAuroraModel(model) && !isSam3VideoModel(model);
+  return !isFlux3MaxModel(model) && !isAuroraModel(model) && !isSam3VideoModel(model);
 }
 
 function isVideoModelUnsupportedCharacterInput(node, portId) {
@@ -18805,6 +18835,7 @@ function isVideoModelUnsupportedCharacterInput(node, portId) {
 }
 
 function isVideoModelUnsupportedInput(node, portId) {
+  if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model) && flux3MaxUnsupportedPorts.includes(portId)) return true;
   if (isVideoModelUnsupportedCharacterInput(node, portId)) return true;
   if (node?.type === "videoModel" && portId === "directorIn" && !videoModelSupportsFilmDirector(node.data?.model)) return true;
   if (node?.type === "videoModel" && isGeminiOmniModel(node.data?.model) && ["endFrameIn", "referenceAudioIn"].includes(portId)) return true;
@@ -18812,6 +18843,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 }
 
 function videoModelUnsupportedInputMessage(model, portId) {
+  if (isFlux3MaxModel(model)) return "FLUX 3 Max accepts a prompt and up to 10 positioned keyframes. Director input is not supported.";
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
     return "Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
   }
@@ -18827,6 +18859,7 @@ function videoModelUnsupportedCharacterMessage(model) {
 }
 
 function videoModelSelectionPatch(data = {}, model) {
+  if (isFlux3MaxModel(model)) return flux3MaxSelectionPatch(data);
   if (isMinimaxH3Model(model)) {
     const preserveMinimaxH3 = isMinimaxH3Model(data.model);
     return {
@@ -19938,6 +19971,7 @@ function visiblePortIdsForNode(node) {
 
 function inputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.input || [];
+  if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model)) return [...basePorts.filter(port => !["referenceImageIn", "startFrameIn", "endFrameIn"].includes(port.id)), ...flux3MaxKeyframePorts(node.data, portColors.image)];
   if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)) return compositeInputPorts(node.data, portColors.preview);
   return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
 }
@@ -21972,13 +22006,19 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
     }))
   ]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
-  return buildVideoGenerationRequest({ node, prompt, workflowContext, projectId, projectName,
+  const fluxFrames = isFlux3MaxModel(node.data.model)
+    ? flux3MaxKeyframeRows(node.data).flatMap(frame => {
+      const urls = connectedAssetUrls(incoming[frame.id]);
+      if (urls.length > 1) throw new Error("Connect only one image to each keyframe input.");
+      return urls.map(image_url => ({ image_url, frame_index: frame.frameIndex }));
+    }) : undefined;
+  return { ...buildVideoGenerationRequest({ node, prompt, workflowContext, projectId, projectName,
     startFrameUrls: connectedAssetUrls(incoming.startFrameIn), endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
     referenceImageUrls: referenceImageItems.map(item => item.url), referenceImageLabels: referenceImageItems.map(item => item.label),
     characterReferenceUrls: characterReferences.map(item => item.url), characterReferenceLabels: characterReferences.map(item => item.label),
     referenceVideoUrls: referenceVideoItems.map(item => item.url), referenceVideoLabels: referenceVideoItems.map(item => item.label),
     referenceAudioUrls: referenceAudioItems.map(item => item.url), referenceAudioLabels: referenceAudioItems.map(item => item.label),
-    exactDialogueAudioUrl: exactAudioInputs.length === 1 ? exactDialogueAudioUrl : "", exactDialogueAudio: exactDialogue, filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: videoCharacterVoiceMode(node.data) === "samples" ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) });
+    exactDialogueAudioUrl: exactAudioInputs.length === 1 ? exactDialogueAudioUrl : "", exactDialogueAudio: exactDialogue, filmDirector: directorPackageForVideo(directorSource, incomingByNode), characterDialogue: videoCharacterVoiceMode(node.data) === "samples" ? directorDialoguePackage(node.data, incoming.characterIn || [], node.id) : null, outputTargetIndex: String(index + 1) }), ...(fluxFrames !== undefined ? { flux3MaxKeyframes: fluxFrames, referenceImageUrls: [] } : {}) };
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
@@ -25529,7 +25569,7 @@ function isCameraImageEdge(edge, target) {
   if (target?.type === "composer" && edge.to.port === "imageIn") return true;
   if (target?.type === "model3d" && isModel3DImageInputPort(edge.to.port)) return true;
   if (target?.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(edge.to.port)) return true;
-  if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(edge.to.port)) return true;
+  if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id)].includes(edge.to.port)) return true;
   if (target?.type === "utility" && utilityImageInputPortIds.includes(edge.to.port)) return true;
   if (target?.type === "edit" && edge.to.port === "imageIn") return true;
   return false;

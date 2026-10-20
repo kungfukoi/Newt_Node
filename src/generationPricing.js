@@ -66,7 +66,7 @@ export function generationProviderForModel({
     if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"))) {
       return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     }
-    if (["Wan 2.7 Reference-to-Video", "Creatify Aurora"].includes(model)) return preferences.veo === "fal" ? "fal" : null;
+    if (["FLUX 3 Max", "Wan 2.7 Reference-to-Video", "Creatify Aurora"].includes(model)) return preferences.veo === "fal" ? "fal" : null;
     return normalized.includes("wan") || normalized.includes("aurora") || normalized.includes("sam 3") ? "fal" : null;
   }
 
