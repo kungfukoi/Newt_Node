@@ -73,7 +73,7 @@ npm run smoke:isolated
 
 Playwright uses its own production preview server on port 5286 (`NEWTNODE_E2E_PORT` overrides it) and refuses to reuse an existing listener. All application APIs are mocked; external requests are blocked. Generated test-pattern PNG/MP4 fixtures live in ignored `e2e/.generated/`. Failure screenshots/traces are under ignored `test-results/` and `playwright-report/`.
 
-`.github/workflows/validation.yml` runs Node tests, performance budget, build, isolated API smoke, and Chromium tests on Windows and macOS. CI configuration is not evidence that a native Mac check passed locally. Native folder dialogs, launch-from-Finder behavior, GPU drivers, and paid provider completion need separate authorized checks.
+`.github/workflows/validation.yml` runs Node tests, performance budget, build, isolated API smoke, and Chromium tests on Windows and macOS. The macOS lane uses `macos-15-intel` to avoid the hosted ARM runner capacity failures seen with `macos-latest`; this validates Intel macOS, not native Apple Silicon. Revisit the runner choice when ARM capacity recovers. CI configuration is not evidence that a native Mac check passed locally. Native folder dialogs, launch-from-Finder behavior, GPU drivers, and paid provider completion need separate authorized checks.
 
 ### Production Runtime
 
