@@ -164,6 +164,8 @@ node --check server/routes/core.js
 
 Start the app and verify `/api/health`. Add or update a health-route capability flag and the smoke harness when the route is part of normal startup.
 
+The isolated smoke harness allows 120 seconds for local Timeline/Composite FFmpeg render requests and 15 seconds for ordinary API requests. Failed requests report their endpoint, elapsed time, timeout and isolated backend output; media assertions still validate the completed files.
+
 Prefer `npm run smoke:isolated` for automated route/persistence tests. It copies source into a checked temporary root, links installed dependencies, uses generated media and empty credentials, and cleans up only its own process/files. It does not load the user's runtime settings, history, or workflows.
 
 ### Startup, Settings, Persistence, Or API Changes

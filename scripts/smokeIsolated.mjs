@@ -57,10 +57,16 @@ try {
   child.stdout.on("data", (data) => { output = (output + data).slice(-16000); });
   child.stderr.on("data", (data) => { output = (output + data).slice(-16000); });
   const api = `http://127.0.0.1:${port}`;
-  const request = async (url, body) => {
-    const response = await fetch(api + url, { signal: AbortSignal.timeout(15000), ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
-    assert.equal(response.ok, true, `${url}: HTTP ${response.status} ${await response.clone().text()}`);
-    return response;
+  const localRenderTimeout = { timeoutMs: 120000 };
+  const request = async (url, body, { timeoutMs = 15000 } = {}) => {
+    const started = Date.now();
+    try {
+      const response = await fetch(api + url, { signal: AbortSignal.timeout(timeoutMs), ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
+      assert.equal(response.ok, true, `${url}: HTTP ${response.status} ${await response.clone().text()}`);
+      return response;
+    } catch (error) {
+      throw new Error(`Isolated smoke request ${url} failed after ${Date.now() - started} ms (timeout ${timeoutMs} ms): ${error.message}\nIsolated backend output:\n${output}`, { cause: error });
+    }
   };
   let healthy = false;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -314,7 +320,7 @@ try {
     outputWidth: 320, outputHeight: 180, frameRate: 24, inPoint: 1, outPoint: 2,
     media: [{ id: "still", type: "image", url: "/outputs/panel.png", duration: 5 }, { id: "unused", type: "video", url: "/outputs/does-not-exist.mp4" }],
     tracks: [{ id: "v1", type: "video", clips: [{ id: "still-clip", mediaId: "still", start: 0, duration: 5 }] }]
-  } })).json();
+  } }, localRenderTimeout)).json();
   assert.equal(timelineStill.endpoint, "local/timeline-extract-frame");
   assert.equal(timelineStill.image.mimeType, "image/png");
   assert.equal(timelineStill.image.metadata.width, 320);
@@ -327,17 +333,17 @@ try {
     { id: "base", url: "/outputs/panel.png", type: "image", blendMode: "normal", mixAmount: 100 },
     { id: "layer1", url: "/outputs/clip.mp4", type: "video", blendMode: "screen", mixAmount: 50, maskUrl: "/outputs/panel.png", maskType: "image", maskBlur: 1, maskExpand: 1 },
     { id: "extra", url: "/outputs/panel.png", type: "image", blendMode: "multiply", mixAmount: 25, maskUrl: "/outputs/clip.mp4", maskType: "video", invertMask: true }
-  ] } })).json();
+  ] } }, localRenderTimeout)).json();
   assert.ok(composite.video.localUrl);
   assert.ok(Math.abs(composite.video.duration - Number(probe.format.duration)) < 0.1, "Still layers must last for the video duration, regardless of Still Duration");
   assert.equal(composite.cost.amountUsd, 0);
   assert.equal((await request(composite.video.localUrl)).status, 200);
   const stillComposite = await (await request("/api/node/utility-video", { model: "Composite Video", compositeVideo: { layers: [
     { id: "base", url: "/outputs/panel.png", type: "image" }, { id: "layer1", url: "/outputs/panel.png", type: "image" }
-  ] } })).json();
+  ] } }, localRenderTimeout)).json();
   assert.ok(stillComposite.video.localUrl);
   assert.ok(Math.abs(stillComposite.video.duration - 5) < 0.1, "Image-only stacks must default to five seconds");
-  const legacyComposite = await (await request("/api/node/utility-video", { model: "Composite Video", referenceVideoUrls: ["/outputs/clip.mp4", "/outputs/clip.mp4"], compositeVideo: { blendMode: "screen", mixAmount: 50 } })).json();
+  const legacyComposite = await (await request("/api/node/utility-video", { model: "Composite Video", referenceVideoUrls: ["/outputs/clip.mp4", "/outputs/clip.mp4"], compositeVideo: { blendMode: "screen", mixAmount: 50 } }, localRenderTimeout)).json();
   assert.ok(legacyComposite.video.localUrl);
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");
 } finally {
