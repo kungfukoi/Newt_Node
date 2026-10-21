@@ -11,6 +11,14 @@ import {
   supportsAtlasVideoModel
 } from "../src/atlasMedia.js";
 
+test("Atlas Seedance outpaint can request documented MOV color fidelity without changing other models", () => {
+  const input = buildAtlasVideoRequest({ model: "Seedance 2.5", prompt: "Extend the scene", videos: ["https://example.com/source.mp4"], seedanceTask: "edit", resolution: "1080p", outputFormat: "mov" });
+  assert.equal(input.output_format, "mov"); assert.equal(input.resolution, "1080p");
+  assert.notEqual(input.draft, true);
+  const normal = buildAtlasVideoRequest({ model: "Seedance 2.5", prompt: "A winter scene" });
+  assert.equal(normal.output_format, undefined);
+});
+
 test("Atlas video input dimensions preserve compliant media and scale undersized references without cropping", () => {
   assert.deepEqual(atlasVideoInputDimensions(3840, 2160), {
     width: 3840,

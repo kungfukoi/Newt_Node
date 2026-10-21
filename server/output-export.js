@@ -1,12 +1,12 @@
 import path from "node:path";
 import { normalizeOutputExportFormat } from "../src/outputExport.js";
 
-export function outputExportRequiresConversion(sourcePath = "", mediaType = "", format = "") {
+export function outputExportRequiresConversion(sourcePath = "", mediaType = "", format = "", codecName = "") {
   const normalized = normalizeOutputExportFormat(mediaType, format);
   const extension = path.extname(String(sourcePath || "")).toLowerCase();
   if (normalized === "png") return extension !== ".png";
   if (normalized === "jpg") return ![".jpg", ".jpeg"].includes(extension);
-  if (normalized === "mp4") return extension !== ".mp4";
+  if (normalized === "mp4") return extension !== ".mp4" || Boolean(codecName && codecName !== "h264");
   if (normalized === "prores") return true;
   return false;
 }
@@ -14,6 +14,7 @@ export function outputExportRequiresConversion(sourcePath = "", mediaType = "", 
 export function buildOutputExportFfmpegArgs({ sourcePath = "", targetPath = "", mediaType = "", format = "" } = {}) {
   const normalized = normalizeOutputExportFormat(mediaType, format);
   const args = ["-y", "-i", sourcePath];
+  if (normalized === "source") return [...args, "-map", "0", "-c", "copy", targetPath];
 
   if (mediaType === "image") {
     args.push("-frames:v", "1");

@@ -1,4 +1,4 @@
-import { normalizeVideoOutpaintSettings } from "../videoOutpaint.js";
+import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { videoCharacterDialogue } from "../characterDialogue.js";
 import { normalizeFilmDirectorVideoModel } from "../filmDirectorVideoModels.js";
@@ -307,7 +307,7 @@ export function buildUtilityVideoRequest({
     startFrameVideoUrls,
     maskVideoUrls,
     wanWarpSegments,
-    videoOutpaint: normalizeVideoOutpaintSettings(node.data.videoOutpaint),
+    videoOutpaint: normalizeUtilityOutpaintSettings(node.data.videoOutpaint),
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,
       format: node.data.extractFrameFormat || "png"

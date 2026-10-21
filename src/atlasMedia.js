@@ -140,7 +140,7 @@ export function buildAtlasVideoRequest({
   duration,
   resolution,
   generateAudio = true,
-  seed, seedanceTask = "reference", seedanceDraft
+  seed, seedanceTask = "reference", seedanceDraft, outputFormat
 } = {}) {
   const spec = videoModels.get(String(model || "").trim().toLowerCase());
   if (!spec) fail(`Atlas Cloud does not support ${model || "this video model"}.`);
@@ -166,6 +166,7 @@ export function buildAtlasVideoRequest({
     request.duration = editing ? -1 : normalizedDuration(duration, 4, is25 ? 30 : 15, 5, true);
     request.resolution = draft ? "480p" : normalizedSeedanceResolution(resolution, is25);
     if (draft) request.draft = true;
+    if (is25 && outputFormat === "mov") request.output_format = "mov";
     request.ratio = editing ? "adaptive" : is25 && startImage ? "adaptive" : normalizedVideoRatio(aspectRatio, startImage ? "adaptive" : "16:9");
     request.generate_audio = generateAudio !== false;
     if (seed !== undefined && seed !== null && seed !== "") {

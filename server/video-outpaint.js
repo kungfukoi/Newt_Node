@@ -1,18 +1,26 @@
 import { normalizeVideoOutpaintSettings, planVideoOutpaint, videoOutpaintFingerprint } from "../src/videoOutpaint.js";
+import { overlapBlendFilters } from "./outpaint-boundary.js";
 
-export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile }) {
-  async function prepare(body, sourceUrl) {
+export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
+  async function prepare(body, sourceUrl, timing = {}) {
     if (!sourceUrl) throw new Error("Connect a source video before preparing outpainting.");
     const asset = await resolveAsset(sourceUrl);
     const metadata = await probeVideo(asset.filePath);
     const plan = planVideoOutpaint(metadata, body.videoOutpaint);
+    if (plan.tailPadded && timing.prerollFrames === 0) {
+      plan.prerollFrames = 0;
+      plan.frames = Math.max(4 * plan.fps, plan.outputFrames + Math.ceil(0.5 * plan.fps));
+      plan.duration = plan.frames / plan.fps;
+      plan.loopFrames = plan.frames; plan.loopDuration = plan.duration;
+    }
     const { width, height, sourceWidth, sourceHeight, left, top, fps, frames, settings } = plan;
     const padded = await createTarget(body, "outpaint-source", ".mp4", true);
-    const mask = await createTarget(body, "outpaint-mask", ".mp4", true);
+    const maskIsImage = settings.model === "seedance-2.5";
+    const mask = await createTarget(body, "outpaint-mask", maskIsImage ? ".png" : ".mp4", true);
     const poster = await createTarget(body, "outpaint-canvas", ".png", true);
     const crop = plan.sourceCrop;
     const cropFilter = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-    const encode = ["-an", "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
+    const encode = ["-an", "-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
     let preparedSource = asset.filePath;
     let sourceStart = settings.start;
     let loopedSourceUrl;
@@ -26,34 +34,68 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       sourceStart = 0;
       loopedSourceUrl = loopedSource.publicPath;
     }
-    await runFfmpeg(["-y", "-ss", String(sourceStart), "-i", preparedSource, "-vf", `fps=${fps},${cropFilter}scale=${sourceWidth}:${sourceHeight},setsar=1,pad=${width}:${height}:${left}:${top}:black`, "-frames:v", String(frames), ...encode, padded.filePath], "Prepare outpaint source", 120000);
-    await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=white:s=${width}x${height}:r=${fps}`, "-vf", `drawbox=x=${left}:y=${top}:w=${sourceWidth}:h=${sourceHeight}:color=black:t=fill`, "-frames:v", String(frames), ...encode, mask.filePath], "Prepare outpaint mask", 120000);
-    await runFfmpeg(["-y", "-i", padded.filePath, "-frames:v", "1", poster.filePath], "Preview outpaint canvas", 30000);
-    return { sourceUrl, ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, maskVideoUrl: mask.publicPath, previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(sourceUrl, settings), plan };
+    const temporalPad = plan.tailPadded ? `trim=end_frame=${plan.outputFrames},setpts=PTS-STARTPTS,tpad=start_mode=clone:start_duration=${(plan.prerollFrames || 0) / fps}:stop_mode=clone:stop_duration=${plan.duration},` : "";
+    await runFfmpeg(["-y", "-ss", String(sourceStart), "-i", preparedSource, "-vf", `fps=${fps},${temporalPad}${cropFilter}scale=${sourceWidth}:${sourceHeight},setsar=1,pad=${width}:${height}:${left}:${top}:black`, "-frames:v", String(frames), ...encode, padded.filePath], "Prepare outpaint source", 120000);
+    if (settings.model === "seedance-2.5" && (await statFile(padded.filePath)).size > 200 * 1024 * 1024) throw new Error("The full-resolution Seedance canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment before generating.");
+    // Reserve real generated pixels beneath the inward source-edge feather.
+    const overlap = settings.restoreSource ? Math.ceil(settings.feather * width / plan.outputWidth) : 0;
+    const ml = left > 0 ? Math.min(overlap, Math.floor(sourceWidth / 2) - 1) : 0;
+    const mr = left + sourceWidth < width ? Math.min(overlap, Math.floor(sourceWidth / 2) - 1) : 0;
+    const mt = top > 0 ? Math.min(overlap, Math.floor(sourceHeight / 2) - 1) : 0;
+    const mb = top + sourceHeight < height ? Math.min(overlap, Math.floor(sourceHeight / 2) - 1) : 0;
+    let generationVideo;
+    if (maskIsImage && ml + mr + mt + mb > 0) {
+      plan.generationOverlap = { left: ml, right: mr, top: mt, bottom: mb };
+      plan.generationContentRect = { x: left + ml, y: top + mt, width: sourceWidth - ml - mr, height: sourceHeight - mt - mb };
+      generationVideo = await createTarget(body, "outpaint-generation-canvas", ".mp4", true);
+      const bands = [
+        ml && `drawbox=x=${left}:y=${top}:w=${ml}:h=${sourceHeight}:color=black:t=fill`,
+        mr && `drawbox=x=${left + sourceWidth - mr}:y=${top}:w=${mr}:h=${sourceHeight}:color=black:t=fill`,
+        mt && `drawbox=x=${left}:y=${top}:w=${sourceWidth}:h=${mt}:color=black:t=fill`,
+        mb && `drawbox=x=${left}:y=${top + sourceHeight - mb}:w=${sourceWidth}:h=${mb}:color=black:t=fill`
+      ].filter(Boolean);
+      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", bands.join(","), "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare inward generation overlap", 120000);
+      if ((await statFile(generationVideo.filePath)).size > 200 * 1024 * 1024) throw new Error("The generation canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment.");
+    }
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=white:s=${width}x${height}:r=${fps}`, "-vf", `drawbox=x=${left + ml}:y=${top + mt}:w=${sourceWidth - ml - mr}:h=${sourceHeight - mt - mb}:color=black:t=fill`, "-frames:v", maskIsImage ? "1" : String(frames), ...(maskIsImage ? [] : [...encode, "-crf", "0"]), mask.filePath], "Prepare local outpaint mask", 120000);
+    await runFfmpeg(["-y", "-i", generationVideo?.filePath || padded.filePath, "-frames:v", "1", poster.filePath], "Preview outpaint canvas", 30000);
+    return { sourceUrl, ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, ...(generationVideo ? { generationVideoUrl: generationVideo.publicPath } : {}), ...(maskIsImage ? { maskImageUrl: mask.publicPath } : { maskVideoUrl: mask.publicPath }), previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(sourceUrl, settings), plan };
   }
   async function finish(body, prepared, generated) {
-    const plan = prepared.plan;
+    reportProgress("Finish: Blending the original source overlap…");
+    const submissionPlan = prepared.plan;
+    const plan = submissionPlan.tailPadded ? { ...submissionPlan, frames: submissionPlan.outputFrames, duration: submissionPlan.outputDuration } : submissionPlan;
     const settings = normalizeVideoOutpaintSettings(plan.settings);
     const native = await probeVideo(generated.filePath);
     const seedance = settings.model === "seedance-2.5";
-    if (!Number.isFinite(Number(native.duration)) || Math.abs(Number(native.duration) - plan.duration) > (seedance ? 0.35 : 0.15)) throw new Error("Generated timing differs from the source segment; the raw result was kept for review.");
+    const preroll = (plan.prerollFrames || 0) / plan.fps;
+    if (!Number.isFinite(Number(native.duration)) || (submissionPlan.tailPadded ? Number(native.duration) + 0.5 / plan.fps < preroll + plan.duration : Math.abs(Number(native.duration) - plan.duration) > (seedance ? 0.35 : 0.15))) throw new Error("Generated timing does not cover the source segment; the raw result was kept instead of freezing or repeating delivery frames.");
     if (seedance && Math.abs(Number(native.width) / Number(native.height) - plan.width / plan.height) > 0.02) throw new Error("Seedance changed the canvas aspect ratio; the raw result was kept for review.");
     const source = await resolveAsset(prepared.loopedSourceUrl || prepared.sourceUrl);
     const sourceStart = prepared.loopedSourceUrl ? 0 : settings.start;
-    const target = await createTarget(body, "video-outpaint", ".mp4", false);
+    let target = await createTarget(body, "video-outpaint", ".mov", false);
     const { outputWidth: w, outputHeight: h } = plan;
     const sw = Math.round(plan.sourceWidth / plan.width * w / 2) * 2;
     const sh = Math.round(plan.sourceHeight / plan.height * h / 2) * 2;
     const x = Math.round(plan.left / plan.width * w), y = Math.round(plan.top / plan.height * h);
-    const feather = settings.feather;
-    const alpha = feather > 0 ? `,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*min(1,min(min(X/${feather},(W-1-X)/${feather}),min(Y/${feather},(H-1-Y)/${feather})))'` : "";
-    const filters = [`[0:v]fps=${plan.fps},${seedance ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},setsar=1,setpts=PTS-STARTPTS[bg]`];
+    const overlapWidth = Math.max(0, Math.min(settings.feather, Math.floor(sw / 2) - 1, Math.floor(sh / 2) - 1));
+    const feather = settings.restoreSource && plan.needsOutpaint ? overlapWidth : 0;
     const crop = plan.sourceCrop;
     const cropFilter = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-    if (settings.restoreSource) filters.push(`[1:v]fps=${plan.fps},${cropFilter}scale=${sw}:${sh},setsar=1,setpts=PTS-STARTPTS${alpha}[source]`, `[bg][source]overlay=${x}:${y}:shortest=1[out]`);
-    await runFfmpeg(["-y", "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", "-t", String(plan.duration), "-frames:v", String(plan.frames), "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", target.filePath], "Finish video outpaint", 600000);
+    const filters = [`[0:v]fps=${plan.fps},${seedance && !submissionPlan.tailPadded ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},setsar=1,setpts=PTS-STARTPTS[bg]`];
+    if (settings.restoreSource) {
+      // Decode the original plate, never the black padded conditioning canvas.
+      filters.push(`[1:v]fps=${plan.fps},${cropFilter}scale=${sw}:${sh},setsar=1,setpts=PTS-STARTPTS[source]`);
+      filters.push(...overlapBlendFilters({ w, h, sw, sh, x, y, feather }));
+    }
+    await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", "-t", String(plan.duration), "-frames:v", String(plan.frames), "-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-c:a", "pcm_s24le", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
     const stat = await statFile(target.filePath);
-    return { ...target, bytes: stat.size };
+    return { ...target, bytes: stat.size, outputFormat: "ProRes 4444 XQ MOV (10-bit processing)", mimeType: "video/quicktime", warning: "",
+      matching: { finishVersion: 3, requested: false, applied: false, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
+        method: "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
+        sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; delivery scaling and ProRes encoding still apply." : "Source restoration is disabled." },
+      qc: { status: "off", flags: [], segments: [] } };
+
   }
   return { prepare, finish };
 }

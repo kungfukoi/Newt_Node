@@ -40,6 +40,9 @@ const requiredHealthRoutes = [
   "videoOutpaintPrompt",
   "videoOutpaint",
   "videoOutpaintFraming",
+  "videoOutpaintMatching",
+  "videoOutpaintFullResolution",
+  "videoOutpaintLocalMasks",
   "videoOutpaintSeedance",
   "utilityVideo"
 ];

@@ -23,7 +23,7 @@ test("Seedance finalization after restart passes and returns the saved dialogue 
   const dialogue = { url: "/outputs/dialogue.mp3", cues: [{ endSeconds: 1.2 }] };
   let downloadedBody;
   const finalize = extract("finalizeSeedanceVideo", {
-    path, saveGeneratedVideoWithFallback, existsSync: () => false,
+    path, saveGeneratedVideoWithFallback, existsSync: () => false, workflowPackageOutputDirName: "outputs", workflowPackageDependencyDirName: "dependencies",
     createManagedAssetTarget: async () => ({ filePath: "mock.mp4" }),
     downloadVideo: async request => { downloadedBody = request.body; return { filePath: "mock.mp4", publicPath: "/outputs/mock.mp4" }; },
     appendHistory: async () => {}, projectFromBody: () => ({}), nodeFromBody: () => ({}), routeKindLabel: value => value

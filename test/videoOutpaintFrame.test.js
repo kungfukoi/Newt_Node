@@ -31,7 +31,7 @@ test("a crop inside the source needs no paid inference and edited frames invalid
   const plan = planVideoOutpaint({ width: 1440, height: 1440, fps: 24, duration: 4 }, { aspectRatio: "16:9", frame: { x: 0.25, y: 0.25, width: 0.5 } });
   assert.equal(plan.needsOutpaint, false);
   assert.equal(plan.sourceCrop.x, 360);
-  assert.equal(plan.sourceWidth, 768); assert.equal(plan.sourceHeight, 432);
+  assert.equal(plan.sourceWidth, 1280); assert.equal(plan.sourceHeight, 720);
   assert.notEqual(videoOutpaintFingerprint("source", {}), videoOutpaintFingerprint("source", { frame: { x: 0, y: 0, width: 1 } }));
   assert.equal(normalizeOutpaintFrame({ x: "bad", y: 0, width: 1 }), null);
 });

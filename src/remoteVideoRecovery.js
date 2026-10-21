@@ -1,6 +1,7 @@
 import { appendUniqueVideoResults, remoteVideoTerminal, remoteVideoNeedsAttention } from "./remoteVideoJobs.js";
 import { existingResultItemsForNode } from "./mediaResults.js";
 import { normalizeVideoGenerationResult } from "./nodeRunners/videoModels.js";
+import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
 
 export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), edges = []) {
   const patches = [];
@@ -21,9 +22,10 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
     const pending = group.some((job) => !remoteVideoTerminal(job) && !remoteVideoNeedsAttention(job));
     const attention = group.some(remoteVideoNeedsAttention);
     const errors = group.filter((job) => job.state === "failed" || remoteVideoNeedsAttention(job)).map((job) => `Run ${job.batchIndex}: ${job.message}`);
+    const qualityFailure = outpaint && group.some(job => job.state === "completed" && outpaintNeedsFinishing({ videoOutpaint: job.result?.videoOutpaint }));
     const terminal = unseen.filter(remoteVideoTerminal);
     const patch = {
-      status: pending ? "running" : attention || errors.length ? "error" : resultItems.length ? "complete" : "ready",
+      status: pending ? "running" : attention || errors.length || qualityFailure ? "error" : resultItems.length ? "complete" : "ready",
       error: [...errors, ...group.map(job => job.result?.warning).filter(Boolean)].join(" "),
       remoteVideoAttention: group.filter(remoteVideoNeedsAttention).map(({ runId, scope, provider, batchIndex, state }) => ({ runId, scope, provider, batchIndex, state })),
       remoteVideoRunIds: [...seen, ...terminal.map((job) => job.runId)]
@@ -37,6 +39,8 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
       const output = nodes.find((item) => item.id === outputId && item.type === "output");
       if (!output || !edges.some((edge) => edge.from.nodeId === node.id && edge.to.nodeId === outputId)) continue;
       const items = completed.filter((job) => job.outputTargetNodeId === outputId).map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
+      const rejected = items.find(outpaintNeedsFinishing);
+      if (rejected) { patches.push({ nodeId: outputId, patch: { status: "error", error: outpaintOutputError(rejected) } }); continue; }
       const outputItems = appendUniqueVideoResults(existingResultItemsForNode(output, "video"), items);
       patches.push({ nodeId: outputId, patch: {
         status: items.some(item => item.storageFallback) ? "error" : "complete", error: items.filter(item => item.storageFallback).map(item => item.warning).join(" "), resultType: "video", resultItems: outputItems,

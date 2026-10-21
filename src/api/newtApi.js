@@ -357,6 +357,7 @@ export const nodeApi = {
   async videoOutpaintPrompt(body) {
     const health = await getJson("/api/health", "Could not verify outpainting prompt support.");
     if (health.routes?.videoOutpaintPrompt !== true) throw new Error("Restart the NewtNode backend to activate outpainting prompt analysis. No analysis was submitted.");
+    if (body.maskImageUrl && health.routes?.videoOutpaintFramePresence !== true) throw new Error("Restart the NewtNode backend to activate frame-by-frame outpainting analysis. No analysis was submitted.");
     return fetchJsonApi("/api/node/video-outpaint-prompt", jsonBody(body), "Outpainting prompt analysis");
   },
 
@@ -455,15 +456,25 @@ export const nodeApi = {
   },
   async prepareVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify video outpaint support.");
-    if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedance !== true) throw new Error("Restart the backend to activate Seedance outpainting. No generation was submitted.");
+    if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintFullResolution !== true) throw new Error("Restart the backend to activate full-resolution Seedance outpainting. No generation was submitted.");
     if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No paid generation was submitted.");
     if (body.videoOutpaint?.frame && health.routes?.videoOutpaintFraming !== true) throw new Error("Restart the NewtNode backend to activate edited outpainting frames. No generation was submitted.");
-    return fetchJsonApi("/api/node/video-outpaint-prepare", jsonBody(body), "Prepare outpaint canvas");
+    if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintLocalMasks !== true) throw new Error("Restart the backend to activate local Seedance canvas preparation. No generation was submitted.");
+    return fetchJsonApi("/api/node/video-outpaint-prepare", jsonBody(body), "Prepare outpaint canvas", { retryLocalApi: false });
+  },
+  async finishVideoOutpaint(body) {
+    const health = await getJson("/api/health", "Could not verify outpaint matching support.");
+    if (health.routes?.videoOutpaintMatching !== true) throw new Error("Restart the backend to activate outpaint matching and QC. No generation was submitted.");
+    return fetchJsonApi("/api/node/video-outpaint-finish", jsonBody(body), "Match and QC outpainting", { retryLocalApi: false, timeoutMs: 600000 });
   },
   async utilityVideo(body, label = "Utility video generation") {
     if (body.model === "Video Outpaint") {
+      label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      if (health.routes?.videoOutpaintMatching !== true) throw new Error("Restart the backend to activate automatic outpaint matching and QC. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5") {
+        if (health.routes?.videoOutpaintFullResolution !== true) throw new Error("Restart the backend to activate full-resolution Seedance outpainting. No generation was submitted.");
+        if (health.routes?.videoOutpaintLocalMasks !== true) throw new Error("Restart the backend to activate local Seedance canvas preparation. No generation was submitted.");
         if (health.routes?.videoOutpaintSeedance !== true) throw new Error("Restart the backend to activate Seedance outpainting. No generation was submitted.");
         return nodeApi.generateVideo(seedanceOutpaintRequest(body), label);
       }

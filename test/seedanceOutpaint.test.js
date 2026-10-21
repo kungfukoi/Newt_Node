@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVideoOutpaintSettings, planVideoOutpaint, videoOutpaintFingerprint, seedanceOutpaintRequest, seedanceOutpaintPrompt } from "../src/videoOutpaint.js";
+import { normalizeVideoOutpaintSettings, normalizeUtilityOutpaintSettings, videoOutpaintModels, planVideoOutpaint, videoOutpaintFingerprint, seedanceOutpaintRequest, seedanceOutpaintPrompt } from "../src/videoOutpaint.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "../server/seedance-outpaint.js";
 import { buildOutpaintAnalysisPrompt } from "../src/videoOutpaintPrompt.js";
 import { recoveredVideoPatches } from "../src/remoteVideoRecovery.js";
@@ -10,12 +10,32 @@ const settings = { model: "seedance-2.5", seedanceResolution: "1080p" };
 const prepared = { sourceUrl: "/outputs/source.mp4", videoUrl: "/outputs/padded.mp4", maskVideoUrl: "/outputs/mask.mp4", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) };
 const body = seedanceOutpaintRequest({ prompt: "Continue the moving foliage", referenceVideoUrls: [prepared.sourceUrl], referenceImageUrls: ["/outputs/look.png"], videoOutpaint: settings, wanVaceInpainting: { seed: "42" }, projectId: "project", nodeId: "node" });
 
-test("legacy workflows keep Wan and engine changes invalidate preparation", () => {
+test("legacy preparation timing remains readable and engine changes invalidate preparation", () => {
   assert.equal(normalizeVideoOutpaintSettings().model, "wan-vace");
   assert.notEqual(videoOutpaintFingerprint("source", {}), videoOutpaintFingerprint("source", settings));
   assert.equal(prepared.plan.frames, 96); assert.equal(prepared.plan.duration, 4);
-  assert.equal(prepared.plan.loopFrames, 40); assert.equal(prepared.plan.looped, true);
+  assert.equal(prepared.plan.outputFrames, 40); assert.equal(prepared.plan.looped, false); assert.equal(prepared.plan.tailPadded, true);
   assert.equal(planVideoOutpaint({ width: 640, height: 360, fps: 16, duration: 2 }, settings).fps, 24);
+});
+
+test("Utility defaults and saved Wan settings select only Seedance Edit without altering old results", () => {
+  assert.deepEqual(videoOutpaintModels, [["seedance-2.5", "Seedance Edit"]]);
+  assert.equal(normalizeUtilityOutpaintSettings().model, "seedance-2.5");
+  const old = { model: "wan-vace", frame: { x: 0, y: -0.2, width: 1 }, feather: 48 };
+  const current = normalizeUtilityOutpaintSettings(old);
+  assert.equal(current.model, "seedance-2.5"); assert.equal(current.feather, 48);
+  assert.deepEqual(current.frame, old.frame); assert.equal(old.model, "wan-vace");
+  const raw = { videoOutpaint: { rawVideoUrl: "/old.mp4", prepared: { sourceUrl: "/source.mp4", plan: { settings: old } } } };
+  assert.equal(normalizeVideoOutpaintSettings(raw.videoOutpaint.prepared.plan.settings).model, "wan-vace");
+});
+
+test("Seedance pads only its submission and delivers the real selected source duration", () => {
+  const full = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { ...settings, duration: 4 });
+  assert.equal(full.outputFrames, 96); assert.equal(full.outputDuration, 4);
+  assert.equal(full.frames, 132); assert.equal(full.duration, 5.5); assert.equal(full.prerollFrames, 24);
+  assert.equal(full.looped, false);
+  const selected = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { ...settings, duration: 1.25 });
+  assert.equal(selected.outputFrames, 30); assert.equal(selected.frames, 96);
 });
 
 test("one Seedance resolution controls generation and export dimensions, overriding old delivery settings", () => {
@@ -23,8 +43,10 @@ test("one Seedance resolution controls generation and export dimensions, overrid
     const plan = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { model: "seedance-2.5", seedanceResolution: resolution, outputSize: "1080p" });
     assert.equal(plan.settings.seedanceResolution, resolution); assert.equal(plan.settings.outputSize, resolution);
     assert.deepEqual([plan.outputWidth, plan.outputHeight], [width, height]);
+    assert.deepEqual([plan.width, plan.height], [width, height]);
   }
-  assert.equal(normalizeVideoOutpaintSettings({ model: "seedance-2.5", seedanceResolution: "auto" }).outputSize, "720p");
+  assert.equal(normalizeVideoOutpaintSettings({ model: "seedance-2.5", seedanceResolution: "auto" }).outputSize, "1080p");
+  assert.equal(planVideoOutpaint({ width: 1920, height: 1080, fps: 60, duration: 2 }, settings).fps, 60);
 });
 
 test("Seedance editing submits only the padded source with explicit border extrapolation and keeps workflow context", async () => {
@@ -38,7 +60,7 @@ test("Seedance editing submits only the padded source with explicit border extra
     assert.equal(result.body.projectId, "project"); assert.equal(result.body.nodeId, "node");
     assert.equal(result.body.videoOutpaintContext, prepared);
     assert.match(result.body.prompt, /solid black padded expansion/); assert.match(result.body.prompt, /context clues/); assert.match(result.body.prompt, /parallax/);
-    assert.match(result.body.prompt, /Continue the moving foliage/); assert.doesNotMatch(result.body.prompt, /mask/);
+    assert.match(result.body.prompt, /Continue the moving foliage/); assert.doesNotMatch(result.body.prompt, /@Video2|@Image2/);
     assert.equal(result.body.outpaintUserPrompt, body.prompt);
   }
 });
@@ -54,12 +76,41 @@ test("unsupported providers, missing keys, missing sources and blank prompts rej
   assert.equal(crop.prepared.plan.needsOutpaint, false);
 });
 
+test("Seedance receives the inward generation overlap canvas while finishing retains the full reference", async () => {
+  const overlap = { ...prepared, generationVideoUrl: "/outputs/overlap.mp4", plan: { ...prepared.plan, generationContentRect: { x: 0, y: 700, width: 1080, height: 500 } } };
+  const result = await prepareSeedanceOutpaint(body, { provider: "atlas", apiKey: "fixture", prepare: async () => overlap });
+  assert.deepEqual(result.body.referenceVideoUrls, [overlap.generationVideoUrl]);
+  assert.equal(result.body.videoOutpaintContext.videoUrl, prepared.videoUrl);
+  assert.match(result.body.prompt, /inward overlap strip reserved/);
+  assert.match(result.body.prompt, /A subject appearing later must never be painted into earlier frames/);
+  assert.ok(Buffer.byteLength(result.body.prompt) < 3900);
+  const longPrompt = "Long direction ".repeat(500);
+  const fitted = await prepareSeedanceOutpaint({ ...body, prompt: longPrompt }, { provider: "atlas", apiKey: "fixture", prepare: async () => overlap });
+  assert.ok(Buffer.byteLength(fitted.body.prompt) <= 3900);
+  assert.equal(fitted.body.outpaintUserPrompt, longPrompt);
+  assert.equal(fitted.body.outpaintPromptCompacted, true);
+  assert.match(fitted.body.prompt, /PREPARED CANVAS/);
+});
+
+test("Seedance edit never receives a preparation fill or mask video", async () => {
+  const local = { ...prepared, maskImageUrl: "/outputs/local-matte.png", filledVideoUrl: "/outputs/old-wan-fill.mov" };
+  const result = await prepareSeedanceOutpaint(body, { provider: "atlas", apiKey: "fixture", prepare: async () => local });
+  assert.equal(result.body.seedanceTask, "edit");
+  assert.deepEqual(result.body.referenceVideoUrls, [prepared.videoUrl]);
+  assert.deepEqual(result.body.referenceImageUrls, body.referenceImageUrls);
+  assert.doesNotMatch(result.body.prompt, /@Video2|already contains a complete masked/);
+  assert.match(result.body.prompt, /CONTEXT-ONLY EXTENSION/);
+});
+
 test("analysis uses the same visual context and mask reasoning but writes for Seedance's unmasked edit input", () => {
   const wan = buildOutpaintAnalysisPrompt({ mode: "guided" });
   const seedance = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", guidance: "Continue the trees" });
   assert.match(wan, /white pixels request generation/); assert.match(seedance, /white pixels request generation/);
   assert.match(seedance, /extrapolate from visible context clues/); assert.match(seedance, /NOT the analysis mask/);
   assert.match(seedance, /Continue the trees/); assert.match(seedanceOutpaintPrompt("Manual direction"), /Manual direction/);
+  const repair = seedanceOutpaintPrompt("User direction", true, [{ category: "seam", description: "Coat join is displaced" }]);
+  assert.match(repair, /TECHNICAL QUALITY REPAIR/); assert.match(repair, /exact user framing and creative direction/); assert.ok(repair.endsWith("User direction"));
+  assert.match(repair, /Coat join is displaced/);
 });
 
 test("finishing preserves raw paid output on failure and records model and restoration metadata", async () => {

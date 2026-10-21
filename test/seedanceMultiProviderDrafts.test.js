@@ -115,13 +115,23 @@ function finalizerHarness() {
   }, async patch => checkpoints.push(patch)) };
 }
 
-test("outpainting reuses real Fal/Atlas editing acceptance with padded input, scene instructions and durable context", async () => {
+test("older automatic QC retry requests are rejected before uploads or provider submission", async () => {
+  const h = routeHarness("atlas");
+  const res = await h.run({ videoOutpaintUtility: true, videoOutpaintRepair: true });
+  assert.equal(res.statusCode, 400); assert.match(res.body.error, /QC fill generation is disabled/);
+  assert.equal(h.uploads.length, 0); assert.equal(h.spec, undefined);
+});
+
+test("outpainting reuses real Fal/Atlas editing acceptance with source canvas, scene instructions and durable context", async () => {
   for (const provider of ["fal", "atlas"]) {
     const h = routeHarness(provider);
     const res = await h.run({ videoOutpaintUtility: true, videoOutpaint: { model: "seedance-2.5" }, referenceVideoUrls: [outpaintFixture.sourceUrl], seedanceDraft: false, prompt: "Continue the floor" });
     assert.equal(res.statusCode, 202);
     assert.equal(h.spec.settings.seedanceTask, "edit"); assert.equal(h.spec.body.videoOutpaintContext.videoUrl, outpaintFixture.videoUrl);
     assert.equal(h.spec.prompt, "Continue the floor"); assert.match(h.spec.submittedPrompt, /solid black padded expansion/);
+    assert.match(h.spec.submittedPrompt, /subject appearing later must never be painted into earlier frames/);
+    assert.match(h.spec.submittedPrompt, /PREPARED CANVAS/);
+    assert.doesNotMatch(h.spec.submittedPrompt, /Director detail compacted/);
     assert.equal(h.spec.cost.amountUsd, null); assert.equal(h.spec.provider, provider);
     assert.ok(h.uploads.some(upload => upload.url === outpaintFixture.videoUrl));
     assert.ok(h.uploads.every(upload => upload.url !== outpaintFixture.maskVideoUrl));

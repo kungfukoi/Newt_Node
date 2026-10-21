@@ -10189,6 +10189,24 @@ video.newtnode-video-fallback {
   overflow-wrap: anywhere;
 }
 
+.node-row > button.outpaint-user-action {
+  background: #ddc631;
+  border-color: #ddc631;
+  color: #111;
+}
+
+.node-row > button.outpaint-user-action:hover:not(:disabled) {
+  background: #ddc631;
+}
+
+.node-row > button.outpaint-user-action:disabled {
+  background: #ddc631;
+  border-color: #ddc631;
+  color: #111;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .utility-lora-stack {
   display: grid;
   width: 100%;

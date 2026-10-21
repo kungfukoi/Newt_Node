@@ -4,13 +4,23 @@ const imageFormats = [
 ];
 
 const videoFormats = [
+  { value: "source", label: "Same as input (no conversion)" },
   { value: "mp4", label: "MP4 (H.264)" },
   { value: "prores", label: "ProRes 422 HQ (.mov)" }
 ];
 
-export function outputExportFormatOptions(mediaType = "") {
+export function preferredOutputExportFormat(data, mediaType, item, { saving = false } = {}) {
+  const requested = normalizeOutputExportFormat(mediaType, mediaType === "video" ? data.outputVideoFormat : data.outputImageFormat);
+  if (mediaType === "video" && !data.outputVideoFormatExplicit) return "source";
+  if (mediaType === "video" && item?.videoOutpaint?.outputFormat?.startsWith("ProRes 4444")) {
+    if (saving && requested === "prores") return "source";
+  }
+  return requested;
+}
+
+export function outputExportFormatOptions(mediaType = "", item) {
   if (mediaType === "image") return imageFormats;
-  if (mediaType === "video") return videoFormats;
+  if (mediaType === "video") return item?.videoOutpaint?.outputFormat?.startsWith("ProRes 4444") ? videoFormats.map(option => option.value === "prores" ? { ...option, label: "MOV (ProRes 4444 XQ master)" } : option) : videoFormats;
   return [];
 }
 

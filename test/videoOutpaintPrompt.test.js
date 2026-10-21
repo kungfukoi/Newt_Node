@@ -40,6 +40,14 @@ test("analysis records provider, usage, source/mask, direction and workflow with
   assert.equal(result.record.cost.status, "unpriced");
 });
 
+test("Seedance prompt analysis uses only the source video and describes the local matte", async () => {
+  const result = await harness().call({ ...body, maskVideoUrl: undefined, maskImageUrl: "/outputs/mask.png", outpaintModel: "seedance-2.5" });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.analysis.inputs.map(i => i.url), [body.sourceVideoUrl]);
+  assert.match(result.analysis.prompt, /static matte is not attached/);
+  assert.match(result.analysis.prompt, /new foreground section/);
+});
+
 test("missing mask, remote sources and manual mode never call paid analysis", async () => {
   for (const patch of [{ maskVideoUrl: "" }, { sourceVideoUrl: "https://example.com/video.mp4" }, { mode: "manual" }]) {
     const result = await harness({ analyze: () => { assert.fail("Must not submit"); } }).call({ ...body, ...patch });
@@ -56,4 +64,24 @@ test("provider failures and empty responses leave the caller's prompt untouched"
   assert.equal(empty.status, 500);
   assert.match(empty.data.error, /existing prompt was preserved/);
   assert.equal(empty.record, undefined);
+});
+
+test("Seedance drafting incorporates verified per-frame entrances and fails closed on incomplete analysis", async () => {
+  const request = { ...body, maskVideoUrl: undefined, maskImageUrl: "/outputs/mask.png", outpaintModel: "seedance-2.5" };
+  const inspected = await harness({ inspectFrames: async () => ({ text: "Frames 0–20: person absent. Frame 21: coat reaches bottom boundary.", frameCount: 48, fps: 24, prerollFrames: 24 }) }).call(request);
+  assert.match(inspected.analysis.prompt, /Frames 0–20: person absent/);
+  assert.match(inspected.analysis.prompt, /Before a person walks in/);
+  assert.equal(inspected.data.frameAnalysis.frameCount, 48);
+  const failed = await harness({ inspectFrames: async () => { throw new Error("Missing frame evidence"); }, analyze: () => assert.fail("Must preserve the old prompt") }).call(request);
+  assert.equal(failed.status, 500); assert.match(failed.data.error, /Missing frame evidence/);
+});
+
+test("oversized model drafts are fitted before returning and their original text remains in History", async () => {
+  const draft = "Continue the supported surfaces. ".repeat(100) + "Before 2 seconds extend background only.";
+  const result = await harness({ analyze: async () => ({ text: draft, provider: "fal", model: "vision", usages: [{ input_tokens: 100 }] }) }).call({ ...body, outpaintModel: "seedance-2.5" });
+  assert.equal(result.status, 200);
+  assert.ok(Buffer.byteLength(result.data.text) <= 1100);
+  assert.match(result.data.text, /Before 2 seconds/);
+  assert.equal(result.record.originalDraft, draft);
+  assert.equal(result.record.text, result.data.text);
 });

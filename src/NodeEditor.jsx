@@ -1,5 +1,7 @@
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
-import { normalizeVideoOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
+import { outpaintNeedsFinishing, outpaintOutputError, outpaintCanRefinish, outpaintCanRegenerate } from "./outpaintQuality.js";
+import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
+import { normalizeUtilityOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
 import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
 import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
 import { videoReferenceLabel } from "./videoReferenceLabels.js";
@@ -119,7 +121,7 @@ import { assemblyRenderPayload, createAssemblyState, normalizeAssemblyState } fr
 import { selectAssemblyPreviewSource } from "./assembly/assemblyPreview.js";
 import { subscribeAssemblyLiveFrame } from "./assembly/assemblyLiveFrameBus.js";
 import { apiErrorMessage } from "./apiErrors.js";
-import { normalizeOutputExportFormat, outputExportFormatOptions } from "./outputExport.js";
+import { normalizeOutputExportFormat, outputExportFormatOptions, preferredOutputExportFormat } from "./outputExport.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -6925,10 +6927,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     updateNode(outputTarget.node.id, { status: "error", error: message || "Output save failed." });
   }
 
-  async function prepareOutpaintCanvas(node, request) {
-    const { response, data } = await nodeApi.prepareVideoOutpaint({ ...request, ...workflowContextPayload(workflowRequestContext()), nodeId: node.id, nodeTitle: node.data.title });
-    if (!response.ok) throw new Error(data.error || "Could not prepare outpainting canvas.");
-    return data;
+  async function prepareOutpaintCanvas(node, request, preferredOutputTarget) {
+    const outputTarget = request.rawVideoUrl ? preferredOutputTarget || outputTargetForSourceNode(node) : null;
+    const context = workflowRequestContext(outputTarget?.context || {});
+    const payload = { prompt: node.data.prompt || "", outpaintGuidance: node.data.outpaintGuidance || "", ...request, ...workflowContextPayload(context), nodeId: node.id, nodeTitle: node.data.title };
+    if (outputTarget) markOutputTargetRunning(outputTarget);
+    try {
+      const { response, data } = request.rawVideoUrl
+        ? await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Outpaint finishing and QC" }, progress => nodeApi.finishVideoOutpaint({ ...payload, ...progress }))
+        : await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Canvas and mask preparation" }, progress => nodeApi.prepareVideoOutpaint({ ...payload, ...progress }));
+      if (!response.ok) throw new Error(data.error || "Could not prepare or finish outpainting.");
+      if (request.rawVideoUrl) markOutputTargetSaved(outputTarget, [data], "video");
+      loadOutputHistory();
+      return data;
+    } catch (error) { markOutputTargetFailed(outputTarget, error.message); throw error; }
   }
 
   async function analyzeOutpaintPrompt(node, request) {
@@ -6941,6 +6953,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function markOutputTargetSaved(outputTarget, generatedItems = [], resultType = "") {
     if (!outputTarget?.node?.id) return;
     const items = (Array.isArray(generatedItems) ? generatedItems : [generatedItems]).filter((item) => item?.url);
+    const rejected = items.find(outpaintNeedsFinishing);
+    if (rejected) { updateNode(outputTarget.node.id, { status: "error", error: outpaintOutputError(rejected) }); return; }
     const primary = items[0] || null;
     const mediaType = resultType || primary?.type || "";
     const fallbackWarning = items.find(item => item.storageFallback)?.warning || "";
@@ -6963,10 +6977,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!connection?.source) throw new Error("Connect a source to Output.");
     const sourceNode = connection.source;
     const outputItem = connectedOutputItem(sourceNode, connection.edge);
+    if (outpaintNeedsFinishing(outputItem)) throw new Error(outpaintOutputError(outputItem));
     const sourceText = outputItem?.url ? "" : rawConnectedTextForSource(sourceNode);
     if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
     const sourceMediaType = outputItem?.type || (sourceText ? "text" : "");
-    const outputFormat = outputExportFormatForNode(outputNode.data, sourceMediaType);
+    const outputFormat = preferredOutputExportFormat(outputNode.data, sourceMediaType, outputItem, { saving: true });
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
     const { response, data } = await nodeApi.saveOutput({
       sourceUrl: outputItem?.url || "",
@@ -7187,13 +7202,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
-      outputTarget = outputTargetForSourceNode(currentNode, currentIncomingByNode);
+      const requestedOutput = runOptions?.outputTargetNodeId ? nodesRef.current.find(n => n.id === runOptions.outputTargetNodeId && n.type === "output") : null;
+      outputTarget = requestedOutput ? { node: requestedOutput, context: outputTargetContextFromOutputNode(requestedOutput, currentNode, "", currentIncomingByNode) } : outputTargetForSourceNode(currentNode, currentIncomingByNode);
       requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
       if (token.stopped) return { status: "error" };
       updateNode(currentNode.id, {
         status: "running",
         error: "",
+        ...(currentNode.type === "utility" && currentNode.data.utilityVideoModel === videoOutpaintModelName ? { videoOutpaintStage: "extension", videoOutpaintQcFindings: [] } : {}),
         ...(currentNode.type === "explore" ? { exploreStopRequested: false } : {}),
         ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {}),
         ...(currentNode.type === "skillDirector" ? {
@@ -7254,6 +7271,32 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "output") {
+        const connection = incoming.sourceIn?.at(-1), source = connection?.source;
+        const isOutpaint = source?.type === "utility" && source.data.utilityMode === "video" && source.data.utilityVideoModel === "Video Outpaint";
+        const item = isOutpaint ? connectedOutputItem(source, connection.edge) : null;
+        if (isOutpaint && (!item || outpaintNeedsFinishing(item))) {
+          if (source.data.status === "running") throw new Error("Outpainting is already running. Wait for its self-QC to finish.");
+          const sourceUrl = connectedAssetUrls(currentIncomingByNode[source.id]?.referenceVideoIn || []).at(-1);
+          if (outpaintCanRefinish(item, source.data.videoOutpaint, sourceUrl)) {
+            updateNode(source.id, { status: "running", videoOutpaintStage: "qc-edits", videoOutpaintQcFindings: [], error: "" });
+            let refinished;
+            try {
+              refinished = await prepareOutpaintCanvas(source, { rawVideoUrl: item.videoOutpaint.rawVideoUrl, prepared: item.videoOutpaint.prepared, videoOutpaint: source.data.videoOutpaint }, { node: currentNode, context: outputTargetContextFromOutputNode(currentNode, source, "", currentIncomingByNode) });
+            } catch (error) { updateNode(source.id, { status: "error", error: error.message }); throw error; }
+            const failed = outpaintNeedsFinishing(refinished);
+            const resultItems = [...existingResultItemsForNode(source, "video"), refinished];
+            updateNode(source.id, { status: failed ? "error" : "complete", error: failed ? outpaintOutputError(refinished) : "", resultItems, selectedResultIndex: resultItems.length - 1, resultUrl: refinished.url, resultType: "video" });
+            if (token.stopped) return { status: "error" };
+            if (!failed) return { status: "complete", resultItems: [refinished] };
+            if (!outpaintCanRegenerate(refinished)) throw new Error(outpaintOutputError(refinished));
+          }
+          const outcome = await runNode(source, { outputTargetNodeId: currentNode.id });
+          if (token.stopped) return { status: "error" };
+          if (outcome?.status !== "complete") throw outcome?.error || new Error("Outpainting could not complete.");
+          const rejected = outcome.resultItems?.find(outpaintNeedsFinishing);
+          if (rejected) throw new Error(outpaintOutputError(rejected));
+          return outcome;
+        }
         const saved = await runOutputNodeSave(currentNode, incoming, requestContext, currentIncomingByNode);
         const resultItems = saved.url ? [saved] : [];
         updateNode(currentNode.id, {
@@ -7731,41 +7774,51 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
 
         const utilityResultType = utilityOutputType(currentNode);
+        const attemptedItems = [];
         const runs = nodeRunIndexes(batchCount).map((index) =>
-          runUtilityVideoGeneration({
-            node: currentNode,
+          runOutpaintRetries({ node: currentNode, isStopped: () => token.stopped,
+            onRetry: (attempt, findings) => updateNode(currentNode.id, { videoOutpaintStage: "qc-edits", videoOutpaintQcFindings: findings }),
+            onResult: items => {
+              attemptedItems.push(...items);
+              const { resultItems } = appendedNodeResultState(previousUtilityResults, attemptedItems, utilityResultType);
+              updateNode(currentNode.id, { resultItems, resultUrl: items.at(-1)?.url || "", selectedResultIndex: resultItems.length - 1, resultType: utilityResultType });
+              loadOutputHistory();
+            }, generate: attemptNode => runUtilityVideoGeneration({
+            node: attemptNode,
             prompt: basePrompt,
             incoming,
             incomingByNode: currentIncomingByNode,
             workflowContext: requestContext,
             index
-          })
+          }) })
         );
         const settled = await Promise.allSettled(runs);
         const successes = fulfilledRunValues(settled, { flatten: true });
         const failures = rejectedRunResults(settled);
         ensureRunSuccesses(successes, failures, "Utility video failed.");
-        const { resultItems, firstNewIndex } = appendedNodeResultState(previousUtilityResults, successes, utilityResultType);
+        const { resultItems } = appendedNodeResultState(previousUtilityResults, attemptedItems.length ? attemptedItems : successes, utilityResultType);
+        const firstNewIndex = resultItems.findLastIndex(item => item.url === successes[0].url);
+        const rejected = successes.find(outpaintNeedsFinishing);
         const wanWarpSourceSegments =
           isUtilityVideoStitchModel(currentNode.data.utilityVideoModel)
             ? connectedWanWarpSegments(incoming.referenceVideoIn, currentIncomingByNode)
             : [];
 
         updateNode(currentNode.id, {
-          status: "complete",
+          status: rejected ? "error" : "complete",
           resultUrl: successes[0].url,
           resultItems,
           selectedResultIndex: firstNewIndex,
           resultText: resultTextFromItems(successes),
           resultType: utilityResultType,
-          error: batchRunError(utilityResultType, batchCount, successes, failures)
+          error: rejected ? outpaintOutputError(rejected) : batchRunError(utilityResultType, batchCount, successes, failures)
         });
         markOutputTargetSaved(outputTarget, successes, utilityResultType);
         if (wanWarpSourceSegments.length) {
           syncWanSegmentPreviewVideos(wanWarpSourceSegments, successes);
         }
         loadOutputHistory();
-        return { status: "complete" };
+        return { status: "complete", resultItems: successes };
       }
 
       if (currentNode.type === "edit") {
@@ -11444,8 +11497,8 @@ function OutputNodeBody({
   const sourcePort = config.input.find((port) => port.id === "sourceIn");
   const sourceSummary = outputSourceSummary(incoming.sourceIn);
   const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn, incomingByNode);
-  const formatOptions = outputExportFormatOptions(sourceInfo.mediaType);
-  const outputFormat = outputExportFormatForNode(node.data, sourceInfo.mediaType);
+  const formatOptions = outputExportFormatOptions(sourceInfo.mediaType, sourceInfo.outputItem);
+  const outputFormat = preferredOutputExportFormat(node.data, sourceInfo.mediaType, sourceInfo.outputItem);
   const outputFormatDataKey = sourceInfo.mediaType === "video" ? "outputVideoFormat" : "outputImageFormat";
   const [filenamePreview, setFilenamePreview] = React.useState({ status: "idle", fileName: "", filePath: "", error: "" });
   const pathInputRef = React.useRef(null);
@@ -11597,7 +11650,7 @@ function OutputNodeBody({
         <NodeRow label="Format">
           <select
             value={outputFormat}
-            onChange={(event) => onUpdate(node.id, { [outputFormatDataKey]: event.target.value, error: "" })}
+            onChange={(event) => onUpdate(node.id, { [outputFormatDataKey]: event.target.value, ...(sourceInfo.mediaType === "video" ? { outputVideoFormatExplicit: true } : {}), error: "" })}
           >
             {formatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -14924,7 +14977,7 @@ function NodeBody({
           </div>
         )}
         <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun}>
-          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
+          {running ? (isOutpaintVideo ? (isOutpaintCropOnly ? "Exporting crop..." : node.data.videoOutpaintStage === "qc-edits" ? "QC Edits..." : "Generating Fill...") : isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
@@ -14964,7 +15017,7 @@ function NodeBody({
                 </NodeRow>
               )}
               {isOutpaintVideo ? (
-                <VideoOutpaintControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
+                <VideoOutpaintControls generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
               ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
                   <select
@@ -18307,7 +18360,7 @@ function createDefaultNodeData(type, label, count) {
       outputPathMode: "project-default",
       outputFileName: "$node_$date_$time",
       outputImageFormat: "png",
-      outputVideoFormat: "mp4",
+      outputVideoFormat: "source",
       resultUrl: "",
       resultItems: [],
       selectedResultIndex: 0,
@@ -18638,7 +18691,7 @@ function createDefaultNodeData(type, label, count) {
       transitionVaceAutoDownsampleMinFps: 15,
       transitionVaceInterpolatorModel: "film",
       transitionVaceTransparencyMode: "content_aware",
-      videoOutpaint: normalizeVideoOutpaintSettings(),
+      videoOutpaint: normalizeUtilityOutpaintSettings(),
       videoOutpaintSnap: true,
       outpaintPromptMode: "guided",
       outpaintGuidance: "",
@@ -21304,7 +21357,7 @@ function outputSourceSummary(items = []) {
 
 function outputExportFormatForNode(data = {}, mediaType = "") {
   if (mediaType === "image") return normalizeOutputExportFormat("image", data.outputImageFormat);
-  if (mediaType === "video") return normalizeOutputExportFormat("video", data.outputVideoFormat);
+  if (mediaType === "video") return preferredOutputExportFormat(data, "video");
   return "";
 }
 
@@ -21319,6 +21372,7 @@ function outputPreviewSourceInfo(items = [], incomingByNode = {}) {
   const sourceTitle = outputSourceNodeTitle(source, sourceLabel(source) || nodeTypeLabel(source.type) || "source");
   return {
     sourceTitle,
+    outputItem,
     sourceFileName: outputFileName || `${safeStillFrameName(sourceTitle)}${outputPreviewDefaultExtension(mediaType)}`,
     mediaType
   };
@@ -25397,7 +25451,7 @@ function normalizeUtilityData(data = {}) {
     transitionVaceAutoDownsampleMinFps: Math.max(1, Math.min(30, Number(data.transitionVaceAutoDownsampleMinFps || 15))),
     transitionVaceInterpolatorModel: normalizeChoice(data.transitionVaceInterpolatorModel, wanVaceInterpolatorOptions, "film"),
     transitionVaceTransparencyMode: normalizeChoice(data.transitionVaceTransparencyMode, wanVaceTransparencyOptions, "content_aware"),
-    videoOutpaint: normalizeVideoOutpaintSettings(data.videoOutpaint),
+    videoOutpaint: normalizeUtilityOutpaintSettings(data.videoOutpaint),
     videoOutpaintSnap: data.videoOutpaintSnap !== false,
     outpaintPromptMode: data.outpaintPromptMode ? normalizeOutpaintPromptMode(data.outpaintPromptMode) : (data.prompt ? "manual" : "guided"),
     outpaintGuidance: String(data.outpaintGuidance || ""),
