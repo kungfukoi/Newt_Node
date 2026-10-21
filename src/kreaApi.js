@@ -5,6 +5,7 @@ export const kreaApiBaseUrl = "https://api.krea.ai";
 
 export const kreaEndpoints = Object.freeze({
   image: Object.freeze({
+    "Ideogram 4.5": "/generate/image/ideogram/ideogram-4.5",
     "Z-Image": "/generate/image/z-image/z-image",
     "Seedream 5.0 Pro": "/generate/image/bytedance/seedream-5-pro",
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
@@ -16,6 +17,7 @@ export const kreaEndpoints = Object.freeze({
     "Krea 2 Large": "/generate/image/krea/krea-2/large"
   }),
   video: Object.freeze({
+    "FLUX 3 Max": "/generate/video/black-forest-labs/flux-3-max",
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
     "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
     "MiniMax H3": "/generate/video/minimax/hailuo-3",
@@ -24,10 +26,13 @@ export const kreaEndpoints = Object.freeze({
     "Gemini Omni Flash": "/generate/video/google/gemini-omni-flash"
   }),
   model3d: Object.freeze({
+    "Rodin 2.5": "/generate/3d/hyper3d/rodin-2.5",
     "Hunyuan 3D 3.1 Pro": "/generate/3d/tencent/hunyuan3d-3.1-pro"
   }),
   videoEnhance: Object.freeze({
-    "Topaz Video Upscale": "/enhance/video/topaz/video"
+    "Topaz Video Upscale": "/generate/enhance/topaz/video-upscale",
+    "Flux Video Upscale": "/generate/enhance/black-forest-labs/flux-video-upscale",
+    "Topaz SDR to HDR": "/generate/enhance/topaz/hyperion"
   })
 });
 
@@ -88,6 +93,11 @@ export function buildKreaImageInput({
   const normalizedAspectRatio = normalizeKreaImageAspectRatio(modelName, aspectRatio);
   const refs = referenceUrls.filter(Boolean);
   const input = { prompt: String(prompt || "").trim() };
+
+  if (modelName === "Ideogram 4.5") {
+    if (refs.length > 5) throw Object.assign(new Error("Krea Ideogram 4.5 supports at most five reference images."), { status: 400 });
+    return { ...input, quality: "high", image_urls: refs, aspect_ratio: normalizedAspectRatio, resolution: "2K" };
+  }
 
   if (isOpenAiImage25Model(modelName)) {
     if (refs.length > 10) throw Object.assign(new Error("Krea Image 2.5 supports at most 10 references."), { status: 400 });
@@ -154,6 +164,7 @@ export function buildKreaImageInput({
 }
 
 export function normalizeKreaImageResolution(modelName, value) {
+  if (modelName === "Ideogram 4.5") return "2K";
   const requested = String(value || "2K").toUpperCase();
   if (modelName === "Z-Image" || modelName === "Krea 2 Large") return "1K";
   if (modelName === "Seedream 5.0 Pro") return requested === "1K" ? "1.5K" : "2K";
@@ -163,7 +174,9 @@ export function normalizeKreaImageResolution(modelName, value) {
 export function normalizeKreaImageAspectRatio(modelName, value) {
   const ratio = String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   const options =
-    modelName === "Z-Image"
+    modelName === "Ideogram 4.5"
+      ? ["1:1", "4:3", "3:2", "16:9", "2.4:1", "4:5", "2:3", "9:16"]
+      : modelName === "Z-Image"
       ? ["1:1", "4:3", "2:3", "16:9", "9:16"]
       : modelName === "Krea 2 Large"
         ? ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "2:3", "9:16"]

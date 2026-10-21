@@ -1,3 +1,5 @@
+import { requestKreaLlm } from "./krea-llm.js";
+import { buildKreaEnhanceInput, kreaEnhanceEndpoint } from "./krea-enhance.js";
 import { createVideoOutpaintService } from "./video-outpaint.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
@@ -954,7 +956,7 @@ registerStoryboardRoutes({ post: (route, handler) => app.post(route === "/api/no
   getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }),
   connection: () => {
     const provider = requireActiveLlmProvider();
-    return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : openAiTextApiKey };
+    return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : openAiTextApiKey };
   }
 });
 
@@ -1190,6 +1192,7 @@ function buildHealthPayload() {
       imageObjectSelection: true,
       ideogram45: true,
       flux3Max: true,
+      kreaModelProviders: true,
       timelineExtractFrame: true,
       flux3: true,
       nanoBanana21: true,
@@ -3728,7 +3731,9 @@ app.post("/api/node/process-text", async (req, res) => {
     }
 
     const activeProvider = requireActiveLlmProvider();
-    const result = activeProvider === "openai"
+    const result = activeProvider === "krea"
+      ? await processTextWithKrea({ mode, messages, text, textInputs, imageInputs, videoInputs })
+      : activeProvider === "openai"
       ? await processTextWithOpenAi({ mode, messages, text, textInputs, imageInputs, videoInputs })
       : activeProvider === "atlas"
         ? await processTextWithAtlas({ mode, messages, text, textInputs, imageInputs, videoInputs })
@@ -5360,6 +5365,15 @@ app.post("/api/node/utility-image", async (req, res) => {
       return res.status(400).json({ error: "Color ID to Matte is generated locally from the picker." });
     }
 
+    if (runtimeModelProviderPreferences.utilityImage === "krea") {
+      if (selectedModel.displayName === "Image to Color ID") {
+        if (!process.env.KREA_API_KEY) throw httpError(400, missingModelProviderApiKeyMessage("Utility Image", "krea"));
+        const imageUrl = firstLocalOutput(req.body.imageUrls);
+        if (!imageUrl) throw httpError(400, "Image to Color ID requires a connected image.");
+        return runImageToIdUtilityImage(req, res, { imageUrl, selectedModel });
+      }
+      return runKreaEnhanceUtility(req, res, selectedModel, "image");
+    }
     if (!process.env.FAL_KEY) {
       return res.status(400).json({
         error: `${selectedModel.displayName} is a Fal-only utility and needs an enabled Fal API key in Settings. Krea does not expose this utility model.`
@@ -5698,7 +5712,38 @@ async function runTopazImageUpscaler(req, res, { imageUrl, selectedModel }) {
   });
 }
 
+async function runKreaEnhanceUtility(req, res, selectedModel, mediaType) {
+  const endpoint = kreaEnhanceEndpoint(selectedModel.displayName, req.body);
+  if (!endpoint) throw httpError(400, `${selectedModel.displayName} is unavailable with Krea. Change the Utility ${mediaType === "image" ? "Image" : "Video"} provider in Settings.`);
+  if (!process.env.KREA_API_KEY) throw httpError(400, missingModelProviderApiKeyMessage("Utility " + mediaType, "krea"));
+  const url = firstLocalOutput(mediaType === "image" ? req.body.imageUrls : req.body.referenceVideoUrls);
+  if (!url) throw httpError(400, `${selectedModel.displayName} requires a connected ${mediaType}.`);
+  const source = await resolveLocalAssetPath(url);
+  const metadata = mediaType === "image" ? imageDimensionsFromBuffer(await readFileWithRetry(source.filePath), mimeForExtension(path.extname(source.filePath))) : await probeVideoFile(source.filePath);
+  if (!metadata?.width || !metadata?.height) throw httpError(400, "Could not read source dimensions for Krea enhancement.");
+  if (selectedModel.displayName === "Flux Video Upscale" && metadata.duration > 20) throw httpError(400, "Flux Video Upscale accepts videos up to 20 seconds long.");
+  if (selectedModel.displayName === "Topaz SDR to HDR" && metadata.duration > 300) throw httpError(400, "Topaz SDR to HDR accepts videos up to 5 minutes long.");
+  // Validate provider-specific model/settings before uploading or submitting paid work.
+  const input = buildKreaEnhanceInput(selectedModel.displayName, req.body, metadata, url);
+  input[mediaType === "image" ? "image_url" : "video_url"] = await uploadLocalOutputToKrea(url);
+  const result = await runKreaGeneration({ endpoint, input, label: selectedModel.displayName });
+  const remoteUrl = extractKreaJobResultUrl(result.job);
+  if (!remoteUrl) throw httpError(502, `Krea returned no ${mediaType} URL. Check Krea history before rerunning.`);
+  const prores = input.video_output_preset === "prores-422-hq";
+  const remote = { url: remoteUrl, content_type: mediaType === "image" ? input.output_format === "jpg" ? "image/jpeg" : "image/png" : prores ? "video/quicktime" : "video/mp4" };
+  const output = mediaType === "image" ? await downloadImage(req, remoteUrl, "krea-topaz-image", remote.content_type) : await downloadVideo(req, remoteUrl, "krea-enhanced-video", { extension: prores ? ".mov" : ".mp4" });
+  const cost = { amountUsd: null, currency: "USD", pricingStatus: "unpriced", mediaType, endpoint, unit: "request", units: 1, pricingBasis: "Krea enhancement; no verified local price estimate", pricingSource: "krea-openapi-2026-10-21" };
+  const settings = { ...input, runtimeProvider: "krea", sourceWidth: metadata.width, sourceHeight: metadata.height };
+  delete settings.image_url; delete settings.video_url;
+  const enriched = mediaType === "video" ? enrichVideoMetadata(remote, await probeVideoFile(output.filePath)) : { ...remote, width: output.width, height: output.height };
+  await appendHistory({ id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType, provider: "Krea", modelName: selectedModel.displayName, endpoint, mode: selectedModel.displayName,
+    prompt: req.body.prompt || "", submittedPrompt: input.prompt || "", project: projectFromBody(req.body), node: nodeFromBody(req.body), settings, cost,
+    [mediaType === "image" ? "remoteImage" : "remoteVideo"]: enriched, [mediaType === "image" ? "localImage" : "localVideo"]: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes });
+  return res.json({ requestId: result.requestId, endpoint, modelName: selectedModel.displayName, provider: "Krea", cost, [mediaType]: { ...enriched, label: selectedModel.displayName, localUrl: output.publicPath, fileName: output.fileName } });
+}
+
 async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
+  const krea = runtimeModelProviderPreferences.utilityImage === "krea";
   const source = await readLocalAsset(imageUrl);
   if (!source.mimeType.startsWith("image/")) {
     return res.status(400).json({ error: "Image to Color ID requires a connected image asset." });
@@ -5712,14 +5757,15 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
     openAiImageAspectRatios
   );
   const resolution = normalizeChoice(req.body.resolution, ["1K", "2K", "4K"], "2K");
-  const openAiImage = await generateFalOpenAiImage2FromInputs({
+  const generate = krea ? generateKreaOpenAiImage2FromInputs : generateFalOpenAiImage2FromInputs;
+  const openAiImage = await generate({
     prompt: utilityImageToIdPrompt,
     imageInputs: [{ ...source, label: "Source image for Cryptomatte-style ID matte" }],
     aspectRatio,
     resolution
   });
   const output = await downloadImage(req, openAiImage.remoteImage.url, "image-to-id", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
-  const cost = estimateOpenAiImage2Cost({
+  const cost = krea ? estimateKreaImageCost({ modelName: imageModelNames.openAiImage2, resolution, referenceCount: 1 }) : estimateOpenAiImage2Cost({
     resolution,
     size: openAiImage.size,
     quality: openAiImage.quality
@@ -5730,7 +5776,7 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
     mediaType: "image",
-    provider: "fal.ai",
+    provider: krea ? "Krea" : "fal.ai",
     modelName: selectedModel.displayName,
     endpoint: openAiImage.endpoint,
     mode: "Image to Color ID matte",
@@ -6074,6 +6120,7 @@ app.post("/api/node/utility-video", async (req, res) => {
       return runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls: [prepared.videoUrl], maskVideoUrls: [prepared.maskVideoUrl], selectedVideoModel, outpaintContext: prepared });
     }
 
+    if (runtimeModelProviderPreferences.utilityVideo === "krea") return runKreaEnhanceUtility(req, res, selectedVideoModel, "video");
     const kreaUtilitySupported =
       selectedVideoModel.provider === "fal-topaz-video-upscaler" &&
       Boolean(process.env.KREA_API_KEY);
@@ -6633,11 +6680,11 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     const generalVideoModels = providerSupportedModels("veo", "fal");
     if (generalVideoModels.includes(selectedVideoModel.displayName)) {
       const provider = runtimeModelProviderPreferences.veo;
-      if (!providerSupportedModels("veo", provider).includes(selectedVideoModel.displayName)) {
+      if (!providerSupportedModels("veo", provider).some(model => model === selectedVideoModel.displayName || model === selectedVideoModel.displayName + " (576P)")) {
         return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by the selected Video Model provider. Choose Fal in Settings > Model Providers > Video Model.` });
       }
-      const key = provider === "google" ? process.env.GOOGLE_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : process.env.FAL_KEY;
-      if (!key) return res.status(400).json({ error: missingModelProviderApiKeyMessage("Video Model", provider) });
+      const key = provider === "google" ? process.env.GOOGLE_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY;
+      if (provider !== "local" && !key) return res.status(400).json({ error: missingModelProviderApiKeyMessage("Video Model", provider) });
     }
 
     if (req.body.generateAudio !== false && filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
@@ -8292,27 +8339,36 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
 }
 
 async function runFlux3MaxVideo(req, res) {
+  const provider = runtimeModelProviderPreferences.veo;
+  const krea = provider === "krea";
+  if (!(krea ? process.env.KREA_API_KEY : process.env.FAL_KEY)) throw httpError(400, missingModelProviderApiKeyMessage("FLUX 3 Max", provider));
   const { endpoint, input, result, remoteVideo } = await generateFlux3Max(req.body, {
     isManagedUrl: isLocalAssetUrl,
     upload: async url => {
       const asset = await readLocalAsset(url);
       if (!["image/png", "image/jpeg", "image/webp"].includes(asset.mimeType)) throw httpError(400, "FLUX 3 Max frames must be PNG, JPEG, or WebP images.");
-      return uploadLocalOutputToFal(url);
+      return krea ? uploadLocalOutputToKrea(url) : uploadLocalOutputToFal(url);
     },
-    subscribe: (endpoint, options) => subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.flux3Max })
+    subscribe: async (endpoint, options) => {
+      if (!krea) return subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.flux3Max });
+      const result = await runKreaGeneration({ endpoint: kreaEndpointForModel("video", videoModelNames.flux3Max), input: options.input, label: videoModelNames.flux3Max });
+      const url = extractKreaJobResultUrl(result.job);
+      return { requestId: result.requestId, data: { video: url ? { url, content_type: "video/mp4" } : null } };
+    }
   });
   const output = await downloadVideo(req, remoteVideo.url, "flux-3-max", { stripAudio: !input.generate_audio });
-  const cost = flux3MaxCost(endpoint, input.duration);
+  const actualEndpoint = krea ? kreaEndpointForModel("video", videoModelNames.flux3Max) : endpoint;
+  const cost = { ...flux3MaxCost(actualEndpoint, input.duration), ...(krea ? { pricingSource: "krea-openapi-2026-10-21", pricingBasis: "Krea FLUX 3 Max; no verified local price estimate" } : {}) };
   await appendHistory({
     id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "video",
-    provider: "fal.ai", modelName: videoModelNames.flux3Max, endpoint,
+    provider: krea ? "Krea" : "fal.ai", modelName: videoModelNames.flux3Max, endpoint: actualEndpoint,
     mode: input.keyframes ? "keyframes-to-video" : "text-to-video", prompt: input.prompt, submittedPrompt: input.prompt,
     project: projectFromBody(req.body), node: nodeFromBody(req.body),
     settings: { duration: input.duration, resolution: input.resolution, aspectRatio: input.aspect_ratio, generateAudio: input.generate_audio,
       keyframeCount: input.keyframes?.length || 0, keyframeIndices: input.keyframes?.map(frame => frame.frame_index) || [], reasoningLevel: input.reasoning_level, seed: result.data.seed ?? input.seed },
     cost, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes
   });
-  return res.json({ requestId: result.requestId, endpoint, modelName: videoModelNames.flux3Max, provider: "fal.ai", submittedPrompt: input.prompt,
+  return res.json({ requestId: result.requestId, endpoint: actualEndpoint, modelName: videoModelNames.flux3Max, provider: krea ? "Krea" : "fal.ai", submittedPrompt: input.prompt,
     seed: result.data.seed, cost, video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath } });
 }
 
@@ -8575,19 +8631,8 @@ app.post("/api/node/generate-3d", async (req, res) => {
   try {
     const modelName = normalizeModel3DModel(req.body.model);
     const rodinSelected = isRodin25Model(modelName);
-    const runtimeProvider = rodinSelected
-      ? String(process.env.FAL_KEY || "").trim() ? "fal" : null
-      : resolveFalKreaProvider({
-          falKey: process.env.FAL_KEY,
-          kreaKey: process.env.KREA_API_KEY
-        });
-    if (!runtimeProvider) {
-      return res.status(400).json({
-        error: rodinSelected
-          ? "Rodin 2.5 needs an enabled Fal API key in Settings."
-          : "Hunyuan 3D needs an enabled Fal or Krea API key in Settings."
-      });
-    }
+    const runtimeProvider = runtimeModelProviderPreferences.model3d;
+    if (!(runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY)) return res.status(400).json({ error: missingModelProviderApiKeyMessage("3D Model", runtimeProvider) });
 
     const imageViewUrls = normalizeModel3DImageViewUrls(req.body);
     if (!imageViewUrls.front) {
@@ -8598,7 +8643,9 @@ app.post("/api/node/generate-3d", async (req, res) => {
       return res.status(400).json({ error: `Rodin 2.5 accepts up to ${rodin25MaxInputImages} connected view images.` });
     }
 
-    const endpoint = rodinSelected
+    const endpoint = runtimeProvider === "krea"
+      ? kreaEndpointForModel("model3d", modelName)
+      : rodinSelected
       ? rodin25FalEndpoint
       : runtimeProvider === "fal"
         ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
@@ -8613,7 +8660,9 @@ app.post("/api/node/generate-3d", async (req, res) => {
       ]))
     );
     const uploadedImageUrls = model3DViewOrder.map((view) => uploadedViewUrls[view]).filter(Boolean);
-    const input = rodinSelected
+    const input = runtimeProvider === "krea" && rodinSelected
+      ? { input_mode: "image", image_urls: uploadedImageUrls, generate_texture: generateType !== "Geometry" }
+      : rodinSelected
       ? buildRodin25FalInput({ imageUrls: uploadedImageUrls, generateType, enablePbr, faceCount })
       : runtimeProvider === "fal"
         ? {
@@ -8699,7 +8748,7 @@ app.post("/api/node/generate-3d", async (req, res) => {
           ...estimatedCost,
           amountUsd: null,
           unitRateUsd: null,
-          pricingBasis: "Hunyuan 3D 3.1 Pro generation through Krea; current public API documentation does not list a fixed local estimate",
+          pricingBasis: `${modelName} generation through Krea; no verified local price estimate`,
           pricingSource: "krea-api-docs-2026-07-30"
         }
       : estimatedCost;
@@ -10557,11 +10606,8 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
     return res.status(400).json({ error: "Topaz Video Upscale requires a connected video." });
   }
 
-  const runtimeProvider = resolveFalKreaProvider({
-    falKey: process.env.FAL_KEY,
-    kreaKey: process.env.KREA_API_KEY
-  });
-  if (!runtimeProvider) {
+  const runtimeProvider = runtimeModelProviderPreferences.utilityVideo;
+  if (!(runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY)) {
     return res.status(400).json({ error: "Topaz Video Upscale needs an enabled Fal or Krea API key in Settings." });
   }
   const endpoint = runtimeProvider === "fal"
@@ -16951,19 +16997,21 @@ function activeLlmProvider(preferredProvider = runtimeModelProviderPreferences.l
     preferredProvider,
     falKey: process.env.FAL_KEY,
     openAiKey: openAiTextApiKey,
-    atlasKey: process.env.ATLAS_API_KEY
+    atlasKey: process.env.ATLAS_API_KEY,
+    kreaKey: process.env.KREA_API_KEY
   });
 }
 
 function requireActiveLlmProvider(preferredProvider = runtimeModelProviderPreferences.llm || textLlmProvider) {
   const provider = activeLlmProvider(preferredProvider);
   if (provider) return provider;
+  if (preferredProvider === "krea") throw httpError(400, missingModelProviderApiKeyMessage("Text / Agent / Director LLM", "krea"));
   throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
 }
 
 function storyboardLlmConnection() {
   const provider = activeLlmProvider();
-  return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : openAiTextApiKey };
+  return { provider, credential: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : openAiTextApiKey };
 }
 
 async function runTextLlm({
@@ -16977,6 +17025,10 @@ async function runTextLlm({
   route = "text-llm"
 }) {
   const provider = requireActiveLlmProvider(preferredProvider);
+  if (provider === "krea") {
+    const result = await requestKreaLlm({ prompt, systemPrompt, model: openAiModel, reasoningEffort, responseMimeType }, { apiKey: process.env.KREA_API_KEY, onProgress: updateCurrentGenerationProgress });
+    return checkedCreativeLlmResult(result, {}, route);
+  }
   if (provider === "fal") {
     const data = await subscribeFal(skillDirectorLlmEndpoint, {
       input: falLlmInput({ model: falModel, prompt, systemPrompt, route }),
@@ -17083,6 +17135,11 @@ async function runMediaDescriptionLlm({
 }) {
   if (!inputs.length) return { text: "", usages: [], provider: "", model: "", endpoint: "" };
   let provider = requireActiveLlmProvider(preferredProvider);
+  if (provider === "krea") {
+    const attachments = await kreaAnalysisAttachments(inputs);
+    const result = await requestKreaLlm({ prompt, systemPrompt, model: openAiModel, reasoningEffort, responseMimeType, attachments }, { apiKey: process.env.KREA_API_KEY, onProgress: updateCurrentGenerationProgress });
+    return checkedCreativeLlmResult(result, {}, route);
+  }
   if (provider === "atlas" && mediaType === "video") {
     if (process.env.FAL_KEY) provider = "fal";
     else throw httpError(400, "Atlas Cloud Responses supports image analysis but not native video. Enable Fal for video analysis.");
@@ -18665,6 +18722,24 @@ function filmDirectorVideoSampleTimes(duration = 0) {
   return unique.sort((a, b) => a - b);
 }
 
+
+async function kreaAnalysisAttachments(inputs) {
+  if (inputs.length > 20) throw httpError(400, "Krea supports at most 20 reference attachments.");
+  return Promise.all(inputs.map(async item => {
+    const asset = item.asset || await readLocalAsset(item.url);
+    const url = item.asset ? await uploadAssetBufferToKrea(asset) : await uploadLocalOutputToKrea(item.url);
+    return { url, name: String(item.label || asset.fileName || "Reference").slice(0,255), contentType: asset.mimeType };
+  }));
+}
+
+async function processTextWithKrea({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
+  const prompt = buildTextProcessingPrompt({ mode, messages, text, textInputs,
+    imageDescriptions: imageInputs.map((item,index) => "Attached image " + (index+1) + ": " + (item.label || item.tag || "Reference")),
+    videoDescriptions: videoInputs.map((item,index) => "Attached video " + (index+1) + ": " + (item.label || "Reference")) });
+  const model = mode === "agent" ? textAgentModelIds(runtimeUserPreferences.textAgentModel).openAiModel : openAiTextModel;
+  const result = await requestKreaLlm({ prompt, model, systemPrompt: mode === "agent" ? textAgentInstructions() : textProcessingInstructions(), attachments: await kreaAnalysisAttachments([...imageInputs, ...videoInputs]) }, { apiKey: process.env.KREA_API_KEY, onProgress: updateCurrentGenerationProgress });
+  return { ...result, submittedPrompt: prompt, helperUsages: [] };
+}
 
 async function processTextWithFal({ mode = "process", messages = [], text, textInputs, imageInputs, videoInputs }) {
   if (!process.env.FAL_KEY) {

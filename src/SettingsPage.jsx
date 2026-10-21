@@ -485,24 +485,6 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
         >
           <div className="settings-provider-routing">
             <label className="settings-field">
-              <span>MiniMax H3</span>
-              <select
-                value={modelProviderPreferences.minimaxH3}
-                onChange={(event) => {
-                  const provider = event.target.value;
-                  setModelProviderPreferences((current) => ({ ...current, minimaxH3: provider }));
-                  if (provider === "local") refreshMinimaxH3LocalStatus({ quiet: true });
-                }}
-              >
-                <option value="fal">Fal</option>
-                <option value="krea">Krea</option>
-                <option value="atlas">Atlas Cloud</option>
-                <option value="local">Local</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.minimaxH3, activeCredentialIds, "MiniMax H3", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("minimaxH3", modelProviderPreferences.minimaxH3)}</small>
-            </label>
-            <label className="settings-field">
               <span>Seedance 2.0 / 2.5</span>
               <select
                 value={modelProviderPreferences.seedance}
@@ -532,15 +514,32 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             <label className="settings-field">
               <span>Video Model</span>
               <select value={modelProviderPreferences.veo}
-                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, veo: event.target.value }))}>
+                onChange={(event) => {
+                  const provider = event.target.value;
+                  setModelProviderPreferences((current) => ({ ...current, veo: provider, minimaxH3: provider }));
+                  if (provider === "local") refreshMinimaxH3LocalStatus({ quiet: true });
+                }}>
                 <option value="fal">Fal</option>
                 <option value="krea">Krea</option>
                 <option value="google">Google</option>
+                <option value="atlas">Atlas Cloud</option>
+                <option value="local">Local</option>
               </select>
-              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "video models")}</small>
+              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "video models", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
               <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
-              <small>Seedance and MiniMax H3 use their dedicated provider settings.</small>
+              <small>MiniMax H3 uses this provider. Seedance uses its dedicated setting.</small>
             </label>
+            {[["model3d", "3D Model"], ["utilityImage", "Utility Image"], ["utilityVideo", "Utility Video"]].map(([group, title]) => (
+              <label className="settings-field" key={group}>
+                <span>{title}</span>
+                <select value={modelProviderPreferences[group]} onChange={event => setModelProviderPreferences(current => ({ ...current, [group]: event.target.value }))}>
+                  <option value="fal">Fal</option>
+                  <option value="krea">Krea</option>
+                </select>
+                <small>{modelProviderDetail(modelProviderPreferences[group], activeCredentialIds, title.toLowerCase())}</small>
+                <small className="settings-provider-models">{providerSupportedModelsLabel(group, modelProviderPreferences[group])}</small>
+              </label>
+            ))}
             <label className="settings-field">
               <span>Text / Agent / Director LLM</span>
               <select
@@ -550,9 +549,11 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
                 <option value="fal">Fal</option>
                 <option value="openai">OpenAI</option>
                 <option value="atlas">Atlas Cloud</option>
+                <option value="krea">Krea</option>
               </select>
               <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text and Director features")}</small>
               <small className="settings-provider-models">{providerSupportedModelsLabel("llm", modelProviderPreferences.llm)}</small>
+              {modelProviderPreferences.llm === "krea" && <small>Krea bills Agent sessions in compute units. Text and reference analysis return replies here; pinned models require access on your Krea plan.</small>}
             </label>
           </div>
           <div className="settings-actions">

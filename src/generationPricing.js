@@ -66,7 +66,7 @@ export function generationProviderForModel({
     if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"))) {
       return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     }
-    if (["FLUX 3 Max", "Wan 2.7 Reference-to-Video", "Creatify Aurora"].includes(model)) return preferences.veo === "fal" ? "fal" : null;
+    if (["FLUX 3 Max", "Wan 2.7 Reference-to-Video", "Creatify Aurora"].includes(model)) return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     return normalized.includes("wan") || normalized.includes("aurora") || normalized.includes("sam 3") ? "fal" : null;
   }
 
@@ -76,6 +76,7 @@ export function generationProviderForModel({
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage25Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
+    if (model === "Ideogram 4.5") return "fal";
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
     return ["Flux 3", "Ideogram 4.5", "REVE 2.1", "SAM 3 Image"].includes(model) ? "fal" : null;
   }

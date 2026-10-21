@@ -6,7 +6,7 @@ test("image choices follow explicit provider support regardless of available key
   for (const model of ["Ideogram 4.5", "Flux 3"]) {
     for (const provider of ["atlas", "krea", "fal"]) {
       const state = modelProviderOptionState(model, "image", { imageGeneration: provider }, { fal: true });
-      assert.equal(state.disabled, provider !== "fal");
+      assert.equal(state.disabled, provider !== "fal" && !(provider === "krea" && model === "Ideogram 4.5"));
       if (state.disabled) assert.match(state.reason, /Settings > Model Providers/);
     }
   }
@@ -16,10 +16,10 @@ test("image choices follow explicit provider support regardless of available key
 
 test("video choices respect dedicated routes and local MiniMax's display alias", () => {
   const preferences = { veo: "google", seedance: "atlas", minimaxH3: "local" };
-  for (const model of ["Seedance 2.5", "MiniMax H3", "Gemini Omni Flash"]) {
+  for (const model of ["Seedance 2.5", "Gemini Omni Flash"]) {
     assert.equal(modelProviderOptionState(model, "video", preferences).disabled, false);
   }
-  for (const model of ["Kling O3 Pro", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]) {
+  for (const model of ["MiniMax H3", "Kling O3 Pro", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]) {
     assert.equal(modelProviderOptionState(model, "video", preferences).disabled, true);
     assert.equal(modelProviderOptionState(model, "video", { veo: "fal" }).disabled, false);
   }

@@ -1156,6 +1156,10 @@ textarea::placeholder {
   font-size: 13px;
 }
 
+.settings-provider-routing .settings-field > span {
+  color: #f0c83b;
+}
+
 .settings-collapsible-panel,
 .settings-model-panel {
   gap: 12px;

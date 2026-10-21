@@ -19,6 +19,7 @@ const imageReferenceLimits = Object.freeze({
     "reve-2-1": 6
   }),
   krea: Object.freeze({
+    "ideogram-4-5": 5,
     "nano-banana-2-1": 14,
     "openai-image-2-5": 10,
     "z-image": 1,

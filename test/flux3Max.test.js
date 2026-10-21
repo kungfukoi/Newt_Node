@@ -20,11 +20,11 @@ test("FLUX 3 Max excludes Director selection, ports and packages before uploads 
   }
 });
 
-test("FLUX 3 Max uses the video catalog and explicit Fal provider selection", () => {
+test("FLUX 3 Max uses the video catalog and explicit Fal or Krea provider selection", () => {
   assert.ok(videoModelOptions.includes(flux3MaxModelName));
   assert.equal(videoWorkspaceModelOptions.includes(flux3MaxModelName), false);
-  for (const provider of ["fal", "google", "krea"]) assert.equal(modelProviderOptionState(flux3MaxModelName, "video", { veo: provider }).disabled, provider !== "fal");
-  for (const provider of ["fal", "google", "krea"]) assert.equal(generationProviderForModel({ model: flux3MaxModelName, mediaType: "video", providerPreferences: { veo: provider } }), provider === "fal" ? "fal" : null);
+  for (const provider of ["fal", "google", "krea"]) assert.equal(modelProviderOptionState(flux3MaxModelName, "video", { veo: provider }).disabled, provider === "google");
+  for (const provider of ["fal", "google", "krea"]) assert.equal(generationProviderForModel({ model: flux3MaxModelName, mediaType: "video", providerPreferences: { veo: provider } }), provider === "google" ? null : provider);
   assert.equal(videoModelSupportsFilmDirector(flux3MaxModelName), false);
 });
 

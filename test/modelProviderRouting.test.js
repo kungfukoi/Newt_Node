@@ -18,7 +18,7 @@ test("model provider routing defaults to Fal for Seedance and Google for video a
 test("model provider routing infers a configured alternative during first-time migration", () => {
   assert.deepEqual(
     normalizeModelProviderPreferences({}, { fal: true, google: false, krea: true }),
-    { seedance: "fal", veo: "fal", imageGeneration: "fal", minimaxH3: "fal", llm: "fal" }
+    { ...defaultModelProviderPreferences, seedance: "fal", veo: "fal", imageGeneration: "fal", minimaxH3: "fal", llm: "fal" }
   );
   assert.equal(
     normalizeModelProviderPreferences({}, { fal: false, google: false, krea: true }).seedance,
@@ -32,7 +32,7 @@ test("explicit model provider routes are preserved even when their key is unavai
       { seedance: "krea", veo: "google", imageGeneration: "google", minimaxH3: "local", llm: "atlas" },
       { fal: true, google: false, krea: false }
     ),
-    { seedance: "krea", veo: "google", imageGeneration: "google", minimaxH3: "local", llm: "atlas" }
+    { ...defaultModelProviderPreferences, seedance: "krea", veo: "google", imageGeneration: "google", minimaxH3: "google", llm: "atlas" }
   );
 });
 
@@ -93,15 +93,15 @@ test("model provider labels are human readable", () => {
 
 test("Krea image routing is explicit and lists only implemented Krea endpoints", () => {
   assert.equal(normalizeModelProviderPreferences({ imageGeneration: "krea" }, { fal: true }).imageGeneration, "krea");
-  assert.deepEqual(providerSupportedModels("imageGeneration", "krea"), ["Z-Image", "Seedream 5.0 Pro", "Nano Banana 2", "Nano Banana 2.1", "Nano Banana Pro", "OpenAI Image 2.5 Flare", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2", "Krea 2 Large"]);
+  assert.deepEqual(providerSupportedModels("imageGeneration", "krea"), ["Ideogram 4.5", "Z-Image", "Seedream 5.0 Pro", "Nano Banana 2", "Nano Banana 2.1", "Nano Banana Pro", "OpenAI Image 2.5 Flare", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2", "Krea 2 Large"]);
   assert.ok(missingModelProviderCredentials({ imageGeneration: "krea" }, { fal: true, google: true }).includes("krea"));
 });
 
-test("general video providers exclude dedicated Seedance and MiniMax routes", () => {
+test("general video providers include MiniMax and exclude dedicated Seedance", () => {
   for (const provider of ["fal", "krea", "google"]) {
     const models = providerSupportedModels("veo", provider);
     assert.ok(models.includes("Gemini Omni Flash"));
-    assert.ok(models.every((model) => !/Seedance|MiniMax/.test(model)));
+    assert.ok(models.every((model) => !/Seedance/.test(model)));
   }
   assert.equal(normalizeModelProviderPreferences({ veo: "krea" }).veo, "krea");
   assert.ok(providerSupportedModels("veo", "fal").includes("Creatify Aurora"));

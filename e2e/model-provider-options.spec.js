@@ -16,7 +16,7 @@ for (const provider of ["atlas", "krea", "fal"]) {
     await expect(image).toHaveValue("Flux 3");
     for (const model of ["Flux 3", "Ideogram 4.5"]) {
       const option = image.locator(`option[value="${model}"]`);
-      if (provider === "fal") await expect(option).toBeEnabled();
+      if (provider === "fal" || (provider === "krea" && model === "Ideogram 4.5")) await expect(option).toBeEnabled();
       else { await expect(option).toBeDisabled(); await expect(option).toContainText("unavailable"); }
     }
     await expect(image.locator('option[value="OpenAI Image 2.5 Flare"]')).toBeEnabled();
@@ -68,3 +68,28 @@ for (const failure of ["write", "reload"]) {
     await expect(page.getByRole("combobox", { name: /^Image Model/ })).toHaveValue("atlas");
   });
 }
+
+test("Krea routing saves every supported group and MiniMax follows Video Model", async ({ page }, testInfo) => {
+  const { saves, errors } = await routingFixture(page);
+  await expect(page.getByRole("combobox", { name: /^MiniMax H3/ })).toHaveCount(0);
+  for (const title of await page.locator(".settings-provider-routing .settings-field > span").all()) {
+    await expect(title).toHaveCSS("color", "rgb(240, 200, 59)");
+  }
+  for (const name of [/^Image Model/, /^Video Model/, /^Seedance 2/, /^3D Model/, /^Utility Image/, /^Utility Video/, /^Text \/ Agent \/ Director LLM/]) {
+    await page.getByRole("combobox", { name }).selectOption("krea");
+  }
+  const video = page.getByRole("combobox", { name: /^Video Model/ }).locator("..");
+  await expect(video).toContainText("MiniMax H3");
+  await expect(video).toContainText("FLUX 3 Max");
+  await expect(page.getByRole("combobox", { name: /^Image Model/ }).locator("..")).toContainText("Ideogram 4.5");
+  await page.getByRole("button", { name: "Save Routing", exact: true }).click();
+  await expect.poll(() => saves.length).toBe(1);
+  expect(saves[0].modelProviderPreferences).toMatchObject({ veo: "krea", minimaxH3: "krea", llm: "krea", imageGeneration: "krea", model3d: "krea", utilityImage: "krea", utilityVideo: "krea" });
+  await expect(page.getByRole("status")).toContainText("Model provider routing saved.");
+  await page.screenshot({ path: testInfo.outputPath("krea-routing.png") });
+  await page.reload();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: /^Text \/ Agent \/ Director LLM/ })).toHaveValue("krea");
+  await expect(page.getByRole("combobox", { name: /^Video Model/ })).toHaveValue("krea");
+  expect(errors).toEqual([]);
+});

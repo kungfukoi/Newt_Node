@@ -4,6 +4,10 @@ This document is the descriptive map of the current NewtNode implementation. `no
 
 ## Runtime Shape
 
+`server/krea-llm.js` adapts Text, Text Agent, Director, Storyboard and shared image/video analysis to Krea Agent send/wait sessions. A request pins the existing selected OpenAI model, sends reference attachments through Krea assets, creates one paid session and polls its exact run ID. It requests text/analysis only, preserves reply formats, reports errors without replay or provider fallback, and leaves token/USD usage unknown because the API reports no usage. Krea is selected explicitly; merely enabling its key does not add it to legacy LLM fallback. Krea bills Agent compute units and model pins require workspace-plan access.
+
+`server/krea-enhance.js` owns published Krea Topaz image/video, Hyperion HDR and FLUX video-upscale request mappings and explicit unsupported-variant errors. Utility Image, Utility Video and 3D Model now have Fal/Krea Settings routes. Image to Color ID uses the existing Krea Image 2.5 adapter when Utility Image selects Krea. Local utility tools retain their existing paths. Provider-specific uploads, managed downloads and History remain in the existing server pipeline. `src/kreaApi.js` adds Ideogram 4.5 (five references, 2K), FLUX 3 Max, Rodin 2.5 and current enhancement endpoints. Flux 3 image, REVE 2.1, Wan 2.7 reference generation and Creatify Aurora have no matching published Krea API endpoints as of 2026-10-21.
+
 `src/components/CompositeLivePreview.jsx` owns disposable browser image/video resources, local thumbnail playback and seeking; `src/compositePreview.js` owns thumbnail blend/alpha/mask pixel math. Thumbnail state stays out of workflow/result persistence and backend execution.
 
 Composite Video uses `src/compositeLayers.js` for stable layer/mask port identities, normalization and legacy shared-input migration. `src/components/CompositeLayerControls.jsx` owns the layer controls; `server/composite-stack.js` builds the planar RGB/alpha FFmpeg graph. The existing Utility video route records the complete stack and writes one managed video result.
@@ -75,7 +79,7 @@ Ideogram 4.5 is available in image generation, Character, Coverage, and Auto Asp
 
 Image Generation can explicitly select Krea using the existing `src/kreaApi.js` endpoint catalog. Supported models use Krea even when Fal keys are present; missing Krea keys and unsupported models fail before submission. The Image Editor preference remains independent: Ideogram edits require Fal.
 
-The general Video Model provider replaces the Veo/Google Video selector while retaining the persisted `veo` key and existing saved choice. Its Fal route supports Gemini Omni, Kling O3 Pro/4K, Wan 2.7 Reference-to-Video, and Creatify Aurora; Krea supports Gemini Omni generation and Kling; Google supports Gemini Omni. Unsupported model/provider pairs and missing selected keys fail before submission. Gemini video-reference edits use the selected Fal or Google route; Krea rejects them. Seedance and MiniMax remain exclusively in their dedicated routing categories.
+The general Video Model provider replaces the Veo/Google Video selector while retaining the persisted `veo` key and existing saved choice. Its Fal route supports Gemini Omni, Kling O3 Pro/4K, Wan 2.7 Reference-to-Video, and Creatify Aurora; Krea supports Gemini Omni generation and Kling; Google supports Gemini Omni. Unsupported model/provider pairs and missing selected keys fail before submission. Gemini video-reference edits use the selected Fal or Google route; Krea rejects them. Seedance retains its dedicated category. MiniMax H3 now follows Video Model (Fal/Krea/Atlas/Local); the legacy minimaxH3 setting is normalized to the persisted veo choice. A legacy H3-only setting migrates into veo. The separate H3 selector is removed. Krea also supports FLUX 3 Max with the shared validated text/keyframe schema.
 
 The normal remote-generation path is:
 
@@ -88,7 +92,7 @@ The normal remote-generation path is:
 7. The server returns a small typed result and records reproducible history/cost metadata.
 8. `src/mediaResults.js` updates result arrays; previews and downstream nodes receive the same playable local result.
 
-The 3D path keeps shared model normalization and Rodin request construction in `src/model3D.js`. `/api/node/generate-3d` routes Hunyuan 3D 3.1 Pro through Fal or Krea and routes Rodin 2.5 through its Fal endpoint without provider fallback. Both paths download the returned model into managed storage and record the selected model, endpoint, settings, and cost in history.
+The 3D path keeps shared model normalization and Rodin request construction in `src/model3D.js`. `/api/node/generate-3d` routes Hunyuan 3D 3.1 Pro through Fal or Krea and routes Rodin 2.5 through Fal or Krea using the explicit 3D Model provider setting without fallback. Krea Rodin preserves up to five input views and texture choice; its API does not expose Fal mesh tier/PBR controls. Both paths download the returned model into managed storage and record the selected model, endpoint, settings, and cost in history.
 
 Generation progress is request-scoped in `server/generation-progress.js`, aggregated by client helpers, and rendered by `src/components/GenerationProgress.jsx`. Progress polling is shared and must not rebuild the graph on every tick. Repeated acceptance requests preserve the same run's original clock and progress; client merges also retain the earliest start timestamp.
 

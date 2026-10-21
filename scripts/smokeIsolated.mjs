@@ -79,6 +79,7 @@ try {
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   const health = await (await request("/api/health")).json();
   assert.equal(health.routes.videoOutpaintPrompt, true);
+  assert.equal(health.routes.kreaModelProviders, true);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
   for (const flag of ["timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
@@ -198,7 +199,10 @@ try {
     seedance: "krea",
     veo: "fal",
     imageGeneration: "atlas",
-    minimaxH3: "local",
+    minimaxH3: "fal",
+    model3d: "fal",
+    utilityImage: "fal",
+    utilityVideo: "fal",
     llm: "openai"
   };
   const savedSettings = await (await request("/api/settings", {
@@ -216,21 +220,35 @@ try {
   assert.deepEqual(reloadedSettings.modelProviderPreferences, expectedRouting);
   assert.equal(reloadedSettings.atlasApiKeyConfigured, true);
   assert.equal(reloadedSettings.activeCredentialIds.atlas, savedSettings.activeCredentialIds.atlas);
-  await request("/api/settings", { modelProviderPreferences: { ...expectedRouting, imageGeneration: "krea", veo: "krea" } });
+  await request("/api/settings", { modelProviderPreferences: { ...expectedRouting, imageGeneration: "krea", veo: "krea", llm: "krea", model3d: "krea", utilityImage: "krea", utilityVideo: "krea" } });
   const kreaSettings = await (await request("/api/settings")).json();
   assert.equal(kreaSettings.modelProviderPreferences.imageGeneration, "krea");
   assert.equal(kreaSettings.modelProviderPreferences.veo, "krea");
+  assert.equal(kreaSettings.modelProviderPreferences.minimaxH3, "krea");
+  assert.equal(kreaSettings.modelProviderPreferences.llm, "krea");
   for (const [route, model, message] of [
-    ["generate-image", "Ideogram 4.5", /not supported/],
+    ["generate-image", "Ideogram 4.5", /Krea API key/],
+    ["generate-image", "Flux 3", /not supported/],
     ["generate-image", "Nano Banana 2.1", /Krea API key/],
     ["generate-image", "Nano Banana 2", /Krea API key/],
     ["generate-video", "Wan 2.7 Reference-to-Video", /not supported/],
     ["generate-video", "Kling O3 Pro", /Krea API key/],
+    ["generate-video", "MiniMax H3", /Krea API key/],
+    ["generate-video", "FLUX 3 Max", /Krea API key/],
+    ["generate-3d", "Rodin 2.5", /Krea API key/],
+    ["utility-image", "Topaz Image Upscale", /Krea API key/],
+    ["utility-image", "Image to Color ID", /Krea API key/],
+    ["utility-video", "Flux Video Upscale", /Krea API key/],
     ["generate-video", "Gemini Omni Flash", /Krea API key/]
   ]) {
     const rejected = await fetch(`${api}/api/node/${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, prompt: "Routing validation only" }) });
     assert.equal(rejected.status, 400);
     assert.match((await rejected.json()).error, message);
+  }
+  for (const mode of ["process", "agent"]) {
+    const rejected = await fetch(`${api}/api/node/process-text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, text: "Routing validation only" }) });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /Krea API key/);
   }
   await request("/api/settings", { modelProviderPreferences: expectedRouting });
   const nano21Atlas = await fetch(`${api}/api/node/generate-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Nano Banana 2.1", prompt: "Routing validation only" }) });

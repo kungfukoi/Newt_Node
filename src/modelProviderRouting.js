@@ -4,11 +4,17 @@ export const defaultModelProviderPreferences = Object.freeze({
   seedance: "fal",
   veo: "google",
   imageGeneration: "google",
-  minimaxH3: "fal",
+  model3d: "fal",
+  utilityImage: "fal",
+  utilityVideo: "fal",
+  minimaxH3: "google",
   llm: "fal"
 });
 
 const providerModelSupport = Object.freeze({
+  model3d: Object.freeze({ fal: Object.freeze(["Hunyuan 3D 3.1 Pro", "Rodin 2.5"]), krea: Object.freeze(["Hunyuan 3D 3.1 Pro", "Rodin 2.5"]) }),
+  utilityImage: Object.freeze({ fal: Object.freeze(["Qwen Camera Edit", "Image to Color ID", "DWPose", "Depth Anything", "Topaz Image Upscale", "Patina", "BiRefNet Image", "SAM 3 Image"]), krea: Object.freeze(["Topaz Image Upscale", "Image to Color ID"]) }),
+  utilityVideo: Object.freeze({ fal: Object.freeze(["Video Outpaint", "DWPose Video", "Depth Anything Video", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting", "Wan 2.2 A14B LoRA Text-to-Video", "Wan 2.2 A14B LoRA Image-to-Video", "Wan 2.2 VACE Fun A14B Depth", "Wan 2.2 VACE Fun A14B Pose", "Wan 2.2 VACE Fun A14B Inpainting", "SAM 3 Video", "VOID Video Inpainting", "BiRefNet Video", "RIFE Video", "Bytedance Upscaler", "Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale"]), krea: Object.freeze(["Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale"]) }),
   minimaxH3: Object.freeze({
     fal: Object.freeze(["MiniMax H3"]),
     krea: Object.freeze(["MiniMax H3"]),
@@ -22,8 +28,10 @@ const providerModelSupport = Object.freeze({
   }),
   veo: Object.freeze({
     google: Object.freeze(["Gemini Omni Flash"]),
-    fal: Object.freeze(["FLUX 3 Max", "Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]),
-    krea: Object.freeze(["Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K"])
+    fal: Object.freeze(["MiniMax H3", "FLUX 3 Max", "Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]),
+    krea: Object.freeze(["MiniMax H3", "FLUX 3 Max", "Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K"]),
+    atlas: Object.freeze(["MiniMax H3"]),
+    local: Object.freeze(["MiniMax H3 (576P)"])
   }),
   imageGeneration: Object.freeze({
     krea: Object.freeze(Object.keys(kreaEndpoints.image)),
@@ -52,6 +60,7 @@ const providerModelSupport = Object.freeze({
     ])
   }),
   llm: Object.freeze({
+    krea: Object.freeze(["GPT-5.6 Luna", "GPT-6 Astra", "GPT-5.6 Sol"]),
     fal: Object.freeze(["GPT-5.6 Terra", "GPT-6 Astra", "GPT-5.6 Sol"]),
     openai: Object.freeze(["GPT-5.6 Luna", "GPT-6 Astra", "GPT-5.6 Sol"]),
     atlas: Object.freeze(["GPT-5.6 Luna", "GPT-6 Astra", "GPT-5.6 Sol"])
@@ -60,17 +69,22 @@ const providerModelSupport = Object.freeze({
 
 export function normalizeModelProviderPreferences(value = {}, availability = {}) {
   const incoming = value && typeof value === "object" ? value : {};
+  const videoProvider = normalizedProvider(incoming.veo, ["google", "fal", "krea", "atlas", "local"])
+    || normalizedProvider(incoming.minimaxH3, ["fal", "krea", "atlas", "local"])
+    || (!availability.google && availability.fal ? "fal" : !availability.fal && availability.krea ? "krea" : defaultModelProviderPreferences.veo);
   return {
     seedance: normalizedProvider(incoming.seedance, ["fal", "krea", "atlas"])
       || (!availability.fal && availability.krea ? "krea" : defaultModelProviderPreferences.seedance),
     // Keep the persisted veo key for compatibility; the UI now calls this Video Model.
-    veo: normalizedProvider(incoming.veo, ["google", "fal", "krea"])
-      || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.veo),
+    veo: videoProvider,
     imageGeneration: normalizedProvider(incoming.imageGeneration, ["google", "fal", "krea", "atlas"])
       || (!availability.google && availability.fal ? "fal" : defaultModelProviderPreferences.imageGeneration),
-    minimaxH3: normalizedProvider(incoming.minimaxH3, ["fal", "krea", "atlas", "local"])
-      || defaultModelProviderPreferences.minimaxH3,
-    llm: normalizedProvider(incoming.llm, ["fal", "openai", "atlas"])
+    model3d: normalizedProvider(incoming.model3d, ["fal", "krea"]) || (!availability.fal && availability.krea ? "krea" : "fal"),
+    utilityImage: normalizedProvider(incoming.utilityImage, ["fal", "krea"]) || "fal",
+    utilityVideo: normalizedProvider(incoming.utilityVideo, ["fal", "krea"]) || (!availability.fal && availability.krea ? "krea" : "fal"),
+    // Compatibility alias for existing runners and saved settings. Video Model owns routing.
+    minimaxH3: videoProvider,
+    llm: normalizedProvider(incoming.llm, ["fal", "openai", "atlas", "krea"])
       || defaultModelProviderPreferences.llm
   };
 }
@@ -89,17 +103,17 @@ export function providerSupportedModels(route, provider) {
 }
 
 // Match the generation routes, including Google's Nano Banana-only override
-// and the dedicated Seedance and MiniMax provider preferences.
+// and the dedicated Seedance provider preference.
 export function modelProviderOptionState(model, mediaType, preferences = {}, availability = {}) {
   const normalized = normalizeModelProviderPreferences(preferences, availability);
   let route = "imageGeneration";
   if (mediaType === "video") {
-    route = /^Seedance /.test(model) ? "seedance" : /^MiniMax H3/.test(model) ? "minimaxH3" : "veo";
+    route = /^Seedance /.test(model) ? "seedance" : "veo";
   }
   let provider = normalized[route];
   if (route === "imageGeneration" && provider === "google" && model !== "Nano Banana Pro") provider = "fal";
   const supported = providerSupportedModels(route, provider).some((candidate) =>
-    candidate === model || (route === "minimaxH3" && provider === "local" && model === "MiniMax H3")
+    candidate === model || (provider === "local" && model === "MiniMax H3")
   );
   return {
     disabled: !supported,

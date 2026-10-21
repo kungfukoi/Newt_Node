@@ -61,7 +61,7 @@ test("provider routing follows explicit model preferences and real fallback avai
 
 test("image estimates are provider and batch aware", () => {
   assert.equal(generationProviderForModel({ model: "Nano Banana 2", mediaType: "image", providerPreferences: { imageGeneration: "krea" }, providerAvailability: { fal: true, krea: true } }), "krea");
-  assert.equal(generationProviderForModel({ model: "Ideogram 4.5", mediaType: "image", providerPreferences: { imageGeneration: "krea" }, providerAvailability: { fal: true, krea: true } }), null);
+  assert.equal(generationProviderForModel({ model: "Ideogram 4.5", mediaType: "image", providerPreferences: { imageGeneration: "krea" }, providerAvailability: { fal: true, krea: true } }), "krea");
   assert.equal(estimateImageRunCost({
     model: "OpenAI Image 2.5",
     resolution: "4K",
