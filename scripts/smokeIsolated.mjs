@@ -365,6 +365,18 @@ try {
   assert.equal(localOutpaintCrop.videoOutpaint.localCrop, true);
   assert.equal(localOutpaintCrop.video.width, 1280);
   assert.equal(localOutpaintCrop.video.height, 720);
+  assert.equal(health.routes.videoOutpaintSeedance, true);
+  const seedancePrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/clip.mp4", videoOutpaint: { model: "seedance-2.5" } }, { timeoutMs: 120000 })).json();
+  assert.equal(seedancePrepared.plan.frames, 96); assert.equal(seedancePrepared.plan.duration, 4);
+  assert.equal(seedancePrepared.plan.looped, true); assert.ok(seedancePrepared.loopedSourceUrl);
+  await request("/api/settings", { modelProviderPreferences: { ...expectedRouting, seedance: "fal" } });
+  const seedanceWithoutKey = await fetch(api + "/api/node/generate-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Seedance 2.5", videoOutpaintUtility: true, videoOutpaint: { model: "seedance-2.5" }, referenceVideoUrls: ["/outputs/clip.mp4"], prompt: "Extend scene" }) });
+  assert.equal(seedanceWithoutKey.status, 400);
+  assert.match((await seedanceWithoutKey.json()).error, /selected Fal key/);
+  const seedanceCrop = await (await request("/api/node/generate-video", { model: "Seedance 2.5", videoOutpaintUtility: true, referenceVideoUrls: ["/outputs/clip.mp4"], videoOutpaint: { model: "seedance-2.5", aspectRatio: "16:9", frame: { x: 0.1, y: 0.1, width: 0.5 }, outputSize: "720p" } }, { timeoutMs: 120000 })).json();
+  assert.equal(seedanceCrop.cost.amountUsd, 0); assert.equal(seedanceCrop.videoOutpaint.localCrop, true);
+  assert.equal(seedanceCrop.video.num_frames, 96);
+  await request("/api/settings", { modelProviderPreferences: expectedRouting });
 
 
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");

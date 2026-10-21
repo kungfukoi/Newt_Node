@@ -16,7 +16,7 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
   const probe = async file => {
     const { stdout } = await execute(ffprobe.path, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true, timeout: 10000 });
     const data = JSON.parse(stdout), video = data.streams.find(s => s.codec_type === "video");
-    return { width: video.width, height: video.height, duration: Number(video.duration || data.format.duration), fps: 24, frames: Number(video.nb_frames), audio: data.streams.some(s => s.codec_type === "audio") };
+    return { width: video.width, height: video.height, duration: Number(video.duration || data.format.duration), fps: 24, frames: Number(video.nb_frames), audio: data.streams.some(s => s.codec_type === "audio"), audioDuration: Number(data.streams.find(s => s.codec_type === "audio")?.duration || 0) };
   };
   try {
     const source = path.join(directory, "source.mp4"), generated = path.join(directory, "generated.mp4");
@@ -48,6 +48,33 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const retained = await pixel(100, 400, offsetOutput.filePath), right = await pixel(600, 400, offsetOutput.filePath), top = await pixel(100, 10, offsetOutput.filePath);
     assert.ok(retained[1] > 200 && retained[0] < 20, `Offset source crop was not restored: ${retained}`);
     assert.ok(right[2] > 200 && top[2] > 200, "Generated right/top areas were overwritten by cropped-out source footage.");
+    const short = path.join(directory, "short.mp4");
+    await run(["-y", "-f", "lavfi", "-i", "color=red:s=64x64:r=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-vf", "drawbox=x=0:y=0:w=iw:h=ih:color=lime:t=fill:enable='gte(n,20)'", "-t", String(40 / 24), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", short]);
+    const looped = await service.prepare({ videoOutpaint: { outputSize: "720p", feather: 0 } }, short);
+    assert.equal(looped.plan.looped, true); assert.equal(looped.plan.loopFrames, 40);
+    assert.equal((await probe(looped.videoUrl)).frames, 81);
+    assert.equal((await probe(looped.maskVideoUrl)).frames, 81);
+    const loopedOutput = await service.finish({}, looped, { filePath: generated });
+    const loopedInfo = await probe(loopedOutput.filePath);
+    assert.equal(loopedInfo.frames, 81); assert.equal(loopedInfo.duration, 3.375);
+    assert.ok(loopedInfo.audioDuration > 3.3, "Audio did not repeat through the extended output.");
+    for (const [time, channel] of [[0.25, 0], [1.1, 1], [1.92, 0], [2.8, 1], [3.333, 0]]) {
+      const { stdout } = await execute(ffmpeg, ["-v", "error", "-ss", String(time), "-i", loopedOutput.filePath, "-vf", "crop=2:2:360:640,format=rgb24", "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
+      assert.ok(stdout[channel] > 200, `Repeated source changed speed or stopped at ${time} seconds: ${[...stdout.subarray(0, 3)]}`);
+    }
+    // A nonzero start repeats only the remaining segment, and silent clips stay valid.
+    const silentLoop = await service.prepare({ videoOutpaint: { start: 2.5 } }, split);
+    assert.equal(silentLoop.plan.looped, true); assert.equal(silentLoop.plan.loopFrames, 24);
+    const silentInfo = await probe(silentLoop.loopedSourceUrl);
+    assert.equal(silentInfo.frames, 81); assert.equal(silentInfo.audio, false);
+    const seedanceGenerated = path.join(directory, "seedance-generated.mp4");
+    await run(["-y", "-f", "lavfi", "-i", "color=blue:s=432x768:r=24", "-frames:v", "93", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", seedanceGenerated]);
+    const seedancePrepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", outputSize: "720p", feather: 0 } }, short);
+    assert.equal(seedancePrepared.plan.frames, 96); assert.equal((await probe(seedancePrepared.videoUrl)).frames, 96);
+    const seedanceOutput = await service.finish({}, seedancePrepared, { filePath: seedanceGenerated });
+    const seedanceInfo = await probe(seedanceOutput.filePath);
+    assert.equal(seedanceInfo.frames, 96); assert.equal(seedanceInfo.duration, 4);
+    assert.ok(seedanceInfo.audioDuration > 3.9);
   } finally {
     const relative = path.relative(os.tmpdir(), directory);
     if (!relative.startsWith("newt-outpaint-media-") || relative.includes(path.sep)) throw new Error("Refusing cleanup outside owned test directory.");

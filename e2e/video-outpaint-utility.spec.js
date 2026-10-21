@@ -2,6 +2,62 @@ import { test, expect } from "@playwright/test";
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
 import { normalizeVideoOutpaintSettings, videoOutpaintFingerprint, planVideoOutpaint } from "../src/videoOutpaint.js";
 
+test("Seedance outpaint switches controls, prepares a short clip, analyzes context and edits with durable routing", async ({ page }, testInfo) => {
+  await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
+    { id: "source", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/source.mp4", status: "complete" } },
+    { id: "outpaint", type: "utility", x: 550, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "guided" } }
+  ], edges: [{ id: "wire", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })));
+  const { errors } = await openFixture(page, { count: 2 });
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFraming: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  let preparation, analysis, generation;
+  await page.route("**/api/node/video-outpaint-prepare", route => {
+    preparation = route.request().postDataJSON();
+    const settings = normalizeVideoOutpaintSettings(preparation.videoOutpaint);
+    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskVideoUrl: "/outputs/e2e/mask.mp4", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) } });
+  });
+  await page.route("**/api/node/video-outpaint-prompt", route => {
+    analysis = route.request().postDataJSON();
+    return route.fulfill({ json: { text: "Extend the floor and moving shadows into the padded regions.", provider: "fal", model: "vision" } });
+  });
+  await page.route("**/api/node/generate-video", route => {
+    generation = route.request().postDataJSON();
+    return route.fulfill({ json: { modelName: "Seedance 2.5", generationRunId: generation.generationRunId, video: { localUrl: "/outputs/e2e/seedance.mp4", fileName: "seedance.mp4" }, videoOutpaint: { model: "seedance-2.5", rawVideoUrl: "/outputs/e2e/raw.mp4", restoredSource: true }, cost: { amountUsd: null } } });
+  });
+  const node = page.locator('[data-node-card-id="outpaint"]');
+  await expect(node.getByLabel("Outpaint model")).toHaveValue("wan-vace");
+  await expect(node.getByLabel("Outpainting guidance")).toHaveValue("");
+  await expect(node.getByLabel("Outpainting guidance")).not.toHaveAttribute("placeholder");
+  await node.getByLabel("Outpaint model").selectOption("seedance-2.5");
+  await expect(node.getByLabel("Outpaint inference steps")).toHaveCount(0);
+  await expect(node.getByLabel("Outpaint guidance scale")).toHaveCount(0);
+  await expect(node.getByLabel("Outpaint negative prompt")).toHaveCount(0);
+  await expect(node.getByLabel("Outpaint Seedance resolution")).toBeVisible();
+  await expect(node.getByLabel("Outpaint delivery size")).toHaveCount(0);
+  await node.getByLabel("Outpaint Seedance resolution").selectOption("1080p");
+  await expect(node.getByLabel("Outpaint duration seconds")).toHaveValue("4");
+  await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
+  await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
+  expect(preparation.videoOutpaint.model).toBe("seedance-2.5");
+  expect(preparation.videoOutpaint.seedanceResolution).toBe("1080p"); expect(preparation.videoOutpaint.outputSize).toBe("1080p");
+  await node.getByLabel("Outpainting guidance").fill("Keep the warm lighting");
+  await node.getByRole("button", { name: "Analyze & draft prompt" }).click();
+  const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
+  await expect(prompt).toHaveValue("Extend the floor and moving shadows into the padded regions.");
+  expect(analysis.outpaintModel).toBe("seedance-2.5");
+  await node.locator(".run-node-button").click();
+  await expect(node.getByRole("link", { name: "View raw generated result" })).toBeVisible();
+  expect(generation.model).toBe("Seedance 2.5"); expect(generation.videoOutpaintUtility).toBe(true);
+  expect(generation.videoOutpaint.seedanceResolution).toBe("1080p"); expect(generation.videoOutpaint.outputSize).toBe("1080p");
+  expect(generation.seedanceTask).toBe("edit"); expect(generation.durableGeneration).toBe(true);
+  expect(generation.referenceVideoUrls).toEqual(["/outputs/e2e/source.mp4"]);
+  await page.screenshot({ path: testInfo.outputPath("seedance-outpaint.png") });
+  await node.getByLabel("Outpaint model").selectOption("wan-vace");
+  await expect(node.getByLabel("Outpaint inference steps")).toBeVisible();
+  await expect(node.getByLabel("Prepared outpainting canvas")).toHaveCount(0);
+  await expect(node.getByRole("link", { name: "View raw generated result" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("Video Outpaint prepares locally, drafts a prompt, runs with refinements and restores its saved workflow", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return;
@@ -16,7 +72,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
     const settings = normalizeVideoOutpaintSettings(preparation.videoOutpaint);
-    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskVideoUrl: "/outputs/e2e/mask.mp4", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, settings) } });
+    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskVideoUrl: "/outputs/e2e/mask.mp4", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) } });
   });
   await page.route("**/api/node/video-outpaint-prompt", route => {
     analysis = route.request().postDataJSON();
@@ -32,6 +88,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await expect(node.getByRole("button", { name: "Analyze & draft prompt" })).toBeDisabled();
   await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
+  await expect(node.getByRole("button", { name: "Analyze & draft prompt" })).toBeEnabled();
   expect(preparation.sourceVideoUrl).toBe("/outputs/e2e/source.mp4");
   expect(preparation.videoOutpaint.aspectRatio).toBe("9:16");
   expect(requests.some(item => item.path === "/api/node/utility-video")).toBe(false);

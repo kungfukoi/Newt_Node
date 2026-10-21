@@ -29,6 +29,7 @@ import {
   assemblyActiveClips,
   assemblyClipPlaybackRate,
   assemblyClipSourceTime,
+  assemblyClipReplacementError,
   assemblyDuration,
   assemblyFrameDuration,
   clearAssemblyInOut,
@@ -42,6 +43,7 @@ import {
   pasteAssemblyClip,
   removeAssemblyClip,
   removeAssemblyMedia,
+  replaceAssemblyClipMedia,
   retimeAssemblyClip,
   setAssemblyInPoint,
   setAssemblyLoopInOut,
@@ -97,6 +99,8 @@ export function AssemblyNodeBody({
   const [extractionError, setExtractionError] = React.useState("");
   const extractionPendingRef = React.useRef(false);
   const [dragTargetTrackId, setDragTargetTrackId] = React.useState("");
+  const [replacementClipId, setReplacementClipId] = React.useState("");
+  const [replacementError, setReplacementError] = React.useState("");
   const [draggingClipId, setDraggingClipId] = React.useState("");
   const [clipClipboard, setClipClipboard] = React.useState(null);
   const [splitGuide, setSplitGuide] = React.useState(null);
@@ -666,6 +670,16 @@ export function AssemblyNodeBody({
     event.preventDefault();
     event.stopPropagation();
     setDragTargetTrackId("");
+    setReplacementClipId("");
+    setReplacementError("");
+    const targetClipId = event.target.closest?.(".assembly-clip[data-clip-id]")?.dataset.clipId;
+    if ((event.ctrlKey || event.metaKey) && targetClipId) {
+      const error = assemblyClipReplacementError(timelineRef.current, targetClipId, mediaId);
+      if (error) { setReplacementError(error); return; }
+      const next = replaceAssemblyClipMedia(timelineRef.current, targetClipId, mediaId);
+      if (JSON.stringify(next) !== JSON.stringify(timelineRef.current)) commitTimeline(next);
+      return;
+    }
     const time = assemblyTimeAtClientX(event.currentTarget, event.clientX, pixelsPerSecond);
     commitTimeline(insertAssemblyMediaWithLinkedAudio(timelineRef.current, mediaId, trackId, time));
   }
@@ -842,6 +856,7 @@ export function AssemblyNodeBody({
   return (
     <div
       ref={rootRef}
+      onDragEndCapture={() => { setDragTargetTrackId(""); setReplacementClipId(""); }}
       className="node-body assembly-node-body nowheel"
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -966,12 +981,16 @@ export function AssemblyNodeBody({
                 onDragOver={(event) => {
                   if (!Array.from(event.dataTransfer.types || []).includes(assemblyMediaDragType())) return;
                   event.preventDefault();
+                  event.stopPropagation();
                   event.dataTransfer.dropEffect = "copy";
-                  if (dragTargetTrackId !== track.id) setDragTargetTrackId(track.id);
+                  const targetClipId = (event.ctrlKey || event.metaKey) ? event.target.closest?.(".assembly-clip[data-clip-id]")?.dataset.clipId || "" : "";
+                  setReplacementClipId(targetClipId);
+                  setDragTargetTrackId(targetClipId ? "" : track.id);
                 }}
                 onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget)) setDragTargetTrackId("");
+                  if (!event.currentTarget.contains(event.relatedTarget)) { setDragTargetTrackId(""); setReplacementClipId(""); }
                 }}
+                onDragEnd={() => { setDragTargetTrackId(""); setReplacementClipId(""); }}
                 onDrop={(event) => handleLaneDrop(event, track.id)}
                 onPointerDown={(event) => {
                   if (event.target !== event.currentTarget) return;
@@ -984,7 +1003,8 @@ export function AssemblyNodeBody({
                   return (
                     <div
                       key={clip.id}
-                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${selectedLinkGroupId && selectedLinkGroupId === clip.linkGroupId ? "linked-selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""}`}
+                      data-clip-id={clip.id}
+                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${selectedLinkGroupId && selectedLinkGroupId === clip.linkGroupId ? "linked-selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""} ${replacementClipId === clip.id ? "is-replace-target" : ""}`}
                       style={{ left: clip.start * pixelsPerSecond, width: Math.max(10, clip.duration * pixelsPerSecond), "--assembly-waveform": media.waveformUrl ? `url("${displayMediaUrl(media.waveformUrl)}")` : "none" }}
                       onPointerDown={(event) => handleClipPointerDown(event, clip, track)}
                       onPointerMove={(event) => handleClipPointerMove(event, clip)}
@@ -1048,6 +1068,7 @@ export function AssemblyNodeBody({
           ) : <span>{timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
           {probeStatus && <small>{probeStatus}</small>}
           {extractionError && <small role="alert">{extractionError}</small>}
+          {replacementError && <small role="alert">{replacementError}</small>}
         </div>
         <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
           <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>

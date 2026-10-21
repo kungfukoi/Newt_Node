@@ -1,4 +1,6 @@
 import { createVideoOutpaintService } from "./video-outpaint.js";
+import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
+import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
 import { registerVideoOutpaintPromptRoute } from "./routes/videoOutpaintPrompt.js";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
 import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
@@ -1225,6 +1227,7 @@ function buildHealthPayload() {
       videoOutpaintPrompt: true,
       videoOutpaint: true,
       videoOutpaintFraming: true,
+      videoOutpaintSeedance: true,
       generateAudio: true,
       atlasDurableVideo: true,
       characterWardrobeFullSheet: true,
@@ -5973,8 +5976,21 @@ async function runBirefnetUtilityImage(req, res, { imageUrl, selectedModel }) {
   });
 }
 
+async function localOutpaintCrop(req, res, prepared) {
+  const asset = await resolveLocalAssetPathFromUrl(prepared.videoUrl);
+  const output = await videoOutpaintService.finish(req.body, prepared, asset);
+  const metadata = await probeVideoFile(output.filePath);
+  const cost = { amountUsd: 0, currency: "USD", mediaType: "video", pricingBasis: "Local crop; no provider request" };
+  const videoOutpaint = { prepared, rawVideoUrl: prepared.videoUrl, localCrop: true, restoredSource: prepared.plan.settings.restoreSource, outputFormat: "8-bit SDR H.264" };
+  await appendHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "video", provider: "local", modelName: "Video Outpaint", endpoint: "local/video-outpaint-crop", mode: "Video crop", prompt: String(req.body.prompt || ""), project: projectFromBody(req.body), node: nodeFromBody(req.body), settings: { videoOutpaint }, videoOutpaint, cost, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes, video: metadata });
+  return res.json({ modelName: "Video Outpaint", video: { ...metadata, localUrl: output.publicPath, fileName: output.fileName, mimeType: "video/mp4" }, videoOutpaint, cost });
+}
+
 app.post("/api/node/utility-video", async (req, res) => {
   try {
+    if (req.body.model === "Video Outpaint" && normalizeVideoOutpaintSettings(req.body.videoOutpaint).model === "seedance-2.5") {
+      return handleVideoGeneration({ ...req, body: seedanceOutpaintRequest(req.body) }, res);
+    }
     const selectedVideoModel = resolveUtilityVideoModel(req.body.model);
     const prompt = String(req.body.prompt || "").trim();
     const startFrameUrls = Array.isArray(req.body.startFrameUrls) ? req.body.startFrameUrls.filter(isLocalAssetUrl) : [];
@@ -6051,15 +6067,7 @@ app.post("/api/node/utility-video", async (req, res) => {
     if (selectedVideoModel.provider === "fal-video-outpaint") {
       updateCurrentGenerationProgress({ phase: "preparing", message: "Preparing source canvas and expansion mask" });
       const prepared = await videoOutpaintService.prepare(req.body, firstLocalOutput(referenceVideoUrls));
-      if (!prepared.plan.needsOutpaint) {
-        const asset = await resolveLocalAssetPathFromUrl(prepared.videoUrl);
-        const output = await videoOutpaintService.finish(req.body, prepared, asset);
-        const metadata = await probeVideoFile(output.filePath);
-        const cost = { amountUsd: 0, currency: "USD", mediaType: "video", pricingBasis: "Local crop; no provider request" };
-        const videoOutpaint = { prepared, rawVideoUrl: prepared.videoUrl, localCrop: true, restoredSource: prepared.plan.settings.restoreSource, outputFormat: "8-bit SDR H.264" };
-        await appendHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "video", provider: "local", modelName: "Video Outpaint", endpoint: "local/video-outpaint-crop", mode: "Video crop", prompt, project: projectFromBody(req.body), node: nodeFromBody(req.body), settings: { videoOutpaint }, videoOutpaint, cost, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes, video: metadata });
-        return res.json({ modelName: "Video Outpaint", video: { ...metadata, localUrl: output.publicPath, fileName: output.fileName, mimeType: "video/mp4" }, videoOutpaint, cost });
-      }
+      if (!prepared.plan.needsOutpaint) return localOutpaintCrop(req, res, prepared);
       if (!process.env.FAL_KEY) return res.status(400).json({ error: "Video Outpaint is a Fal-only utility and needs an enabled Fal API key in Settings." });
       if (!prompt) return res.status(400).json({ error: "Enter or draft an outpainting prompt before Run." });
       req.body.wanVaceInpainting = { ...req.body.wanVaceInpainting, resolution: "auto", aspectRatio: prepared.plan.settings.aspectRatio, matchInputNumFrames: true, matchInputFps: true, preprocess: false, enablePromptExpansion: false, numInterpolatedFrames: 0 };
@@ -6543,9 +6551,15 @@ async function runTransitionBuilderUtilityVideo(req, res, { startFrameUrls, endF
   );
 }
 
-app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res) => {
+const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
   try {
     updateCurrentGenerationProgress({ status: "running", phase: "generating", message: "Preparing video generation" });
+    if (req.body.videoOutpaintUtility === true) {
+      const provider = runtimeModelProviderPreferences.seedance;
+      const result = await prepareSeedanceOutpaint(req.body, { provider, apiKey: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : "", prepare: videoOutpaintService.prepare });
+      if (!result.prepared.plan.needsOutpaint) return localOutpaintCrop(req, res, result.prepared);
+      req.body = result.body;
+    }
     let prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -6877,9 +6891,10 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
           generationBatchIndex: req.body.generationBatchIndex, generationBatchTotal: req.body.generationBatchTotal,
           generationSubmittedAt: req.body.generationSubmittedAt,
           ...(req.body.directorDialogueAudio ? { directorDialogueAudio: req.body.directorDialogueAudio } : {}),
-          ...(req.body.characterVoiceReferences ? { characterVoiceReferences: req.body.characterVoiceReferences } : {})
+          ...(req.body.characterVoiceReferences ? { characterVoiceReferences: req.body.characterVoiceReferences } : {}),
+          ...(req.body.videoOutpaintContext ? { videoOutpaintContext: req.body.videoOutpaintContext, outpaintUserPrompt: req.body.outpaintUserPrompt } : {})
         },
-        prompt, submittedPrompt, routeKind, seedance25, cost, storageFallback: req.videoStorageFallback === true,
+        prompt: req.body.videoOutpaintContext ? req.body.outpaintUserPrompt : prompt, submittedPrompt, routeKind, seedance25, cost, storageFallback: req.videoStorageFallback === true,
         pricingSnapshot: generationPricingScope.getStore() || pricingRefresh.snapshot(),
         runtimeAspectRatio, runtimeDurationSeconds, referenceVideoDurationSeconds,
         settings: {
@@ -7029,7 +7044,8 @@ app.post("/api/node/generate-video", durableVideoRequestHandler(async (req, res)
     console.error(error);
     sendApiError(res, error, "Video generation failed.");
   }
-}, remoteVideoJobs));
+}, remoteVideoJobs);
+app.post("/api/node/generate-video", handleVideoGeneration);
 
 async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const spec = job.spec;
@@ -7047,7 +7063,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     },
     download: (storageBody, target) => downloadVideo({ body: storageBody }, remoteVideo.url, routeKind, { stripAudio: !settings.generateAudio, target, timeoutMs: 5 * 60 * 1000 })
   });
-  const output = storage.output;
+  let output = storage.output;
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
     if (!settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
@@ -7078,12 +7094,20 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
     else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.`;
   }
+  let outpaintFinished;
+  if (body.videoOutpaintContext) {
+    const cached = job.outpaintFinished && existsSync(job.outpaintFinished.output.filePath) ? job.outpaintFinished : null;
+    outpaintFinished = cached || await finishSeedanceOutpaint(body, body.videoOutpaintContext, output, remoteVideo, { finish: videoOutpaintService.finish, probeVideo: probeVideoFile });
+    if (!cached) await checkpoint({ outpaintFinished });
+    output = outpaintFinished.output;
+    remoteVideo = outpaintFinished.video;
+  }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
     id: job.requestId || job.runId || randomUUID(), createdAt: job.createdAt || new Date().toISOString(),
-    mediaType: "video", provider, modelName, endpoint, mode: routeKindLabel(routeKind),
+    mediaType: "video", provider, modelName, endpoint, mode: outpaintFinished ? "Video outpainting" : routeKindLabel(routeKind),
     prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
-    project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed, ...(draftMetadata ? { draft: draftMetadata } : {}) },
+    project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed, ...(draftMetadata ? { draft: draftMetadata } : {}), ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}) },
     cost, keyIdentity: { fingerprint: spec.credentialFingerprint }, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes,
     ...(job.runId ? { generationRunId: job.runId, generationTimings: jobTimingDiagnostic(job) } : {})
   }, { deduplicate: Boolean(job.runId) });
@@ -7091,8 +7115,9 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     requestId: job.requestId, generationRunId: job.runId, seed: resultSeed, endpoint, provider, modelName,
     ...(job.runId ? { generationTimings: jobTimingDiagnostic(job) } : {}),
     submittedPrompt: spec.submittedPrompt, cost,
+    ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}),
     ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
-    ...([draftWarning, storage.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning].filter(Boolean).join(" ") } : {}),
+    ...([draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).join(" ") } : {}),
     ...(storage.fallback ? { storageFallback: true } : {}),
     ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),

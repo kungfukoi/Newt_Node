@@ -624,6 +624,7 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
   return {
     ...(data.videoOutpaint ? { videoOutpaint: data.videoOutpaint } : {}),
     ...(data.warning ? { warning: data.warning } : {}),
+    ...(data.generationRunId ? { generationRunId: data.generationRunId } : {}),
     url: data.video.localUrl,
     type: "video",
     label: data.modelName || `Video ${index + 1}`,

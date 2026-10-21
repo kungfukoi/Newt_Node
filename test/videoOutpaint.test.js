@@ -11,13 +11,19 @@ test("square source keeps its full composition centered in the tested 9:16 canva
   assert.equal(plan.frames, 81); assert.equal(plan.duration, 3.375);
   assert.deepEqual([plan.outputWidth, plan.outputHeight], [1080, 1920]);
 });
-test("landscape footage is fitted without a crop and short sources fail before paid work", () => {
+test("landscape footage is fitted without a crop and short sources loop at normal speed", () => {
   const plan = planVideoOutpaint({ width: 1920, height: 1080, fps: 24, duration: 5 });
   assert.equal(plan.sourceWidth, 432); assert.equal(plan.sourceHeight, 242);
   assert.ok(Math.abs(plan.sourceWidth / plan.sourceHeight - 16 / 9) < 0.01);
   assert.equal(planVideoOutpaint({ width: 1080, height: 1920, duration: 5 }).needsOutpaint, false);
-  assert.throws(() => planVideoOutpaint({ width: 1440, height: 1440, fps: 24, duration: 2 }), /segment must contain/);
-  assert.throws(() => planVideoOutpaint({ width: 1440, height: 1440, fps: 24, duration: 4 }, { start: 2 }), /segment must contain/);
+  const short = planVideoOutpaint({ width: 1440, height: 1440, fps: 24, duration: 1.666667 });
+  assert.equal(short.looped, true); assert.equal(short.loopFrames, 40);
+  assert.equal(short.frames, 81); assert.equal(short.duration, 3.375); assert.equal(short.fps, 24);
+  const offset = planVideoOutpaint({ width: 1440, height: 1440, fps: 24, duration: 4 }, { start: 2 });
+  assert.equal(offset.looped, true); assert.equal(offset.loopFrames, 48);
+  assert.equal(plan.looped, false);
+  assert.equal(planVideoOutpaint({ width: 64, height: 64, fps: 16, duration: 1 }).frames, 81);
+  assert.throws(() => planVideoOutpaint({ width: 64, height: 64, fps: 24, duration: 2 }, { start: 2 }), /source frame/);
   assert.deepEqual(normalizeVideoOutpaintSettings(null), normalizeVideoOutpaintSettings());
 });
 test("framing signatures invalidate prepared assets when source or settings change", () => {

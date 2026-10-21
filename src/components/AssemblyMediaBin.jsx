@@ -74,7 +74,7 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
               draggable
               role="button"
               tabIndex={0}
-              title="Drag to a compatible track or onto the canvas. Double-click to preview."
+              title="Drag to a compatible track or onto the canvas. Ctrl-drag (Command-drag on Mac) onto a video clip to replace it. Double-click to preview."
               onDragStart={(event) => beginMediaDrag(event, item)}
               onDragEnd={() => clearOutputItemDragData()}
               onDoubleClick={(event) => {

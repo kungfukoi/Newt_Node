@@ -17,10 +17,14 @@ import { finishSeedanceDraft } from "../src/nodeRunners/seedanceDraft.js";
 import { seedanceSubmittedPrompt } from "../src/seedancePrompt.js";
 import { validateAtlasSeedanceDurations } from "../src/atlasSeedanceLimits.js";
 import { saveGeneratedVideoWithFallback } from "../server/video-save-fallback.js";
+import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "../server/seedance-outpaint.js";
+import { planVideoOutpaint } from "../src/videoOutpaint.js";
+
+const outpaintFixture = { sourceUrl: "/outputs/short.mp4", videoUrl: "/outputs/padded.mp4", maskVideoUrl: "/outputs/mask.mp4", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 2 }, { model: "seedance-2.5" }) };
 
 // Execute the real route/finalizer with provider, storage and History boundaries mocked.
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
-const routeSource = source.slice(source.indexOf('app.post("/api/node/generate-video",'), source.indexOf("async function finalizeSeedanceVideo("));
+const routeSource = source.slice(source.indexOf('const handleVideoGeneration ='), source.indexOf("async function finalizeSeedanceVideo("));
 const finalizerSource = source.slice(source.indexOf("async function finalizeSeedanceVideo("), source.indexOf("async function importSeedanceResult("));
 function routeHarness(provider, { missingKey = false, rotateDuringUpload = false } = {}) {
   let handler, spec;
@@ -35,6 +39,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
   };
   const deps = {
     ...seedance, ...drafts, resolveSeedanceRuntimeProvider, providerKeyFingerprint, kreaSeedanceEndpoint, compactSeedancePrompt, estimateKreaSeedanceCost, mergeSeedanceDirectorReferences, supportsAtlasVideoModel,
+    prepareSeedanceOutpaint, videoOutpaintService: { prepare: async () => outpaintFixture },
     console: { error: () => {} },
     path, rootDir: "/fixture", outputsDir: "/fixture/outputs", localWorkflowAssetDirName: () => "workflow", verifyVideoOutputDestination: async () => ({}),
     seedanceSubmittedPrompt, validateAtlasSeedanceDurations,
@@ -49,6 +54,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
     resolveLocalAssetPathFromUrl: async url => ({ filePath: url }), probeVideoFile: async () => ({ duration: 10 }), localVideoDurations: async urls => urls.map(() => 10),
     resolveKreaSeedanceAspectRatio: async ({ value }) => value,
     uploadKreaReferenceImage: upload, uploadLocalOutputToKrea: upload,
+    uploadLocalOutputToFal: upload,
     createSingleSubmissionFalClient: ({ credentials }) => ({ storage: { upload: file => upload(file.name, credentials) } }),
     readLocalAsset: async url => ({ buffer: Buffer.from("fake"), fileName: url, mimeType: "image/png" }),
     atlasMedia: createAtlasMedia({ readLocalAsset: async url => ({ source: url }), client: { upload: (asset, key) => upload(asset.source, key) } }),
@@ -97,16 +103,43 @@ function finalizerHarness() {
     process: { env: { ATLAS_API_KEY: "atlas-key" } }, providerKeyFingerprint,
     providerPricing: { atlasInput: () => assert.fail("Do not borrow normal quotes for drafts or completion") },
     seedanceDrafts: { recordDraft: async input => { receipts.push(input); return input.draftId ? { provider: input.provider, receiptId: "receipt", draftId: input.draftId } : null; } },
+    finishSeedanceOutpaint, videoOutpaintService: { finish: async () => ({ filePath: "/finished.mp4", publicPath: "/outputs/finished.mp4", fileName: "finished.mp4", bytes: 100 }) },
     appendHistory: async (item, options) => histories.push({ item, options }), routeKindLabel: value => value,
     projectFromBody: () => ({}), nodeFromBody: () => ({}), jobTimingDiagnostic: () => ({ totalMs: 1000 }) };
   const finalize = new Function(...Object.keys(deps), `${finalizerSource}; return finalizeSeedanceVideo;`)(...Object.values(deps));
-  return { histories, receipts, checkpoints, run: (provider, { missingId = false, completion = false } = {}) => finalize({
+  return { histories, receipts, checkpoints, run: (provider, { missingId = false, completion = false, outpaint = false } = {}) => finalize({
     runId: "run", requestId: "request", remote: { video: { url: "https://example.test/draft.mp4" }, ...(missingId ? {} : { draft_id: "provider-draft" }) },
     target: {}, savedOutput: { filePath: "/saved.mp4", publicPath: "/outputs/saved.mp4" },
-    spec: { provider, modelName: "Seedance 2.5", seedance25: true, body: {}, settings: { seedanceDraft: !completion, generateAudio: true, ...(completion ? { seedanceDraftSource: "receipt" } : {}) },
+    spec: { provider, modelName: "Seedance 2.5", seedance25: true, body: outpaint ? { videoOutpaintContext: outpaintFixture } : {}, settings: { seedanceDraft: !completion && !outpaint, ...(outpaint ? { seedanceTask: "edit" } : {}), generateAudio: true, ...(completion ? { seedanceDraftSource: "receipt" } : {}) },
       endpoint: completion ? drafts.seedanceAtlasDraftCompletionEndpoint : "generation", routeKind: "text-to-video", cost: drafts.seedanceDraftCost(completion ? "completion" : "preview", provider), credentialFingerprint: providerKeyFingerprint("atlas-key") }
   }, async patch => checkpoints.push(patch)) };
 }
+
+test("outpainting reuses real Fal/Atlas editing acceptance with padded input, scene instructions and durable context", async () => {
+  for (const provider of ["fal", "atlas"]) {
+    const h = routeHarness(provider);
+    const res = await h.run({ videoOutpaintUtility: true, videoOutpaint: { model: "seedance-2.5" }, referenceVideoUrls: [outpaintFixture.sourceUrl], seedanceDraft: false, prompt: "Continue the floor" });
+    assert.equal(res.statusCode, 202);
+    assert.equal(h.spec.settings.seedanceTask, "edit"); assert.equal(h.spec.body.videoOutpaintContext.videoUrl, outpaintFixture.videoUrl);
+    assert.equal(h.spec.prompt, "Continue the floor"); assert.match(h.spec.submittedPrompt, /solid black padded expansion/);
+    assert.equal(h.spec.cost.amountUsd, null); assert.equal(h.spec.provider, provider);
+    assert.ok(h.uploads.some(upload => upload.url === outpaintFixture.videoUrl));
+    assert.ok(h.uploads.every(upload => upload.url !== outpaintFixture.maskVideoUrl));
+    if (provider === "fal") assert.equal(h.spec.input.task, "editing");
+    else assert.equal(h.spec.input.omni_reference_task_type, "edit");
+  }
+});
+
+test("Seedance outpaint finalization checkpoints restoration and records raw/source metadata with unknown cost", async () => {
+  const h = finalizerHarness();
+  const result = await h.run("atlas", { outpaint: true });
+  assert.equal(result.video.localUrl, "/outputs/finished.mp4");
+  assert.equal(result.videoOutpaint.rawVideoUrl, "/outputs/saved.mp4");
+  assert.equal(result.videoOutpaint.restoredSource, true); assert.equal(result.cost.amountUsd, null);
+  assert.equal(h.checkpoints.at(-1).outpaintFinished.output.publicPath, result.video.localUrl);
+  assert.equal(h.histories.at(-1).item.mode, "Video outpainting");
+  assert.equal(h.histories.at(-1).item.settings.videoOutpaint.model, "seedance-2.5");
+});
 
 test("Atlas finalization preserves draft ID, History provider, unknown costs and timing metadata", async () => {
   const h = finalizerHarness();

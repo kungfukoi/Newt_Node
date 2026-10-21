@@ -1,4 +1,4 @@
-import { VideoOutpaintControls } from "./components/VideoOutpaintControls.jsx";
+import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
 import { normalizeVideoOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
 import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
 import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
@@ -14928,6 +14928,7 @@ function NodeBody({
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
+          {isOutpaintVideo && <RemoteVideoAttention node={node} onUpdate={onUpdate} />}
           {isVideoMode ? (
             <>
               <NodeRow label="Model">
@@ -14938,6 +14939,7 @@ function NodeBody({
                   {!utilityVideoModelOptions.includes(utilityVideoModel) && <option hidden>{utilityVideoModel}</option>}
                 </select>
               </NodeRow>
+              {isOutpaintVideo && <VideoOutpaintModelControl node={node} running={running} onUpdate={onUpdate} />}
               {settingsOpen && isCompositeVideo && <CompositeLayerControls node={node} incoming={incoming} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} colors={portColors} mediaType={previewMediaType} connectedSummary={connectedSummary} />}
               {!isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>

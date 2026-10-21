@@ -5,7 +5,8 @@ import { normalizeVideoGenerationResult } from "./nodeRunners/videoModels.js";
 export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), edges = []) {
   const patches = [];
   for (const node of nodes) {
-    if (node.type !== "videoModel" || activeNodeIds.has(node.id)) continue;
+    const outpaint = node.type === "utility" && node.data.utilityMode === "video" && node.data.utilityVideoModel === "Video Outpaint";
+    if ((node.type !== "videoModel" && !outpaint) || activeNodeIds.has(node.id)) continue;
     const owned = jobs.filter((job) => job.nodeId === node.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (!owned.length) continue;
     const seen = new Set(node.data.remoteVideoRunIds || []);

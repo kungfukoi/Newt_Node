@@ -1,4 +1,5 @@
 import { isFlux3MaxModel } from "../flux3Max.js";
+import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../videoOutpaint.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
 import { apiErrorMessage } from "../apiErrors.js";
 import { supportsDurableVideo } from "../remoteVideoJobs.js";
@@ -454,6 +455,7 @@ export const nodeApi = {
   },
   async prepareVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify video outpaint support.");
+    if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedance !== true) throw new Error("Restart the backend to activate Seedance outpainting. No generation was submitted.");
     if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No paid generation was submitted.");
     if (body.videoOutpaint?.frame && health.routes?.videoOutpaintFraming !== true) throw new Error("Restart the NewtNode backend to activate edited outpainting frames. No generation was submitted.");
     return fetchJsonApi("/api/node/video-outpaint-prepare", jsonBody(body), "Prepare outpaint canvas");
@@ -461,6 +463,10 @@ export const nodeApi = {
   async utilityVideo(body, label = "Utility video generation") {
     if (body.model === "Video Outpaint") {
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5") {
+        if (health.routes?.videoOutpaintSeedance !== true) throw new Error("Restart the backend to activate Seedance outpainting. No generation was submitted.");
+        return nodeApi.generateVideo(seedanceOutpaintRequest(body), label);
+      }
       if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No generation was submitted.");
       if (body.videoOutpaint?.frame && health.routes?.videoOutpaintFraming !== true) throw new Error("Restart the NewtNode backend to activate edited outpainting frames. No generation was submitted.");
     }

@@ -180,6 +180,45 @@ export function insertAssemblyMediaWithLinkedAudio(state, mediaId, targetTrackId
   return ensureAssemblyEmbeddedAudioClips(inserted, mediaId);
 }
 
+export function assemblyClipReplacementError(state, clipId, mediaId) {
+  const current = normalizeAssemblyState(state);
+  const found = findAssemblyClip(current, clipId);
+  const media = current.media.find(item => item.id === mediaId);
+  if (!found || !media) return "The clip or replacement media is unavailable.";
+  if (found.track.type !== "video" || !["image", "video"].includes(media.type)) return "Drop a video or image onto a video clip.";
+  if (linkedAssemblyClipEntries(current, clipId).some(entry => entry.track.locked)) return "Unlock the clip and its linked audio before replacing it.";
+  if (media.type === "video" && media.duration + 0.001 < assemblyClipSourceSpan(found.clip)) return `Replacement needs at least ${assemblyClipSourceSpan(found.clip).toFixed(3)} seconds at this clip's playback speed.`;
+  return "";
+}
+
+export function replaceAssemblyClipMedia(state, clipId, mediaId) {
+  const current = normalizeAssemblyState(state);
+  if (assemblyClipReplacementError(current, clipId, mediaId)) return current;
+  const next = cloneAssemblyState(current);
+  const found = findAssemblyClip(next, clipId);
+  const media = next.media.find(item => item.id === mediaId);
+  if (found.clip.mediaId === media.id) return current;
+  const oldMediaId = found.clip.mediaId;
+  const audioEntries = linkedAssemblyClipEntries(next, clipId).filter(entry => entry.track.type === "audio" && entry.media.derivedFromMediaId === oldMediaId);
+  const linkGroupId = found.clip.linkGroupId || createAssemblyId("clip-link");
+  Object.assign(found.clip, { mediaId: media.id, sourceIn: 0, sourceDuration: media.type === "image" ? Math.max(media.duration, assemblyClipSourceSpan(found.clip)) : media.duration, linkGroupId: "" });
+  if (media.type === "video" && media.hasAudio) {
+    const audioMedia = ensureEmbeddedAudioMedia(next, media);
+    found.clip.linkGroupId = linkGroupId;
+    if (audioEntries.length) {
+      audioEntries.forEach(entry => Object.assign(entry.clip, { mediaId: audioMedia.id, sourceIn: 0, sourceDuration: media.duration, linkGroupId, start: found.clip.start, duration: found.clip.duration, speed: found.clip.speed, reverse: found.clip.reverse }));
+    } else {
+      const audioTrack = pairedAssemblyTrack(next, found.track, "audio");
+      audioTrack.clips.push(normalizeAssemblyClip({ ...found.clip, id: createAssemblyId("clip"), mediaId: audioMedia.id }));
+    }
+  } else {
+    const removed = new Set(audioEntries.map(entry => entry.clip.id));
+    next.tracks.forEach(track => { track.clips = track.clips.filter(clip => !removed.has(clip.id)); });
+  }
+  next.selectedClipId = clipId;
+  return next;
+}
+
 export function ensureAssemblyEmbeddedAudioClips(state, videoMediaId = "") {
   const current = normalizeAssemblyState(state);
   const next = cloneAssemblyState(current);
