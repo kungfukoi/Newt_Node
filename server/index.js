@@ -2,6 +2,8 @@ import { requestKreaLlm } from "./krea-llm.js";
 import { buildKreaEnhanceInput, kreaEnhanceEndpoint } from "./krea-enhance.js";
 import { createVideoOutpaintService } from "./video-outpaint.js";
 import { registerVideoOutpaintFinishRoute } from "./routes/videoOutpaintFinish.js";
+import { createKeyerService } from "./keyer.js";
+import { registerKeyerRoutes } from "./routes/keyer.js";
 import { createOutpaintVisualReviewer } from "./outpaint-visual-qc.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
@@ -173,7 +175,7 @@ import {
   workflowPackageAssetCandidatesForExternalFilePath,
   workflowSaveIdentity
 } from "./workflowPackageAssets.js";
-import { compositeVideoBlendModeOptions, model3DNames, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
+import { compositeVideoBlendModeOptions, isRetiredUtilityVideoModel, model3DNames, normalizeModelPreferences, utilityImageToIdPrompt } from "../src/modelOptions.js";
 import { normalizeCompositeLayers, compositeLayerLimit } from "../src/compositeLayers.js";
 import { buildCompositeStackArgs } from "./composite-stack.js";
 import {
@@ -1171,6 +1173,8 @@ function buildHealthPayload() {
     routes: {
       utilityImage: true,
       utilityVideo: true,
+      keyer: true,
+      keyerUtility: true,
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
@@ -3722,6 +3726,11 @@ const videoOutpaintService = createVideoOutpaintService({
   reviewVisual: reviewOutpaintVisual
 });
 registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service: videoOutpaintService, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile, appendHistory, projectFromBody, nodeFromBody });
+registerKeyerRoutes(app, createKeyerService({
+  isLocalAssetUrl, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile,
+  ffmpeg: ffmpegBinaryPath, recordHistory: appendHistory, projectFromBody, nodeFromBody,
+  createTarget: (body, kind, extension, dependency) => createManagedAssetTarget({ body }, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName, { forceExtension: true })
+}));
 app.post("/api/node/video-outpaint-prepare", async (req, res) => {
   try {
     if (!isLocalAssetUrl(req.body.canvasVideoUrl || req.body.sourceVideoUrl)) return res.status(400).json({ error: "Connect a local source or Canvas video." });
@@ -6067,6 +6076,7 @@ async function localOutpaintCrop(req, res, prepared) {
 
 app.post("/api/node/utility-video", async (req, res) => {
   try {
+    if (isRetiredUtilityVideoModel(req.body.model)) return res.status(400).json({ error: "This Utility model is disabled. Choose an available model; saved results are preserved." });
     if (req.body.model === "Video Outpaint" && normalizeVideoOutpaintSettings(req.body.videoOutpaint).model === "seedance-2.5") {
       return handleVideoGeneration({ ...req, body: seedanceOutpaintRequest(req.body) }, res);
     }

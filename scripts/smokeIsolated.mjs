@@ -82,6 +82,17 @@ try {
   const health = await (await request("/api/health")).json();
   assert.equal(health.routes.videoOutpaintPrompt, true);
   assert.equal(health.routes.kreaModelProviders, true);
+  assert.equal(health.routes.keyer, true);
+  assert.equal(health.routes.keyerUtility, true);
+  for (const model of ["Extract Frame", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting"]) {
+    const retired = await fetch(api + "/api/node/utility-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }), signal: AbortSignal.timeout(15000) });
+    assert.equal(retired.status, 400);
+    assert.match((await retired.json()).error, /disabled/);
+  }
+  const keyerStatus = await (await request("/api/keyer/status")).json();
+  assert.equal(typeof keyerStatus.ready, "boolean");
+  const invalidKeyer = await fetch(api + "/api/node/keyer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: {} }), signal: AbortSignal.timeout(15000) });
+  assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
   for (const flag of ["timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);

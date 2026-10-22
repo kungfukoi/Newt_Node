@@ -10,6 +10,9 @@ import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3
 import ImageModelAdvancedOptions from "./components/ImageModelAdvancedOptions.jsx";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
+import { isKeyerNode, keyerModelName, migrateKeyerNode, normalizeKeyerData, keyerResultForPort, remapUtilityKeyerEdges } from "./keyer.js";
+import { isRetiredUtilityVideoModel } from "./modelOptions.js";
+import { runKeyer } from "./nodeRunners/keyer.js";
 import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
 import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
 import { Grid3X3 } from "lucide-react";
@@ -45,6 +48,7 @@ import CropModeControls from "./components/CropModeControls.jsx";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
 import { runExploreGeneration } from "./nodeRunners/explore.js";
 const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
+const KeyerNodeBody = React.lazy(() => import("./components/KeyerNodeBody.jsx").then(module => ({ default: module.KeyerNodeBody })));
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, curveLookup } from "./imageAdjustments.js";
 import { generateCharacterWardrobeVariant } from "./characterWardrobeGeneration.js";
 import {
@@ -2721,14 +2725,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
 
     if (nextUtilityData && ("utilityMode" in patch || "utilityImageModel" in patch || "utilityVideoModel" in patch || "compositeLayers" in patch)) {
-      const activePorts = new Set(utilityInputPortIds(nextUtilityData.utilityMode, nextUtilityData.utilityImageModel, nextUtilityData.utilityVideoModel, nextUtilityData));
-      setEdges((current) =>
-        current.filter((edge) => {
-          const staleOutput = "utilityMode" in patch && edge.from.nodeId === nodeId;
-          const inactiveInput = edge.to.nodeId === nodeId && !activePorts.has(edge.to.port);
-          return !staleOutput && !inactiveInput;
-        })
-      );
+      const nextUtility = { type: "utility", data: nextUtilityData };
+      const activePorts = utilityInputPortIds(nextUtilityData.utilityMode, nextUtilityData.utilityImageModel, nextUtilityData.utilityVideoModel, nextUtilityData);
+      const outputs = outputPortIdsForNode(nextUtility);
+      setEdges(current => remapUtilityKeyerEdges(current, nodeId, activePorts, outputs, isKeyerNode(nextUtility), "utilityMode" in patch));
     }
 
     if (nextEditData && ("editGroup" in patch || "editEffect" in patch || "editSourceType" in patch)) {
@@ -6075,6 +6075,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (isKeyerNode(target)) return outputKind === "video" ? ["videoIn"] : outputKind === "image" && target.data.keyerMode === "first" ? ["firstHintIn"] : [];
     if (target.type === "videoModel" && isFlux3MaxModel(target.data?.model) && outputKind === "image") return flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id).filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
       return normalizeCompositeLayers(target.data).map(compositeLayerPortId).filter((port) => !edgesRef.current.some((edge) => edge.to.nodeId === target.id && edge.to.port === port));
@@ -6172,6 +6173,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function autoConnectionOutputKind(source, from) {
+    if (isKeyerNode(source)) return "video";
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "coverage") return "image";
@@ -6208,6 +6210,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (isKeyerNode(target)) return activeInputPortIdsForNode(target).includes(to.port) ? "" : "Choose the matching CorridorKey hint mode first";
+    if (isKeyerNode(source)) return "";
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && isCompositeLayerPort(target.data, to.port)) {
       const outputPort = portDefinitionForNode(source, from.port, "output");
       return outputPort?.disabled ? outputPort.disabledReason || "Generate this output before connecting it" : "";
@@ -6917,6 +6921,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function outputTargetForSourceNode(sourceNode, incomingByNode = {}) {
     if (!sourceNode || sourceNode.type === "output") return null;
+    if (isKeyerNode(sourceNode)) {
+      const edge = edgesRef.current.find(edge => edge.from.nodeId === sourceNode.id && edge.from.port === "cutoutOut" && nodesRef.current.some(node => node.id === edge.to.nodeId && node.type === "output"));
+      const outputNode = edge && nodesRef.current.find(node => node.id === edge.to.nodeId);
+      return outputNode ? { node: outputNode, context: outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode) } : null;
+    }
     const outputNode = connectedOutputNodesForSource(sourceNode.id).at(0);
     if (!outputNode) return null;
     return {
@@ -7220,6 +7229,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       const requestedOutput = runOptions?.outputTargetNodeId ? nodesRef.current.find(n => n.id === runOptions.outputTargetNodeId && n.type === "output") : null;
+      if (currentNode.type === "utility" && currentNode.data.utilityMode === "video" && isRetiredUtilityVideoModel(currentNode.data.utilityVideoModel)) throw new Error("This Utility model is disabled. Choose an available model; saved results are preserved.");
       outputTarget = requestedOutput ? { node: requestedOutput, context: outputTargetContextFromOutputNode(requestedOutput, currentNode, "", currentIncomingByNode) } : outputTargetForSourceNode(currentNode, currentIncomingByNode);
       requestContext = workflowRequestContext(outputTarget?.context || {});
       await ensureComfyWanAvailableForRun(currentNode);
@@ -7663,7 +7673,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      if (currentNode.type === "utility") {
+      if (currentNode.type === "utility" && !isKeyerNode(currentNode)) {
         if (utilityMode(currentNode) === "image") {
           const utilityImageModel = normalizedUtilityImageModelName(currentNode.data.utilityImageModel);
           if (isUtilityAutoAspectModel(utilityImageModel)) {
@@ -7859,6 +7869,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           error: ""
         });
         markOutputTargetSaved(outputTarget, generatedItems, editResultType);
+        loadOutputHistory();
+        return { status: "complete" };
+      }
+
+      if (isKeyerNode(currentNode)) {
+        const keyerScope = remoteVideoScope(requestContext);
+        const tracking = () => !token.stopped && currentVideoScopeRef.current === keyerScope;
+        const item = await runKeyer({ node: currentNode, sourceVideoUrl: incoming.videoIn?.length ? connectedOutputUrl(incoming.videoIn.at(-1).source, incoming.videoIn.at(-1).edge) : "",
+          firstHintUrl: incoming.firstHintIn?.length ? connectedOutputUrl(incoming.firstHintIn.at(-1).source, incoming.firstHintIn.at(-1).edge) : "",
+          hintVideoUrl: incoming.hintVideoIn?.length ? connectedOutputUrl(incoming.hintVideoIn.at(-1).source, incoming.hintVideoIn.at(-1).edge) : "",
+          workflowContext: requestContext, shouldTrack: tracking, update: patch => { if (tracking()) updateNode(currentNode.id, patch); } });
+        if (!item || !tracking()) return { status: "error" };
+        const { resultItems, firstNewIndex } = appendedNodeResultState(existingResultItemsForNode(currentNode, "video"), [item], "video");
+        updateNode(currentNode.id, { status: "complete", resultUrl: item.url, resultItems, selectedResultIndex: firstNewIndex, resultType: "video", keyerJobId: "", keyerProgress: "Key complete", keyerAction: "", error: "" });
+        markOutputTargetSaved(outputTarget, [item], "video");
         loadOutputHistory();
         return { status: "complete" };
       }
@@ -11839,6 +11864,24 @@ function NodeBody({
       qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
   }
+  if (isKeyerNode(node)) {
+    const keyerBusy = ["running", "uploading"].includes(node.data.status);
+    const reset = { resultUrl: "", resultItems: [], selectedResultIndex: 0, status: "ready", error: "" };
+    const modeControls = <div className="utility-mode-tabs" role="tablist" aria-label="Utility mode">
+        <button type="button" role="tab" aria-selected={false} disabled={keyerBusy} onClick={() => onUpdate(node.id, { utilityMode: "image", ...reset })}>Image</button>
+        <button type="button" role="tab" aria-selected className="active" disabled={keyerBusy}>Video</button>
+      </div>;
+    const controls = <NodeRow label="Model"><select aria-label="Utility video model" value={keyerModelName} disabled={keyerBusy} onChange={event => onUpdate(node.id, { ...utilityVideoModelSelectionPatch(event.target.value), keyerJobId: "", keyerProgress: "" })}>
+        {utilityVideoModelOptions.map(model => <option key={model}>{model}</option>)}
+        {!utilityVideoModelOptions.includes(keyerModelName) && <option hidden>{keyerModelName}</option>}
+      </select></NodeRow>;
+    return <React.Suspense fallback={<div className="node-body">Loading CorridorKey…</div>}><KeyerNodeBody node={node} config={getNodeConfig("keyer")} utilityControls={controls} utilityModeControls={modeControls}
+      source={incoming.videoIn?.length ? connectedOutputItem(incoming.videoIn.at(-1).source, incoming.videoIn.at(-1).edge) : null}
+      firstHint={incoming.firstHintIn?.length ? connectedOutputItem(incoming.firstHintIn.at(-1).source, incoming.firstHintIn.at(-1).edge) : null}
+      hintVideo={incoming.hintVideoIn?.length ? connectedOutputItem(incoming.hintVideoIn.at(-1).source, incoming.hintVideoIn.at(-1).edge) : null}
+      sourceConnected={Boolean(incoming.videoIn?.length)} onUpdate={onUpdate} onRun={onRun} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} /></React.Suspense>;
+  }
   if (node.type === "audioModel") {
     return <AudioModelNodeBody node={node} incoming={incoming} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
       showApiCosts={showPriceSnapshot} generationScope={generationScope}
@@ -14993,7 +15036,8 @@ function NodeBody({
             ))}
           </div>
         )}
-        <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun}>
+        {isVideoMode && isRetiredUtilityVideoModel(utilityVideoModel) && <p className="utility-model-description">This model is disabled. Choose an available model. Saved results are preserved.</p>}
+        <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun || isVideoMode && isRetiredUtilityVideoModel(utilityVideoModel)}>
           {running ? (isOutpaintVideo ? (isOutpaintCropOnly ? "Exporting crop..." : node.data.videoOutpaintStage === "qc-edits" ? "QC Edits..." : "Generating Fill...") : isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
@@ -15002,11 +15046,11 @@ function NodeBody({
           {isVideoMode ? (
             <>
               <NodeRow label="Model">
-                <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, utilityVideoModelSelectionPatch(event.target.value))}>
+                <select aria-label="Utility video model" value={utilityVideoModel} onChange={(event) => onUpdate(node.id, utilityVideoModelSelectionPatch(event.target.value))}>
                   {utilityVideoModelOptions.map((model) => (
                     <option key={model}>{model}</option>
                   ))}
-                  {!utilityVideoModelOptions.includes(utilityVideoModel) && <option hidden>{utilityVideoModel}</option>}
+                  {!utilityVideoModelOptions.includes(utilityVideoModel) && <option hidden disabled={isRetiredUtilityVideoModel(utilityVideoModel)}>{utilityVideoModel}</option>}
                 </select>
               </NodeRow>
               {isOutpaintVideo && <VideoOutpaintModelControl node={node} running={running} onUpdate={onUpdate} />}
@@ -18060,6 +18104,15 @@ function formatFrameTimeDisplay(value) {
 }
 
 function getNodeConfig(type) {
+  if (type === "keyer") return { icon: Wrench, input: [
+    { id: "videoIn", label: "Source video", color: portColors.video },
+    { id: "firstHintIn", label: "Frame 1 matte", color: portColors.image },
+    { id: "hintVideoIn", label: "Matte video", color: portColors.video }
+  ], output: [
+    { id: "cutoutOut", label: "Cutout · RGBA", color: portColors.video },
+    { id: "matteOut", label: "Matte", color: portColors.video },
+    { id: "foregroundOut", label: "Foreground", color: portColors.video }
+  ] };
   if (type === "explore") return { icon: Compass, input: [
     { id: "promptIn", label: "Brief", color: portColors.prompt }, { id: "imageIn", label: "Image / Product", color: portColors.image },
     { id: "characterIn", label: "Character", color: portColors.character }, { id: "transferIn", label: "Mood Board", color: portColors.transfer },
@@ -18284,6 +18337,7 @@ function unsupportedNodeConfig(type) {
 }
 
 function createDefaultNodeData(type, label, count) {
+  if (type === "keyer") return normalizeKeyerData({ title: `${label}${count > 1 ? ` ${count}` : ""}` });
   if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
   if (type === "audioModel") return { title, ...audioModelDefaults };
@@ -18599,7 +18653,8 @@ function createDefaultNodeData(type, label, count) {
       settingsOpen: true,
       model: videoModelNames.wanFunControl,
       utilityImageModel: utilityImageModelNames.dwpose,
-      utilityVideoModel: utilityVideoModelNames.extractFrame,
+      utilityVideoModel: utilityVideoModelNames.corridorKey,
+      nodeWidth: 420,
       stillFrameTime: 0,
       selectedAspectRatios: autoAspectDefaultRatios,
       autoAspectResults: [],
@@ -19563,6 +19618,7 @@ function utilityImageModelSelectionPatch(model) {
 }
 
 function utilityVideoModelSelectionPatch(model) {
+  if (model === keyerModelName) return { ...normalizeKeyerData(), utilityVideoModel: keyerModelName, resultUrl: "", selectedResultIndex: 0, error: "", status: "ready", keyerJobId: "", keyerProgress: "", batchCount: "1" };
   const patch = {
     utilityVideoModel: model,
     resultUrl: "",
@@ -19750,6 +19806,7 @@ function utilityVideoModelSelectionPatch(model) {
 }
 
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wan22VaceDepth, data = {}) {
+  if (mode !== "image" && videoModel === keyerModelName) return ["videoIn", "firstHintIn", "hintVideoIn"];
   if (mode === "image") {
     if (isUtilityCoverageModel(imageModel)) return ["imageIn", "styleIn", "transferIn", "characterIn"];
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
@@ -19796,6 +19853,7 @@ function normalizedUtilityImageModelName(model) {
 }
 
 function normalizedUtilityVideoModelName(model) {
+  if (String(model).toLowerCase() === keyerModelName.toLowerCase()) return keyerModelName;
   if (String(model).toLowerCase() === "video outpaint") return videoOutpaintModelName;
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
@@ -20211,6 +20269,7 @@ function visiblePortIdsForNode(node) {
 }
 
 function inputPortDefinitionsForNode(node) {
+  if (isKeyerNode(node)) return getNodeConfig("keyer").input;
   const basePorts = getNodeConfig(node?.type)?.input || [];
   if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model)) return [...basePorts.filter(port => !["referenceImageIn", "startFrameIn", "endFrameIn"].includes(port.id)), ...flux3MaxKeyframePorts(node.data, portColors.image)];
   if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)) return compositeInputPorts(node.data, portColors.preview);
@@ -20218,6 +20277,7 @@ function inputPortDefinitionsForNode(node) {
 }
 
 function outputPortDefinitionsForNode(node) {
+  if (isKeyerNode(node)) return getNodeConfig("keyer").output;
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "frameIt") return basePorts.map((port) => ({
     ...port,
@@ -20274,6 +20334,7 @@ function inputPortIdsForNode(node) {
 }
 
 function activeInputPortIdsForNode(node) {
+  if (isKeyerNode(node)) return ["videoIn", ...(node.data.keyerMode === "first" ? ["firstHintIn"] : node.data.keyerMode === "video" ? ["hintVideoIn"] : [])];
   if (node?.type === "audioModel") return inputPortIdsForNode(node).filter(port => audioInputEnabled(node.data.audioMode, port));
   if (node?.type === "utility") {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel, node.data);
@@ -20528,6 +20589,7 @@ function resetAutoAspectOutputPatch() {
 }
 
 function utilityOutputPortIdsForNode(node) {
+  if (isKeyerNode(node)) return ["cutoutOut", "matteOut", "foregroundOut"];
   if (!isUtilityTransitionBuilderModel(node?.data?.utilityVideoModel)) return ["utilityOut"];
   return ["outclipOut", "generatedVideoOut"];
 }
@@ -20590,6 +20652,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (isKeyerNode(node)) return "video";
   if (node.type === "audioModel") return "audio";
   if (node.type === "explore") return "image";
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
@@ -21218,6 +21281,7 @@ function nodeReferenceSyntheticEdge(node) {
 
 function nodeReferenceOutputPort(node) {
   if (!node) return "";
+  if (isKeyerNode(node)) return "cutoutOut";
   if (["plainText", "text", "textAgent"].includes(node.type)) return "promptOut";
   if (node.type === "image") return "imageOut";
   if (node.type === "video") return "videoOut";
@@ -21332,6 +21396,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (isKeyerNode(source)) return keyerResultForPort(source, edge?.from?.port);
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "storyboard") return storyboardOutputItem(source, edge);
   if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
@@ -21580,6 +21645,7 @@ function segmentVideoResultsByRole(items = []) {
 }
 
 function sourceResultItemsForPort(source, portId = "", type = "") {
+  if (isKeyerNode(source)) { const item = keyerResultForPort(source, portId); return item ? [item] : []; }
   if (source?.type === "assembly") {
     if (portId === "frameOut") {
       return source.data?.assemblyFrameUrl ? [{
@@ -21609,6 +21675,7 @@ function sourceResultItemsForPort(source, portId = "", type = "") {
 }
 
 function sourceResultUrlForPort(source, portId = "") {
+  if (isKeyerNode(source)) return keyerResultForPort(source, portId)?.url || "";
   if (source?.type === "assembly") return portId === "frameOut" ? source.data?.assemblyFrameUrl || "" : source.data?.resultUrl || "";
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
     const item = transitionBuilderResultItemForPort(source, portId);
@@ -22638,6 +22705,7 @@ function connectedPreviewSources(items = []) {
 }
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
+  if (isKeyerNode(source)) return sourceResultItemsForPort(source, edge?.from?.port, "video");
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (!source) return [];
   if (source.type === "assembly") {
@@ -22936,6 +23004,7 @@ function previewVideoSourceForNode(node, incomingByNode) {
 }
 
 function previewMediaType(source, edge) {
+  if (isKeyerNode(source)) return "video";
   if (source.type === "audio" || source.type === "audioModel" || (source.type === "character" && edge?.from?.port === "voiceOut")) return "audio";
   if (!source) return "";
   if (source.type === "assembly") return edge?.from?.port === "frameOut" ? "image" : "video";
@@ -23884,6 +23953,7 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 function normalizeCurrentNode(node) {
   node = { ...node, data: migrateImageModelSelections(node.data) };
   const nextNode = clearStaleRunningState(node);
+  if (isKeyerNode(nextNode)) return migrateKeyerNode(nextNode);
   if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(nextNode.data) };
   const data = nextNode.data || {};
 
@@ -25345,6 +25415,7 @@ function textModelTitleFromLegacy(title) {
 }
 
 function normalizeUtilityData(data = {}) {
+  if (isKeyerNode({ type: "utility", data })) return normalizeKeyerData({ ...data, title: data.title || "Utility" });
   const utilityModeValue = data.utilityMode === "image" ? "image" : "video";
   const utilityVideoModel = normalizedUtilityVideoModelName(data.utilityVideoModel);
   const wanVaceResolutionChoices = isUtilityWanVaceMaskToVideoModel(utilityVideoModel) ? wanVaceResolutionOptions : wanVaceInpaintingResolutionOptions;
@@ -25752,7 +25823,9 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "utility") {
-    if (isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
+    if (isKeyerNode(source)) {
+      if (nextEdge.from.port === "utilityOut") nextEdge.from.port = "cutoutOut";
+    } else if (isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
       if (!utilityOutputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "outclipOut";
     } else {
       nextEdge.from.port = "utilityOut";

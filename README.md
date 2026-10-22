@@ -195,3 +195,6 @@ FLUX 3 Max is available in the Video Model node through Fal. Choose Fal in Setti
 FLUX 3 Max accepts up to 10 positioned keyframes. Each Keyframe row has its own image input and adjacent Frame Indices field at 24 fps, from 0 to duration × 24. Use +/− to add or remove rows. Positions must be unique; no boundary frame is required. There are no separate Start Frame or End Frame inputs.
 
 Krea API additions (2026-10-21): Ideogram 4.5 image generation/editing with up to five references at 2K; FLUX 3 Max text/keyframe video; Rodin 2.5 3D; matching Topaz image/video enhancement variants, FLUX video upscale and Hyperion SDR-to-HDR. Unsupported variants return an explicit error, and unverified prices remain unknown. The separate preview Image Editor retains its existing Fal/Atlas routing.
+## Local Keyer
+
+Choose **Utility → Video → CorridorKey 2.0** for local keying, with an in-node source/checker/matte/foreground viewer, optional matte hints, despill and VRAM controls, plus Cutout, Matte and Foreground outputs. The engine is installed separately. Legacy Keyer nodes migrate automatically. Extract Frame, Wan VACE Mask-to-Video and Wan VACE 14B Inpainting have been removed from Utility selection and disabled for new runs; saved results remain available. See [CorridorKey setup and limitations](docs/keyer.md).

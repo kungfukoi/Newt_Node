@@ -1,7 +1,9 @@
 import { normalizeModelProviderPreferences } from "./modelProviderRouting.js";
+import { isKeyerNode } from "./keyer.js";
 
 // Scheduling hints only. Provider selection still belongs to the existing runners.
 export function nodeSchedulingKey(node, preferences) {
+  if (isKeyerNode(node)) return "localGpu";
   if (node?.type === "audioModel") return "elevenLabs";
   const routes = normalizeModelProviderPreferences(preferences);
   const model = String(node?.data?.model || "").toLowerCase();

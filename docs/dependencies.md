@@ -6,6 +6,8 @@ For setup commands, validation tiers, environment overrides, and troubleshooting
 
 ## Runtime Requirements
 
+Keyer has an optional, separate [CorridorKey 2.0 Python/CUDA installation](keyer.md). Newt Node bundles no CorridorKey source or weights. Configure `NEWTNODE_CORRIDORKEY_ROOT` and optionally `NEWTNODE_CORRIDORKEY_PYTHON`; no npm packages are added for it. Review upstream licensing before distributing a software integration.
+
 - Node.js 22.12 or newer on the 22 LTS line is recommended (CI uses Node 22). Current Vite requires Node `^20.19.0 || >=22.12.0`.
 - npm, distributed with Node.js.
 - Git is recommended but optional for public GitHub ZIP installs. The first Settings update adopts a shallow Git checkout when Git is available and otherwise uses GitHub source archives.

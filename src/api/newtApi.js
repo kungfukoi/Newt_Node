@@ -207,6 +207,12 @@ export async function deleteJson(path, fallbackMessage) {
   }, fallbackMessage);
 }
 
+export const keyerApi = {
+  status: () => getJson("/api/keyer/status", "Could not check the Keyer engine."),
+  start: body => postJson("/api/node/keyer", body, "Could not start Keyer."),
+  job: id => getJson(`/api/keyer/jobs/${encodeURIComponent(id)}`, "Could not reconnect to Keyer. Check History before starting another key.")
+};
+
 export const newtPresetsApi = {
   list() {
     return getJson("/api/newt-presets", "Could not load Newt Presets.");

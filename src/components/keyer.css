@@ -1,0 +1,12 @@
+.keyer-node-body { min-width: 0; }
+.keyer-node-body > .keyer-video-section { flex: 0 0 auto; }
+.keyer-engine, .keyer-number { display: flex; align-items: center; gap: 8px; }
+.keyer-engine { justify-content: space-between; font-size: 12px; opacity: .85; }
+.keyer-view-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.keyer-view-tabs button { flex: 1; padding: 6px 4px; font-size: 11px; }
+.keyer-view-tabs button[aria-pressed="true"] { color: #d9ffe9; background: #244c3c; border-color: #6abd96; }
+.keyer-status { display: block; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; padding: 5px 0; opacity: .8; }
+.keyer-node-body fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.keyer-number { width: 100%; }
+.keyer-number input { min-width: 0; width: 0; flex: 1; }
+.keyer-node-body .result-item video { width: 100%; height: 100%; object-fit: contain; }

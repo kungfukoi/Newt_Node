@@ -17,6 +17,7 @@ export const nodeTypeDefinitions = [
   { type: "frameIt", label: "Frame It", catalog: false },
   { type: "skillDirector", label: "Director" },
   { type: "edit", label: "Edit" },
+  { type: "keyer", label: "Keyer", catalog: false },
   { type: "assembly", label: "Timeline" },
   { type: "storyboard", label: "Storyboard" },
   { type: "image", label: "Image" },

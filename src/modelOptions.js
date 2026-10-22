@@ -329,6 +329,7 @@ export const patinaMapOptions = [
   { id: "height", label: "Height" }
 ];
 export const utilityVideoModelNames = {
+  corridorKey: "CorridorKey 2.0",
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID to Matte",
@@ -356,7 +357,7 @@ export const utilityVideoModelNames = {
   topazUpscaler: "Topaz Video Upscale"
 };
 export const utilityVideoModelOptions = [
-  utilityVideoModelNames.extractFrame,
+  utilityVideoModelNames.corridorKey,
   utilityVideoModelNames.colorIdMatte,
   utilityVideoModelNames.compositeVideo,
   utilityVideoModelNames.videoOutpaint,
@@ -365,8 +366,6 @@ export const utilityVideoModelOptions = [
   utilityVideoModelNames.wanBlend,
   utilityVideoModelNames.videoStitch,
   utilityVideoModelNames.transitionBuilder,
-  utilityVideoModelNames.wanVaceMaskToVideo,
-  utilityVideoModelNames.wanVaceInpainting,
   utilityVideoModelNames.wan22A14bT2v,
   utilityVideoModelNames.wan22A14bI2v,
   utilityVideoModelNames.wan22VaceDepth,
@@ -381,6 +380,11 @@ export const utilityVideoModelOptions = [
   utilityVideoModelNames.topazSdrToHdr,
   utilityVideoModelNames.topazUpscaler
 ];
+
+export const retiredUtilityVideoModels = [utilityVideoModelNames.extractFrame, utilityVideoModelNames.wanVaceMaskToVideo, utilityVideoModelNames.wanVaceInpainting];
+export function isRetiredUtilityVideoModel(model) {
+  return retiredUtilityVideoModels.some(name => name.toLowerCase() === String(model || "").trim().toLowerCase());
+}
 
 export const modelPreferenceGroups = {
   image: imageModelOptions,
@@ -527,6 +531,7 @@ export const wanVaceInterpolatorOptions = ["film", "rife"];
 export const wanVaceTransparencyOptions = ["content_aware", "white", "black"];
 
 export const utilityModelDescriptions = {
+  [utilityVideoModelNames.corridorKey]: "Runs the separately installed local CorridorKey 2.0 CUDA engine. Extracts a straight-alpha ProRes cutout, matte and foreground, with optional matte hints, despill and temporal-memory controls.",
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into selected delivery aspect ratios while preserving the subject and composition.",
   [utilityImageModelNames.coverage]: "Generates a standard nine-angle coverage set from one connected reference image.",
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white matte from a picked source-image Color ID.",
