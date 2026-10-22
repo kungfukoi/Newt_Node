@@ -3,6 +3,7 @@ import { buildKreaEnhanceInput, kreaEnhanceEndpoint } from "./krea-enhance.js";
 import { createVideoOutpaintService } from "./video-outpaint.js";
 import { registerVideoOutpaintFinishRoute } from "./routes/videoOutpaintFinish.js";
 import { createKeyerService } from "./keyer.js";
+import { createKeyerInstaller } from "./keyer-install.js";
 import { registerKeyerRoutes } from "./routes/keyer.js";
 import { createOutpaintVisualReviewer } from "./outpaint-visual-qc.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
@@ -1175,6 +1176,7 @@ function buildHealthPayload() {
       utilityVideo: true,
       keyer: true,
       keyerUtility: true,
+      keyerAutoSetup: true,
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
@@ -3726,7 +3728,9 @@ const videoOutpaintService = createVideoOutpaintService({
   reviewVisual: reviewOutpaintVisual
 });
 registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service: videoOutpaintService, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile, appendHistory, projectFromBody, nodeFromBody });
+const keyerInstaller = createKeyerInstaller({ baseDir: path.join(dataDir, "corridorkey") });
 registerKeyerRoutes(app, createKeyerService({
+  setup: keyerInstaller, runtime: keyerInstaller.runtime,
   isLocalAssetUrl, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile,
   ffmpeg: ffmpegBinaryPath, recordHistory: appendHistory, projectFromBody, nodeFromBody,
   createTarget: (body, kind, extension, dependency) => createManagedAssetTarget({ body }, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName, { forceExtension: true })

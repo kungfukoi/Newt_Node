@@ -2,13 +2,17 @@
 
 Choose **Utility → Video → CorridorKey 2.0**. CorridorKey is no longer a separate catalog node. Saved `keyer` nodes migrate to Utility while retaining their node IDs, ports, results, hints and settings. Switching Utility video models preserves the source and main-output connection where compatible; unsupported auxiliary connections are removed. Extract Frame, Wan VACE Mask-to-Video and Wan VACE 14B Inpainting are retired Utility selections: their saved results remain viewable, but their runs are disabled. Timeline frame extraction and Wan 2.2 VACE Inpainting remain available.
 
-Keyer runs an independently installed CorridorKey 2.0 Python engine on the local NVIDIA GPU. It does not use a hosted provider, install weights, or switch to another keyer. The current integration accepts display-coded sRGB/Rec.709 video. Convert camera log, ACES, PQ or HLG upstream; this node does not provide HDR/EXR ingest or output.
+Keyer runs the CorridorKey 2.0 Python engine on the local NVIDIA GPU, installing missing components on first use. The current integration accepts display-coded sRGB/Rec.709 video. Convert camera log, ACES, PQ or HLG upstream; this node does not provide HDR/EXR ingest or output.
 
 ## Setup
 
-Install the official [CorridorKey 2.0 engine](https://github.com/nikopueringer/CorridorKey2.0) and all foundation weights. Its published requirements are an RTX 30-series or newer NVIDIA GPU, CUDA-enabled PyTorch, and FFmpeg. Apple GPU inference is not supported by this integration.
+On Windows x64, connect source footage and choose **Install & Run Keyer**. Newt installs a pinned official engine, isolated Python 3.12, CUDA PyTorch 2.9.1/torchvision 0.24.1, Python dependencies and model weights. No global Python, Git or CUDA toolkit is required; FFmpeg is supplied by Newt. Allow approximately 8 GB of downloads and at least 20 GB free disk space. Progress appears in the node and downloaded files remain available for retry. Runtime files/caches stay in ignored `server/data/corridorkey/`.
 
-Set these local server environment variables, or add them to the ignored `.env` file:
+An NVIDIA GPU (RTX 30-series or newer, at least 4 GB VRAM) and driver supporting CUDA 12.8+ are required. Newt verifies package imports, model files and a CUDA operation. Drivers must be installed separately.
+
+Newt supports macOS, but this Python adapter requires CUDA and downloads nothing on Mac. The official commercial CorridorKey 2.0 application has a separate Apple Silicon beta, which is not integrated here. Linux setup is outside this adapter's supported scope.
+
+Existing installations can optionally use these local server environment overrides in the ignored `.env` file:
 
 ```
 NEWTNODE_CORRIDORKEY_ROOT=C:/tools/CorridorKey2.0
@@ -16,7 +20,7 @@ NEWTNODE_CORRIDORKEY_ROOT=C:/tools/CorridorKey2.0
 # NEWTNODE_CORRIDORKEY_PYTHON=C:/tools/CorridorKey2.0/venv/Scripts/python.exe
 ```
 
-On Linux use the engine's absolute path; the default Python is `venv/bin/python`. Windows uses `venv/Scripts/python.exe`. Restart the Newt Node backend after configuration, once active generations have finished. The node's Refresh button checks installation files; a successful key confirms runtime/CUDA availability. Missing dependencies or unsupported hardware produce explicit errors.
+Windows uses `venv/Scripts/python.exe`. Restart the backend after changing configuration, once active generations have finished. Refresh checks runtime readiness. Missing dependencies and weights are repaired on Run; a missing explicit Python override must be corrected or removed. Unsupported hardware fails before downloads.
 
 ## Node workflow
 

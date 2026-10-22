@@ -43,6 +43,17 @@ test("Keyer controls persist and hint modes retain stable handles", async ({ pag
   expect(fit).toBe(true); expect(errors).toEqual([]);
 });
 
+test("missing components offer automatic setup while Mac disables CUDA runs", async ({ page }) => {
+  const { node } = await setup(page);
+  await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: false, canInstall: true, busy: false, message: "Install missing components on Run" } }));
+  await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
+  await expect(node.getByRole("button", { name: "Install & Run Keyer", exact: true })).toBeEnabled();
+  await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: false, canInstall: false, busy: false, message: "The Python engine requires CUDA and cannot run on macOS" } }));
+  await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
+  await expect(node.getByRole("button", { name: "Run Keyer", exact: true })).toBeDisabled();
+  await expect(node.locator('[role="status"].keyer-status')).toContainText("macOS");
+});
+
 test("Utility model switching preserves the source connection and restores CorridorKey controls", async ({ page }) => {
   const { node, errors } = await setup(page);
   const selector = node.getByLabel("Utility video model");

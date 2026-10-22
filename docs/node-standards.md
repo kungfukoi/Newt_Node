@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+CorridorKey first-use setup belongs to the server job, with visible stages and retryable errors. Supported Windows NVIDIA systems install missing Python, packages, engine and weights automatically. Unsupported platforms/drivers fail before downloads. macOS explains that this Python adapter requires CUDA; the separate commercial Mac runtime is not integrated.
+
 This is a living standard for NewtNode. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
 Documentation audited against checkout version `4.5.0-beta.0` on 2026-10-15; see [audit scope and evidence](documentation-audit-2026-10-15.md). Runtime source and tests expose the current implementation; this document defines the intended durable contract. Resolve drift in the same change that discovers it.

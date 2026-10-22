@@ -84,6 +84,7 @@ try {
   assert.equal(health.routes.kreaModelProviders, true);
   assert.equal(health.routes.keyer, true);
   assert.equal(health.routes.keyerUtility, true);
+  assert.equal(health.routes.keyerAutoSetup, true);
   for (const model of ["Extract Frame", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting"]) {
     const retired = await fetch(api + "/api/node/utility-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }), signal: AbortSignal.timeout(15000) });
     assert.equal(retired.status, 400);
@@ -91,6 +92,7 @@ try {
   }
   const keyerStatus = await (await request("/api/keyer/status")).json();
   assert.equal(typeof keyerStatus.ready, "boolean");
+  assert.equal(typeof keyerStatus.canInstall, "boolean");
   const invalidKeyer = await fetch(api + "/api/node/keyer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: {} }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });

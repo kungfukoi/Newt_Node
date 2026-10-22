@@ -3,11 +3,12 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { keyerModelName, keyerInputError } from "../src/keyer.js";
 
 const exists = file => access(file).then(() => true, () => false);
-export function keyerRuntime(env = process.env, platform = process.platform) {
-  const root = env.NEWTNODE_CORRIDORKEY_ROOT || "";
+export function keyerRuntime(env = process.env, platform = process.platform, baseDir = fileURLToPath(new URL("./data/corridorkey/", import.meta.url))) {
+  const root = env.NEWTNODE_CORRIDORKEY_ROOT || path.join(baseDir, "engine");
   return { root, python: env.NEWTNODE_CORRIDORKEY_PYTHON || (root ? path.join(root, "venv", platform === "win32" ? "Scripts/python.exe" : "bin/python") : "") };
 }
 
@@ -52,10 +53,11 @@ export function runKeyerProcess(python, args, { cwd, onProgress, timeoutMs = 360
   });
 }
 
-export function createKeyerService({ resolveAsset, isLocalAssetUrl, createTarget, probeVideo, ffmpeg, recordHistory, projectFromBody, nodeFromBody, runtime = () => keyerRuntime(), run = runKeyerProcess }) {
+export function createKeyerService({ resolveAsset, isLocalAssetUrl, createTarget, probeVideo, ffmpeg, recordHistory, projectFromBody, nodeFromBody, runtime = () => keyerRuntime(), run = runKeyerProcess, setup }) {
   const jobs = new Map();
   let busy = false;
   async function status() {
+    if (setup) return { ...await setup.status(), busy, model: keyerModelName };
     const r = runtime();
     const required = [r.python, r.root && path.join(r.root, "infer.py"), r.root && path.join(r.root, "weights/corridorkey_v2.safetensors"), r.root && path.join(r.root, "weights/foundation_stats.safetensors"), r.root && path.join(r.root, "vfms/cradio/C-RADIOv4-SO400M/model.safetensors"), r.root && path.join(r.root, "vfms/moge/model.pt"), r.root && path.join(r.root, "vfms/rvm/pretrain_rvm_small16_256_204031069.npz")];
     const ready = required.every(Boolean) && (await Promise.all(required.map(exists))).every(Boolean);
@@ -64,6 +66,11 @@ export function createKeyerService({ resolveAsset, isLocalAssetUrl, createTarget
   async function execute(job, body, assets) {
     let temporary;
     try {
+      if (setup) {
+        job.state = "installing";
+        job.message = "Checking CorridorKey dependencies…";
+        await setup.ensure(message => { job.message = message; });
+      }
       temporary = await mkdtemp(path.join(os.tmpdir(), "newt-keyer-"));
       const r = runtime();
       const output = path.join(temporary, "result");
@@ -101,7 +108,8 @@ export function createKeyerService({ resolveAsset, isLocalAssetUrl, createTarget
       // Reserve before awaiting validation, so simultaneous windows cannot both start.
       busy = true;
       try {
-        if (!(await status()).ready) throw new Error("CorridorKey 2.0 is not configured. See docs/keyer.md.");
+        const readiness = await status();
+        if (!readiness.ready && !readiness.canInstall) throw new Error(readiness.message || "CorridorKey 2.0 is not configured. See docs/keyer.md.");
         for (const url of [body.sourceVideoUrl, body.settings.mode === "first" ? body.firstHintUrl : "", body.settings.mode === "video" ? body.hintVideoUrl : ""].filter(Boolean)) if (!isLocalAssetUrl(url)) throw new Error("Keyer inputs must be managed local assets.");
         const source = await resolveAsset(body.sourceVideoUrl);
         const metadata = await probeVideo(source.filePath);

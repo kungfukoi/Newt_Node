@@ -25,7 +25,7 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
   const selected = results[selectedIndex];
   const passItems = d.keyerView === "source" ? (sourceItem ? [sourceItem] : []) : results.map(item => d.keyerView === "cutout" ? item : item.keyer?.passes?.[d.keyerView]).filter(Boolean);
   const missing = keyerInputError({ sourceVideoUrl: sourceUrl, firstHintUrl: firstHint?.url, hintVideoUrl: hintVideo?.url, settings: keyerSettings(d) });
-  const canRun = !busy && engine?.ready && !missing;
+  const canRun = !busy && (engine?.ready || engine?.canInstall) && !missing;
   const inputPorts = config.input.map(port => ({ ...port, disabled: port.id === "firstHintIn" ? d.keyerMode !== "first" : port.id === "hintVideoIn" ? d.keyerMode !== "video" : false, disabledReason: "Select the matching hint mode" }));
   function toggleVideo(open) {
     if (open === d.keyerVideoOpen) return;
@@ -71,7 +71,7 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
       {d.error && <p className="utility-model-description" role="alert">{d.error}</p>}
     </>}
     {config.output.map(p => <OutputPortRow key={p.id} node={node} port={p} {...ports} />)}
-    <button className="run-node-button" disabled={!canRun} title={missing || engine?.message || "Run local keying"} onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "run" } })}>{busy ? "Keying…" : d.keyerFrameLimit ? `Test key · first ${d.keyerFrameLimit} frames` : "Run Keyer"}</button>
+    <button className="run-node-button" disabled={!canRun} title={missing || engine?.message || "Run local keying"} onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "run" } })}>{busy ? "Keying…" : engine?.canInstall && !engine?.ready ? "Install & Run Keyer" : d.keyerFrameLimit ? `Test key · first ${d.keyerFrameLimit} frames` : "Run Keyer"}</button>
     {!busy && d.keyerJobId && <button type="button" className="run-node-button" onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "reconnect" } })}>Reconnect to previous key</button>}
   </div>;
 }
