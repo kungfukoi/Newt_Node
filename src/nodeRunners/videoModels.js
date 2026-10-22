@@ -284,6 +284,7 @@ export function buildUtilityVideoRequest({
   endFrameUrls = [],
   referenceImageUrls = [],
   wanBlendImageSlots = [],
+  canvasVideoUrl = "",
   referenceVideoUrls = [],
   controlVideoUrls = [],
   startFrameVideoUrls = [],
@@ -307,6 +308,7 @@ export function buildUtilityVideoRequest({
     startFrameVideoUrls,
     maskVideoUrls,
     wanWarpSegments,
+    canvasVideoUrl,
     videoOutpaint: normalizeUtilityOutpaintSettings(node.data.videoOutpaint),
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,

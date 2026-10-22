@@ -1346,7 +1346,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const activeEdgeIds = React.useMemo(() => {
     const active = buildActiveEdgeIds(nodes, edges);
     edges.forEach(edge => {
-      if (outpaintAnalysisNodeIds.has(edge.to.nodeId) && ["referenceVideoIn", "maskVideoIn", "referenceImageIn"].includes(edge.to.port)) active.add(edge.id);
+      if (outpaintAnalysisNodeIds.has(edge.to.nodeId) && ["referenceVideoIn", "canvasVideoIn", "maskVideoIn", "referenceImageIn"].includes(edge.to.port)) active.add(edge.id);
     });
     return active;
   }, [nodes, edges, outpaintAnalysisNodeIds]);
@@ -14778,7 +14778,7 @@ function NodeBody({
     const endFramesOutputPort = config.output.find((port) => port.id === "endFramesOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
-    const isOutpaintCropOnly = isOutpaintVideo && node.data.videoOutpaintPrepared?.fingerprint === videoOutpaintFingerprint(connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", node.data.videoOutpaint) && node.data.videoOutpaintPrepared?.plan?.needsOutpaint === false;
+    const isOutpaintCropOnly = isOutpaintVideo && node.data.videoOutpaintPrepared?.fingerprint === videoOutpaintFingerprint(connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", node.data.videoOutpaint, connectedAssetUrls(incoming.canvasVideoIn).at(0) || "") && node.data.videoOutpaintPrepared?.plan?.needsOutpaint === false;
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
     const collapsedPorts = (isVideoMode && isCompositeVideo ? compositeInputPorts(node.data, portColors.preview) : activeUtilityInputPortIds
       .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
@@ -14791,7 +14791,7 @@ function NodeBody({
       });
     const resultType = node.data.resultType || utilityOutputMediaType;
     const hasReferenceVideoInput = activeUtilityInputPortIds.includes("referenceVideoIn");
-    const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length);
+    const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length || (isOutpaintVideo && incoming.canvasVideoIn?.length));
     const wanWarpSegmentCount = isVideoStitch ? connectedWanWarpSegments(incoming.referenceVideoIn).length : 0;
     const wanWarpReferenceVideoCount = isVideoStitch ? connectedAssetUrlsByType(incoming.referenceVideoIn, "video").length : 0;
     const wanWarpBlendRefineReady = isVideoStitch && wanWarpReferenceVideoCount > 0 && Boolean(incoming.controlVideoIn?.length) && Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim());
@@ -15034,7 +15034,7 @@ function NodeBody({
                 </NodeRow>
               )}
               {isOutpaintVideo ? (
-                <VideoOutpaintControls generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceImageUrls={connectedAssetUrls(incoming.referenceImageIn)} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
+                <VideoOutpaintControls canvasVideoUrl={connectedAssetUrls(incoming.canvasVideoIn).at(0) || ""} canvasPort={config.input.find(port => port.id === "canvasVideoIn")} generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceImageUrls={connectedAssetUrls(incoming.referenceImageIn)} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
               ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
                   <select
@@ -18154,6 +18154,7 @@ function getNodeConfig(type) {
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
         ...wanBlendImageSlots.map((slot) => ({ id: slot.id, label: `${slot.label} Image`, color: portColors.image })),
         { id: "referenceVideoIn", label: "Control Video", color: portColors.video },
+        { id: "canvasVideoIn", label: "Canvas", color: portColors.video },
         { id: "controlVideoIn", label: "Motion Map", color: portColors.video },
         { id: "maskVideoIn", label: "Mask Video", color: portColors.video }
       ],
@@ -19756,7 +19757,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
-  if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn"];
+  if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn", "canvasVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDwposeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -22366,6 +22367,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     wanBlendImageSlots,
     startFrameVideoUrls,
     referenceVideoUrls: wanWarpSegments.length ? wanBlendVideoUrls : connectedAssetUrls(incoming.referenceVideoIn),
+    canvasVideoUrl: model === videoOutpaintModelName ? connectedAssetUrls(incoming.canvasVideoIn).at(0) || "" : "",
     controlVideoUrls: connectedAssetUrls(incoming.controlVideoIn),
     wanWarpSegments,
     maskVideoUrls: connectedAssetUrls(incoming.maskVideoIn),

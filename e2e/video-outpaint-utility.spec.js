@@ -1,4 +1,33 @@
 import { test, expect } from "@playwright/test";
+
+test("supplied Canvas port sits beside Canvas and routes independently of source", async ({ page }) => {
+  await page.addInitScript(() => { if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return; sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
+    { id: "canvas", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/source.mp4", status: "complete" } },
+    { id: "outpaint", type: "utility", x: 550, y: 20, data: { utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "manual", prompt: "A continuous landscape" } }
+  ], edges: [{ id: "canvas-wire", from: { nodeId: "canvas", port: "videoOut" }, to: { nodeId: "outpaint", port: "canvasVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })); });
+  const { errors } = await openFixture(page, { count: 2 });
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  let preparation, generation;
+  await page.route("**/api/node/video-outpaint-prepare", route => {
+    preparation = route.request().postDataJSON();
+    return route.fulfill({ json: { videoUrl: "/outputs/e2e/padded.mp4", maskImageUrl: "/outputs/e2e/mask.png", fingerprint: videoOutpaintFingerprint("", preparation.videoOutpaint, preparation.canvasVideoUrl), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1 }, preparation.videoOutpaint) } });
+  });
+  await page.route("**/api/node/generate-video", route => { generation = route.request().postDataJSON(); return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/done.mp4" } } }); });
+  const node = page.locator('[data-node-card-id="outpaint"]');
+  const canvasRow = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Canvas$/ }) });
+  await expect(canvasRow.locator('[data-port-role="input"]')).toHaveCount(1);
+  await expect(node.getByRole("button", { name: "Canvas Edit", exact: true })).toBeDisabled();
+  await node.getByRole("button", { name: "Prepare supplied canvas & mask" }).click();
+  await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
+  expect(preparation.canvasVideoUrl).toBe("/outputs/e2e/source.mp4");
+  expect(preparation.sourceVideoUrl).toBe("");
+  await node.locator(".run-node-button").click();
+  await expect.poll(() => generation?.canvasVideoUrl).toBe("/outputs/e2e/source.mp4");
+  expect(generation.referenceVideoUrls).toEqual([]);
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(node.getByRole("button", { name: "Prepare supplied canvas & mask" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
 import { normalizeVideoOutpaintSettings, videoOutpaintFingerprint, planVideoOutpaint } from "../src/videoOutpaint.js";
 
@@ -193,7 +222,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
     return route.fulfill({ status: shouldFail ? 502 : 200, json: shouldFail ? { error: "Fal unavailable" } : { modelName: "Video Outpaint", video: { localUrl: "/outputs/e2e/outpaint.mp4", fileName: "outpaint.mp4", mimeType: "video/mp4" }, videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", restoredSource: true, localCrop }, cost: { amountUsd: localCrop ? 0 : 0.405 } } });
   });
   const node = page.locator('[data-node-card-id="outpaint"]');
-  await expect(node.locator('[data-port-role="input"]')).toHaveCount(3);
+  await expect(node.locator('[data-port-role="input"]')).toHaveCount(4);
   await expect(node.getByRole("button", { name: "Analyze & draft prompt" })).toBeDisabled();
   await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
@@ -284,7 +313,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.at(-1)?.videoOutpaint?.rawVideoUrl)).toBe("/outputs/e2e/raw.mp4");
   await node.locator(".model-settings-drawer > summary").click();
   await expect(node.getByLabel("Outpaint target ratio")).toBeHidden();
-  await expect(node.locator('[data-port-role="input"]')).toHaveCount(3);
+  await expect(node.locator('[data-port-role="input"]')).toHaveCount(4);
   await expect.poll(async () => (await wireAttachmentErrors(page, [{ id: "source-outpaint", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }])).every(edge => !edge.missing && edge.start < 2 && edge.end < 2)).toBe(true);
   await node.locator(".model-settings-drawer > summary").click();
   await node.getByRole("button", { name: "Canvas Edit", exact: true }).click();

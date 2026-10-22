@@ -12,16 +12,16 @@ export function VideoOutpaintModelControl({ node, running, onUpdate }) {
   return <NodeRow label="Outpaint model"><select aria-label="Outpaint model" value={settings.model} disabled={running} onChange={e => onUpdate(node.id, { videoOutpaint: { ...settings, model: e.target.value }, videoOutpaintPrepared: null })}>{videoOutpaintModels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></NodeRow>;
 }
 
-export function VideoOutpaintControls({ node, sourceVideoUrl, referenceImageUrls = [], promptConnected, running, onUpdate, onPrepare, onAnalyze, referenceImagePort, settingsOpen, incoming, portProps, generationScope }) {
+export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "", canvasPort, referenceImageUrls = [], promptConnected, running, onUpdate, onPrepare, onAnalyze, referenceImagePort, settingsOpen, incoming, portProps, generationScope }) {
   const settings = normalizeUtilityOutpaintSettings(node.data.videoOutpaint);
   const seedance = settings.model === "seedance-2.5";
-  const key = videoOutpaintFingerprint(sourceVideoUrl, settings);
+  const key = videoOutpaintFingerprint(sourceVideoUrl, settings, canvasVideoUrl);
   const prepared = node.data.videoOutpaintPrepared?.fingerprint === key ? node.data.videoOutpaintPrepared : null;
   const selected = (node.data.resultItems || []).at(node.data.selectedResultIndex || 0);
   const details = selected?.videoOutpaint;
   const [busy, setBusy] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
-  React.useEffect(() => setEditing(false), [sourceVideoUrl]);
+  React.useEffect(() => setEditing(false), [sourceVideoUrl, canvasVideoUrl]);
   const [notice, setNotice] = React.useState("");
   const current = React.useRef(key);
   current.current = key;
@@ -31,31 +31,32 @@ export function VideoOutpaintControls({ node, sourceVideoUrl, referenceImageUrls
     onUpdate(node.id, { videoOutpaint: { ...settings, ...patch }, videoOutpaintPrepared: null });
   };
   async function prepare(overrides) {
-    if (busy || running || !sourceVideoUrl) return;
+    if (busy || running || !(sourceVideoUrl || canvasVideoUrl)) return;
     const nextSettings = normalizeUtilityOutpaintSettings(overrides || settings);
-    const snapshot = videoOutpaintFingerprint(sourceVideoUrl, nextSettings);
+    const snapshot = videoOutpaintFingerprint(sourceVideoUrl, nextSettings, canvasVideoUrl);
     current.current = snapshot;
     setBusy(true); setNotice("");
     try {
-      const result = await onPrepare(node, { sourceVideoUrl, videoOutpaint: nextSettings });
+      const result = await onPrepare(node, { sourceVideoUrl, canvasVideoUrl, videoOutpaint: nextSettings });
       if (current.current === snapshot) onUpdate(node.id, { videoOutpaintPrepared: result });
       else if (current.current !== null) setNotice("Source or settings changed. Prepare the current canvas again.");
     } catch (error) { if (current.current !== null) setNotice(error.message); }
     finally { if (current.current !== null) setBusy(false); }
   }
   return <>
-    <NodeRow label="Target ratio"><select aria-label="Outpaint target ratio" value={settings.aspectRatio} disabled={busy || running} onChange={e => change({ aspectRatio: e.target.value })}>{videoOutpaintRatios.map(ratio => <option key={ratio}>{ratio}</option>)}</select></NodeRow>
+    <NodeRow label="Target ratio">{canvasVideoUrl ? <span>{prepared?.plan.settings.aspectRatio || "From connected canvas"}</span> : <select aria-label="Outpaint target ratio" value={settings.aspectRatio} disabled={busy || running || Boolean(canvasVideoUrl)} onChange={e => change({ aspectRatio: e.target.value })}>{videoOutpaintRatios.map(ratio => <option key={ratio}>{ratio}</option>)}</select>}</NodeRow>
     <NodeRow label="Start (sec)"><input aria-label="Outpaint start seconds" type="number" min="0" step="0.125" value={settings.start} disabled={busy || running} onChange={e => change({ start: e.target.value })} /></NodeRow>
     <NodeRow label="Duration (sec)"><input aria-label="Outpaint duration seconds" type="number" min={seedance ? "0.125" : "2.7"} max="10.05" step="0.125" value={settings.duration} disabled={busy || running} onChange={e => change({ duration: e.target.value })} /></NodeRow>
-    <NodeRow label="Framing"><button className="outpaint-user-action" type="button" disabled={busy || running || !sourceVideoUrl} onClick={() => setEditing(true)}>Canvas Edit</button></NodeRow>
-    <NodeRow label="Canvas"><button className="outpaint-user-action" type="button" title="Prepare the source canvas and black-and-white expansion mask locally. The selected outpaint model performs the fill." disabled={busy || running || !sourceVideoUrl || !onPrepare} onClick={() => prepare()}>{busy ? "Preparing canvas…" : "Prepare canvas & mask"}</button></NodeRow>
+    <NodeRow label="Framing"><button className="outpaint-user-action" type="button" disabled={busy || running || !sourceVideoUrl || Boolean(canvasVideoUrl)} onClick={() => setEditing(true)}>Canvas Edit</button></NodeRow>
+    <NodeRow label="Canvas" inputPort={settingsOpen ? canvasPort : null} node={node} {...portProps}><button className="outpaint-user-action" type="button" title="Prepare the source canvas and black-and-white expansion mask locally. The selected outpaint model performs the fill." disabled={busy || running || !(sourceVideoUrl || canvasVideoUrl) || !onPrepare} onClick={() => prepare()}>{busy ? "Preparing canvas…" : canvasVideoUrl ? "Prepare supplied canvas & mask" : "Prepare canvas & mask"}</button></NodeRow>
+    {canvasVideoUrl && <p className="utility-mini-note">Connected canvas supplies framing. Rectangular black outer borders define the fill.</p>}
     {editing && <VideoOutpaintCanvasEditor key={sourceVideoUrl} sourceUrl={sourceVideoUrl} settings={settings} snapEnabled={node.data.videoOutpaintSnap !== false} onSnapChange={value => onUpdate(node.id, { videoOutpaintSnap: value })} onClose={() => setEditing(false)} onApply={frame => { const next = { ...settings, frame }; change({ frame }); setEditing(false); prepare(next); }} />}
     {notice && <p className="utility-mini-note" role="alert">{notice}</p>}
     {prepared && <>
       <video aria-label="Prepared outpainting canvas" controls muted preload="metadata" poster={prepared.previewUrl} src={displayMediaUrl(prepared.generationVideoUrl || prepared.videoUrl)} style={{ width: "100%", maxHeight: 320, objectFit: "contain" }} />
       {!seedance && <a className="utility-mini-note" href={prepared.maskVideoUrl} target="_blank" rel="noreferrer">View expansion mask</a>}
     </>}
-    {prepared?.plan.needsOutpaint !== false && <VideoOutpaintPromptControls node={{ ...node, data: { ...node.data, wanVaceAspectRatio: settings.aspectRatio } }} sourceVideoUrl={prepared?.videoUrl || ""} maskVideoUrl={prepared?.maskVideoUrl || ""} maskImageUrl={prepared?.maskImageUrl || ""} preparedPlan={prepared?.plan} referenceImageUrls={referenceImageUrls} promptConnected={promptConnected} running={running || busy} onUpdate={onUpdate} onAnalyze={onAnalyze} />}
+    {prepared?.plan.needsOutpaint !== false && <VideoOutpaintPromptControls node={{ ...node, data: { ...node.data, wanVaceAspectRatio: prepared?.plan.settings.aspectRatio || settings.aspectRatio } }} sourceVideoUrl={prepared?.videoUrl || ""} maskVideoUrl={prepared?.maskVideoUrl || ""} maskImageUrl={prepared?.maskImageUrl || ""} preparedPlan={prepared?.plan} referenceImageUrls={referenceImageUrls} promptConnected={promptConnected} running={running || busy} onUpdate={onUpdate} onAnalyze={onAnalyze} />}
     <NodeRow label="Reference image" inputPort={settingsOpen ? referenceImagePort : null} node={node} {...portProps}><span>{incoming.referenceImageIn?.length ? "Connected" : "Optional"}</span></NodeRow>
     <NodeRow label="Restore source"><input aria-label="Restore original source footage" type="checkbox" checked={settings.restoreSource} disabled={busy || running} onChange={e => change({ restoreSource: e.target.checked })} /></NodeRow>
     <NodeRow label="Blend width (px)"><input aria-label="Outpaint seam feather" title="Generated overlap inside the original edge. A smooth inward feather blends this ring and preserves the original core; generated pixels outside the source remain unchanged." type="number" min="0" max="128" step="1" value={settings.feather} disabled={busy || running || !settings.restoreSource} onChange={e => change({ feather: e.target.value })} /></NodeRow>

@@ -4,8 +4,8 @@ import { fitOutpaintPrompt, outpaintEditablePromptBudget } from "../src/outpaint
 export async function prepareSeedanceOutpaint(body, { provider, apiKey, prepare }) {
   const settings = normalizeVideoOutpaintSettings(body.videoOutpaint);
   if (body.model !== "Seedance 2.5" || settings.model !== "seedance-2.5") throw Object.assign(new Error("Seedance outpainting requires the Seedance 2.5 outpaint model."), { status: 400 });
-  if (!Array.isArray(body.referenceVideoUrls) || body.referenceVideoUrls.length !== 1) throw Object.assign(new Error("Connect exactly one source video for outpainting."), { status: 400 });
-  const prepared = await prepare(body, body.referenceVideoUrls[0]);
+  if (!body.canvasVideoUrl && (!Array.isArray(body.referenceVideoUrls) || body.referenceVideoUrls.length !== 1)) throw Object.assign(new Error("Connect exactly one source video or a supplied Canvas video for outpainting."), { status: 400 });
+  const prepared = await prepare(body, body.referenceVideoUrls?.[0] || "");
   const prompt = String(body.prompt || "");
   if (prepared.plan.needsOutpaint) {
     // Preparation is local; validate the selected route before any provider upload.

@@ -1,12 +1,19 @@
 import { normalizeVideoOutpaintSettings, planVideoOutpaint, videoOutpaintFingerprint } from "../src/videoOutpaint.js";
 import { overlapBlendFilters } from "./outpaint-boundary.js";
+import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied-canvas.js";
 
 export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
   async function prepare(body, sourceUrl, timing = {}) {
+    const originalSourceUrl = sourceUrl;
+    if (body.canvasVideoUrl) sourceUrl = body.canvasVideoUrl;
     if (!sourceUrl) throw new Error("Connect a source video before preparing outpainting.");
     const asset = await resolveAsset(sourceUrl);
     const metadata = await probeVideo(asset.filePath);
-    const plan = planVideoOutpaint(metadata, body.videoOutpaint);
+    const plan = planVideoOutpaint(metadata, body.canvasVideoUrl ? { ...body.videoOutpaint, frame: null, aspectRatio: suppliedCanvasRatio(metadata) } : body.videoOutpaint);
+    if (body.canvasVideoUrl) {
+      const detected = await runFfmpeg(["-hide_banner", "-ss", String(plan.settings.start), "-i", asset.filePath, "-t", String(Math.min(plan.settings.duration, metadata.duration - plan.settings.start)), "-vf", "cropdetect=limit=24:round=2:reset=1:skip=0", "-an", "-f", "null", "-"], "Detect supplied canvas picture", 120000);
+      Object.assign(plan, suppliedCanvasGeometry(metadata, plan, detected.stderr), { suppliedCanvas: true });
+    }
     if (plan.tailPadded && timing.prerollFrames === 0) {
       plan.prerollFrames = 0;
       plan.frames = Math.max(4 * plan.fps, plan.outputFrames + Math.ceil(0.5 * plan.fps));
@@ -71,7 +78,7 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       await runFfmpeg(["-y", "-i", mask.filePath, "-frames:v", "1", analysisMask.filePath], "Prepare VACE analysis mask", 30000);
     }
     await runFfmpeg(["-y", "-i", generationVideo?.filePath || padded.filePath, "-frames:v", "1", poster.filePath], "Preview outpaint canvas", 30000);
-    return { sourceUrl, ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, ...(generationVideo ? { generationVideoUrl: generationVideo.publicPath } : {}), ...(maskIsImage ? { maskImageUrl: mask.publicPath } : { maskVideoUrl: mask.publicPath, maskImageUrl: analysisMask.publicPath }), previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(sourceUrl, settings), plan };
+    return { sourceUrl, ...(body.canvasVideoUrl ? { canvasVideoUrl: body.canvasVideoUrl } : {}), ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, ...(generationVideo ? { generationVideoUrl: generationVideo.publicPath } : {}), ...(maskIsImage ? { maskImageUrl: mask.publicPath } : { maskVideoUrl: mask.publicPath, maskImageUrl: analysisMask.publicPath }), previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(originalSourceUrl || "", body.videoOutpaint, body.canvasVideoUrl), plan };
   }
   async function finish(body, prepared, generated) {
     reportProgress("Finish: Blending the original source overlap…");

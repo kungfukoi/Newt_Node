@@ -1240,6 +1240,7 @@ function buildHealthPayload() {
       videoOutpaintLocalMasks: true,
       videoOutpaintSeedance: true,
       videoOutpaintWanConditioning: true,
+      videoOutpaintSuppliedCanvas: true,
       generateAudio: true,
       atlasDurableVideo: true,
       characterWardrobeFullSheet: true,
@@ -3723,7 +3724,7 @@ const videoOutpaintService = createVideoOutpaintService({
 registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service: videoOutpaintService, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile, appendHistory, projectFromBody, nodeFromBody });
 app.post("/api/node/video-outpaint-prepare", async (req, res) => {
   try {
-    if (!isLocalAssetUrl(req.body.sourceVideoUrl)) return res.status(400).json({ error: "Connect a local source video." });
+    if (!isLocalAssetUrl(req.body.canvasVideoUrl || req.body.sourceVideoUrl)) return res.status(400).json({ error: "Connect a local source or Canvas video." });
     const prepared = await videoOutpaintService.prepare(req.body, req.body.sourceVideoUrl);
     res.json(prepared);
   } catch (error) { res.status(error.status || 400).json({ error: error.message || "Could not prepare outpainting." }); }
