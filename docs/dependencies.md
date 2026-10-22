@@ -31,11 +31,13 @@ Important direct runtime packages include:
 `Launch_NewtNode.ps1` on Windows and `NewtNode.command` on macOS run `scripts/ensureDependencies.mjs` before building or starting NewtNode. The preflight runs `npm install --no-audit --no-fund` when:
 
 - `node_modules` has not been initialized;
-- `package.json` or `package-lock.json` changed after the last install;
+- dependency requirements or locked package content changed (app version bumps, formatting and file timestamps do not trigger reinstalls once the content stamp exists);
 - a declared top-level package is missing; or
 - an installed top-level version differs from `package-lock.json`.
 
 Automatic installs use the gitignored `server/data/npm-cache` directory so launch does not depend on write access to the operating system user's global npm cache.
+
+The preflight records a dependency-content fingerprint in `node_modules/.newtnode-dependencies.json`, including platform, architecture and Node ABI. It records the post-install lockfile because npm can rewrite it. The first upgraded launch uses the existing install timestamp to establish that stamp; subsequent launches compare content.
 
 This ensures a normal git pull followed by launch installs additions such as `@xyflow/react` automatically. Run the same check manually with:
 

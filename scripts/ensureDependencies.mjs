@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync, renameSync } from "node:fs";
+import { dependencyFingerprint } from "./dependencyFingerprint.mjs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,16 +9,20 @@ const packageJsonPath = path.join(rootDir, "package.json");
 const packageLockPath = path.join(rootDir, "package-lock.json");
 const hiddenLockPath = path.join(rootDir, "node_modules", ".package-lock.json");
 const npmCachePath = path.join(rootDir, "server", "data", "npm-cache");
+const stampPath = path.join(rootDir, "node_modules", ".newtnode-dependencies.json");
 
 const packageJson = readJson(packageJsonPath);
 const packageLock = existsSync(packageLockPath) ? readJson(packageLockPath) : null;
 const dependencies = Object.keys(packageJson.dependencies || {});
 const reasons = [];
+const fingerprint = dependencyFingerprint(packageJson, packageLock);
+let previous;
+try { previous = readJson(stampPath).fingerprint; } catch { /* First upgraded launch or invalid stamp. */ }
 
 if (!existsSync(hiddenLockPath)) {
   reasons.push("node_modules is not initialized");
-} else if (manifestMtime() > statSync(hiddenLockPath).mtimeMs) {
-  reasons.push("package manifest changed");
+} else if (previous ? previous !== fingerprint : manifestMtime() > statSync(hiddenLockPath).mtimeMs) {
+  reasons.push(previous ? "dependency requirements changed" : "dependency state needs verification");
 }
 
 for (const dependency of dependencies) {
@@ -35,6 +40,7 @@ for (const dependency of dependencies) {
 }
 
 if (!reasons.length) {
+  saveFingerprint(fingerprint);
   console.log("NewtNode dependencies are current.");
   process.exit(0);
 }
@@ -67,6 +73,15 @@ if (stillMissing.length) {
 }
 
 console.log("NewtNode dependencies installed.");
+// npm may rewrite the lockfile. Record its resulting content, not pre-install state.
+saveFingerprint(dependencyFingerprint(readJson(packageJsonPath), existsSync(packageLockPath) ? readJson(packageLockPath) : null));
+
+function saveFingerprint(value) {
+  if (previous === value) return;
+  const temporary = `${stampPath}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ fingerprint: value }) + "\n");
+  renameSync(temporary, stampPath);
+}
 
 function manifestMtime() {
   return Math.max(
