@@ -62,6 +62,7 @@ export function createOutpaintFramePresence({ resolveAsset, probeVideo, createTa
       await recordAnalysis({ body, result, inputs, prompt: analysisPrompt, firstFrame: ids[0], lastFrame: ids.at(-1), fps, prerollFrames: first });
       observations.push(...parseFramePresence(result.text, ids));
     }
-    return { frameCount: count, fps, prerollFrames: first, text: observations.map(item => `Frame ${item.frame}, @Video1 ${((first + item.frame) / fps).toFixed(4)}s (delivery ${(item.frame / fps).toFixed(4)}s): ${item.observation}`).join("\n") };
+    // Only one clock goes to the drafting model: the actual submitted video.
+    return { frameCount: count, fps, prerollFrames: first, text: observations.map(item => `Frame ${item.frame}, @Video1 ${((first + item.frame) / fps).toFixed(4)}s: ${item.observation}`).join("\n") };
   };
 }

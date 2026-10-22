@@ -39,8 +39,9 @@ test("all delivery frames are represented once with exact timing and no later-fr
     const result = await inspect({ sourceVideoUrl: "/source.mp4", preparedPlan: { width: 64, height: 96, fps: 24, prerollFrames: 24, outputFrames: 27, left: 0, top: 0, sourceWidth: 64, sourceHeight: 96 } });
     assert.equal(result.frameCount, 27); assert.equal(records.length, 2); assert.equal(sheets.length, 3);
     assert.equal(result.text.split("\n").length, 27);
-    assert.match(result.text, /Frame 0, @Video1 1.0000s .*Person absent/);
+    assert.match(result.text, /Frame 0, @Video1 1.0000s: Person absent/);
     assert.match(result.text, /Frame 26, @Video1 2.0833s/);
+    assert.doesNotMatch(result.text, /delivery \d/);
     assert.match(calls[0], /must never be painted into earlier frames/);
     const pixels = await sharp(sheets[0]).removeAlpha().raw().toBuffer();
     const pixel = (x, y) => [...pixels.subarray((y * 1920 + x) * 3, (y * 1920 + x) * 3 + 3)];

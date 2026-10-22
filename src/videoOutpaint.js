@@ -30,7 +30,7 @@ export function normalizeUtilityOutpaintSettings(value = {}) {
   return normalizeVideoOutpaintSettings({ ...(value && typeof value === "object" ? value : {}), model: value?.model === "wan-vace" ? "wan-vace" : "seedance-2.5" });
 }
 export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "") {
-  return JSON.stringify(["outpaint-canvas-v12-supplied-canvas", sourceUrl, normalizeVideoOutpaintSettings(settings), canvasVideoUrl]);
+  return JSON.stringify(["outpaint-canvas-v14-frame-grid", sourceUrl, normalizeVideoOutpaintSettings(settings), canvasVideoUrl]);
 }
 export function planVideoOutpaint(metadata, options = {}) {
   const settings = normalizeVideoOutpaintSettings(options);
@@ -59,8 +59,14 @@ export function planVideoOutpaint(metadata, options = {}) {
   const outputFrames = seedance ? Math.max(1, Math.floor((Math.min(availableDuration, settings.duration) + 0.001) * fps)) : null;
   // Seedance receives a held tail plus guard time, but delivery contains only the
   // real shot. Neither the original nor its audio repeats to meet model minimums.
-  const prerollFrames = seedance ? fps : 0;
-  const frames = seedance ? Math.max(4 * fps, prerollFrames + outputFrames + Math.ceil(0.5 * fps)) : Math.max(81, Math.min(241, Math.floor((Math.round(settings.duration * fps) - 1) / 4) * 4 + 1));
+  // Keep the source clock intact. A tested cloned lead-in let the provider start
+  // action early and did not fix convergence, so only the tail is held.
+  const prerollFrames = 0;
+  // Observed Seedance Edit outputs quantize to 8n+1 frames and resample action
+  // when given another count. Round UP with held tail frames, never stretch the
+  // source. Provider output is still verified rather than assuming compliance.
+  const seedanceFrames = Math.max(4 * fps, prerollFrames + outputFrames + Math.ceil(0.5 * fps));
+  const frames = seedance ? Math.ceil((seedanceFrames - 1) / 8) * 8 + 1 : Math.max(81, Math.min(241, Math.floor((Math.round(settings.duration * fps) - 1) / 4) * 4 + 1));
   const duration = frames / fps;
   const looped = !seedance && availableDuration + 0.001 < duration;
   const loopFrames = looped ? Math.max(1, Math.floor((availableDuration + 0.001) * fps)) : frames;
@@ -79,9 +85,11 @@ export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], ov
     const location = regions.length ? ` The ${regions.join(" and ")} black bands are the areas to outpaint.` : "";
     return [
       "Edit @Video1. Replace all black padding around the picture with a seamless continuation of the visible scene." + location + " These bands are missing image content, not letterboxing to preserve. Generate new scene imagery throughout these entire areas; the finished video must reach every canvas edge with no black bars. Fill the padded areas completely throughout the clip, starting at frame one.",
-      ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"} for the extended environment, surface detail, color and lighting in the padded regions. Match these references where consistent with @Video1; do not copy their people, change the source action or transition to a still image.`] : []),
+      ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"} for the extended environment, surface detail, color and lighting in the padded regions. Match these references where consistent with @Video1; do not add people, change source identity or action, or transition to a still image.`] : []),
       String(prompt || "").trim(),
       "Preserve the existing picture content, people, camera, action and timing, but do not preserve its black padding. Continue the scene naturally across the joins. Keep real dark objects; replace only the padding.",
+      ...(preparedPlan && rect ? [`SPATIAL LOCK: Canvas ${preparedPlan.width}x${preparedPlan.height}. The visible source core occupies x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height} pixels. Keep every source feature at its original coordinates in every frame. Do not shift, resize, zoom, crop, recenter or recompose the existing picture to fit a whole person or object. Generate outward from these fixed edges; never move the source to make room. These coordinates are constraints, not marks to draw.`] : []),
+      "SAME-FRAME ATTACHMENT: At every frame, extend each boundary-crossing limb, garment or prop from its visible attachment in that exact source frame, at the same position, angle, scale and velocity. Continue existing rigid props along their visible axes and outlines; never erase them. Legs follow the existing hips and clothing, never a separately invented walking cycle. Before entry and after exit or occlusion, extend background only. Source evidence overrides conflicting timing or action in the description. No retiming, new action, motion interpolation, camera change or independent movement. Cloned leading and trailing source frames stay motionless. Reference images guide appearance, never motion.",
       "FRAME 1 REQUIREMENT: The finished extension is already fully present on the very first frame and every subsequent frame, including held frames. No transition, reveal, fade, dissolve, wipe, sliding or shrinking black bars, progressive drawing, or animation of the filling process. Do not start from the black-padded input and gradually replace it. Only the original scene action and camera motion continue."
     ].filter(Boolean).join("\n\n");
   }

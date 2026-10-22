@@ -15,7 +15,9 @@ test("draft and submission budgets include the concise edit wrapper without comp
     assert.match(complete, /Edit @Video1/);
     assert.match(complete, /starting at frame one/);
     assert.doesNotMatch(complete, /PREPARED CANVAS|COMPOSITING OVERLAP|transition band|restoration rectangle/);
-    assert.ok(Buffer.byteLength(seedanceOutpaintPrompt("", false, [], feather, plan)) < 1300);
+    assert.ok(Buffer.byteLength(seedanceOutpaintPrompt("", false, [], feather, plan)) < 2400);
+    assert.match(complete, /SPATIAL LOCK/);
+    assert.match(complete, /SAME-FRAME ATTACHMENT/);
     assert.match(complete, /top and bottom black bands are the areas to outpaint/);
     assert.match(complete, /not letterboxing to preserve/);
     assert.match(complete, /do not preserve its black padding/);

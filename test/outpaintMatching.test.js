@@ -63,6 +63,6 @@ test("local reprocessing rebuilds the original geometry, preserves raw and recor
   let result;
   await handler({ body: { rawVideoUrl: "/outputs/raw.mp4", prepared: previous, videoOutpaint: { frame: { x: 7 }, model: "wan-vace", feather: 64 } } }, { json: item => { result = item; } });
   assert.deepEqual(preparation.videoOutpaint.frame, previous.plan.settings.frame); assert.equal(preparation.videoOutpaint.model, "seedance-2.5"); assert.equal(preparation.videoOutpaint.feather, 64);
-  assert.deepEqual(preparationTiming, { prerollFrames: 0 }, "Existing raw generations must not acquire a new time offset");
+  assert.deepEqual(preparationTiming, { prerollFrames: 0, frames: undefined }, "Existing raw generations must not acquire a new time offset");
   assert.equal(result.cost.amountUsd, 0); assert.equal(history.provider, "local"); assert.equal(history.videoOutpaint.rawVideoUrl, "/outputs/raw.mp4"); assert.equal(result.videoOutpaint.qc.status, "needs_review");
 });

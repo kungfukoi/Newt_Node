@@ -407,7 +407,7 @@ try {
   const seedancePrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/clip.mp4", videoOutpaint: { model: "seedance-2.5" } }, { timeoutMs: 120000 })).json();
   assert.equal(seedancePrepared.maskVideoUrl, undefined);
   assert.ok(seedancePrepared.maskImageUrl.endsWith(".png"));
-  assert.equal(seedancePrepared.plan.frames, 96); assert.equal(seedancePrepared.plan.duration, 4);
+  assert.equal(seedancePrepared.plan.frames, 97); assert.equal(seedancePrepared.plan.duration, 97 / 24);
   assert.equal(health.routes.videoOutpaintFullResolution, true);
   assert.deepEqual([seedancePrepared.plan.width, seedancePrepared.plan.height], [1080, 1920]);
   assert.equal(seedancePrepared.plan.looped, false); assert.equal(seedancePrepared.plan.tailPadded, true); assert.equal(seedancePrepared.loopedSourceUrl, undefined);

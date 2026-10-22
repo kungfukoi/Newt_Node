@@ -13,7 +13,7 @@ const body = seedanceOutpaintRequest({ prompt: "Continue the moving foliage", re
 test("legacy preparation timing remains readable and engine changes invalidate preparation", () => {
   assert.equal(normalizeVideoOutpaintSettings().model, "wan-vace");
   assert.notEqual(videoOutpaintFingerprint("source", {}), videoOutpaintFingerprint("source", settings));
-  assert.equal(prepared.plan.frames, 96); assert.equal(prepared.plan.duration, 4);
+  assert.equal(prepared.plan.frames, 97); assert.equal(prepared.plan.duration, 97 / 24);
   assert.equal(prepared.plan.outputFrames, 40); assert.equal(prepared.plan.looped, false); assert.equal(prepared.plan.tailPadded, true);
   assert.equal(planVideoOutpaint({ width: 640, height: 360, fps: 16, duration: 2 }, settings).fps, 24);
 });
@@ -32,10 +32,16 @@ test("Utility defaults to Seedance and preserves selectable Wan settings and old
 test("Seedance pads only its submission and delivers the real selected source duration", () => {
   const full = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { ...settings, duration: 4 });
   assert.equal(full.outputFrames, 96); assert.equal(full.outputDuration, 4);
-  assert.equal(full.frames, 132); assert.equal(full.duration, 5.5); assert.equal(full.prerollFrames, 24);
+  assert.equal(full.frames, 113); assert.equal(full.duration, 113 / 24); assert.equal(full.prerollFrames, 0);
   assert.equal(full.looped, false);
   const selected = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { ...settings, duration: 1.25 });
-  assert.equal(selected.outputFrames, 30); assert.equal(selected.frames, 96);
+  assert.equal(selected.outputFrames, 30); assert.equal(selected.frames, 97);
+  for (const fps of [24, 25, 30, 60]) for (const duration of [0.25, 1.25, 3.375, 4, 8]) {
+    const p = planVideoOutpaint({ width: 640, height: 360, fps, duration }, { ...settings, duration });
+    assert.equal((p.frames - 1) % 8, 0);
+    assert.ok(p.frames >= p.outputFrames + Math.ceil(fps / 2));
+    assert.equal(p.outputFrames, Math.floor((duration + 0.001) * fps));
+  }
 });
 
 test("one Seedance resolution controls generation and export dimensions, overriding old delivery settings", () => {
@@ -64,6 +70,8 @@ test("Seedance editing submits only the padded source with explicit border extra
     assert.equal(result.body.outpaintUserPrompt, body.prompt);
     assert.match(result.body.prompt, /@Image1 is a visual reference for the extended environment/);
     assert.match(result.body.prompt, /FRAME 1 REQUIREMENT/);
+    assert.match(result.body.prompt, /SAME-FRAME ATTACHMENT/);
+    assert.match(result.body.prompt, /never a separately invented walking cycle/);
     assert.match(result.body.prompt, /Only the original scene action and camera motion continue/);
   }
 });

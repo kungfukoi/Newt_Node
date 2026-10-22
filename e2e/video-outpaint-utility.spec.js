@@ -93,7 +93,7 @@ for (const entry of ["output", "outpaint"]) for (const succeeds of [true, false]
     generations.push(route.request().postDataJSON());
     await expect(page.locator('[data-node-card-id="outpaint"]').getByRole("button", { name: generations.at(-1).videoOutpaintRepair ? "QC Edits..." : "Generating Fill...", exact: true })).toBeVisible();
     const passed = succeeds;
-    return route.fulfill({ json: { modelName: "Seedance 2.5", video: { localUrl: passed ? "/outputs/e2e/finished.mp4" : "/outputs/e2e/candidate.mp4", fileName: passed ? "finished.mp4" : "candidate.mp4" }, videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", qc: { status: passed ? "passed_checks" : "needs_review", flags: passed ? [] : ["Seam repair exhausted"], visual: { status: passed ? "passed_checks" : "needs_review", summary: "Reviewed", issues: passed ? [] : [{ category: "geometry", start: 0, end: 1, description: "Missing coat" }] } } }, warning: passed ? "" : "Seam repair exhausted", cost: { amountUsd: null } } });
+    return route.fulfill({ json: { modelName: "Seedance 2.5", video: { localUrl: passed ? "/outputs/e2e/finished.mp4" : "/outputs/e2e/candidate.mp4", fileName: passed ? "finished.mp4" : "candidate.mp4" }, videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", matching: { finishVersion: 3, motionValidation: { status: passed ? "passed_checks" : "needs_review", flaggedFrames: passed ? 0 : 2 } }, qc: { status: "off" } }, warning: passed ? "" : "Outpaint motion needs review", cost: { amountUsd: null } } });
   });
   const output = page.locator(`[data-node-card-id="${entry}"]`);
   await output.locator(".run-node-button").click();
@@ -175,7 +175,8 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   expect(analysis.referenceImageUrls).toEqual(["/outputs/e2e/framing.png"]);
   expect(analysis.maskImageUrl).toBe("/outputs/e2e/mask.png");
   expect(analysis.preparedPlan.outputFrames).toBe(40);
-  expect(analysis.preparedPlan.prerollFrames).toBe(24);
+  expect(analysis.preparedPlan.prerollFrames).toBe(0);
+  expect((analysis.preparedPlan.frames - 1) % 8).toBe(0);
   await node.locator(".run-node-button").click();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.at(-1)?.videoOutpaint?.rawVideoUrl)).toBe("/outputs/e2e/raw.mp4");
   expect(generation.model).toBe("Seedance 2.5"); expect(generation.videoOutpaintUtility).toBe(true);

@@ -10,6 +10,7 @@ export function outpaintCanRefinish(item, settings, sourceUrl) {
 
 export function outpaintNeedsFinishing(item) {
   const details = item?.videoOutpaint;
+  if (details?.matching?.motionValidation?.status === "needs_review") return true;
   const finishedWithoutQc = details?.qc?.status === "off" && details?.matching?.finishVersion === 3;
   return Boolean(details && !details.localCrop && details.qc?.status !== "passed_checks" && !finishedWithoutQc);
 }

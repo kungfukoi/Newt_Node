@@ -59,6 +59,14 @@ test("preparation creates a matching source/mask and preview without calling gen
   assert.match(calls[1].args.join(" "), /drawbox=x=0:y=302:w=720:h=676:color=black/);
   assert.equal(prepared.fingerprint, videoOutpaintFingerprint("/outputs/source.mp4", {}));
 });
+
+test("reprocessing preserves historical leading holds and frame counts", async () => {
+  const { service, calls } = serviceHarness();
+  const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5" } }, "/outputs/source.mp4", { prerollFrames: 24, frames: 117 });
+  assert.equal(prepared.plan.prerollFrames, 24); assert.equal(prepared.plan.frames, 117);
+  assert.match(calls[0].args.join(" "), /start_duration=1:/);
+  assert.equal(prepared.plan.duration, 117 / 24);
+});
 test("finishing restores original source, maps optional audio and retains raw on timing mismatch", async () => {
   const { service, calls } = serviceHarness(); const prepared = await service.prepare({}, "/outputs/source.mp4");
   const finished = await service.finish({}, prepared, { filePath: "/outputs/generated.mp4" });
