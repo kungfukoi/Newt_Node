@@ -5,6 +5,7 @@ import { registerVideoOutpaintFinishRoute } from "./routes/videoOutpaintFinish.j
 import { createOutpaintVisualReviewer } from "./outpaint-visual-qc.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
+import { wanOutpaintPrompt, wanOutpaintNegativePrompt } from "../src/wanOutpaintPrompt.js";
 import { registerVideoOutpaintPromptRoute } from "./routes/videoOutpaintPrompt.js";
 import { createOutpaintFramePresence } from "./outpaint-frame-presence.js";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
@@ -1238,6 +1239,7 @@ function buildHealthPayload() {
       videoOutpaintFullResolution: true,
       videoOutpaintLocalMasks: true,
       videoOutpaintSeedance: true,
+      videoOutpaintWanConditioning: true,
       generateAudio: true,
       atlasDurableVideo: true,
       characterWardrobeFullSheet: true,
@@ -6147,7 +6149,7 @@ app.post("/api/node/utility-video", async (req, res) => {
       if (!process.env.FAL_KEY) return res.status(400).json({ error: "Video Outpaint is a Fal-only utility and needs an enabled Fal API key in Settings." });
       if (!prompt) return res.status(400).json({ error: "Enter or draft an outpainting prompt before Run." });
       req.body.wanVaceInpainting = { ...req.body.wanVaceInpainting, resolution: "720p", aspectRatio: prepared.plan.settings.aspectRatio, matchInputNumFrames: true, matchInputFps: true, preprocess: false, enablePromptExpansion: false, numInterpolatedFrames: 0, videoQuality: "maximum", acceleration: "none", enableAutoDownsample: false, temporalDownsampleFactor: 0 };
-      return runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls: [prepared.videoUrl], maskVideoUrls: [prepared.maskVideoUrl], selectedVideoModel, outpaintContext: prepared });
+      return runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls: [prepared.generationVideoUrl], maskVideoUrls: [prepared.maskVideoUrl], selectedVideoModel, outpaintContext: prepared });
     }
 
     if (runtimeModelProviderPreferences.utilityVideo === "krea") return runKreaEnhanceUtility(req, res, selectedVideoModel, "video");
@@ -9746,8 +9748,8 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
   const referenceOnlyImageUrls = useReferenceFrames ? referenceImageUrls.slice(2, 6) : referenceImageUrls.slice(0, 4);
   const refImageUrls = await Promise.all(referenceOnlyImageUrls.map((url) => uploadLocalOutputToFal(url)));
   const input = {
-    prompt,
-    negative_prompt: String(options.negativePrompt || ""),
+    prompt: outpaintContext ? wanOutpaintPrompt(prompt, outpaintContext.plan) : prompt,
+    negative_prompt: outpaintContext ? wanOutpaintNegativePrompt(options.negativePrompt) : String(options.negativePrompt || ""),
     match_input_num_frames: matchInputNumFrames,
     match_input_frames_per_second: matchInputFps,
     resolution,
@@ -9830,11 +9832,12 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     endpoint,
     mode: outpaintContext ? "Video outpainting" : isWan22VaceInpainting ? "Wan 2.2 VACE Fun A14B inpainting" : "Wan VACE inpainting",
     prompt,
-    submittedPrompt: prompt,
+    submittedPrompt: input.prompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
       ...(outpaintDetails ? { videoOutpaint: outpaintDetails } : {}),
+      ...(outpaintContext ? { negativePrompt: input.negative_prompt, conditioningVersion: "vace-gray-v1" } : {}),
       matchInputNumFrames,
       numFrames: input.num_frames || null,
       matchInputFps,

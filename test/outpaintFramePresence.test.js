@@ -50,6 +50,9 @@ test("all delivery frames are represented once with exact timing and no later-fr
     assert.equal(records.at(-1).inputs.at(-1).url, "/reference.png");
     assert.match(records.at(-1).prompt, /still images, not numbered footage frames/);
     assert.match(records.at(-1).prompt, /keep the source lighting authoritative/);
+    const wan = await inspect({ sourceVideoUrl: "/source.mp4", referenceImageUrls: ["/reference.png"], preparedPlan: { width: 64, height: 96, fps: 24, frames: 80, settings: { model: "wan-vace" }, left: 0, top: 0, sourceWidth: 64, sourceHeight: 96 } });
+    assert.equal(wan.frameCount, 80); assert.equal(wan.prerollFrames, 0);
+    assert.equal(records.at(-1).inputs.at(-1).url, "/reference.png");
     await assert.rejects(inspect({ sourceVideoUrl: "/source.mp4", preparedPlan: { width: 10 } }), /timing changed/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

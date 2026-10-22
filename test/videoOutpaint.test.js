@@ -54,7 +54,7 @@ function serviceHarness({ generatedDuration = 3.375, reviewVisual } = {}) {
 test("preparation creates a matching source/mask and preview without calling generation", async () => {
   const { service, calls, targets } = serviceHarness();
   const prepared = await service.prepare({}, "/outputs/source.mp4");
-  assert.equal(calls.length, 3); assert.ok(targets.every(t => t.dependency));
+  assert.equal(calls.length, 5); assert.ok(targets.every(t => t.dependency));
   assert.match(calls[0].args.join(" "), /pad=720:1280:0:280:black/);
   assert.match(calls[1].args.join(" "), /drawbox=x=0:y=302:w=720:h=676:color=black/);
   assert.equal(prepared.fingerprint, videoOutpaintFingerprint("/outputs/source.mp4", {}));

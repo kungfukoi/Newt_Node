@@ -30,7 +30,7 @@ export function normalizeUtilityOutpaintSettings(value = {}) {
   return normalizeVideoOutpaintSettings({ ...(value && typeof value === "object" ? value : {}), model: value?.model === "wan-vace" ? "wan-vace" : "seedance-2.5" });
 }
 export function videoOutpaintFingerprint(sourceUrl, settings) {
-  return JSON.stringify(["outpaint-canvas-v10-inward-generation-overlap", sourceUrl, normalizeVideoOutpaintSettings(settings)]);
+  return JSON.stringify(["outpaint-canvas-v11-vace-gray-conditioning", sourceUrl, normalizeVideoOutpaintSettings(settings)]);
 }
 export function planVideoOutpaint(metadata, options = {}) {
   const settings = normalizeVideoOutpaintSettings(options);

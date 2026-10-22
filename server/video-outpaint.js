@@ -58,8 +58,20 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       if ((await statFile(generationVideo.filePath)).size > 200 * 1024 * 1024) throw new Error("The generation canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment.");
     }
     await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=white:s=${width}x${height}:r=${fps}`, "-vf", `drawbox=x=${left + ml}:y=${top + mt}:w=${sourceWidth - ml - mr}:h=${sourceHeight - mt - mb}:color=black:t=fill`, "-frames:v", maskIsImage ? "1" : String(frames), ...(maskIsImage ? [] : [...encode, "-crf", "0"]), mask.filePath], "Prepare local outpaint mask", 120000);
+    let analysisMask;
+    if (!maskIsImage) {
+      // VACE's preprocessed input uses neutral gray for unknown pixels, including
+      // the inward overlap. Keep the original canvas for analysis/restoration.
+      generationVideo = await createTarget(body, "outpaint-vace-conditioning", ".mp4", true);
+      const cx = left + ml, cy = top + mt, cw = sourceWidth - ml - mr, ch = sourceHeight - mt - mb;
+      const regions = [[0, 0, width, cy], [0, cy + ch, width, height - cy - ch], [0, cy, cx, ch], [cx + cw, cy, width - cx - cw, ch]];
+      const bands = regions.filter(([, , w, h]) => w > 0 && h > 0).map(([x, y, w, h]) => `drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=0x7f7f7f:t=fill`);
+      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", bands.join(",") || "null", "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare VACE neutral-gray conditioning", 120000);
+      analysisMask = await createTarget(body, "outpaint-analysis-mask", ".png", true);
+      await runFfmpeg(["-y", "-i", mask.filePath, "-frames:v", "1", analysisMask.filePath], "Prepare VACE analysis mask", 30000);
+    }
     await runFfmpeg(["-y", "-i", generationVideo?.filePath || padded.filePath, "-frames:v", "1", poster.filePath], "Preview outpaint canvas", 30000);
-    return { sourceUrl, ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, ...(generationVideo ? { generationVideoUrl: generationVideo.publicPath } : {}), ...(maskIsImage ? { maskImageUrl: mask.publicPath } : { maskVideoUrl: mask.publicPath }), previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(sourceUrl, settings), plan };
+    return { sourceUrl, ...(loopedSourceUrl ? { loopedSourceUrl } : {}), videoUrl: padded.publicPath, ...(generationVideo ? { generationVideoUrl: generationVideo.publicPath } : {}), ...(maskIsImage ? { maskImageUrl: mask.publicPath } : { maskVideoUrl: mask.publicPath, maskImageUrl: analysisMask.publicPath }), previewUrl: poster.publicPath, fingerprint: videoOutpaintFingerprint(sourceUrl, settings), plan };
   }
   async function finish(body, prepared, generated) {
     reportProgress("Finish: Blending the original source overlap…");

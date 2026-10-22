@@ -22,10 +22,12 @@ export function createOutpaintFramePresence({ resolveAsset, probeVideo, createTa
     const plan = body.preparedPlan;
     const fps = Number(metadata.fps), total = Number(metadata.num_frames || metadata.frames || Math.round(metadata.duration * fps));
     if (!(fps > 0 && total > 0 && total <= 1200)) throw new Error("Cannot verify every frame of this canvas. Prepare a source segment of up to 10 seconds before analyzing.");
+    const firstFrame = plan?.settings?.model === "wan-vace" ? 0 : plan?.prerollFrames;
+    const deliveryFrames = plan?.settings?.model === "wan-vace" ? plan.frames : plan?.outputFrames;
     const validPlan = plan && plan.width === metadata.width && plan.height === metadata.height && Math.abs(plan.fps - fps) < 0.01
-      && Number.isInteger(plan.prerollFrames) && plan.prerollFrames >= 0 && Number.isInteger(plan.outputFrames) && plan.outputFrames > 0 && plan.prerollFrames + plan.outputFrames <= total;
+      && Number.isInteger(firstFrame) && firstFrame >= 0 && Number.isInteger(deliveryFrames) && deliveryFrames > 0 && firstFrame + deliveryFrames <= total;
     if (plan && !validPlan) throw new Error("Prepared canvas timing changed. Prepare canvas & mask again before analyzing.");
-    const first = validPlan ? plan.prerollFrames : 0, count = validPlan ? plan.outputFrames : total;
+    const first = validPlan ? firstFrame : 0, count = validPlan ? deliveryFrames : total;
     const rect = validPlan && [plan.left, plan.top, plan.sourceWidth, plan.sourceHeight].every(Number.isInteger)
       && plan.left >= 0 && plan.top >= 0 && plan.sourceWidth > 0 && plan.sourceHeight > 0
       && plan.left + plan.sourceWidth <= metadata.width && plan.top + plan.sourceHeight <= metadata.height

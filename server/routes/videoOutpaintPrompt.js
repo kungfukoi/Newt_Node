@@ -13,7 +13,7 @@ export function registerVideoOutpaintPromptRoute(app, deps) {
       if (mode === "manual") return res.status(400).json({ error: "Manual mode uses the editable Prompt field; select Auto to analyze video." });
       const references = req.body.referenceImageUrls || [];
       if (!Array.isArray(references) || references.length > 30 || references.some(url => typeof url !== "string" || !deps.isLocalAssetUrl(url))) return res.status(400).json({ error: "Connect up to 30 local reference images before analyzing outpainting." });
-      if (references.length && (!maskImageUrl || !deps.inspectFrames)) return res.status(400).json({ error: "Reference-aware analysis requires Seedance canvas preparation and the current backend. Prepare canvas & mask after restarting Newt Node." });
+      if (references.length && (!maskImageUrl || !deps.inspectFrames)) return res.status(400).json({ error: "Reference-aware analysis requires current canvas preparation. Prepare canvas & mask after restarting Newt Node." });
       const frameEvidence = maskImageUrl && deps.inspectFrames ? await deps.inspectFrames(req.body) : null;
       const promptByteBudget = req.body.outpaintModel === "seedance-2.5" ? outpaintEditablePromptBudget(req.body.preparedPlan, req.body.preparedPlan?.settings, references.length) : 1100;
       const prompt = buildOutpaintAnalysisPrompt({ mode, guidance: req.body.guidance, aspectRatio: req.body.aspectRatio, outpaintModel: req.body.outpaintModel, maskIsImage: Boolean(maskImageUrl), frameEvidence: frameEvidence?.text || "", maxPromptBytes: promptByteBudget, preparedPlan: req.body.preparedPlan });

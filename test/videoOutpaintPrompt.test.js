@@ -72,6 +72,10 @@ test("reference-aware drafting passes connected images to frame inspection and r
   assert.equal(result.status, 200);
   assert.deepEqual(inspected.referenceImageUrls, request.referenceImageUrls);
   assert.match(result.analysis.prompt, /snow ground matching the reference/);
+  const wan = await harness({ inspectFrames: async () => ({ text: "Reference matches the snowy ground.", frameCount: 81, fps: 24, prerollFrames: 0 }) }).call({ ...request, outpaintModel: "wan-vace", maskVideoUrl: "/outputs/mask.mp4" });
+  assert.equal(wan.status, 200);
+  assert.match(wan.analysis.prompt, /Write a descriptive caption/);
+  assert.match(wan.analysis.prompt, /Reference matches the snowy ground/);
   for (const referenceImageUrls of [["https://example.com/ref.png"], "not-an-array", Array(31).fill("/outputs/ref.png")]) {
     const rejected = await harness({ inspectFrames: () => assert.fail("Must not inspect invalid refs"), analyze: () => assert.fail("Must not analyze invalid refs") }).call({ ...request, referenceImageUrls });
     assert.equal(rejected.status, 400);

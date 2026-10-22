@@ -26,7 +26,7 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const service = createVideoOutpaintService({ resolveAsset: async filePath => ({ filePath }), probeVideo: probe,
       createTarget: async (body, kind, ext) => ({ filePath: path.join(directory, kind + ext), publicPath: path.join(directory, kind + ext), fileName: kind + ext }),
       runFfmpeg: run, statFile: stat, reviewVisual: async () => { reviewCount++; return reviewReplies.shift() || { status: "passed_checks", summary: "Mocked review", issues: [] }; } });
-    const prepared = await service.prepare({ videoOutpaint: { outputSize: "720p", feather: 0 } }, source);
+    const prepared = await service.prepare({ videoOutpaint: { outputSize: "720p", feather: 32 } }, source);
     const padded = await probe(prepared.videoUrl), mask = await probe(prepared.maskVideoUrl);
     assert.equal(padded.frames, 81); assert.equal(mask.frames, 81); assert.equal(padded.duration, mask.duration);
     const output = await service.finish({}, prepared, { filePath: generated });
@@ -38,6 +38,13 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
       return [...stdout.subarray(0, 3)];
     };
     const center = await pixel(360, 640), border = await pixel(360, 10);
+    const conditionedBorder = await pixel(360, 10, prepared.generationVideoUrl);
+    const conditionedCore = await pixel(360, 640, prepared.generationVideoUrl);
+    assert.ok(conditionedBorder.every(v => Math.abs(v - 127) <= 3), `VACE missing area must be neutral gray: ${conditionedBorder}`);
+    assert.ok(conditionedCore[0] > 200 && conditionedCore[2] < 20, "VACE must retain original source core");
+    assert.equal((await probe(prepared.generationVideoUrl)).frames, mask.frames);
+    assert.ok((await pixel(360, prepared.plan.top + 10, prepared.generationVideoUrl)).every(v => Math.abs(v - 127) <= 3), "Inward overlap must also be neutral gray");
+    assert.ok((await pixel(360, prepared.plan.top + 10, prepared.maskVideoUrl)).every(v => v > 240), "Inward overlap must be inside the generation mask");
     assert.ok(center[0] > 200 && center[2] < 20, `Original red source was not restored: ${center}`);
     assert.ok(border[2] > 200 && border[0] < 20, `Generated blue border was not retained: ${border}`);
     const split = path.join(directory, "split.mp4");
