@@ -51,9 +51,13 @@ export function createOutpaintFramePresence({ resolveAsset, probeVideo, createTa
         `Return ONLY JSON {"frames":[{"frame":0,"observation":"..."}]} with exactly one entry for EACH of these frame IDs: ${ids.join(", ")}.`,
         "For each frame identify whether each person/object is absent, visible but not crossing an expansion boundary, visibly attached across a specific boundary, or occluded. Describe boundary-connected subjects AND supported background surfaces, structural edges, textures, perspective and occlusion at each join. Evaluate background continuity as carefully as foreground continuity. Record uncertain attachment as uncertain, do not guess invisible legs. Keep each observation concise. Evaluate each frame independently; do not copy later presence backward."
       ].join("\n\n");
-      const result = await analyzeImages({ inputs, prompt });
+      const references = (body.referenceImageUrls || []).map((url, index) => ({ url, type: "image", label: `Extension reference @Image${index + 1} (not a source frame)` }));
+      inputs.push(...references);
+      const referenceContext = references.length ? "\n\nThe additional labeled extension references are still images, not numbered footage frames. Compare their environment, surfaces, brightness and color with the actual source boundaries. In each frame observation, describe supported continuation into each missing region using the references where consistent with the footage. Never infer a subject's presence or motion from a still reference, never substitute reference people into the footage, and keep the source lighting authoritative." : "";
+      const analysisPrompt = prompt + referenceContext;
+      const result = await analyzeImages({ inputs, prompt: analysisPrompt });
       // Record paid work before validating its response, including malformed results.
-      await recordAnalysis({ body, result, inputs, prompt, firstFrame: ids[0], lastFrame: ids.at(-1), fps, prerollFrames: first });
+      await recordAnalysis({ body, result, inputs, prompt: analysisPrompt, firstFrame: ids[0], lastFrame: ids.at(-1), fps, prerollFrames: first });
       observations.push(...parseFramePresence(result.text, ids));
     }
     return { frameCount: count, fps, prerollFrames: first, text: observations.map(item => `Frame ${item.frame}, @Video1 ${((first + item.frame) / fps).toFixed(4)}s (delivery ${(item.frame / fps).toFixed(4)}s): ${item.observation}`).join("\n") };

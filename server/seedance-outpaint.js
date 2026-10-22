@@ -13,8 +13,9 @@ export async function prepareSeedanceOutpaint(body, { provider, apiKey, prepare 
     if (!apiKey) throw Object.assign(new Error(`Enable the selected ${provider === "fal" ? "Fal" : "Atlas Cloud"} key for Seedance outpainting.`), { status: 400 });
     if (!prompt.trim()) throw Object.assign(new Error("Enter or draft an outpainting prompt before Run."), { status: 400 });
   }
-  const fittedPrompt = fitOutpaintPrompt(prompt, outpaintEditablePromptBudget(prepared.plan, settings));
-  const submittedPrompt = seedanceOutpaintPrompt(fittedPrompt, false, [], settings.restoreSource ? settings.feather : 0, prepared.plan);
+  const referenceImageCount = (body.referenceImageUrls || []).length;
+  const fittedPrompt = fitOutpaintPrompt(prompt, outpaintEditablePromptBudget(prepared.plan, settings, referenceImageCount));
+  const submittedPrompt = seedanceOutpaintPrompt(fittedPrompt, false, [], settings.restoreSource ? settings.feather : 0, prepared.plan, referenceImageCount);
   // The shared Seedance adapter compacts overlong prompts. Never let it cut
   // temporal presence, geometry or overlap instructions out of an outpaint.
   return { prepared, body: {

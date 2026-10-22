@@ -1,4 +1,5 @@
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
+import { NodeAbout } from "./components/NodeAbout.jsx";
 import { outpaintNeedsFinishing, outpaintOutputError, outpaintCanRefinish, outpaintCanRegenerate } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
 import { normalizeUtilityOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
@@ -1341,7 +1342,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => (modelPreferencesReady ? enabledUtilityVideoModelOptions(modelPreferences) : utilityVideoModelOptions),
     [modelPreferences, modelPreferencesReady]
   );
-  const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
+  const [outpaintAnalysisNodeIds, setOutpaintAnalysisNodeIds] = React.useState(() => new Set());
+  const activeEdgeIds = React.useMemo(() => {
+    const active = buildActiveEdgeIds(nodes, edges);
+    edges.forEach(edge => {
+      if (outpaintAnalysisNodeIds.has(edge.to.nodeId) && ["referenceVideoIn", "maskVideoIn", "referenceImageIn"].includes(edge.to.port)) active.add(edge.id);
+    });
+    return active;
+  }, [nodes, edges, outpaintAnalysisNodeIds]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, promptResolvedIncomingByNode, groups, edges), [nodes, promptResolvedIncomingByNode, groups, edges]);
   const selectedRunnableNodes = React.useMemo(
@@ -6945,9 +6953,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function analyzeOutpaintPrompt(node, request) {
     const context = workflowRequestContext();
-    const { response, data } = await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "text", label: "Outpainting prompt analysis" }, progress => nodeApi.videoOutpaintPrompt({ ...request, ...workflowContextPayload(context), nodeId: node.id, nodeTitle: node.data.title, ...progress }));
-    if (!response.ok) throw new Error(data.error || "Outpainting analysis failed.");
-    return data;
+    setOutpaintAnalysisNodeIds(current => new Set(current).add(node.id));
+    try {
+      const { response, data } = await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "text", label: "Outpainting prompt analysis" }, progress => nodeApi.videoOutpaintPrompt({ ...request, ...workflowContextPayload(context), nodeId: node.id, nodeTitle: node.data.title, ...progress }));
+      if (!response.ok) throw new Error(data.error || "Outpainting analysis failed.");
+      return data;
+    } finally {
+      setOutpaintAnalysisNodeIds(current => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+    }
   }
 
   function markOutputTargetSaved(outputTarget, generatedItems = [], resultType = "") {
@@ -14614,7 +14631,7 @@ function NodeBody({
           ) : !isLocalImageEffect ? (
             <div className="edit-empty-controls">No settings for this effect.</div>
           ) : null}
-          <p className="edit-effect-description">{effect.definition}</p>
+          <NodeAbout>{effect.definition}</NodeAbout>
         </details>
       </div>
     );
@@ -15017,7 +15034,7 @@ function NodeBody({
                 </NodeRow>
               )}
               {isOutpaintVideo ? (
-                <VideoOutpaintControls generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
+                <VideoOutpaintControls generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceImageUrls={connectedAssetUrls(incoming.referenceImageIn)} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
               ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
                   <select
@@ -15789,7 +15806,7 @@ function NodeBody({
             </>
           )}
         </details>
-        <p className="utility-model-description">{utilityDescription}</p>
+        <NodeAbout>{utilityDescription}</NodeAbout>
       </div>
     );
   }
@@ -15935,9 +15952,9 @@ function NodeBody({
             </NodeRow>
           )}
         </details>
-        <p className="utility-model-description">
+        <NodeAbout>
           {model3DDescription}{rodinSelected ? ` Rodin accepts up to ${rodin25MaxInputImages} connected views.` : ""}
-        </p>
+        </NodeAbout>
       </div>
     );
   }

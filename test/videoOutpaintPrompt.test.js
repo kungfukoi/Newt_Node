@@ -27,6 +27,15 @@ function harness(overrides = {}) {
 }
 const body = { sourceVideoUrl: "/outputs/source.mp4", maskVideoUrl: "/outputs/mask.mp4", mode: "guided", guidance: "No windows", aspectRatio: "9:16", projectId: "p", nodeId: "n" };
 
+test("Seedance analysis explicitly covers every padded edge and source lighting", () => {
+  const text = buildOutpaintAnalysisPrompt({ mode: "auto", outpaintModel: "seedance-2.5", preparedPlan: { width: 720, height: 1280, left: 0, top: 306, sourceWidth: 720, sourceHeight: 664 } });
+  assert.match(text, /PRIMARY DELIVERABLE:[^\n]*TOP, BOTTOM/);
+  assert.match(text, /Every listed region must have its own/);
+  assert.match(text, /bottom canvas edge/);
+  assert.match(text, /pale bright overcast sky must remain pale and equally bright/);
+  assert.match(text, /Do not add dramatic weather/);
+});
+
 test("analysis records provider, usage, source/mask, direction and workflow without generating video", async () => {
   const result = await harness().call(body);
   assert.equal(result.status, 200);
@@ -53,6 +62,19 @@ test("missing mask, remote sources and manual mode never call paid analysis", as
     const result = await harness({ analyze: () => { assert.fail("Must not submit"); } }).call({ ...body, ...patch });
     assert.equal(result.status, 400);
     assert.equal(result.record, undefined);
+  }
+});
+
+test("reference-aware drafting passes connected images to frame inspection and rejects invalid references before paid work", async () => {
+  let inspected;
+  const request = { ...body, maskVideoUrl: undefined, maskImageUrl: "/outputs/mask.png", outpaintModel: "seedance-2.5", referenceImageUrls: ["/outputs/background.png"] };
+  const result = await harness({ inspectFrames: async input => { inspected = input; return { text: "Top: pale sky. Bottom: snow ground matching the reference.", frameCount: 21, fps: 24, prerollFrames: 24 }; } }).call(request);
+  assert.equal(result.status, 200);
+  assert.deepEqual(inspected.referenceImageUrls, request.referenceImageUrls);
+  assert.match(result.analysis.prompt, /snow ground matching the reference/);
+  for (const referenceImageUrls of [["https://example.com/ref.png"], "not-an-array", Array(31).fill("/outputs/ref.png")]) {
+    const rejected = await harness({ inspectFrames: () => assert.fail("Must not inspect invalid refs"), analyze: () => assert.fail("Must not analyze invalid refs") }).call({ ...request, referenceImageUrls });
+    assert.equal(rejected.status, 400);
   }
 });
 

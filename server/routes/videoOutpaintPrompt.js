@@ -11,9 +11,12 @@ export function registerVideoOutpaintPromptRoute(app, deps) {
       }
       const mode = normalizeOutpaintPromptMode(req.body.mode);
       if (mode === "manual") return res.status(400).json({ error: "Manual mode uses the editable Prompt field; select Auto to analyze video." });
+      const references = req.body.referenceImageUrls || [];
+      if (!Array.isArray(references) || references.length > 30 || references.some(url => typeof url !== "string" || !deps.isLocalAssetUrl(url))) return res.status(400).json({ error: "Connect up to 30 local reference images before analyzing outpainting." });
+      if (references.length && (!maskImageUrl || !deps.inspectFrames)) return res.status(400).json({ error: "Reference-aware analysis requires Seedance canvas preparation and the current backend. Prepare canvas & mask after restarting Newt Node." });
       const frameEvidence = maskImageUrl && deps.inspectFrames ? await deps.inspectFrames(req.body) : null;
-      const promptByteBudget = req.body.outpaintModel === "seedance-2.5" ? outpaintEditablePromptBudget(req.body.preparedPlan, req.body.preparedPlan?.settings) : 1100;
-      const prompt = buildOutpaintAnalysisPrompt({ mode, guidance: req.body.guidance, aspectRatio: req.body.aspectRatio, outpaintModel: req.body.outpaintModel, maskIsImage: Boolean(maskImageUrl), frameEvidence: frameEvidence?.text || "", maxPromptBytes: promptByteBudget });
+      const promptByteBudget = req.body.outpaintModel === "seedance-2.5" ? outpaintEditablePromptBudget(req.body.preparedPlan, req.body.preparedPlan?.settings, references.length) : 1100;
+      const prompt = buildOutpaintAnalysisPrompt({ mode, guidance: req.body.guidance, aspectRatio: req.body.aspectRatio, outpaintModel: req.body.outpaintModel, maskIsImage: Boolean(maskImageUrl), frameEvidence: frameEvidence?.text || "", maxPromptBytes: promptByteBudget, preparedPlan: req.body.preparedPlan });
       const inputs = [{ url: sourceVideoUrl, label: "Source footage on target canvas", type: "video" }, ...(!maskImageUrl ? [{ url: maskVideoUrl, label: "Expansion mask: white generate, black preserve", type: "video" }] : [])];
       const result = await deps.analyze({ inputs, prompt });
       if (!result.text?.trim()) throw new Error("Video analysis returned no prompt. Your existing prompt was preserved.");
@@ -28,7 +31,9 @@ export function registerVideoOutpaintPromptRoute(app, deps) {
         usage: { request: usage, helpers: helperUsages }, cost });
       res.json({ text: result.text, provider: result.provider, model: result.model, cost, ...(frameEvidence ? { frameAnalysis: { frameCount: frameEvidence.frameCount, fps: frameEvidence.fps, prerollFrames: frameEvidence.prerollFrames } } : {}) });
     } catch (error) {
-      res.status(error.status || error.statusCode || 500).json({ error: error.message || "Outpainting prompt analysis failed." });
+      const detail = error.body?.detail;
+      const message = typeof detail === "string" && detail.trim() ? detail.slice(0, 900) : error.message;
+      res.status(error.status || error.statusCode || 500).json({ error: message || "Outpainting prompt analysis failed." });
     }
   });
 }

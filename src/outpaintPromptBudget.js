@@ -3,9 +3,9 @@ import { seedanceOutpaintPrompt } from "./videoOutpaint.js";
 export const outpaintSubmissionByteLimit = 3900;
 const bytes = text => new TextEncoder().encode(text).length;
 
-export function outpaintEditablePromptBudget(plan, settings = {}) {
+export function outpaintEditablePromptBudget(plan, settings = {}, referenceImageCount = 0) {
   const overlap = settings.restoreSource === false ? 0 : settings.feather ?? 32;
-  const reserved = bytes(seedanceOutpaintPrompt("", false, [], overlap, plan));
+  const reserved = bytes(seedanceOutpaintPrompt("", false, [], overlap, plan, referenceImageCount));
   return Math.max(0, Math.min(1100, outpaintSubmissionByteLimit - reserved - 16));
 }
 
@@ -22,7 +22,7 @@ function clipWords(text, budget) {
 }
 
 // Shared by drafting and submission, so stale drafts, pasted text and connected
-// prompts also fit. Generic canvas/presence instructions are never compacted.
+// prompts also fit. The concise edit/preservation wrapper is never compacted.
 export function fitOutpaintPrompt(value, maxBytes) {
   const text = String(value || "").trim();
   const budget = Math.max(0, Math.floor(maxBytes));

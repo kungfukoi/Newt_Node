@@ -103,9 +103,10 @@ test("outpaint keeps automatic finishing metadata without a local-finish button"
 test("Seedance outpaint switches controls, prepares a short clip, analyzes context and edits with durable routing", async ({ page }, testInfo) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
     { id: "source", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/source.mp4", status: "complete" } },
+    { id: "look", type: "image", x: 20, y: 400, data: { resultUrl: "/outputs/e2e/framing.png", status: "complete" } },
     { id: "outpaint", type: "utility", x: 550, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "guided" } }
-  ], edges: [{ id: "wire", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })));
-  const { errors } = await openFixture(page, { count: 2 });
+  ], edges: [{ id: "wire", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }, { id: "look-wire", from: { nodeId: "look", port: "imageOut" }, to: { nodeId: "outpaint", port: "referenceImageIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })));
+  const { errors } = await openFixture(page, { count: 3 });
   await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintMatching: true, videoOutpaintFraming: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
   let preparation, analysis, generation;
   await page.route("**/api/node/video-outpaint-prepare", route => {
@@ -142,6 +143,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
   await expect(prompt).toHaveValue("Extend the floor and moving shadows into the padded regions.");
   expect(analysis.outpaintModel).toBe("seedance-2.5");
+  expect(analysis.referenceImageUrls).toEqual(["/outputs/e2e/framing.png"]);
   expect(analysis.maskImageUrl).toBe("/outputs/e2e/mask.png");
   expect(analysis.preparedPlan.outputFrames).toBe(40);
   expect(analysis.preparedPlan.prerollFrames).toBe(24);
@@ -153,9 +155,14 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   expect(generation.seedanceTask).toBe("edit"); expect(generation.durableGeneration).toBe(true);
   expect(generation.referenceVideoUrls).toEqual(["/outputs/e2e/source.mp4"]);
   await page.screenshot({ path: testInfo.outputPath("seedance-outpaint.png") });
-  await expect(node.getByLabel("Outpaint model").locator("option")).toHaveCount(1);
+  await expect(node.getByLabel("Outpaint model").locator("option")).toHaveCount(2);
   await expect(node.getByLabel("Outpaint model")).toHaveValue("seedance-2.5");
   await expect(node.getByLabel("Outpaint inference steps")).toHaveCount(0);
+  await node.getByLabel("Outpaint model").selectOption("wan-vace");
+  await expect(node.getByLabel("Outpaint inference steps")).toBeVisible();
+  await expect(node.getByLabel("Outpaint guidance scale")).toBeVisible();
+  await expect(node.getByLabel("Prepared outpainting canvas")).toHaveCount(0);
+  await expect(node.getByLabel("Outpaint model")).toHaveValue("wan-vace");
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.at(-1)?.videoOutpaint?.rawVideoUrl)).toBe("/outputs/e2e/raw.mp4");
   expect(errors).toEqual([]);
 });
@@ -174,13 +181,13 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
     const settings = normalizeVideoOutpaintSettings(preparation.videoOutpaint);
-    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskImageUrl: "/outputs/e2e/mask.png", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) } });
+    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskVideoUrl: "/outputs/e2e/mask.mp4", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) } });
   });
   await page.route("**/api/node/video-outpaint-prompt", route => {
     analysis = route.request().postDataJSON();
     return route.fulfill({ json: { text: "Complete one anatomically connected person in the lower extension.", provider: "fal", model: "vision" } });
   });
-  await page.route("**/api/node/generate-video", route => {
+  await page.route("**/api/node/utility-video", route => {
     generation = route.request().postDataJSON();
     const localCrop = !planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, generation.videoOutpaint).needsOutpaint;
     return route.fulfill({ status: shouldFail ? 502 : 200, json: shouldFail ? { error: "Fal unavailable" } : { modelName: "Video Outpaint", video: { localUrl: "/outputs/e2e/outpaint.mp4", fileName: "outpaint.mp4", mimeType: "video/mp4" }, videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", restoredSource: true, localCrop }, cost: { amountUsd: localCrop ? 0 : 0.405 } } });
@@ -198,11 +205,11 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await node.getByRole("button", { name: "Analyze & draft prompt" }).click();
   const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
   await expect(prompt).toHaveValue("Complete one anatomically connected person in the lower extension.");
-  expect(analysis.sourceVideoUrl).toBe("/outputs/e2e/padded.mp4"); expect(analysis.maskImageUrl).toBe("/outputs/e2e/mask.png");
+  expect(analysis.sourceVideoUrl).toBe("/outputs/e2e/padded.mp4"); expect(analysis.maskVideoUrl).toBe("/outputs/e2e/mask.mp4");
   await prompt.fill("My reviewed person-completion prompt");
   await node.locator(".run-node-button").click();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.at(-1)?.videoOutpaint?.rawVideoUrl)).toBe("/outputs/e2e/raw.mp4");
-  expect(generation.model).toBe("Seedance 2.5"); expect(generation.prompt).toBe("My reviewed person-completion prompt");
+  expect(generation.model).toBe("Video Outpaint"); expect(generation.videoOutpaint.model).toBe("wan-vace"); expect(generation.prompt).toBe("My reviewed person-completion prompt");
   expect(generation.referenceVideoUrls).toEqual(["/outputs/e2e/source.mp4"]);
   expect(generation.maskVideoUrls).toEqual([]);
   expect(generation.videoOutpaint.restoreSource).toBe(true);

@@ -157,13 +157,13 @@ export function extractOpenAiResponseText(response) {
 }
 
 export function falLlmInput({ model, prompt, systemPrompt, route = "" }) {
-  // Fal defaults to false even when omitted; Astra requires reasoning enabled.
+  // Fal defaults to false even when omitted; Astra and Gemini 3 require reasoning.
   const instructions = route === "explore-plan"
     ? [systemPrompt, "Required response JSON Schema (return the matching JSON object only):", JSON.stringify(explorePlanSchema)].filter(Boolean).join("\n\n")
     : systemPrompt;
   return { model, prompt, system_prompt: instructions,
     ...(creativeSchemas[route] ? { max_tokens: creativeOutputBudget(route) } : {}),
-    ...(creativeSchemas[route] || /^openai\/gpt-(?:5|6)/.test(model) ? { reasoning: true } : {}) };
+    ...(creativeSchemas[route] || /^(?:openai\/gpt-(?:5|6)|google\/gemini-3)/.test(model) ? { reasoning: true } : {}) };
 }
 
 export function creativeFinalOutputText(value) {

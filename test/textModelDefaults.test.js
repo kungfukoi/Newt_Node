@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { falLlmInput } from "../server/creative-llm.js";
 import {
   defaultFalTextModel,
   defaultFalVideoTextModel,
@@ -36,5 +37,10 @@ test("native-video analysis enables reasoning required by Gemini 3.1 Pro", () =>
   assert.equal(input.model, "google/gemini-3.1-pro-preview");
   assert.equal(input.prompt, "Describe this clip for the Text Agent.");
   assert.equal(input.system_prompt, "Return concise context.");
+  assert.equal(input.reasoning, true);
+});
+
+test("Gemini frame-presence vision requests enable mandatory reasoning", () => {
+  const input = falLlmInput({ model: defaultFalVideoTextModel, route: "video-outpaint-frame-presence", prompt: "Inspect every frame." });
   assert.equal(input.reasoning, true);
 });

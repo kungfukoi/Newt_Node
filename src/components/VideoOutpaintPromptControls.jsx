@@ -2,12 +2,12 @@ import React from "react";
 import { NodeRow } from "./NodePorts.jsx";
 import { normalizeOutpaintPromptMode } from "../videoOutpaintPrompt.js";
 
-export function VideoOutpaintPromptControls({ node, sourceVideoUrl, maskVideoUrl, maskImageUrl = "", preparedPlan, promptConnected, running, onUpdate, onAnalyze }) {
+export function VideoOutpaintPromptControls({ node, sourceVideoUrl, maskVideoUrl, maskImageUrl = "", preparedPlan, referenceImageUrls = [], promptConnected, running, onUpdate, onAnalyze }) {
   const mode = normalizeOutpaintPromptMode(node.data.outpaintPromptMode);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const latest = React.useRef(null);
-  const state = JSON.stringify([sourceVideoUrl, maskVideoUrl, maskImageUrl, preparedPlan, mode, node.data.videoOutpaint?.model || "wan-vace", node.data.outpaintGuidance || "", node.data.wanVaceAspectRatio || "auto", node.data.prompt || "", promptConnected, running]);
+  const state = JSON.stringify([sourceVideoUrl, maskVideoUrl, maskImageUrl, preparedPlan, referenceImageUrls, mode, node.data.videoOutpaint?.model || "wan-vace", node.data.outpaintGuidance || "", node.data.wanVaceAspectRatio || "auto", node.data.prompt || "", promptConnected, running]);
   latest.current = state;
   React.useEffect(() => () => { latest.current = null; }, []);
   async function analyze() {
@@ -15,12 +15,12 @@ export function VideoOutpaintPromptControls({ node, sourceVideoUrl, maskVideoUrl
     const snapshot = state;
     setBusy(true); setNotice("");
     try {
-      const data = await onAnalyze(node, { mode, guidance: node.data.outpaintGuidance || "", aspectRatio: node.data.wanVaceAspectRatio || "auto", outpaintModel: node.data.videoOutpaint?.model || "wan-vace", sourceVideoUrl, maskVideoUrl, ...(maskImageUrl ? { maskImageUrl, preparedPlan } : {}) });
+      const data = await onAnalyze(node, { mode, guidance: node.data.outpaintGuidance || "", aspectRatio: node.data.wanVaceAspectRatio || "auto", outpaintModel: node.data.videoOutpaint?.model || "wan-vace", sourceVideoUrl, maskVideoUrl, referenceImageUrls, ...(maskImageUrl ? { maskImageUrl, preparedPlan } : {}) });
       if (latest.current !== snapshot) {
         if (latest.current !== null) setNotice("Inputs or prompt changed during analysis. Existing prompt kept; see History for the generated draft.");
         return;
       }
-      onUpdate(node.id, { prompt: data.text, outpaintPromptAnalysis: { provider: data.provider, model: data.model, sourceVideoUrl, maskVideoUrl, frameAnalysis: data.frameAnalysis, createdAt: new Date().toISOString() } });
+      onUpdate(node.id, { prompt: data.text, outpaintPromptAnalysis: { provider: data.provider, model: data.model, sourceVideoUrl, maskVideoUrl, referenceImageUrls, frameAnalysis: data.frameAnalysis, createdAt: new Date().toISOString() } });
       setNotice("");
     } catch (error) {
       if (latest.current !== null) setNotice(error.message || "Analysis failed; existing prompt kept.");

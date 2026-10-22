@@ -46,6 +46,10 @@ test("all delivery frames are represented once with exact timing and no later-fr
     const pixel = (x, y) => [...pixels.subarray((y * 1920 + x) * 3, (y * 1920 + x) * 3 + 3)];
     assert.ok(pixel(240, 150)[0] > 200, "First delivery panel must remain red (no later blue subject)");
     assert.ok(pixel(2 * 480 + 240, 300 + 150)[2] > 200, "Frame six must show its actual later blue content");
+    await inspect({ sourceVideoUrl: "/source.mp4", referenceImageUrls: ["/reference.png"], preparedPlan: { width: 64, height: 96, fps: 24, prerollFrames: 24, outputFrames: 27, left: 0, top: 0, sourceWidth: 64, sourceHeight: 96 } });
+    assert.equal(records.at(-1).inputs.at(-1).url, "/reference.png");
+    assert.match(records.at(-1).prompt, /still images, not numbered footage frames/);
+    assert.match(records.at(-1).prompt, /keep the source lighting authoritative/);
     await assert.rejects(inspect({ sourceVideoUrl: "/source.mp4", preparedPlan: { width: 10 } }), /timing changed/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
