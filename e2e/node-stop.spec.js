@@ -1,6 +1,56 @@
 import { test, expect } from '@playwright/test';
 import { openFixture } from './helpers.mjs';
 
+for (const recovered of [false, true]) test(`Stop keeps ${recovered ? 'recovered' : 'batched'} Outpaint jobs stopped across polling and reload`, async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seedance-node-editor-draft-v1')) return;
+    sessionStorage.setItem('seedance-node-editor-draft-v1', JSON.stringify({ nodes: [
+      { id: 'source', type: 'video', x: 20, y: 20, data: { resultUrl: '/outputs/e2e/source.mp4', status: 'complete' } },
+      { id: 'outpaint', type: 'utility', x: 500, y: 20, data: { title: 'Outpaint', utilityMode: 'video', utilityVideoModel: 'Video Outpaint', prompt: 'Continue the scene.', outpaintPromptMode: 'manual', batchCount: '2', settingsOpen: true } }
+    ], edges: [{ id: 'wire', from: { nodeId: 'source', port: 'videoOut' }, to: { nodeId: 'outpaint', port: 'referenceVideoIn' } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } }));
+  });
+  const jobs = recovered ? [{ runId: 'recovered-outpaint', nodeId: 'outpaint', groupId: 'old', batchIndex: 1, state: 'running', createdAt: '2026-10-23T12:00:00Z' }] : [];
+  let stopped = false, sent, polls = 0;
+  const generations = [];
+  const { errors } = await openFixture(page, { count: 2, remoteVideoJobs: route => {
+    polls++;
+    const scope = new URL(route.request().url()).searchParams.get('scope');
+    return route.fulfill({ json: { jobs: jobs.map(job => ({ ...job, scope, state: stopped ? 'dismissed' : job.state })), cursor: 'fixture:' + polls, reset: true, pollAfterMs: 3000 } });
+  } });
+  await page.route('**/api/health', route => route.fulfill({ json: { ok: true, routes: { generationProgress: true, remoteVideoJobs: true, videoOutpaintMatching: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, videoOutpaintSeedanceSourceFrames: true, seedanceVideoEditing: true } } }));
+  await page.route('**/api/node/generate-video', route => {
+    const body = route.request().postDataJSON(); generations.push(body);
+    const job = { runId: body.generationRunId, nodeId: 'outpaint', groupId: body.generationGroupId, batchIndex: body.generationBatchIndex, state: 'running', scope: body.generationScope, createdAt: new Date().toISOString() };
+    jobs.push(job);
+    return route.fulfill({ status: 202, json: { job } });
+  });
+  await page.route(/\/api\/remote-video-jobs\/[^/?]+$/, route => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1));
+    return route.fulfill({ json: { job: { ...jobs.find(job => job.runId === id), state: stopped ? 'dismissed' : 'running' } } });
+  });
+  await page.route('**/api/remote-video-jobs/stop-node', route => { sent = route.request().postDataJSON(); stopped = true; return route.fulfill({ json: { jobs: [] } }); });
+  const node = page.locator('[data-node-card-id="outpaint"]');
+  if (!recovered) {
+    await node.locator('.run-node-button').click();
+    await expect.poll(() => generations.length).toBe(2);
+    expect(new Set(generations.map(body => body.generationGroupId)).size).toBe(1);
+    expect(generations[0].generationGroupId).toBeTruthy();
+    expect(generations.map(body => body.generationBatchIndex).sort()).toEqual([1, 2]);
+  }
+  await expect(node.locator('.run-node-button')).toBeDisabled();
+  await page.getByRole('button', { name: 'Stop all active canvas nodes', exact: true }).click();
+  await expect.poll(() => sent?.nodeId).toBe('outpaint');
+  expect(sent.groupIds).toEqual(recovered ? [] : [generations[0].generationGroupId]);
+  await expect(node.locator('.run-node-button')).toBeEnabled();
+  const afterStop = polls;
+  await expect.poll(() => polls, { timeout: 12000 }).toBeGreaterThan(afterStop + 1);
+  await expect(node.locator('.run-node-button')).toBeEnabled();
+  expect(generations.length).toBe(recovered ? 0 : 2);
+  await page.reload(); await page.getByRole('button', { name: 'Nodes', exact: true }).click();
+  await expect(node.locator('.run-node-button')).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
 test('Stop releases a running image node and ignores a late successful response', async ({ page }) => {
   const { errors } = await openFixture(page, { generation: true, scale: 1 });
   let finish;

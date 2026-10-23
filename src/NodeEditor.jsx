@@ -523,7 +523,7 @@ import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { createWorkflowSessionId } from "./workflowSession.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import { useRemoteVideoRecovery } from "./useRemoteVideoRecovery.js";
-import { appendUniqueVideoResults, remoteVideoScope } from "./remoteVideoJobs.js";
+import { appendUniqueVideoResults, remoteVideoScope, supportsRemoteVideoRecovery } from "./remoteVideoJobs.js";
 import {
   createWorkflowClipboardPayload,
   normalizeWorkflowClipboardPayload,
@@ -7098,7 +7098,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     storyboardRevisionRunsRef.current.delete(node.id);
     draftFinishesRef.current.delete(node.id);
     if (token?.outputTarget) markOutputTargetFailed(token.outputTarget, message);
-    if (node.type === "videoModel") {
+    if (supportsRemoteVideoRecovery(node)) {
       try {
         const { response, data } = await stopRemoteVideoNode({ scope, nodeId: node.id, groupIds: token?.groupId ? [token.groupId] : [] });
         if (!response.ok) throw new Error(data?.error || "Stop request failed.");
@@ -7207,7 +7207,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = ["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type)
+    const generationGroupId = (["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode))
       ? createGenerationGroupId(currentNode.type)
       : "";
     token.groupId = generationGroupId;
@@ -7816,7 +7816,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             incoming,
             incomingByNode: currentIncomingByNode,
             workflowContext: requestContext,
-            index
+            index, generationGroupId, batchTotal: batchCount
           }) })
         );
         const settled = await Promise.allSettled(runs);
@@ -22408,7 +22408,7 @@ function buildWanSegmentGenerationResult({ node, prompt, incoming, index }) {
   };
 }
 
-async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNode = {}, projectId, projectName, workflowContext, index }) {
+async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNode = {}, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
   const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wan22VaceDepth);
   const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   const isWanSegment = isUtilityTransitionBuilderModel(model);
@@ -22428,7 +22428,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     : isUtilityWanBlendModel(model)
       ? wanBlendInputImageUrls(incoming)
     : connectedAssetUrls(incoming.referenceImageIn);
-  const { response, data } = await nodeApi.utilityVideo(buildUtilityVideoRequest({
+  const request = buildUtilityVideoRequest({
     node,
     prompt,
     model,
@@ -22505,7 +22505,10 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     },
     voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames),
     outputTargetIndex: String((Number(index) || 0) + 1)
-  }), "Utility video");
+  });
+  const { response, data } = model === videoOutpaintModelName
+    ? await runTrackedGeneration({ scope: remoteVideoScope(workflowContext), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Video Outpaint", groupId: generationGroupId, batchIndex: index + 1, batchTotal }, progress => nodeApi.utilityVideo({ ...request, ...progress }, "Utility video"))
+    : await nodeApi.utilityVideo(request, "Utility video");
   if (!response.ok) {
     const error = new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);
     error.code = data.errorCode || data.code || "";

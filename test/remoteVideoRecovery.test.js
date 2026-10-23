@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { waitForRemoteVideo, activeRemoteVideoNodeIds } from "../src/remoteVideoJobClient.js";
-import { remoteVideoScope, supportsDurableVideo, appendUniqueVideoResults } from "../src/remoteVideoJobs.js";
+import { remoteVideoScope, supportsDurableVideo, appendUniqueVideoResults, supportsRemoteVideoRecovery } from "../src/remoteVideoJobs.js";
 import { recoveredVideoPatches } from "../src/remoteVideoRecovery.js";
 
 const body = { generationRunId: "one", projectId: "project", nodeId: "video" };
 const result = { generationRunId: "one", video: { localUrl: "/outputs/one.mp4", fileName: "one.mp4" }, cost: { amount: 1 } };
 const response = (job, status = 200) => ({ response: { ok: status < 400, status }, data: { job } });
+
+test("Stop and recovery recognize both Video Model and Utility Outpaint ownership", () => {
+  assert.equal(supportsRemoteVideoRecovery({ type: "videoModel" }), true);
+  assert.equal(supportsRemoteVideoRecovery({ type: "utility", data: { utilityMode: "video", utilityVideoModel: "Video Outpaint" } }), true);
+  assert.equal(supportsRemoteVideoRecovery({ type: "utility", data: { utilityMode: "image", utilityVideoModel: "Video Outpaint" } }), false);
+  assert.equal(supportsRemoteVideoRecovery({ type: "utility", data: { utilityMode: "video", utilityVideoModel: "Composite Video" } }), false);
+});
 
 test("client recovers lost acceptance and network polls using original run ID", async () => {
   let submits = 0, polls = 0;

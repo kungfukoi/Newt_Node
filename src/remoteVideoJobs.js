@@ -12,6 +12,10 @@ export function supportsDurableVideo(model) {
   return /^seedance\s*2\.(0|5)$/i.test(String(model || "").trim());
 }
 
+export function supportsRemoteVideoRecovery(node) {
+  return node?.type === "videoModel" || node?.type === "utility" && node.data?.utilityMode === "video" && node.data?.utilityVideoModel === "Video Outpaint";
+}
+
 export function remoteVideoScope(context = {}) {
   // Package identity separates Save As copies even when node IDs are retained.
   const packagePath = String(context.workflowPackagePath || "").replace(/\\/g, "/").replace(/\/$/, "");

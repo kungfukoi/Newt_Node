@@ -1,4 +1,4 @@
-import { appendUniqueVideoResults, remoteVideoTerminal, remoteVideoNeedsAttention } from "./remoteVideoJobs.js";
+import { appendUniqueVideoResults, remoteVideoTerminal, remoteVideoNeedsAttention, supportsRemoteVideoRecovery } from "./remoteVideoJobs.js";
 import { existingResultItemsForNode } from "./mediaResults.js";
 import { normalizeVideoGenerationResult } from "./nodeRunners/videoModels.js";
 import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
@@ -7,7 +7,7 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
   const patches = [];
   for (const node of nodes) {
     const outpaint = node.type === "utility" && node.data.utilityMode === "video" && node.data.utilityVideoModel === "Video Outpaint";
-    if ((node.type !== "videoModel" && !outpaint) || activeNodeIds.has(node.id)) continue;
+    if (!supportsRemoteVideoRecovery(node) || activeNodeIds.has(node.id)) continue;
     const owned = jobs.filter((job) => job.nodeId === node.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (!owned.length) continue;
     const seen = new Set(node.data.remoteVideoRunIds || []);
