@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+Video Outpaint permits the same image asset in multiple reference slots, such as Environment and Wardrobe. Preserve slot order, numbered prompt references and roles through provider submission; do not collapse these slots by URL.
+
 Production launcher sessions shut down 15 seconds after the last connected app window closes. Refresh/reconnection cancels pending shutdown; minimized/background windows remain connected, and closing one of several windows does not stop shared work. Shutdown stops both supervised servers and their owned process trees (including local media/GPU helpers), without crash-restarting them. WSL MiniMax services are stopped only when NewtNode observed them inactive and started them in this supervisor session. Independently running ComfyUI/inference services and already accepted cloud jobs are not canceled. Development/headless sessions are not stopped by browser closure. Reopen through the launcher after shutdown.
 
 CorridorKey first-use setup belongs to the server job, with visible stages and retryable errors. Supported Windows NVIDIA systems install missing Python, packages, engine and weights automatically. Unsupported platforms/drivers fail before downloads. macOS explains that this Python adapter requires CUDA; the separate commercial Mac runtime is not integrated.

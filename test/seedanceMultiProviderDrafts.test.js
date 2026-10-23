@@ -39,7 +39,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
   };
   const deps = {
     ...seedance, ...drafts, resolveSeedanceRuntimeProvider, providerKeyFingerprint, kreaSeedanceEndpoint, kreaSeedanceEditInput, compactSeedancePrompt, estimateKreaSeedanceCost, mergeSeedanceDirectorReferences, supportsAtlasVideoModel,
-    prepareSeedanceOutpaint, videoOutpaintService: { prepare: async () => outpaintFixture },
+    prepareSeedanceOutpaint, videoOutpaintService: { prepare: async body => ({ ...outpaintFixture, plan: { ...outpaintFixture.plan, settings: { ...outpaintFixture.plan.settings, ...body.videoOutpaint } } }) },
     console: { error: () => {} },
     path, rootDir: "/fixture", outputsDir: "/fixture/outputs", localWorkflowAssetDirName: () => "workflow", verifyVideoOutputDestination: async () => ({}),
     seedanceSubmittedPrompt, validateAtlasSeedanceDurations,
@@ -155,6 +155,26 @@ test("outpainting reuses Fal/Atlas/Krea editing acceptance with source canvas, s
       assert.equal(h.spec.input.generate_audio, undefined);
       assert.equal(h.spec.settings.seedanceTask, "edit");
     }
+  }
+});
+
+test("outpaint preserves repeated image slots so numbered role references remain valid", async () => {
+  for (const provider of ["fal", "atlas", "krea"]) {
+    const h = routeHarness(provider);
+    const sharedImage = "/outputs/environment-and-wardrobe.png";
+    const res = await h.run({ videoOutpaintUtility: true,
+      videoOutpaint: { model: "seedance-2.5", referenceRoles: ["environment", "wardrobe"] },
+      referenceVideoUrls: [outpaintFixture.sourceUrl],
+      referenceImageUrls: [sharedImage, sharedImage],
+      seedanceDraft: false, prompt: "Continue the scene." });
+    assert.equal(res.statusCode, 202, JSON.stringify(res.body));
+    assert.equal(h.spec.settings.referenceImageCount, 2);
+    assert.equal((h.spec.input.image_urls || h.spec.input.reference_images).length, 2);
+    assert.match(h.spec.submittedPrompt, /@Image1/);
+    assert.match(h.spec.submittedPrompt, /@Image2/);
+    assert.match(h.spec.submittedPrompt, /defines the shared set/);
+    assert.match(h.spec.submittedPrompt, /defines clothing only/);
+    assert.equal(h.uploads.filter(upload => upload.url === sharedImage).length, 2);
   }
 });
 

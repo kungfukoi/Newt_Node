@@ -1,5 +1,7 @@
 # NewtNode Architecture
 
+Seedance Outpaint retains ordered image-reference slots through the shared video route, including repeated asset URLs. Its prepared prompt has already numbered each slot, so Director reference deduplication must not remove a slot or shift its role.
+
 `src/windowLifecycle.js` keeps one EventSource connection for the whole app window through `src/api/newtApi.js`; pagehide closes it and pageshow restores it, including BFCache. `server/window-lifecycle.js` tracks actual open connections with a 15-second last-window grace period, enabled only under the production supervisor's IPC channel. It validates the local client origin and does not use expiring JavaScript heartbeats that could kill minimized windows. `scripts/localServerSupervisor.mjs` receives the last-window signal, prevents restart, requests the matching frontend supervisor to stop using its per-instance ownership token, blocks new backend requests, and shuts down its own process tree through `scripts/ownedProcessTree.mjs`. Windows uses taskkill on the owned child tree; POSIX uses a dedicated process group. WSL services explicitly started from inactive/failed state are registered over IPC and retained across backend restarts for final cleanup. External already-running inference services remain independent.
 
 This document is the descriptive map of the current NewtNode implementation. `node-standards.md` remains the normative contract. Documentation audited against checkout version `4.5.0-beta.0` on 2026-10-15; see [audit scope](documentation-audit-2026-10-15.md).

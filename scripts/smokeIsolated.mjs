@@ -388,6 +388,7 @@ try {
   assert.equal(health.routes.videoOutpaintFraming, true);
   assert.equal(health.routes.videoOutpaintMatching, true);
   assert.equal(health.routes.videoOutpaintConsistency, true);
+  assert.equal(health.routes.videoOutpaintReferenceSlots, true);
   await promisify(execFile)(ffmpeg, ["-y", "-stream_loop", "-1", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-t", "4", "-c:v", "copy", path.join(sandbox, "outputs", "outpaint-source.mp4")], { windowsHide: true, timeout: 30000 });
   const outpaintPrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/outpaint-source.mp4", projectName: "Outpaint smoke", videoOutpaint: { aspectRatio: "9:16", duration: 3.375 } }, { timeoutMs: 120000 })).json();
   assert.equal(outpaintPrepared.plan.frames, 81);

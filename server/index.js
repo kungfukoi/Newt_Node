@@ -1257,6 +1257,7 @@ function buildHealthPayload() {
       videoOutpaintFraming: true,
       videoOutpaintMatching: true,
       videoOutpaintConsistency: true,
+      videoOutpaintReferenceSlots: true,
       videoOutpaintFullResolution: true,
       videoOutpaintLocalMasks: true,
       videoOutpaintSeedanceGreenPadding: true,
@@ -6876,7 +6877,12 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     if (seedance25 && rawReferenceImageUrls.filter(isLocalAssetUrl).length > seedance25ReferenceLimits.images) {
       return res.status(400).json({ error: `Seedance 2.5 accepts up to ${seedance25ReferenceLimits.images} image references.` });
     }
-    const mergedReferenceImages = mergeSeedanceDirectorReferences({
+    // Outpaint has already assigned numbered roles to each connected slot.
+    // The same file can serve both Environment and Wardrobe; keep both slots.
+    const mergedReferenceImages = req.body.videoOutpaintContext ? {
+      urls: rawReferenceImageUrls,
+      labels: req.body.referenceImageLabels || []
+    } : mergeSeedanceDirectorReferences({
       directUrls: rawReferenceImageUrls,
       directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
       directorReferences,
