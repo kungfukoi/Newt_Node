@@ -8388,6 +8388,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
           {showPresetPanel && <NewtPresetLibrary controller={newtPresets} />}
         </div>
+        <div className="node-catalog" style={{ "--catalog-row-count": nodeCatalog.length, "--catalog-compact-row-count": Math.ceil(nodeCatalog.length / 2) }}>
         {nodeCatalog.map((item) => {
           const Icon = item.icon;
           return (
@@ -8398,6 +8399,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             </button>
           );
         })}
+        </div>
       </aside>
 
       <div

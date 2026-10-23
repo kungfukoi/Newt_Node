@@ -3,8 +3,8 @@
   display: grid;
   grid-template-columns: 180px 1fr;
   gap: 16px;
-  height: calc(100vh - 104px);
-  min-height: 520px;
+  height: calc(100dvh - 104px);
+  min-height: 0;
   padding-top: 18px;
 }
 
@@ -22,13 +22,31 @@
 
 .node-toolbar {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   align-content: start;
+  min-height: 0;
   gap: 5px;
   padding: 8px;
   overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   background: rgba(18, 18, 18, 0.82);
+}
+
+.node-catalog {
+  --catalog-rows: var(--catalog-row-count);
+  display: grid;
+  grid-template-rows: repeat(var(--catalog-rows), minmax(0, 1fr));
+  gap: 4px;
+  height: 100%;
+  max-height: calc(var(--catalog-rows) * 31px + (var(--catalog-rows) - 1) * 4px);
+  min-height: 0;
+}
+
+.node-toolbar .node-catalog > button {
+  min-height: 0;
+  height: 100%;
+  line-height: 1.15;
 }
 
 .node-workspace.toolbar-collapsed .node-toolbar {
@@ -10522,6 +10540,28 @@ video.newtnode-video-fallback {
   white-space: normal;
 }
 
+@media (max-height: 900px) and (min-width: 861px) {
+  .node-workspace { grid-template-columns: 300px minmax(0, 1fr); }
+  .node-workspace.outputs-open { grid-template-columns: 300px minmax(0, 1fr) var(--project-output-drawer-width, 116px); }
+  .node-workspace.toolbar-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .node-workspace.toolbar-collapsed.outputs-open { grid-template-columns: minmax(0, 1fr) var(--project-output-drawer-width, 116px); }
+  .node-catalog {
+    --catalog-rows: var(--catalog-compact-row-count);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+  }
+  .node-toolbar .node-catalog > button { gap: 4px; padding: 0 6px; font-size: 11px; }
+  .project-tools { gap: 4px; margin-bottom: 0; padding-bottom: 4px; }
+  .project-tools input,
+  .project-tools select,
+  .node-toolbar .project-tools .new-project-button,
+  .node-toolbar .project-tools .file-menu-trigger,
+  .node-toolbar .project-tools .project-picker-trigger { min-height: 28px; height: 28px; }
+  .toolbar-header { min-height: 26px; }
+  .node-toolbar .sidebar-hide,
+  .node-toolbar .newt-preset-library .icon-button { min-height: 26px; height: 26px; }
+}
+
 @media (max-width: 860px) {
   .node-workspace,
   .node-workspace.outputs-open,
@@ -10530,7 +10570,16 @@ video.newtnode-video-fallback {
   }
 
   .node-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .node-catalog {
+    height: auto;
+    max-height: none;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-rows: none;
+    grid-auto-rows: 31px;
   }
 
   .project-output-drawer {

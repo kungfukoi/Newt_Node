@@ -353,6 +353,8 @@ Every new node type should touch the same core surfaces unless there is a clear 
 
 ## Node UI Standards
 
+The node palette fits the available browser height: project controls retain their size and the full catalog shares the remaining vertical space. Short desktop windows use two compact catalog columns. Do not hide overflow to conceal unreachable node buttons or apply browser zoom to the canvas. The palette retains scrolling as a fallback for unusually small windows or expanded preset controls.
+
 Node render-error fallback cards must follow the same positioning owner as normal cards. Inside React Flow, use the flow-managed card layout without applying the node's world translation again, so errors remain visible at the node's location.
 
 The yellow crop box in the image preview supports freeform rectangular crops. Side handles adjust one axis; corner handles adjust both independently, with no aspect lock. Moving a crop preserves its dimensions at image boundaries. Undo and Apply retain the chosen width and height. Geometry is owned by `src/cropGeometry.js`.
