@@ -4,6 +4,8 @@ This document is the descriptive map of the current NewtNode implementation. `no
 
 ## Runtime Shape
 
+Video Outpaint uses the shared Utility Generations selector and `batchCount` scheduler in `NodeEditor.jsx`, with the existing Utility result aggregation and durable Seedance requests. It adds no separate batch API or persisted count field. Canvas repetition remains a per-request preparation setting.
+
 `src/videoOutpaint.js` normalizes Seedance `repeatCount` and plans the final copy's start in `prerollFrames`, enforcing the 30-second submission ceiling. `VideoOutpaintControls.jsx` persists the numeric Canvas repeats setting. `server/video-outpaint.js` repeats the trimmed moving shot before tail padding; existing finishing, timing alignment and coverage checks use the selected final interval. Original source/audio restoration still starts at the selected shot's original start. Prepared plans retained in durable jobs/history carry both full submission and single-copy delivery timing. `videoOutpaintSeedanceRepeats` health-gates newer clients against older backends.
 
 `server/keyer-install.js` owns first-use Windows x64 CorridorKey setup, pinned Python/CUDA dependencies and model downloads, hardware checks and runtime preflight. Setup runs inside the serialized Keyer job and reports installation stages through existing polling. Storage defaults to ignored `server/data/corridorkey/`; server overrides remain optional. macOS returns an unsupported-Python-engine state without downloads. Health advertises `keyerAutoSetup`.

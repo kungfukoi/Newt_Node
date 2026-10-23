@@ -15063,9 +15063,9 @@ function NodeBody({
                 </NodeRow>
               )}
               {(isWanVaceInpaintingVideo || isUtilityWan22VaceInpaintingModel(utilityVideoModel)) && <VideoOutpaintPromptControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} maskVideoUrl={connectedAssetUrls(incoming.maskVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onAnalyze={onOutpaintAnalyze} />}
-              {!isOutpaintVideo && !isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
-                  <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
+                  <select aria-label="Utility video generations" disabled={running} value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
                       <option key={option} value={option}>
                         {formatNodeBatchCount(option)}
