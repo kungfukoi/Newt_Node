@@ -38,6 +38,17 @@ test("repeated drops of the same output do not duplicate bin media", () => {
   assert.equal(second.media.length, 1);
 });
 
+test("different video results from the same source append without replacing existing clips", () => {
+  let state = importAssemblyOutputItem(createAssemblyState(), videoOutput);
+  state = insertAssemblyMediaClip(state, state.media[0].id, state.tracks[0].id, 0);
+  const clips = structuredClone(state.tracks);
+  const second = importAssemblyOutputItem(state, { ...videoOutput, url: "/outputs/second.mp4" });
+  const third = importAssemblyOutputItem(second, { ...videoOutput, url: "/outputs/third.mp4" });
+  assert.deepEqual(third.media.map(item => item.url), [videoOutput.url, "/outputs/second.mp4", "/outputs/third.mp4"]);
+  assert.equal(new Set(third.media.map(item => item.id)).size, 3);
+  assert.deepEqual(third.tracks, clips);
+});
+
 test("a directly dropped output and its later connection share one bin asset", () => {
   const dropped = importAssemblyOutputItem(createAssemblyState(), { ...videoOutput, sourceNodeId: "", sourcePort: "videoOut" });
   const connected = importAssemblyOutputItem(dropped, videoOutput);

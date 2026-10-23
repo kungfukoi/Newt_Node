@@ -1,7 +1,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { Film, Image as ImageIcon, Music2, X } from "lucide-react";
-import { clearOutputItemDragData, displayMediaUrl, hasOutputItemDragData, outputItemFromDataTransfer, setOutputItemDragData } from "../mediaAssets.js";
+import { clearOutputItemDragData, displayMediaUrl, hasOutputItemDragData, outputDragEndEvent, outputItemFromDataTransfer, setOutputItemDragData } from "../mediaAssets.js";
 
 const mediaDragType = "application/x-newtnode-assembly-media";
 
@@ -9,7 +9,25 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
   const [viewerMediaId, setViewerMediaId] = React.useState("");
   const [outputDropActive, setOutputDropActive] = React.useState(false);
   const listRef = React.useRef(null);
+  const binRef = React.useRef(null);
+  const onOutputDropRef = React.useRef(onOutputDrop);
+  onOutputDropRef.current = onOutputDrop;
   const viewerMedia = media.find((item) => item.id === viewerMediaId) || null;
+
+  React.useEffect(() => {
+    // Native video controls can consume a drop once the bin has a thumbnail.
+    // Use the source preview's drag-end coordinates as a delivery fallback.
+    const handleDragEnd = event => {
+      const { item, clientX, clientY } = event.detail || {};
+      if (!onOutputDropRef.current || !item?.url || !["image", "video", "audio"].includes(item.type)) return;
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+      const target = document.elementFromPoint(clientX, clientY);
+      if (!target || !binRef.current?.contains(target)) return;
+      onOutputDropRef.current(item);
+    };
+    window.addEventListener(outputDragEndEvent, handleDragEnd);
+    return () => window.removeEventListener(outputDragEndEvent, handleDragEnd);
+  }, []);
 
   React.useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
@@ -54,12 +72,13 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
   return (
     <>
       <aside
+        ref={binRef}
         className={`assembly-media-bin nodrag nowheel ${outputDropActive ? "is-output-drop-target" : ""}`}
         aria-label="Timeline media bin"
         onPointerDown={(event) => event.stopPropagation()}
-        onDragOver={handleOutputDragOver}
+        onDragOverCapture={handleOutputDragOver}
         onDragLeave={handleOutputDragLeave}
-        onDrop={handleOutputDrop}
+        onDropCapture={handleOutputDrop}
       >
         <header className="assembly-media-bin-header">
           <strong>Media</strong>
