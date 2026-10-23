@@ -4,7 +4,7 @@
 }
 
 .assembly-node-body {
-  grid-template-columns: minmax(154px, var(--assembly-bin-width, 190px)) minmax(460px, 1fr) minmax(210px, 240px);
+  grid-template-columns: var(--assembly-bin-width, 190px) minmax(0, 1fr) minmax(210px, 240px);
   grid-template-rows: auto auto minmax(230px, 1fr) auto;
 }
 
@@ -239,12 +239,14 @@
 }
 
 .assembly-media-bin-list {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 160px));
+  align-content: start;
+  align-items: start;
   min-height: 0;
   padding: 7px;
   overflow-x: hidden;
   overflow-y: auto;
-  flex-direction: column;
   gap: 7px;
   scrollbar-color: #5e5e5e #171717;
 }

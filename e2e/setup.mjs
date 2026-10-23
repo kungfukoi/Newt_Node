@@ -9,4 +9,5 @@ export default async function setup() {
   const target = (name) => fileURLToPath(new URL(`./.generated/${name}`, import.meta.url));
   await run(ffmpeg, ["-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24", "-t", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", target("motion.mp4")], { windowsHide: true });
   await run(ffmpeg, ["-y", "-i", target("motion.mp4"), "-frames:v", "1", "-update", "1", target("landscape.png")], { windowsHide: true });
+  await run(ffmpeg, ["-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "2", target("speech.wav")], { windowsHide: true });
 }

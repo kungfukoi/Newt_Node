@@ -71,7 +71,7 @@ test("Settings saves Nano Banana 2.1 as the editor preference", async ({ page },
   await videos.locator("select").selectOption("fal");
   await expect(videos.locator(".settings-provider-models")).toContainText("Gemini Omni Flash");
   await expect(videos.locator(".settings-provider-models")).not.toContainText("Seedance");
-  await expect(videos.locator(".settings-provider-models")).not.toContainText("MiniMax");
+  await expect(videos.locator(".settings-provider-models")).toContainText("MiniMax H3");
   await page.screenshot({ path: testInfo.outputPath("nano-banana-21-preferences.png") });
   expect(errors).toEqual([]);
 });

@@ -12,7 +12,8 @@ const execute = promisify(execFile);
 
 test("real FFmpeg outpainting prep and restoration preserve the source center, generated border, timing and audio", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-outpaint-media-"));
-  const run = args => execute(ffmpeg, args, { windowsHide: true, timeout: 30000 });
+  // Shared Intel macOS runners can take over 30 seconds for the ProRes master.
+  const run = args => execute(ffmpeg, args, { windowsHide: true, timeout: 120000 });
   let reviewReplies = [], reviewCount = 0;
   const probe = async file => {
     const { stdout } = await execute(ffprobe.path, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true, timeout: 10000 });

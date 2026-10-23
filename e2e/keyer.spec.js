@@ -19,7 +19,10 @@ async function setup(page, { completed = false, reconnect = false, scale = .7, l
   const fixture = await openFixture(page, { count: 3 });
   await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: true, busy: false, message: "Local engine configured" } }));
   const node = page.locator('[data-node-card-id="keyer"]');
-  await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
+  // At overview zoom the tiny refresh glyph has no reliable pointer hit area.
+  const refresh = node.getByRole("button", { name: "Refresh Keyer engine" });
+  await refresh.focus();
+  await refresh.press("Enter");
   await expect(node.locator('[role="status"].keyer-status')).toHaveText("Local engine configured");
   return { ...fixture, node };
 }

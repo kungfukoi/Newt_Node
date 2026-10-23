@@ -50,7 +50,7 @@ test("Settings saves Flux 3 as the editor preference", async ({ page }, testInfo
   await videos.locator("select").selectOption("fal");
   await expect(videos.locator(".settings-provider-models")).toContainText("Gemini Omni Flash");
   await expect(videos.locator(".settings-provider-models")).not.toContainText("Seedance");
-  await expect(videos.locator(".settings-provider-models")).not.toContainText("MiniMax");
+  await expect(videos.locator(".settings-provider-models")).toContainText("MiniMax H3");
   await page.screenshot({ path: testInfo.outputPath("flux3-preferences.png") });
   expect(errors).toEqual([]);
 });

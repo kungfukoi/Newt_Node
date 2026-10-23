@@ -11,6 +11,7 @@ export async function openFixture(page, options = {}) {
   page.on("pageerror", (error) => errors.push(error.message));
   const png = await readFile(new URL("./.generated/landscape.png", import.meta.url));
   const video = await readFile(new URL("./.generated/motion.mp4", import.meta.url));
+  const audio = await readFile(new URL("./.generated/speech.wav", import.meta.url));
   await page.addInitScript((fixture) => {
     if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify(fixture));
   }, fixture);
@@ -19,6 +20,7 @@ export async function openFixture(page, options = {}) {
     const url = new URL(request.url());
     const path = url.pathname;
     const json = (value) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
+    if (path === "/uploads/fixture/speech.wav") return route.fulfill({ status: 200, contentType: "audio/wav", body: audio });
     if (path.startsWith("/outputs/") || path === "/api/media-thumbnail" || path === "/api/video-poster") {
       const isVideo = path.endsWith(".mp4");
       const headers = { "Access-Control-Allow-Origin": "*", "Accept-Ranges": "bytes" };

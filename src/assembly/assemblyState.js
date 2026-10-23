@@ -115,10 +115,17 @@ export function assemblyActiveClips(state, time = state?.playhead || 0, type = "
 
 export function syncAssemblyInputs(state, inputs = []) {
   const current = normalizeAssemblyState(state);
-  const next = cloneAssemblyState(current);
-  let changed = false;
+  const normalizedInputs = normalizeAssemblyInputs(inputs);
+  const sourceKeys = new Set(normalizedInputs.map(assemblyConnectedSourceKey).filter(Boolean));
+  let next = cloneAssemblyState(current);
+  // Derived audio follows its parent; it is not a separate graph input.
+  const disconnected = current.media.filter((item) => item.linkedSource
+    && !item.derivedFromMediaId && assemblyConnectedSourceKey(item)
+    && !sourceKeys.has(assemblyConnectedSourceKey(item)));
+  disconnected.forEach((item) => { next = removeAssemblyMedia(next, item.id); });
+  let changed = disconnected.length > 0;
 
-  normalizeAssemblyInputs(inputs).forEach((input) => {
+  normalizedInputs.forEach((input) => {
     const sourceKey = assemblyConnectedSourceKey(input);
     let existingIndex = sourceKey
       ? next.media.findIndex((item) => item.linkedSource && assemblyConnectedSourceKey(item) === sourceKey)

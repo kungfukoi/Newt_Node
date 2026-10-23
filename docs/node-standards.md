@@ -84,6 +84,10 @@ Before completion:
 
 - Timeline media bins accept successive video drops and all results from connected multi-video outputs. Connected batch entries retain independent result positions; legacy single-result connections use position zero. The bin’s right-edge divider resizes its width in canvas coordinates and saves it with the timeline.
 
+- Widening the Timeline media bin adds columns of fixed-width thumbnails rather than enlarging media. Items fill columns in order, retain their aspect ratios, and wrap back into fewer columns when narrowed.
+
+- Deleting or disconnecting a Timeline input removes its linked media, associated timeline clips and derived audio. Other connected sources retain their bindings and edits; directly dropped media remains independent.
+
 - Timeline offers Include audio beside Render, enabled by default for new and older workflows. The setting persists with the timeline and controls rendered outputs only. Enabled renders mix unmuted audio tracks and embedded video audio; disabling it writes a video without an audio stream. Preview playback and track mute settings remain independent.
 
 - Timeline render requests carry the audio setting explicitly. FFmpeg normalizes audio clips to 48 kHz stereo and rebuilds timestamps from sample counts before and after mixing so source time bases cannot corrupt the output audio stream.

@@ -5,6 +5,7 @@ import {
   createAssemblyState,
   importAssemblyOutputItem,
   insertAssemblyMediaClip,
+  insertAssemblyMediaWithLinkedAudio,
   syncAssemblyInputs
 } from "../src/assembly/assemblyState.js";
 
@@ -17,6 +18,28 @@ const connectedVideo = {
   duration: 5,
   label: "Video Model 1"
 };
+
+test("disconnecting one video removes its bin entry and audio while preserving the remaining source", () => {
+  const second = { ...connectedVideo, id: "second-edge", sourceNodeId: "second-video", url: "/outputs/second.mp4", hasAudio: true };
+  let state = syncAssemblyInputs(createAssemblyState(), [{ ...connectedVideo, hasAudio: true }, second]);
+  const firstId = state.media[0].id;
+  const secondId = state.media[1].id;
+  const trackId = state.tracks.find(track => track.type === "video").id;
+  state = insertAssemblyMediaWithLinkedAudio(state, firstId, trackId, 0);
+  state = insertAssemblyMediaWithLinkedAudio(state, secondId, trackId, 6);
+  state = importAssemblyOutputItem(state, { type: "video", url: "/outputs/dropped.mp4" });
+  const remainingClips = state.tracks.flatMap(track => track.clips).filter(clip => clip.mediaId === secondId);
+  const removed = syncAssemblyInputs(JSON.parse(JSON.stringify(state)), [second]);
+  assert.equal(removed.media.some(item => item.id === firstId || item.derivedFromMediaId === firstId), false);
+  assert.equal(removed.media.some(item => item.derivedFromMediaId === secondId), true);
+  assert.equal(removed.media.some(item => item.url === "/outputs/dropped.mp4"), true);
+  assert.deepEqual(removed.tracks.flatMap(track => track.clips).filter(clip => clip.mediaId === secondId), remainingClips);
+  const updated = syncAssemblyInputs(removed, [{ ...second, url: "/outputs/second-new.mp4" }]);
+  assert.equal(updated.media.find(item => item.id === secondId).url, "/outputs/second-new.mp4");
+  const empty = syncAssemblyInputs(updated, []);
+  assert.deepEqual(empty.media.map(item => item.url), ["/outputs/dropped.mp4"]);
+  assert.equal(empty.tracks.flatMap(track => track.clips).length, 0);
+});
 
 test("connected Timeline media updates in place when its source regenerates", () => {
   const synced = syncAssemblyInputs(createAssemblyState(), [connectedVideo]);
