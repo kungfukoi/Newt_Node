@@ -1247,6 +1247,7 @@ function buildHealthPayload() {
       videoOutpaintFullResolution: true,
       videoOutpaintLocalMasks: true,
       videoOutpaintSeedanceGrayPadding: true,
+      videoOutpaintSeedanceRepeats: true,
       videoOutpaintSeedance: true,
       videoOutpaintWanConditioning: true,
       videoOutpaintSuppliedCanvas: true,

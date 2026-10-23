@@ -12,6 +12,7 @@ export function normalizeVideoOutpaintSettings(value = {}) {
   return {
     model,
     seedanceResolution,
+    repeatCount: model === "seedance-2.5" ? Math.round(bounded(value.repeatCount, 1, 30, 1)) : 1,
     aspectRatio: videoOutpaintRatios.includes(value.aspectRatio) ? value.aspectRatio : "9:16",
     frame: normalizeOutpaintFrame(value.frame),
     start: bounded(value.start, 0, 86400, 0),
@@ -59,17 +60,16 @@ export function planVideoOutpaint(metadata, options = {}) {
   const availableDuration = Number(metadata.duration) - settings.start;
   if (!Number.isFinite(availableDuration) || availableDuration < 1 / fps) throw new Error("Choose a start time with at least one source frame remaining.");
   const outputFrames = seedance ? Math.max(1, Math.floor((Math.min(availableDuration, settings.duration) + 0.001) * fps)) : null;
-  // Seedance receives a held tail plus guard time, but delivery contains only the
-  // real shot. Neither the original nor its audio repeats to meet model minimums.
-  // Keep the source clock intact. A tested cloned lead-in let the provider start
-  // action early and did not fix convergence, so only the tail is held.
-  const prerollFrames = 0;
+  // Explicit repeats play the entire shot at its original speed. Delivery keeps
+  // only the last copy; a held tail supplies minimum duration and guard time.
+  const prerollFrames = seedance ? (settings.repeatCount - 1) * outputFrames : 0;
   // Observed Seedance Edit outputs quantize to 8n+1 frames and resample action
   // when given another count. Round UP with held tail frames, never stretch the
   // source. Provider output is still verified rather than assuming compliance.
   const seedanceFrames = Math.max(4 * fps, prerollFrames + outputFrames + Math.ceil(0.5 * fps));
   const frames = seedance ? Math.ceil((seedanceFrames - 1) / 8) * 8 + 1 : Math.max(81, Math.min(241, Math.floor((Math.round(settings.duration * fps) - 1) / 4) * 4 + 1));
   const duration = frames / fps;
+  if (seedance && duration > 30) throw new Error("Canvas repeats exceed Seedance's 30-second input limit. Reduce Canvas repeats or shorten the selected shot.");
   const looped = !seedance && availableDuration + 0.001 < duration;
   const loopFrames = looped ? Math.max(1, Math.floor((availableDuration + 0.001) * fps)) : frames;
   const loopDuration = loopFrames / fps;

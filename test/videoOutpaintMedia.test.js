@@ -125,6 +125,26 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     assert.equal(grayUnfilled.matching.motionValidation.status, "needs_review", "Preserving the new gray padding must not pass the output gate");
     const { stdout: heldPixel } = await execute(ffmpeg, ["-v", "error", "-ss", "3", "-i", seedancePrepared.videoUrl, "-vf", `crop=2:2:${seedancePrepared.plan.width / 2}:${seedancePrepared.plan.height / 2},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
     assert.ok(heldPixel[1] > 200 && heldPixel[0] < 20, "Model submission repeats the shot instead of holding its last frame.");
+    const repeated = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", repeatCount: 2, feather: 0 } }, short);
+    assert.equal(repeated.plan.prerollFrames, 40);
+    assert.equal((await probe(repeated.generationVideoUrl)).frames, repeated.plan.frames);
+    for (const [frame, channel] of [[0, 0], [19, 0], [20, 1], [39, 1], [40, 0], [59, 0], [60, 1], [79, 1], [96, 1]]) {
+      const { stdout } = await execute(ffmpeg, ["-v", "error", "-i", repeated.generationVideoUrl, "-vf", `select=eq(n\\,${frame}),crop=2:2:240:426,format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
+      assert.ok(stdout[channel] > 200, `Repeated canvas changed source motion at frame ${frame}: ${[...stdout.subarray(0, 3)]}`);
+    }
+    const repeatedOutput = await service.finish({}, repeated, { filePath: seedanceGenerated });
+    const repeatedInfo = await probe(repeatedOutput.filePath);
+    assert.equal(repeatedInfo.frames, 40);
+    assert.ok(repeatedInfo.audioDuration > 1.6 && repeatedInfo.audioDuration < 1.75);
+    const firstPixel = async (x, y, file) => {
+      const { stdout } = await execute(ffmpeg, ["-v", "error", "-i", file, "-vf", `crop=2:2:${x}:${y},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
+      return [...stdout.subarray(0, 3)];
+    };
+    assert.ok((await firstPixel(240, 10, repeatedOutput.filePath))[2] > 200, "Delivery must begin in copy two's blue fill, skipping copy one's green reveal");
+    assert.ok((await firstPixel(240, 426, repeatedOutput.filePath))[0] > 200, "Source restoration must restart at the original shot's first red frame");
+    const unrestored = { ...repeated, plan: { ...repeated.plan, settings: { ...repeated.plan.settings, restoreSource: false } } };
+    const unrestoredOutput = await service.finish({}, unrestored, { filePath: seedanceGenerated });
+    assert.ok((await firstPixel(240, 10, unrestoredOutput.filePath))[2] > 200, "Final-copy trimming must also work without restoration");
     const insufficient = { ...seedancePrepared, plan: { ...seedancePrepared.plan, outputFrames: 96, outputDuration: 4 } };
     await assert.rejects(service.finish({}, insufficient, { filePath: seedanceGenerated }), /does not cover/);
     const graySource = path.join(directory, "gray-source.mp4"), grayGenerated = path.join(directory, "gray-generated.mp4");

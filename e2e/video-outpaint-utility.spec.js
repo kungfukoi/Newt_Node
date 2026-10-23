@@ -6,7 +6,7 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
     { id: "outpaint", type: "utility", x: 550, y: 20, data: { utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "manual", prompt: "A continuous landscape" } }
   ], edges: [{ id: "canvas-wire", from: { nodeId: "canvas", port: "videoOut" }, to: { nodeId: "outpaint", port: "canvasVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })); });
   const { errors } = await openFixture(page, { count: 2 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, videoOutpaintSeedanceRepeats: true, seedanceVideoEditing: true } } }));
   let preparation, generation;
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
@@ -17,15 +17,23 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
   const canvasRow = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Canvas$/ }) });
   await expect(canvasRow.locator('[data-port-role="input"]')).toHaveCount(1);
   await expect(node.getByRole("button", { name: "Canvas Edit", exact: true })).toBeDisabled();
+  const repeats = node.getByRole("spinbutton", { name: "Outpaint canvas repeats" });
+  await expect(repeats).toHaveValue("1");
+  await repeats.fill("3");
+  await repeats.press("ArrowDown");
+  await expect(repeats).toHaveValue("2");
   await node.getByRole("button", { name: "Prepare supplied canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
   expect(preparation.canvasVideoUrl).toBe("/outputs/e2e/source.mp4");
   expect(preparation.sourceVideoUrl).toBe("");
+  expect(preparation.videoOutpaint.repeatCount).toBe(2);
   await node.locator(".run-node-button").click();
   await expect.poll(() => generation?.canvasVideoUrl).toBe("/outputs/e2e/source.mp4");
   expect(generation.referenceVideoUrls).toEqual([]);
+  expect(generation.videoOutpaint.repeatCount).toBe(2);
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(node.getByRole("button", { name: "Prepare supplied canvas & mask" })).toBeVisible();
+  await expect(repeats).toHaveValue("2");
   expect(errors).toEqual([]);
 });
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";

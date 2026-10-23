@@ -462,6 +462,7 @@ export const nodeApi = {
   },
   async prepareVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify video outpaint support.");
+    if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
     if (body.canvasVideoUrl && health.routes?.videoOutpaintSuppliedCanvas !== true) throw new Error("Restart NewtNode to activate the Canvas video input. No generation was submitted.");
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintFullResolution !== true) throw new Error("Restart the backend to activate full-resolution Seedance outpainting. No generation was submitted.");
     if (health.routes?.videoOutpaint !== true) throw new Error("Restart the NewtNode backend to activate Video Outpaint. No paid generation was submitted.");
@@ -478,6 +479,7 @@ export const nodeApi = {
     if (body.model === "Video Outpaint") {
       label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
     if (body.canvasVideoUrl && health.routes?.videoOutpaintSuppliedCanvas !== true) throw new Error("Restart NewtNode to activate the Canvas video input. No generation was submitted.");
       if (health.routes?.videoOutpaintMatching !== true) throw new Error("Restart the backend to activate automatic outpaint matching and QC. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5") {

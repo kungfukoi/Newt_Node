@@ -31,6 +31,33 @@ test("framing signatures invalidate prepared assets when source or settings chan
   assert.notEqual(key, videoOutpaintFingerprint("/outputs/b.mp4", {}));
   assert.notEqual(key, videoOutpaintFingerprint("/outputs/a.mp4", { aspectRatio: "16:9" }));
 });
+
+test("Seedance repeats select the final shot without changing delivery timing", () => {
+  const metadata = { width: 1920, height: 1080, fps: 24, duration: 8 };
+  const options = { model: "seedance-2.5", duration: 3.375 };
+  const single = planVideoOutpaint(metadata, options);
+  const repeated = planVideoOutpaint(metadata, { ...options, repeatCount: 3 });
+  assert.equal(single.settings.repeatCount, 1);
+  assert.equal(repeated.prerollFrames, 162);
+  assert.equal(repeated.outputFrames, 81);
+  assert.equal(repeated.outputDuration, single.outputDuration);
+  assert.ok(repeated.frames >= 3 * 81 + 12);
+  assert.equal((repeated.frames - 1) % 8, 0);
+  assert.notEqual(videoOutpaintFingerprint("source", options), videoOutpaintFingerprint("source", { ...options, repeatCount: 2 }));
+  assert.throws(() => planVideoOutpaint(metadata, { ...options, duration: 8, repeatCount: 4 }), /30-second/);
+  assert.equal(normalizeVideoOutpaintSettings({ ...options, repeatCount: 0 }).repeatCount, 1);
+  assert.equal(normalizeVideoOutpaintSettings({ ...options, repeatCount: "2" }).repeatCount, 2);
+  assert.equal(normalizeVideoOutpaintSettings({ model: "wan-vace", repeatCount: 4 }).repeatCount, 1);
+});
+
+test("Seedance preparation repeats moving frames before its held guard tail", async () => {
+  const { service, calls } = serviceHarness();
+  const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", repeatCount: 2 } }, "/outputs/source.mp4");
+  assert.equal(prepared.plan.prerollFrames, prepared.plan.outputFrames);
+  const filter = calls[0].args[calls[0].args.indexOf("-vf") + 1];
+  assert.match(filter, /trim=end_frame=81,setpts=PTS-STARTPTS,loop=loop=1:size=81:start=0,setpts=N\/\(24\*TB\)/);
+  assert.match(filter, /start_duration=0:/);
+});
 test("request and result preserve refinements, cost, raw result and partial-success warning", () => {
   assert.ok(utilityVideoModelOptions.includes("Video Outpaint"));
   const request = buildUtilityVideoRequest({ node: { id: "n", data: { videoOutpaint: { feather: 12, restoreSource: false }, seed: "12345" } }, model: "Video Outpaint", prompt: "Complete the person", referenceVideoUrls: ["/outputs/source.mp4"] });

@@ -46,7 +46,8 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       sourceStart = 0;
       loopedSourceUrl = loopedSource.publicPath;
     }
-    const temporalPad = plan.tailPadded ? `trim=end_frame=${plan.outputFrames},setpts=PTS-STARTPTS,tpad=start_mode=clone:start_duration=${(plan.prerollFrames || 0) / fps}:stop_mode=clone:stop_duration=${plan.duration},` : "";
+    const repeat = settings.repeatCount > 1 ? `loop=loop=${settings.repeatCount - 1}:size=${plan.outputFrames}:start=0,setpts=N/(${fps}*TB),` : "";
+    const temporalPad = plan.tailPadded ? `trim=end_frame=${plan.outputFrames},setpts=PTS-STARTPTS,${repeat}tpad=start_mode=clone:start_duration=${settings.repeatCount > 1 ? 0 : (plan.prerollFrames || 0) / fps}:stop_mode=clone:stop_duration=${plan.duration},` : "";
     await runFfmpeg(["-y", "-ss", String(sourceStart), "-i", preparedSource, "-vf", `fps=${fps},${temporalPad}${cropFilter}scale=${sourceWidth}:${sourceHeight},setsar=1,pad=${width}:${height}:${left}:${top}:black`, "-frames:v", String(frames), ...encode, padded.filePath], "Prepare outpaint source", 120000);
     if (settings.model === "seedance-2.5" && (await statFile(padded.filePath)).size > 200 * 1024 * 1024) throw new Error("The full-resolution Seedance canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment before generating.");
     // Reserve real generated pixels beneath the inward source-edge feather.
