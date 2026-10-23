@@ -61,7 +61,7 @@ import {
 } from "../assembly/assemblyState.js";
 import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
 import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPlaybackPreviewLayers, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
 import { assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
@@ -408,14 +408,15 @@ export function AssemblyNodeBody({
       };
     });
     const scrubPreview = timelineScrubbingRef.current || scrubPreviewPendingRef.current;
-    const renderableLayers = scrubPreview ? assemblyScrubPreviewLayers(drawableLayers) : assemblyRenderablePreviewLayers(drawableLayers);
+    const renderableLayers = scrubPreview ? assemblyScrubPreviewLayers(drawableLayers) : playingRef.current ? assemblyPlaybackPreviewLayers(drawableLayers) : assemblyRenderablePreviewLayers(drawableLayers);
     if (renderableLayers === null) return;
     if (scrubPreview && !layers.length && !timelineScrubbingRef.current) scrubPreviewPendingRef.current = false;
     if (layers.length && !renderableLayers.length && !scrubPreview) return;
 
     const aspect = state.outputWidth / state.outputHeight;
-    canvas.width = 640;
-    canvas.height = Math.max(1, Math.round(canvas.width / aspect));
+    if (canvas.width !== 640) canvas.width = 640;
+    const frameHeight = Math.max(1, Math.round(canvas.width / aspect));
+    if (canvas.height !== frameHeight) canvas.height = frameHeight;
     context.fillStyle = "#000";
     context.fillRect(0, 0, canvas.width, canvas.height);
 

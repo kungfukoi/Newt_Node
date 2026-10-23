@@ -1,6 +1,7 @@
 import { normalizeOutpaintFrame, outpaintFrameGeometry } from "./videoOutpaintFrame.js";
 import { preparedCanvasInstructions, outpaintReferenceAppearanceRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule } from "./outpaintFrameOne.js";
+import { normalizeOutpaintReferenceRoles, outpaintRoleInstructions } from "./outpaintReferences.js";
 export const videoOutpaintModelName = "Video Outpaint";
 export const videoOutpaintRatios = ["9:16", "16:9", "1:1"];
 export const videoOutpaintModels = [["seedance-2.5", "Seedance Edit"], ["wan-vace", "Wan VACE 14B"]];
@@ -22,6 +23,8 @@ export function normalizeVideoOutpaintSettings(value = {}) {
     restoreSource: value.restoreSource !== false,
     feather: bounded(value.feather, 0, 128, 32),
     autoMatch: value.autoMatch !== false,
+    matchExtensionColor: value.matchExtensionColor === true,
+    referenceRoles: normalizeOutpaintReferenceRoles(value.referenceRoles),
     finalQc: false,
     visualQc: false,
     outputSize: model === "seedance-2.5" ? seedanceResolution : value.outputSize === "720p" ? "720p" : "1080p"
@@ -98,9 +101,9 @@ export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], ov
     const location = regions.length ? ` The ${regions.join(" and ")} ${paddingColor} bands are the areas to outpaint.` : "";
     return [
       `Edit @Video1. The first output frame at t=0 is the already completed full-canvas shot. Replace all ${paddingColor} padding${colorDescription} around the picture with a seamless continuation of the visible scene.` + location + ` These bands are missing image content, not letterboxing to preserve. Generate new scene imagery throughout these entire areas; the finished video must reach every canvas edge with no ${paddingColor} bars. Fill the padded areas completely throughout the clip, starting at frame one.`,
-      ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
+      ...(referenceImageCount > 0 ? [outpaintRoleInstructions(referenceImageCount, preparedPlan?.settings?.referenceRoles) || `${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
       String(prompt || "").trim(),
-      `Preserve the existing picture content, people, camera, action and timing, but do not preserve its ${paddingColor} padding. Continue the scene naturally across the joins. Keep real dark objects${paddingColor !== "black" ? ` and real ${paddingColor} objects inside the source picture` : ""}; replace only the padding.`,
+      `Preserve the existing picture content, people, camera, action and timing, but do not preserve its ${paddingColor} padding. Replace it throughout the clip. Continue the scene across the joins. Keep real dark objects${paddingColor !== "black" ? ` and real ${paddingColor} objects inside the source picture` : ""}; replace only the padding.`,
       ...(preparedPlan && rect ? [`SPATIAL LOCK: Canvas ${preparedPlan.width}x${preparedPlan.height}. The visible source core occupies x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height} pixels. Keep every source feature at its original coordinates in every frame. Do not shift, resize, zoom, crop, recenter or recompose the existing picture to fit a whole person or object. Generate outward from these fixed edges; never move the source to make room. These coordinates are constraints, not marks to draw.`] : []),
       "SAME-FRAME ATTACHMENT: At every frame, extend each boundary-crossing limb, garment or prop from its visible attachment in that exact source frame, at the same position, angle, scale and velocity. Continue existing rigid props along their visible axes and outlines; never erase them. Legs follow the existing hips and clothing, never a separately invented walking cycle. Before entry and after exit or occlusion, extend background only. Source evidence overrides conflicting timing or action in the description. No retiming, new action, motion interpolation, camera change or independent movement. Cloned leading and trailing source frames stay motionless. Reference images guide appearance, never motion.",
       outpaintFrameOneRule.replace("Black padding", `${paddingColor[0].toUpperCase() + paddingColor.slice(1)} padding`).replace("black-padded", `${paddingColor}-padded`)

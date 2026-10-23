@@ -1,5 +1,19 @@
 # Video outpainting proof
 
+## Current controls (4.19)
+
+The proof notes below describe earlier experiments. For current timing/provider behavior, see [the node standards](node-standards.md).
+
+Seedance Edit supports the selected Fal, Atlas Cloud or Krea route. Duration follows the complete source frame count after Start; Canvas repeats repeats that complete segment before submission. Keep all repeats (debug) retains all copies and guard tail; disable it to deliver the final copy. Original picture/audio restoration follows the native source clock. No frozen reference plate is composited.
+
+Connect the same approved reference image nodes across takes and assign each Image role: Environment for set layout/materials, Wardrobe for clothing, or the legacy Appearance guidance. Keep reference order/roles consistent. Source footage controls visible content, framing, camera, performance and timing. References improve continuity but cannot guarantee identical generated geometry.
+
+Enable Match extension color for bounded per-side color offsets that stay constant through the shot. Inconsistent evidence is skipped and reported. Refinish selected result applies finishing settings to retained raw media locally on its saved geometry/timing, appends a result and makes no new paid request. Source restoration and a nonzero Blend width are required for color matching; legacy finishing stays unchanged until this control is enabled.
+
+Analyze & draft prompt retains frame evidence and native video analysis, describing completed scenery in each missing region throughout the video. Green #00FF00 is a visual replacement cue rather than a documented hard mask; first-frame completion remains a model limitation. Analysis and generation still require separate explicit actions. Restart the backend and refresh the UI after updating.
+
+## Historical proof
+
 This is a development experiment using the existing Fal Wan VACE 14B Inpainting route, not a new Utility capability.
 
 Prepare a source clip with:

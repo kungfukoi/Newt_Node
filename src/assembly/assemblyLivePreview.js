@@ -139,6 +139,12 @@ export function assemblyScrubPreviewLayers(layers = []) {
   return [topLayer];
 }
 
+export function assemblyPlaybackPreviewLayers(layers = []) {
+  // A temporarily seeking/loading upper layer must not reveal a lower clip.
+  if (layers.some(layer => !layer?.ready || !layer.element || !(layer.width > 0) || !(layer.height > 0))) return null;
+  return layers;
+}
+
 export function assemblyPreviewLayerGeometry(clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth = frameWidth, outputHeight = frameHeight) {
   const containScale = Math.min(frameWidth / mediaWidth, frameHeight / mediaHeight);
   const clipScale = Math.max(0.01, Number(clip?.scale || 100) / 100);

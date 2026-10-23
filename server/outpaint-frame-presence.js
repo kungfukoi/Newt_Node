@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { readFile, writeFile } from "node:fs/promises";
 import { outpaintFramePresenceRule, outpaintReferenceAppearanceRule } from "../src/outpaintContext.js";
+import { outpaintRoleInstructions } from "../src/outpaintReferences.js";
 
 export function parseFramePresence(text, expected) {
   const parsed = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
@@ -56,7 +57,7 @@ export function createOutpaintFramePresence({ resolveAsset, probeVideo, createTa
       const references = (body.referenceImageUrls || []).map((url, index) => ({ url, type: "image", label: `Extension reference @Image${index + 1} (not a source frame)` }));
       inputs.push(...references);
       const referenceContext = references.length ? "\n\nThe additional labeled extension references are still images, not numbered footage frames. Compare their environment, surfaces, brightness and color with the actual source boundaries. In each frame observation, describe supported continuation into each missing region using the references where consistent with the footage. Never infer a subject's presence or motion from a still reference, never substitute reference people into the footage, and keep the source lighting authoritative." : "";
-      const analysisPrompt = prompt + referenceContext + (references.length ? "\n\n" + outpaintReferenceAppearanceRule : "");
+      const analysisPrompt = prompt + referenceContext + (references.length ? "\n\n" + (outpaintRoleInstructions(references.length, plan?.settings?.referenceRoles) || outpaintReferenceAppearanceRule) : "");
       const result = await analyzeImages({ inputs, prompt: analysisPrompt });
       // Record paid work before validating its response, including malformed results.
       await recordAnalysis({ body, result, inputs, prompt: analysisPrompt, firstFrame: ids[0], lastFrame: ids.at(-1), fps, prerollFrames: first });

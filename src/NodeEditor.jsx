@@ -156,6 +156,7 @@ import ModelProviderOption from "./components/ModelProviderOption.jsx";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
 import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { activeCanvasNodes, stoppedCanvasNodePatch } from "./canvasStop.js";
+import { createAssemblyFramePresenter } from "./assembly/assemblyFramePresenter.js";
 import { createNodeRunControl } from "./nodeRunControl.js";
 import { runTrackedGeneration, stopGenerationProgress } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
@@ -22959,7 +22960,15 @@ function TimelineLivePreviewImage({ item, sourceLabel }) {
     frameTime: item.frameTime,
     targetFrameRate: item.targetFrameRate
   });
-  return <img src={displayMediaUrl(frame?.url || item.url)} alt={item.label || sourceLabel} draggable={false} loading="eager" decoding="async" onError={useNewtNodeImageFallback} />;
+  const [decodedUrl, setDecodedUrl] = React.useState("");
+  const presenter = React.useRef(null);
+  React.useEffect(() => {
+    const next = createAssemblyFramePresenter({ present: setDecodedUrl });
+    presenter.current = next;
+    return () => { next.dispose(); presenter.current = null; };
+  }, [item.sourceNodeId]);
+  React.useEffect(() => { presenter.current?.offer(displayMediaUrl(frame?.url || item.url)); }, [frame?.url, item.url, item.sourceNodeId]);
+  return <img src={decodedUrl || undefined} alt={item.label || sourceLabel} draggable={false} loading="eager" decoding="async" onError={useNewtNodeImageFallback} />;
 }
 
 function TimelinePreviewPlaybackRate({ sourceNodeId, frameTime = 0, targetFrameRate = 24 }) {

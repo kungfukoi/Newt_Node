@@ -131,7 +131,7 @@ for (const entry of ["output", "outpaint"]) for (const succeeds of [true, false]
   expect(errors).toEqual([]);
 });
 
-test("outpaint keeps automatic finishing metadata without a local-finish button", async ({ page }) => {
+test("outpaint keeps legacy finishing metadata and disables refinishing incompatible saved geometry", async ({ page }) => {
   await page.addInitScript(() => {
     if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return;
     const result = { type: "video", url: "/outputs/e2e/matched.mp4", videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", prepared: { sourceUrl: "/outputs/e2e/source.mp4", plan: { settings: {} } }, matching: { applied: true }, qc: { status: "needs_review", flags: ["Generated tail is short"] } } };
@@ -141,7 +141,7 @@ test("outpaint keeps automatic finishing metadata without a local-finish button"
   const node = page.locator('[data-node-card-id="outpaint"]');
   await expect(node.getByLabel("Outpaint auto match")).toHaveCount(0);
   await expect(node.getByRole("button", { name: "Reprocess raw result" })).toHaveCount(0);
-  await expect(node.getByText("Local finish", { exact: true })).toHaveCount(0);
+  await expect(node.getByRole("button", { name: "Refinish selected result" })).toBeDisabled();
   await expect(node.getByLabel("Outpaint QC Status")).toHaveText("Needs review.\nBlend or consistency checks need review.");
   await node.getByLabel("Outpaint seam feather").fill("48");
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.videoOutpaint?.feather)).toBe("48");

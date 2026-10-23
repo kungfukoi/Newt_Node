@@ -61,7 +61,8 @@ test("local reprocessing rebuilds the original geometry, preserves raw and recor
     resolveAsset: async () => ({ filePath: "raw.mp4" }), probeVideo: async () => ({ width: 720, height: 1280, duration: 4 }), appendHistory: async record => { history = record; }, projectFromBody: () => ({}), nodeFromBody: () => ({})
   });
   let result;
-  await handler({ body: { rawVideoUrl: "/outputs/raw.mp4", prepared: previous, videoOutpaint: { frame: { x: 7 }, model: "wan-vace", feather: 64 } } }, { json: item => { result = item; } });
+  await handler({ body: { rawVideoUrl: "/outputs/raw.mp4", prepared: previous, videoOutpaint: { frame: { x: 7 }, model: "wan-vace", feather: 64, matchExtensionColor: true } } }, { json: item => { result = item; } });
+  assert.equal(preparation.videoOutpaint.matchExtensionColor, true);
   assert.deepEqual(preparation.videoOutpaint.frame, previous.plan.settings.frame); assert.equal(preparation.videoOutpaint.model, "seedance-2.5"); assert.equal(preparation.videoOutpaint.feather, 64);
   assert.deepEqual(preparationTiming, { prerollFrames: 94, frames: 201, outputFrames: 94, outputDuration: previous.plan.outputDuration, sourceFps: 24000 / 1001, sourceFrameRate: "24000/1001", sourceStartSeconds: 0 }, "Existing raw generations must keep their original counts and clocks");
   assert.equal(result.cost.amountUsd, 0); assert.equal(history.provider, "local"); assert.equal(history.videoOutpaint.rawVideoUrl, "/outputs/raw.mp4"); assert.equal(result.videoOutpaint.qc.status, "needs_review");

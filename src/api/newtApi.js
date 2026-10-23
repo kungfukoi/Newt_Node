@@ -1,4 +1,5 @@
 import { isFlux3MaxModel } from "../flux3Max.js";
+import { assertOutpaintConsistencySupport } from "../outpaintReferences.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../videoOutpaint.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
 import { apiErrorMessage } from "../apiErrors.js";
@@ -362,6 +363,7 @@ export const nodeApi = {
 
   async videoOutpaintPrompt(body) {
     const health = await getJson("/api/health", "Could not verify outpainting prompt support.");
+    assertOutpaintConsistencySupport(body, health);
     if (health.routes?.videoOutpaintPrompt !== true) throw new Error("Restart the NewtNode backend to activate outpainting prompt analysis. No analysis was submitted.");
     if (body.maskImageUrl && health.routes?.videoOutpaintFramePresence !== true) throw new Error("Restart the NewtNode backend to activate frame-by-frame outpainting analysis. No analysis was submitted.");
     return fetchJsonApi("/api/node/video-outpaint-prompt", jsonBody(body), "Outpainting prompt analysis");
@@ -462,6 +464,7 @@ export const nodeApi = {
   },
   async prepareVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify video outpaint support.");
+    assertOutpaintConsistencySupport(body, health);
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedanceSourceFrames !== true) throw new Error("Restart the backend to preserve the complete source frame count and timing. No generation was submitted.");
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && normalizeVideoOutpaintSettings(body.videoOutpaint).keepAllRepeats && health.routes?.videoOutpaintSeedanceAllRepeats !== true) throw new Error("Restart the backend to activate full-repeat debug output. No generation was submitted.");
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
@@ -474,6 +477,7 @@ export const nodeApi = {
   },
   async finishVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify outpaint matching support.");
+    assertOutpaintConsistencySupport(body, health);
     if (health.routes?.videoOutpaintMatching !== true) throw new Error("Restart the backend to activate outpaint matching and QC. No generation was submitted.");
     return fetchJsonApi("/api/node/video-outpaint-finish", jsonBody(body), "Match and QC outpainting", { retryLocalApi: false, timeoutMs: 600000 });
   },
@@ -481,6 +485,7 @@ export const nodeApi = {
     if (body.model === "Video Outpaint") {
       label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      assertOutpaintConsistencySupport(body, health);
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedanceSourceFrames !== true) throw new Error("Restart the backend to preserve the complete source frame count and timing. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && normalizeVideoOutpaintSettings(body.videoOutpaint).keepAllRepeats && health.routes?.videoOutpaintSeedanceAllRepeats !== true) throw new Error("Restart the backend to activate full-repeat debug output. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");

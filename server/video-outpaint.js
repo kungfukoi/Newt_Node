@@ -3,6 +3,7 @@ import { overlapBlendFilters } from "./outpaint-boundary.js";
 import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied-canvas.js";
 import { alignOutpaintTiming } from "./outpaint-timing.js";
 import { inspectOutpaintMotion } from "./outpaint-motion.js";
+import { inspectExtensionColor, extensionColorFilter } from "./outpaint-color.js";
 
 export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
   async function prepare(body, sourceUrl, timing = {}) {
@@ -127,9 +128,20 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const x = Math.round(plan.left / plan.width * w), y = Math.round(plan.top / plan.height * h);
     const overlapWidth = Math.max(0, Math.min(settings.feather, Math.floor(sw / 2) - 1, Math.floor(sh / 2) - 1));
     const feather = settings.restoreSource && plan.needsOutpaint ? overlapWidth : 0;
+    let colorMatching = { requested: settings.matchExtensionColor, applied: false, reason: "Extension color matching is disabled" };
+    if (seedance && settings.matchExtensionColor && feather > 0 && prepared.videoUrl) {
+      reportProgress("Finish: Matching extension color to corresponding source surfaces…");
+      try {
+        const reference = await resolveAsset(prepared.videoUrl);
+        colorMatching = await inspectExtensionColor({ referencePath: reference.filePath, generatedPath: generated.filePath, plan: checkedPlan, offset: temporalAlignment.offsetFrames, runFfmpeg });
+      } catch {
+        colorMatching = { requested: true, applied: false, reason: "Color analysis unavailable; source restoration and ungraded extension retained" };
+      }
+    } else if (settings.matchExtensionColor) colorMatching.reason = "Color matching requires Seedance, source restoration and a nonzero overlap";
+    const colorFilter = extensionColorFilter(colorMatching, { w, h, sw, sh, x, y });
     const crop = plan.sourceCrop;
     const cropFilter = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-    const filters = [`[0:v]fps=${submissionPlan.fps},${seedance && !submissionPlan.tailPadded ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[bg]`];
+    const filters = [`[0:v]fps=${submissionPlan.fps},${seedance && !submissionPlan.tailPadded ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},${colorFilter},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[bg]`];
     const repeatSource = allRepeats ? `trim=end_frame=${submissionPlan.outputFrames},setpts=PTS-STARTPTS,loop=loop=${settings.repeatCount - 1}:size=${submissionPlan.outputFrames}:start=0,setpts=N/(${plan.fps}*TB),tpad=stop_mode=clone:stop_duration=${plan.duration},` : "";
     const repeatAudio = allRepeats ? ["-af", `atrim=duration=${submissionPlan.outputDuration},asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=duration=${submissionPlan.outputDuration},aloop=loop=${settings.repeatCount - 1}:size=${Math.round(submissionPlan.outputDuration * 48000)},asetpts=N/SR/TB,apad,atrim=duration=${plan.duration}`] : [];
     if (settings.restoreSource) {
@@ -141,8 +153,8 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const stat = await statFile(target.filePath);
     const warning = allRepeats ? `Debug outpaint: all ${settings.repeatCount} copies and the held tail are retained from frame zero for inspection.${motionValidation?.status === "needs_review" ? ` ${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands.` : ""}` : motionValidation?.status === "needs_review" ? `Outpaint needs review: ${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands. The candidate and paid raw result are retained; this candidate cannot replace an accepted Output.` : "";
     return { ...target, bytes: stat.size, outputFormat: "ProRes 4444 XQ MOV (10-bit processing)", mimeType: "video/quicktime", warning,
-      matching: { finishVersion: 3, requested: false, applied: false, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
-        method: "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
+      matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
+        method: colorMatching.applied ? "Shot-stable extension color matching followed by smooth inward source overlap" : "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
         sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; delivery scaling and ProRes encoding still apply." : "Source restoration is disabled." },
       qc: { status: "off", flags: [], segments: [] } };
 
