@@ -66,7 +66,7 @@ export default function VideoOutpaintCanvasEditor({ sourceUrl, settings, onApply
     const step = (event.shiftKey ? 10 : 1) / dimensions.width;
     update(dragOutpaintFrame(frame, handle, event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0, event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0, settings.aspectRatio), true);
   }
-  const endTime = Math.min(duration || Infinity, settings.start + settings.duration);
+  const endTime = settings.model === "seedance-2.5" ? duration || Infinity : Math.min(duration || Infinity, settings.start + settings.duration);
   function apply() {
     const sourceHeight = dimensions.height / dimensions.width;
     if (frame.x >= 1 || frame.x + frame.width <= 0 || frame.y >= sourceHeight || frame.y + frame.width / ratio <= 0) { setError("Move the frame so it overlaps the video."); return; }

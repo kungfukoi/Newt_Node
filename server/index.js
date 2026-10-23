@@ -1249,6 +1249,7 @@ function buildHealthPayload() {
       videoOutpaintSeedanceGreenPadding: true,
       videoOutpaintSeedanceRepeats: true,
       videoOutpaintSeedanceAllRepeats: true,
+      videoOutpaintSeedanceSourceFrames: true,
       videoOutpaintSeedance: true,
       videoOutpaintWanConditioning: true,
       videoOutpaintSuppliedCanvas: true,
@@ -13240,7 +13241,7 @@ async function replaceVideoAudioTrack(videoPath, audioPath) {
   }
 }
 
-async function probeVideoFile(filePath) {
+async function probeVideoFile(filePath, { countFrames = false } = {}) {
   if (!filePath) return {};
 
   try {
@@ -13251,13 +13252,14 @@ async function probeVideoFile(filePath) {
         "error",
         "-select_streams",
         "v:0",
+        ...(countFrames ? ["-count_frames"] : []),
         "-show_entries",
-        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,codec_name,pix_fmt:format=duration",
+        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,nb_read_frames,codec_name,pix_fmt:format=duration",
         "-of",
         "json",
         filePath
       ],
-      { windowsHide: true, timeout: 10000 }
+      { windowsHide: true, timeout: countFrames ? 120000 : 10000 }
     );
     const data = JSON.parse(stdout || "{}");
     const stream = Array.isArray(data.streams) ? data.streams[0] || {} : {};
@@ -13265,8 +13267,9 @@ async function probeVideoFile(filePath) {
       width: positiveNumber(stream.width),
       height: positiveNumber(stream.height),
       duration: positiveNumber(stream.duration) || positiveNumber(data.format?.duration),
-      fps: frameRateFromRatio(stream.avg_frame_rate || stream.r_frame_rate),
-      num_frames: positiveNumber(stream.nb_frames),
+      fps: frameRateFromRatio(stream.avg_frame_rate) || frameRateFromRatio(stream.r_frame_rate),
+      frameRate: frameRateFromRatio(stream.avg_frame_rate) ? stream.avg_frame_rate : stream.r_frame_rate,
+      num_frames: positiveNumber(stream.nb_frames) || positiveNumber(stream.nb_read_frames),
       codecName: stream.codec_name || null,
       pixelFormat: stream.pix_fmt || null
     };

@@ -6,7 +6,7 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
     { id: "outpaint", type: "utility", x: 550, y: 20, data: { utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "manual", prompt: "A continuous landscape" } }
   ], edges: [{ id: "canvas-wire", from: { nodeId: "canvas", port: "videoOut" }, to: { nodeId: "outpaint", port: "canvasVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })); });
   const { errors } = await openFixture(page, { count: 2 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, videoOutpaintSeedanceRepeats: true, videoOutpaintSeedanceAllRepeats: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintSeedanceSourceFrames: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, videoOutpaintSeedanceRepeats: true, videoOutpaintSeedanceAllRepeats: true, seedanceVideoEditing: true } } }));
   let preparation, generation;
   const generations = [];
   await page.route("**/api/node/video-outpaint-prepare", route => {
@@ -111,7 +111,7 @@ for (const entry of ["output", "outpaint"]) for (const succeeds of [true, false]
     { id: "output", type: "output", x: 950, y: 10, data: { title: "Final", outputPath: "C:/fixtures/outputs", outputFileName: "finished_$index" } }
   ], edges: [{ id: "in", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }, ... (entry === "output" ? [{ id: "out", from: { nodeId: "outpaint", port: "videoOut" }, to: { nodeId: "output", port: "sourceIn" } }] : [])], groups: [], viewport: { x: 10, y: 10, scale: 0.7 } })), { frame, entry });
   const { errors, requests } = await openFixture(page, { count: 3 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintMatching: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintMatching: true, videoOutpaintFullResolution: true, videoOutpaintSeedanceSourceFrames: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
   const generations = [];
   await page.route("**/api/node/generate-video", async route => {
     generations.push(route.request().postDataJSON());
@@ -160,7 +160,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
     { id: "outpaint", type: "utility", x: 550, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "guided" } }
   ], edges: [{ id: "wire", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }, { id: "look-wire", from: { nodeId: "look", port: "imageOut" }, to: { nodeId: "outpaint", port: "referenceImageIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })));
   const { errors } = await openFixture(page, { count: 3 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintMatching: true, videoOutpaintFraming: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintMatching: true, videoOutpaintFraming: true, videoOutpaintFullResolution: true, videoOutpaintSeedanceSourceFrames: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
   let preparation, analysis, generation;
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
@@ -186,7 +186,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   await expect(node.getByLabel("Outpaint Seedance resolution")).toBeVisible();
   await expect(node.getByLabel("Outpaint delivery size")).toHaveCount(0);
   await node.getByLabel("Outpaint Seedance resolution").selectOption("1080p");
-  await expect(node.getByLabel("Outpaint duration seconds")).toHaveValue("3.375");
+  await expect(node.getByLabel("Outpaint duration seconds")).toHaveCount(0);
   await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
   expect(preparation.videoOutpaint.model).toBe("seedance-2.5");
@@ -232,7 +232,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
     ], edges: [{ id: "source-outpaint", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } }));
   });
   const { errors, requests } = await openFixture(page, { count: 2 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintMatching: true, videoOutpaintFraming: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintMatching: true, videoOutpaintFraming: true, videoOutpaintFullResolution: true, videoOutpaintSeedanceSourceFrames: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, seedanceVideoEditing: true } } }));
   let preparation, analysis, generation, shouldFail = false;
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();

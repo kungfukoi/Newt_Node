@@ -15,7 +15,7 @@ test("Seedance preparation reserves inward overlap on the submitted canvas and k
   const run = args => execute(ffmpeg, args, { windowsHide: true, timeout: 30000 });
   try {
     await run(["-y", "-f", "lavfi", "-i", "color=red:s=64x64:r=24", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", source]);
-    const service = createVideoOutpaintService({ resolveAsset: async filePath => ({ filePath }), probeVideo: async () => ({ width: 64, height: 64, fps: 24, duration: 1 }),
+    const service = createVideoOutpaintService({ resolveAsset: async filePath => ({ filePath }), probeVideo: async () => ({ width: 64, height: 64, fps: 24, num_frames: 24, duration: 1 }),
       createTarget: async (_body, kind, extension) => ({ filePath: path.join(directory, kind + extension), publicPath: path.join(directory, kind + extension) }), runFfmpeg: run, statFile: stat });
     const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", feather: 32 } }, source);
     const { left, top, sourceWidth: sw, sourceHeight: sh } = prepared.plan;

@@ -420,6 +420,7 @@ try {
   assert.equal(health.routes.videoOutpaintLocalMasks, true);
   assert.equal(health.routes.videoOutpaintSeedanceGreenPadding, true);
   assert.equal(health.routes.videoOutpaintSeedanceAllRepeats, true);
+  assert.equal(health.routes.videoOutpaintSeedanceSourceFrames, true);
   const seedancePrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/clip.mp4", videoOutpaint: { model: "seedance-2.5" } }, { timeoutMs: 120000 })).json();
   assert.equal(seedancePrepared.maskVideoUrl, undefined);
   assert.equal(seedancePrepared.plan.generationPaddingColor, "green");

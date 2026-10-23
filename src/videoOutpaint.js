@@ -14,10 +14,11 @@ export function normalizeVideoOutpaintSettings(value = {}) {
     seedanceResolution,
     repeatCount: model === "seedance-2.5" ? Math.round(bounded(value.repeatCount, 1, 30, 1)) : 1,
     keepAllRepeats: model === "seedance-2.5" && value.keepAllRepeats !== false,
+    useFullSource: model === "seedance-2.5",
     aspectRatio: videoOutpaintRatios.includes(value.aspectRatio) ? value.aspectRatio : "9:16",
     frame: normalizeOutpaintFrame(value.frame),
     start: bounded(value.start, 0, 86400, 0),
-    duration: bounded(value.duration, model === "seedance-2.5" ? 0.125 : 2.7, 10.05, 3.375),
+    duration: bounded(value.duration, model === "seedance-2.5" ? 0.125 : 2.7, model === "seedance-2.5" ? 30 : 10.05, 3.375),
     restoreSource: value.restoreSource !== false,
     feather: bounded(value.feather, 0, 128, 32),
     autoMatch: value.autoMatch !== false,
@@ -34,9 +35,9 @@ export function normalizeUtilityOutpaintSettings(value = {}) {
 }
 export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "") {
   const normalized = normalizeVideoOutpaintSettings(settings);
-  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v16-seedance-green" : "outpaint-canvas-v14-frame-grid", sourceUrl, normalized, canvasVideoUrl]);
+  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v17-source-frames" : "outpaint-canvas-v14-frame-grid", sourceUrl, normalized, canvasVideoUrl]);
 }
-export function planVideoOutpaint(metadata, options = {}) {
+export function planVideoOutpaint(metadata, options = {}, timing = {}) {
   const settings = normalizeVideoOutpaintSettings(options);
   const canvases = { "9:16": [720, 1280], "16:9": [1280, 720], "1:1": [720, 720] };
   const seedance = settings.model === "seedance-2.5";
@@ -58,11 +59,18 @@ export function planVideoOutpaint(metadata, options = {}) {
     ({ sourceWidth, sourceHeight, left, top, sourceCrop, needsOutpaint } = geometry);
   }
   const fps = Math.min(seedance ? 60 : 30, Math.max(seedance ? 24 : 8, Math.round(Number(metadata.fps) || 24)));
+  const retainedTiming = seedance && Number.isInteger(timing.outputFrames) && timing.outputFrames > 0;
+  const sourceFps = retainedTiming ? timing.sourceFps || fps : Number(metadata.fps) > 0 ? Number(metadata.fps) : fps;
+  const sourceFrameRate = retainedTiming ? timing.sourceFrameRate || String(sourceFps) : metadata.frameRate || String(sourceFps);
   const availableDuration = Number(metadata.duration) - settings.start;
-  if (!Number.isFinite(availableDuration) || availableDuration < 1 / fps) throw new Error("Choose a start time with at least one source frame remaining.");
-  const outputFrames = seedance ? Math.max(1, Math.floor((Math.min(availableDuration, settings.duration) + 0.001) * fps)) : null;
-  // Explicit repeats play the entire shot at its original speed. Delivery keeps
-  // only the last copy; a held tail supplies minimum duration and guard time.
+  if (!Number.isFinite(availableDuration) || availableDuration + 0.000001 < 1 / (seedance ? sourceFps : fps)) throw new Error("Choose a start time with at least one source frame remaining.");
+  const sourceStartFrame = Math.max(0, Math.ceil(settings.start * sourceFps - 0.001));
+  const sourceFrames = Math.round(Number(metadata.num_frames || metadata.frames) || Number(metadata.duration) * sourceFps);
+  const remainingFrames = sourceFrames - sourceStartFrame;
+  if (seedance && remainingFrames < 1) throw new Error("Choose a start time with at least one source frame remaining.");
+  const outputFrames = seedance ? retainedTiming ? timing.outputFrames : remainingFrames : null;
+  // Repeat complete source frame sequences on the provider clock. Finishing
+  // restores the native clock and selects either all copies or the final copy.
   const prerollFrames = seedance ? (settings.repeatCount - 1) * outputFrames : 0;
   // Observed Seedance Edit outputs quantize to 8n+1 frames and resample action
   // when given another count. Round UP with held tail frames, never stretch the
@@ -70,11 +78,11 @@ export function planVideoOutpaint(metadata, options = {}) {
   const seedanceFrames = Math.max(4 * fps, prerollFrames + outputFrames + Math.ceil(0.5 * fps));
   const frames = seedance ? Math.ceil((seedanceFrames - 1) / 8) * 8 + 1 : Math.max(81, Math.min(241, Math.floor((Math.round(settings.duration * fps) - 1) / 4) * 4 + 1));
   const duration = frames / fps;
-  if (seedance && duration > 30) throw new Error("Canvas repeats exceed Seedance's 30-second input limit. Reduce Canvas repeats or shorten the selected shot.");
+  if (seedance && duration > 30) throw new Error("Canvas repeats exceed Seedance's 30-second input limit. Reduce Canvas repeats or trim the upstream source clip.");
   const looped = !seedance && availableDuration + 0.001 < duration;
   const loopFrames = looped ? Math.max(1, Math.floor((availableDuration + 0.001) * fps)) : frames;
   const loopDuration = loopFrames / fps;
-  return { settings, width, height, sourceWidth, sourceHeight, left, top, sourceCrop, needsOutpaint, fps, frames, duration, looped, loopFrames, loopDuration, ...(seedance ? { tailPadded: true, prerollFrames, outputFrames, outputDuration: outputFrames / fps } : {}), outputWidth, outputHeight };
+  return { settings, width, height, sourceWidth, sourceHeight, left, top, sourceCrop, needsOutpaint, fps, frames, duration, looped, loopFrames, loopDuration, ...(seedance ? { tailPadded: true, prerollFrames, outputFrames, outputDuration: outputFrames / sourceFps, sourceFps, sourceFrameRate, sourceStartFrame, sourceStartSeconds: retainedTiming ? timing.sourceStartSeconds ?? settings.start : sourceStartFrame / sourceFps, sourceFrames } : {}), outputWidth, outputHeight };
 }
 
 export function seedanceOutpaintRequest(body) {

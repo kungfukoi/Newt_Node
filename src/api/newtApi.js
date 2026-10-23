@@ -462,6 +462,7 @@ export const nodeApi = {
   },
   async prepareVideoOutpaint(body) {
     const health = await getJson("/api/health", "Could not verify video outpaint support.");
+    if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedanceSourceFrames !== true) throw new Error("Restart the backend to preserve the complete source frame count and timing. No generation was submitted.");
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && normalizeVideoOutpaintSettings(body.videoOutpaint).keepAllRepeats && health.routes?.videoOutpaintSeedanceAllRepeats !== true) throw new Error("Restart the backend to activate full-repeat debug output. No generation was submitted.");
     if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
     if (body.canvasVideoUrl && health.routes?.videoOutpaintSuppliedCanvas !== true) throw new Error("Restart NewtNode to activate the Canvas video input. No generation was submitted.");
@@ -480,6 +481,7 @@ export const nodeApi = {
     if (body.model === "Video Outpaint") {
       label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
+      if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedanceSourceFrames !== true) throw new Error("Restart the backend to preserve the complete source frame count and timing. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && normalizeVideoOutpaintSettings(body.videoOutpaint).keepAllRepeats && health.routes?.videoOutpaintSeedanceAllRepeats !== true) throw new Error("Restart the backend to activate full-repeat debug output. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
     if (body.canvasVideoUrl && health.routes?.videoOutpaintSuppliedCanvas !== true) throw new Error("Restart NewtNode to activate the Canvas video input. No generation was submitted.");

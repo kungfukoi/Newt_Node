@@ -40,10 +40,10 @@ test("Seedance repeats select the final shot without changing delivery timing", 
   assert.equal(single.settings.repeatCount, 1);
   assert.equal(single.settings.keepAllRepeats, true);
   assert.equal(normalizeVideoOutpaintSettings({ ...options, keepAllRepeats: false }).keepAllRepeats, false);
-  assert.equal(repeated.prerollFrames, 162);
-  assert.equal(repeated.outputFrames, 81);
+  assert.equal(repeated.prerollFrames, 384);
+  assert.equal(repeated.outputFrames, 192);
   assert.equal(repeated.outputDuration, single.outputDuration);
-  assert.ok(repeated.frames >= 3 * 81 + 12);
+  assert.ok(repeated.frames >= 3 * 192 + 12);
   assert.equal((repeated.frames - 1) % 8, 0);
   assert.notEqual(videoOutpaintFingerprint("source", options), videoOutpaintFingerprint("source", { ...options, repeatCount: 2 }));
   assert.throws(() => planVideoOutpaint(metadata, { ...options, duration: 8, repeatCount: 4 }), /30-second/);
@@ -57,9 +57,25 @@ test("Seedance preparation repeats moving frames before its held guard tail", as
   const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", repeatCount: 2 } }, "/outputs/source.mp4");
   assert.equal(prepared.plan.prerollFrames, prepared.plan.outputFrames);
   const filter = calls[0].args[calls[0].args.indexOf("-vf") + 1];
-  assert.match(filter, /trim=end_frame=81,setpts=PTS-STARTPTS,loop=loop=1:size=81:start=0,setpts=N\/\(24\*TB\)/);
+  assert.match(filter, /trim=end_frame=97,setpts=PTS-STARTPTS,loop=loop=1:size=97:start=0,setpts=N\/\(24\*TB\)/);
   assert.match(filter, /start_duration=0:/);
 });
+test("hh30's complete 94 source frames are counted before repeating and keep their native clock", () => {
+  const metadata = { width: 1920, height: 1080, fps: 24000 / 1001, frameRate: "24000/1001", num_frames: 94, duration: 94 * 1001 / 24000 };
+  const p = planVideoOutpaint(metadata, { model: "seedance-2.5", duration: 3.375, repeatCount: 2 });
+  assert.equal(p.outputFrames, 94);
+  assert.equal(p.prerollFrames, 94);
+  assert.equal(p.frames, 201);
+  assert.equal(p.fps, 24);
+  assert.equal(p.sourceFrameRate, "24000/1001");
+  assert.ok(Math.abs(p.outputDuration - 94 * 1001 / 24000) < 1e-10);
+  const later = planVideoOutpaint(metadata, { model: "seedance-2.5", start: 1, repeatCount: 2 });
+  assert.equal(later.sourceStartFrame, 24);
+  assert.equal(later.outputFrames, 70);
+  assert.equal(later.sourceStartSeconds, 1.001);
+  assert.equal(planVideoOutpaint(metadata, { model: "seedance-2.5", duration: 0.125 }).outputFrames, 94);
+});
+
 test("request and result preserve refinements, cost, raw result and partial-success warning", () => {
   assert.ok(utilityVideoModelOptions.includes("Video Outpaint"));
   const request = buildUtilityVideoRequest({ node: { id: "n", data: { videoOutpaint: { feather: 12, restoreSource: false }, seed: "12345" } }, model: "Video Outpaint", prompt: "Complete the person", referenceVideoUrls: ["/outputs/source.mp4"] });
@@ -70,16 +86,28 @@ test("request and result preserve refinements, cost, raw result and partial-succ
   assert.equal(result.videoOutpaint.rawVideoUrl, details.rawVideoUrl); assert.equal(result.warning, "Raw result kept"); assert.equal(result.cost.amountUsd, 0.405);
 });
 
-function serviceHarness({ generatedDuration = 3.375, reviewVisual } = {}) {
+function serviceHarness({ generatedDuration = 3.375, reviewVisual, sourceProbe } = {}) {
   const calls = [], targets = [];
   const service = createVideoOutpaintService({
     resolveAsset: async url => ({ filePath: url }),
-    probeVideo: async file => file.includes("generated") ? { width: 720, height: 1280, duration: generatedDuration } : { width: 1440, height: 1440, fps: 24, duration: 4.041667 },
+    probeVideo: async (file, options) => file.includes("generated") ? { width: 720, height: 1280, duration: generatedDuration } : sourceProbe ? sourceProbe(options) : { width: 1440, height: 1440, fps: 24, num_frames: 97, duration: 4.041667 },
     createTarget: async (body, kind, ext, dependency) => { const result = { filePath: `/managed/${kind}${ext}`, publicPath: `/outputs/${kind}${ext}`, fileName: kind + ext }; targets.push({ ...result, dependency }); return result; },
     runFfmpeg: async (args, label) => { calls.push({ args, label }); }, statFile: async () => ({ size: 100 }), reviewVisual
   });
   return { service, calls, targets };
 }
+test("Seedance decode-counts missing container counts and refuses unknown counts before submission", async () => {
+  const metadata = { width: 64, height: 64, fps: 24000 / 1001, frameRate: "24000/1001", duration: 3.920583 };
+  const probes = [];
+  const harness = serviceHarness({ sourceProbe: options => { probes.push(options); return { ...metadata, ...(options?.countFrames ? { num_frames: 94 } : {}) }; } });
+  const prepared = await harness.service.prepare({ videoOutpaint: { model: "seedance-2.5", repeatCount: 2 } }, "/outputs/source.mp4");
+  assert.equal(prepared.plan.outputFrames, 94);
+  assert.deepEqual(probes, [undefined, { countFrames: true }]);
+  const unreadable = serviceHarness({ sourceProbe: () => metadata });
+  await assert.rejects(unreadable.service.prepare({ videoOutpaint: { model: "seedance-2.5" } }, "/outputs/source.mp4"), /Could not count/);
+  assert.equal(unreadable.calls.length, 0);
+});
+
 test("preparation creates a matching source/mask and preview without calling generation", async () => {
   const { service, calls, targets } = serviceHarness();
   const prepared = await service.prepare({}, "/outputs/source.mp4");
@@ -104,7 +132,7 @@ test("Seedance green preparation covers the outer bands and authorized inward ov
 
 test("reprocessing preserves historical leading holds and frame counts", async () => {
   const { service, calls } = serviceHarness();
-  const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5" } }, "/outputs/source.mp4", { prerollFrames: 24, frames: 117 });
+  const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5" } }, "/outputs/source.mp4", { prerollFrames: 24, frames: 117, outputFrames: 81, outputDuration: 3.375 });
   assert.equal(prepared.plan.prerollFrames, 24); assert.equal(prepared.plan.frames, 117);
   assert.match(calls[0].args.join(" "), /start_duration=1:/);
   assert.equal(prepared.plan.duration, 117 / 24);

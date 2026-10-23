@@ -9,7 +9,7 @@ export function registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service
       // existing generation using a newly edited crop, model, duration or resolution.
       const { restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats } = req.body.videoOutpaint || {};
       const finishing = Object.fromEntries(Object.entries({ restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats }).filter(([, value]) => value !== undefined));
-      const prepared = await service.prepare({ ...req.body, videoOutpaint: { ...previous.plan.settings, ...finishing } }, previous.sourceUrl, { prerollFrames: previous.plan.prerollFrames || 0, frames: previous.plan.frames });
+      const prepared = await service.prepare({ ...req.body, videoOutpaint: { ...previous.plan.settings, ...finishing } }, previous.sourceUrl, { prerollFrames: previous.plan.prerollFrames || 0, frames: previous.plan.frames, outputFrames: previous.plan.outputFrames, outputDuration: previous.plan.outputDuration, sourceFps: previous.plan.sourceFps, sourceFrameRate: previous.plan.sourceFrameRate, sourceStartSeconds: previous.plan.sourceStartSeconds });
       const raw = await resolveAsset(rawVideoUrl), native = await probeVideo(raw.filePath);
       const output = await service.finish(req.body, prepared, raw), metadata = await probeVideo(output.filePath);
       const videoOutpaint = { prepared, rawVideoUrl, model: prepared.plan.settings.model, nativeWidth: native.width, nativeHeight: native.height, nativeDuration: native.duration, restoredSource: prepared.plan.settings.restoreSource, matching: output.matching, qc: output.qc, outputFormat: output.outputFormat || "8-bit SDR H.264", warning: output.warning };

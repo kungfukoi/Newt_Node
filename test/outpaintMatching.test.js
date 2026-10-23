@@ -54,7 +54,7 @@ test("saved explicit feather survives; saved matching controls survive while QC 
 });
 test("local reprocessing rebuilds the original geometry, preserves raw and records zero new provider cost", async () => {
   let handler, preparation, history, preparationTiming;
-  const previous = { sourceUrl: "/outputs/source.mp4", plan: { settings: { frame: { x: 0, y: -0.5, width: 1 }, model: "seedance-2.5", duration: 4 } } };
+  const previous = { sourceUrl: "/outputs/source.mp4", plan: { frames: 201, prerollFrames: 94, outputFrames: 94, outputDuration: 94 * 1001 / 24000, sourceFps: 24000 / 1001, sourceFrameRate: "24000/1001", sourceStartSeconds: 0, settings: { frame: { x: 0, y: -0.5, width: 1 }, model: "seedance-2.5", duration: 4 } } };
   registerVideoOutpaintFinishRoute({ post: (_route, fn) => { handler = fn; } }, {
     isLocalAssetUrl: s => typeof s === "string" && s.startsWith("/outputs/"),
     service: { prepare: async (body, _source, timing) => { preparation = body; preparationTiming = timing; return { ...previous, plan: { settings: body.videoOutpaint } }; }, finish: async () => ({ filePath: "final.mp4", publicPath: "/outputs/final.mp4", fileName: "final.mp4", bytes: 100, qc: { status: "needs_review" }, warning: "Needs review" }) },
@@ -63,6 +63,6 @@ test("local reprocessing rebuilds the original geometry, preserves raw and recor
   let result;
   await handler({ body: { rawVideoUrl: "/outputs/raw.mp4", prepared: previous, videoOutpaint: { frame: { x: 7 }, model: "wan-vace", feather: 64 } } }, { json: item => { result = item; } });
   assert.deepEqual(preparation.videoOutpaint.frame, previous.plan.settings.frame); assert.equal(preparation.videoOutpaint.model, "seedance-2.5"); assert.equal(preparation.videoOutpaint.feather, 64);
-  assert.deepEqual(preparationTiming, { prerollFrames: 0, frames: undefined }, "Existing raw generations must not acquire a new time offset");
+  assert.deepEqual(preparationTiming, { prerollFrames: 94, frames: 201, outputFrames: 94, outputDuration: previous.plan.outputDuration, sourceFps: 24000 / 1001, sourceFrameRate: "24000/1001", sourceStartSeconds: 0 }, "Existing raw generations must keep their original counts and clocks");
   assert.equal(result.cost.amountUsd, 0); assert.equal(history.provider, "local"); assert.equal(history.videoOutpaint.rawVideoUrl, "/outputs/raw.mp4"); assert.equal(result.videoOutpaint.qc.status, "needs_review");
 });

@@ -22,7 +22,7 @@ test("Seedance green conditioning and analysis name #00FF00 while retaining old 
   const greenAnalysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: green.plan });
   assert.match(greenAnalysis, /solid green padding \(#00FF00 \/ RGB 0, 255, 0\)/);
   assert.doesNotMatch(greenAnalysis, /solid black padding|gray padding|black-padded|black bars/);
-  assert.equal(JSON.parse(videoOutpaintFingerprint("source", settings))[0], "outpaint-canvas-v16-seedance-green");
+  assert.equal(JSON.parse(videoOutpaintFingerprint("source", settings))[0], "outpaint-canvas-v17-source-frames");
   const gray = { ...prepared, generationVideoUrl: "/outputs/gray.mp4", plan: { ...prepared.plan, generationPaddingColor: "gray" } };
   const result = await prepareSeedanceOutpaint(body, { provider: "fal", apiKey: "fixture", prepare: async () => gray });
   assert.deepEqual(result.body.referenceVideoUrls, [gray.generationVideoUrl]);
@@ -65,12 +65,12 @@ test("Seedance pads only its submission and delivers the real selected source du
   assert.equal(full.frames, 113); assert.equal(full.duration, 113 / 24); assert.equal(full.prerollFrames, 0);
   assert.equal(full.looped, false);
   const selected = planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 4 }, { ...settings, duration: 1.25 });
-  assert.equal(selected.outputFrames, 30); assert.equal(selected.frames, 97);
+  assert.equal(selected.outputFrames, 96); assert.equal(selected.frames, 113, "Saved duration must not truncate the source");
   for (const fps of [24, 25, 30, 60]) for (const duration of [0.25, 1.25, 3.375, 4, 8]) {
     const p = planVideoOutpaint({ width: 640, height: 360, fps, duration }, { ...settings, duration });
     assert.equal((p.frames - 1) % 8, 0);
     assert.ok(p.frames >= p.outputFrames + Math.ceil(fps / 2));
-    assert.equal(p.outputFrames, Math.floor((duration + 0.001) * fps));
+    assert.equal(p.outputFrames, Math.round(duration * fps));
   }
 });
 

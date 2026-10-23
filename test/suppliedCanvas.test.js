@@ -25,7 +25,7 @@ test("real supplied canvas detects borders, keeps placement and prepares inward 
     const source = path.join(dir, "canvas.mp4");
     await run(["-y", "-f", "lavfi", "-i", "color=red:s=64x32:r=24", "-vf", "pad=64:64:0:16:black", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", source]);
     const settings = { model: "seedance-2.5", seedanceResolution: "480p", feather: 32 };
-    const service = createVideoOutpaintService({ resolveAsset: async url => ({ filePath: url }), probeVideo: async () => ({ width: 64, height: 64, fps: 24, duration: 1 }), createTarget: async (_body, kind, ext) => ({ filePath: path.join(dir, kind + ext), publicPath: path.join(dir, kind + ext) }), runFfmpeg: run, statFile: stat });
+    const service = createVideoOutpaintService({ resolveAsset: async url => ({ filePath: url }), probeVideo: async () => ({ width: 64, height: 64, fps: 24, num_frames: 24, duration: 1 }), createTarget: async (_body, kind, ext) => ({ filePath: path.join(dir, kind + ext), publicPath: path.join(dir, kind + ext) }), runFfmpeg: run, statFile: stat });
     const prepared = await service.prepare({ videoOutpaint: settings, canvasVideoUrl: source }, "");
     assert.equal(prepared.sourceUrl, source);
     assert.deepEqual(prepared.plan.sourceCrop, { x: 0, y: 16, width: 64, height: 32 });
