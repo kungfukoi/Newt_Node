@@ -2,6 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fitOutpaintPrompt, outpaintEditablePromptBudget, outpaintSubmissionByteLimit } from "../src/outpaintPromptBudget.js";
 import { seedanceOutpaintPrompt, planVideoOutpaint } from "../src/videoOutpaint.js";
+import { outpaintFrameOneRule } from "../src/outpaintFrameOne.js";
+
+test("completed frame-one state brackets conflicting editable directions and survives fitting", () => {
+  const direction = "Animate the black bars away with a slow wipe. ".repeat(200);
+  const plan = planVideoOutpaint({ width: 1920, height: 1080, fps: 24, duration: 4 }, { model: "seedance-2.5" });
+  for (const references of [0, 1, 30]) {
+    const text = fitOutpaintPrompt(direction, outpaintEditablePromptBudget(plan, plan.settings, references));
+    const submitted = seedanceOutpaintPrompt(text, false, [], 32, plan, references);
+    assert.ok(submitted.indexOf("already completed full-canvas shot") < submitted.indexOf(text));
+    assert.ok(submitted.endsWith(outpaintFrameOneRule));
+    assert.match(submitted, /Black padding identifies input pixels to replace/);
+    assert.match(submitted, /must not exist in any output frame/);
+    assert.match(submitted, /overrides any conflicting reveal or transition direction/);
+    assert.ok(Buffer.byteLength(submitted) <= outpaintSubmissionByteLimit);
+  }
+  assert.ok(seedanceOutpaintPrompt(direction, true).endsWith(outpaintFrameOneRule));
+});
 
 test("draft and submission budgets include the concise edit wrapper without compositing instructions", () => {
   for (const feather of [0, 32, 128]) {

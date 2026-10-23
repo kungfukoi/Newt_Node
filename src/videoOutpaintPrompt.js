@@ -1,4 +1,5 @@
 import { conservativeOutpaintContext, outpaintFramePresenceRule } from "./outpaintContext.js";
+import { outpaintFrameOneRule } from "./outpaintFrameOne.js";
 export const outpaintPromptModes = ["manual", "auto", "guided"];
 
 export function normalizeOutpaintPromptMode(value) {
@@ -12,6 +13,7 @@ export function buildOutpaintAnalysisPrompt({ mode, guidance = "", aspectRatio =
   const regions = rect ? [rect.y > 0 && "TOP", rect.y + rect.height < preparedPlan.height && "BOTTOM", rect.x > 0 && "LEFT", rect.x + rect.width < preparedPlan.width && "RIGHT"].filter(Boolean) : [];
   return [
     "Write a production-ready video OUTPAINTING prompt after examining the attached source video throughout their duration and its matching local mask.",
+    outpaintFrameOneRule,
     ...(outpaintModel === "seedance-2.5" ? [
       `PRIMARY DELIVERABLE: A concrete scene-extension instruction for EACH missing outer region${regions.length ? `: ${regions.join(", ")}` : " visible in the prepared canvas"}. Every listed region must have its own short, explicitly named clause in the final prompt. Do not spend the budget describing the protected central picture or leave a region implicit.`,
       "For each region, inspect its adjacent visible image edge throughout the footage. Describe what surfaces, structures, textures and boundary-crossing objects should CONTINUE into that region, their direction and perspective, and their existing motion. For a bottom expansion, explicitly describe the ground/floor or other surface reaching the bottom canvas edge. For a top expansion, describe only the supported upper environment. For side expansions, continue the corresponding side's visible environment. Do not merely say fill black or expand the scene.",

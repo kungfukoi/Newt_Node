@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { outpaintFrameOneRule } from "../src/outpaintFrameOne.js";
 import { normalizeVideoOutpaintSettings, normalizeUtilityOutpaintSettings, videoOutpaintModels, planVideoOutpaint, videoOutpaintFingerprint, seedanceOutpaintRequest, seedanceOutpaintPrompt } from "../src/videoOutpaint.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "../server/seedance-outpaint.js";
 import { buildOutpaintAnalysisPrompt } from "../src/videoOutpaintPrompt.js";
@@ -120,7 +121,7 @@ test("analysis uses the same visual context and mask reasoning but writes for Se
   assert.match(seedance, /extrapolate from visible context clues/); assert.match(seedance, /NOT the analysis mask/);
   assert.match(seedance, /Continue the trees/); assert.match(seedanceOutpaintPrompt("Manual direction"), /Manual direction/);
   const repair = seedanceOutpaintPrompt("User direction", true, [{ category: "seam", description: "Coat join is displaced" }]);
-  assert.match(repair, /TECHNICAL QUALITY REPAIR/); assert.match(repair, /exact user framing and creative direction/); assert.ok(repair.endsWith("User direction"));
+  assert.match(repair, /TECHNICAL QUALITY REPAIR/); assert.match(repair, /exact user framing and creative direction/); assert.match(repair, /User direction/); assert.ok(repair.endsWith(outpaintFrameOneRule));
   assert.match(repair, /Coat join is displaced/);
 });
 
