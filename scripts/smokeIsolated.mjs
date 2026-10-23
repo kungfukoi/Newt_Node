@@ -80,6 +80,8 @@ try {
   }
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   const health = await (await request("/api/health")).json();
+  assert.equal(health.routes.windowLifecycle, true);
+  assert.equal((await request("/api/window-session")).status, 204, "Unsupervised API stays available without a browser");
   assert.equal(health.routes.videoOutpaintPrompt, true);
   assert.equal(health.routes.kreaModelProviders, true);
   assert.equal(health.routes.keyer, true);

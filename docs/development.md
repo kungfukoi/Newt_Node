@@ -77,6 +77,10 @@ Playwright uses its own production preview server on port 5286 (`NEWTNODE_E2E_PO
 
 ### Production Runtime
 
+After the last app window closes, production sessions wait 15 seconds for refresh/reconnection, then stop the API, preview server and their child processes. Another open window (including a background window) keeps the session running. Reopen with the launcher; the previous browser URL alone cannot restart stopped servers. The supervisor also stops MiniMax WSL units it started from an inactive state, leaving pre-existing services and the WSL distro itself alone. ComfyUI and cloud jobs remain independently managed. No browser connection ever established means no automatic shutdown; headless startup and `npm run dev` remain available.
+
+After installing this lifecycle change, existing supervisors must be stopped and the normal launcher run once; restarting only their backend does not add the new IPC/ownership behavior. Do this after active work has settled. `node --test test/windowLifecycle.test.js test/windowShutdown.test.js test/supervisor.test.js test/minimaxH3Local.test.js` covers reload/multiple windows, real process-tree cleanup and ownership without using user data or GPUs.
+
 Use the normal Windows/macOS launchers for user sessions. Both start the API and built client through `localServerSupervisor.mjs`; `--client` selects the client service. Logs are `.newtnode_logs/server-<port>.log` and `client-<port>.log`, rotating at 2 MiB with four backups. Service locks prevent duplicate supervisors in the same checkout/port. Crashes back off from one to thirty seconds; the restart marker requests a prompt restart. `Restart_NewtNode.ps1` uses the local restart endpoint rather than killing arbitrary port owners.
 
 `npm run dev` and `npm run server` are explicitly watched development sessions. Existing sessions are not converted in place: close/relaunch a legacy watch session after generation has settled to adopt the production supervisor. Settings > Diagnostics reports current supervision/restart status. Do not restart a user's active generation just to test launch behavior; the supervisor regression uses a temporary fixture process.

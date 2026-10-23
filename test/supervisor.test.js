@@ -43,7 +43,7 @@ test("production supervisor restarts a crashed child, rejects duplicate owners a
   assert.ok(relative.startsWith("newt-supervisor-") && !relative.includes(path.sep));
   await mkdir(path.join(root, "scripts"));
   await mkdir(path.join(root, "server"));
-  for (const file of ["localServerSupervisor.mjs", "supervisorPolicy.mjs", "rotatingLog.mjs"]) {
+  for (const file of ["localServerSupervisor.mjs", "supervisorPolicy.mjs", "rotatingLog.mjs", "ownedProcessTree.mjs"]) {
     await copyFile(new URL(`../scripts/${file}`, import.meta.url), path.join(root, "scripts", file));
   }
   await copyFile(new URL("../server/file-write.js", import.meta.url), path.join(root, "server", "file-write.js"));

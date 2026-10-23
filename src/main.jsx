@@ -1,3 +1,5 @@
+import { startWindowLifecycle } from "./windowLifecycle.js";
+import { connectWindowSession } from "./api/newtApi.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
@@ -1284,6 +1286,9 @@ function batchStatusMessage(mediaType, total, completed, failures) {
 
   return firstError || `${label[0].toUpperCase()}${label.slice(1)} generation failed.`;
 }
+
+const stopWindowLifecycle = startWindowLifecycle({ connect: connectWindowSession });
+if (import.meta.hot) import.meta.hot.dispose(stopWindowLifecycle);
 
 createRoot(document.getElementById("root")).render(
   <WorkspaceErrorBoundary label="NewtNode" onRetry={() => window.location.reload()}>

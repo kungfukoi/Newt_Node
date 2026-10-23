@@ -12,6 +12,9 @@ const execFile = promisify(execFileCallback);
 let localVariantQueue = Promise.resolve();
 const wslKeepAliveProcesses = new Map();
 let wslKeepAliveCleanupRegistered = false;
+let sessionClosing = false;
+
+export function preventMinimaxH3Starts() { sessionClosing = true; }
 
 export function minimaxH3LocalConfigFromEnv(env = process.env) {
   const url = normalizeMinimaxH3LocalUrl(env.MINIMAX_H3_LOCAL_URL || defaultMinimaxH3LocalUrl);
@@ -195,8 +198,16 @@ export async function ensureMinimaxH3LocalVariant({
   onProgress = () => {}
 } = {}) {
   if (!config?.wslDistro) return;
+  if (sessionClosing) throw new Error("NewtNode is shutting down.");
   const reference = task === "ref2va";
   const service = reference ? config.ref2vaService : config.fl2vaService;
+  const previous = await readWslServiceState({ config, service, execFileImpl });
+  if (sessionClosing) throw new Error("NewtNode is shutting down.");
+  // Only claim an explicitly inactive unit. Unknown/previously active services
+  // belong to their existing owner, even if NewtNode uses them.
+  if (["inactive", "failed"].includes(previous.state)) {
+    process.send?.({ type: "owned-wsl-service", distro: config.wslDistro, user: config.wslUser, service });
+  }
   onProgress({ status: "loading-model", percent: 0, variant: reference ? "ref2va" : "fl2va" });
   ensureMinimaxH3WslKeepAlive({ config, spawnImpl });
   try {
@@ -287,7 +298,7 @@ async function readWslServiceState({ config, service, execFileImpl }) {
     const state = String(result?.stdout || "active").trim().toLowerCase() || "active";
     return { running: ["active", "activating", "reloading"].includes(state), state, detail: "" };
   } catch (error) {
-    const state = String(error?.stdout || "").trim().toLowerCase() || "inactive";
+    const state = String(error?.stdout || "").trim().toLowerCase() || "unknown";
     const detail = String(error?.stderr || error?.message || "Restart Newt Node and try again.").trim();
     return { running: false, state, detail };
   }

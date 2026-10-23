@@ -167,6 +167,10 @@ test("WSL switching starts the requested variant and waits for health", async ()
   assert.deepEqual(commands.map(({ command, args }) => ({ command, args })), [
     {
       command: "wsl.exe",
+      args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "systemctl", "is-active", "minimax-h3-ref2va.service"]
+    },
+    {
+      command: "wsl.exe",
       args: ["-d", "Newt-MiniMax-H3", "-u", "root", "--", "sh", "-lc", "trap 'exit 0' TERM INT HUP; while :; do sleep 3600; done"]
     },
     {
@@ -194,4 +198,29 @@ test("WSL keepalive is reused for the same distro", () => {
   const second = ensureMinimaxH3WslKeepAlive({ config, spawnImpl });
   assert.equal(first, second);
   assert.equal(children.length, 1);
+});
+
+test("WSL ownership claims only services that NewtNode starts from an inactive state", async t => {
+  const previousSend = process.send;
+  const claims = [];
+  process.send = message => claims.push(message);
+  t.after(() => { if (previousSend) process.send = previousSend; else delete process.send; });
+  for (const state of ["active", "activating", "inactive", "failed", "unknown"]) {
+    const config = minimaxH3LocalConfigFromEnv({ MINIMAX_H3_LOCAL_WSL_DISTRO: `Ownership-${state}` });
+    const child = new EventEmitter();
+    child.kill = () => {};
+    await ensureMinimaxH3LocalVariant({
+      config, task: "fl2va", baseUrl: config.url,
+      spawnImpl: () => child,
+      execFileImpl: async (_command, args) => {
+        if (args.includes("is-active")) {
+          if (["active", "activating"].includes(state)) return { stdout: state };
+          throw Object.assign(new Error("not active"), { stdout: state === "unknown" ? "" : state });
+        }
+        return {};
+      },
+      fetchImpl: async () => new Response("ok")
+    });
+  }
+  assert.deepEqual(claims.map(claim => claim.distro), ["Ownership-inactive", "Ownership-failed"]);
 });

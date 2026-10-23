@@ -1,3 +1,5 @@
+import { registerWindowLifecycle } from "./window-lifecycle.js";
+import { preventMinimaxH3Starts } from "./minimaxH3Local/engine.js";
 import { requestKreaLlm } from "./krea-llm.js";
 import { buildKreaEnhanceInput, kreaEnhanceEndpoint } from "./krea-enhance.js";
 import { createVideoOutpaintService } from "./video-outpaint.js";
@@ -843,6 +845,15 @@ const localVideoUpload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: "16mb" }));
+registerWindowLifecycle(app);
+let sessionClosing = false;
+process.on("message", (message) => {
+  if (message?.type !== "shutdown-session") return;
+  sessionClosing = true;
+  preventMinimaxH3Starts();
+  process.send?.({ type: "shutdown-ready" });
+});
+app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -1173,6 +1184,7 @@ function buildHealthPayload() {
     ok: true,
     version: appVersion,
     routes: {
+      windowLifecycle: true,
       utilityImage: true,
       utilityVideo: true,
       keyer: true,
