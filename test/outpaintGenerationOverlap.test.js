@@ -26,8 +26,8 @@ test("Seedance preparation reserves inward overlap on the submitted canvas and k
       return [...stdout.subarray(0, 3)];
     };
     assert.ok((await pixel(prepared.videoUrl, top + 12))[0] > 200, "Reference must retain source pixels throughout the overlap");
-    assert.ok((await pixel(prepared.generationVideoUrl, top + 12)).every(v => v < 8), "Submitted top fill must extend inward, not stop at the old edge");
-    assert.ok((await pixel(prepared.generationVideoUrl, top + sh - 12)).every(v => v < 8), "Submitted bottom fill must extend inward");
+    assert.ok((await pixel(prepared.generationVideoUrl, top + 12)).every(v => Math.abs(v - 127) <= 3), "Submitted RGB 127 top fill must extend inward, not stop at the old edge");
+    assert.ok((await pixel(prepared.generationVideoUrl, top + sh - 12)).every(v => Math.abs(v - 127) <= 3), "Submitted RGB 127 bottom fill must extend inward");
     assert.ok((await pixel(prepared.generationVideoUrl, top + 50))[0] > 200, "Conditioning core must remain intact");
     assert.ok((await pixel(prepared.maskImageUrl, top + 12)).every(v => v > 240), "Local mask and submitted inward overlap must agree");
     assert.equal(prepared.maskVideoUrl, undefined);

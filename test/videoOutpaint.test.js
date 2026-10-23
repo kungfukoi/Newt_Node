@@ -60,6 +60,19 @@ test("preparation creates a matching source/mask and preview without calling gen
   assert.equal(prepared.fingerprint, videoOutpaintFingerprint("/outputs/source.mp4", {}));
 });
 
+test("Seedance gray preparation covers the outer bands and authorized inward overlap", async () => {
+  const { service, calls } = serviceHarness();
+  const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", feather: 32 } }, "/outputs/source.mp4");
+  assert.equal(prepared.plan.generationPaddingColor, "gray");
+  assert.ok(prepared.plan.generationContentRect.y > prepared.plan.top);
+  assert.ok(prepared.plan.generationContentRect.height < prepared.plan.sourceHeight);
+  const conditioning = calls.find(call => call.label === "Prepare Seedance gray padding and inward overlap");
+  const filter = conditioning.args[conditioning.args.indexOf("-vf") + 1];
+  assert.match(filter, /color=0x7f7f7f:t=fill/);
+  assert.match(filter, new RegExp(`drawbox=x=0:y=0:w=${prepared.plan.width}:h=${prepared.plan.generationContentRect.y}`));
+  assert.doesNotMatch(filter, /color=black/);
+});
+
 test("reprocessing preserves historical leading holds and frame counts", async () => {
   const { service, calls } = serviceHarness();
   const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5" } }, "/outputs/source.mp4", { prerollFrames: 24, frames: 117 });

@@ -416,9 +416,13 @@ try {
   assert.equal(localOutpaintCrop.video.width, 1280);
   assert.equal(localOutpaintCrop.video.height, 720);
   assert.equal(health.routes.videoOutpaintSeedance, true);
+  assert.equal(health.routes.seedanceKreaVideoEditing, true);
   assert.equal(health.routes.videoOutpaintLocalMasks, true);
+  assert.equal(health.routes.videoOutpaintSeedanceGrayPadding, true);
   const seedancePrepared = await (await request("/api/node/video-outpaint-prepare", { sourceVideoUrl: "/outputs/clip.mp4", videoOutpaint: { model: "seedance-2.5" } }, { timeoutMs: 120000 })).json();
   assert.equal(seedancePrepared.maskVideoUrl, undefined);
+  assert.equal(seedancePrepared.plan.generationPaddingColor, "gray");
+  assert.ok(seedancePrepared.generationVideoUrl);
   assert.ok(seedancePrepared.maskImageUrl.endsWith(".png"));
   assert.equal(seedancePrepared.plan.frames, 97); assert.equal(seedancePrepared.plan.duration, 97 / 24);
   assert.equal(health.routes.videoOutpaintFullResolution, true);

@@ -283,6 +283,7 @@ import {
   estimateKreaSeedanceCost,
   kreaReferenceImageTarget,
   kreaSeedanceEndpoint,
+  kreaSeedanceEditInput,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
 import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
@@ -1209,6 +1210,7 @@ function buildHealthPayload() {
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
       seedanceVideoEditing: true,
+      seedanceKreaVideoEditing: true,
       exploreLookVariation: true,
       elevenLabsV4: true,
       explore: true,
@@ -1244,6 +1246,7 @@ function buildHealthPayload() {
       videoOutpaintMatching: true,
       videoOutpaintFullResolution: true,
       videoOutpaintLocalMasks: true,
+      videoOutpaintSeedanceGrayPadding: true,
       videoOutpaintSeedance: true,
       videoOutpaintWanConditioning: true,
       videoOutpaintSuppliedCanvas: true,
@@ -6651,7 +6654,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     if (req.body.videoOutpaintUtility === true && req.body.videoOutpaintRepair === true) return res.status(400).json({ error: "Automatic QC fill generation is disabled. Reprocess the raw result for local color matching and feathering." });
     if (req.body.videoOutpaintUtility === true) {
       const provider = runtimeModelProviderPreferences.seedance;
-      const result = await prepareSeedanceOutpaint(req.body, { provider, apiKey: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : "", prepare: videoOutpaintService.prepare });
+      const result = await prepareSeedanceOutpaint(req.body, { provider, apiKey: provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : provider === "krea" ? process.env.KREA_API_KEY : "", prepare: videoOutpaintService.prepare });
       if (!result.prepared.plan.needsOutpaint) return localOutpaintCrop(req, res, result.prepared);
       req.body = result.body;
     }
@@ -7093,20 +7096,23 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
       }
     } else {
       endpoint = kreaSeedanceEndpoint(undefined, selectedVideoModel.displayName);
-      const kreaAspectRatio = await resolveKreaSeedanceAspectRatio({
+      const kreaAspectRatio = editing ? "auto" : await resolveKreaSeedanceAspectRatio({
         value: aspectRatio,
         imageUrls: [startFrameUrl, ...referenceImageUrls]
       });
       runtimeAspectRatio = kreaAspectRatio;
-      runtimeDurationSeconds = seedance25 && duration === "auto" ? 5 : durationToSeconds(duration);
+      runtimeDurationSeconds = editing ? sourceDurationSeconds : seedance25 && duration === "auto" ? 5 : durationToSeconds(duration);
       const input = {
-        prompt: submittedPrompt,
-        resolution,
-        duration: runtimeDurationSeconds,
-        aspect_ratio: kreaAspectRatio,
-        generate_audio: generateAudio,
+        ...(editing ? kreaSeedanceEditInput({ prompt: submittedPrompt, resolution, sourceDurationSeconds }) : {
+          prompt: submittedPrompt,
+          resolution,
+          duration: runtimeDurationSeconds,
+          aspect_ratio: kreaAspectRatio,
+          ...(seedance25 ? { enhance_prompt: false } : { generate_audio: generateAudio })
+        }),
         ...(draftMode ? { draft: true } : {})
       };
+      submittedPrompt = input.prompt;
       if (Number.isInteger(requestedSeed)) input.seed = requestedSeed;
 
       if (routeKind === "image-to-video") {
@@ -7123,7 +7129,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, audioLimit).map(url => uploadLocalOutputToKrea(url, draftMode ? draftKey : undefined)));
       }
 
-      cost = draftMode ? seedanceDraftCost("preview", "krea") : estimateKreaSeedanceCost({
+      cost = draftMode ? seedanceDraftCost("preview", "krea") : editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Krea video editing cost depends on source and provider usage; no verified estimate is available." } : estimateKreaSeedanceCost({
         modelName: selectedVideoModel.displayName,
         durationSeconds: runtimeDurationSeconds,
         resolution,

@@ -11,6 +11,24 @@ const settings = { model: "seedance-2.5", seedanceResolution: "1080p" };
 const prepared = { sourceUrl: "/outputs/source.mp4", videoUrl: "/outputs/padded.mp4", maskVideoUrl: "/outputs/mask.mp4", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) };
 const body = seedanceOutpaintRequest({ prompt: "Continue the moving foliage", referenceVideoUrls: [prepared.sourceUrl], referenceImageUrls: ["/outputs/look.png"], videoOutpaint: settings, wanVaceInpainting: { seed: "42" }, projectId: "project", nodeId: "node" });
 
+test("Seedance gray conditioning and analysis name RGB 127 padding while legacy plans keep black wording", async () => {
+  const gray = { ...prepared, generationVideoUrl: "/outputs/gray.mp4", plan: { ...prepared.plan, generationPaddingColor: "gray" } };
+  const result = await prepareSeedanceOutpaint(body, { provider: "fal", apiKey: "fixture", prepare: async () => gray });
+  assert.deepEqual(result.body.referenceVideoUrls, [gray.generationVideoUrl]);
+  assert.match(result.body.prompt, /Replace all gray padding/);
+  assert.match(result.body.prompt, /#7F7F7F \/ RGB 127, 127, 127/);
+  assert.match(result.body.prompt, /real gray objects inside the source picture/);
+  assert.match(result.body.prompt, /Gray padding identifies input pixels/);
+  assert.doesNotMatch(result.body.prompt, /black padding|black-padded|black bands/);
+  const analysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: gray.plan });
+  assert.match(analysis, /solid gray padding \(#7F7F7F/);
+  assert.doesNotMatch(analysis, /solid black padding|black-padded/);
+  assert.match(seedanceOutpaintPrompt("Direction", false, [], 0, prepared.plan), /Replace all black padding/);
+  const oldFingerprint = JSON.stringify(["outpaint-canvas-v14-frame-grid", "source", normalizeVideoOutpaintSettings(settings), ""]);
+  assert.notEqual(videoOutpaintFingerprint("source", settings), oldFingerprint);
+  assert.equal(JSON.parse(videoOutpaintFingerprint("source", { model: "wan-vace" }))[0], "outpaint-canvas-v14-frame-grid");
+});
+
 test("legacy preparation timing remains readable and engine changes invalidate preparation", () => {
   assert.equal(normalizeVideoOutpaintSettings().model, "wan-vace");
   assert.notEqual(videoOutpaintFingerprint("source", {}), videoOutpaintFingerprint("source", settings));
@@ -57,7 +75,7 @@ test("one Seedance resolution controls generation and export dimensions, overrid
 });
 
 test("Seedance editing submits only the padded source with explicit border extrapolation and keeps workflow context", async () => {
-  for (const provider of ["fal", "atlas"]) {
+  for (const provider of ["fal", "atlas", "krea"]) {
     const result = await prepareSeedanceOutpaint(body, { provider, apiKey: "test-fixture", prepare: async (request, url) => { assert.equal(request, body); assert.equal(url, prepared.sourceUrl); return prepared; } });
     assert.deepEqual(result.body.referenceVideoUrls, [prepared.videoUrl]);
     assert.deepEqual(result.body.referenceImageUrls, body.referenceImageUrls);
@@ -80,7 +98,7 @@ test("Seedance editing submits only the padded source with explicit border extra
 test("unsupported providers, missing keys, missing sources and blank prompts reject before generation", async () => {
   const deps = { provider: "fal", apiKey: "test-fixture", prepare: async () => prepared };
   for (const [patch, dependencies, error] of [
-    [{}, { provider: "krea" }, /supports Fal or Atlas/], [{}, { apiKey: "" }, /selected Fal/],
+    [{}, { provider: "google" }, /supports Fal, Atlas Cloud or Krea/], [{}, { apiKey: "" }, /selected Fal/],
     [{ prompt: "" }, {}, /Enter or draft/], [{ referenceVideoUrls: [] }, {}, /exactly one/],
     [{ model: "Other" }, {}, /requires the Seedance/]
   ]) await assert.rejects(prepareSeedanceOutpaint({ ...body, ...patch }, { ...deps, ...dependencies }), error);

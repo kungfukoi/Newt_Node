@@ -34,15 +34,15 @@ export function normalizeSeedance25Duration(value) {
   return Number.isInteger(seconds) && seconds >= 4 && seconds <= 30 ? String(seconds) : "auto";
 }
 
-// Same model/endpoint, different operation. Never infer editing from a prompt.
-// Fal and Atlas reference-to-video schemas verified 2026-10-06.
+// Editing is an explicit Newt task, mapped to each provider's own contract.
+// Krea infers editing from the prompt and source video (OpenAPI 2026-10-23).
 export function validateSeedance25Task({ model, seedanceTask = "reference", provider,
   videos = [], startFrames = [], endFrames = [], filmDirector } = {}) {
   const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
   if (!["reference", "edit"].includes(seedanceTask)) fail("Unknown Seedance task. Choose Generate Video or Edit Existing Video.");
   if (seedanceTask === "reference") return false;
   if (!isSeedance25Model(model)) fail("Edit Existing Video requires Seedance 2.5.");
-  if (provider && !["atlas", "fal"].includes(provider)) fail("Seedance video editing is verified for Fal and Atlas only. No provider has been changed.");
+  if (provider && !["atlas", "fal", "krea"].includes(provider)) fail("Seedance video editing requires Fal, Atlas Cloud or Krea. No provider has been changed.");
   if (!Array.isArray(videos) || videos.length !== 1) fail("Edit Existing Video requires exactly one connected Reference Video.");
   if (!Array.isArray(startFrames) || !Array.isArray(endFrames)) fail("Invalid frame inputs for Edit Existing Video.");
   if (startFrames.length || endFrames.length) fail("Edit Existing Video cannot use Start or End Frames. Connect the look reference to Reference Image instead.");

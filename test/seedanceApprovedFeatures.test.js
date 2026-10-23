@@ -25,7 +25,8 @@ test("draft and edit contracts preserve normal saved settings and reject incompa
   assert.deepEqual(node, before);
   for (const provider of ["fal", "krea", "atlas"]) assert.equal(validateSeedanceDraft({ model: node.data.model, seedanceDraft: true, provider }), true);
   for (const provider of ["", "google"]) assert.throws(() => validateSeedanceDraft({ model: node.data.model, seedanceDraft: true, provider }), /Draft mode requires/);
-  for (const patch of [{ provider: "krea" }, { videos: [] }, { startFrames: ["frame"] }, { filmDirector: {} }, { model: "Seedance 2.0" }]) assert.throws(() => validateSeedance25Task({ model: node.data.model, seedanceTask: "edit", videos: ["video"], ...patch }));
+  for (const provider of ["fal", "atlas", "krea"]) assert.equal(validateSeedance25Task({ model: node.data.model, seedanceTask: "edit", videos: ["video"], provider }), true);
+  for (const patch of [{ provider: "google" }, { videos: [] }, { startFrames: ["frame"] }, { filmDirector: {} }, { model: "Seedance 2.0" }]) assert.throws(() => validateSeedance25Task({ model: node.data.model, seedanceTask: "edit", videos: ["video"], ...patch }));
   for (const duration of [3.9, 30.1, NaN]) assert.throws(() => validateSeedance25EditDuration(duration));
   assert.equal(validateSeedance25EditDuration(30), 30);
   const atlas = buildAtlasVideoRequest({ model: node.data.model, prompt: "Repaint", seedanceTask: "edit", videos: ["https://example.com/room.mp4"], duration: "12 seconds", aspectRatio: "21:9" });

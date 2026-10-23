@@ -45,6 +45,21 @@ export function kreaSeedanceEndpoint(speed, modelName = "Seedance 2.0") {
     : "/generate/video/bytedance/seedance-2";
 }
 
+// Krea has no task/edit flag: its documented wrapper recognizes an editing
+// prompt with reference_videos and sets the source clock/ratio internally.
+export function kreaSeedanceEditInput({ prompt, resolution, sourceDurationSeconds }) {
+  if (!(sourceDurationSeconds >= 4 && sourceDurationSeconds <= 30)) throw new Error("Krea editing requires a source video between 4 and 30 seconds.");
+  const prefix = "Edit @Video1 in place. Keep the source video's duration, framing, aspect ratio and event timing.\n\n";
+  return {
+    prompt: prefix + compactKreaSeedancePrompt(prompt, kreaSeedancePromptBudget - new TextEncoder().encode(prefix).length),
+    resolution,
+    duration: sourceDurationSeconds,
+    // These valid schema values are ignored by Krea for inferred editing tasks.
+    aspect_ratio: "16:9",
+    enhance_prompt: false
+  };
+}
+
 export function kreaReferenceImageTarget(width, height, maxDimension = 2048) {
   const sourceWidth = Math.max(1, Math.round(Number(width) || 0));
   const sourceHeight = Math.max(1, Math.round(Number(height) || 0));

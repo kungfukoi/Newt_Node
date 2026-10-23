@@ -79,7 +79,7 @@ export async function inspectOutpaintMotion({ referencePath, generatedPath, plan
       full.push(await readFile(target));
     }
     report.coverage = full.every(data => data.length >= count * geometry.stride)
-      ? inspectOutpaintCoverage(full[0], full[1], geometry, count, plan.fps, { requireFullCoverage: true })
+      ? inspectOutpaintCoverage(full[0], full[1], geometry, count, plan.fps, { requireFullCoverage: true, paddingColor: plan.generationPaddingColor || "black" })
       : { status: "needs_review", missingFillFrames: count, reason: "Incomplete coverage evidence" };
     if (report.coverage.status === "needs_review") {
       report.status = "needs_review";

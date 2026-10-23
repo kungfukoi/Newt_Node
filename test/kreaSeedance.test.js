@@ -6,9 +6,21 @@ import {
   estimateKreaSeedanceCost,
   extractKreaJobResultUrl,
   kreaSeedanceEndpoint,
+  kreaSeedanceEditInput,
   kreaReferenceImageTarget,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
+
+test("Krea edit payload follows its public schema and preserves the editing instruction within the prompt budget", () => {
+  const input = kreaSeedanceEditInput({ prompt: "Extend the scene. ".repeat(500), resolution: "1080p", sourceDurationSeconds: 4.041667 });
+  assert.match(input.prompt, /^Edit @Video1 in place/);
+  assert.ok(Buffer.byteLength(input.prompt) <= 4000);
+  assert.equal(input.duration, 4.041667);
+  assert.equal(input.aspect_ratio, "16:9");
+  assert.equal(input.enhance_prompt, false);
+  assert.deepEqual(Object.keys(input).sort(), ["aspect_ratio", "duration", "enhance_prompt", "prompt", "resolution"]);
+  assert.throws(() => kreaSeedanceEditInput({ prompt: "Edit", resolution: "720p", sourceDurationSeconds: 3 }), /between 4 and 30/);
+});
 
 test("Seedance preserves legacy Fal-first routing when no explicit provider is set", () => {
   assert.equal(resolveSeedanceRuntimeProvider({ falKey: "fal", kreaKey: "krea" }), "fal");

@@ -10,7 +10,7 @@ import { createAtlasMedia } from "../server/atlas-media.js";
 import { createSeedanceDraftStore } from "../server/seedance-drafts.js";
 import { createSeedanceJobAdapter, providerKeyFingerprint } from "../server/seedance-job-provider.js";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
-import { resolveSeedanceRuntimeProvider, kreaSeedanceEndpoint, compactKreaSeedancePrompt as compactSeedancePrompt, estimateKreaSeedanceCost } from "../src/kreaSeedance.js";
+import { resolveSeedanceRuntimeProvider, kreaSeedanceEndpoint, kreaSeedanceEditInput, compactKreaSeedancePrompt as compactSeedancePrompt, estimateKreaSeedanceCost } from "../src/kreaSeedance.js";
 import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
 import { normalizeVideoGenerationResult } from "../src/nodeRunners/videoModels.js";
 import { finishSeedanceDraft } from "../src/nodeRunners/seedanceDraft.js";
@@ -38,7 +38,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
     return "https://example.test/reference";
   };
   const deps = {
-    ...seedance, ...drafts, resolveSeedanceRuntimeProvider, providerKeyFingerprint, kreaSeedanceEndpoint, compactSeedancePrompt, estimateKreaSeedanceCost, mergeSeedanceDirectorReferences, supportsAtlasVideoModel,
+    ...seedance, ...drafts, resolveSeedanceRuntimeProvider, providerKeyFingerprint, kreaSeedanceEndpoint, kreaSeedanceEditInput, compactSeedancePrompt, estimateKreaSeedanceCost, mergeSeedanceDirectorReferences, supportsAtlasVideoModel,
     prepareSeedanceOutpaint, videoOutpaintService: { prepare: async () => outpaintFixture },
     console: { error: () => {} },
     path, rootDir: "/fixture", outputsDir: "/fixture/outputs", localWorkflowAssetDirName: () => "workflow", verifyVideoOutputDestination: async () => ({}),
@@ -47,6 +47,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
     process: { env }, runtimeModelProviderPreferences: { seedance: provider },
     updateCurrentGenerationProgress: () => {}, resolveVideoModel: model => ({ displayName: model, provider: "fal-seedance-25" }),
     isLocalAssetUrl: url => url.startsWith("/outputs/"), httpError: (status, message) => Object.assign(Error(message), { status }),
+    missingModelProviderApiKeyMessage: (model, provider) => `Enable the selected ${provider} key for ${model}.`,
     providerSupportedModels: () => [], filmDirectorUsesMusic: () => false,
     firstLocalOutput: urls => urls?.[0] || "", filterFilmDirectorReferencesForOutput: refs => refs,
     normalizeReferenceNames: (labels, count, prefix = "Image") => Array.from({ length: count }, (_, i) => labels[i] || `${prefix}${i + 1}`),
@@ -71,7 +72,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
   } };
 }
 
-for (const provider of ["fal", "atlas", "krea"]) for (const mode of ["text", "image", "reference", ...(provider !== "krea" ? ["edit"] : [])]) {
+for (const provider of ["fal", "atlas", "krea"]) for (const mode of ["text", "image", "reference", "edit"]) {
   test(`${provider} ${mode} draft route uses captured credentials and 480p without a normal-price quote`, async () => {
     const h = routeHarness(provider, { rotateDuringUpload: true });
     const res = await h.run({ ...(mode === "image" ? { startFrameUrls: ["/outputs/frame.png"] } : {}),
@@ -82,17 +83,27 @@ for (const provider of ["fal", "atlas", "krea"]) for (const mode of ["text", "im
     assert.equal(h.spec.credentialFingerprint, providerKeyFingerprint(`${provider}-key`));
     assert.ok(h.uploads.every(upload => upload.key === `${provider}-key`));
     assert.equal(h.spec.cost.amountUsd, null); assert.match(h.spec.cost.pricingBasis, new RegExp(drafts.seedanceDraftProviderName(provider)));
-    if (mode === "edit") assert.equal(h.spec.input[provider === "atlas" ? "omni_reference_task_type" : "task"], provider === "atlas" ? "edit" : "editing");
+    if (mode === "edit" && provider !== "krea") assert.equal(h.spec.input[provider === "atlas" ? "omni_reference_task_type" : "task"], provider === "atlas" ? "edit" : "editing");
+    if (provider === "krea") {
+      assert.equal(h.spec.input.generate_audio, undefined);
+      if (mode === "edit") {
+        assert.match(h.spec.input.prompt, /^Edit @Video1 in place/);
+        assert.equal(h.spec.input.duration, 10);
+        assert.equal(h.spec.input.enhance_prompt, false);
+        assert.equal(h.spec.input.task, undefined);
+        assert.equal(h.spec.submittedPrompt, h.spec.input.prompt);
+      }
+    }
   });
 }
 
-test("selected draft providers with missing keys never fall back; Krea editing rejects before uploads", async () => {
+test("selected draft providers with missing keys never fall back", async () => {
   for (const provider of ["fal", "atlas", "krea"]) {
     const h = routeHarness(provider, { missingKey: true });
     assert.equal((await h.run()).statusCode, 400); assert.equal(h.spec, undefined); assert.equal(h.uploads.length, 0);
   }
-  const h = routeHarness("krea");
-  assert.equal((await h.run({ seedanceTask: "edit", referenceVideoUrls: ["/outputs/clip.mp4"] })).statusCode, 400);
+  const h = routeHarness("krea", { missingKey: true });
+  assert.equal((await h.run({ seedanceDraft: false, seedanceTask: "edit", referenceVideoUrls: ["/outputs/clip.mp4"] })).statusCode, 400);
   assert.equal(h.spec, undefined); assert.equal(h.uploads.length, 0);
 });
 
@@ -122,8 +133,8 @@ test("older automatic QC retry requests are rejected before uploads or provider 
   assert.equal(h.uploads.length, 0); assert.equal(h.spec, undefined);
 });
 
-test("outpainting reuses real Fal/Atlas editing acceptance with source canvas, scene instructions and durable context", async () => {
-  for (const provider of ["fal", "atlas"]) {
+test("outpainting reuses Fal/Atlas/Krea editing acceptance with source canvas, scene instructions and durable context", async () => {
+  for (const provider of ["fal", "atlas", "krea"]) {
     const h = routeHarness(provider);
     const res = await h.run({ videoOutpaintUtility: true, videoOutpaint: { model: "seedance-2.5" }, referenceVideoUrls: [outpaintFixture.sourceUrl], seedanceDraft: false, prompt: "Continue the floor" });
     assert.equal(res.statusCode, 202);
@@ -137,7 +148,13 @@ test("outpainting reuses real Fal/Atlas editing acceptance with source canvas, s
     assert.ok(h.uploads.some(upload => upload.url === outpaintFixture.videoUrl));
     assert.ok(h.uploads.every(upload => upload.url !== outpaintFixture.maskVideoUrl));
     if (provider === "fal") assert.equal(h.spec.input.task, "editing");
-    else assert.equal(h.spec.input.omni_reference_task_type, "edit");
+    else if (provider === "atlas") assert.equal(h.spec.input.omni_reference_task_type, "edit");
+    else {
+      assert.match(h.spec.input.prompt, /^Edit @Video1 in place/);
+      assert.ok(h.spec.input.reference_videos.length === 1);
+      assert.equal(h.spec.input.generate_audio, undefined);
+      assert.equal(h.spec.settings.seedanceTask, "edit");
+    }
   }
 });
 

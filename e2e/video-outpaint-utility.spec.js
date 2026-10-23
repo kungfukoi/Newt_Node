@@ -141,7 +141,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
     const settings = normalizeVideoOutpaintSettings(preparation.videoOutpaint);
-    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskImageUrl: "/outputs/e2e/mask.png", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) } });
+    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", generationVideoUrl: "/outputs/e2e/gray-conditioned.mp4", maskImageUrl: "/outputs/e2e/mask.png", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: { ...planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings), generationPaddingColor: "gray" } } });
   });
   await page.route("**/api/node/video-outpaint-prompt", route => {
     analysis = route.request().postDataJSON();
@@ -172,6 +172,8 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
   await expect(prompt).toHaveValue("Extend the floor and moving shadows into the padded regions.");
   expect(analysis.outpaintModel).toBe("seedance-2.5");
+  expect(analysis.sourceVideoUrl).toBe("/outputs/e2e/gray-conditioned.mp4");
+  expect(analysis.preparedPlan.generationPaddingColor).toBe("gray");
   expect(analysis.referenceImageUrls).toEqual(["/outputs/e2e/framing.png"]);
   expect(analysis.maskImageUrl).toBe("/outputs/e2e/mask.png");
   expect(analysis.preparedPlan.outputFrames).toBe(40);

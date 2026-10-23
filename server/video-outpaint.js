@@ -56,17 +56,15 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const mt = top > 0 ? Math.min(overlap, Math.floor(sourceHeight / 2) - 1) : 0;
     const mb = top + sourceHeight < height ? Math.min(overlap, Math.floor(sourceHeight / 2) - 1) : 0;
     let generationVideo;
-    if (maskIsImage && ml + mr + mt + mb > 0) {
+    if (maskIsImage) {
+      plan.generationPaddingColor = "gray";
       plan.generationOverlap = { left: ml, right: mr, top: mt, bottom: mb };
       plan.generationContentRect = { x: left + ml, y: top + mt, width: sourceWidth - ml - mr, height: sourceHeight - mt - mb };
       generationVideo = await createTarget(body, "outpaint-generation-canvas", ".mp4", true);
-      const bands = [
-        ml && `drawbox=x=${left}:y=${top}:w=${ml}:h=${sourceHeight}:color=black:t=fill`,
-        mr && `drawbox=x=${left + sourceWidth - mr}:y=${top}:w=${mr}:h=${sourceHeight}:color=black:t=fill`,
-        mt && `drawbox=x=${left}:y=${top}:w=${sourceWidth}:h=${mt}:color=black:t=fill`,
-        mb && `drawbox=x=${left}:y=${top + sourceHeight - mb}:w=${sourceWidth}:h=${mb}:color=black:t=fill`
-      ].filter(Boolean);
-      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", bands.join(","), "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare inward generation overlap", 120000);
+      const { x: cx, y: cy, width: cw, height: ch } = plan.generationContentRect;
+      const regions = [[0, 0, width, cy], [0, cy + ch, width, height - cy - ch], [0, cy, cx, ch], [cx + cw, cy, width - cx - cw, ch]];
+      const bands = regions.filter(([, , w, h]) => w > 0 && h > 0).map(([x, y, w, h]) => `drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=0x7f7f7f:t=fill`);
+      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", bands.join(",") || "null", "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare Seedance gray padding and inward overlap", 120000);
       if ((await statFile(generationVideo.filePath)).size > 200 * 1024 * 1024) throw new Error("The generation canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment.");
     }
     await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=white:s=${width}x${height}:r=${fps}`, "-vf", `drawbox=x=${left + ml}:y=${top + mt}:w=${sourceWidth - ml - mr}:h=${sourceHeight - mt - mb}:color=black:t=fill`, "-frames:v", maskIsImage ? "1" : String(frames), ...(maskIsImage ? [] : [...encode, "-crf", "0"]), mask.filePath], "Prepare local outpaint mask", 120000);

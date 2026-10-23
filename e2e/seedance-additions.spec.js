@@ -52,8 +52,8 @@ for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish
   expect(errors).toEqual([]);
 });
 
-test("editing sends the explicit task and restores saved duration and framing", async ({ page }) => {
-  const { errors } = await setup(page, "fal", true);
+for (const provider of ["fal", "krea"]) test(`${provider} editing sends the explicit task and restores saved duration and framing`, async ({ page }) => {
+  const { errors } = await setup(page, provider, true);
   const video = card(page);
   await expect(video.getByLabel("Seedance duration")).toHaveValue("source-video");
   await expect(video.getByLabel("Seedance aspect ratio")).toHaveValue("source-video");
@@ -69,10 +69,10 @@ test("editing sends the explicit task and restores saved duration and framing", 
   expect(errors).toEqual([]);
 });
 
-test("Krea can enable drafts but cannot run a saved edit", async ({ page }) => {
+test("Krea enables both drafts and saved edits", async ({ page }) => {
   const { errors } = await setup(page, "krea", true);
   await expect(card(page).getByLabel("Seedance Draft mode")).toBeEnabled();
-  await expect(card(page).locator(".run-node-button").first()).toBeDisabled();
+  await expect(card(page).locator(".run-node-button").first()).toBeEnabled();
   expect(errors).toEqual([]);
 });
 

@@ -99,6 +99,10 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const seedancePrepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", outputSize: "720p", feather: 0 } }, short);
     assert.equal(seedancePrepared.plan.frames, 97); assert.equal((await probe(seedancePrepared.videoUrl)).frames, 97);
     assert.equal(seedancePrepared.plan.prerollFrames, 0);
+    assert.equal(seedancePrepared.plan.generationPaddingColor, "gray");
+    assert.equal((await probe(seedancePrepared.generationVideoUrl)).frames, 97);
+    assert.ok((await pixel(360, 10, seedancePrepared.generationVideoUrl)).every(v => Math.abs(v - 127) <= 3), "Seedance submitted padding must be RGB 127 gray, including zero-feather preparations");
+    assert.ok((await pixel(360, 10, seedancePrepared.videoUrl)).every(v => v < 10), "Original padded source stays available for comparison");
     const seedanceOutput = await service.finish({}, seedancePrepared, { filePath: seedanceGenerated });
     const seedanceInfo = await probe(seedanceOutput.filePath);
     assert.equal(seedanceInfo.frames, 40); assert.ok(Math.abs(seedanceInfo.duration - 40 / 24) < 0.001);
@@ -115,6 +119,10 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     assert.equal(unfilled.matching.motionValidation.flaggedFrames, 0, "Identical source frames must pass correspondence");
     assert.equal(unfilled.matching.motionValidation.coverage.missingFillFrames, 40);
     assert.equal(unfilled.matching.motionValidation.status, "needs_review", "Preserving black padding must not pass merely because source motion matches");
+    const grayUnfilled = await service.finish({}, seedancePrepared, { filePath: seedancePrepared.generationVideoUrl });
+    assert.equal(grayUnfilled.matching.motionValidation.flaggedFrames, 0);
+    assert.equal(grayUnfilled.matching.motionValidation.coverage.missingFillFrames, 40);
+    assert.equal(grayUnfilled.matching.motionValidation.status, "needs_review", "Preserving the new gray padding must not pass the output gate");
     const { stdout: heldPixel } = await execute(ffmpeg, ["-v", "error", "-ss", "3", "-i", seedancePrepared.videoUrl, "-vf", `crop=2:2:${seedancePrepared.plan.width / 2}:${seedancePrepared.plan.height / 2},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
     assert.ok(heldPixel[1] > 200 && heldPixel[0] < 20, "Model submission repeats the shot instead of holding its last frame.");
     const insufficient = { ...seedancePrepared, plan: { ...seedancePrepared.plan, outputFrames: 96, outputDuration: 4 } };

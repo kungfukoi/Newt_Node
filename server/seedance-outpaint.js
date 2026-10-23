@@ -9,8 +9,8 @@ export async function prepareSeedanceOutpaint(body, { provider, apiKey, prepare 
   const prompt = String(body.prompt || "");
   if (prepared.plan.needsOutpaint) {
     // Preparation is local; validate the selected route before any provider upload.
-    if (!["fal", "atlas"].includes(provider)) throw Object.assign(new Error("Seedance outpainting supports Fal or Atlas. Select one in Settings > Model Providers > Seedance."), { status: 400 });
-    if (!apiKey) throw Object.assign(new Error(`Enable the selected ${provider === "fal" ? "Fal" : "Atlas Cloud"} key for Seedance outpainting.`), { status: 400 });
+    if (!["fal", "atlas", "krea"].includes(provider)) throw Object.assign(new Error("Seedance outpainting supports Fal, Atlas Cloud or Krea. Select one in Settings > Model Providers > Seedance."), { status: 400 });
+    if (!apiKey) throw Object.assign(new Error(`Enable the selected ${{ fal: "Fal", atlas: "Atlas Cloud", krea: "Krea" }[provider]} key for Seedance outpainting.`), { status: 400 });
     if (!prompt.trim()) throw Object.assign(new Error("Enter or draft an outpainting prompt before Run."), { status: 400 });
   }
   const referenceImageCount = (body.referenceImageUrls || []).length;

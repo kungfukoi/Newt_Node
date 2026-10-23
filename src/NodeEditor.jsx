@@ -16336,7 +16336,7 @@ function NodeBody({
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
   const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
   const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(seedanceProvider);
-  const editingUnavailable = seedanceEditing && (!["fal", "atlas"].includes(seedanceProvider) || directorConnected);
+  const editingUnavailable = seedanceEditing && (!["fal", "atlas", "krea"].includes(seedanceProvider) || directorConnected);
   const selectedDraft = selectedSeedanceDraft(node.data);
   const previewOnlyDraft = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft?.completionSupported === false;
   const draftProviderName = seedanceDraftProviderName(selectedDraft?.seedanceDraft.provider);
@@ -16443,7 +16443,7 @@ function NodeBody({
           </select></NodeRow>
           {!supportsSeedanceDraft(seedanceProvider) && <small role="status">Enable Fal, Atlas Cloud or Krea for Seedance in Settings before running a draft.</small>}
           {directorConnected && <small role="status">Draft mode is controlled by the connected Director.</small>}
-          {editingUnavailable && <small role="status">Editing requires Fal or Atlas and no connected Director.</small>}
+          {editingUnavailable && <small role="status">Editing requires Fal, Atlas Cloud or Krea and no connected Director.</small>}
         </>}
         <NodeRow label="Model">
           <select value={node.data.model} disabled={Boolean(directorSettings?.videoModel)} title={directorSettings?.videoModel ? "Controlled by Director" : undefined} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
