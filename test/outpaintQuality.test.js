@@ -30,6 +30,17 @@ test("QC never permits regeneration, including observed structural or timing def
   assert.equal(Boolean(outpaintCanRegenerate({ warning: "Visual QC could not complete" })), false);
   assert.equal(outpaintCanRegenerate({ warning: "Generated timing does not cover the source segment" }), false);
 });
+
+test("explicit full-repeat debug output remains viewable despite retained fill defects", () => {
+  const matching = { finishVersion: 3, repeatOutput: "all", motionValidation: { status: "needs_review" } };
+  assert.equal(outpaintNeedsFinishing({ videoOutpaint: { qc: { status: "off" }, matching } }), false);
+  assert.equal(outpaintNeedsFinishing({ videoOutpaint: { qc: { status: "off" }, matching: { ...matching, repeatOutput: "last" } } }), true);
+  assert.equal(outpaintNeedsFinishing({ videoOutpaint: { matching: { repeatOutput: "all" } } }), true);
+  const nodes = [{ id: "u", type: "utility", data: { utilityMode: "video", utilityVideoModel: "Video Outpaint" } }, { id: "o", type: "output", data: { resultUrl: "/previous.mp4" } }];
+  const jobs = [{ runId: "debug", nodeId: "u", groupId: "g", batchIndex: 1, createdAt: "2026-10-23", state: "completed", outputTargetNodeId: "o", result: { video: { localUrl: "/debug.mp4" }, videoOutpaint: { qc: { status: "off" }, matching }, warning: "Debug output retains fill defects" } }];
+  const patches = recoveredVideoPatches(nodes, jobs, new Set(), [{ from: { nodeId: "u" }, to: { nodeId: "o" } }]);
+  assert.equal(patches.find(p => p.nodeId === "o").patch.resultUrl, "/debug.mp4");
+});
 test("durable recovery retains a rejected candidate on its producer and does not replace Output", () => {
   const nodes = [{ id: "u", type: "utility", data: { utilityMode: "video", utilityVideoModel: "Video Outpaint" } }, { id: "o", type: "output", data: { resultUrl: "/previous.mp4" } }];
   const jobs = [{ runId: "r", nodeId: "u", groupId: "g", batchIndex: 1, createdAt: "2026-10-21", state: "completed", outputTargetNodeId: "o", result: { video: { localUrl: "/candidate.mp4" }, videoOutpaint: { qc: { status: "needs_review" } }, warning: "Seam remains" } }];

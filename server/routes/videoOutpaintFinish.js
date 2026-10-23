@@ -7,8 +7,8 @@ export function registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service
       if (!isLocalAssetUrl(rawVideoUrl) || !isLocalAssetUrl(previous?.sourceUrl) || !previous?.plan?.settings) return res.status(400).json({ error: "Select a local outpaint result with its original preparation metadata." });
       // Rebuild geometry server-side; finishing controls must never reinterpret an
       // existing generation using a newly edited crop, model, duration or resolution.
-      const { restoreSource, feather, autoMatch, finalQc, visualQc } = req.body.videoOutpaint || {};
-      const finishing = Object.fromEntries(Object.entries({ restoreSource, feather, autoMatch, finalQc, visualQc }).filter(([, value]) => value !== undefined));
+      const { restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats } = req.body.videoOutpaint || {};
+      const finishing = Object.fromEntries(Object.entries({ restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats }).filter(([, value]) => value !== undefined));
       const prepared = await service.prepare({ ...req.body, videoOutpaint: { ...previous.plan.settings, ...finishing } }, previous.sourceUrl, { prerollFrames: previous.plan.prerollFrames || 0, frames: previous.plan.frames });
       const raw = await resolveAsset(rawVideoUrl), native = await probeVideo(raw.filePath);
       const output = await service.finish(req.body, prepared, raw), metadata = await probeVideo(output.filePath);

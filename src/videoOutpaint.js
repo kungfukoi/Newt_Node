@@ -13,6 +13,7 @@ export function normalizeVideoOutpaintSettings(value = {}) {
     model,
     seedanceResolution,
     repeatCount: model === "seedance-2.5" ? Math.round(bounded(value.repeatCount, 1, 30, 1)) : 1,
+    keepAllRepeats: model === "seedance-2.5" && value.keepAllRepeats !== false,
     aspectRatio: videoOutpaintRatios.includes(value.aspectRatio) ? value.aspectRatio : "9:16",
     frame: normalizeOutpaintFrame(value.frame),
     start: bounded(value.start, 0, 86400, 0),
@@ -33,7 +34,7 @@ export function normalizeUtilityOutpaintSettings(value = {}) {
 }
 export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "") {
   const normalized = normalizeVideoOutpaintSettings(settings);
-  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v15-seedance-gray" : "outpaint-canvas-v14-frame-grid", sourceUrl, normalized, canvasVideoUrl]);
+  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v16-seedance-green" : "outpaint-canvas-v14-frame-grid", sourceUrl, normalized, canvasVideoUrl]);
 }
 export function planVideoOutpaint(metadata, options = {}) {
   const settings = normalizeVideoOutpaintSettings(options);
@@ -82,18 +83,19 @@ export function seedanceOutpaintRequest(body) {
 
 export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], overlapWidth = 0, preparedPlan = null, referenceImageCount = 0) {
   if (!repair) {
-    const paddingColor = preparedPlan?.generationPaddingColor === "gray" ? "gray" : "black";
+    const paddingColor = ["gray", "green"].includes(preparedPlan?.generationPaddingColor) ? preparedPlan.generationPaddingColor : "black";
+    const colorDescription = paddingColor === "green" ? " (chroma green, #00FF00 / RGB 0, 255, 0)" : paddingColor === "gray" ? " (neutral gray, #7F7F7F / RGB 127, 127, 127)" : "";
     const rect = preparedPlan?.generationContentRect || (preparedPlan ? { x: preparedPlan.left, y: preparedPlan.top, width: preparedPlan.sourceWidth, height: preparedPlan.sourceHeight } : null);
     const regions = rect ? [rect.y > 0 && "top", rect.y + rect.height < preparedPlan.height && "bottom", rect.x > 0 && "left", rect.x + rect.width < preparedPlan.width && "right"].filter(Boolean) : [];
     const location = regions.length ? ` The ${regions.join(" and ")} ${paddingColor} bands are the areas to outpaint.` : "";
     return [
-      `Edit @Video1. The first output frame at t=0 is the already completed full-canvas shot. Replace all ${paddingColor} padding${paddingColor === "gray" ? " (neutral gray, #7F7F7F / RGB 127, 127, 127)" : ""} around the picture with a seamless continuation of the visible scene.` + location + ` These bands are missing image content, not letterboxing to preserve. Generate new scene imagery throughout these entire areas; the finished video must reach every canvas edge with no ${paddingColor} bars. Fill the padded areas completely throughout the clip, starting at frame one.`,
+      `Edit @Video1. The first output frame at t=0 is the already completed full-canvas shot. Replace all ${paddingColor} padding${colorDescription} around the picture with a seamless continuation of the visible scene.` + location + ` These bands are missing image content, not letterboxing to preserve. Generate new scene imagery throughout these entire areas; the finished video must reach every canvas edge with no ${paddingColor} bars. Fill the padded areas completely throughout the clip, starting at frame one.`,
       ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
       String(prompt || "").trim(),
-      `Preserve the existing picture content, people, camera, action and timing, but do not preserve its ${paddingColor} padding. Continue the scene naturally across the joins. Keep real dark objects${paddingColor === "gray" ? " and real gray objects inside the source picture" : ""}; replace only the padding.`,
+      `Preserve the existing picture content, people, camera, action and timing, but do not preserve its ${paddingColor} padding. Continue the scene naturally across the joins. Keep real dark objects${paddingColor !== "black" ? ` and real ${paddingColor} objects inside the source picture` : ""}; replace only the padding.`,
       ...(preparedPlan && rect ? [`SPATIAL LOCK: Canvas ${preparedPlan.width}x${preparedPlan.height}. The visible source core occupies x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height} pixels. Keep every source feature at its original coordinates in every frame. Do not shift, resize, zoom, crop, recenter or recompose the existing picture to fit a whole person or object. Generate outward from these fixed edges; never move the source to make room. These coordinates are constraints, not marks to draw.`] : []),
       "SAME-FRAME ATTACHMENT: At every frame, extend each boundary-crossing limb, garment or prop from its visible attachment in that exact source frame, at the same position, angle, scale and velocity. Continue existing rigid props along their visible axes and outlines; never erase them. Legs follow the existing hips and clothing, never a separately invented walking cycle. Before entry and after exit or occlusion, extend background only. Source evidence overrides conflicting timing or action in the description. No retiming, new action, motion interpolation, camera change or independent movement. Cloned leading and trailing source frames stay motionless. Reference images guide appearance, never motion.",
-      paddingColor === "gray" ? outpaintFrameOneRule.replace("Black padding", "Gray padding").replace("black-padded", "gray-padded") : outpaintFrameOneRule
+      outpaintFrameOneRule.replace("Black padding", `${paddingColor[0].toUpperCase() + paddingColor.slice(1)} padding`).replace("black-padded", `${paddingColor}-padded`)
     ].filter(Boolean).join("\n\n");
   }
   if (repair && Array.isArray(findings) && findings.length) {

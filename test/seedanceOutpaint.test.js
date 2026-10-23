@@ -11,7 +11,18 @@ const settings = { model: "seedance-2.5", seedanceResolution: "1080p" };
 const prepared = { sourceUrl: "/outputs/source.mp4", videoUrl: "/outputs/padded.mp4", maskVideoUrl: "/outputs/mask.mp4", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings) };
 const body = seedanceOutpaintRequest({ prompt: "Continue the moving foliage", referenceVideoUrls: [prepared.sourceUrl], referenceImageUrls: ["/outputs/look.png"], videoOutpaint: settings, wanVaceInpainting: { seed: "42" }, projectId: "project", nodeId: "node" });
 
-test("Seedance gray conditioning and analysis name RGB 127 padding while legacy plans keep black wording", async () => {
+test("Seedance green conditioning and analysis name #00FF00 while retaining old gray and black plans", async () => {
+  const green = { ...prepared, generationVideoUrl: "/outputs/green.mp4", plan: { ...prepared.plan, generationPaddingColor: "green" } };
+  const current = await prepareSeedanceOutpaint(body, { provider: "krea", apiKey: "fixture", prepare: async () => green });
+  assert.deepEqual(current.body.referenceVideoUrls, [green.generationVideoUrl]);
+  assert.match(current.body.prompt, /Replace all green padding \(chroma green, #00FF00 \/ RGB 0, 255, 0\)/);
+  assert.match(current.body.prompt, /real green objects inside the source picture/);
+  assert.match(current.body.prompt, /Green padding identifies input pixels/);
+  assert.doesNotMatch(current.body.prompt, /gray padding|black padding|black-padded/);
+  const greenAnalysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: green.plan });
+  assert.match(greenAnalysis, /solid green padding \(#00FF00 \/ RGB 0, 255, 0\)/);
+  assert.doesNotMatch(greenAnalysis, /solid black padding|gray padding|black-padded|black bars/);
+  assert.equal(JSON.parse(videoOutpaintFingerprint("source", settings))[0], "outpaint-canvas-v16-seedance-green");
   const gray = { ...prepared, generationVideoUrl: "/outputs/gray.mp4", plan: { ...prepared.plan, generationPaddingColor: "gray" } };
   const result = await prepareSeedanceOutpaint(body, { provider: "fal", apiKey: "fixture", prepare: async () => gray });
   assert.deepEqual(result.body.referenceVideoUrls, [gray.generationVideoUrl]);

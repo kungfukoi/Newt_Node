@@ -1,4 +1,4 @@
-// Detect flat black padding or the selected Seedance RGB 127 gray padding,
+// Detect flat black padding or the selected Seedance gray/green padding,
 // not arbitrary source objects. Require contiguous outer-edge matching lines.
 export function inspectOutpaintCoverage(reference, generated, g, frames, fps, { requireFullCoverage = false, paddingColor = "black" } = {}) {
   const s = g.source;
@@ -24,7 +24,8 @@ export function inspectOutpaintCoverage(reference, generated, g, frames, fps, { 
         for (let p = 2; p < region.length - 2; p += 2) {
           const [x, y] = region.point(line, p), i = f * g.stride + (y * g.width + x) * 3;
           const emptyGray = paddingColor === "gray" && [generated[i], generated[i + 1], generated[i + 2]].every(value => Math.abs(value - 127) <= 4);
-          if (emptyGray || generated[i] < 10 && generated[i + 1] < 10 && generated[i + 2] < 10) black++;
+          const emptyGreen = paddingColor === "green" && generated[i] <= 8 && generated[i + 1] >= 247 && generated[i + 2] <= 8;
+          if (emptyGray || emptyGreen || generated[i] < 10 && generated[i + 1] < 10 && generated[i + 2] < 10) black++;
           samples++;
         }
         if (black / samples < 0.98) break;

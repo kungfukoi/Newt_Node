@@ -6,7 +6,7 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
     { id: "outpaint", type: "utility", x: 550, y: 20, data: { utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "manual", prompt: "A continuous landscape" } }
   ], edges: [{ id: "canvas-wire", from: { nodeId: "canvas", port: "videoOut" }, to: { nodeId: "outpaint", port: "canvasVideoIn" } }], groups: [], viewport: { x: 10, y: 10, scale: 0.8 } })); });
   const { errors } = await openFixture(page, { count: 2 });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, videoOutpaintSeedanceRepeats: true, seedanceVideoEditing: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintSuppliedCanvas: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintMatching: true, videoOutpaintSeedance: true, videoOutpaintSeedanceRepeats: true, videoOutpaintSeedanceAllRepeats: true, seedanceVideoEditing: true } } }));
   let preparation, generation;
   const generations = [];
   await page.route("**/api/node/video-outpaint-prepare", route => {
@@ -27,6 +27,8 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
   await repeats.fill("3");
   await repeats.press("ArrowDown");
   await expect(repeats).toHaveValue("2");
+  const debug = node.getByRole("checkbox", { name: "Keep all outpaint repeats for debugging" });
+  await expect(debug).toBeChecked();
   await node.getByRole("button", { name: "Prepare supplied canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
   expect(preparation.canvasVideoUrl).toBe("/outputs/e2e/source.mp4");
@@ -37,6 +39,7 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
   await expect.poll(() => generations.length).toBe(2);
   expect(new Set(generations.map(item => item.generationRunId)).size).toBe(2);
   expect(generations.every(item => item.videoOutpaint.repeatCount === 2)).toBe(true);
+  expect(generations.every(item => item.videoOutpaint.keepAllRepeats === true)).toBe(true);
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.length)).toBe(2);
   expect(generation.referenceVideoUrls).toEqual([]);
   expect(generation.videoOutpaint.repeatCount).toBe(2);
@@ -44,6 +47,9 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
   await expect(node.getByRole("button", { name: "Prepare supplied canvas & mask" })).toBeVisible();
   await expect(repeats).toHaveValue("2");
   await expect(count).toHaveValue("2");
+  await expect(debug).toBeChecked();
+  await debug.uncheck();
+  await expect(node.getByText("Submit 2 copies; keep copy 2.", { exact: false })).toBeVisible();
   expect(errors).toEqual([]);
 });
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
@@ -159,7 +165,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   await page.route("**/api/node/video-outpaint-prepare", route => {
     preparation = route.request().postDataJSON();
     const settings = normalizeVideoOutpaintSettings(preparation.videoOutpaint);
-    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", generationVideoUrl: "/outputs/e2e/gray-conditioned.mp4", maskImageUrl: "/outputs/e2e/mask.png", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: { ...planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings), generationPaddingColor: "gray" } } });
+    return route.fulfill({ json: { sourceUrl: preparation.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", generationVideoUrl: "/outputs/e2e/green-conditioned.mp4", maskImageUrl: "/outputs/e2e/mask.png", previewUrl: "/outputs/e2e/framing.png", fingerprint: videoOutpaintFingerprint(preparation.sourceVideoUrl, settings), plan: { ...planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1.666667 }, settings), generationPaddingColor: "green" } } });
   });
   await page.route("**/api/node/video-outpaint-prompt", route => {
     analysis = route.request().postDataJSON();
@@ -190,8 +196,8 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
   await expect(prompt).toHaveValue("Extend the floor and moving shadows into the padded regions.");
   expect(analysis.outpaintModel).toBe("seedance-2.5");
-  expect(analysis.sourceVideoUrl).toBe("/outputs/e2e/gray-conditioned.mp4");
-  expect(analysis.preparedPlan.generationPaddingColor).toBe("gray");
+  expect(analysis.sourceVideoUrl).toBe("/outputs/e2e/green-conditioned.mp4");
+  expect(analysis.preparedPlan.generationPaddingColor).toBe("green");
   expect(analysis.referenceImageUrls).toEqual(["/outputs/e2e/framing.png"]);
   expect(analysis.maskImageUrl).toBe("/outputs/e2e/mask.png");
   expect(analysis.preparedPlan.outputFrames).toBe(40);

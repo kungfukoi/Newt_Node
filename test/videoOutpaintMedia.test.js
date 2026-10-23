@@ -99,9 +99,10 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const seedancePrepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", outputSize: "720p", feather: 0 } }, short);
     assert.equal(seedancePrepared.plan.frames, 97); assert.equal((await probe(seedancePrepared.videoUrl)).frames, 97);
     assert.equal(seedancePrepared.plan.prerollFrames, 0);
-    assert.equal(seedancePrepared.plan.generationPaddingColor, "gray");
+    assert.equal(seedancePrepared.plan.generationPaddingColor, "green");
     assert.equal((await probe(seedancePrepared.generationVideoUrl)).frames, 97);
-    assert.ok((await pixel(360, 10, seedancePrepared.generationVideoUrl)).every(v => Math.abs(v - 127) <= 3), "Seedance submitted padding must be RGB 127 gray, including zero-feather preparations");
+    const greenPadding = await pixel(360, 10, seedancePrepared.generationVideoUrl);
+    assert.ok(greenPadding[0] <= 8 && greenPadding[1] >= 247 && greenPadding[2] <= 8, `Seedance submitted padding must be RGB 0, 255, 0, including zero-feather preparations: ${greenPadding}`);
     assert.ok((await pixel(360, 10, seedancePrepared.videoUrl)).every(v => v < 10), "Original padded source stays available for comparison");
     const seedanceOutput = await service.finish({}, seedancePrepared, { filePath: seedanceGenerated });
     const seedanceInfo = await probe(seedanceOutput.filePath);
@@ -119,13 +120,13 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     assert.equal(unfilled.matching.motionValidation.flaggedFrames, 0, "Identical source frames must pass correspondence");
     assert.equal(unfilled.matching.motionValidation.coverage.missingFillFrames, 40);
     assert.equal(unfilled.matching.motionValidation.status, "needs_review", "Preserving black padding must not pass merely because source motion matches");
-    const grayUnfilled = await service.finish({}, seedancePrepared, { filePath: seedancePrepared.generationVideoUrl });
-    assert.equal(grayUnfilled.matching.motionValidation.flaggedFrames, 0);
-    assert.equal(grayUnfilled.matching.motionValidation.coverage.missingFillFrames, 40);
-    assert.equal(grayUnfilled.matching.motionValidation.status, "needs_review", "Preserving the new gray padding must not pass the output gate");
+    const greenUnfilled = await service.finish({}, seedancePrepared, { filePath: seedancePrepared.generationVideoUrl });
+    assert.equal(greenUnfilled.matching.motionValidation.flaggedFrames, 0);
+    assert.equal(greenUnfilled.matching.motionValidation.coverage.missingFillFrames, 40);
+    assert.equal(greenUnfilled.matching.motionValidation.status, "needs_review", "Preserving the new green padding must not pass the output gate");
     const { stdout: heldPixel } = await execute(ffmpeg, ["-v", "error", "-ss", "3", "-i", seedancePrepared.videoUrl, "-vf", `crop=2:2:${seedancePrepared.plan.width / 2}:${seedancePrepared.plan.height / 2},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
     assert.ok(heldPixel[1] > 200 && heldPixel[0] < 20, "Model submission repeats the shot instead of holding its last frame.");
-    const repeated = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", repeatCount: 2, feather: 0 } }, short);
+    const repeated = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", repeatCount: 2, keepAllRepeats: false, feather: 0 } }, short);
     assert.equal(repeated.plan.prerollFrames, 40);
     assert.equal((await probe(repeated.generationVideoUrl)).frames, repeated.plan.frames);
     for (const [frame, channel] of [[0, 0], [19, 0], [20, 1], [39, 1], [40, 0], [59, 0], [60, 1], [79, 1], [96, 1]]) {
@@ -145,6 +146,29 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const unrestored = { ...repeated, plan: { ...repeated.plan, settings: { ...repeated.plan.settings, restoreSource: false } } };
     const unrestoredOutput = await service.finish({}, unrestored, { filePath: seedanceGenerated });
     assert.ok((await firstPixel(240, 10, unrestoredOutput.filePath))[2] > 200, "Final-copy trimming must also work without restoration");
+    const debug = { ...repeated, plan: { ...repeated.plan, settings: { ...repeated.plan.settings, keepAllRepeats: true } } };
+    const fullGenerated = path.join(directory, "full-generated.mp4");
+    await run(["-y", "-i", seedanceGenerated, "-vf", "tpad=stop_mode=clone:stop_duration=1", "-frames:v", String(debug.plan.frames), "-c:v", "libx264", "-pix_fmt", "yuv420p", fullGenerated]);
+    const debugOutput = await service.finish({}, debug, { filePath: fullGenerated });
+    const debugInfo = await probe(debugOutput.filePath);
+    assert.equal(debugInfo.frames, debug.plan.frames);
+    assert.ok(Math.abs(debugInfo.audioDuration - debug.plan.duration) < 0.01);
+    assert.equal(debugOutput.matching.repeatOutput, "all");
+    assert.equal(debugOutput.matching.motionValidation.framesChecked, debug.plan.frames);
+    assert.ok((await firstPixel(240, 10, debugOutput.filePath))[1] > 200, "Debug must preserve the first pass's green reveal rather than seek to pass two");
+    for (const [frame, channel] of [[0, 0], [20, 1], [40, 0], [60, 1], [79, 1], [96, 1]]) {
+      const { stdout } = await execute(ffmpeg, ["-v", "error", "-i", debugOutput.filePath, "-vf", `select=eq(n\\,${frame}),crop=2:2:240:426,format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
+      assert.ok(stdout[channel] > 200, `Debug restoration must repeat the original source at frame ${frame}: ${[...stdout.subarray(0, 3)]}`);
+    }
+    const debugUnrestored = { ...debug, plan: { ...debug.plan, settings: { ...debug.plan.settings, restoreSource: false } } };
+    const debugUnrestoredOutput = await service.finish({}, debugUnrestored, { filePath: fullGenerated });
+    assert.equal((await probe(debugUnrestoredOutput.filePath)).frames, debug.plan.frames);
+    assert.ok((await firstPixel(240, 10, debugUnrestoredOutput.filePath))[1] > 200);
+    const debugSilent = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", start: 2.5, repeatCount: 2, feather: 0 } }, split);
+    const debugSilentOutput = await service.finish({}, debugSilent, { filePath: fullGenerated });
+    const debugSilentInfo = await probe(debugSilentOutput.filePath);
+    assert.equal(debugSilentInfo.frames, debugSilent.plan.frames);
+    assert.equal(debugSilentInfo.audio, false, "Debug repeats with a nonzero start must support silent source clips");
     const insufficient = { ...seedancePrepared, plan: { ...seedancePrepared.plan, outputFrames: 96, outputDuration: 4 } };
     await assert.rejects(service.finish({}, insufficient, { filePath: seedanceGenerated }), /does not cover/);
     const graySource = path.join(directory, "gray-source.mp4"), grayGenerated = path.join(directory, "gray-generated.mp4");
