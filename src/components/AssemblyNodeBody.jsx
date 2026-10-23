@@ -858,6 +858,7 @@ export function AssemblyNodeBody({
       ref={rootRef}
       onDragEndCapture={() => { setDragTargetTrackId(""); setReplacementClipId(""); }}
       className="node-body assembly-node-body nowheel"
+      style={{ "--assembly-bin-width": `${timeline.mediaBinWidth}px` }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
@@ -882,6 +883,8 @@ export function AssemblyNodeBody({
 
       <AssemblyMediaBin
         media={binMedia}
+        width={timeline.mediaBinWidth}
+        onWidthChange={(width, persist) => replaceTimeline(setAssemblyView(timelineRef.current, { mediaBinWidth: width }), persist)}
         onOutputDrop={handleMediaBinOutputDrop}
         onRemove={handleMediaBinRemove}
         connectionControls={(

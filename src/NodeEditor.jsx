@@ -21560,27 +21560,32 @@ function assemblyConnectedMediaInputs(incoming = {}) {
     ["imageIn", "image"],
     ["audioIn", "audio"]
   ];
-  return ports.flatMap(([targetPort, fallbackType]) => (incoming[targetPort] || []).map(({ source, edge }, index) => {
-    const item = connectedOutputItem(source, edge);
-    const url = item?.url || connectedOutputUrl(source, edge);
-    if (!url) return null;
-    return {
-      id: edge?.id || `${source.id}:${edge?.from?.port || index}`,
-      sourceNodeId: source.id,
-      sourcePort: edge?.from?.port || "",
-      sourcePortTarget: targetPort,
-      url,
-      type: item?.type || fallbackType,
-      label: item?.label || sourceLabel(source),
-      fileName: item?.fileName || fileNameFromLocalUrl(url),
-      mimeType: item?.mimeType || mimeForOutputItem({ url, type: fallbackType }),
-      duration: Number(item?.metadata?.duration || item?.duration || 0),
-      width: Number(item?.metadata?.width || item?.width || 0),
-      height: Number(item?.metadata?.height || item?.height || 0),
-      fps: Number(item?.metadata?.fps || item?.fps || 0),
-      hasAudio: Boolean(item?.metadata?.hasAudio || fallbackType === "audio")
-    };
-  }).filter(Boolean));
+  return ports.flatMap(([targetPort, fallbackType]) => (incoming[targetPort] || []).flatMap(({ source, edge }, index) => {
+    const selected = connectedOutputItem(source, edge);
+    const results = sourceResultItemsForPort(source, edge?.from?.port, fallbackType).filter(item => item?.url && item.type === fallbackType);
+    const items = fallbackType === "video" && results.length > 1 ? results : [selected];
+    return items.map((item, resultIndex) => {
+      const url = item?.url || connectedOutputUrl(source, edge);
+      if (!url) return null;
+      return {
+        id: `${edge?.id || `${source.id}:${edge?.from?.port || index}`}:${resultIndex}`,
+        sourceItemIndex: resultIndex,
+        sourceNodeId: source.id,
+        sourcePort: edge?.from?.port || "",
+        sourcePortTarget: targetPort,
+        url,
+        type: item?.type || fallbackType,
+        label: item?.label || sourceLabel(source),
+        fileName: item?.fileName || fileNameFromLocalUrl(url),
+        mimeType: item?.mimeType || mimeForOutputItem({ url, type: fallbackType }),
+        duration: Number(item?.metadata?.duration || item?.duration || 0),
+        width: Number(item?.metadata?.width || item?.width || 0),
+        height: Number(item?.metadata?.height || item?.height || 0),
+        fps: Number(item?.metadata?.fps || item?.fps || 0),
+        hasAudio: Boolean(item?.metadata?.hasAudio || item?.hasAudio || fallbackType === "audio")
+      };
+    }).filter(Boolean);
+  }));
 }
 
 function connectedAssetItems(items = [], { prompt } = {}) {

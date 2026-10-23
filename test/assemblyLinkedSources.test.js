@@ -67,3 +67,18 @@ test("connecting an already dropped asset adopts it without breaking timeline cl
   assert.equal(regenerated.media[0].url, "/outputs/generation-v2.mp4");
   assert.equal(regenerated.tracks.find((track) => track.id === videoTrack.id).clips[0].mediaId, mediaId);
 });
+
+
+test("multiple videos on one source port keep independent linked bin entries", () => {
+  const inputs = [0, 1, 2].map(index => ({ ...connectedVideo,
+    id: `edge-video-1:${index}`, sourceItemIndex: index,
+    url: `/outputs/shot-${index}.mp4`
+  }));
+  const state = syncAssemblyInputs(createAssemblyState(), inputs);
+  assert.deepEqual(state.media.map(item => item.url), inputs.map(item => item.url));
+  const restored = JSON.parse(JSON.stringify(state));
+  const updated = syncAssemblyInputs(restored, inputs.map(item => ({ ...item, url: item.url.replace('shot-', 'new-') })));
+  assert.equal(updated.media.length, 3);
+  assert.deepEqual(updated.media.map(item => item.id), state.media.map(item => item.id));
+  assert.deepEqual(updated.media.map(item => item.url), inputs.map(item => item.url.replace('shot-', 'new-')));
+});

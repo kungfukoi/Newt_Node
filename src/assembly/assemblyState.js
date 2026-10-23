@@ -51,6 +51,7 @@ export function normalizeAssemblyState(value = {}) {
     outputWidth: evenDimension(source.outputWidth, 1920),
     outputHeight: evenDimension(source.outputHeight, 1080),
     renderAudio: source.renderAudio !== false,
+    mediaBinWidth: clampNumber(source.mediaBinWidth, 154, 520, 190),
     zoom: normalizeAssemblyZoom(source.zoom),
     ripple: Boolean(source.ripple),
     tool: ["select", "blade", "slip"].includes(source.tool) ? source.tool : "select",
@@ -729,6 +730,7 @@ function normalizeAssemblyMedia(value = {}) {
     id: String(value.id || createAssemblyId("media")),
     sourceNodeId: String(value.sourceNodeId || ""),
     sourcePort: String(value.sourcePort || ""),
+    sourceItemIndex: Math.max(0, Math.floor(Number(value.sourceItemIndex) || 0)),
     linkedSource: Boolean(value.linkedSource),
     derivedFromMediaId: String(value.derivedFromMediaId || ""),
     url: String(value.url || ""),
@@ -779,7 +781,7 @@ function assemblyConnectedSourceKey(item) {
   const sourceNodeId = String(item.sourceNodeId || "");
   const sourcePort = String(item.sourcePort || "");
   if (!sourceNodeId || !sourcePort) return "";
-  return [sourceNodeId, sourcePort, item.type || ""].join(":");
+  return [sourceNodeId, sourcePort, item.type || "", Math.max(0, Math.floor(Number(item.sourceItemIndex) || 0))].join(":");
 }
 
 function mergeAssemblyConnectedMedia(existing, input) {

@@ -4,7 +4,7 @@
 }
 
 .assembly-node-body {
-  grid-template-columns: minmax(154px, 190px) minmax(460px, 1fr) minmax(210px, 240px);
+  grid-template-columns: minmax(154px, var(--assembly-bin-width, 190px)) minmax(460px, 1fr) minmax(210px, 240px);
   grid-template-rows: auto auto minmax(230px, 1fr) auto;
 }
 
@@ -503,3 +503,17 @@
   min-width: 150px;
   white-space: nowrap;
 }
+
+.assembly-media-bin { position: relative; }
+.assembly-media-bin-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.assembly-media-bin-resize:hover,
+.assembly-media-bin-resize:focus-visible { background: #e8d229; outline: none; }

@@ -5,10 +5,11 @@ import { clearOutputItemDragData, displayMediaUrl, hasOutputItemDragData, output
 
 const mediaDragType = "application/x-newtnode-assembly-media";
 
-export function AssemblyMediaBin({ media = [], connectionControls = null, onOutputDrop = null, onRemove = null }) {
+export function AssemblyMediaBin({ media = [], connectionControls = null, onOutputDrop = null, onRemove = null, width = 190, onWidthChange = null }) {
   const [viewerMediaId, setViewerMediaId] = React.useState("");
   const [outputDropActive, setOutputDropActive] = React.useState(false);
   const listRef = React.useRef(null);
+  const resizeRef = React.useRef(null);
   const binRef = React.useRef(null);
   const onOutputDropRef = React.useRef(onOutputDrop);
   onOutputDropRef.current = onOutputDrop;
@@ -80,6 +81,49 @@ export function AssemblyMediaBin({ media = [], connectionControls = null, onOutp
         onDragLeave={handleOutputDragLeave}
         onDropCapture={handleOutputDrop}
       >
+        <div
+          className="assembly-media-bin-resize nodrag"
+          role="separator"
+          aria-label="Media bin width"
+          aria-orientation="vertical"
+          aria-valuemin={154}
+          aria-valuemax={520}
+          aria-valuenow={width}
+          tabIndex={0}
+          title="Drag to widen the media bin"
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const bin = binRef.current;
+            resizeRef.current = { x: event.clientX, width, scale: bin.getBoundingClientRect().width / bin.offsetWidth };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={event => {
+            const start = resizeRef.current;
+            if (!start) return;
+            event.stopPropagation();
+            onWidthChange?.(Math.max(154, Math.min(520, start.width + (event.clientX - start.x) / start.scale)), false);
+          }}
+          onPointerUp={event => {
+            if (!resizeRef.current) return;
+            resizeRef.current = null;
+            event.stopPropagation();
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            onWidthChange?.(width, true);
+          }}
+          onLostPointerCapture={() => {
+            if (!resizeRef.current) return;
+            resizeRef.current = null;
+            onWidthChange?.(width, true);
+          }}
+          onKeyDown={event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onWidthChange?.(event.key === "Home" ? 154 : event.key === "End" ? 520 : Math.max(154, Math.min(520, width + (event.key === "ArrowRight" ? 20 : -20))), true);
+          }}
+        />
         <header className="assembly-media-bin-header">
           <strong>Media</strong>
           <span>{media.length}</span>
