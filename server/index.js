@@ -9763,7 +9763,7 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
   const referenceOnlyImageUrls = useReferenceFrames ? referenceImageUrls.slice(2, 6) : referenceImageUrls.slice(0, 4);
   const refImageUrls = await Promise.all(referenceOnlyImageUrls.map((url) => uploadLocalOutputToFal(url)));
   const input = {
-    prompt: outpaintContext ? wanOutpaintPrompt(prompt, outpaintContext.plan) : prompt,
+    prompt: outpaintContext ? wanOutpaintPrompt(prompt, outpaintContext.plan, refImageUrls.length) : prompt,
     negative_prompt: outpaintContext ? wanOutpaintNegativePrompt(options.negativePrompt) : String(options.negativePrompt || ""),
     match_input_num_frames: matchInputNumFrames,
     match_input_frames_per_second: matchInputFps,

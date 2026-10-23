@@ -16,7 +16,7 @@ export function registerVideoOutpaintPromptRoute(app, deps) {
       if (references.length && (!maskImageUrl || !deps.inspectFrames)) return res.status(400).json({ error: "Reference-aware analysis requires current canvas preparation. Prepare canvas & mask after restarting Newt Node." });
       const frameEvidence = maskImageUrl && deps.inspectFrames ? await deps.inspectFrames(req.body) : null;
       const promptByteBudget = req.body.outpaintModel === "seedance-2.5" ? outpaintEditablePromptBudget(req.body.preparedPlan, req.body.preparedPlan?.settings, references.length) : 1100;
-      const prompt = buildOutpaintAnalysisPrompt({ mode, guidance: req.body.guidance, aspectRatio: req.body.aspectRatio, outpaintModel: req.body.outpaintModel, maskIsImage: Boolean(maskImageUrl), frameEvidence: frameEvidence?.text || "", maxPromptBytes: promptByteBudget, preparedPlan: req.body.preparedPlan });
+      const prompt = buildOutpaintAnalysisPrompt({ mode, guidance: req.body.guidance, aspectRatio: req.body.aspectRatio, outpaintModel: req.body.outpaintModel, maskIsImage: Boolean(maskImageUrl), frameEvidence: frameEvidence?.text || "", maxPromptBytes: promptByteBudget, preparedPlan: req.body.preparedPlan, referenceImageCount: references.length });
       const inputs = [{ url: sourceVideoUrl, label: "Source footage on target canvas", type: "video" }, ...(!maskImageUrl ? [{ url: maskVideoUrl, label: "Expansion mask: white generate, black preserve", type: "video" }] : [])];
       const result = await deps.analyze({ inputs, prompt });
       if (!result.text?.trim()) throw new Error("Video analysis returned no prompt. Your existing prompt was preserved.");

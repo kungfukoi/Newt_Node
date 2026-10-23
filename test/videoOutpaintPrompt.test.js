@@ -72,6 +72,8 @@ test("reference-aware drafting passes connected images to frame inspection and r
   assert.equal(result.status, 200);
   assert.deepEqual(inspected.referenceImageUrls, request.referenceImageUrls);
   assert.match(result.analysis.prompt, /snow ground matching the reference/);
+  assert.match(result.analysis.prompt, /APPEARANCE REFERENCE ONLY, NOT COMPOSITION/);
+  assert.match(result.analysis.prompt, /wardrobe, garment cut, fabric/);
   const wan = await harness({ inspectFrames: async () => ({ text: "Reference matches the snowy ground.", frameCount: 81, fps: 24, prerollFrames: 0 }) }).call({ ...request, outpaintModel: "wan-vace", maskVideoUrl: "/outputs/mask.mp4" });
   assert.equal(wan.status, 200);
   assert.match(wan.analysis.prompt, /Write a descriptive caption/);

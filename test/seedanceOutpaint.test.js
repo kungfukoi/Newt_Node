@@ -69,7 +69,7 @@ test("Seedance editing submits only the padded source with explicit border extra
     assert.match(result.body.prompt, /Replace all black padding/); assert.match(result.body.prompt, /seamless continuation/); assert.match(result.body.prompt, /Preserve the existing picture/);
     assert.match(result.body.prompt, /Continue the moving foliage/); assert.doesNotMatch(result.body.prompt, /@Video2|@Image2/);
     assert.equal(result.body.outpaintUserPrompt, body.prompt);
-    assert.match(result.body.prompt, /@Image1 is a visual reference for the extended environment/);
+    assert.match(result.body.prompt, /@Image1 is a visual reference\. APPEARANCE REFERENCE ONLY, NOT COMPOSITION/);
     assert.match(result.body.prompt, /FRAME 1 REQUIREMENT/);
     assert.match(result.body.prompt, /SAME-FRAME ATTACHMENT/);
     assert.match(result.body.prompt, /never a separately invented walking cycle/);

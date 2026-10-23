@@ -68,3 +68,16 @@ test("reference roles and permanent frame-one rules fit even with the maximum re
     if (count === 30) assert.match(prompt, /@Image30/);
   }
 });
+
+
+test("reference wardrobe direction stays outside editable fitting in normal and repair submissions", () => {
+  for (const repair of [false, true]) {
+    const budget = outpaintEditablePromptBudget(null, {}, 30);
+    const prompt = seedanceOutpaintPrompt(fitOutpaintPrompt("Copy the reference composition. ".repeat(300), budget), repair, [], 0, null, 30);
+    assert.match(prompt, /APPEARANCE REFERENCE ONLY, NOT COMPOSITION/);
+    assert.match(prompt, /wardrobe, garment cut, fabric, colors, patterns/);
+    assert.match(prompt, /Never copy reference layout, crop, pose or camera/);
+    assert.match(prompt, /Preserve visible source clothing and identity/);
+    if (!repair) assert.ok(Buffer.byteLength(prompt) <= outpaintSubmissionByteLimit);
+  }
+});

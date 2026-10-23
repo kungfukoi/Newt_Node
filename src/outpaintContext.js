@@ -15,3 +15,5 @@ export function preparedCanvasInstructions(plan) {
     "MATCH: Continue adjacent exposure, white balance, shadows, reflections, focus, grain, sharpness, shutter blur and fine texture through the overlap. No dividing line, rim, halo, double contour, new color grade or posterization. Original core is restored afterward. User direction describes supported continuation, not new objects to add. Deliver only the continuous expanded shot."
   ].join("\n\n");
 }
+
+export const outpaintReferenceAppearanceRule = "APPEARANCE REFERENCE ONLY, NOT COMPOSITION: Guidance images art-direct only the generated fill: wardrobe, garment cut, fabric, colors, patterns, materials and environment detail. The source video alone controls composition, framing, camera, perspective, subject scale, placement, pose, action and timing. Never copy reference layout, crop, pose or camera; never reframe the video to match a reference. Continue clothing from the same-frame visible garment into missing areas, using reference wardrobe details where consistent with the source. Preserve visible source clothing and identity; do not add reference people or objects. Source evidence wins any conflict.";

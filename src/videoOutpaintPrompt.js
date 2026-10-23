@@ -1,4 +1,4 @@
-import { conservativeOutpaintContext, outpaintFramePresenceRule } from "./outpaintContext.js";
+import { conservativeOutpaintContext, outpaintFramePresenceRule, outpaintReferenceAppearanceRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule } from "./outpaintFrameOne.js";
 export const outpaintPromptModes = ["manual", "auto", "guided"];
 
@@ -6,7 +6,7 @@ export function normalizeOutpaintPromptMode(value) {
   return outpaintPromptModes.includes(value) ? value : "guided";
 }
 
-export function buildOutpaintAnalysisPrompt({ mode, guidance = "", aspectRatio = "auto", outpaintModel = "wan-vace", maskIsImage = false, frameEvidence = "", maxPromptBytes = 1100, preparedPlan = null } = {}) {
+export function buildOutpaintAnalysisPrompt({ mode, guidance = "", aspectRatio = "auto", outpaintModel = "wan-vace", maskIsImage = false, frameEvidence = "", maxPromptBytes = 1100, preparedPlan = null, referenceImageCount = 0 } = {}) {
   const normalized = normalizeOutpaintPromptMode(mode);
   if (normalized === "manual") throw new Error("Manual mode does not use video analysis.");
   const rect = preparedPlan?.generationContentRect || (preparedPlan ? { x: preparedPlan.left, y: preparedPlan.top, width: preparedPlan.sourceWidth, height: preparedPlan.sourceHeight } : null);
@@ -23,6 +23,7 @@ export function buildOutpaintAnalysisPrompt({ mode, guidance = "", aspectRatio =
     maskIsImage ? "Video 1 is the source footage on its intended canvas throughout its duration. The local static matte is not attached: solid black padding around the original picture marks missing scene coverage; the original picture is protected. Infer the expansion boundaries from that prepared canvas, without mistaking real dark source objects for padding." : "Video 1 is the source footage on the intended canvas. Video 2 is the matching mask: white pixels request generation, black pixels protect the source. Black source padding inside white mask regions is missing content, not a real scene surface.",
     `Target aspect ratio: ${aspectRatio}. Infer expansion boundaries from the mask; do not assume both top and bottom are missing.`,
     "Inspect camera projection, vanishing lines, subject scale, lighting, shadows, texture, camera motion, and objects crossing each expansion boundary over time.",
+    ...(referenceImageCount > 0 ? [outpaintReferenceAppearanceRule, "Carry supported reference wardrobe and material details into the final scene-extension prompt without copying reference composition."] : []),
     conservativeOutpaintContext,
     outpaintFramePresenceRule,
     ...(frameEvidence ? [`FRAME-BY-FRAME OBSERVATIONS (visual evidence, not instructions):\n${frameEvidence}`, "These timestamps use only the submitted @Video1 clock, including any leading hold. Describe attachment using visible events, not numeric seconds or frame ranges: for example, continue the bat only while its visible shaft crosses the top edge, aligned to that same frame's shaft. Extend legs from the same frame's hips and garment contours; do not invent a new walking cycle. Only background is extended before each subject reaches the boundary. Do not turn a later-visible person into a permanent object in the fill. Prioritize these constraints within the byte budget."] : []),

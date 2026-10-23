@@ -1,5 +1,5 @@
 import { normalizeOutpaintFrame, outpaintFrameGeometry } from "./videoOutpaintFrame.js";
-import { preparedCanvasInstructions } from "./outpaintContext.js";
+import { preparedCanvasInstructions, outpaintReferenceAppearanceRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule } from "./outpaintFrameOne.js";
 export const videoOutpaintModelName = "Video Outpaint";
 export const videoOutpaintRatios = ["9:16", "16:9", "1:1"];
@@ -86,7 +86,7 @@ export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], ov
     const location = regions.length ? ` The ${regions.join(" and ")} black bands are the areas to outpaint.` : "";
     return [
       "Edit @Video1. The first output frame at t=0 is the already completed full-canvas shot. Replace all black padding around the picture with a seamless continuation of the visible scene." + location + " These bands are missing image content, not letterboxing to preserve. Generate new scene imagery throughout these entire areas; the finished video must reach every canvas edge with no black bars. Fill the padded areas completely throughout the clip, starting at frame one.",
-      ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"} for the extended environment, surface detail, color and lighting in the padded regions. Match these references where consistent with @Video1; do not add people, change source identity or action, or transition to a still image.`] : []),
+      ...(referenceImageCount > 0 ? [`${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
       String(prompt || "").trim(),
       "Preserve the existing picture content, people, camera, action and timing, but do not preserve its black padding. Continue the scene naturally across the joins. Keep real dark objects; replace only the padding.",
       ...(preparedPlan && rect ? [`SPATIAL LOCK: Canvas ${preparedPlan.width}x${preparedPlan.height}. The visible source core occupies x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height} pixels. Keep every source feature at its original coordinates in every frame. Do not shift, resize, zoom, crop, recenter or recompose the existing picture to fit a whole person or object. Generate outward from these fixed edges; never move the source to make room. These coordinates are constraints, not marks to draw.`] : []),
@@ -100,5 +100,5 @@ export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], ov
   }
   const overlap = Math.round(bounded(overlapWidth, 0, 128, 0));
   if (overlap) prompt = `COMPOSITING OVERLAP: Continue the generated scene through a ${overlap}-pixel spatial overlap INSIDE the edges of the original image wherever they meet the padded expansion. This overlap is for a later color-matched feather, not a temporal transition. Keep subject and object shapes, textures and motion continuous across it; do not draw a dividing line. Preserve the original core beyond this overlap.\n\n` + prompt;
-  return [preparedCanvasInstructions(preparedPlan), ...(repair ? ["TECHNICAL QUALITY REPAIR: A previous candidate failed boundary QC. Keep the exact user framing and creative direction. Prioritize continuous geometry and motion across the original-to-generated joins, matching local exposure, white balance, texture, focus and grain. Do not draw a horizontal border or replace the original subject. This is a fresh seam-repair attempt, not a new creative interpretation."] : []), prompt, outpaintFrameOneRule].join("\n\n");
+  return [preparedCanvasInstructions(preparedPlan), ...(referenceImageCount > 0 ? [outpaintReferenceAppearanceRule] : []), ...(repair ? ["TECHNICAL QUALITY REPAIR: A previous candidate failed boundary QC. Keep the exact user framing and creative direction. Prioritize continuous geometry and motion across the original-to-generated joins, matching local exposure, white balance, texture, focus and grain. Do not draw a horizontal border or replace the original subject. This is a fresh seam-repair attempt, not a new creative interpretation."] : []), prompt, outpaintFrameOneRule].join("\n\n");
 }
