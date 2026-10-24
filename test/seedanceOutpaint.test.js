@@ -15,9 +15,9 @@ test("Seedance green conditioning and analysis name #00FF00 while retaining old 
   const green = { ...prepared, generationVideoUrl: "/outputs/green.mp4", plan: { ...prepared.plan, generationPaddingColor: "green" } };
   const current = await prepareSeedanceOutpaint(body, { provider: "krea", apiKey: "fixture", prepare: async () => green });
   assert.deepEqual(current.body.referenceVideoUrls, [green.generationVideoUrl]);
-  assert.match(current.body.prompt, /Replace all green padding \(chroma green, #00FF00 \/ RGB 0, 255, 0\)/);
-  assert.match(current.body.prompt, /real green objects inside the source picture/);
-  assert.match(current.body.prompt, /Green padding identifies input pixels/);
+  assert.match(current.body.prompt, /^Full frame /);
+  assert.match(current.body.prompt, /Preserve the existing picture content/);
+  assert.match(current.body.prompt, /complete scene is already present from frame one/);
   assert.doesNotMatch(current.body.prompt, /gray padding|black padding|black-padded/);
   const greenAnalysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: green.plan });
   assert.match(greenAnalysis, /solid green padding \(#00FF00 \/ RGB 0, 255, 0\)/);
@@ -26,15 +26,15 @@ test("Seedance green conditioning and analysis name #00FF00 while retaining old 
   const gray = { ...prepared, generationVideoUrl: "/outputs/gray.mp4", plan: { ...prepared.plan, generationPaddingColor: "gray" } };
   const result = await prepareSeedanceOutpaint(body, { provider: "fal", apiKey: "fixture", prepare: async () => gray });
   assert.deepEqual(result.body.referenceVideoUrls, [gray.generationVideoUrl]);
-  assert.match(result.body.prompt, /Replace all gray padding/);
-  assert.match(result.body.prompt, /#7F7F7F \/ RGB 127, 127, 127/);
-  assert.match(result.body.prompt, /real gray objects inside the source picture/);
-  assert.match(result.body.prompt, /Gray padding identifies input pixels/);
+  assert.match(result.body.prompt, /^Full frame /);
+  assert.match(result.body.prompt, /Preserve the existing picture content/);
+  assert.match(result.body.prompt, /Source framing, subject scale/);
+  assert.match(result.body.prompt, /complete scene is already present from frame one/);
   assert.doesNotMatch(result.body.prompt, /black padding|black-padded|black bands/);
   const analysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: gray.plan });
   assert.match(analysis, /solid gray padding \(#7F7F7F/);
   assert.doesNotMatch(analysis, /solid black padding|black-padded/);
-  assert.match(seedanceOutpaintPrompt("Direction", false, [], 0, prepared.plan), /Replace all black padding/);
+  assert.match(seedanceOutpaintPrompt("Direction", false, [], 0, prepared.plan), /^Full frame /);
   const oldFingerprint = JSON.stringify(["outpaint-canvas-v14-frame-grid", "source", normalizeVideoOutpaintSettings(settings), ""]);
   assert.notEqual(videoOutpaintFingerprint("source", settings), oldFingerprint);
   assert.equal(JSON.parse(videoOutpaintFingerprint("source", { model: "wan-vace" }))[0], "outpaint-canvas-v14-frame-grid");
@@ -95,13 +95,13 @@ test("Seedance editing submits only the padded source with explicit border extra
     assert.equal(result.body.generateAudio, false); assert.equal(result.body.seed, undefined);
     assert.equal(result.body.projectId, "project"); assert.equal(result.body.nodeId, "node");
     assert.equal(result.body.videoOutpaintContext, prepared);
-    assert.match(result.body.prompt, /Replace all black padding/); assert.match(result.body.prompt, /seamless continuation/); assert.match(result.body.prompt, /Preserve the existing picture/);
+    assert.match(result.body.prompt, /^Full frame /); assert.match(result.body.prompt, /continuous perspective/); assert.match(result.body.prompt, /Preserve the existing picture/);
     assert.match(result.body.prompt, /Continue the moving foliage/); assert.doesNotMatch(result.body.prompt, /@Video2|@Image2/);
     assert.equal(result.body.outpaintUserPrompt, body.prompt);
     assert.match(result.body.prompt, /@Image1 is a visual reference\. APPEARANCE REFERENCE ONLY, NOT COMPOSITION/);
     assert.match(result.body.prompt, /FRAME 1 REQUIREMENT/);
     assert.match(result.body.prompt, /SAME-FRAME ATTACHMENT/);
-    assert.match(result.body.prompt, /never a separately invented walking cycle/);
+    assert.match(result.body.prompt, /Legs follow the existing hips and clothing/);
     assert.match(result.body.prompt, /Only the original scene action and camera motion continue/);
   }
 });
@@ -123,7 +123,7 @@ test("Seedance receives the inward generation overlap canvas while finishing ret
   assert.deepEqual(result.body.referenceVideoUrls, [overlap.generationVideoUrl]);
   assert.equal(result.body.videoOutpaintContext.videoUrl, prepared.videoUrl);
   assert.doesNotMatch(result.body.prompt, /inward overlap strip|PREPARED CANVAS|COMPOSITING OVERLAP/);
-  assert.match(result.body.prompt, /starting at frame one/);
+  assert.match(result.body.prompt, /already present from frame one/);
   assert.ok(Buffer.byteLength(result.body.prompt) < 3900);
   const longPrompt = "Long direction ".repeat(500);
   const fitted = await prepareSeedanceOutpaint({ ...body, prompt: longPrompt }, { provider: "atlas", apiKey: "fixture", prepare: async () => overlap });
@@ -140,18 +140,18 @@ test("Seedance edit never receives a preparation fill or mask video", async () =
   assert.deepEqual(result.body.referenceVideoUrls, [prepared.videoUrl]);
   assert.deepEqual(result.body.referenceImageUrls, body.referenceImageUrls);
   assert.doesNotMatch(result.body.prompt, /@Video2|already contains a complete masked/);
-  assert.match(result.body.prompt, /seamless continuation/);
+  assert.match(result.body.prompt, /continuous perspective/);
 });
 
 test("analysis uses the same visual context and mask reasoning but writes for Seedance's unmasked edit input", () => {
   const wan = buildOutpaintAnalysisPrompt({ mode: "guided" });
   const seedance = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", guidance: "Continue the trees" });
   assert.match(wan, /white pixels request generation/); assert.match(seedance, /white pixels request generation/);
-  assert.match(seedance, /extrapolate from visible context clues/); assert.match(seedance, /NOT the analysis mask/);
+  assert.match(seedance, /PRIVATE COVERAGE CHECK/); assert.match(seedance, /Keep the analysis inventory private/);
   assert.match(seedance, /Continue the trees/); assert.match(seedanceOutpaintPrompt("Manual direction"), /Manual direction/);
   const repair = seedanceOutpaintPrompt("User direction", true, [{ category: "seam", description: "Coat join is displaced" }]);
-  assert.match(repair, /TECHNICAL QUALITY REPAIR/); assert.match(repair, /exact user framing and creative direction/); assert.match(repair, /User direction/); assert.ok(repair.endsWith(outpaintFrameOneRule));
-  assert.match(repair, /Coat join is displaced/);
+  assert.match(repair, /Maintain the exact user framing/); assert.match(repair, /exact user framing and creative direction/); assert.match(repair, /User direction/); assert.ok(repair.endsWith(outpaintFrameOneRule));
+  assert.match(repair, /continuous subject geometry/);
 });
 
 test("finishing preserves raw paid output on failure and records model and restoration metadata", async () => {

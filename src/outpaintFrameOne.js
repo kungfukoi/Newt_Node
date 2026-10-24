@@ -1,2 +1,6 @@
-// Mandatory submission guidance, outside the editable/compacted scene direction.
-export const outpaintFrameOneRule = "FRAME 1 REQUIREMENT: The extension is 100% complete on the very first frame (t=0), including held frames, and remains filled edge to edge in every frame. Black padding identifies input pixels to replace; it is not part of the scene and must not exist in any output frame. No transition, reveal, fade, dissolve, wipe, or fill animation. Do not start from the black-padded input and gradually replace it. This overrides any conflicting reveal or transition direction. Only the original scene action and camera motion continue.";
+// Positive completed-scene guidance shared by analysis and submission.
+export const outpaintFrameOneRule = "FRAME 1 REQUIREMENT: The complete scene is already present from frame one and remains complete throughout the shot. Only the original scene action and camera motion continue. Source framing, subject scale, placement and timing remain consistent; held source frames stay still.";
+export function fullFrameScene(prompt) {
+  const scene = String(prompt || "").trim();
+  return /^full frame\b/i.test(scene) ? scene : `Full frame ${scene || "of the observed scene."}`;
+}

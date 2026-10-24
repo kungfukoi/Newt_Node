@@ -29,8 +29,8 @@ const body = { sourceVideoUrl: "/outputs/source.mp4", maskVideoUrl: "/outputs/ma
 
 test("Seedance analysis explicitly covers every padded edge and source lighting", () => {
   const text = buildOutpaintAnalysisPrompt({ mode: "auto", outpaintModel: "seedance-2.5", preparedPlan: { width: 720, height: 1280, left: 0, top: 306, sourceWidth: 720, sourceHeight: 664 } });
-  assert.match(text, /PRIMARY DELIVERABLE:[^\n]*TOP, BOTTOM/);
-  assert.match(text, /Every listed region must have its own/);
+  assert.match(text, /PRIVATE COVERAGE CHECK:[^\n]*TOP, BOTTOM/);
+  assert.match(text, /Account for every intersecting person/);
   assert.match(text, /bottom canvas edge/);
   assert.match(text, /pale bright overcast sky must remain pale and equally bright/);
   assert.match(text, /Do not add dramatic weather/);

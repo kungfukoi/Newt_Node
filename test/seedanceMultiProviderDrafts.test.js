@@ -139,8 +139,8 @@ test("outpainting reuses Fal/Atlas/Krea editing acceptance with source canvas, s
     const res = await h.run({ videoOutpaintUtility: true, videoOutpaint: { model: "seedance-2.5" }, referenceVideoUrls: [outpaintFixture.sourceUrl], seedanceDraft: false, prompt: "Continue the floor" });
     assert.equal(res.statusCode, 202);
     assert.equal(h.spec.settings.seedanceTask, "edit"); assert.equal(h.spec.body.videoOutpaintContext.videoUrl, outpaintFixture.videoUrl);
-    assert.equal(h.spec.prompt, "Continue the floor"); assert.match(h.spec.submittedPrompt, /Replace all black padding/);
-    assert.match(h.spec.submittedPrompt, /starting at frame one/);
+    assert.equal(h.spec.prompt, "Continue the floor"); assert.match(h.spec.submittedPrompt, /^Full frame /m);
+    assert.match(h.spec.submittedPrompt, /already present from frame one/);
     assert.doesNotMatch(h.spec.submittedPrompt, /COMPOSITING OVERLAP|restoration rectangle/);
     assert.match(h.spec.submittedPrompt, /Edit @Video1/);
     assert.doesNotMatch(h.spec.submittedPrompt, /Director detail compacted/);

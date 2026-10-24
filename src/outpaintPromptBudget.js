@@ -29,7 +29,7 @@ export function fitOutpaintPrompt(value, maxBytes) {
   if (bytes(text) <= budget) return text;
   const sentences = text.split(/(?<=[.!?])\s+|\n+/u).map(s => s.trim()).filter(Boolean);
   const ranked = sentences.map((sentence, index) => ({ sentence, index,
-    priority: (index === 0 ? 3 : 0) + (/\b(?:TOP|BOTTOM|LEFT|RIGHT)\s*:/i.test(sentence) ? 6 : 0) + (/\b(?:before|after|until|only when|enter|enters|exit|exits|absent|occlu\w*|frame|time|never|must not|do not|no new)\b|\d+(?:\.\d+)?\s*(?:s\b|seconds?)/i.test(sentence) ? 4 : 0)
+    priority: (index === 0 ? (/^full frame\b/i.test(sentence) ? 20 : 3) : 0) + (/\b(?:TOP|BOTTOM|LEFT|RIGHT)\s*:/i.test(sentence) ? 6 : 0) + (/\b(?:before|after|until|only when|enter|enters|exit|exits|absent|occlu\w*|frame|time|never|must not|do not|no new)\b|\d+(?:\.\d+)?\s*(?:s\b|seconds?)/i.test(sentence) ? 4 : 0)
   })).sort((a, b) => b.priority - a.priority || a.index - b.index);
   const chosen = [];
   let used = 0;

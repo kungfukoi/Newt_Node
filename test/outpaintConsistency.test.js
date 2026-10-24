@@ -45,9 +45,9 @@ test("all reference roles fit the provider budget and require a capable backend"
 
 test("drafting describes complete regions and fitting preserves them ahead of generic prose", () => {
   const prompt = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5" });
-  assert.match(prompt, /WHOLE-CLIP REPLACEMENT, NOT A TEMPORAL EXTENSION/);
-  assert.match(prompt, /already occupying each missing region/);
-  assert.match(prompt, /Temporal wording is reserved for real source subjects/);
+  assert.match(prompt, /Begin exactly with "Full frame "/);
+  assert.match(prompt, /completed scene visible in the FIRST frame/);
+  assert.match(prompt, /only observed source actions and camera motion/);
   const fitted = fitOutpaintPrompt("Decorative description. Rich textures and wonderful surfaces. TOP: pale sky. BOTTOM: continuous gray floor.", 65);
   assert.match(fitted, /TOP: pale sky/);
   assert.match(fitted, /BOTTOM: continuous gray floor/);
