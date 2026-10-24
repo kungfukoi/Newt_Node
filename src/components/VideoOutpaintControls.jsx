@@ -15,7 +15,7 @@ export function VideoOutpaintModelControl({ node, running, onUpdate }) {
   return <NodeRow label="Outpaint model"><select aria-label="Outpaint model" value={settings.model} disabled={running} onChange={e => onUpdate(node.id, { videoOutpaint: { ...settings, model: e.target.value } })}>{videoOutpaintModels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></NodeRow>;
 }
 
-export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "", canvasPort, referenceImageUrls = [], promptConnected, running, onUpdate, onPrepare, onAnalyze, referenceImagePort, settingsOpen, incoming, portProps, generationScope }) {
+export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "", canvasPort, referenceImageUrls = [], referenceSlots = [], referenceImagePorts = [], referenceRoles = [], promptConnected, running, onUpdate, onPrepare, onAnalyze, referenceImagePort, settingsOpen, incoming, portProps, generationScope }) {
   const settings = normalizeUtilityOutpaintSettings(node.data.videoOutpaint);
   const seedance = settings.model === "seedance-2.5";
   const key = videoOutpaintFingerprint(sourceVideoUrl, settings, canvasVideoUrl);
@@ -82,14 +82,18 @@ export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "
       <video aria-label="Prepared outpainting canvas" controls muted preload="metadata" poster={prepared.previewUrl} src={displayMediaUrl(prepared.generationVideoUrl || prepared.videoUrl)} style={{ width: "100%", maxHeight: 320, objectFit: "contain" }} />
       {!seedance && <a className="utility-mini-note" href={prepared.maskVideoUrl} target="_blank" rel="noreferrer">View expansion mask</a>}
     </>}
-    {prepared?.plan.needsOutpaint !== false && <VideoOutpaintPromptControls node={{ ...node, data: { ...node.data, wanVaceAspectRatio: prepared?.plan.settings.aspectRatio || settings.aspectRatio } }} sourceVideoUrl={(seedance && ["gray", "green"].includes(prepared?.plan.generationPaddingColor) ? prepared.generationVideoUrl : prepared?.videoUrl) || ""} maskVideoUrl={prepared?.maskVideoUrl || ""} maskImageUrl={prepared?.maskImageUrl || ""} preparedPlan={prepared ? { ...prepared.plan, settings: activeSettings } : undefined} referenceImageUrls={referenceImageUrls} promptConnected={promptConnected} running={running || busy || Boolean(preparationError)} onUpdate={onUpdate} onAnalyze={onAnalyze} />}
-    <NodeRow label="Reference image" inputPort={settingsOpen ? referenceImagePort : null} node={node} {...portProps}><span>{incoming.referenceImageIn?.length ? "Connected" : "Optional"}</span></NodeRow>
-    {seedance && referenceImageUrls.slice(0, 30).map((url, index) => <NodeRow key={`${index}:${url}`} label={`Image ${index + 1} role`}>
-      <select aria-label={`Outpaint image ${index + 1} role`} value={settings.referenceRoles[index] || "appearance"} disabled={busy || running} onChange={event => { const roles = referenceImageUrls.slice(0, 30).map((_, i) => settings.referenceRoles[i] || "appearance"); roles[index] = event.target.value; change({ referenceRoles: roles }); }}>
-        {outpaintReferenceRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select>
-    </NodeRow>)}
-    {seedance && <p className="utility-mini-note">Reuse the same reference image nodes across takes. Environment guides the shared set; Wardrobe guides clothing. Source footage controls performance and camera. References improve consistency without guaranteeing identical geometry.</p>}
+    {prepared?.plan.needsOutpaint !== false && <VideoOutpaintPromptControls node={{ ...node, data: { ...node.data, wanVaceAspectRatio: prepared?.plan.settings.aspectRatio || settings.aspectRatio } }} sourceVideoUrl={(seedance && ["gray", "green"].includes(prepared?.plan.generationPaddingColor) ? prepared.generationVideoUrl : prepared?.videoUrl) || ""} maskVideoUrl={prepared?.maskVideoUrl || ""} maskImageUrl={prepared?.maskImageUrl || ""} preparedPlan={prepared ? { ...prepared.plan, settings: { ...activeSettings, referenceRoles } } : undefined} referenceImageUrls={referenceImageUrls} promptConnected={promptConnected} running={running || busy || Boolean(preparationError)} onUpdate={onUpdate} onAnalyze={onAnalyze} />}
+    {referenceSlots.map(slot => <React.Fragment key={slot.id}>
+      <NodeRow label={`Image ${slot.index + 1}`} inputPort={settingsOpen ? referenceImagePorts.find(port => port.id === slot.id) : null} node={node} {...portProps}>
+        <input aria-label={`Outpaint image ${slot.index + 1} name`} value={slot.name} readOnly title={slot.name} />
+      </NodeRow>
+      <NodeRow label="Role">
+        <select aria-label={`Outpaint image ${slot.index + 1} role`} value={slot.role} disabled={running || busy} onChange={event => { const roles = [...referenceSlots.map(item => item.role), ...settings.referenceRoles.slice(referenceSlots.length)]; roles[slot.index] = event.target.value; change({ referenceRoles: roles }); }}>
+          {outpaintReferenceRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <span className="utility-mini-note">{slot.urls.length ? "Connected" : "Optional"}</span>
+      </NodeRow>
+    </React.Fragment>)}
     <details className="outpaint-advanced nodrag nowheel">
       <summary>Advanced</summary>
     {seedance && <>

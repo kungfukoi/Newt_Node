@@ -21,6 +21,13 @@ test("outpaint reference roles persist and color refinishing uses retained raw w
   const { errors, requests } = await openFixture(page, { count: 4 });
   await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaintMatching: true, videoOutpaintConsistency: true } } }));
   const node = page.locator('[data-node-card-id="outpaint"]');
+  await expect(node.getByText("Reuse the same reference image nodes", { exact: false })).toHaveCount(0);
+  for (let i = 1; i <= 3; i++) await expect(node.getByLabel(`Outpaint image ${i} name`)).toBeVisible();
+  await expect(node.locator('[data-port-id="referenceImageIn"]')).toHaveCount(1);
+  await expect(node.locator('[data-port-id="outpaintImage2In"]')).toHaveCount(1);
+  await expect(node.locator('[data-port-id="outpaintImage3In"]')).toHaveCount(1);
+  await expect(node.getByLabel("Outpaint image 1 name")).toHaveValue("set.png");
+  await expect(node.getByLabel("Outpaint image 2 name")).toHaveValue("clothes.png");
   await node.getByLabel("Outpaint image 1 role").selectOption("environment");
   await node.getByLabel("Outpaint image 2 role").selectOption("wardrobe");
   await expect(node.getByLabel("Restore original source footage")).not.toBeVisible();
@@ -29,9 +36,10 @@ test("outpaint reference roles persist and color refinishing uses retained raw w
   await expect(node.getByLabel("Match outpaint extension color")).toBeChecked();
   await expect(node.getByLabel("Prepared outpainting canvas")).toHaveAttribute("src", /generation\.mp4/);
   const saved = () => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(n => n.id === "outpaint").data);
-  await expect.poll(async () => (await saved()).videoOutpaint.referenceRoles).toEqual(["environment", "wardrobe"]);
+  await expect.poll(async () => (await saved()).videoOutpaint.referenceRoles).toEqual(["environment", "wardrobe", "appearance"]);
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(node.getByLabel("Outpaint image 1 name")).toHaveValue("set.png");
   await expect(node.getByLabel("Outpaint image 1 role")).toHaveValue("environment");
   await expect(node.getByLabel("Outpaint image 2 role")).toHaveValue("wardrobe");
   await node.locator("summary").filter({ hasText: /^Advanced$/ }).click();

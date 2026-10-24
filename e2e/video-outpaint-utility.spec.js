@@ -254,7 +254,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
     return route.fulfill({ status: shouldFail ? 502 : 200, json: shouldFail ? { error: "Fal unavailable" } : { modelName: "Video Outpaint", video: { localUrl: "/outputs/e2e/outpaint.mp4", fileName: "outpaint.mp4", mimeType: "video/mp4" }, videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", restoredSource: true, localCrop }, cost: { amountUsd: localCrop ? 0 : 0.405 } } });
   });
   const node = page.locator('[data-node-card-id="outpaint"]');
-  await expect(node.locator('[data-port-role="input"]')).toHaveCount(4);
+  await expect(node.locator('[data-port-role="input"]')).toHaveCount(6);
   await expect(node.getByRole("button", { name: "Analyze & draft prompt" })).toBeDisabled();
   await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
@@ -345,7 +345,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "outpaint")?.data?.resultItems?.at(-1)?.videoOutpaint?.rawVideoUrl)).toBe("/outputs/e2e/raw.mp4");
   await node.locator(".model-settings-drawer > summary").click();
   await expect(node.getByLabel("Outpaint target ratio")).toBeHidden();
-  await expect(node.locator('[data-port-role="input"]')).toHaveCount(4);
+  await expect(node.locator('[data-port-role="input"]')).toHaveCount(6);
   await expect.poll(async () => (await wireAttachmentErrors(page, [{ id: "source-outpaint", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "outpaint", port: "referenceVideoIn" } }])).every(edge => !edge.missing && edge.start < 2 && edge.end < 2)).toBe(true);
   await node.locator(".model-settings-drawer > summary").click();
   await node.getByRole("button", { name: "Canvas Edit", exact: true }).click();

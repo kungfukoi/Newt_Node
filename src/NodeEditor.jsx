@@ -1,3 +1,4 @@
+import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpaintNode, migrateOutpaintImageEdges } from "./outpaintReferenceSlots.js";
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
 import { NodeAbout } from "./components/NodeAbout.jsx";
@@ -833,7 +834,7 @@ const wanBlendImageSlots = [
   { id: "wanBlendWhiteImageIn", channel: "white", label: "White", shortLabel: "Wht", color: "#f8fafc", maskIndex: 7 }
 ];
 const wanBlendImagePortIds = wanBlendImageSlots.map((slot) => slot.id);
-const utilityImageInputPortIds = ["startFrameIn", "endFrameIn", "imageIn", "referenceImageIn", ...wanBlendImagePortIds];
+const utilityImageInputPortIds = ["startFrameIn", "endFrameIn", "imageIn", "referenceImageIn", ...outpaintImagePortIds.slice(1), ...wanBlendImagePortIds];
 
 const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
@@ -1352,7 +1353,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const activeEdgeIds = React.useMemo(() => {
     const active = buildActiveEdgeIds(nodes, edges);
     edges.forEach(edge => {
-      if (outpaintAnalysisNodeIds.has(edge.to.nodeId) && ["referenceVideoIn", "canvasVideoIn", "maskVideoIn", "referenceImageIn"].includes(edge.to.port)) active.add(edge.id);
+      if (outpaintAnalysisNodeIds.has(edge.to.nodeId) && ["referenceVideoIn", "canvasVideoIn", "maskVideoIn", ...outpaintImagePortIds].includes(edge.to.port)) active.add(edge.id);
     });
     return active;
   }, [nodes, edges, outpaintAnalysisNodeIds]);
@@ -5977,7 +5978,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           from: draftEdge.from,
           to,
           color: draftEdge.color
-        }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel)));
+        }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && (isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel) || (isOutpaintNode(targetNodeForConnection) && outpaintImagePortIds.includes(to.port)))));
         if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
         if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
       }
@@ -6024,7 +6025,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       nodeDataIds: shouldResetAutoAspectOutput || shouldResetCoverageOutput ? [to.nodeId] : [],
       restoreStructure: true
     });
-    setEdges((current) => appendInputConnection(targetNodeForConnection?.type === "audioModel" && to.port === "audioIn" ? current.filter(edge => edge.to.nodeId !== to.nodeId || edge.to.port !== to.port) : current, { id: `edge-${Date.now()}`, from, to, color }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel)));
+    setEdges((current) => appendInputConnection(targetNodeForConnection?.type === "audioModel" && to.port === "audioIn" ? current.filter(edge => edge.to.nodeId !== to.nodeId || edge.to.port !== to.port) : current, { id: `edge-${Date.now()}`, from, to, color }, targetNodeForConnection?.type === "utility" && targetNodeForConnection.data?.utilityMode === "video" && (isUtilityCompositeVideoModel(targetNodeForConnection.data?.utilityVideoModel) || (isOutpaintNode(targetNodeForConnection) && outpaintImagePortIds.includes(to.port)))));
     if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
     if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
     setSaveStatus("Connected nodes");
@@ -6077,6 +6078,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (isOutpaintNode(target) && outputKind === "image") return outpaintImagePortIds.filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
     if (isKeyerNode(target)) return outputKind === "video" ? ["videoIn"] : outputKind === "image" && target.data.keyerMode === "first" ? ["firstHintIn"] : [];
     if (target.type === "videoModel" && isFlux3MaxModel(target.data?.model) && outputKind === "image") return flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id).filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && ["image", "video"].includes(outputKind)) {
@@ -6246,7 +6248,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", ...outpaintImagePortIds].includes(to.port)) return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       return "Storyboard frames connect to image inputs or previews";
@@ -6262,7 +6264,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", ...outpaintImagePortIds].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
@@ -6277,7 +6279,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
-      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", ...outpaintImagePortIds].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       return "Coverage output connects to image inputs or previews";
@@ -6408,7 +6410,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", ...flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id), "referenceImageIn"].includes(to.port)) return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
-      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", ...outpaintImagePortIds].includes(to.port)) return "";
       if (target.type === "edit" && to.port === "imageIn") return "";
       return "Edit image output connects to image inputs";
     }
@@ -14825,6 +14827,14 @@ function NodeBody({
     const endFramesOutputPort = config.output.find((port) => port.id === "endFramesOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
+    const outpaintSlotUrls = Object.fromEntries(outpaintImagePortIds.map(id => [id, connectedAssetUrls(incoming[id])]));
+    const outpaintSlotNames = Object.fromEntries(outpaintImagePortIds.map(id => {
+      const connection = (incoming[id] || []).find(({ source, edge }) => connectedOutputUrl(source, edge));
+      const output = connection && connectedOutputItem(connection.source, connection.edge);
+      return [id, output?.fileName || connection?.source.data?.fileName || ""];
+    }));
+    const outpaintSlots = outpaintImageSlots(node.data, outpaintSlotUrls, outpaintSlotNames);
+    const outpaintReferences = outpaintImagePayload(node.data, outpaintSlotUrls);
     const retainedOutpaint = lastOutpaintPreparation(node.data);
     const isOutpaintCropOnly = isOutpaintVideo && retainedOutpaint?.plan?.needsOutpaint === false && !outpaintPreparationError(retainedOutpaint, connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", connectedAssetUrls(incoming.canvasVideoIn).at(0) || "", normalizeUtilityOutpaintSettings(node.data.videoOutpaint).model);
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
@@ -14832,6 +14842,7 @@ function NodeBody({
       .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
       .filter(Boolean))
       .map((port) => {
+        if (isOutpaintVideo && outpaintImagePortIds.includes(port.id)) return { ...port, label: outpaintSlots.find(slot => slot.id === port.id).name };
         if (!isCompositeVideo) return port;
         const connection = incoming[port.id]?.at(-1);
         const type = connection ? previewMediaType(connection.source, connection.edge) : "";
@@ -15083,7 +15094,7 @@ function NodeBody({
                 </NodeRow>
               )}
               {isOutpaintVideo ? (
-                <VideoOutpaintControls canvasVideoUrl={connectedAssetUrls(incoming.canvasVideoIn).at(0) || ""} canvasPort={config.input.find(port => port.id === "canvasVideoIn")} generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceImageUrls={connectedAssetUrls(incoming.referenceImageIn)} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
+                <VideoOutpaintControls canvasVideoUrl={connectedAssetUrls(incoming.canvasVideoIn).at(0) || ""} canvasPort={config.input.find(port => port.id === "canvasVideoIn")} generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceSlots={outpaintSlots} referenceImagePorts={outpaintImagePortIds.map(id => ({ ...config.input.find(port => port.id === id), label: outpaintSlots.find(slot => slot.id === id).name }))} referenceImageUrls={outpaintReferences.urls} referenceRoles={outpaintReferences.roles} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
               ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
                   <select
@@ -16886,7 +16897,7 @@ function NodeBody({
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
       {isMinimaxH3 && <small className="upload-status model-status-note">{activeMinimaxH3Route.replaceAll("-", " ")} · native audio</small>}
-      {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings Â· preview</small>}
+      {isGeminiOmni && <small className="upload-status model-status-note">Provider selected in Settings · preview</small>}
       {isKlingO3 && <small className="upload-status model-status-note">Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
@@ -18213,6 +18224,7 @@ function getNodeConfig(type) {
         ...wanBlendImageSlots.map((slot) => ({ id: slot.id, label: `${slot.label} Image`, color: portColors.image })),
         { id: "referenceVideoIn", label: "Control Video", color: portColors.video },
         { id: "canvasVideoIn", label: "Canvas", color: portColors.video },
+        ...outpaintImagePortIds.slice(1).map((id, index) => ({ id, label: `Image ${index + 2}`, color: portColors.image })),
         { id: "controlVideoIn", label: "Motion Map", color: portColors.video },
         { id: "maskVideoIn", label: "Mask Video", color: portColors.video }
       ],
@@ -19819,7 +19831,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
-  if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn", "canvasVideoIn"];
+  if (videoModel === videoOutpaintModelName) return ["promptIn", ...outpaintImagePortIds, "referenceVideoIn", "canvasVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDwposeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -22426,13 +22438,14 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
   const wanWarpMotionVideoUrl = isWanWarp ? connectedAssetUrlsByType(incoming.controlVideoIn, "video").at(-1) || "" : "";
   const wanWarpDepthVideoUrl = isWanWarp ? connectedAssetUrlsByType(incoming.maskVideoIn, "video").at(-1) || "" : "";
   const wanBlendImageSlots = isUtilityWanBlendModel(model) ? wanBlendInputImageSlots(incoming) : [];
-  const referenceImageUrls = isUtilityTransitionBuilderModel(model)
+  const outpaintReferences = outpaintImagePayload(node.data, Object.fromEntries(outpaintImagePortIds.map(id => [id, connectedAssetUrls(incoming[id])])));
+  const referenceImageUrls = model === videoOutpaintModelName ? outpaintReferences.urls : isUtilityTransitionBuilderModel(model)
     ? wanWarpInputImageUrlsForNode(node, incoming)
     : isUtilityWanBlendModel(model)
       ? wanBlendInputImageUrls(incoming)
     : connectedAssetUrls(incoming.referenceImageIn);
   const request = buildUtilityVideoRequest({
-    node,
+    node: model === videoOutpaintModelName ? { ...node, data: { ...node.data, videoOutpaint: { ...node.data.videoOutpaint, referenceRoles: outpaintReferences.roles } } } : node,
     prompt,
     model,
     workflowContext,
@@ -23884,7 +23897,7 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
 
 function normalizeEdgesForCurrentGraph(edges = [], nodes = []) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  return keepLatestSingleImageInputs(dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
+  return keepLatestSingleImageInputs(dedupeEdges(migrateOutpaintImageEdges(nodes, edges).map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
 }
 
 function keepLatestSingleImageInputs(edges = [], nodeMap = new Map()) {

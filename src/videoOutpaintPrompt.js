@@ -1,4 +1,4 @@
-import { conservativeOutpaintContext, outpaintFramePresenceRule, outpaintReferenceAppearanceRule } from "./outpaintContext.js";
+import { conservativeOutpaintContext, outpaintFramePresenceRule, outpaintReferenceAppearanceRule, outpaintSourceColorRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule } from "./outpaintFrameOne.js";
 import { outpaintRoleInstructions } from "./outpaintReferences.js";
 export const outpaintPromptModes = ["manual", "auto", "guided"];
@@ -17,6 +17,7 @@ export function buildOutpaintAnalysisPrompt({ mode, guidance = "", aspectRatio =
   return [
     "Write a production-ready video OUTPAINTING prompt after examining the attached source video throughout their duration and its matching local mask.",
     outpaintFrameOneRule,
+    outpaintSourceColorRule,
     ...(outpaintModel === "seedance-2.5" ? [
       `PRIVATE COVERAGE CHECK: Inspect EACH missing region${regions.length ? `: ${regions.join(", ")}` : ""}. Account for every intersecting person, garment, limb and prop as well as the environment. Use this inventory to describe the completed scene in natural prose.`,
       "For each region, inspect its adjacent visible image edge throughout the footage. Describe what surfaces, structures, textures and boundary-crossing objects should CONTINUE into that region, their direction and perspective, and their existing motion. For a bottom expansion, explicitly describe the ground/floor or other surface reaching the bottom canvas edge. For a top expansion, describe only the supported upper environment. For side expansions, continue the corresponding side's visible environment. Do not merely say fill black or expand the scene.",

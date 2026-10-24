@@ -1,5 +1,5 @@
 import { normalizeOutpaintFrame, outpaintFrameGeometry } from "./videoOutpaintFrame.js";
-import { outpaintReferenceAppearanceRule } from "./outpaintContext.js";
+import { outpaintReferenceAppearanceRule, outpaintSourceColorRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule, fullFrameScene } from "./outpaintFrameOne.js";
 import { normalizeOutpaintReferenceRoles, outpaintRoleInstructions } from "./outpaintReferences.js";
 export const videoOutpaintModelName = "Video Outpaint";
@@ -99,6 +99,7 @@ export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], ov
     ...(referenceImageCount > 0 ? [outpaintRoleInstructions(referenceImageCount, preparedPlan?.settings?.referenceRoles) || `${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
     "SAME-FRAME ATTACHMENT: Each visible person, limb, garment and prop has coherent anatomy and geometry connected to its visible source in that same frame, at the same position, angle, scale and velocity. Legs follow the existing hips and clothing; rigid props follow their visible axes. Subject presence follows the source entrances, exits and occlusion. Background remains continuous around the subjects. Reference images guide appearance; source footage determines motion.",
     ...(repair ? ["Maintain the exact user framing and creative direction, with continuous subject geometry, local exposure, texture and motion."] : []),
+    outpaintSourceColorRule,
     outpaintFrameOneRule
   ].filter(Boolean).join("\n\n");
 }

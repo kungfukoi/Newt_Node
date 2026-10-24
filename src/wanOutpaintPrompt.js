@@ -1,4 +1,4 @@
-import { outpaintReferenceAppearanceRule } from "./outpaintContext.js";
+import { outpaintReferenceAppearanceRule, outpaintSourceColorRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule, fullFrameScene } from "./outpaintFrameOne.js";
 // VACE conditions on a completed-scene caption, rather than Seedance media tags.
 export function wanOutpaintPrompt(prompt, plan, referenceImageCount = 0) {
@@ -7,6 +7,7 @@ export function wanOutpaintPrompt(prompt, plan, referenceImageCount = 0) {
     fullFrameScene(scene),
     ...(referenceImageCount > 0 ? [outpaintReferenceAppearanceRule] : []),
     "The entire scene is already present from frame one and remains complete in every frame. Only the source action and camera motion continue; the surrounding scene follows their coherent motion and parallax.",
+    outpaintSourceColorRule,
     outpaintFrameOneRule
   ].join("\n\n");
 }
