@@ -33,6 +33,8 @@ export async function openFixture(page, options = {}) {
     }
     if (path.startsWith("/api/")) {
       requests.push({ path, method: request.method() });
+      // Browser fixtures have no supervisor; match the real headless lifecycle response.
+      if (path === "/api/window-session") return route.fulfill({ status: 204, body: "" });
       if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, exploreLookVariation: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" }, ...options.settings });
       if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });

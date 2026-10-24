@@ -17,7 +17,7 @@ for (const recovered of [false, true]) test(`Stop keeps ${recovered ? 'recovered
     const scope = new URL(route.request().url()).searchParams.get('scope');
     return route.fulfill({ json: { jobs: jobs.map(job => ({ ...job, scope, state: stopped ? 'dismissed' : job.state })), cursor: 'fixture:' + polls, reset: true, pollAfterMs: 3000 } });
   } });
-  await page.route('**/api/health', route => route.fulfill({ json: { ok: true, routes: { generationProgress: true, remoteVideoJobs: true, videoOutpaintMatching: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, videoOutpaintSeedanceSourceFrames: true, seedanceVideoEditing: true } } }));
+  await page.route('**/api/health', route => route.fulfill({ json: { ok: true, routes: { generationProgress: true, remoteVideoJobs: true, videoOutpaintMatching: true, videoOutpaintConsistency: true, videoOutpaintPreparedReuse: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintSeedance: true, videoOutpaintSeedanceSourceFrames: true, seedanceVideoEditing: true } } }));
   await page.route('**/api/node/generate-video', route => {
     const body = route.request().postDataJSON(); generations.push(body);
     const job = { runId: body.generationRunId, nodeId: 'outpaint', groupId: body.generationGroupId, batchIndex: body.generationBatchIndex, state: 'running', scope: body.generationScope, createdAt: new Date().toISOString() };

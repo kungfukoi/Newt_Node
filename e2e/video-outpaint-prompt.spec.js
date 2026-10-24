@@ -15,9 +15,9 @@ test("Video Outpaint drafts an editable guided prompt without generating video a
   await page.route("**/api/node/video-outpaint-prepare", route => {
     const body = route.request().postDataJSON();
     const settings = normalizeVideoOutpaintSettings(body.videoOutpaint);
-    return route.fulfill({ json: { sourceUrl: body.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", maskImageUrl: "/outputs/e2e/mask.png", fingerprint: videoOutpaintFingerprint(body.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 3.375 }, settings) } });
+    return route.fulfill({ json: { sourceUrl: body.sourceVideoUrl, videoUrl: "/outputs/e2e/padded.mp4", generationVideoUrl: "/outputs/e2e/conditioned.mp4", maskVideoUrl: "/outputs/e2e/mask.mp4", maskImageUrl: "/outputs/e2e/mask.png", fingerprint: videoOutpaintFingerprint(body.sourceVideoUrl, settings), plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 3.375 }, settings) } });
   });
-  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintFraming: true, videoOutpaintMatching: true } } }));
+  await page.route("**/api/health", route => route.fulfill({ json: { ok: true, routes: { videoOutpaint: true, videoOutpaintPrompt: true, videoOutpaintFramePresence: true, videoOutpaintFullResolution: true, videoOutpaintLocalMasks: true, videoOutpaintFraming: true, videoOutpaintMatching: true, videoOutpaintConsistency: true, videoOutpaintPreparedReuse: true } } }));
   let submitted, fail = false, release;
   await page.route("**/api/node/video-outpaint-prompt", async route => {
     submitted = route.request().postDataJSON();
@@ -28,7 +28,7 @@ test("Video Outpaint drafts an editable guided prompt without generating video a
   const about = node.getByRole("button", { name: "About this Node", exact: true });
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await about.hover();
-  await expect(page.getByRole("tooltip")).toContainText("Wan VACE");
+  await expect(page.getByRole("tooltip")).toContainText("Analyze and Run reuse the last canvas");
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await about.focus();
