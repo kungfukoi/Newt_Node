@@ -1,3 +1,4 @@
+import { lastOutpaintPreparation } from "../outpaintPreparation.js";
 import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import { workflowContextPayload } from "../workflowContext.js";
 import { videoCharacterDialogue } from "../characterDialogue.js";
@@ -310,6 +311,7 @@ export function buildUtilityVideoRequest({
     wanWarpSegments,
     canvasVideoUrl,
     videoOutpaint: normalizeUtilityOutpaintSettings(node.data.videoOutpaint),
+    videoOutpaintPrepared: lastOutpaintPreparation(node.data),
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,
       format: node.data.extractFrameFormat || "png"

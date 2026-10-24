@@ -4,7 +4,7 @@ import { planVideoOutpaint } from "../src/videoOutpaint.js";
 
 test("outpaint reference roles persist and color refinishing uses retained raw without a generation", async ({ page }) => {
   const settings = { model: "seedance-2.5", seedanceResolution: "480p", feather: 32 };
-  const prepared = { sourceUrl: "/outputs/e2e/source.mp4", videoUrl: "/outputs/e2e/padded.mp4", maskImageUrl: "/outputs/e2e/mask.png", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1 }, settings) };
+  const prepared = { sourceUrl: "/outputs/e2e/source.mp4", videoUrl: "/outputs/e2e/padded.mp4", generationVideoUrl: "/outputs/e2e/generation.mp4", maskImageUrl: "/outputs/e2e/mask.png", plan: planVideoOutpaint({ width: 640, height: 360, fps: 24, duration: 1 }, settings) };
   await page.addInitScript(({ settings, prepared }) => {
     if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return;
     sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
@@ -23,13 +23,18 @@ test("outpaint reference roles persist and color refinishing uses retained raw w
   const node = page.locator('[data-node-card-id="outpaint"]');
   await node.getByLabel("Outpaint image 1 role").selectOption("environment");
   await node.getByLabel("Outpaint image 2 role").selectOption("wardrobe");
-  await node.getByLabel("Match outpaint extension color").check();
+  await expect(node.getByLabel("Restore original source footage")).not.toBeVisible();
+  await node.locator("summary").filter({ hasText: /^Advanced$/ }).click();
+  await expect(node.getByLabel("Restore original source footage")).toBeChecked();
+  await expect(node.getByLabel("Match outpaint extension color")).toBeChecked();
+  await expect(node.getByLabel("Prepared outpainting canvas")).toHaveAttribute("src", /generation\.mp4/);
   const saved = () => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(n => n.id === "outpaint").data);
   await expect.poll(async () => (await saved()).videoOutpaint.referenceRoles).toEqual(["environment", "wardrobe"]);
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(node.getByLabel("Outpaint image 1 role")).toHaveValue("environment");
   await expect(node.getByLabel("Outpaint image 2 role")).toHaveValue("wardrobe");
+  await node.locator("summary").filter({ hasText: /^Advanced$/ }).click();
   await expect(node.getByLabel("Match outpaint extension color")).toBeChecked();
   let finishing;
   await page.route("**/api/node/video-outpaint-finish", route => {

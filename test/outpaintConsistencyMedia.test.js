@@ -24,7 +24,7 @@ test("real finishing improves extension color, preserves the original core and f
     let targets = 0;
     const service = createVideoOutpaintService({ resolveAsset: async filePath => ({ filePath }), probeVideo: probe, runFfmpeg: run, statFile: stat,
       createTarget: async (_body, kind, ext) => { const filePath = path.join(directory, `${++targets}-${kind}${ext}`); return { filePath, publicPath: filePath }; } });
-    const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", feather: 32 } }, source);
+    const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", feather: 32, matchExtensionColor: false } }, source);
     await run(["-y", "-f", "lavfi", "-i", `color=c=0x787878:s=480x854:r=24`, "-frames:v", String(prepared.plan.frames), "-c:v", "libx264", "-crf", "0", raw]);
     const baseline = await service.finish({}, prepared, { filePath: raw });
     const enabled = { ...prepared, plan: { ...prepared.plan, settings: { ...prepared.plan.settings, matchExtensionColor: true } } };

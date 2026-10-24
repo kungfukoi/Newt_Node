@@ -1,3 +1,4 @@
+import { outpaintPreparationError, preparedOutpaintSettings } from "../src/outpaintPreparation.js";
 import { normalizeVideoOutpaintSettings, planVideoOutpaint, videoOutpaintFingerprint } from "../src/videoOutpaint.js";
 import { overlapBlendFilters } from "./outpaint-boundary.js";
 import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied-canvas.js";
@@ -7,6 +8,22 @@ import { inspectExtensionColor, extensionColorFilter } from "./outpaint-color.js
 
 export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
   async function prepare(body, sourceUrl, timing = {}) {
+    const cached = body.videoOutpaintPrepared;
+    if (cached && !body.forcePrepareOutpaint) {
+      const error = outpaintPreparationError(cached, sourceUrl, body.canvasVideoUrl, normalizeVideoOutpaintSettings(body.videoOutpaint).model);
+      if (error) throw new Error(error);
+      const urls = [cached.sourceUrl, cached.videoUrl, cached.generationVideoUrl, cached.maskImageUrl, cached.maskVideoUrl, cached.loopedSourceUrl].filter(Boolean);
+      try {
+        for (const url of new Set(urls)) {
+          const asset = await resolveAsset(url);
+          if (!(await statFile(asset.filePath)).size) throw new Error("Empty asset");
+        }
+      } catch {
+        throw new Error("The saved canvas has missing or unreadable files. Prepare a new canvas before running.");
+      }
+      reportProgress("Using the last prepared canvas…");
+      return { ...cached, plan: { ...cached.plan, settings: preparedOutpaintSettings(cached, body.videoOutpaint) } };
+    }
     const originalSourceUrl = sourceUrl;
     if (body.canvasVideoUrl) sourceUrl = body.canvasVideoUrl;
     if (!sourceUrl) throw new Error("Connect a source video before preparing outpainting.");

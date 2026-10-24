@@ -1,8 +1,9 @@
+import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
 import { NodeAbout } from "./components/NodeAbout.jsx";
 import { outpaintNeedsFinishing, outpaintOutputError, outpaintCanRefinish, outpaintCanRegenerate } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
-import { normalizeUtilityOutpaintSettings, videoOutpaintModelName, videoOutpaintFingerprint } from "./videoOutpaint.js";
+import { normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
 import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
 import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
 import { videoReferenceLabel } from "./videoReferenceLabels.js";
@@ -14824,7 +14825,8 @@ function NodeBody({
     const endFramesOutputPort = config.output.find((port) => port.id === "endFramesOut");
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
-    const isOutpaintCropOnly = isOutpaintVideo && node.data.videoOutpaintPrepared?.fingerprint === videoOutpaintFingerprint(connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", node.data.videoOutpaint, connectedAssetUrls(incoming.canvasVideoIn).at(0) || "") && node.data.videoOutpaintPrepared?.plan?.needsOutpaint === false;
+    const retainedOutpaint = lastOutpaintPreparation(node.data);
+    const isOutpaintCropOnly = isOutpaintVideo && retainedOutpaint?.plan?.needsOutpaint === false && !outpaintPreparationError(retainedOutpaint, connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", connectedAssetUrls(incoming.canvasVideoIn).at(0) || "", normalizeUtilityOutpaintSettings(node.data.videoOutpaint).model);
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
     const collapsedPorts = (isVideoMode && isCompositeVideo ? compositeInputPorts(node.data, portColors.preview) : activeUtilityInputPortIds
       .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))

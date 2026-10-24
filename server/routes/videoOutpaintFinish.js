@@ -5,11 +5,12 @@ export function registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service
     try {
       const { rawVideoUrl, prepared: previous } = req.body;
       if (!isLocalAssetUrl(rawVideoUrl) || !isLocalAssetUrl(previous?.sourceUrl) || !previous?.plan?.settings) return res.status(400).json({ error: "Select a local outpaint result with its original preparation metadata." });
-      // Rebuild geometry server-side; finishing controls must never reinterpret an
+      // Reuse the retained canvas; finishing controls must never reinterpret an
       // existing generation using a newly edited crop, model, duration or resolution.
       const { restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats, matchExtensionColor } = req.body.videoOutpaint || {};
       const finishing = Object.fromEntries(Object.entries({ restoreSource, feather, autoMatch, finalQc, visualQc, keepAllRepeats, matchExtensionColor }).filter(([, value]) => value !== undefined));
-      const prepared = await service.prepare({ ...req.body, canvasVideoUrl: previous.canvasVideoUrl || "", videoOutpaint: { ...previous.plan.settings, ...finishing } }, previous.sourceUrl, { prerollFrames: previous.plan.prerollFrames || 0, frames: previous.plan.frames, outputFrames: previous.plan.outputFrames, outputDuration: previous.plan.outputDuration, sourceFps: previous.plan.sourceFps, sourceFrameRate: previous.plan.sourceFrameRate, sourceStartSeconds: previous.plan.sourceStartSeconds });
+      const prepared = await service.prepare({ ...req.body, videoOutpaintPrepared: previous, canvasVideoUrl: previous.canvasVideoUrl || "", videoOutpaint: { ...previous.plan.settings, ...finishing } }, previous.sourceUrl, { prerollFrames: previous.plan.prerollFrames || 0, frames: previous.plan.frames, outputFrames: previous.plan.outputFrames, outputDuration: previous.plan.outputDuration, sourceFps: previous.plan.sourceFps, sourceFrameRate: previous.plan.sourceFrameRate, sourceStartSeconds: previous.plan.sourceStartSeconds });
+      prepared.plan = { ...prepared.plan, settings: { ...prepared.plan.settings, ...finishing } };
       const raw = await resolveAsset(rawVideoUrl), native = await probeVideo(raw.filePath);
       const output = await service.finish(req.body, prepared, raw), metadata = await probeVideo(output.filePath);
       const videoOutpaint = { prepared, rawVideoUrl, model: prepared.plan.settings.model, nativeWidth: native.width, nativeHeight: native.height, nativeDuration: native.duration, restoredSource: prepared.plan.settings.restoreSource, matching: output.matching, qc: output.qc, outputFormat: output.outputFormat || "8-bit SDR H.264", warning: output.warning };

@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+Video Outpaint retains the last prepared canvas across settings edits. Analyze and Run reuse its files and geometry; Prepare canvas & mask and Canvas Edit Apply & prepare explicitly rebuild it. Pending canvas settings are labeled. Reference roles and finishing-only options apply without rebuilding. Source/model changes or missing saved assets require explicit preparation, never silent regeneration. Older nodes can recover preparation from their most recent result. The collapsed Advanced section contains Canvas repeats, Restore source, Match extension color, Local finish and Blend width. Restore source and Match extension color default on; explicit saved off values remain off.
+
 Video Outpaint drafts and positive submission prompts begin with `Full frame <scene description>`, describing the completed first-frame scene before observed action. Analysis privately inventories every intersecting person, limb, garment and prop as well as background coverage. Generation wrappers omit colored-padding instructions, region headings, pixel rectangles, outward-generation commands and lists of unwanted transitions. Source placement, anatomy attachments, appearance references and observed motion remain preserved. Wan retains its separate negative prompt. Re-analyze existing drafts after updating; saved user text is not rewritten.
 
 

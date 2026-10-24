@@ -23,7 +23,7 @@ export function normalizeVideoOutpaintSettings(value = {}) {
     restoreSource: value.restoreSource !== false,
     feather: bounded(value.feather, 0, 128, 32),
     autoMatch: value.autoMatch !== false,
-    matchExtensionColor: value.matchExtensionColor === true,
+    matchExtensionColor: value.matchExtensionColor !== false,
     referenceRoles: normalizeOutpaintReferenceRoles(value.referenceRoles),
     finalQc: false,
     visualQc: false,

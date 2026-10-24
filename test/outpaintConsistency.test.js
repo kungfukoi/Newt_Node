@@ -11,7 +11,7 @@ test("shared environment and wardrobe roles survive normalization and match actu
   assert.deepEqual(normalizeOutpaintReferenceRoles(null), []);
   assert.deepEqual(normalizeOutpaintReferenceRoles(["environment", "bad", "wardrobe"]), ["environment", "appearance", "wardrobe"]);
   assert.equal(normalizeOutpaintReferenceRoles(Array(40).fill("environment")).length, 30);
-  assert.equal(normalizeVideoOutpaintSettings().matchExtensionColor, false, "Legacy finishing stays unchanged until explicitly enabled");
+  assert.equal(normalizeVideoOutpaintSettings().matchExtensionColor, true, "Color matching defaults on");
   const settings = { model: "seedance-2.5", matchExtensionColor: true, referenceRoles: ["environment", "wardrobe"] };
   const plan = planVideoOutpaint({ width: 1920, height: 1080, fps: 24, duration: 2 }, settings);
   const prepared = { plan, videoUrl: "/outputs/canvas.mp4" };

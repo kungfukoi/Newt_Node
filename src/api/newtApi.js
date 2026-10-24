@@ -490,6 +490,7 @@ export const nodeApi = {
       label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");
       assertOutpaintConsistencySupport(body, health);
+      if (body.videoOutpaintPrepared && health.routes?.videoOutpaintPreparedReuse !== true) throw new Error("Restart Newt Node to reuse the saved canvas. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).model === "seedance-2.5" && health.routes?.videoOutpaintSeedanceSourceFrames !== true) throw new Error("Restart the backend to preserve the complete source frame count and timing. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && normalizeVideoOutpaintSettings(body.videoOutpaint).keepAllRepeats && health.routes?.videoOutpaintSeedanceAllRepeats !== true) throw new Error("Restart the backend to activate full-repeat debug output. No generation was submitted.");
       if (normalizeVideoOutpaintSettings(body.videoOutpaint).repeatCount > 1 && health.routes?.videoOutpaintSeedanceRepeats !== true) throw new Error("Restart the backend to activate Seedance canvas repeats. No generation was submitted.");
