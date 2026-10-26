@@ -31,7 +31,7 @@ export function normalizeKeyerData(data = {}) {
     keyerMode: ["auto", "first", "video"].includes(data.keyerMode) ? data.keyerMode : "auto",
     keyerDespill: number(data.keyerDespill ?? 0.5, 0.5, 0, 1),
     keyerHintQuality: number(data.keyerHintQuality ?? 0.95, 0.95, 0, 1),
-    keyerMemory: ["auto", "balanced", "low"].includes(data.keyerMemory) ? data.keyerMemory : "auto",
+    keyerMemory: ["auto", "balanced", "low"].includes(data.keyerMemory) ? data.keyerMemory : "balanced",
     keyerFrameLimit: Math.round(number(data.keyerFrameLimit ?? 0, 0, 0, 1000000)),
     keyerView: ["source", "checker", "alpha", "fg", "cutout"].includes(data.keyerView) ? data.keyerView : "checker",
     keyerCarry: data.keyerCarry !== false,

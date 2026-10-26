@@ -5,19 +5,63 @@ import { NodeRow, OutputPortRow } from "./NodePorts.jsx";
 import { ResultPane } from "./MediaViews.jsx";
 import "./keyer.css";
 
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// A determinate bar when a percentage is known (value 0..1), otherwise an indeterminate one; always shows elapsed time.
+function KeyerProgress({ value, label, detail, startedAt }) {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const known = Number.isFinite(value) && value > 0;
+  const percent = Math.min(100, Math.round(value * 100));
+  return <div className="keyer-progress" role="group" aria-label="Keyer progress">
+    <div className="keyer-progress-head"><span>{label}</span><span>{known ? `Estimated ${percent}%` : "working…"}{startedAt ? ` · ${formatElapsed(now - startedAt)}` : ""}</span></div>
+    {known ? <progress max="100" value={percent} /> : <progress />}
+    {detail && <small className="keyer-progress-detail">{detail}</small>}
+  </div>;
+}
+
 export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sourceConnected, onUpdate, onRun, onPreviewOpen, utilityControls, utilityModeControls, ...ports }) {
   const d = normalizeKeyerData(node.data);
   const patch = value => onUpdate(node.id, value);
   const [engine, setEngine] = React.useState(null);
   const [statusError, setStatusError] = React.useState("");
   const [refresh, setRefresh] = React.useState(0);
+  const [installRequested, setInstallRequested] = React.useState(false);
   React.useEffect(() => {
     let current = true;
     setStatusError("");
     keyerApi.status().then(value => { if (current) setEngine(value); }, error => { if (current) setStatusError(error.message); });
     return () => { current = false; };
   }, [refresh]);
+  // While the install runs on the server, re-read its status so progress and completion show up.
+  React.useEffect(() => {
+    if (!engine?.installing) return undefined;
+    const timer = setInterval(() => setRefresh(n => n + 1), 2000);
+    return () => clearInterval(timer);
+  }, [engine?.installing]);
   const busy = ["running", "uploading"].includes(d.status);
+  const engineReady = Boolean(engine?.ready);
+  const installing = Boolean(engine?.installing) || installRequested;
+  const canInstall = Boolean(engine?.canInstall) && !engineReady && !installing;
+  const installLabel = engineReady ? "✓ Installed" : installing ? "Installing…" : !engine ? "Checking…" : engine.canInstall ? "Not installed" : "Unavailable";
+  async function install() {
+    setInstallRequested(true);
+    setStatusError("");
+    try { await keyerApi.install(); } catch (error) { setStatusError(error.message); } finally { setInstallRequested(false); setRefresh(n => n + 1); }
+  }
+  const [cancelling, setCancelling] = React.useState(false);
+  async function cancelKey() {
+    setCancelling(true);
+    try {
+      const result = await keyerApi.cancel(d.keyerJobId);
+      if (result.cancelled) patch({ keyerProgress: result.stopping ? "Stopping; waiting for setup to finish…" : "Cancelled" });
+      // The polling runner owns completion/error state and cannot race a newly started run.
+    } catch (error) { setStatusError(error.message); }
+    finally { setCancelling(false); }
+  }
   const sourceUrl = sourceConnected ? source?.url || "" : "";
   const sourceItem = sourceUrl ? { type: "video", url: sourceUrl, label: source?.label || d.sourceVideoName || "Source" } : null;
   const results = d.resultItems;
@@ -25,7 +69,9 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
   const selected = results[selectedIndex];
   const passItems = d.keyerView === "source" ? (sourceItem ? [sourceItem] : []) : results.map(item => d.keyerView === "cutout" ? item : item.keyer?.passes?.[d.keyerView]).filter(Boolean);
   const missing = keyerInputError({ sourceVideoUrl: sourceUrl, firstHintUrl: firstHint?.url, hintVideoUrl: hintVideo?.url, settings: keyerSettings(d) });
-  const canRun = !busy && (engine?.ready || engine?.canInstall) && !missing;
+  // Running needs an installed engine; install is a separate step with its own button.
+  const canRun = !busy && engineReady && !installing && !missing;
+  const runTitle = missing || (!engineReady ? (engine?.canInstall ? "Install CorridorKey first." : engine?.message) : "") || "Run local keying";
   const inputPorts = config.input.map(port => ({ ...port, disabled: port.id === "firstHintIn" ? d.keyerMode !== "first" : port.id === "hintVideoIn" ? d.keyerMode !== "video" : false, disabledReason: "Select the matching hint mode" }));
   function toggleVideo(open) {
     if (open === d.keyerVideoOpen) return;
@@ -39,14 +85,23 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
       <summary>Video</summary>
       {d.keyerVideoOpen && <>
     {utilityControls}
-    <div className="keyer-engine"><span>CorridorKey 2.0 · Local GPU</span><button type="button" disabled={busy} aria-label="Refresh Keyer engine" onClick={() => setRefresh(n => n + 1)}>↻</button></div>
+    <div className="keyer-engine">
+      <span>CorridorKey 2.0 · Local GPU</span>
+      <span className="keyer-engine-actions">
+        <span className={`keyer-install-badge ${engineReady ? "is-installed" : installing ? "is-installing" : "is-missing"}`} aria-label="Keyer engine installation">{installLabel}</span>
+        {canInstall && <button type="button" className="keyer-install-button" disabled={busy} onClick={install}>Install</button>}
+        <button type="button" disabled={busy} aria-label="Refresh Keyer engine" onClick={() => setRefresh(n => n + 1)}>↻</button>
+      </span>
+    </div>
     <div className="keyer-view-tabs" role="group" aria-label="Keyer viewer">
       {[["source", "Source"], ["checker", "Checker"], ["alpha", "Matte"], ["fg", "Foreground"], ["cutout", "Cutout"]].map(([value, label]) => <button type="button" key={value} aria-pressed={d.keyerView === value} onClick={() => patch({ keyerView: value })}>{label}</button>)}
     </div>
     <ResultPane label={d.keyerView === "source" ? "Connect a source video" : "Run Keyer to see this pass"} resultItems={passItems} selectedIndex={d.keyerView === "source" ? 0 : selectedIndex} type="video" status={d.status} error={d.error}
       onSelectResult={(index) => { const item = results[index]; patch({ selectedResultIndex: index, resultUrl: item?.url || "" }); }} onPreviewOpen={onPreviewOpen}
       sourceNodeId={d.keyerView === "source" || d.keyerView === "checker" ? "" : node.id} sourcePort={{ cutout: "cutoutOut", alpha: "matteOut", fg: "foregroundOut" }[d.keyerView] || ""} />
-    <div role="status" className="keyer-status">{busy ? d.status === "uploading" ? "Uploading source…" : d.keyerProgress || "Loading model…" : statusError || engine?.message || "Checking local engine…"}</div>
+    {installing && engine?.installing && <KeyerProgress value={engine.progress} label={`Installing · step ${Math.max(1, engine.step || 1)} of ${engine.steps || 6}`} detail={engine.detail} startedAt={engine.startedAt} />}
+    {busy && d.status === "running" && <KeyerProgress value={d.keyerPercent} label="Keying" detail={d.keyerDetail} startedAt={d.keyerStartedAt} />}
+    <div role="status" className="keyer-status">{busy ? d.status === "uploading" ? "Uploading source…" : d.keyerProgress || "Loading model…" : statusError || engine?.installError || engine?.message || "Checking local engine…"}</div>
     {inputPorts.map(p => <NodeRow key={p.id} label={p.label} node={node} inputPort={p} {...ports}>
       <span>{p.id === "videoIn" ? sourceConnected ? source?.label || "Connected video" : "Connect a video output" : p.id === "firstHintIn" ? firstHint?.label || "Optional matte image" : hintVideo?.label || "Optional matte video"}</span>
     </NodeRow>)}
@@ -57,7 +112,7 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
         <NodeRow label="Despill"><div className="keyer-number"><input aria-label="Keyer despill" type="range" min="0" max="1" step="0.05" value={d.keyerDespill} onChange={event => patch({ keyerDespill: Number(event.target.value) })} /><output>{d.keyerDespill.toFixed(2)}</output></div></NodeRow>
         {d.keyerMode !== "auto" && <><NodeRow label="Hint trust"><input aria-label="Keyer hint trust" type="number" min="0" max="1" step="0.05" value={d.keyerHintQuality} onChange={event => patch({ keyerHintQuality: event.target.value })} /></NodeRow>
           <NodeRow label="Carry matte through time"><input aria-label="Carry matte through time" type="checkbox" checked={d.keyerCarry} onChange={event => patch({ keyerCarry: event.target.checked })} /></NodeRow></>}
-        <NodeRow label="GPU memory"><select aria-label="Keyer GPU memory" value={d.keyerMemory} onChange={event => patch({ keyerMemory: event.target.value })}><option value="auto">Auto · use available VRAM</option><option value="balanced">8-frame temporal window</option><option value="low">Low VRAM · 4-frame window</option></select></NodeRow>
+        <NodeRow label="GPU memory"><select aria-label="Keyer GPU memory" value={d.keyerMemory} onChange={event => patch({ keyerMemory: event.target.value })}><option value="balanced">8-frame temporal window · Recommended</option><option value="low">Low VRAM · 4-frame window</option><option value="auto">Auto · can be very slow on Windows</option></select></NodeRow>
         <NodeRow label="Test frames"><input aria-label="Keyer test frames" type="number" min="0" max="1000000" step="1" value={d.keyerFrameLimit} onChange={event => patch({ keyerFrameLimit: event.target.value })} /></NodeRow>
         <p className="utility-model-description">0 = full clip. Use sRGB/Rec.709 video. Cutout carries straight alpha; source audio is omitted.</p>
       </fieldset>
@@ -71,7 +126,9 @@ export function KeyerNodeBody({ node, config, source, firstHint, hintVideo, sour
       {d.error && <p className="utility-model-description" role="alert">{d.error}</p>}
     </>}
     {config.output.map(p => <OutputPortRow key={p.id} node={node} port={p} {...ports} />)}
-    <button className="run-node-button" disabled={!canRun} title={missing || engine?.message || "Run local keying"} onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "run" } })}>{busy ? "Keying…" : engine?.canInstall && !engine?.ready ? "Install & Run Keyer" : d.keyerFrameLimit ? `Test key · first ${d.keyerFrameLimit} frames` : "Run Keyer"}</button>
+    {d.status === "running"
+      ? <button type="button" className="run-node-button keyer-cancel-button" disabled={cancelling || !d.keyerJobId} title="Stop the current key and free the Keyer" onClick={cancelKey}>{cancelling ? "Cancelling…" : "Cancel keying"}</button>
+      : <button className="run-node-button" disabled={!canRun} title={runTitle} onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "run" } })}>{busy ? "Preparing…" : d.keyerFrameLimit ? `Test key · first ${d.keyerFrameLimit} frames` : "Run Keyer"}</button>}
     {!busy && d.keyerJobId && <button type="button" className="run-node-button" onClick={() => onRun({ ...node, data: { ...node.data, keyerAction: "reconnect" } })}>Reconnect to previous key</button>}
   </div>;
 }

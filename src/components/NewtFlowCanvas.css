@@ -87,10 +87,19 @@
   vector-effect: non-scaling-stroke;
 }
 
+.newt-flow-edge-hitbox { cursor: pointer; }
+
+.newt-flow-edge:hover .newt-flow-edge-visible {
+  opacity: 0.95;
+  stroke-width: 8px;
+}
+
+/* A selected wire turns bright cyan with a glow, so it is obvious that Delete will remove it. */
 .newt-flow-edge.selected .newt-flow-edge-visible {
+  stroke: #38e1ff;
   stroke-width: var(--newt-flow-edge-selected-width);
-  opacity: 0.96;
-  filter: drop-shadow(0 0 4px rgba(244, 240, 232, 0.5));
+  opacity: 1;
+  filter: drop-shadow(0 0 3px #38e1ff) drop-shadow(0 0 9px rgba(56, 225, 255, 0.75));
 }
 
 .node-canvas.is-distant-zoom .newt-react-flow .node-card,
@@ -104,6 +113,10 @@
 
 .newt-flow-edge.inactive .newt-flow-edge-visible {
   opacity: 0.3;
+}
+
+.newt-flow-edge.selected.inactive .newt-flow-edge-visible {
+  opacity: 1;
 }
 
 .newt-flow-edge.active .newt-flow-edge-visible {

@@ -7,6 +7,7 @@ import { registerVideoOutpaintFinishRoute } from "./routes/videoOutpaintFinish.j
 import { createKeyerService } from "./keyer.js";
 import { createKeyerInstaller } from "./keyer-install.js";
 import { registerKeyerRoutes } from "./routes/keyer.js";
+import { registerUiStateRoutes } from "./ui-state.js";
 import { createOutpaintVisualReviewer } from "./outpaint-visual-qc.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
@@ -845,6 +846,7 @@ const localVideoUpload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: "16mb" }));
+registerUiStateRoutes(app, { dataDir });
 registerWindowLifecycle(app);
 let sessionClosing = false;
 process.on("message", (message) => {
@@ -1190,6 +1192,8 @@ function buildHealthPayload() {
       keyer: true,
       keyerUtility: true,
       keyerAutoSetup: true,
+      keyerInstallCancel: true,
+      workspaceRecovery: true,
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
@@ -3752,6 +3756,7 @@ registerVideoOutpaintFinishRoute(app, { isLocalAssetUrl, service: videoOutpaintS
 const keyerInstaller = createKeyerInstaller({ baseDir: path.join(dataDir, "corridorkey") });
 registerKeyerRoutes(app, createKeyerService({
   setup: keyerInstaller, runtime: keyerInstaller.runtime,
+  logDir: path.join(dataDir, "corridorkey"),
   isLocalAssetUrl, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile,
   ffmpeg: ffmpegBinaryPath, recordHistory: appendHistory, projectFromBody, nodeFromBody,
   createTarget: (body, kind, extension, dependency) => createManagedAssetTarget({ body }, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName, { forceExtension: true })

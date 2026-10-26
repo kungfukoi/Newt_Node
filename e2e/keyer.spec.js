@@ -46,13 +46,21 @@ test("Keyer controls persist and hint modes retain stable handles", async ({ pag
   expect(fit).toBe(true); expect(errors).toEqual([]);
 });
 
-test("missing components offer automatic setup while Mac disables CUDA runs", async ({ page }) => {
+test("missing components show a separate Install button and badge, and Mac disables CUDA runs", async ({ page }) => {
   const { node } = await setup(page);
-  await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: false, canInstall: true, busy: false, message: "Install missing components on Run" } }));
+  await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: false, canInstall: true, busy: false, message: "CorridorKey 2.0 is not installed. Click Install to download the missing components." } }));
   await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
-  await expect(node.getByRole("button", { name: "Install & Run Keyer", exact: true })).toBeEnabled();
+  await expect(node.locator(".keyer-install-badge")).toHaveText("Not installed");
+  await expect(node.getByRole("button", { name: "Install", exact: true })).toBeEnabled();
+  await expect(node.getByRole("button", { name: "Run Keyer", exact: true })).toBeDisabled();
+  await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: true, canInstall: true, busy: false, message: "CorridorKey 2.0 ready · Local GPU" } }));
+  await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
+  await expect(node.locator(".keyer-install-badge")).toHaveText("✓ Installed");
+  await expect(node.getByRole("button", { name: "Install", exact: true })).toHaveCount(0);
+  await expect(node.getByRole("button", { name: "Run Keyer", exact: true })).toBeEnabled();
   await page.route("**/api/keyer/status", route => route.fulfill({ json: { ready: false, canInstall: false, busy: false, message: "The Python engine requires CUDA and cannot run on macOS" } }));
   await node.getByRole("button", { name: "Refresh Keyer engine" }).click();
+  await expect(node.locator(".keyer-install-badge")).toHaveText("Unavailable");
   await expect(node.getByRole("button", { name: "Run Keyer", exact: true })).toBeDisabled();
   await expect(node.locator('[role="status"].keyer-status')).toContainText("macOS");
 });

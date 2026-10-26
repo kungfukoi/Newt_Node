@@ -87,6 +87,7 @@ async function harness(t, run) {
   for (const file of required) { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), "fixture"); }
   const targets = [], history = [];
   const service = createKeyerService({
+    logDir: root,
     runtime: () => ({ root, python }), ffmpeg: "ffmpeg", isLocalAssetUrl: url => url.startsWith("/outputs/"),
     resolveAsset: async url => ({ filePath: path.join(root, path.basename(url)) }),
     probeVideo: async () => ({ width: 512, height: 512, duration: 1, fps: 24 }),
@@ -131,4 +132,81 @@ test("service rejects remote inputs and missing hints, exposes process failures 
   assert.equal(job.state, "error"); assert.match(job.error, /CUDA out of memory/);
   assert.equal(job.item, undefined); assert.equal(h.targets.length, 0); assert.equal(h.history.length, 0);
   assert.equal((await h.service.status()).busy, false);
+});
+
+test("install-only action installs without keying, joins a running install and reports failures through status", async t => {
+  let ready = false, installing = false, release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const setup = {
+    status: async () => ({ ready, canInstall: true, installing, message: ready ? "ready" : "not installed" }),
+    ensure: async onProgress => { installing = true; onProgress?.("working"); await gate; installing = false; ready = true; }
+  };
+  const service = createKeyerService({ setup });
+  assert.deepEqual(await service.install(), { started: true });
+  assert.equal((await service.status()).installing, true);
+  assert.deepEqual(await service.install(), { started: true, installing: true });
+  release(); await new Promise(resolve => setTimeout(resolve, 20));
+  const done = await service.status();
+  assert.equal(done.ready, true); assert.equal(done.installError, undefined);
+  assert.deepEqual(await service.install(), { started: false, ready: true });
+
+  let attempts = 0;
+  const failing = createKeyerService({ setup: { status: async () => ({ ready: false, canInstall: true, installing: false, message: "not installed" }), ensure: async () => { attempts++; throw new Error("disk full"); } } });
+  await failing.install(); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await failing.status()).installError, "disk full");
+  await failing.install(); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(attempts, 2);
+});
+
+test("install-only action is refused when setup is unsupported or unavailable", async () => {
+  await assert.rejects(createKeyerService({}).install(), error => error.status === 400 && /not available/.test(error.message));
+  const mac = createKeyerService({ setup: { status: async () => ({ ready: false, canInstall: false, message: "macOS is unsupported" }), ensure: async () => assert.fail("must not install") } });
+  await assert.rejects(mac.install(), error => error.status === 400 && /macOS/.test(error.message));
+});
+
+test("install route returns 202 with the started state and surfaces service errors", async () => {
+  const routes = {};
+  const app = { get: (route, handler) => { routes[`GET ${route}`] = handler; }, post: (route, handler) => { routes[`POST ${route}`] = handler; } };
+  const reply = () => ({ code: 200, body: null, status(code) { this.code = code; return this; }, json(value) { this.body = value; return this; } });
+  registerKeyerRoutes(app, { status: async () => ({}), job: () => null, start: async () => ({}), install: async () => ({ started: true }) });
+  let res = reply(); await routes["POST /api/keyer/install"]({}, res);
+  assert.equal(res.code, 202); assert.deepEqual(res.body, { started: true });
+  registerKeyerRoutes(app, { status: async () => ({}), job: () => null, start: async () => ({}), install: async () => { throw Object.assign(new Error("busy"), { status: 409 }); } });
+  res = reply(); await routes["POST /api/keyer/install"]({}, res);
+  assert.equal(res.code, 409); assert.deepEqual(res.body, { error: "busy" });
+});
+
+test("cancel stops the running key, reports it as cancelled and frees the Keyer for the next run", async t => {
+  let aborted = false;
+  const h = await harness(t, (_python, _args, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => { aborted = true; reject(new Error("Keying cancelled.")); }, { once: true });
+  }));
+  const { jobId } = await h.service.start(h.body);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal((await h.service.status()).busy, true);
+  assert.deepEqual(await h.service.cancel(jobId), { cancelled: true });
+  assert.equal(aborted, true);
+  const job = h.service.job(jobId);
+  assert.equal(job.state, "cancelled"); assert.equal(job.error, "Keying cancelled."); assert.equal(job.controller, undefined);
+  assert.equal((await h.service.status()).busy, false);
+  assert.deepEqual(await h.service.cancel(jobId), { cancelled: false });
+  assert.equal(h.history.length, 0);
+  const next = await h.service.start(h.body);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await h.service.cancel(next.jobId);
+});
+
+test("cancel route and real process termination", async () => {
+  const handlers = new Map(); let seen;
+  registerKeyerRoutes({ get: () => {}, post: (route, handler) => handlers.set(route, handler) }, { cancel: async id => { seen = id; return { cancelled: true }; } });
+  const res = { status(code) { this.code = code; return this; }, json(value) { this.value = value; } };
+  await handlers.get("/api/keyer/cancel")({ body: { jobId: "abc" } }, res);
+  assert.equal(seen, "abc"); assert.deepEqual(res.value, { cancelled: true });
+  const { runKeyerProcess } = await import("../server/keyer.js");
+  const controller = new AbortController();
+  const started = Date.now();
+  const pending = runKeyerProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+  await assert.rejects(pending, /cancelled/);
+  assert.ok(Date.now() - started < 5000);
 });

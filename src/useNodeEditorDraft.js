@@ -1,4 +1,5 @@
 import React from "react";
+import { uiMirrorDraft } from "./uiState.js";
 
 export const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 
@@ -79,7 +80,9 @@ export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraft
     if (!pendingSnapshot) return;
 
     try {
-      writeNodeEditorDraftValue(storageKey, JSON.stringify(pendingSnapshot));
+      const serialized = JSON.stringify(pendingSnapshot);
+      writeNodeEditorDraftValue(storageKey, serialized);
+      if (storageKey === nodeDraftStorageKey) uiMirrorDraft(serialized);
       pendingDraftSnapshotRef.current = null;
     } catch {
       // Local persistence should never interrupt the node editor.

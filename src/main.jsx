@@ -79,6 +79,9 @@ import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45ResolutionOptions } from "./ideogram45.js";
 import { isReve21Model } from "./reve21.js";
+import { UpdateButton } from "./components/UpdateButton.jsx";
+import { installVideoHoverScrub } from "./videoHoverScrub.js";
+import { loadUiState, uiGet, uiSet, installUiStateFlush } from "./uiState.js";
 import "./styles.css";
 
 installClientDiagnostics();
@@ -192,7 +195,11 @@ function App() {
   const [imageResult, setImageResult] = React.useState([]);
   const [imageBatchCount, setImageBatchCount] = React.useState("1");
   const [imageHistory, setImageHistory] = React.useState([]);
-  const [workspaceMode, setWorkspaceMode] = React.useState("image");
+  const [workspaceMode, setWorkspaceMode] = React.useState(() => {
+    const saved = uiGet("workspaceMode", "image");
+    return ["image", "video", "nodes", "stats", "settings"].includes(saved) ? saved : "image";
+  });
+  React.useEffect(() => { uiSet("workspaceMode", workspaceMode); }, [workspaceMode]);
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
@@ -1287,11 +1294,21 @@ function batchStatusMessage(mediaType, total, completed, failures) {
   return firstError || `${label[0].toUpperCase()}${label.slice(1)} generation failed.`;
 }
 
+const stopHoverScrub = installVideoHoverScrub();
+if (import.meta.hot) import.meta.hot.dispose(stopHoverScrub);
 const stopWindowLifecycle = startWindowLifecycle({ connect: connectWindowSession });
 if (import.meta.hot) import.meta.hot.dispose(stopWindowLifecycle);
 
-createRoot(document.getElementById("root")).render(
-  <WorkspaceErrorBoundary label="NewtNode" onRetry={() => window.location.reload()}>
-    <App />
-  </WorkspaceErrorBoundary>
-);
+const stopUiStateFlush = installUiStateFlush();
+if (import.meta.hot) import.meta.hot.dispose(stopUiStateFlush);
+// Load the remembered interface state first so the app opens where it was left.
+loadUiState().finally(() => {
+  createRoot(document.getElementById("root")).render(
+    <>
+      <WorkspaceErrorBoundary label="NewtNode" onRetry={() => window.location.reload()}>
+        <App />
+      </WorkspaceErrorBoundary>
+      <UpdateButton />
+    </>
+  );
+});

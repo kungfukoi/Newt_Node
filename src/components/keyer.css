@@ -2,6 +2,18 @@
 .keyer-node-body > .keyer-video-section { flex: 0 0 auto; }
 .keyer-engine, .keyer-number { display: flex; align-items: center; gap: 8px; }
 .keyer-engine { justify-content: space-between; font-size: 12px; opacity: .85; }
+.keyer-engine-actions { display: flex; align-items: center; gap: 6px; }
+.keyer-install-badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid transparent; white-space: nowrap; }
+.keyer-install-badge.is-installed { color: #d9ffe9; background: #1f3d31; border-color: #3f8a68; }
+.keyer-install-badge.is-installing { color: #ffe9a8; background: #3d3416; border-color: #8a7a3f; }
+.keyer-install-badge.is-missing { color: #ffd0cc; background: #3d1f1d; border-color: #8a463f; }
+.keyer-install-button { padding: 3px 10px; font-size: 11px; font-weight: 600; }
+.keyer-progress { margin: 6px 0; font-size: 11px; }
+.keyer-progress-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; opacity: .9; }
+.keyer-progress progress { width: 100%; height: 8px; accent-color: #d9b82b; }
+.keyer-progress-detail { display: block; margin-top: 3px; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.keyer-cancel-button { background: #7a2e2a !important; color: #fff !important; }
+.keyer-cancel-button:hover:not(:disabled) { background: #96383a !important; }
 .keyer-view-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 .keyer-view-tabs button { flex: 1; padding: 6px 4px; font-size: 11px; }
 .keyer-view-tabs button[aria-pressed="true"] { color: #d9ffe9; background: #244c3c; border-color: #6abd96; }

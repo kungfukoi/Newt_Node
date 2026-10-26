@@ -87,6 +87,12 @@ try {
   assert.equal(health.routes.keyer, true);
   assert.equal(health.routes.keyerUtility, true);
   assert.equal(health.routes.keyerAutoSetup, true);
+  assert.equal(health.routes.workspaceRecovery, true);
+  assert.equal(health.routes.keyerInstallCancel, true);
+  const recovery = await fetch(api + "/api/ui-state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "smoke-window", revision: 1, state: { workspaceMode: "nodes", draft: { nodes: [], edges: [], projectName: "Recovery smoke" } } }) });
+  assert.equal(recovery.status, 200);
+  assert.equal((await (await request("/api/ui-state?sessionId=smoke-window")).json()).state.draft.projectName, "Recovery smoke");
+  assert.equal((await (await request("/api/keyer/cancel", { jobId: "nonexistent-smoke" })).json()).cancelled, false);
   for (const model of ["Extract Frame", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting"]) {
     const retired = await fetch(api + "/api/node/utility-video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }), signal: AbortSignal.timeout(15000) });
     assert.equal(retired.status, 400);

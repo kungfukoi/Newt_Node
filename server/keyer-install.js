@@ -109,6 +109,20 @@ export function createKeyerInstaller({ baseDir, env = process.env, platform = pr
   const runtime = () => keyerRuntime(env, platform, baseDir);
   const commandEnv = { UV_CACHE_DIR: path.join(baseDir, "uv-cache"), UV_PYTHON_INSTALL_DIR: path.join(baseDir, "python"), UV_PYTHON_BIN_DIR: path.join(baseDir, "bin"), UV_LINK_MODE: "copy", HF_HOME: path.join(baseDir, "huggingface"), HF_HUB_DISABLE_SYMLINKS_WARNING: "1", PYTHONUNBUFFERED: "1" };
   let pending, message = "", cached, cacheAt = 0, inspection;
+  // Live install progress (0..1), the current step, and the latest line of tool output.
+  const totalSteps = 6;
+  let progress = 0, step = 0, detail = "", startedAt = 0;
+  const bar = (value, stepNumber) => { progress = Math.max(progress, Math.min(1, value)); if (stepNumber) step = Math.max(step, stepNumber); };
+  // Feed a running tool's output into the progress state; tqdm-style "NN%|" lines move the bar inside [low, high].
+  const watch = (low, high) => ({ onOutput: chunk => {
+    for (const raw of String(chunk).split(/[\r\n]+/)) {
+      const line = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
+      if (!line) continue;
+      detail = line.slice(0, 160);
+      const percent = line.match(/(\d{1,3})%\|/)?.[1];
+      if (percent !== undefined) bar(low + (high - low) * Math.min(100, Number(percent)) / 100);
+    }
+  } });
   async function inspect() {
     if (platform === "darwin") return { ready: false, canInstall: false, message: "The open CorridorKey 2.0 engine requires NVIDIA CUDA and cannot run locally on macOS. No CUDA packages or model weights will be downloaded." };
     if (platform !== "win32" || arch !== "x64") return { ready: false, canInstall: false, message: "CorridorKey automatic setup requires Windows x64 and NVIDIA CUDA. This platform is unsupported." };
@@ -121,10 +135,10 @@ export function createKeyerInstaller({ baseDir, env = process.env, platform = pr
     const weights = (await Promise.all(assets.map(file => validAsset(path.join(r.root, file))))).every(Boolean);
     const packages = source && python ? await probe(r.python) : { ok: false };
     const ready = source && python && weights && packages.ok;
-    return { ready, canInstall: true, message: ready ? "CorridorKey 2.0 ready · Local GPU" : "Missing CorridorKey components will install automatically on Run (about 8 GB of downloads on a new system)." };
+    return { ready, canInstall: true, message: ready ? "CorridorKey 2.0 ready · Local GPU" : "CorridorKey 2.0 is not installed. Click Install to download the missing components (about 8 GB on a new system)." };
   }
   async function status(force = false) {
-    if (pending) return { ready: false, canInstall: true, installing: true, message };
+    if (pending) return { ready: false, canInstall: true, installing: true, message, progress, step, steps: totalSteps, detail, startedAt };
     if (!force && cached && Date.now() - cacheAt < 30000) return cached;
     if (!inspection) inspection = inspect().then(value => { cached = value; cacheAt = Date.now(); return value; }).finally(() => { inspection = null; });
     return inspection;
@@ -136,7 +150,8 @@ export function createKeyerInstaller({ baseDir, env = process.env, platform = pr
     await run("tar", ["-xf", archive, "-C", destination, ...(strip ? ["--strip-components=1"] : [])], { timeoutMs: 60000 });
   }
   async function install(onProgress) {
-    const report = text => { message = text; onProgress?.(text); };
+    const report = (text, value, stepNumber) => { message = text; detail = ""; if (value !== undefined) bar(value, stepNumber); onProgress?.(text, progress); };
+    progress = 0; step = 0; detail = ""; startedAt = Date.now();
     const before = await inspect();
     if (before.ready) return runtime();
     if (!before.canInstall) throw new Error(before.message);
@@ -147,34 +162,39 @@ export function createKeyerInstaller({ baseDir, env = process.env, platform = pr
     const tool = uvAssets[platform];
     const uv = path.join(baseDir, "tools", tool.binary);
     if (!await fileExists(uv)) {
-      report("Installing the Python setup tool…");
+      report("Installing the Python setup tool…", 0.01, 1);
       const archive = path.join(temporary, tool.name);
       await download(`https://github.com/astral-sh/uv/releases/download/${uvVersion}/${tool.name}`, archive, tool.sha);
       await unpack(archive, path.join(baseDir, "tools"));
     }
+    bar(0.03, 1);
     if (!await fileExists(path.join(r.root, "infer.py"))) {
       if (await fileExists(r.root) && (await readdir(r.root)).length) throw new Error("The configured CorridorKey folder contains unrelated files. Select an empty folder or remove the root override for managed setup.");
-      report("Downloading the CorridorKey 2.0 engine…");
+      report("Downloading the CorridorKey 2.0 engine…", 0.04, 2);
       const archive = path.join(temporary, "engine.tar.gz");
       await download(`https://codeload.github.com/nikopueringer/CorridorKey2.0/tar.gz/${corridorKeySourceRevision}`, archive);
       await unpack(archive, r.root, true);
     }
+    bar(0.08, 2);
     if (!await fileExists(r.python)) {
-      report("Installing isolated Python 3.12…");
-      await run(uv, ["venv", "--python", "3.12", "--managed-python", "--seed", "--allow-existing", path.join(r.root, "venv")], { env: commandEnv });
+      report("Installing isolated Python 3.12…", 0.09, 3);
+      await run(uv, ["venv", "--python", "3.12", "--managed-python", "--seed", "--allow-existing", path.join(r.root, "venv")], { env: commandEnv, ...watch(0.09, 0.12) });
     }
+    bar(0.12, 3);
     if (!(await probe(r.python)).ok) {
-      report("Installing CUDA PyTorch and Python dependencies…");
-      await run(uv, ["pip", "install", "--python", r.python, "--reinstall-package", "torch", "--reinstall-package", "torchvision", "torch==2.9.1", "torchvision==0.24.1", "--index-url", "https://download.pytorch.org/whl/cu128"], { env: commandEnv });
+      report("Installing CUDA PyTorch and Python dependencies… (the largest download, several GB)", 0.12, 4);
+      await run(uv, ["pip", "install", "--python", r.python, "--reinstall-package", "torch", "--reinstall-package", "torchvision", "torch==2.9.1", "torchvision==0.24.1", "--index-url", "https://download.pytorch.org/whl/cu128"], { env: commandEnv, ...watch(0.12, 0.35) });
+      bar(0.35);
       // Avoid Git and isolated-build interpreter discovery on Windows.
-      await run(uv, ["pip", "install", "--python", r.python, "setuptools==78.1.0", "wheel"], { env: commandEnv });
+      await run(uv, ["pip", "install", "--python", r.python, "setuptools==78.1.0", "wheel"], { env: commandEnv, ...watch(0.35, 0.37) });
       const requirements = path.join(baseDir, "requirements-corridorkey.txt");
       await writeFile(requirements, corridorKeyRequirements);
-      await run(uv, ["pip", "install", "--no-build-isolation", "--python", r.python, "-r", requirements], { env: commandEnv });
+      await run(uv, ["pip", "install", "--no-build-isolation", "--python", r.python, "-r", requirements], { env: commandEnv, ...watch(0.37, 0.45) });
     }
-    report("Downloading or resuming CorridorKey and foundation model weights…");
-    await run(r.python, ["-u", "scripts/download_weights.py", "--corridorkey_revision", corridorKeyWeightsRevision], { cwd: r.root, env: commandEnv });
-    report("Verifying Python dependencies, model files and CUDA execution…");
+    bar(0.45, 4);
+    report("Downloading or resuming CorridorKey and foundation model weights… (about 8 GB)", 0.46, 5);
+    await run(r.python, ["-u", "scripts/download_weights.py", "--corridorkey_revision", corridorKeyWeightsRevision], { cwd: r.root, env: commandEnv, ...watch(0.46, 0.96) });
+    report("Verifying Python dependencies, model files and CUDA execution…", 0.97, 6);
     cached = null;
     const after = await inspect();
     if (!after.ready) throw new Error("CorridorKey setup could not verify CUDA and all dependencies. Check the NVIDIA driver and retry; downloaded files are retained.");

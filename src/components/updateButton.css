@@ -1,0 +1,12 @@
+.update-button { position: fixed; right: 16px; bottom: 8px; z-index: 1000; display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 10px; font-size: 12px; font-weight: 600; border-radius: 16px; cursor: pointer; color: #e6e6e6;
+  background: rgba(30, 30, 30, .85); border: 1px solid #3a3a3a; opacity: .55; transition: opacity .15s; }
+.update-button:hover { opacity: 1; }
+.update-button.is-ready { opacity: 1; color: #111; background: #d9b82b; border-color: #d9b82b; animation: update-pulse 1.6s ease-in-out infinite; }
+@keyframes update-pulse { 50% { box-shadow: 0 0 0 6px rgba(217, 184, 43, .25); } }
+.workspace-recovery-warning { position: fixed; bottom: 108px; right: 16px; max-width: min(440px, 90vw); padding: 12px; color: #ffe29c; background: #27241c; border: 1px solid #887443; border-radius: 8px; z-index: 10000; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .update-button.is-ready { animation: none; } }
+.canvas-preferences { position: relative; font-size: 12px; }
+.canvas-preferences summary { padding: 6px; cursor: pointer; }
+.canvas-preferences > div { position: absolute; bottom: 36px; right: 0; width: 230px; padding: 12px; display: grid; gap: 12px; color: #eee; background: #202329; border: 1px solid #555; border-radius: 8px; }
+.canvas-preferences label { display: flex; gap: 8px; align-items: center; }

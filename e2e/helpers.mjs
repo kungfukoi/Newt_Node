@@ -12,7 +12,7 @@ export async function openFixture(page, options = {}) {
   const png = await readFile(new URL("./.generated/landscape.png", import.meta.url));
   const video = await readFile(new URL("./.generated/motion.mp4", import.meta.url));
   const audio = await readFile(new URL("./.generated/speech.wav", import.meta.url));
-  await page.addInitScript((fixture) => {
+  if (!options.restoreWorkspace) await page.addInitScript((fixture) => {
     if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify(fixture));
   }, fixture);
   await page.route("**/*", async (route) => {
@@ -35,6 +35,7 @@ export async function openFixture(page, options = {}) {
       requests.push({ path, method: request.method() });
       // Browser fixtures have no supervisor; match the real headless lifecycle response.
       if (path === "/api/window-session") return route.fulfill({ status: 204, body: "" });
+      if (path === "/api/ui-state") return json(request.method() === "PUT" ? { ok: true } : { state: options.uiState || {}, revision: 0, updatedAt: 0 });
       if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, exploreLookVariation: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" }, ...options.settings });
       if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });

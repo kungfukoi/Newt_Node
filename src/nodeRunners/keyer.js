@@ -9,13 +9,14 @@ export async function runKeyer({ node, sourceVideoUrl, firstHintUrl, hintVideoUr
   const error = reconnect ? "" : keyerInputError(input);
   if (error) throw new Error(error);
   const { jobId } = reconnect ? { jobId: node.data.keyerJobId } : await api.start({ ...input, ...workflowContextPayload(workflowContext), nodeId: node.id, nodeTitle: node.data.title });
-  update({ keyerJobId: jobId, keyerProgress: "Loading CorridorKey 2.0…" });
+  update({ keyerJobId: jobId, keyerProgress: "Loading CorridorKey 2.0…", keyerPercent: 0, keyerStartedAt: Date.now() });
   for (;;) {
     if (!shouldTrack()) return null;
     const job = await api.job(jobId);
     if (!shouldTrack()) return null;
-    update({ keyerProgress: job.message || "Processing…" });
+    update({ keyerProgress: job.message || "Processing…", keyerPercent: Number(job.progress) || 0, keyerDetail: job.detail || "", ...(job.startedAt ? { keyerStartedAt: job.startedAt } : {}) });
     if (job.state === "complete") return job.item;
+    if (job.state === "cancelled") { update({ keyerJobId: "", keyerPercent: 0 }); throw new Error("Keying cancelled."); }
     if (job.state === "error") { update({ keyerJobId: "" }); throw new Error(job.error || "Keying failed. Previous results were kept."); }
     await wait(1500);
   }

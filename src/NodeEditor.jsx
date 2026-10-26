@@ -137,6 +137,8 @@ import { GenerationProgress } from "./components/GenerationProgress.jsx";
 import { NewtPresetDialog, NewtPresetLibrary } from "./components/NewtPresetDialog.jsx";
 import { RemoteVideoAttention } from "./components/RemoteVideoAttention.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
+import { createViewportMotion, wheelZoomStep, isMouseWheelNotch } from "./canvasMotion.js";
+import { CanvasPreferences } from "./components/CanvasPreferences.jsx";
 import {
   Model3DViewer,
   OutputPreviewLightbox,
@@ -521,6 +523,7 @@ import { storyboardBoardSheetLayout } from "./storyboardBoardLayout.js";
 import { storyboardDirectorFramePlan } from "./storyboardShotExpansion.js";
 import { requireStoryboardPlanResponse, storyboardQcUnavailable } from "./storyboardPlanValidation.js";
 import { degreesToRadians, radiansToDegrees } from "./threeRuntime.js";
+import { uiGet, uiSet } from "./uiState.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { createWorkflowSessionId } from "./workflowSession.js";
@@ -1252,6 +1255,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const canvasRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
+  const viewportMotionRef = React.useRef(null);
+  React.useEffect(() => () => viewportMotionRef.current?.stop(), []);
   const flowConnectionRef = React.useRef(null);
   const flowDragStartRef = React.useRef(null);
   const flowNodeRenderRef = React.useRef(null);
@@ -1302,8 +1307,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
-  const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
-  const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
+  const [toolbarCollapsed, setToolbarCollapsed] = React.useState(() => uiGet("nodePaletteCollapsed", true) !== false);
+  const [outputsCollapsed, setOutputsCollapsed] = React.useState(() => uiGet("nodeOutputsCollapsed", true) !== false);
+  React.useEffect(() => { uiSet("nodePaletteCollapsed", toolbarCollapsed); }, [toolbarCollapsed]);
+  React.useEffect(() => { uiSet("nodeOutputsCollapsed", outputsCollapsed); }, [outputsCollapsed]);
   const [openingOutputFolder, setOpeningOutputFolder] = React.useState(false);
   const outputCatalog = useProjectOutputCatalog({ projectId, projectName, enabled: active && !outputsCollapsed });
   const [defaultProjectOutputPath, setDefaultProjectOutputPath] = React.useState("");
@@ -2010,6 +2017,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (zoomReadoutRef.current) {
       zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
     }
+  }
+
+  // Eased pan/zoom with momentum (see canvasMotion.js). Created lazily; it reads and writes the same viewportRef.
+  function viewportMotion() {
+    if (!viewportMotionRef.current) {
+      viewportMotionRef.current = createViewportMotion({
+        get: () => viewportRef.current,
+        apply: (next) => renderTransientViewport(next, { commitAfterMs: 120 }),
+        minScale: viewportScaleFloor,
+        maxScale: maxZoom
+      });
+    }
+    return viewportMotionRef.current;
+  }
+
+  // Before any click or drag starts, stop a gliding or easing view and flush it into React Flow, so node drags are
+  // computed against the viewport that is actually on screen (otherwise nodes jump when the pending viewport commits).
+  function settleViewportForPointer() {
+    viewportMotionRef.current?.stop();
+    if (viewportCommitTimerRef.current) commitTransientViewport();
   }
 
   function renderTransientViewport(nextViewport, { commitAfterMs = null } = {}) {
@@ -5395,7 +5422,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function handlePointerMove(event) {
     if (dragState?.type === "pan") {
       event.preventDefault();
-      renderTransientViewport({
+      viewportMotion().dragTo({
         ...dragState.viewport,
         x: dragState.viewport.x + event.clientX - dragState.startClient.x,
         y: dragState.viewport.y + event.clientY - dragState.startClient.y
@@ -5557,7 +5584,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function stopNodeDrag() {
-    if (dragState?.type === "pan") commitTransientViewport();
+    // Releasing a pan lets it glide; the motion loop commits the viewport once it settles.
+    if (dragState?.type === "pan" && !viewportMotion().release()) commitTransientViewport();
     setDragState(null);
     schedulePortPositionRefresh();
   }
@@ -5604,6 +5632,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     event.stopPropagation();
     const captureTarget = event.target.closest?.(".flow-overview-canvas") || canvasRef.current;
     captureTarget?.setPointerCapture?.(event.pointerId);
+    viewportMotion().begin();
     setDragState({
       type: "pan",
       startClient: {
@@ -5799,23 +5828,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       y: event.clientY - rect.top
     };
 
+    // Never move the view while a mouse button is held (dragging a node or wire): it would shift the drag under the pointer.
+    if (event.buttons) return;
+    const motion = viewportMotion();
     if (event.ctrlKey || event.metaKey || event.altKey) {
       const wheelDelta = normalizedWheelZoomDelta(event);
-      if (wheelDelta) {
-        zoomViewportAtPoint(pointer, zoomFactorForWheelDelta(event, wheelDelta));
-      }
+      if (wheelDelta) motion.zoomBy(pointer, zoomFactorForWheelDelta(event, wheelDelta));
       return;
     }
 
-    const current = viewportRef.current;
-    renderTransientViewport(
-      {
-        ...current,
-        x: current.x - event.deltaX,
-        y: current.y - event.deltaY
-      },
-      { commitAfterMs: 120 }
-    );
+    let wheelBehavior = "zoom";
+    try { wheelBehavior = window.localStorage.getItem("newt.wheelBehavior") || "zoom"; } catch { /* storage unavailable */ }
+    // Mouse wheel zooms toward the cursor, like the photo viewer. Set localStorage "newt.wheelBehavior" to "pan" to scroll instead.
+    if (wheelBehavior !== "pan" && !event.shiftKey && isMouseWheelNotch(event)) {
+      motion.zoomBy(pointer, (event.deltaY || event.deltaX) < 0 ? wheelZoomStep : 1 / wheelZoomStep);
+      return;
+    }
+    // Trackpad two-finger scroll, or Shift+wheel for sideways, pans.
+    const sideways = event.shiftKey && !event.deltaX;
+    motion.panBy(sideways ? -event.deltaY : -event.deltaX, sideways ? 0 : -event.deltaY);
   }
 
   function zoomViewportAtCanvasCenter(zoomFactor) {
@@ -5823,7 +5854,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    zoomViewportAtPoint(
+    viewportMotion().zoomBy(
       {
         x: rect.width / 2,
         y: rect.height / 2
@@ -8415,6 +8446,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           "--grid-x": `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px`,
           "--grid-y": `${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
         }}
+        onPointerDownCapture={settleViewportForPointer}
         onPointerDown={startCanvasPointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishConnection}
@@ -8606,6 +8638,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
+          <CanvasPreferences />
           <button type="button" className="canvas-stop-button" onClick={stopCanvasNodes} title="Stop all active nodes on this canvas and cancel queued runs. Cloud jobs already accepted may still finish." aria-label="Stop all active canvas nodes"><X size={16} /></button>
           <button type="button" aria-label="Snap to grid" aria-pressed={snapToGrid} title={`Snap to grid: ${snapToGrid ? "On" : "Off"}. Hold Alt while dragging to bypass.`} onClick={() => { const enabled = !snapToGrid; setSnapToGrid(enabled); rememberCanvasSnapToGrid(enabled); }}>
             <Grid3X3 size={14} />

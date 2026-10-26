@@ -386,7 +386,9 @@ function NewtFlowCanvasInner({
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={scheduleFlowSelectionCommit}
-        onEdgeClick={scheduleFlowSelectionCommit}
+        // Edges are controlled by the editor (no onEdgesChange), so React Flow never marks a clicked edge as selected;
+        // report the clicked edge directly instead of reading it back from the flow instance.
+        onEdgeClick={(_event, edge) => onSelectionChange?.({ nodeIds: [], edgeId: edge.id })}
         onSelectionEnd={scheduleFlowSelectionCommit}
         onMove={handleMove}
         onMoveEnd={handleMoveEnd}

@@ -49,3 +49,8 @@ server/data/director-dialogue-cache/
 
 server/data/seedance-drafts/
 server/data/corridorkey/
+
+# Interface memory (your open project and layout; personal, not for sharing)
+server/data/ui-state.json
+server/data/.ui-state.json.*.tmp
+server/data/ui-state.json.*.tmp

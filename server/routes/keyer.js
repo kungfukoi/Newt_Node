@@ -4,6 +4,12 @@ export function registerKeyerRoutes(app, service) {
   app.get("/api/keyer/status", async (_req, res) => {
     try { res.json(await service.status()); } catch { res.status(500).json({ error: "Could not inspect the local Keyer installation." }); }
   });
+  app.post("/api/keyer/install", async (_req, res) => {
+    try { res.status(202).json(await service.install()); } catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
+  app.post("/api/keyer/cancel", async (req, res) => {
+    try { res.json(await service.cancel(typeof req.body?.jobId === "string" ? req.body.jobId : "")); } catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
   app.post("/api/node/keyer", async (req, res) => {
     try {
       // Reuse client normalization at the trust boundary; arbitrary CLI flags are never accepted.

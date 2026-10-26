@@ -212,8 +212,23 @@ export async function deleteJson(path, fallbackMessage) {
   }, fallbackMessage);
 }
 
+export const uiStateApi = {
+  async load(sessionId) {
+    const { response, data } = await fetchJsonApi(`/api/ui-state?sessionId=${encodeURIComponent(sessionId)}`, { cache: "no-store" }, "Workspace recovery", { timeoutMs: 2000, retryLocalApi: false });
+    return ensureOk(response, data, "Could not load workspace recovery.");
+  },
+  async save(body, { closing = false } = {}) {
+    const options = { ...jsonBody(body), method: "PUT" };
+    options.keepalive = closing && new TextEncoder().encode(options.body).length < 60000;
+    const { response, data } = await fetchJsonApi("/api/ui-state", options, "Workspace recovery", { timeoutMs: 10000, retryLocalApi: false });
+    return ensureOk(response, data, "Could not save workspace recovery.");
+  }
+};
+
 export const keyerApi = {
   status: () => getJson("/api/keyer/status", "Could not check the Keyer engine."),
+  install: () => postJson("/api/keyer/install", {}, "Could not start the Keyer install."),
+  cancel: jobId => postJson("/api/keyer/cancel", { jobId: jobId || "" }, "Could not cancel the Keyer."),
   start: body => postJson("/api/node/keyer", body, "Could not start Keyer."),
   job: id => getJson(`/api/keyer/jobs/${encodeURIComponent(id)}`, "Could not reconnect to Keyer. Check History before starting another key.")
 };
