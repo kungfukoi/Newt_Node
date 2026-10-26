@@ -4,7 +4,7 @@
   <img src="public/newtnode-logo.png" alt="NewtNode" width="520" />
 </p>
 
-**A IDE Canvas driven visual workspace for AI-assisted Filmmaking Content Creation and Edit Tools.**
+**A node and canvas-based IDE for AI-assisted filmmaking, content creation, and media editing.**
 
 NewtNode connects image, video, audio, text, and 3D tools on a node canvas. Build reusable creative pipelines, work with references, edit and preview results, and save projects with their media. The app runs locally in your browser on Windows and macOS.
 
