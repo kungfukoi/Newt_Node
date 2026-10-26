@@ -6,7 +6,3 @@
 @keyframes update-pulse { 50% { box-shadow: 0 0 0 6px rgba(217, 184, 43, .25); } }
 .workspace-recovery-warning { position: fixed; bottom: 108px; right: 16px; max-width: min(440px, 90vw); padding: 12px; color: #ffe29c; background: #27241c; border: 1px solid #887443; border-radius: 8px; z-index: 10000; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .update-button.is-ready { animation: none; } }
-.canvas-preferences { position: relative; font-size: 12px; }
-.canvas-preferences summary { padding: 6px; cursor: pointer; }
-.canvas-preferences > div { position: absolute; bottom: 36px; right: 0; width: 230px; padding: 12px; display: grid; gap: 12px; color: #eee; background: #202329; border: 1px solid #555; border-radius: 8px; }
-.canvas-preferences label { display: flex; gap: 8px; align-items: center; }

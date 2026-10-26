@@ -36,6 +36,7 @@ import { imageEditModelOptions } from "./imageEdit.js";
 import { saveImageEditorModel } from "./imageEditorPreference.js";
 import { defaultUserPreferences, directorProcessingModelOptions, textAgentModelOptions, normalizeUserPreferences } from "./userPreferences.js";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel.jsx";
+import { CanvasPreferences } from "./components/CanvasPreferences.jsx";
 
 const providerDefinitions = Object.freeze([
   Object.freeze({ id: "fal", label: "Fal" }),
@@ -618,6 +619,7 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
           onToggle={() => toggleSection("userPreferences")}
         >
           <div className="settings-preference-list">
+            <CanvasPreferences />
             <label className={`settings-preference-toggle ${userPreferences.showPresetPanel ? "enabled" : ""}`}>
               <span>
                 <strong>Show Preset Panel</strong>

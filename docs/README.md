@@ -27,6 +27,7 @@ This directory separates the current product contract from architecture, build g
 - `explore-node.md`: look development, reference influence, favorites, refinements, and resumable queues.
 - `character-upstream.md`: Character generation contracts and upstream adaptations.
 - `storyboard-upstream.md`: Storyboard upstream behavior, protection, revisions, and review.
+- `upstream-feature-sources.md`: the user's tracked Sugarmilks and Deadmeat repositories, integration checkpoints and future feature-review guidance.
 - `stats-analytics.md`: Local/Global accounting scope, filters, pricing gaps, and isolated playtesting.
 - `ideogram45.md`: provider-specific generation/editing contracts and limits.
 - `newt-presets.md`: creating, inserting, binding, deleting, storing, and troubleshooting user-created Newt Presets.

@@ -98,7 +98,13 @@ async function harness(t, run) {
   return { root, service, targets, history, body };
 }
 const complete = async (service, id) => {
-  for (let n = 0; n < 300; n++) { const job = service.job(id); if (["complete", "error"].includes(job.state)) return job; await new Promise(resolve => setTimeout(resolve, 10)); }
+  for (let n = 0; n < 300; n++) {
+    const job = service.job(id);
+    // Terminal results can precede asynchronous log/temp cleanup. Wait for the
+    // serialized processing slot to be released before asserting readiness.
+    if (["complete", "error"].includes(job.state) && !(await service.status()).busy) return job;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
   throw new Error("Fixture job did not finish");
 };
 

@@ -15,6 +15,8 @@ Do not begin a feature by searching only for the visible UI label. Internal type
 
 ## Source Of Truth
 
+The user's tracked feature sources are SugerMilks/NewtNode and Deadmeat (James Fisher)'s jamesmfisher1979-source/NewtNode and jamesmfisher1979-source/newtLauncher. Consult `docs/upstream-feature-sources.md` for exact URLs, local paths and review checkpoints before evaluating or porting upstream features. Review changes against this checkout; upstream commits may already have been adapted under different hashes. The user has authorized keeping this source list, not automatic merges, pushes or scheduled monitoring.
+
 - The user's current requirement defines the intended change.
 - `docs/node-standards.md` defines the durable product contract.
 - Current source and tests show how that contract is implemented.

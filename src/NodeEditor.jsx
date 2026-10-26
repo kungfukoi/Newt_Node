@@ -138,7 +138,6 @@ import { NewtPresetDialog, NewtPresetLibrary } from "./components/NewtPresetDial
 import { RemoteVideoAttention } from "./components/RemoteVideoAttention.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import { createViewportMotion, wheelZoomStep, isMouseWheelNotch } from "./canvasMotion.js";
-import { CanvasPreferences } from "./components/CanvasPreferences.jsx";
 import {
   Model3DViewer,
   OutputPreviewLightbox,
@@ -8638,7 +8637,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           </div>
         )}
         <div className="zoom-controls" onPointerDown={(event) => event.stopPropagation()}>
-          <CanvasPreferences />
           <button type="button" className="canvas-stop-button" onClick={stopCanvasNodes} title="Stop all active nodes on this canvas and cancel queued runs. Cloud jobs already accepted may still finish." aria-label="Stop all active canvas nodes"><X size={16} /></button>
           <button type="button" aria-label="Snap to grid" aria-pressed={snapToGrid} title={`Snap to grid: ${snapToGrid ? "On" : "Off"}. Hold Alt while dragging to bypass.`} onClick={() => { const enabled = !snapToGrid; setSnapToGrid(enabled); rememberCanvasSnapToGrid(enabled); }}>
             <Grid3X3 size={14} />
