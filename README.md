@@ -1,5 +1,7 @@
 # NewtNode
 
+Batch audition (`4.27.0-beta.0`): select image or video nodes and choose **Batch** from the selection bar or context menu. Drop files or connect sources, remove entries, and click an entry to edit its optional prompt. Each collection contains images or videos; its output connects to matching media inputs throughout the canvas. Runnable processors operate on each entry with shared settings, up to three at once within existing resource limits. Preview, Timeline and Composer expose collection items through their usual media controls. Completed media have a **Batch** output for further processing. A Text Agent can write a prompt per image/video; its Batch output carries each original source with its generated prompt. Results stay ordered, failures can be retried individually, and interrupted runs do not automatically resubmit. Multiple connected batches pair by position with equal lengths (a single entry broadcasts); Cross combinations are not included. The container has no move arrows, upload buttons or instructional footer; add files by dropping them onto it.
+
 <p align="center">
   <img src="public/newtnode-logo.png" alt="NewtNode" width="520" />
 </p>

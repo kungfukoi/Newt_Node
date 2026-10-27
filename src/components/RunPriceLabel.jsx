@@ -1,4 +1,5 @@
 import React from "react";
+import { BatchRunContext } from "./BatchRunContext.js";
 import { refreshGenerationEstimate } from "../api/pricingEstimate.js";
 import { generationEstimate, formatRunCost } from "../generationPricing.js";
 import { generationQuoteKey } from "../pricingTrust.js";
@@ -6,6 +7,11 @@ import { getGenerationQuote } from "../pricingCatalog.js";
 import { usePricingRevision } from "../usePricing.js";
 
 export function RunPriceLabel({ label, options, visible = true }) {
+  const multiplier = React.useContext(BatchRunContext);
+  if (multiplier > 1) {
+    options = { ...options, batchCount: (Number(options.batchCount) || 1) * multiplier };
+    if (typeof label === "string" && !label.startsWith("Run Batch")) label = `${label} · ${multiplier} entries`;
+  }
   const revision = usePricingRevision();
   const key = generationQuoteKey(options);
   const [result, setResult] = React.useState(null);

@@ -1,4 +1,8 @@
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
+import BatchNodeBody from "./components/BatchNodeBody.jsx";
+import { batchEntries, batchInputEntries, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { runMediaBatch } from "./nodeRunners/batch.js";
+import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
 import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpaintNode, migrateOutpaintImageEdges } from "./outpaintReferenceSlots.js";
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
@@ -7,6 +11,7 @@ import { NodeAbout } from "./components/NodeAbout.jsx";
 import { outpaintNeedsFinishing, outpaintOutputError, outpaintCanRefinish, outpaintCanRegenerate } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
 import { normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
+import { defaultOutpaintFrame } from "./videoOutpaintFrame.js";
 import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
 import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
 import { videoReferenceLabel } from "./videoReferenceLabels.js";
@@ -122,7 +127,7 @@ import {
 } from "lucide-react";
 import { audioModelApi, composerApi, nodeApi, systemApi, stopRemoteVideoNode } from "./api/newtApi.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
-import { nodeSchedulingKey } from "./nodeScheduling.js";
+import { nodeSchedulingKey, nodeBatchConcurrency } from "./nodeScheduling.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
 import { useNewtPresets } from "./useNewtPresets.js";
 import { AssemblyNodeBody } from "./components/AssemblyNodeBody.jsx";
@@ -2567,6 +2572,28 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus(`${edgeIds.length} connection${edgeIds.length === 1 ? "" : "s"} deleted`);
   }
 
+  function selectedBatchSources() {
+    return nodesRef.current.filter(node => selectedNodeIds.includes(node.id) && node.type !== "batch")
+      .map(node => ({ node, port: outputPortDefinitionsForNode(node).find(port => ["image", "video"].includes(portKindForNodePort(node, port.id, "output")) && !port.disabled) }))
+      .filter(item => item.port);
+  }
+
+  function createBatchFromSelection() {
+    const sources = selectedBatchSources();
+    if (!sources.length) { setSaveStatus("Select image or video nodes to create a Batch."); return; }
+    const kind = portKindForNodePort(sources[0].node, sources[0].port.id, "output");
+    if (sources.some(item => portKindForNodePort(item.node, item.port.id, "output") !== kind)) { setSaveStatus("Create separate batches for images and videos."); return; }
+    pushUndoSnapshot();
+    const node = { id: createNodeId("batch"), type: "batch", x: Math.max(...sources.map(item => item.node.x)) + 380,
+      y: Math.min(...sources.map(item => item.node.y)), data: { ...createDefaultNodeData("batch", "Batch", 1), batchMediaType: kind } };
+    setNodes(current => [...current, node]);
+    setEdges(current => [...current, ...sources.map(({ node: source, port }) => ({ id: crypto.randomUUID(),
+      from: { nodeId: source.id, port: port.id }, to: { nodeId: node.id, port: kind === "video" ? "videoIn" : "imageIn" }, color: portColors[kind] }))]);
+    setSelectedNodeIds([node.id]);
+    setContextMenu(null);
+    setSaveStatus(`Created Batch with ${sources.length} linked ${kind === "video" ? "videos" : "images"}`);
+  }
+
   function createGroupFromSelection() {
     if (selectedNodeIds.length < 2) return;
 
@@ -2704,6 +2731,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function updateNode(nodeId, patch) {
+    if (["image", "video"].includes(patch.batchMediaType)) {
+      const previous = nodesRef.current.find(node => node.id === nodeId);
+      if (previous?.data.batchMediaType !== patch.batchMediaType) setEdges(current => current.filter(edge => {
+        if (edge.from.nodeId !== nodeId || edge.from.port !== "batchOut") return true;
+        const target = nodesRef.current.find(node => node.id === edge.to.nodeId);
+        return acceptedInputPortKinds(target, edge.to.port).includes(patch.batchMediaType);
+      }));
+    }
+    if (patch.batchRemoveEntry) {
+      const id = patch.batchRemoveEntry;
+      pushUndoSnapshot();
+      setEdges(current => current.filter(edge => !(edge.to.nodeId === nodeId && `${edge.from.nodeId}:${edge.from.port}` === id)));
+      const batch = nodesRef.current.find(node => node.id === nodeId);
+      const files = (batch?.data.batchFiles || []).filter(item => item.id !== id);
+      const linked = edgesRef.current.some(edge => edge.to.nodeId === nodeId && `${edge.from.nodeId}:${edge.from.port}` !== id);
+      patch = { batchFiles: files, batchOrder: (batch?.data.batchOrder || []).filter(key => key !== id), ...(!files.length && !linked ? { batchMediaType: "" } : {}) };
+    }
     let nextUtilityData = null;
     let nextEditData = null;
     let nextCameraData = null;
@@ -2801,6 +2845,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function uploadMediaAsset(node, file) {
     if (!file) return;
+    if (node.type === "batch") {
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
+      updateNode(node.id, { status: "uploading", error: "" });
+      const added = [];
+      try {
+        for (const image of (Array.isArray(file) ? file : [file])) {
+          const kind = nodeTypeForDroppedFile(image);
+          if (!["image", "video"].includes(kind)) throw new Error("Drop image or video files onto Batch.");
+          const locked = added[0]?.type || node.data.batchMediaType;
+          if (locked && locked !== kind) throw new Error("Create separate batches for images and videos.");
+          const asset = await uploadNodeAsset(image, kind);
+          if (!asset.localUrl) throw new Error("Upload returned no image.");
+          added.push({ ...asset, id: crypto.randomUUID(), url: asset.localUrl, label: image.name, fileName: asset.fileName, type: kind });
+        }
+        updateNode(node.id, { status: "ready" });
+      } catch (error) { updateNode(node.id, { status: "error", error: error.message }); }
+      const current = nodesRef.current.find(item => item.id === node.id);
+      if (current) updateNode(node.id, { batchFiles: [...(current.data.batchFiles || []), ...added], ...(added.length ? { batchMediaType: added[0].type } : {}) });
+      return;
+    }
     if (nodesRef.current.find(current => current.id === node.id)?.data.status === "uploading") return;
     if (node.type === "audioModel") {
       if (["running", "uploading"].includes(node.data.status)) return;
@@ -3363,6 +3427,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function importOutputAssetToMediaNode(node, item) {
+    if (node.type === "batch") {
+      if (!["image", "video"].includes(item?.type) || !item.url) { setSaveStatus("Batch accepts images or videos."); return; }
+      if (node.data.batchMediaType && node.data.batchMediaType !== item.type) { setSaveStatus("Create separate batches for images and videos."); return; }
+      pushUndoSnapshot({ nodeDataIds: [node.id] });
+      const current = nodesRef.current.find(value => value.id === node.id);
+      if (current) updateNode(node.id, { batchMediaType: item.type, batchFiles: [...(current.data.batchFiles || []), { ...item, id: crypto.randomUUID() }] });
+      return;
+    }
     if (!isOutputItemCompatibleWithNode(item, node.type)) {
       const itemType = capitalizeMediaType(item?.type || "media");
       const targetType = node.type === "model3d" ? "3D" : capitalizeMediaType(node.type);
@@ -3890,6 +3962,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!response.ok) throw new Error(data.error || "Upload failed.");
     return {
       fileName: data.asset.fileName,
+      thumbnailUrl: data.asset.thumbnailUrl || "",
+      duration: data.asset.duration || data.asset.metadata?.duration,
+      metadata: data.asset.metadata,
       storedFileName: data.asset.storedFileName,
       mimeType: data.asset.mimeType,
       mediaType: data.asset.mediaType,
@@ -5649,7 +5724,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function openCanvasContextMenu(event) {
-    if (event.target.closest("[data-node-card-id]")) return;
+    if (event.target.closest("[data-node-card-id]") && selectedNodeIds.length < 2) return;
     event.preventDefault();
     openNodeContextMenuAtPoint(event.clientX, event.clientY);
   }
@@ -5689,6 +5764,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     event.preventDefault();
     event.stopPropagation();
     const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (targetNode?.type === "batch" && !(targetNode.data.batchFiles || []).length) updateNode(nodeId, { batchMediaType: "" });
     const resetsNodeOutput = ["autoAspect", "coverage"].includes(targetNode?.type) && port === "imageIn";
     pushUndoSnapshot({ nodeDataIds: resetsNodeOutput ? [nodeId] : [], restoreStructure: true });
     setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
@@ -5711,9 +5787,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function disconnectAssemblyMedia(nodeId, media) {
     const targetPort = media?.type === "image" ? "imageIn" : media?.type === "audio" ? "audioIn" : "videoIn";
+    const sourceId = String(media?.sourceNodeId || "").split(":entry:")[0];
     const edgeIds = edgesRef.current
       .filter((edge) => edge.to.nodeId === nodeId && edge.to.port === targetPort)
-      .filter((edge) => edge.from.nodeId === media?.sourceNodeId && edge.from.port === media?.sourcePort)
+      .filter((edge) => edge.from.nodeId === sourceId && edge.from.port === media?.sourcePort)
       .map((edge) => edge.id);
     removeEdges(edgeIds);
   }
@@ -6003,6 +6080,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
 
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
+        if (targetNodeForConnection?.type === "batch") updateNode(to.nodeId, { batchMediaType: to.port === "videoIn" ? "video" : "image" });
         const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
         pushUndoSnapshot({
@@ -6047,6 +6125,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function connectFlowPorts(from, to, color) {
+    if (nodesRef.current.find(node => node.id === to.nodeId)?.type === "batch") {
+      const error = getConnectionError(from, to);
+      if (error) { setSaveStatus(error); return; }
+      updateNode(to.nodeId, { batchMediaType: to.port === "videoIn" ? "video" : "image" });
+    }
     if (!from?.nodeId || !from?.port || !to?.nodeId || !to?.port || from.nodeId === to.nodeId) return false;
     const connectionError = getConnectionError(from, to, nodesRef.current);
     if (connectionError) {
@@ -6142,6 +6225,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         storyboard: ["directorIn"]
       },
       image: {
+        batch: ["imageIn"],
         output: ["sourceIn"],
         preview: ["sourceIn"],
         autoAspect: ["imageIn"],
@@ -6160,6 +6244,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         skillDirector: ["imageIn", "locationIn"]
       },
       video: {
+        batch: ["videoIn"],
         output: ["sourceIn"],
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
@@ -6250,6 +6335,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "batch") {
+      if (source.type === "batch" || from.port === "batchOut") return "Connect media sources directly to Batch.";
+      const kind = portKindForNodePort(source, from.port, "output");
+      return !target.data.batchMediaType || target.data.batchMediaType === kind ? "" : "Create separate batches for images and videos.";
+    }
+    if (source.type === "batch" || from.port === "batchOut") return activeInputPortIdsForNode(target).includes(to.port) ? "" : "Enable the matching input before connecting Batch.";
     if (isKeyerNode(target)) return activeInputPortIdsForNode(target).includes(to.port) ? "" : "Choose the matching CorridorKey hint mode first";
     if (isKeyerNode(source)) return "";
     if (target.type === "utility" && target.data?.utilityMode === "video" && isUtilityCompositeVideoModel(target.data?.utilityVideoModel) && isCompositeLayerPort(target.data, to.port)) {
@@ -6795,6 +6886,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       };
     });
     const pastedNodeMap = new Map(pastedNodes.map((node) => [node.id, node]));
+    for (const node of pastedNodes) {
+      if (node.type !== "batch") continue;
+      const remap = key => { for (const [oldId, newId] of idMap) if (key.startsWith(`${oldId}:`)) return `${newId}${key.slice(oldId.length)}`; return key; };
+      node.data.batchOrder = (node.data.batchOrder || []).map(remap);
+      node.data.batchSettings = Object.fromEntries(Object.entries(node.data.batchSettings || {}).map(([key, value]) => [remap(key), value]));
+    }
     const pastedEdges = clipboard.edges
       .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
       .map((edge, index) => ({
@@ -6985,6 +7082,54 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function prepareOutpaintCanvas(node, request, preferredOutputTarget) {
+    const graphNodes = nodesRef.current, graphEdges = edgesRef.current;
+    const raw = buildIncomingByNode(graphNodes, graphEdges, { expandBatches: false });
+    const incoming = raw[node.id] || {};
+    const batchVideo = [...(incoming.referenceVideoIn || []), ...(incoming.canvasVideoIn || [])].some(isBatchConnection);
+    if (request.rawVideoUrl || !batchVideo) return prepareSingleOutpaintCanvas(node, request, preferredOutputTarget);
+    const plan = buildBatchPlan(batchInputConnections(incoming), raw, connectedOutputItem);
+    const batchPreparation = await runCanvasAction(node, async token => {
+      token.groupId = createGenerationGroupId("batch-prepare");
+      const prepared = { ...(node.data.batchPreparations || {}) };
+      updateNode(node.id, { status: "running", batchRunActive: true, batchProgress: `0 / ${plan.length}`, error: "" });
+      try {
+        const sharedSettings = normalizeUtilityOutpaintSettings(request.videoOutpaint);
+        if (!sharedSettings.frame && !request.canvasVideoUrl) {
+          const firstGraph = materializeBatchGraph(graphNodes, graphEdges, node.id, plan[0].inputs);
+          const sourceUrl = connectedAssetUrls(buildIncomingByNode(firstGraph.nodes, firstGraph.edges)[node.id]?.referenceVideoIn)[0];
+          const metadata = await probeAssemblyMedia(node, { url: sourceUrl, type: "video" });
+          if (!(metadata?.width > 0 && metadata?.height > 0)) throw new Error("Could not read the first video’s dimensions for shared batch framing.");
+          sharedSettings.frame = defaultOutpaintFrame(metadata, sharedSettings.aspectRatio);
+        }
+        const settled = await runBatchEntries(plan, { concurrency: 2, stopped: () => token.stopped, run: async entry => {
+          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs);
+          const inputs = buildIncomingByNode(graph.nodes, graph.edges)[node.id] || {};
+          const sourceVideoUrl = connectedAssetUrls(inputs.referenceVideoIn)[0] || "";
+          const canvasVideoUrl = connectedAssetUrls(inputs.canvasVideoIn)[0] || "";
+          if (token.stopped) throw new Error("Stopped at user request.");
+          const result = await prepareSingleOutpaintCanvas({ ...node, data: { ...node.data, title: `${node.data.title} · ${entry.label}` } },
+            { ...request, sourceVideoUrl, canvasVideoUrl, videoOutpaint: sharedSettings }, preferredOutputTarget, token.groupId);
+          if (!token.stopped) {
+            prepared[JSON.stringify([sourceVideoUrl, canvasVideoUrl])] = result;
+            updateNode(node.id, { batchPreparations: { ...prepared } });
+          }
+          return result;
+        }, onResult: results => { if (!token.stopped) updateNode(node.id, { batchProgress: `${results.length} / ${plan.length}` }); } });
+        if (token.stopped) throw new Error("Stopped at user request.");
+        const failure = rejectedRunResults(settled)[0];
+        if (failure) throw failure.reason;
+        updateNode(node.id, { status: "ready", error: "" });
+        return { ...fulfilledRunValues(settled)[0], batchSharedSettings: sharedSettings };
+      } catch (error) {
+        if (!token.stopped) updateNode(node.id, { status: "error", error: error.message });
+        throw error;
+      } finally { if (!token.stopped) updateNode(node.id, { batchRunActive: false, batchProgress: "" }); }
+    });
+    if (batchPreparation?.status === "error" && batchPreparation.error) throw batchPreparation.error;
+    return batchPreparation;
+  }
+
+  async function prepareSingleOutpaintCanvas(node, request, preferredOutputTarget, groupId = "") {
     const outputTarget = request.rawVideoUrl ? preferredOutputTarget || outputTargetForSourceNode(node) : null;
     const context = workflowRequestContext(outputTarget?.context || {});
     const payload = { prompt: node.data.prompt || "", outpaintGuidance: node.data.outpaintGuidance || "", ...request, ...workflowContextPayload(context), nodeId: node.id, nodeTitle: node.data.title };
@@ -6992,7 +7137,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       const { response, data } = request.rawVideoUrl
         ? await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Outpaint finishing and QC" }, progress => nodeApi.finishVideoOutpaint({ ...payload, ...progress }))
-        : await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Canvas and mask preparation" }, progress => nodeApi.prepareVideoOutpaint({ ...payload, ...progress }));
+        : await runTrackedGeneration({ scope: remoteVideoScope(context), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Canvas and mask preparation", groupId }, progress => nodeApi.prepareVideoOutpaint({ ...payload, ...progress }));
       if (!response.ok) throw new Error(data.error || "Could not prepare or finish outpainting.");
       if (request.rawVideoUrl) markOutputTargetSaved(outputTarget, [data], "video");
       loadOutputHistory();
@@ -7133,7 +7278,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const message = "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish.";
     const scope = generationScope;
     stopGenerationProgress(scope, node.id, token?.groupId);
-    updateNode(node.id, stoppedCanvasNodePatch(node, message));
+    updateNode(node.id, { ...stoppedCanvasNodePatch(node, message), batchRunActive: false, batchProgress: "" });
     exploreRunsRef.current.delete(node.id);
     storyboardRevisionRunsRef.current.delete(node.id);
     draftFinishesRef.current.delete(node.id);
@@ -7164,10 +7309,62 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function runNode(node, runOptions = {}) {
     if (runOptions === "stop-node") return stopNode(node);
-    return nodeRunControlRef.current.run(node.id, token => executeNode(node, runOptions, token, { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved }));
+    return nodeRunControlRef.current.run(node.id, async token => {
+      const actions = { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved };
+      if (typeof runOptions !== "string" && node.type !== "assembly") {
+        const rawIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current, { expandBatches: false });
+        const connections = batchInputConnections(rawIncoming[node.id]);
+        if (connections.length) return executeBatchNode(node, runOptions, token, actions, connections, rawIncoming);
+      }
+      return executeNode(node, runOptions, token, actions);
+    });
+  }
+
+  async function executeBatchNode(node, runOptions, token, actions, connections, rawIncoming) {
+    const graphNodes = nodesRef.current, graphEdges = edgesRef.current;
+    try {
+      const retry = node.data.batchRetryEntry;
+      const plan = retry ? [{ ...retry, inputs: retry.inputs || [{ batchId: connections[0].source.id, entry: retry }] }]
+        : buildBatchPlan(connections, rawIncoming, connectedOutputItem);
+      const groupId = createGenerationGroupId("batch");
+      token.groupId = groupId;
+      let outputTarget;
+      const outcome = await runMediaBatch({ node, plan, stopped: () => token.stopped,
+        concurrency: nodeBatchConcurrency(node, modelProviderPreferences),
+        update: patch => { if (!token.stopped) actions.updateNode(node.id, patch); },
+        execute: async (entry, capture) => {
+          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs);
+          const inputs = buildIncomingByNode(graph.nodes, graph.edges)[node.id] || {};
+          const preparation = node.data.batchPreparations?.[JSON.stringify([connectedAssetUrls(inputs.referenceVideoIn)[0] || "", connectedAssetUrls(inputs.canvasVideoIn)[0] || ""])];
+          const child = { ...node, data: { ...node.data, status: "ready", title: node.data.title + " · " + entry.label,
+            resultItems: [], resultUrl: "", resultText: "", batchResults: [], batchRetryEntry: null, batchFailedEntries: [],
+            ...(preparation ? { videoOutpaintPrepared: preparation } : {}),
+            ...(["text", "skillDirector"].includes(node.type) ? { text: [node.data.text, entry.prompt].filter(Boolean).join("\n\n") } : {}) } };
+          const options = { ...runOptions, graphNodes: graph.nodes, graphEdges: graph.edges,
+            batchGroupId: groupId, batchPrompt: entry.prompt || "",
+            ...(node.type === "textAgent" ? { agentMessage: [runOptions.agentMessage ?? node.data.agentDraft, entry.prompt].filter(Boolean).join("\n\n") } : {}) };
+          return executeNode(child, options, token, {
+            updateNode: (id, patch) => { if (id === node.id) capture(patch); else actions.updateNode(id, patch); },
+            markOutputTargetRunning: target => { outputTarget = target; if (target) actions.markOutputTargetRunning(target); },
+            markOutputTargetFailed: () => {}, markOutputTargetSaved: target => { if (target) outputTarget = target; }
+          });
+        }
+      });
+      if (!token.stopped && outputTarget) {
+        if (outcome.resultItems?.length) actions.markOutputTargetSaved(outputTarget, outcome.resultItems, outcome.resultItems[0].type);
+        else if (outcome.status === "error") actions.markOutputTargetFailed(outputTarget, outcome.error?.message || "Batch failed.");
+      }
+      return outcome;
+    } catch (error) {
+      if (!token.stopped) actions.updateNode(node.id, { status: "error", error: error.message, batchProgress: "" });
+      return { status: "error", error };
+    }
   }
 
   async function executeNode(node, runOptions = {}, token, actions) {
+    const graphNodes = runOptions.graphNodes || nodesRef.current;
+    const graphEdges = runOptions.graphEdges || edgesRef.current;
+    const graphGroups = groupsRef.current;
     const updateNode = (...args) => { if (!token.stopped) actions.updateNode(...args); };
     const markOutputTargetRunning = (...args) => { token.outputTarget = args[0]; if (!token.stopped) actions.markOutputTargetRunning(...args); };
     const markOutputTargetFailed = (...args) => { if (!token.stopped) actions.markOutputTargetFailed(...args); };
@@ -7183,7 +7380,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return result;
       } finally { if (!token.stopped) draftFinishesRef.current.delete(node.id); }
     }
-    const storedNode = nodesRef.current.find((item) => item.id === node.id);
+    const storedNode = graphNodes.find((item) => item.id === node.id);
     let currentNode =
       storedNode
         ? {
@@ -7201,7 +7398,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       exploreRunsRef.current.add(currentNode.id);
     }
 
-    const nodeReferenceBindings = updatedNodeReferenceBindings(currentNode, nodesRef.current, groupsRef.current, edgesRef.current);
+    const nodeReferenceBindings = updatedNodeReferenceBindings(currentNode, graphNodes, graphGroups, graphEdges);
     if (!nodeReferenceBindingsEqual(nodeReferenceBindings, currentNode.data?.nodeReferenceBindings)) {
       currentNode = {
         ...currentNode,
@@ -7210,9 +7407,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(currentNode.id, { nodeReferenceBindings });
     }
 
-    const referenceNodes = resolvePlainTextGraphNodes(nodesRef.current, edgesRef.current)
+    const referenceNodes = resolvePlainTextGraphNodes(graphNodes, graphEdges)
       .map((item) => item.id === currentNode.id ? currentNode : item);
-    const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    const currentIncomingByNode = buildIncomingByNode(graphNodes, graphEdges);
     const incoming = currentIncomingByNode[currentNode.id] || {};
     if (["imageModel", "videoModel"].includes(currentNode.type) && incoming.directorIn?.length) {
       const source = incoming.directorIn[0].source;
@@ -7224,7 +7421,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         currentNode = { ...currentNode, data: filmDirectorVideoSettings(currentNode.data, directorPackageForVideo(source, currentIncomingByNode)) };
       }
     }
-    const nodeReferenceContext = { nodes: referenceNodes, groups: groupsRef.current, edges: edgesRef.current, scopeNodeId: currentNode.id };
+    const nodeReferenceContext = { nodes: referenceNodes, groups: graphGroups, edges: graphEdges, scopeNodeId: currentNode.id };
     const connectedPrompt = connectedText(incoming.promptIn, nodeReferenceContext);
     const directorPackagePrompt =
       currentNode.type === "imageModel"
@@ -7232,10 +7429,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         ? connectedDirectorPackageText(incoming.directorIn, currentIncomingByNode)
         : "";
     const fallbackPrompt = resolveNodeReferencesInText(currentNode.data.prompt, nodeReferenceContext, currentNode.id);
-    const basePrompt =
+    let basePrompt =
       ["imageModel", "videoModel"].includes(currentNode.type)
         ? composeFilmDirectorPrompt({ directorPrompt: directorPackagePrompt, connectedPrompt, fallbackPrompt })
         : connectedPrompt || fallbackPrompt;
+    basePrompt = [basePrompt, runOptions.batchPrompt].filter(Boolean).join("\n\n");
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
       (currentNode.type === "videoModel" && isSam3VideoModel(currentNode.data.model)) ||
@@ -7247,9 +7445,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = (["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode))
+    const generationGroupId = runOptions.batchGroupId || ((["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode))
       ? createGenerationGroupId(currentNode.type)
-      : "";
+      : "");
     token.groupId = generationGroupId;
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
@@ -7413,7 +7611,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "text") {
-        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current, "", edgesRef.current);
+        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, graphGroups, "", graphEdges);
         const resolvedText = resolveNodeReferencesInText(currentNode.data.text, nodeReferenceContext, currentNode.id);
         const processed = await runTextNodeProcessing({
           node: currentNode,
@@ -7451,7 +7649,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           textPromptHistoryDraft: ""
         });
 
-        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, groupsRef.current, agentMessage, edgesRef.current);
+        const nodeReferences = textModelNodeReferenceInputs(currentNode, incoming, referenceNodes, graphGroups, agentMessage, graphEdges);
         const resolvedText = resolveNodeReferencesInText(agentMessage, nodeReferenceContext, currentNode.id);
         const processed = await runTextNodeProcessing({
           node: currentNode,
@@ -7952,7 +8150,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
         const imageIncoming = expandImageDirectorPackageIncoming(
-          promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current, edgesRef.current),
+          promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, graphGroups, graphEdges),
           currentIncomingByNode
         );
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, imageIncoming);
@@ -8024,7 +8222,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      const promptReferencedVideoIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, groupsRef.current, edgesRef.current);
+      const promptReferencedVideoIncoming = promptReferenceIncomingForNode(incoming, currentNode, referenceNodes, graphGroups, graphEdges);
       const supportsVideoCharacters = videoModelSupportsCharacterInput(currentNode.data.model);
       const compatibleVideoIncoming = supportsVideoCharacters
         ? promptReferencedVideoIncoming
@@ -8619,6 +8817,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
+            onBatch={createBatchFromSelection}
             onSavePreset={newtPresets.beginSave}
             onMoveStart={startSelectionMove}
           />
@@ -8634,7 +8833,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             {nodeCatalog.map((item) => {
               const Icon = item.icon;
               return (
-                <button key={item.type} onClick={() => addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
+                <button key={item.type} onClick={() => item.type === "batch" && selectedNodeIds.length ? createBatchFromSelection() : addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
                   <Icon size={15} />
                   <span>{item.label}</span>
                 </button>
@@ -9401,6 +9600,7 @@ function NodeCard({
         </span>
       </div>
 
+      <BatchRunContext.Provider value={isRunnableNode(node) && node.type !== "assembly" ? batchInputConnections(incoming).reduce((count, item) => Math.max(count, batchInputEntries(item.source, incomingByNode, connectedOutputItem).length), 1) : 1}>
       <NodeBody
         node={renderedNode}
         defaultOutputPath={defaultOutputPath}
@@ -9466,6 +9666,14 @@ function NodeCard({
         modelProviderAvailability={modelProviderAvailability}
         showPriceSnapshot={showPriceSnapshot}
       />
+      </BatchRunContext.Provider>
+      {node.type !== "batch" && (node.data.batchResults?.length || node.data.batchProgress || node.data.batchFailedEntries?.length) ? <div className="batch-result-controls" onPointerDown={event => event.stopPropagation()}>
+        {node.data.batchProgress && <small>Batch {node.data.batchProgress}</small>}
+        {(node.data.batchFailedEntries || []).map(entry => <button key={`${entry.id}:${entry.runIndex}`} disabled={node.data.status === "running"}
+          title={entry.error} onClick={() => handleNodeRun({ ...node, data: { ...node.data, batchRetryEntry: entry } })}>Retry {entry.label} · 1</button>)}
+        {node.data.batchResults?.length > 0 && <OutputPortRow node={renderedNode} port={outputPortDefinitionsForNode(renderedNode).find(port => port.id === "batchOut")}
+          label={`Batch · ${node.data.batchResults.length}`} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
+      </div> : null}
       <button
         type="button"
         className="node-width-resize-handle"
@@ -11869,7 +12077,8 @@ function NodeBody({
   modelProviderAvailability = {},
   showPriceSnapshot = true
 }) {
-  const config = getNodeConfig(node.type);
+  const config = node.type === "batch" ? { ...getNodeConfig(node.type), input: inputPortDefinitionsForNode(node), output: outputPortDefinitionsForNode(node) } : getNodeConfig(node.type);
+  if (isRunnableNode(node) && node.type !== "assembly") incoming = representativeBatchIncoming(incoming);
   const outputPort = config.output[0];
   const providerOptionProps = { preferences: modelProviderPreferences, availability: modelProviderAvailability };
   const resolvedPromptText = (items = []) => connectedText(items);
@@ -12003,6 +12212,12 @@ function NodeBody({
         connectedPortKeys={connectedPortKeys}
       />
     );
+  }
+
+  if (node.type === "batch") {
+    return <BatchNodeBody node={node} incoming={incoming} config={config} onUpdate={onUpdate} onUpload={onUpload} onOutputImport={onOutputImport} parseOutputDrop={outputItemFromDataTransfer}
+      resolve={connectedOutputItem}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />;
   }
 
   if (node.type === "image" || node.type === "video" || node.type === "audio") {
@@ -16105,6 +16320,9 @@ function NodeBody({
       incomingByNode,
       { includeComposerCharacterBindings: !isZImage }
     );
+    const connectedBatches = batchInputConnections(incoming);
+    const batchEntryCount = connectedBatches.reduce((count, item) => Math.max(count, batchInputEntries(item.source, incomingByNode, connectedOutputItem).length), 0);
+    const batchRunCount = batchEntryCount * nodeBatchCount(node, 9);
     const imageReferenceCount = imageReferenceItems.length;
     const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
     const kreaReferenceLimit = imageModelReferenceLimit(node.data.model, "krea");
@@ -16174,10 +16392,10 @@ function NodeBody({
           </div>
         )}
         <GenerationProgress scope={generationScope} nodeId={node.id} />
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || imageReferenceOverLimit}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || imageReferenceOverLimit || (connectedBatches.length > 0 && batchEntryCount === 0)}>
           {running
-            ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
-            : <RunPriceLabel label="Run Image" options={{ ...imageRunOptions, kind: "image" }} visible={showPriceSnapshot} />}
+            ? connectedBatches.length ? `Batch ${node.data.batchProgress || `0 / ${batchRunCount}`}…` : `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
+            : <RunPriceLabel label={connectedBatches.length ? `Run Batch · ${batchRunCount} images` : "Run Image"} options={{ ...imageRunOptions, kind: "image" }} visible={showPriceSnapshot} />}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -18166,6 +18384,7 @@ function formatFrameTimeDisplay(value) {
 }
 
 function getNodeConfig(type) {
+  if (type === "batch") return { icon: Box, input: [{ id: "imageIn", label: "Images", color: portColors.image }, { id: "videoIn", label: "Videos", color: portColors.video }], output: [{ id: "batchOut", label: "Batch", color: portColors.image }] };
   if (type === "keyer") return { icon: Wrench, input: [
     { id: "videoIn", label: "Source video", color: portColors.video },
     { id: "firstHintIn", label: "Frame 1 matte", color: portColors.image },
@@ -18403,6 +18622,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "keyer") return normalizeKeyerData({ title: `${label}${count > 1 ? ` ${count}` : ""}` });
   if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
+  if (type === "batch") return { title, batchMediaType: "", batchFiles: [], batchSettings: {}, batchOrder: [] };
   if (type === "audioModel") return { title, ...audioModelDefaults };
 
   if (type === "plainText") return { title, text: "", resultText: "" };
@@ -20337,12 +20557,20 @@ function visiblePortIdsForNode(node) {
 function inputPortDefinitionsForNode(node) {
   if (isKeyerNode(node)) return getNodeConfig("keyer").input;
   const basePorts = getNodeConfig(node?.type)?.input || [];
+  if (node?.type === "batch" && node.data?.batchMediaType) return basePorts.filter(port => port.id === (node.data.batchMediaType === "video" ? "videoIn" : "imageIn"));
   if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model)) return [...basePorts.filter(port => !["referenceImageIn", "startFrameIn", "endFrameIn"].includes(port.id)), ...flux3MaxKeyframePorts(node.data, portColors.image)];
   if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)) return compositeInputPorts(node.data, portColors.preview);
   return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
 }
 
 function outputPortDefinitionsForNode(node) {
+  const ports = baseOutputPortDefinitionsForNode(node);
+  return node?.type !== "batch" && node?.data?.batchResults?.length
+    ? [...ports, { id: "batchOut", label: "Batch", color: portColors[batchMediaType(node)] }] : ports;
+}
+
+function baseOutputPortDefinitionsForNode(node) {
+  if (node?.type === "batch") return [{ id: "batchOut", label: "Batch", color: portColors[batchMediaType(node)], disabled: node.data?.batchMediaType === "", disabledReason: "Add images or videos first" }];
   if (isKeyerNode(node)) return getNodeConfig("keyer").output;
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "frameIt") return basePorts.map((port) => ({
@@ -20446,6 +20674,7 @@ function portKindFromColor(color) {
 
 function portKindForNodePort(node, portId, role) {
   if (!node || !portId) return "";
+  if (role === "output" && portId === "batchOut") return batchMediaType(node);
   if (role === "input" && node.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel) && isCompositeLayerPort(node.data, portId)) return "media";
   if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
   if (role === "input" && node.type === "output" && portId === "sourceIn") return "output";
@@ -20732,9 +20961,9 @@ function nodeResultMediaType(node) {
   return "";
 }
 
-function buildIncomingByNode(nodes, edges) {
+function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
   const nodeMap = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
-  return edges.reduce((incoming, edge) => {
+  const raw = edges.reduce((incoming, edge) => {
     const source = nodeMap.get(edge.from.nodeId);
     if (!source) return incoming;
     incoming[edge.to.nodeId] ||= {};
@@ -20742,6 +20971,15 @@ function buildIncomingByNode(nodes, edges) {
     incoming[edge.to.nodeId][edge.to.port].push({ edge, source });
     return incoming;
   }, {});
+  if (!expandBatches) return raw;
+  return Object.fromEntries(Object.entries(raw).map(([id, incoming]) => [id, Object.fromEntries(Object.entries(incoming).map(([port, connections]) => [port,
+    connections.flatMap(connection => {
+      if (!isBatchConnection(connection) || nodeMap.get(id)?.type === "batch") return [connection];
+      const entries = batchInputEntries(connection.source, raw, connectedOutputItem);
+      if (!entries.length) return [connection];
+      return entries.map(entry => ({ ...connection, edge: { ...connection.edge, id: `${connection.edge.id}:entry:${entry.id}` }, source: batchEntrySource(connection.source, entry), batchSource: connection.source, batchEntry: entry }));
+    })
+  ]))]));
 }
 
 function buildPromptResolvedIncomingByNode(nodes = [], incomingByNode = {}, groups = [], edges = []) {
@@ -24036,6 +24274,7 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 function normalizeCurrentNode(node) {
   node = { ...node, data: migrateImageModelSelections(node.data) };
   const nextNode = clearStaleRunningState(node);
+  if (nextNode.type === "batch") return { ...nextNode, data: { ...nextNode.data, batchMediaType: nextNode.data?.batchMediaType ?? nextNode.data?.batchFiles?.[0]?.type ?? "image" } };
   if (isKeyerNode(nextNode)) return migrateKeyerNode(nextNode);
   if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(nextNode.data) };
   const data = nextNode.data || {};

@@ -251,7 +251,7 @@ export const SelectionMarquee = React.memo(function SelectionMarquee({ start, cu
   );
 });
 
-export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onSavePreset, onMoveStart }) {
+export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onBatch, onSavePreset, onMoveStart }) {
   const x = viewport.x + (bounds.left + bounds.width / 2) * viewport.scale;
   const y = viewport.y + bounds.top * viewport.scale - 54;
 
@@ -273,6 +273,7 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
         <Save size={17} />
         <span>Preset</span>
       </button>
+      <button onClick={onBatch} title="Create a Batch from selected images"><Plus size={17} /><span>Batch</span></button>
     </div>
   );
 });

@@ -94,6 +94,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (data.batchRunActive || data.batchFailedEntries?.length) data = { ...data, batchRunActive: false, batchProgress: "", batchFailedEntries: [], batchRetryEntry: null };
   if (data.seedanceFinishing) return { ...data, seedanceFinishing: "", status: data.resultUrl ? "complete" : "ready", error: "", remoteVideoRunIds: [] };
   if (data.storyboardRevisionActive) return clearStaleRunningState({ type: "storyboard", data }).data;
   if (Array.isArray(data.exploreQueue)) return clearStaleRunningState({ type: "explore", data }).data;
@@ -141,6 +142,8 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
+  if (node.data?.batchRunActive) return { ...node, data: { ...node.data, batchRunActive: false, batchProgress: "", batchRetryEntry: null,
+    status: "error", error: "Batch interrupted. Completed results were kept; check History and provider jobs before running again." } };
   if (node.data?.seedanceFinishing) node = { ...node, data: { ...node.data, seedanceFinishing: "" } };
   if (node.data?.characterVoiceBusy) node = { ...node, data: { ...node.data, characterVoiceBusy: false, characterVoiceError: "Speech preparation was interrupted. Check History before generating again." } };
   if (node.type === "storyboard" && node.data?.status === "reviewing-sequence") return { ...node, data: { ...node.data, status: "error", error: "Sequence review interrupted. Check History before submitting again." } };
