@@ -3,9 +3,24 @@ import test from "node:test";
 
 import {
   flowNodeNoDragObserverOptions,
+  guardFlowNodeMouseDown,
   markFlowNodeNoDragElements,
   markFlowNodeNoDragMutations
 } from "../src/flowNodeInteractions.js";
+
+test("mousedown repairs a media boundary removed by a React render before drag starts", () => {
+  const video = fakeElement({ matches: true });
+  const event = { target: { closest: () => video }, currentTarget: { contains: () => true } };
+  guardFlowNodeMouseDown(event);
+  assert.equal(video.classes.has("nodrag"), true);
+  video.classes.clear();
+  guardFlowNodeMouseDown(event);
+  assert.equal(video.classes.has("nodrag"), true);
+});
+
+test("mousedown on a node title keeps normal node dragging available", () => {
+  guardFlowNodeMouseDown({ target: { closest: () => null }, currentTarget: {} });
+});
 
 function fakeElement({ matches = false, descendants = [] } = {}) {
   const classes = new Set();

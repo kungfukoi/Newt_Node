@@ -29,6 +29,8 @@ Before starting any new feature, read this document first. If the feature change
 
 ## Goals
 
+Preview playback controls must never start node movement. If native media controls consume a mouse release during a node drag, the next movement with the left button released ends the gesture before moving the node. Escape and window blur also release it through React Flow's normal drag-stop path.
+
 Timeline live viewers retain their last displayed image until its replacement has decoded. Pending preview frames are coalesced rather than accumulated, and stale callbacks are discarded on source changes/unmount. Playback holds the complete previous composition while any active visible layer seeks/loads, preventing lower-layer flashes; real timeline gaps remain black. Canvas buffers resize only when composition dimensions change. Timeline timing, edits, hidden tracks and export sources are unaffected.
 
 Canvas Stop applies the same server-side durable-job dismissal to Video Model and Utility Video Outpaint nodes. Outpaint batches share a generation group and include batch indices/totals in tracked requests, so stopping during preparation also blocks later acceptance of that group's requests. Recovery polling must not resurrect dismissed jobs or replace results after Stop. Stopping local tracking does not promise cancellation or a refund for a cloud job already accepted; a new explicit Run uses a new group.

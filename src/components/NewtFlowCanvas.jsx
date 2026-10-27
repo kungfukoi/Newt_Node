@@ -36,6 +36,7 @@ import { FlowOverviewCanvas } from "./FlowOverviewCanvas.jsx";
 import { NewtFlowPortProvider } from "./NewtFlowContext.jsx";
 import { flowConnectOnClick, flowPortConnectability } from "../nodePortBehavior.js";
 import { observeNodePortGeometry } from "../flowNodeGeometry.js";
+import { installFlowDragReleaseRecovery } from "../flowNodeInteractions.js";
 
 const NewtFlowRenderContext = React.createContext(null);
 const flowMultiSelectionKeys = ["Shift", "Control", "Meta"];
@@ -78,6 +79,7 @@ function NewtFlowCanvasInner({
   const instance = useReactFlow();
   const bypassSnap = useKeyPress("Alt", { preventDefault: false });
   const draggingRef = React.useRef(false);
+  React.useEffect(() => installFlowDragReleaseRecovery(window), []);
   const selectionCommitFrameRef = React.useRef(null);
   const lastViewportSyncRef = React.useRef(0);
   const navigationActiveRef = React.useRef(false);

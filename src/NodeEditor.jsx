@@ -159,7 +159,7 @@ import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import ModelProviderOption from "./components/ModelProviderOption.jsx";
 import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
-import { flowNodeNoDragObserverOptions, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
+import { flowNodeNoDragObserverOptions, guardFlowNodeMouseDown, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { activeCanvasNodes, stoppedCanvasNodePatch } from "./canvasStop.js";
 import { createAssemblyFramePresenter } from "./assembly/assemblyFramePresenter.js";
 import { createNodeRunControl } from "./nodeRunControl.js";
@@ -5421,6 +5421,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function handlePointerMove(event) {
+    if (dragState && event.pointerType === "mouse" && event.buttons === 0) {
+      stopNodeDrag();
+      return;
+    }
     if (dragState?.type === "pan") {
       event.preventDefault();
       viewportMotion().dragTo({
@@ -9317,6 +9321,7 @@ function NodeCard({
       className={cardClassName}
       style={cardStyle}
       data-node-card-id={node.id}
+      onMouseDownCapture={flowManaged ? guardFlowNodeMouseDown : undefined}
       onPointerDownCapture={beginTextareaResize}
       onBlurCapture={handleBlurCapture}
       onPointerDown={flowManaged ? undefined : (event) => onDragStart(event, renderedNode)}
@@ -13754,7 +13759,8 @@ function NodeBody({
         {activePreviewTab === "preview" ? (
           <>
             <div
-              className={`preview-stage aspect-safe-media-frame ${previewItem ? "has-preview" : ""}`}
+              className={`preview-stage aspect-safe-media-frame nodrag nopan ${previewItem ? "has-preview" : ""}`}
+              onMouseDownCapture={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
             >
               {previewItem?.type === "image" && (previewItem.live
