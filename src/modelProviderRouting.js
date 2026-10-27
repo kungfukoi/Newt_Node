@@ -28,9 +28,9 @@ const providerModelSupport = Object.freeze({
   }),
   veo: Object.freeze({
     google: Object.freeze(["Gemini Omni Flash"]),
-    fal: Object.freeze(["MiniMax H3", "FLUX 3 Max", "Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]),
+    fal: Object.freeze(["MiniMax H3", "FLUX 3 Max", "Gemini Omni Flash", "Kling 4.0 Image-to-Video", "Kling O3 Pro", "Kling O3 4K", "Wan 2.7 Reference-to-Video", "Creatify Aurora"]),
     krea: Object.freeze(["MiniMax H3", "FLUX 3 Max", "Gemini Omni Flash", "Kling O3 Pro", "Kling O3 4K"]),
-    atlas: Object.freeze(["MiniMax H3"]),
+    atlas: Object.freeze(["MiniMax H3", "Kling 4.0 Image-to-Video"]),
     local: Object.freeze(["MiniMax H3 (576P)"])
   }),
   imageGeneration: Object.freeze({

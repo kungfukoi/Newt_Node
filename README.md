@@ -105,3 +105,5 @@ Pull requests are welcome. See the [development guide](docs/development.md) for 
 ## Third-party notices
 
 See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for acknowledgments and license information for third-party components. Optional engines and hosted services have their own terms; consult their setup guides before use.
+
+Kling 4.0 Image-to-Video is available through the selected Fal or Atlas Cloud Video Model provider. See [settings, keyframes and provider limits](docs/kling4.md).

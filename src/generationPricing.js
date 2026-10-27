@@ -1,3 +1,4 @@
+import { isKling4Model } from "./kling4.js";
 import { isFlux3Model, estimateFlux3Cost } from "./flux3.js";
 import { isNanoBanana21Model, estimateNanoBanana21Cost } from "./nanoBanana21.js";
 import { getGenerationQuote, getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
@@ -63,6 +64,7 @@ export function generationProviderForModel({
     if (normalized.includes("seedance")) return preferences.seedance;
     if (isMinimaxH3Model(model)) return preferences.minimaxH3;
     if (normalized.includes("gemini") && normalized.includes("omni")) return preferences.veo;
+    if (isKling4Model(model)) return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"))) {
       return providerSupportedModels("veo", preferences.veo).includes(model) ? preferences.veo : null;
     }

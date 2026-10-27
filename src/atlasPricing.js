@@ -45,6 +45,7 @@ export const atlasPricingSpecs = Object.fromEntries([
 ]);
 
 export const atlasPricingEndpoints = [
+  "kwaivgi/kling-v4.0/image-to-video",
   ...["text-to-image", "edit"].map(route => `${seedream5ProAtlasBase}/${route}`),
   ...Object.keys(atlasPricingSpecs), "google/nano-banana-2/reference-to-image",
   ...["2", "2.5-sunburst", "2.5-flare"].flatMap((version) => ["text-to-image", "edit"].map((route) => `openai/gpt-image-${version}/${route}`)),

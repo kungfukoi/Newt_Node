@@ -105,7 +105,7 @@ try {
   assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
-  for (const flag of ["timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   const clientPort = await freePort();
@@ -272,6 +272,14 @@ try {
     const rejected = await fetch(`${api}/api/node/process-text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, text: "Routing validation only" }) });
     assert.equal(rejected.status, 400);
     assert.match((await rejected.json()).error, /Krea API key/);
+  }
+  for (const provider of ["fal", "atlas", "google", "krea"]) {
+    await request("/api/settings", { modelProviderPreferences: { ...expectedRouting, veo: provider } });
+    // Atlas has a deliberately invalid configured fixture key. Reject the
+    // missing start frame locally, before that key could reach an upload.
+    const rejected = await fetch(`${api}/api/node/generate-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Kling 4.0 Image-to-Video", prompt: "Routing validation only", startFrameUrls: [] }) });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, provider === "fal" ? /Fal API key/ : provider === "atlas" ? /exactly one Start Frame/ : /not supported/);
   }
   await request("/api/settings", { modelProviderPreferences: expectedRouting });
   const nano21Atlas = await fetch(`${api}/api/node/generate-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "Nano Banana 2.1", prompt: "Routing validation only" }) });

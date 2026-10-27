@@ -1,3 +1,5 @@
+import { Kling4Controls } from "./components/Kling4Controls.jsx";
+import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
 import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpaintNode, migrateOutpaintImageEdges } from "./outpaintReferenceSlots.js";
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
@@ -16332,6 +16334,7 @@ function NodeBody({
   const isWan27Reference = isWan27ReferenceModel(node.data.model);
   const isAurora = isAuroraModel(node.data.model);
   const isHappyHorse = isHappyHorseModel(node.data.model);
+  const isKling4 = isKling4Model(node.data.model);
   const isKlingO34k = isKlingO34kModel(node.data.model);
   const isKlingO3Pro = isKlingO3ProModel(node.data.model);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
@@ -16410,7 +16413,9 @@ function NodeBody({
     })
   };
   const settingsOpen = node.data.settingsOpen !== false;
-  const collapsedPorts = isFlux3Max
+  const collapsedPorts = isKling4
+    ? [promptPort, startFramePort, endFramePort, referenceImagePort]
+    : isFlux3Max
     ? [promptPort, ...flux3MaxKeyframePorts(node.data, portColors.image)]
     : isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
@@ -16755,6 +16760,10 @@ function NodeBody({
               </button>
             </NodeRow>
           </>
+        ) : isKling4 ? (
+          <Kling4Controls node={node} provider={normalizeModelProviderPreferences(modelProviderPreferences).veo} settingsOpen={settingsOpen} incoming={incoming}
+            framePorts={[["Start Frame", startFramePort, "Required image"], ["Middle Images", referenceImagePort, "Up to 8 ordered images"], ["End Frame", endFramePort, "Optional image"]]}
+            onUpdate={onUpdate} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} connectedSummary={connectedSummary} />
         ) : isFlux3Max ? (
           <>
             {flux3MaxKeyframeRows(node.data).map((frame, index) => <NodeRow key={frame.id} label={`Keyframe ${index + 1}`} inputPort={settingsOpen ? { id: frame.id, label: `Keyframe ${index + 1}`, color: portColors.image } : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -19165,7 +19174,7 @@ function isKlingO3ProModel(model) {
 }
 
 function videoModelSupportsCharacterInput(model) {
-  return !isFlux3MaxModel(model) && !isAuroraModel(model) && !isSam3VideoModel(model);
+  return !isKling4Model(model) && !isFlux3MaxModel(model) && !isAuroraModel(model) && !isSam3VideoModel(model);
 }
 
 function isVideoModelUnsupportedCharacterInput(node, portId) {
@@ -19173,6 +19182,7 @@ function isVideoModelUnsupportedCharacterInput(node, portId) {
 }
 
 function isVideoModelUnsupportedInput(node, portId) {
+  if (node?.type === "videoModel" && isKling4Model(node.data?.model) && kling4UnsupportedPorts.includes(portId)) return true;
   if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model) && flux3MaxUnsupportedPorts.includes(portId)) return true;
   if (isVideoModelUnsupportedCharacterInput(node, portId)) return true;
   if (node?.type === "videoModel" && portId === "directorIn" && !videoModelSupportsFilmDirector(node.data?.model)) return true;
@@ -19181,6 +19191,7 @@ function isVideoModelUnsupportedInput(node, portId) {
 }
 
 function videoModelUnsupportedInputMessage(model, portId) {
+  if (isKling4Model(model)) return "Kling 4.0 Image-to-Video accepts Start Frame, End Frame and ordered middle images only.";
   if (isFlux3MaxModel(model)) return "FLUX 3 Max accepts a prompt and up to 10 positioned keyframes. Director input is not supported.";
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
     return "Director is available only for Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
@@ -19197,6 +19208,7 @@ function videoModelUnsupportedCharacterMessage(model) {
 }
 
 function videoModelSelectionPatch(data = {}, model) {
+  if (isKling4Model(model)) return kling4SelectionPatch(data);
   if (isFlux3MaxModel(model)) return flux3MaxSelectionPatch(data);
   if (isMinimaxH3Model(model)) {
     const preserveMinimaxH3 = isMinimaxH3Model(data.model);
@@ -22354,7 +22366,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
 
   const characterReferences = connectedCharacterReferences(characterConnections, { prompt });
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
-  const referenceImageItems = uniqueAssetItems([
+  const referenceImageItems = (isKling4Model(node.data.model) ? items => items : uniqueAssetItems)([
     ...connectedAssetItems(incoming.referenceImageIn, { prompt }),
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);

@@ -1,3 +1,4 @@
+import { isKling4Model, buildKling4Request, kling4Endpoints } from "./kling4.js";
 import { validateSeedance25Task } from "./seedance25.js";
 import { validateSeedanceDraft } from "./seedanceDraft.js";
 import { getPricingCatalog } from "./pricingCatalog.js";
@@ -56,7 +57,7 @@ export function supportsAtlasImageModel(model) {
 }
 
 export function supportsAtlasVideoModel(model) {
-  return videoModels.has(String(model || "").trim().toLowerCase());
+  return isKling4Model(model) || videoModels.has(String(model || "").trim().toLowerCase());
 }
 
 export function buildAtlasImageRequest({
@@ -142,6 +143,7 @@ export function buildAtlasVideoRequest({
   generateAudio = true,
   seed, seedanceTask = "reference", seedanceDraft, outputFormat
 } = {}) {
+  if (isKling4Model(model)) return buildKling4Request({ prompt, duration: typeof duration === "number" ? `${duration} seconds` : duration, resolution, startFrameUrls: startImage ? [startImage] : [], endFrameUrls: endImage ? [endImage] : [], referenceImageUrls: images, referenceVideoUrls: videos, referenceAudioUrls: audios }, "atlas").input;
   const spec = videoModels.get(String(model || "").trim().toLowerCase());
   if (!spec) fail(`Atlas Cloud does not support ${model || "this video model"}.`);
   const draft = validateSeedanceDraft({ model, seedanceDraft, provider: "atlas" });
@@ -224,9 +226,9 @@ export function estimateAtlasImageCost({ model, resolution, referenceCount = 0, 
 }
 
 export function estimateAtlasVideoCost({ model, duration, resolution, referenceImageCount = 0, hasVideoReference = false, endpoint = "" } = {}) {
-  const pricingEndpoint = endpoint || (videoModels.get(String(model).toLowerCase())?.id + (referenceImageCount ? "/reference-to-video" : "/text-to-video"));
+  const pricingEndpoint = endpoint || (isKling4Model(model) ? kling4Endpoints.atlas : "") || (videoModels.get(String(model).toLowerCase())?.id + (referenceImageCount ? "/reference-to-video" : "/text-to-video"));
   if(pricingEndpoint === "bytedance/seedance-2.0/reference-to-video" || pricingEndpoint?.startsWith("bytedance/seedance-2.5/") || getPricingCatalog().entries?.["atlas:"+pricingEndpoint]) return catalogVideoCost({model:pricingEndpoint,duration,resolution,referenceImageCount,hasVideoReference});
-  const seconds = normalizedDuration(duration, 4, 30, 5, true);
+  const seconds = normalizedDuration(duration, isKling4Model(model) ? 3 : 4, 30, 5, true);
   const normalizedResolution = String(resolution || "").toUpperCase();
   let amountUsd = null;
   if (!hasVideoReference && model === "MiniMax H3" && seconds > 0 && ["768P", "2K"].includes(normalizedResolution)) {

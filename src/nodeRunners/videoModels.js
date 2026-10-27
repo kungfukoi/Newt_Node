@@ -1,3 +1,4 @@
+import { isKling4Model } from "../kling4.js";
 import { lastOutpaintPreparation } from "../outpaintPreparation.js";
 import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import { workflowContextPayload } from "../workflowContext.js";
@@ -183,7 +184,7 @@ export function buildVideoGenerationRequest({
 }) {
   node = { ...node, data: filmDirectorVideoSettings(node.data, filmDirector) };
   const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
-  const generateAudio = node.data.generateAudio !== false;
+  const generateAudio = !isKling4Model(node.data.model) && node.data.generateAudio !== false;
   const effectiveFilmDirector = filmDirectorForVideoRequest(activeFilmDirector, generateAudio);
   const seedanceTask = isSeedance25Model(node.data.model) ? node.data.seedanceTask || "reference" : "reference";
   const editing = validateSeedance25Task({ model: node.data.model, seedanceTask, videos: referenceVideoUrls, startFrames: startFrameUrls, endFrames: endFrameUrls, filmDirector: effectiveFilmDirector });

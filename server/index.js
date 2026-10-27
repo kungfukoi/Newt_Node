@@ -1,3 +1,5 @@
+import { isKling4Model, kling4Endpoints } from "../src/kling4.js";
+import { generateKling4, kling4HistorySettings } from "./kling4.js";
 import { registerWindowLifecycle } from "./window-lifecycle.js";
 import { preventMinimaxH3Starts } from "./minimaxH3Local/engine.js";
 import { requestKreaLlm } from "./krea-llm.js";
@@ -562,6 +564,7 @@ const videoModelNames = {
   seedance: "Seedance 2.0",
   seedance25: seedance25ModelName,
   minimaxH3: minimaxH3ModelName,
+  kling4: "Kling 4.0 Image-to-Video",
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   flux3Max: "FLUX 3 Max",
@@ -574,6 +577,7 @@ const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedance25,
   videoModelNames.minimaxH3,
+  videoModelNames.kling4,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.flux3Max,
@@ -1218,6 +1222,7 @@ function buildHealthPayload() {
       objectSelectionCache: true,
       imageObjectSelection: true,
       ideogram45: true,
+      kling4ImageToVideo: true,
       flux3Max: true,
       kreaModelProviders: true,
       timelineExtractFrame: true,
@@ -6780,6 +6785,8 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
       req.body.generateAudio = true;
     }
 
+    if (selectedVideoModel.provider === "kling-4") return await runKling4Video(req, res);
+
     if (selectedVideoModel.provider === "fal-flux-3-max") return await runFlux3MaxVideo(req, res);
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
@@ -8421,6 +8428,36 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
       fileName: output.fileName
     }
   });
+}
+
+async function runKling4Video(req, res) {
+  const provider = runtimeModelProviderPreferences.veo;
+  const atlasClient = createAtlasClient({ onProgress: ({ status }) => updateCurrentGenerationProgress({ status: "running", phase: "generating", message: `Atlas Cloud: ${status || "processing"}` }) });
+  const generated = await generateKling4(req.body, provider, {
+    isManagedUrl: isLocalAssetUrl,
+    upload: async url => {
+      const asset = await readLocalAsset(url);
+      if (!["image/png", "image/jpeg"].includes(asset.mimeType)) throw httpError(400, "Kling 4.0 keyframes must be PNG or JPEG images.");
+      const metadata = imageDimensionsFromBuffer(asset.buffer, asset.mimeType) || {};
+      if (!metadata.width || !metadata.height || asset.buffer.length > 30 * 1024 * 1024 || metadata.width < 300 || metadata.height < 300 || metadata.width / metadata.height < 0.4 || metadata.width / metadata.height > 2.5) throw httpError(400, "Kling 4.0 keyframes must be at least 300px per side, at most 30MB, with an aspect ratio from 2:5 to 5:2.");
+      return provider === "atlas" ? atlasClient.upload(asset, process.env.ATLAS_API_KEY) : uploadLocalOutputToFal(url);
+    },
+    subscribe: (endpoint, options) => subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.kling4 }),
+    atlasGenerate: input => atlasClient.generate({ mediaType: "video", input, key: process.env.ATLAS_API_KEY }),
+    quoteInput: input => providerPricing.atlasInput(input, process.env.ATLAS_API_KEY)
+  });
+  const { endpoint, input, result, remoteVideo, cost } = generated;
+  const output = await downloadVideo(req, remoteVideo.url, `kling-4-${provider}`);
+  const providerName = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
+  await appendHistory({
+    id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "video",
+    provider: providerName, modelName: videoModelNames.kling4, endpoint, mode: "image-to-video",
+    prompt: req.body.prompt || "", submittedPrompt: input.prompt || "", project: projectFromBody(req.body), node: nodeFromBody(req.body),
+    settings: kling4HistorySettings(req.body, provider, input),
+    cost, remoteVideo, localVideo: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes
+  });
+  return res.json({ requestId: result.requestId, endpoint, provider: providerName, modelName: videoModelNames.kling4, submittedPrompt: input.prompt || "", cost,
+    video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName } });
 }
 
 async function runFlux3MaxVideo(req, res) {
@@ -19598,6 +19635,7 @@ function resolveUtilityVideoModel(model) {
 }
 
 function resolveVideoModel(model) {
+  if (isKling4Model(model)) return { provider: "kling-4", displayName: videoModelNames.kling4, id: kling4Endpoints.fal };
   if (isFlux3MaxModel(model)) return { provider: "fal-flux-3-max", displayName: videoModelNames.flux3Max, id: "blackforestlabs/flux-3-max/text-to-video" };
   const normalized = String(model || "").toLowerCase();
   if (isMinimaxH3Model(model)) {

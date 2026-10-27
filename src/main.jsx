@@ -1,3 +1,4 @@
+import { isKling4Model, kling4DurationOptions, kling4ResolutionOptions } from "./kling4.js";
 import { startWindowLifecycle } from "./windowLifecycle.js";
 import { connectWindowSession } from "./api/newtApi.js";
 import { generationProviderForModel } from "./generationPricing.js";
@@ -1175,6 +1176,8 @@ function videoSettingsForModel(model, modelProviderPreferences = defaultModelPro
       aspectRatios: geminiOmniAspectRatioOptions
     };
   }
+
+  if (isKling4Model(model)) return { durations: kling4DurationOptions.map(durationLabelToValue), durationValues: kling4DurationOptions.map(durationLabelToValue), defaultDuration: "5", resolutions: kling4ResolutionOptions(normalizeModelProviderPreferences(modelProviderPreferences).veo), aspectRatios: ["Auto"] };
 
   if (isKlingO3VideoModel(model)) {
     const is4k = isKlingO34kVideoModel(model);
