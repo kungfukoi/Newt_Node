@@ -81,6 +81,12 @@
   background: rgba(255, 255, 255, 0.055);
 }
 
+.canvas-panel-tab { position: absolute; top: 12px; z-index: 10; display: grid; place-items: center; width: 30px; height: 30px; min-height: 30px; padding: 0; border: 1px solid #ffffff14; border-radius: 8px; color: #f4f0e8ad; background: #121212dc; cursor: pointer; }
+.canvas-panel-tab.sidebar-restore { left: 12px; }
+.canvas-panel-tab.outputs-restore { right: 12px; }
+.canvas-panel-tab:hover { color: #f4f0e8; background: #ddc6311f; }
+.canvas-panel-tab:focus-visible { outline: 2px solid #ddc631; outline-offset: 2px; }
+
 .node-toolbar button {
   display: grid;
   grid-template-columns: 17px minmax(0, 1fr) 13px;

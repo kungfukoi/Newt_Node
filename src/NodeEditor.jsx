@@ -104,6 +104,8 @@ import {
   MessageSquareText,
   Minus,
   PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightOpen,
   Palette,
   Pause,
   PersonStanding,
@@ -1308,7 +1310,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [workflowFilePath, setWorkflowFilePath] = React.useState(savedDraft.workflowFilePath);
   const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
-  const [canvasRunActive, setCanvasRunActive] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(() => uiGet("nodePaletteCollapsed", true) !== false);
@@ -8420,18 +8421,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     );
   }
 
-  async function runAllCanvasNodes() {
-    if (canvasRunActive) return;
-    const graph = nodesRef.current;
-    const runnable = selectedRunnableNodesForRun(graph, new Set(graph.map(node => node.id)), buildIncomingByNode(graph, edgesRef.current));
-    if (!runnable.length) { setSaveStatus("No runnable canvas nodes."); return; }
-    setCanvasRunActive(true);
-    try {
-      const result = await runNodesByDependencyOrder(runnable);
-      setSaveStatus(result.cancelled ? "Stopped canvas run." : `Finished ${result.completed} canvas nodes${result.failed + result.skipped ? `; ${result.failed + result.skipped} blocked or failed` : ""}`);
-    } finally { setCanvasRunActive(false); }
-  }
-
   async function runNodesByDependencyOrder(runnableNodes) {
     const controller = new AbortController();
     const batchPromptRuns = new Map();
@@ -8591,9 +8580,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onSave={saveProject} onSaveAs={saveProjectAsLocalFile} onImport={importWorkflowFromSystemPicker}
         onLoad={loadProject} onDelete={deleteProject}
         presets={showPresetPanel ? newtPresets : null} selectedCount={selectedNodeIds.length}
-        toolbarCollapsed={toolbarCollapsed} onToggleToolbar={() => setToolbarCollapsed(value => !value)}
-        outputsCollapsed={outputsCollapsed} onToggleOutputs={() => setOutputsCollapsed(value => !value)}
-        onRunAll={runAllCanvasNodes} canRun={!canvasRunActive && nodes.some(node => isRunnableNode(node) && node.data?.status !== "running")}
       />
       <aside className="node-toolbar">
         <div className="toolbar-header">
@@ -8635,6 +8621,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        {toolbarCollapsed && <button type="button" className="sidebar-restore canvas-panel-tab" title="Show node palette" aria-label="Show node palette"
+          onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setToolbarCollapsed(false); }}><PanelLeftOpen size={17} /></button>}
+        {outputsCollapsed && <button type="button" className="outputs-restore canvas-panel-tab" title="Show project outputs" aria-label="Show project outputs"
+          onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setOutputsCollapsed(false); }}><PanelRightOpen size={17} /></button>}
         <NewtFlowCanvas
           ref={flowCanvasRef}
           snapToGrid={snapToGrid}

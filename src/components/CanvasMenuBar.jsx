@@ -1,18 +1,18 @@
 import React from "react";
-import { Check, ChevronDown, ChevronRight, Download, Folder, FolderOpen, History, Layers, MoreHorizontal, PanelLeftOpen, PanelRightOpen, Play, Plus, Save, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Folder, FolderOpen, History, Layers, Plus, Save, Trash2 } from "lucide-react";
 import { NewtPresetLibrary } from "./NewtPresetDialog.jsx";
 import "./CanvasMenuBar.css";
 
 export default function CanvasMenuBar({ projectName, onRename, projectPath, projects, fileMenuOpen, setFileMenuOpen, projectMenuOpen, setProjectMenuOpen,
-  onNew, onOpen, onSave, onSaveAs, onImport, onLoad, onDelete, toolbarCollapsed, onToggleToolbar, outputsCollapsed, onToggleOutputs, onRunAll, canRun, presets, selectedCount = 0 }) {
+  onNew, onOpen, onSave, onSaveAs, onImport, onLoad, onDelete, presets, selectedCount = 0 }) {
   const root = React.useRef(null), renameInput = React.useRef(null), originalName = React.useRef("");
-  const [moreOpen, setMoreOpen] = React.useState(false), [renaming, setRenaming] = React.useState(false);
+  const [renaming, setRenaming] = React.useState(false);
   const [presetsOpen, setPresetsOpen] = React.useState(false);
-  const openMenu = fileMenuOpen ? "file" : projectMenuOpen ? "recent" : moreOpen ? "more" : presetsOpen && presets ? "presets" : "";
+  const openMenu = fileMenuOpen ? "file" : projectMenuOpen ? "recent" : presetsOpen && presets ? "presets" : "";
   const command = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
   const pathParts = String(projectPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
   const folderName = pathParts.at(-1) || "Local workspace";
-  function open(name) { setFileMenuOpen(name === "file"); setProjectMenuOpen(name === "recent"); setMoreOpen(name === "more"); setPresetsOpen(name === "presets"); }
+  function open(name) { setFileMenuOpen(name === "file"); setProjectMenuOpen(name === "recent"); setPresetsOpen(name === "presets"); }
   function close(restoreFocus = false) {
     if (restoreFocus) root.current?.querySelector(`[data-menu-trigger="${openMenu}"]`)?.focus();
     open("");
@@ -86,6 +86,18 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
   const item = (label, Icon, callback, shortcut) => <button type="button" role="menuitem" onClick={() => action(callback)}><Icon size={15} /><span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
   return <header className="canvas-menu-bar" ref={root} role="toolbar" aria-label="Canvas menu bar" onKeyDown={menuKeys}
     onBlurCapture={event => { if (openMenu === "presets" && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close(); }}>
+    <div className="canvas-recent-menu">
+      {trigger("recent", "Recent Projects", <History size={19} />)}
+      {projectMenuOpen && <div className="canvas-menu-dropdown canvas-recent-dropdown" role="menu" aria-label="Recent Projects" id="canvas-recent-menu" data-menu="recent">
+        <span className="canvas-menu-section">Recent projects</span>
+        {projects.length ? projects.map(project => <div className="canvas-recent-row" key={project.id}>
+          <button role="menuitem" title={project.fileName || project.name} onClick={() => action(() => onLoad(project.id))}><Folder size={15} /><span>{project.name}</span></button>
+          <button className="canvas-recent-remove" role="menuitem" aria-label={`Remove ${project.name} from recent projects`} onClick={() => onDelete(project)}><Trash2 size={14} /></button>
+        </div>) : <small className="canvas-menu-empty">No recent projects</small>}
+        <div role="separator" />
+        {item("Open project…", FolderOpen, onOpen)}
+      </div>}
+    </div>
     <div className="canvas-document-menu">
       {renaming ? <input ref={renameInput} aria-label="Project name" className="canvas-document-name" value={projectName} onChange={event => onRename(event.target.value)}
         onBlur={() => setRenaming(false)} onKeyDown={event => {
@@ -109,14 +121,6 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     <span className="canvas-menu-divider" />
     <button className="canvas-menu-icon canvas-quick-new" title="New canvas" aria-label="New canvas" onClick={onNew}><Plus size={18} /></button>
     <button className="canvas-menu-icon" title={`Save project (${command}S)`} aria-label="Save project" onClick={onSave}><Save size={17} /></button>
-    <div className="canvas-more-menu">
-      {trigger("more", "Canvas options", <MoreHorizontal size={19} />)}
-      {moreOpen && <div className="canvas-menu-dropdown" role="menu" aria-label="Canvas options" id="canvas-more-menu" data-menu="more">
-        <span className="canvas-menu-section">View</span>
-        <button role="menuitemcheckbox" aria-checked={!toolbarCollapsed} onClick={() => action(onToggleToolbar)}><PanelLeftOpen size={15} /><span>Node palette</span>{!toolbarCollapsed && <Check size={14} />}</button>
-        <button role="menuitemcheckbox" aria-checked={!outputsCollapsed} onClick={() => action(onToggleOutputs)}><PanelRightOpen size={15} /><span>Project outputs</span>{!outputsCollapsed && <Check size={14} />}</button>
-      </div>}
-    </div>
     {presets && <div className="canvas-presets-menu">
       {trigger("presets", "Presets", <><Layers size={16} /><span>Presets</span><ChevronDown size={12} /></>)}
       {openMenu === "presets" && <div className="canvas-menu-dropdown canvas-presets-dropdown" role="dialog" aria-label="Workflow presets" id="canvas-presets-menu" data-menu="presets">
@@ -126,20 +130,5 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     <span className="canvas-menu-divider canvas-path-divider" />
     <div className="canvas-project-location" title={projectPath || "Save As to choose a portable workflow folder"}><Folder size={17} /><span>{folderName}</span><ChevronRight size={13} /><small>Canvas</small></div>
     <div className="canvas-menu-spacer" />
-    {toolbarCollapsed && <button className="canvas-menu-icon canvas-panel-toggle" title="Show node palette" aria-label="Show node palette" onClick={onToggleToolbar}><PanelLeftOpen size={17} /></button>}
-    {outputsCollapsed && <button className="canvas-menu-icon canvas-panel-toggle" title="Show project outputs" aria-label="Show project outputs" onClick={onToggleOutputs}><PanelRightOpen size={17} /></button>}
-    <div className="canvas-recent-menu">
-      {trigger("recent", "Recent Projects", <History size={19} />)}
-      {projectMenuOpen && <div className="canvas-menu-dropdown canvas-recent-dropdown" role="menu" aria-label="Recent Projects" id="canvas-recent-menu" data-menu="recent">
-        <span className="canvas-menu-section">Recent projects</span>
-        {projects.length ? projects.map(project => <div className="canvas-recent-row" key={project.id}>
-          <button role="menuitem" title={project.fileName || project.name} onClick={() => action(() => onLoad(project.id))}><Folder size={15} /><span>{project.name}</span></button>
-          <button className="canvas-recent-remove" role="menuitem" aria-label={`Remove ${project.name} from recent projects`} onClick={() => onDelete(project)}><Trash2 size={14} /></button>
-        </div>) : <small className="canvas-menu-empty">No recent projects</small>}
-        <div role="separator" />
-        {item("Open project…", FolderOpen, onOpen)}
-      </div>}
-    </div>
-    <button className="canvas-run-all" onClick={onRunAll} disabled={!canRun}><Play size={17} fill="currentColor" /><span>Run all</span></button>
   </header>;
 }
