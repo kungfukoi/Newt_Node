@@ -83,6 +83,26 @@ export function buildSelectedRunnableDependencies(nodes, edges) {
     dependencies.get(edge.to.nodeId)?.push(edge.from.nodeId);
   });
 
+  // Batch containers are passive, but their selected producers must finish
+  // before a selected downstream consumer reads the live collection.
+  const upstream = new Map();
+  const batchIds = new Set((edges || []).filter(edge => edge.from.port === "batchOut").map(edge => edge.from.nodeId));
+  for (const edge of edges || []) {
+    if (!upstream.has(edge.to.nodeId)) upstream.set(edge.to.nodeId, []);
+    upstream.get(edge.to.nodeId).push(edge.from.nodeId);
+  }
+  for (const node of nodes) {
+    const visit = (id, seen = new Set()) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const sourceId of upstream.get(id) || []) {
+        if (runnableIds.has(sourceId)) {
+          if (!dependencies.get(node.id).includes(sourceId)) dependencies.get(node.id).push(sourceId);
+        } else if (batchIds.has(sourceId)) visit(sourceId, seen);
+      }
+    };
+    visit(node.id);
+  }
   return dependencies;
 }
 

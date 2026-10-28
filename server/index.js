@@ -10,6 +10,7 @@ import { createKeyerService } from "./keyer.js";
 import { createKeyerInstaller } from "./keyer-install.js";
 import { registerKeyerRoutes } from "./routes/keyer.js";
 import { registerUiStateRoutes } from "./ui-state.js";
+import { findMatchingWorkflowInput } from "./workflow-input-reuse.js";
 import { createOutpaintVisualReviewer } from "./outpaint-visual-qc.js";
 import { prepareSeedanceOutpaint, finishSeedanceOutpaint } from "./seedance-outpaint.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../src/videoOutpaint.js";
@@ -3421,8 +3422,17 @@ async function handleNodeAssetUpload(req, res) {
   try {
     const extensionMimeType = mimeForExtension(path.extname(req.file.originalname).toLowerCase());
     const mimeType = req.file.mimetype && req.file.mimetype !== "application/octet-stream" ? req.file.mimetype : extensionMimeType;
-    const target = await createManagedAssetTarget(req, req.file.filename, "", workflowPackageInputDirName);
-    await moveUploadedFile(req.file.path, target.filePath);
+    const packageContext = workflowPackageContextFromBody(req.body);
+    const existing = packageContext ? await findMatchingWorkflowInput(path.join(packageContext.packagePath, workflowPackageInputDirName), req.file.path, req.file.originalname) : "";
+    let target;
+    if (existing) {
+      const relativePath = path.relative(packageContext.packagePath, existing);
+      target = { filePath: existing, relativePath: relativePath.split(path.sep).join("/"), publicPath: workflowPackagePublicPath(packageContext.id, relativePath) };
+      await rm(req.file.path, { force: true });
+    } else {
+      target = await createManagedAssetTarget(req, req.file.filename, "", workflowPackageInputDirName);
+      await moveUploadedFile(req.file.path, target.filePath);
+    }
 
     res.json({
       asset: {

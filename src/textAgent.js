@@ -99,3 +99,11 @@ function createMessageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+export function textAgentSplitRatio(data = {}) {
+  const stored = Number(data.agentSplitRatio);
+  if (data.agentSplitRatio != null && Number.isFinite(stored)) return Math.min(.9, Math.max(.1, stored));
+  const response = Number(data.textareaHeights?.["0:Text Agent response"]);
+  const prompt = Number(data.textareaHeights?.["1:Message Text Agent"]);
+  return data.textareaResizeMode && response > 0 && prompt > 0 ? Math.min(.9, Math.max(.1, response / (response + prompt))) : 2 / 3;
+}

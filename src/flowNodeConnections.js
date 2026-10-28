@@ -71,7 +71,13 @@ export function createFlowConnectionIndex() {
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     let changed = inputDependencyRefsByNode.size !== nodes.length;
     const next = new Map(ids.map((id) => {
-      const values = incoming.get(id).map((source) => nodeById.get(source.id)?.data);
+      const collect = (sourceId, seen = new Set()) => {
+        if (seen.has(sourceId)) return [];
+        seen.add(sourceId);
+        const source = nodeById.get(sourceId);
+        return [source?.data, ...(source?.type === "batch" ? (incoming.get(sourceId) || []).flatMap(item => collect(item.id, new Set(seen))) : [])];
+      };
+      const values = incoming.get(id).flatMap(source => collect(source.id));
       const previous = inputDependencyRefsByNode.get(id);
       if (previous && sameNodeInputDependencyRefs(previous, values)) return [id, previous];
       changed = true;

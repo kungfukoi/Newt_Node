@@ -46,7 +46,7 @@ export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "
     setBusy(true); setNotice("");
     try {
       const result = await onPrepare(node, { sourceVideoUrl, canvasVideoUrl, videoOutpaint: nextSettings });
-      if (current.current === snapshot) onUpdate(node.id, { videoOutpaintPrepared: result });
+      if (current.current === snapshot) onUpdate(node.id, { videoOutpaintPrepared: result, ...(result.batchSharedSettings ? { videoOutpaint: result.batchSharedSettings } : {}) });
       else if (current.current !== null) setNotice("Source or settings changed. Prepare the current canvas again.");
     } catch (error) { if (current.current !== null) setNotice(error.message); }
     finally { if (current.current !== null) setBusy(false); }

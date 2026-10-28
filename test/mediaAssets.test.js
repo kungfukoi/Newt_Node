@@ -17,11 +17,22 @@ import {
   outputItemFromDataTransfer,
   prepareFullResolutionImageForNativeSave,
   previewImageUrl,
+  videoPosterUrl,
   restoreFullResolutionImagePreview,
   setOutputItemDragData,
   supportedFilesFromDataTransfer
 } from "../src/mediaAssets.js";
 import { nodeTypeForOutputItem } from "../src/nodeRegistry.js";
+
+test("video thumbnail selectors reuse still posters and encode original media without changing it", () => {
+  const item = { url: "/workflow-assets/project/outputs/clip 1.mp4", type: "video" };
+  assert.equal(videoPosterUrl(item), "/api/video-poster?url=%2Fworkflow-assets%2Fproject%2Foutputs%2Fclip%201.mp4");
+  assert.equal(videoPosterUrl({ ...item, thumbnailUrl: "/outputs/poster.webp?v=2" }), "/outputs/poster.webp?v=2");
+  assert.equal(videoPosterUrl({ ...item, thumbnailUrl: "/outputs/preview.mp4" }), videoPosterUrl(item));
+  assert.equal(videoPosterUrl("/uploads/clip.mov"), "/api/video-poster?url=%2Fuploads%2Fclip.mov");
+  assert.equal(videoPosterUrl({}), "");
+  assert.equal(item.url, "/workflow-assets/project/outputs/clip 1.mp4");
+});
 
 test("active Newt Node output drags remain droppable when the browser hides custom MIME types", () => {
   const previousWindow = globalThis.window;

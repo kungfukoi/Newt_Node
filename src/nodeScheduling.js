@@ -20,3 +20,10 @@ export function nodeSchedulingKey(node, preferences) {
   if (["edit", "assembly", "output"].includes(node?.type)) return "localMedia";
   return "other";
 }
+
+export function nodeBatchConcurrency(node, preferences) {
+  if (["keyer", "explore", "skillDirector", "storyboard"].includes(node?.type)) return 1;
+  const model = node?.type === "utility" ? node.data?.utilityMode === "video" ? node.data.utilityVideoModel : node.data.utilityImageModel : node?.data?.model;
+  const resource = nodeSchedulingKey({ ...node, data: { ...node?.data, model } }, preferences);
+  return resource === "localGpu" ? 1 : resource === "localMedia" ? 2 : 3;
+}

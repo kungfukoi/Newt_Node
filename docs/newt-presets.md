@@ -2,12 +2,12 @@
 
 Newt Presets save a selected section of the node graph as a reusable local template. A preset can include nodes, their settings and sizes, internal connections, complete groups, managed media dependencies, and optional inputs that can be rebound when the preset is inserted.
 
-Newt Presets are separate from Style-node presets. The current implementation contains user-created presets only; it does not install bundled System Presets.
+Newt Presets are separate from Style-node presets. The library groups bundled read-only definitions under **Built-in presets** and local user-created entries under **My presets**. Inserted copies of either kind remain editable.
 
 ## Create A Preset
 
 1. Select one or more nodes with multi-select or a selection box.
-2. Use **Preset** in the floating selection action bar.
+2. Open **Presets** in the canvas menu bar and choose **Save selection as preset…**, or use **Preset** in the floating selection action bar.
 3. Enter a unique preset name.
 4. Optionally open **Reusable inputs**.
 5. Select any saved input nodes that should be replaceable and assign an available role.
@@ -31,20 +31,20 @@ Roles describe the intended use; binding remains type-safe. For example, an Imag
 
 ## Insert A Preset
 
-1. Open **Presets** in the left node sidebar.
+1. Open **Presets** in the canvas menu bar. The library remains available when the node palette is hidden.
 2. Choose the preset.
 3. For each reusable input, select a compatible node from the current project or leave **Preset default** selected.
-4. Select the **+** button.
+4. Select **Insert preset**.
 
 The inserted graph is placed beyond the occupied canvas and receives fresh node, edge, and group IDs. It is independent of both the saved preset and other inserted copies.
 
 When a reusable input is bound, its saved input node is replaced by the chosen project node and outgoing connections are reattached. Matching `@tags` are updated and affected downstream generated results are cleared so stale media is not presented as belonging to the newly bound inputs. Insertion never runs or submits paid work automatically.
 
-The Presets sidebar can be hidden or restored with **Settings > User Preferences > Show Preset Panel**. Hiding the panel does not delete saved presets or disable preset creation from the selection action bar.
+The toolbar control can be hidden or restored with **Settings > User Preferences > Show Presets Menu**. The existing saved preference is preserved. Hiding this control does not delete presets or disable creation from the selection action bar. Escape returns focus to the Presets button; clicking outside closes the library. Form controls retain their normal keyboard behavior.
 
 ## Delete A Preset
 
-Choose the preset in the sidebar and select the trash button. Deleting the library entry does not remove copies already inserted into workflows. Copied dependency media is retained because those workflows may still reference it.
+Choose a personal preset in the toolbar library and select **Delete**. Built-in presets cannot be deleted. Deleting the library entry does not remove copies already inserted into workflows. Copied dependency media is retained because those workflows may still reference it.
 
 ## Stored And Excluded Data
 
