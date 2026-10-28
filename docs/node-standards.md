@@ -465,7 +465,7 @@ Every catalog node uses the shared bottom-right resize handle. Resizing changes 
 
 When adding or changing a resizable node, verify its minimum size, width-only growth, height-only growth, diagonal growth, shrink-back behavior, saved/reopened dimensions, controls at both extremes, media aspect ratio, scroll reachability, and every connected port before considering the layout complete.
 
-Group backdrops expose resize handles at all four corners. A corner resize keeps the opposite corner anchored, updates position and dimensions live during the gesture, stops at the group minimum size, and persists the resulting bounds without moving contained nodes.
+Group backdrops expose resize handles at all four corners. A corner resize keeps the opposite corner anchored, updates position and dimensions live during the gesture, stops at the group minimum size, and persists the resulting bounds without moving contained nodes. Double-clicking the group background selects the nodes inside it and shows the same contextual selection action bar as selecting the group frame. The group's name/color header stays in its normal position. Double-clicking editable controls retains native text/button behavior.
 
 ## Port And Connection Standards
 

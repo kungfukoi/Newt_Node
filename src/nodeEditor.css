@@ -1347,6 +1347,7 @@
   position: absolute;
   z-index: 5;
   display: flex;
+  width: max-content;
   align-items: center;
   gap: 8px;
   min-height: 42px;
@@ -1371,6 +1372,7 @@
 
 .selection-action-bar button {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 7px;
   min-height: 32px;
@@ -1378,6 +1380,7 @@
   border-radius: 999px;
   color: rgba(244, 240, 232, 0.82);
   background: transparent;
+  white-space: nowrap;
 }
 
 .selection-action-bar button:hover:not(:disabled) {

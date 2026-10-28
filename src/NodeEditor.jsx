@@ -2632,6 +2632,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setSaveStatus("Group removed");
   }
 
+  function selectGroup(group) {
+    setSelectedNodeIds(getNodeIdsInsideGroup(group));
+    setSelectedEdgeId(null);
+    setContextMenu(null);
+  }
+
   function startGroupDrag(event, group) {
     if (event.target.closest("input, textarea, select, button, .group-resize-handle")) return;
     event.preventDefault();
@@ -5711,7 +5717,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    const captureTarget = event.target.closest?.(".flow-overview-canvas") || canvasRef.current;
+    const captureTarget = event.target.closest?.(".node-group-backdrop, .flow-overview-canvas") || canvasRef.current;
     captureTarget?.setPointerCapture?.(event.pointerId);
     viewportMotion().begin();
     setDragState({
@@ -8525,6 +8531,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   flowGroupRenderRef.current = (group) => (
     <GroupBackdrop
       group={group}
+      onSelect={selectGroup}
       onDragStart={startGroupDrag}
       onResizeStart={startGroupResize}
       onUpdate={updateGroup}
@@ -8673,6 +8680,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             <GroupBackdrop
               key={group.id}
               group={group}
+              onSelect={selectGroup}
               onDragStart={startGroupDrag}
               onResizeStart={startGroupResize}
               onUpdate={updateGroup}
@@ -8948,14 +8956,22 @@ function ComfyWanMissingRequirements({ customNodes = [], models = [] }) {
   );
 }
 
-function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }) {
+function GroupBackdrop({ group, onSelect, onDragStart, onResizeStart, onUpdate, onRemove }) {
   const color = group.color || groupPalette[0];
   const moveEdges = ["top", "right", "bottom", "left"];
   const resizeCorners = ["top-left", "top-right", "bottom-right", "bottom-left"];
 
+  function openGroupMenu(event) {
+    if (event.target.closest(".group-header, .group-resize-handle")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(group);
+  }
+
   return (
     <section
       className="node-group-backdrop"
+      onDoubleClick={openGroupMenu}
       style={{
         transform: `translate(${group.x}px, ${group.y}px)`,
         width: group.width,
