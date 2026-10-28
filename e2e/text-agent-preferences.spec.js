@@ -1,6 +1,24 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 
+test("Enter formats the Text Agent user prompt and only Send submits it", async ({ page }) => {
+  const node = { id: "agent", type: "textAgent", x: 20, y: 20, data: { title: "Text Agent", agentDraft: "" } };
+  await page.addInitScript(node => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [node], edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 } })), node);
+  const { errors } = await openFixture(page, { count: 1 });
+  const submitted = [];
+  await page.route("**/api/node/process-text", async route => { submitted.push(route.request().postDataJSON()); await route.fulfill({ json: { text: "Formatted response", model: "fixture" } }); });
+  const agent = page.locator('[data-node-card-id="agent"]');
+  const field = agent.getByLabel("Message Text Agent", { exact: true });
+  await field.fill("First line"); await field.press("Enter"); await field.pressSequentially("Second line"); await field.press("Shift+Enter"); await field.pressSequentially("Third line");
+  await expect(field).toHaveValue("First line\nSecond line\nThird line");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.agentDraft)).toBe("First line\nSecond line\nThird line");
+  expect(submitted).toHaveLength(0);
+  await agent.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect.poll(() => submitted.length).toBe(1);
+  expect(submitted[0].text).toContain("First line\nSecond line\nThird line");
+  expect(errors).toEqual([]);
+});
+
 for (const explicit of [false, true]) test(`resized Text Agent fields stay adjacent with ${explicit ? "saved field sizes" : "automatic sizing"}`, async ({ page }, testInfo) => {
   const node = { id: "agent", type: "textAgent", x: 40, y: 30, data: { title: "Text Agent", nodeWidth: 650, nodeHeight: 720,
     agentDraft: "Keep the subject and change the background", resultText: "A detailed prompt. ".repeat(100), lastRunModel: "fixture", batchResults: [],

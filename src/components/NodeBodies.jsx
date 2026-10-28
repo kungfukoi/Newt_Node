@@ -261,9 +261,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
                 textPromptHistoryDraft: event.target.value
               })}
               onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent?.isComposing) return;
-                event.preventDefault();
-                sendMessage();
+                if (event.key === "Enter") event.stopPropagation();
               }}
             />
           </div>

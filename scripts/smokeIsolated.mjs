@@ -4,7 +4,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { once } from "node:events";
 import { createServer } from "node:net";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -300,6 +300,26 @@ try {
     id: "smoke-project", name: "Smoke", nodes: [{ id: "board", type: "storyboard", data: { storyboardFrames: [{ id: "panel", number: 1, protected: true, resultUrl: "/outputs/panel.png", versions: [{ resultUrl: "/outputs/panel.png", prompt: "Original direction", savedAt: 1 }] }] } }], edges: [], packageParentPath: path.join(sandbox, "packages")
   })).json();
   assert.equal(saved.projectOutputs.length, 1);
+  const inputBytes = await readFile(path.join(sandbox, "outputs", "panel.png"));
+  const inputFolder = path.join(saved.packagePath, "inputs");
+  await writeFile(path.join(inputFolder, "already-here.png"), inputBytes);
+  const inputCount = (await readdir(inputFolder)).length;
+  async function uploadInput(bytes) {
+    const form = new FormData();
+    form.append("workflowPackageId", saved.id); form.append("workflowPackagePath", saved.packagePath);
+    form.append("asset", new Blob([bytes], { type: "image/png" }), "already-here.png");
+    const response = await fetch(api + "/api/node/upload-asset", { method: "POST", body: form, signal: AbortSignal.timeout(15000) });
+    assert.equal(response.status, 200);
+    return (await response.json()).asset;
+  }
+  const reusedInput = await uploadInput(inputBytes);
+  assert.equal(reusedInput.storedFileName, "inputs/already-here.png");
+  assert.match(reusedInput.localUrl, /\/inputs\/already-here\.png$/);
+  assert.equal((await readdir(inputFolder)).length, inputCount);
+  assert.deepEqual(await readFile(path.join(inputFolder, "already-here.png")), inputBytes);
+  assert.equal((await uploadInput(inputBytes)).localUrl, reusedInput.localUrl);
+  assert.notEqual((await uploadInput(Buffer.concat([inputBytes, Buffer.from("changed")]))).localUrl, reusedInput.localUrl);
+  assert.equal((await readdir(inputFolder)).length, inputCount + 1);
   const savedPanel = saved.graph.nodes[0].data.storyboardFrames[0];
   assert.equal(savedPanel.protected, true);
   assert.match(savedPanel.versions[0].resultUrl, /^\/workflow-assets\//);
