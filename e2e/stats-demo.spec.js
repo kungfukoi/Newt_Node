@@ -35,7 +35,7 @@ test("synthetic preview exercises populated stats without any API or persistence
 });
 
 test("ordinary non-package rename preserves workflow ID; explicit Save As creates a new identity", async ({ page }) => {
-  const { errors } = await openFixture(page, { count: 2 }); const saves = [];
+  const { errors } = await openFixture(page, { count: 2, uiState: { nodePaletteCollapsed: false } }); const saves = [];
   await page.route("**/api/saved-workflows", async route => {
     if (route.request().method() !== "POST") return route.fulfill({ json: [] });
     const data = route.request().postDataJSON(); saves.push(data);
@@ -43,7 +43,7 @@ test("ordinary non-package rename preserves workflow ID; explicit Save As create
   });
   await page.getByRole("button", { name: "File", exact: true }).click();
   await page.getByRole("menuitem", { name: "Rename…", exact: true }).click();
-  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Renamed workflow");
+  await page.getByRole("textbox", { name: "Workflow name", exact: true }).fill("Renamed workflow");
   await page.keyboard.press("Enter");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await expect.poll(() => saves.length).toBe(1); expect(saves[0].id).toBe(fixtureProjectId);

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import TextSplitDivider from "./TextSplitDivider.jsx";
+import { textAgentSplitRatio } from "../textAgent.js";
 import { supportsSeedanceDraft, seedanceDraftHint } from "../seedanceDraft.js";
 import ModelProviderOption from "./ModelProviderOption.jsx";
 import { DirectorDialogueControls } from "./DirectorDialogueControls.jsx";
@@ -152,6 +154,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
 }
 
 export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys, generationScope }) {
+  const split = textAgentSplitRatio(node.data);
   const draft = String(node.data.agentDraft || "");
   const response = String(node.data.resultText || "");
   const messages = normalizeTextAgentMessages(node.data.agentMessages);
@@ -198,7 +201,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
           />
         ))}
       </div>
-      <div className="text-agent-shell">
+      <div className="text-agent-shell" style={{ "--agent-response-weight": split, "--agent-prompt-weight": 1 - split }}>
         <div className="text-agent-toolbar">
           <span>Response</span>
           <button
@@ -234,6 +237,7 @@ export function TextAgentNodeBody({ node, config, outputPort, incoming, onUpdate
             });
           }}
         />
+        <TextSplitDivider value={split} onChange={agentSplitRatio => onUpdate(node.id, { agentSplitRatio })} />
         <div className="text-agent-composer">
           <div className="text-agent-composer-field">
             <span className="text-prompt-header">

@@ -22,7 +22,8 @@ test("image Batch processes each source through Utility and exposes its output c
   await expect.poll(async () => (await savedNode(page, "utility"))?.batchResults?.length).toBe(2);
   expect(calls.map(call => call.imageUrls)).toEqual([["/outputs/e2e/source-1.png"], ["/outputs/e2e/source-2.png"]]);
   expect(calls[0].prompt).toContain("Direction 1"); expect(calls[1].prompt).toContain("Direction 2");
-  await expect(card(page, "utility").locator('[data-port-key="utility:batchOut"]')).toBeVisible();
+  await expect(card(page, "utility").locator('[data-port-key="utility:batchOut"]')).toHaveCount(0);
+  await expect(card(page, "utility").locator('[data-port-key="utility:utilityOut"]')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -36,6 +37,41 @@ test("image Batch runs each start frame through a Video Model", async ({ page })
   expect(calls.map(call => call.startFrameUrls).sort()).toEqual([["/outputs/e2e/source-1.png"], ["/outputs/e2e/source-2.png"]]);
   expect(new Set(calls.map(call => call.generationGroupId)).size).toBe(1);
   expect((await savedNode(page, "video")).batchMediaType).toBe("video");
+  expect(errors).toEqual([]);
+});
+
+test("normal Utility image outputs carry all batch entries to processors and Preview after reload", async ({ page }) => {
+  const utility = id => ({ id, type: "utility", x: id === "first" ? 370 : 730, y: 20,
+    data: { title: id, utilityMode: "image", utilityImageModel: "Depth Anything" } });
+  const { errors } = await seed(page, [batch(), utility("first"), utility("second"), { id: "viewer", type: "preview", x: 1100, y: 20, data: {} }],
+    [wire("batch", "first", "imageIn"), { id: "ordinary-media", from: { nodeId: "first", port: "utilityOut" }, to: { nodeId: "second", port: "imageIn" } },
+      { id: "ordinary-viewer", from: { nodeId: "second", port: "utilityOut" }, to: { nodeId: "viewer", port: "sourceIn" } }]);
+  const calls = [];
+  await page.route("**/api/node/utility-image", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { images: [{ localUrl: `/outputs/e2e/processed-${calls.length}.png` }] } }); });
+  await card(page, "first").getByRole("button", { name: /Run Depth Map/ }).click();
+  await expect.poll(async () => (await savedNode(page, "first"))?.status).toBe("complete");
+  await card(page, "second").getByRole("button", { name: /Run Depth Map/ }).click();
+  await expect.poll(async () => (await savedNode(page, "second"))?.status).toBe("complete");
+  expect(calls).toHaveLength(4);
+  expect(calls.slice(2).flatMap(call => call.imageUrls).sort()).toEqual(["/outputs/e2e/processed-1.png", "/outputs/e2e/processed-2.png"]);
+  await expect(card(page, "viewer").getByRole("combobox").locator("option")).toHaveCount(2);
+  await expect(card(page, "second").locator('[data-port-key="second:batchOut"]')).toHaveCount(0);
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(card(page, "viewer").getByRole("combobox").locator("option")).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+test("normal Text Agent Prompt output keeps original videos paired for downstream video edits", async ({ page }) => {
+  const { errors } = await seed(page, [batch("video"), { id: "agent", type: "textAgent", x: 370, y: 20, data: { agentDraft: "Change the lighting" } },
+    { id: "video", type: "videoModel", x: 780, y: 20, data: { model: "Seedance 2.5", seedanceTask: "edit", prompt: "Preserve motion", resolution: "720p", duration: "4 seconds", aspectRatio: "16:9", batchCount: "1", settingsOpen: false } }],
+    [wire("batch", "agent", "videoIn"), { id: "normal-prompt", from: { nodeId: "agent", port: "promptOut" }, to: { nodeId: "video", port: "promptIn" } }]);
+  await page.route("**/api/node/process-text", async route => { const request = route.request().postDataJSON(); await route.fulfill({ json: { text: `Lighting for ${request.videoInputs[0].url}`, model: "fixture" } }); });
+  const calls = [];
+  await page.route("**/api/node/generate-video", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { video: { localUrl: `/outputs/e2e/edited-${calls.length}.mp4` } } }); });
+  await card(page, "video").getByRole("button", { name: /^Edit Video/ }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  for (const request of calls) { expect(request.referenceVideoUrls).toHaveLength(1); expect(request.prompt).toContain(request.referenceVideoUrls[0]); }
+  await expect(card(page, "agent").locator('[data-port-key="agent:batchOut"]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -77,7 +113,7 @@ test("Preview and Timeline receive every member of an image Batch", async ({ pag
   expect(errors).toEqual([]);
 });
 
-test("Text Agent writes per-image prompts and its Batch output feeds the matching image to generation", async ({ page }) => {
+test("Text Agent's normal Prompt output pairs each batch prompt with its image behind the scenes", async ({ page }) => {
   const instruction = "Add a soccer ball to this image";
   const { errors } = await seed(page, [batch(), { id: "agent", type: "textAgent", x: 380, y: 20, data: { title: "Write prompts", agentDraft: instruction,
     resultText: "Old unrelated prompt", agentMessages: [{ role: "user", text: "Old instruction" }, { role: "assistant", text: "Old unrelated prompt" }] } },
@@ -93,9 +129,9 @@ test("Text Agent writes per-image prompts and its Batch output feeds the matchin
     active--; completed++;
   });
   // Wire the fresh agent before any requests, then use only the model button.
-  await expect(card(page, "agent").locator('[data-port-key="agent:batchOut"]')).toBeVisible();
-  const output = await card(page, "agent").locator('[data-port-key="agent:batchOut"]').boundingBox();
-  const input = await card(page, "model").locator('[data-port-key="model:imagePromptIn"]').boundingBox();
+  await expect(card(page, "agent").locator('[data-port-key="agent:batchOut"]')).toHaveCount(0);
+  const output = await card(page, "agent").locator('[data-port-key="agent:promptOut"]').boundingBox();
+  const input = await card(page, "model").locator('[data-port-key="model:promptIn"]').boundingBox();
   await page.mouse.move(output.x + output.width / 2, output.y + output.height / 2); await page.mouse.down(); await page.mouse.move(input.x + input.width / 2, input.y + input.height / 2, { steps: 8 }); await page.mouse.up();
   await page.route("**/api/node/generate-image", async route => {
     expect(completed).toBe(revision * 2);

@@ -8,8 +8,17 @@ import {
   replaceLatestTextAgentAssistantMessage,
   textAgentReferenceText,
   textAgentMessagesForPrompt,
-  textAgentRequestMessages
+  textAgentRequestMessages,
+  textAgentSplitRatio
 } from "../src/textAgent.js";
+
+test("Text Agent split preserves a saved ratio and derives legacy field proportions", () => {
+  assert.equal(textAgentSplitRatio({ agentSplitRatio: .4 }), .4);
+  assert.equal(textAgentSplitRatio({ agentSplitRatio: 7 }), .9);
+  assert.equal(textAgentSplitRatio({ agentSplitRatio: -1 }), .1);
+  assert.equal(textAgentSplitRatio({ textareaResizeMode: true, textareaHeights: { "0:Text Agent response": 300, "1:Message Text Agent": 100 } }), .75);
+  assert.equal(textAgentSplitRatio({}), 2 / 3);
+});
 
 test("saved output without conversation becomes the prompt editing baseline", () => {
   const messages = textAgentMessagesForPrompt({ resultText: "A cluttered dorm desk. Keep the laptop and mug untouched." });

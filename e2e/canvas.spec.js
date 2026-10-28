@@ -298,6 +298,7 @@ test("generated images propagate without a nudge, stay contained on resize, and 
     return { fit: getComputedStyle(element).objectFit, width: image.width, height: image.height, inside: image.left >= node.left && image.right <= node.right + 1 && image.bottom <= node.bottom + 1 };
   });
   expect(geometry.fit).toBe("contain"); expect(geometry.inside).toBeTruthy();
+  await page.getByRole("button", { name: "Show node palette", exact: true }).click();
   await page.getByRole("button", { name: "File", exact: true }).click();
   await page.getByRole("menuitem", { name: /^Save As/ }).click();
   await expect.poll(() => requests.some((request) => request.path === "/api/saved-workflows" && request.method === "POST")).toBeTruthy();

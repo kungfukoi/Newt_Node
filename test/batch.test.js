@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, batchInputEntryCount } from "../src/batch.js";
+import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, batchInputEntryCount, batchInputConnections, migrateBatchOutputEdge } from "../src/batch.js";
 import { runMediaBatch } from "../src/nodeRunners/batch.js";
 import { buildSelectedRunnableDependencies } from "../src/nodeRunner.js";
 import { createFlowConnectionIndex } from "../src/flowNodeConnections.js";
@@ -10,6 +10,54 @@ import { textAgentMessagesForPrompt } from "../src/textAgent.js";
 import { runRunnableNodesByDependencyOrder } from "../src/nodeRunner.js";
 
 const connection = (id, url) => ({ source: { id, data: { title: id, resultUrl: url } }, edge: { from: { nodeId: id, port: "imageOut" } } });
+
+test("normal media outputs carry the complete collection into the next processor", () => {
+  const source = { id: "processor", type: "utility", data: { batchResults: [{ id: "a", url: "/a.png", type: "image" }, { id: "b", url: "/b.png", type: "image" }] } };
+  const target = { id: "next", type: "imageModel", data: {} };
+  const edge = { id: "normal-media", from: { nodeId: source.id, port: "utilityOut" }, to: { nodeId: target.id, port: "imagePromptIn" } };
+  const inputs = batchInputConnections({ imagePromptIn: [{ source, edge }] });
+  const plan = buildBatchPlan(inputs, {}, () => null);
+  assert.equal(plan.length, 2);
+  for (const entry of plan) {
+    const graph = materializeBatchGraph([source, target], [edge], target.id, entry.inputs);
+    assert.equal(graph.edges[0].id, edge.id);
+    assert.equal(graph.edges[0].from.port, "imageOut");
+    assert.equal(graph.nodes.find(node => node.id === graph.edges[0].from.nodeId).data.resultUrl, entry.url);
+  }
+});
+
+test("ordinary Prompt wires carry per-entry prompts and privately pair media without a second wire", () => {
+  const agent = { id: "agent", type: "textAgent", data: { batchResults: [{ id: "a", type: "video", url: "/a.mp4", prompt: "Follow A" }, { id: "b", type: "video", url: "/b.mp4", prompt: "Follow B" }] } };
+  const target = { id: "model", type: "videoModel", data: {} };
+  const edge = { id: "ordinary-prompt", from: { nodeId: agent.id, port: "promptOut" }, to: { nodeId: target.id, port: "promptIn" } };
+  const plan = buildBatchPlan(batchInputConnections({ promptIn: [{ source: agent, edge }] }), {}, () => null);
+  for (const entry of plan) {
+    const graph = materializeBatchGraph([agent, target], [edge], target.id, entry.inputs, () => "referenceVideoIn");
+    assert.equal(graph.edges.length, 1);
+    assert.equal(graph.edges[0].to.port, "referenceVideoIn");
+    const source = graph.nodes.find(node => node.id === graph.edges[0].from.nodeId);
+    assert.equal(source.data.resultUrl, entry.url);
+    assert.equal(source.data.resultText, entry.prompt);
+  }
+  assert.equal(edge.to.port, "promptIn");
+  assert.equal(agent.data.batchResults.length, 2);
+});
+
+test("fresh normal Prompt chains inherit pending batch context and legacy special wires migrate", () => {
+  const batch = { id: "batch", type: "batch", data: { batchMediaType: "video", batchFiles: [{ id: "v", type: "video", url: "/v.mp4" }] } };
+  const first = { id: "first", type: "textAgent", data: {} }, second = { id: "second", type: "textAgent", data: {} };
+  const edges = [{ from: { nodeId: batch.id, port: "batchOut" }, to: { nodeId: first.id, port: "videoIn" } },
+    { from: { nodeId: first.id, port: "promptOut" }, to: { nodeId: second.id, port: "textIn" } },
+    { from: { nodeId: second.id, port: "promptOut" }, to: { nodeId: "model", port: "promptIn" } }];
+  const nodes = initializeTextAgentBatches([batch, first, second], edges);
+  assert.equal(nodes[2].data.batchMediaType, "video");
+  assert.deepEqual(upstreamBatchTextAgents("model", nodes, edges).map(node => node.id), [first.id, second.id]);
+  const legacy = { id: "keep-me", from: { nodeId: first.id, port: "batchOut" }, to: { nodeId: "model", port: "startFrameIn" } };
+  const migrated = migrateBatchOutputEdge(legacy, first, {}, "promptOut", "promptIn");
+  assert.equal(migrated.id, legacy.id); assert.equal(migrated.from.port, "promptOut"); assert.equal(migrated.to.port, "promptIn");
+  assert.equal(legacy.from.port, "batchOut");
+  assert.equal(migrateBatchOutputEdge(edges[0], batch, first, "batchOut", "textIn"), edges[0]);
+});
 test("selected consumer waits for selected producers across a passive Batch", () => {
   const nodes = [{ id: "producer", type: "imageModel" }, { id: "consumer", type: "imageModel" }];
   const dependencies = buildSelectedRunnableDependencies(nodes, [

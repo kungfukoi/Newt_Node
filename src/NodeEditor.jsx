@@ -2,7 +2,7 @@ import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
-import { batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
 import { runMediaBatch } from "./nodeRunners/batch.js";
 import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
@@ -515,7 +515,7 @@ import {
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
-import { appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentMessagesForPrompt, textAgentReferenceText } from "./textAgent.js";
+import { textAgentSplitRatio, appendTextAgentMessage, createTextAgentMessage, normalizeTextAgentMessages, textAgentMessagesForPrompt, textAgentReferenceText } from "./textAgent.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -5454,6 +5454,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ...item.data,
                 nodeWidth: startWidth,
                 nodeHeight: startHeight,
+                ...(node.type === "textAgent" ? { agentSplitRatio: textAgentSplitRatio(node.data) } : {}),
                 ...(textarea ? {} : { textareaWidths: {}, textareaHeights: {}, textareaResizeMode: false })
               }
             }
@@ -7113,7 +7114,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           sharedSettings.frame = defaultOutpaintFrame(metadata, sharedSettings.aspectRatio);
         }
         const settled = await runBatchEntries(plan, { concurrency: 2, stopped: () => token.stopped, run: async entry => {
-          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs);
+          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs, batchMediaInputPort);
           const inputs = buildIncomingByNode(graph.nodes, graph.edges)[node.id] || {};
           const sourceVideoUrl = connectedAssetUrls(inputs.referenceVideoIn)[0] || "";
           const canvasVideoUrl = connectedAssetUrls(inputs.canvasVideoIn)[0] || "";
@@ -7371,7 +7372,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         concurrency: nodeBatchConcurrency(node, modelProviderPreferences),
         update: patch => { if (!token.stopped) actions.updateNode(node.id, patch); },
         execute: async (entry, capture) => {
-          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs);
+          const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs, batchMediaInputPort);
           const inputs = buildIncomingByNode(graph.nodes, graph.edges)[node.id] || {};
           const preparation = node.data.batchPreparations?.[JSON.stringify([connectedAssetUrls(inputs.referenceVideoIn)[0] || "", connectedAssetUrls(inputs.canvasVideoIn)[0] || ""])];
           const child = batchChildNode(node, entry, preparation);
@@ -9420,14 +9421,17 @@ function NodeCard({
       const storageKey = nodeTextareaStorageKey(textarea, index);
       const savedHeight = savedHeights[storageKey];
       const savedWidth = savedWidths[storageKey];
-      if (savedHeight) textarea.style.height = `${savedHeight}px`;
-      if (savedWidth) textarea.style.width = `${savedWidth}px`;
+      if (rawNodeData.nodeHeight && (node.type === "textAgent" || !rawNodeData.textareaResizeMode)) textarea.style.height = "";
+      else if (savedHeight) textarea.style.height = `${savedHeight}px`;
+      if (rawNodeData.nodeWidth && (node.type === "textAgent" || !rawNodeData.textareaResizeMode)) textarea.style.width = "";
+      else if (savedWidth) textarea.style.width = `${savedWidth}px`;
     });
-  }, [node.id, node.type, rawNodeData.textareaHeights, rawNodeData.textareaWidths]);
+  }, [node.id, node.type, rawNodeData.textareaHeights, rawNodeData.textareaWidths, rawNodeData.nodeHeight, rawNodeData.nodeWidth, rawNodeData.textareaResizeMode]);
 
   function beginTextareaResize(event) {
     const textarea = event.target.closest?.("textarea");
     if (!textarea || !cardRef.current?.contains(textarea)) return;
+    if (node.type === "textAgent") return;
     const rect = textarea.getBoundingClientRect();
     const gripSize = 20;
     if (event.clientX < rect.right - gripSize || event.clientY < rect.bottom - gripSize) return;
@@ -9647,8 +9651,7 @@ function NodeCard({
         {node.data.batchProgress && <small>Batch {node.data.batchProgress}</small>}
         {(node.data.batchFailedEntries || []).map(entry => <button key={`${entry.id}:${entry.runIndex}`} disabled={node.data.status === "running"}
           title={entry.error} onClick={() => handleNodeRun({ ...node, data: { ...node.data, batchRetryEntry: entry } })}>Retry {entry.label} · 1</button>)}
-        {Array.isArray(node.data.batchResults) && <OutputPortRow node={renderedNode} port={outputPortDefinitionsForNode(renderedNode).find(port => port.id === "batchOut")}
-          label={`Batch · ${node.data.batchResults.length}`} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
+        {Array.isArray(node.data.batchResults) && <small>{node.data.batchResults.length} batch results</small>}
       </div> : null}
       <button
         type="button"
@@ -20540,13 +20543,11 @@ function inputPortDefinitionsForNode(node) {
 }
 
 function outputPortDefinitionsForNode(node) {
-  const ports = baseOutputPortDefinitionsForNode(node);
-  return node?.type !== "batch" && Array.isArray(node?.data?.batchResults)
-    ? [...ports, { id: "batchOut", label: "Batch", color: portColors[batchMediaType(node)] }] : ports;
+  return baseOutputPortDefinitionsForNode(node);
 }
 
 function baseOutputPortDefinitionsForNode(node) {
-  if (node?.type === "batch") return [{ id: "batchOut", label: "Batch", color: portColors[batchMediaType(node)], disabled: node.data?.batchMediaType === "", disabledReason: "Add images or videos first" }];
+  if (node?.type === "batch") return [{ id: "batchOut", label: batchMediaType(node) === "video" ? "Video" : "Image", color: portColors[batchMediaType(node)], disabled: node.data?.batchMediaType === "", disabledReason: "Add images or videos first" }];
   if (isKeyerNode(node)) return getNodeConfig("keyer").output;
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "frameIt") return basePorts.map((port) => ({
@@ -20675,6 +20676,7 @@ function acceptedInputPortKinds(node, portId) {
 function portsAreCompatible(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const acceptedKinds = acceptedInputPortKinds(target, toPort);
+  if (outputKind === "prompt" && isBatchConnection({ source }) && acceptedKinds.includes(batchMediaType(source))) return true;
   return Boolean(outputKind && acceptedKinds.includes(outputKind));
 }
 
@@ -20937,6 +20939,11 @@ function nodeResultMediaType(node) {
   return "";
 }
 
+function batchMediaInputPort(node, kind, preferred) {
+  const ports = activeInputPortIdsForNode(node).filter(port => acceptedInputPortKinds(node, port).includes(kind));
+  return ports.includes(preferred) ? preferred : ports[0] || "";
+}
+
 function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
   const nodeMap = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
   const raw = edges.reduce((incoming, edge) => {
@@ -20953,7 +20960,9 @@ function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
       if (!isBatchConnection(connection) || nodeMap.get(id)?.type === "batch") return [connection];
       const entries = batchInputEntries(connection.source, raw, connectedOutputItem);
       if (!entries.length) return [connection];
-      return entries.map(entry => ({ ...connection, edge: { ...connection.edge, id: `${connection.edge.id}:entry:${entry.id}` }, source: batchEntrySource(connection.source, entry), batchSource: connection.source, batchEntry: entry }));
+      return entries.map(entry => ({ ...connection, edge: { ...connection.edge, id: `${connection.edge.id}:entry:${entry.id}` },
+        source: { ...batchEntrySource(connection.source, entry), ...(connection.edge.from.port === "promptOut" ? { type: "textAgent" } : {}) },
+        batchSource: connection.source, batchEntry: entry }));
     })
   ]))]));
 }
@@ -26081,8 +26090,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   const source = nodeMap.get(edge.from.nodeId);
   if (!source) return null;
 
-  const nextEdge = cloneEdge(edge);
   const target = nodeMap.get(edge.to.nodeId);
+  const promptInput = inputPortIdsForNode(target).find(port => ["promptIn", "textIn", "sceneDescriptionIn"].includes(port));
+  const nextEdge = cloneEdge(migrateBatchOutputEdge(edge, source, target, baseOutputPortDefinitionsForNode(source)[0]?.id, promptInput));
+  if (edge.from.port === "batchOut" && nextEdge.from.port !== "batchOut") nextEdge.color = portDefinitionForNode(source, nextEdge.from.port, "output")?.color;
 
   if (target?.type === "model3d" && nextEdge.to.port === "imageIn") {
     nextEdge.to.port = "frontImageIn";
