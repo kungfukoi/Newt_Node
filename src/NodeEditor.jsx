@@ -1,3 +1,4 @@
+import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
 import { batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
@@ -103,8 +104,6 @@ import {
   MessageSquareText,
   Minus,
   PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightOpen,
   Palette,
   Pause,
   PersonStanding,
@@ -141,7 +140,7 @@ import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasCh
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import { FrameItNodeBody } from "./components/FrameItNodeBody.jsx";
 import { GenerationProgress } from "./components/GenerationProgress.jsx";
-import { NewtPresetDialog, NewtPresetLibrary } from "./components/NewtPresetDialog.jsx";
+import { NewtPresetDialog } from "./components/NewtPresetDialog.jsx";
 import { RemoteVideoAttention } from "./components/RemoteVideoAttention.jsx";
 import { NewtFlowCanvas } from "./components/NewtFlowCanvas.jsx";
 import { createViewportMotion, wheelZoomStep, isMouseWheelNotch } from "./canvasMotion.js";
@@ -1268,8 +1267,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const flowNodeRenderRef = React.useRef(null);
   const flowGroupRenderRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
-  const fileMenuRef = React.useRef(null);
-  const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
   const undoStackRef = React.useRef([]);
   const redoStackRef = React.useRef([]);
@@ -1311,6 +1308,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [workflowFilePath, setWorkflowFilePath] = React.useState(savedDraft.workflowFilePath);
   const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
+  const [canvasRunActive, setCanvasRunActive] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(() => uiGet("nodePaletteCollapsed", true) !== false);
@@ -1403,7 +1401,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     loadProjects,
     createNewWorkflow,
     saveProject,
-    startNewProject,
     saveProjectAsLocalFile,
     openWorkflowFromSystemPicker,
     importWorkflowFromSystemPicker,
@@ -1782,7 +1779,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       if (commandKey && key === "s") {
         event.preventDefault();
-        saveProject();
+        if (event.shiftKey) saveProjectAsLocalFile();
+        else saveProject();
         return;
       }
 
@@ -1918,12 +1916,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useEffect(() => {
     if (!active) return undefined;
     function handlePointerDown(event) {
-      if (!fileMenuRef.current?.contains(event.target)) {
-        setFileMenuOpen(false);
-      }
-      if (!projectMenuRef.current?.contains(event.target)) {
-        setProjectMenuOpen(false);
-      }
       if (!event.target.closest?.(".node-context-menu")) {
         if (contextMenu?.pendingConnection) setDraftEdge(null);
         setContextMenu(null);
@@ -8428,6 +8420,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     );
   }
 
+  async function runAllCanvasNodes() {
+    if (canvasRunActive) return;
+    const graph = nodesRef.current;
+    const runnable = selectedRunnableNodesForRun(graph, new Set(graph.map(node => node.id)), buildIncomingByNode(graph, edgesRef.current));
+    if (!runnable.length) { setSaveStatus("No runnable canvas nodes."); return; }
+    setCanvasRunActive(true);
+    try {
+      const result = await runNodesByDependencyOrder(runnable);
+      setSaveStatus(result.cancelled ? "Stopped canvas run." : `Finished ${result.completed} canvas nodes${result.failed + result.skipped ? `; ${result.failed + result.skipped} blocked or failed` : ""}`);
+    } finally { setCanvasRunActive(false); }
+  }
+
   async function runNodesByDependencyOrder(runnableNodes) {
     const controller = new AbortController();
     const batchPromptRuns = new Map();
@@ -8579,86 +8583,24 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onClose={closePreviewLightbox}
         />
       )}
-      {toolbarCollapsed && (
-        <button className="sidebar-restore" onClick={() => setToolbarCollapsed(false)} title="Show node palette">
-          <PanelLeftOpen size={17} />
-        </button>
-      )}
-      {outputsCollapsed && (
-        <button className="outputs-restore" onClick={() => setOutputsCollapsed(false)} title="Show project outputs">
-          <PanelRightOpen size={17} />
-        </button>
-      )}
-
+      <CanvasMenuBar
+        projectName={projectName} onRename={setProjectName} projectPath={projectPackagePath || workflowFilePath}
+        projects={projects} fileMenuOpen={fileMenuOpen} setFileMenuOpen={setFileMenuOpen}
+        projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen}
+        onNew={createNewWorkflow} onOpen={openWorkflowFromSystemPicker}
+        onSave={saveProject} onSaveAs={saveProjectAsLocalFile} onImport={importWorkflowFromSystemPicker}
+        onLoad={loadProject} onDelete={deleteProject}
+        presets={showPresetPanel ? newtPresets : null} selectedCount={selectedNodeIds.length}
+        toolbarCollapsed={toolbarCollapsed} onToggleToolbar={() => setToolbarCollapsed(value => !value)}
+        outputsCollapsed={outputsCollapsed} onToggleOutputs={() => setOutputsCollapsed(value => !value)}
+        onRunAll={runAllCanvasNodes} canRun={!canvasRunActive && nodes.some(node => isRunnableNode(node) && node.data?.status !== "running")}
+      />
       <aside className="node-toolbar">
         <div className="toolbar-header">
           <span>Nodes</span>
           <button className="sidebar-hide" onClick={() => setToolbarCollapsed(true)} title="Hide node palette">
             <PanelLeftClose size={16} />
           </button>
-        </div>
-        <div className="project-tools">
-          <button className="new-project-button" onClick={startNewProject} title="Start a new node project">
-            <Plus size={14} />
-            <span>New Project</span>
-          </button>
-          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" />
-          <div className="file-menu" ref={fileMenuRef}>
-            <button className="file-menu-trigger" onClick={() => setFileMenuOpen((open) => !open)} title="File">
-              <FolderOpen size={16} />
-              <span>File</span>
-              <ChevronDown size={13} />
-            </button>
-            {fileMenuOpen && (
-              <div className="file-menu-list">
-                <button onClick={() => { setFileMenuOpen(false); createNewWorkflow(); }} title="Start a new blank workflow">
-                  <Plus size={15} />
-                  <span>New</span>
-                </button>
-                <button onClick={() => { setFileMenuOpen(false); saveProject(); }} title="Save project">
-                  <Save size={15} />
-                  <span>Save</span>
-                </button>
-                <button onClick={() => { setFileMenuOpen(false); saveProjectAsLocalFile(); }} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
-                  <Save size={15} />
-                  <span>Save As</span>
-                </button>
-                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow JSON from disk">
-                  <FolderOpen size={15} />
-                  <span>Open</span>
-                </button>
-                <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
-                  <Download size={15} />
-                  <span>Import</span>
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="project-picker" ref={projectMenuRef}>
-            <button className="project-picker-trigger" onClick={() => setProjectMenuOpen((open) => !open)} title="Load saved workflow">
-              <span>Recent Projects</span>
-              <ChevronDown size={13} />
-            </button>
-            {projectMenuOpen && (
-              <div className="project-menu">
-                {projects.length ? (
-                  projects.map((project) => (
-                    <div className="project-menu-row" key={project.id}>
-                      <button className="project-load" onClick={() => loadProject(project.id)} title={`Load ${project.fileName || project.name}`}>
-                        {project.name}
-                      </button>
-                      <button className="project-delete" onClick={() => deleteProject(project)} title={`Remove ${project.registryFileName || project.fileName || project.name} from dropdown`}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <small>No saved workflows</small>
-                )}
-              </div>
-            )}
-          </div>
-          {showPresetPanel && <NewtPresetLibrary controller={newtPresets} />}
         </div>
         <div className="node-catalog" style={{ "--catalog-row-count": nodeCatalog.length, "--catalog-compact-row-count": Math.ceil(nodeCatalog.length / 2) }}>
         {nodeCatalog.map((item) => {

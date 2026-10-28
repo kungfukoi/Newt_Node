@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { newtPresetInputRoles } from "../newtPresets.js";
 
 export function NewtPresetDialog({ controller }) {
@@ -109,28 +109,28 @@ export function NewtPresetDialog({ controller }) {
   );
 }
 
-export function NewtPresetLibrary({ controller }) {
+export function NewtPresetLibrary({ controller, canSaveSelection, onSaveSelection }) {
   const selected = controller.items.find((item) => item.id === controller.selectedId);
   return (
     <section className="newt-preset-library" aria-label="Newt Presets">
       <div className="newt-preset-library-heading">
-        <span>Presets</span>
+        <span>Workflow presets</span>
         <button type="button" className="icon-button" onClick={controller.refresh} disabled={controller.busy} title="Refresh presets" aria-label="Refresh presets">
           <RefreshCw size={14} />
         </button>
       </div>
-      <div className="newt-preset-library-controls">
+      <label className="newt-preset-choice">
+        <span>Choose a preset</span>
         <select value={controller.selectedId} onChange={(event) => controller.select(event.target.value)} disabled={controller.busy} aria-label="Newt Preset">
           <option value="">{controller.items.length ? "Select preset" : "No presets saved"}</option>
-          {controller.items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.isSystem ? "System" : "User"}, {item.nodeCount})</option>)}
+          {[true, false].map(system => {
+            const items = controller.items.filter(item => Boolean(item.isSystem) === system);
+            return items.length ? <optgroup key={String(system)} label={system ? "Built-in presets" : "My presets"}>
+              {items.map(item => <option key={item.id} value={item.id}>{item.name} · {item.nodeCount} nodes</option>)}
+            </optgroup> : null;
+          })}
         </select>
-        <button type="button" className="icon-button" onClick={controller.insert} disabled={controller.busy || !selected} title="Insert preset" aria-label="Insert preset">
-          <Plus size={16} />
-        </button>
-        <button type="button" className="icon-button" onClick={controller.remove} disabled={controller.busy || !selected || selected.isSystem} title="Delete preset" aria-label="Delete preset">
-          <Trash2 size={15} />
-        </button>
-      </div>
+      </label>
       {!!selected?.slots?.length && (
         <div className="newt-preset-bindings">
           {selected.slots.map((slot) => (
@@ -146,7 +146,20 @@ export function NewtPresetLibrary({ controller }) {
           ))}
         </div>
       )}
+      <div className="newt-preset-library-actions">
+        <button type="button" className="newt-preset-insert" onClick={controller.insert} disabled={controller.busy || !selected} title="Insert preset" aria-label="Insert preset">
+          <Plus size={16} /><span>Insert preset</span>
+        </button>
+        <button type="button" className="newt-preset-delete" onClick={controller.remove} disabled={controller.busy || !selected || selected.isSystem} title={selected?.isSystem ? "Built-in presets cannot be deleted" : "Delete preset"} aria-label="Delete preset">
+          <Trash2 size={15} /><span>Delete</span>
+        </button>
+      </div>
       {controller.error && <small role="alert">{controller.error}</small>}
+      <div className="newt-preset-save-selection">
+        <button type="button" onClick={onSaveSelection} disabled={controller.busy || !canSaveSelection} title={canSaveSelection ? "Save selected nodes as a reusable preset" : "Select canvas nodes to save a preset"}>
+          <Save size={15} /><span>Save selection as preset…</span>
+        </button>
+      </div>
     </section>
   );
 }

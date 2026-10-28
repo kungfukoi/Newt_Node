@@ -41,11 +41,13 @@ test("ordinary non-package rename preserves workflow ID; explicit Save As create
     const data = route.request().postDataJSON(); saves.push(data);
     return route.fulfill({ json: { id: data.id || "new-copy", name: data.name, fileName: `${data.name}.json` } });
   });
-  if (!await page.getByPlaceholder("Project name", { exact: true }).isVisible()) await page.getByTitle("Show node palette", { exact: true }).click();
-  await page.getByPlaceholder("Project name", { exact: true }).fill("Renamed workflow");
-  await page.getByTitle("File", { exact: true }).click(); await page.getByTitle("Save project", { exact: true }).click();
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Rename…", exact: true }).click();
+  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Renamed workflow");
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
   await expect.poll(() => saves.length).toBe(1); expect(saves[0].id).toBe(fixtureProjectId);
-  await page.getByTitle("File", { exact: true }).click(); await page.getByRole("button", { name: "Save As", exact: true }).click();
+  await page.getByRole("button", { name: "File", exact: true }).click(); await page.getByRole("menuitem", { name: /^Save As/ }).click();
   await expect.poll(() => saves.length).toBe(2); expect(saves[1].id).toBe(null); expect(saves[1].sourceWorkflowId).toBe(fixtureProjectId);
   expect(errors).toEqual([]);
 });

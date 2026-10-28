@@ -1,0 +1,76 @@
+import { test, expect } from "@playwright/test";
+import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
+
+test("canvas toolbar keeps file actions above the canvas and supports keyboard menus and panel toggles", async ({ page }, testInfo) => {
+  const { errors, fixture } = await openFixture(page, { count: 24, scale: .3, uiState: { nodePaletteCollapsed: false } });
+  const bar = page.getByRole("toolbar", { name: "Canvas menu bar" });
+  await expect(bar).toBeVisible();
+  const layout = await page.evaluate(() => {
+    const bar = document.querySelector(".canvas-menu-bar").getBoundingClientRect();
+    const canvas = document.querySelector(".node-canvas").getBoundingClientRect();
+    const palette = document.querySelector(".node-toolbar").getBoundingClientRect();
+    return { above: bar.bottom <= canvas.top && bar.bottom <= palette.top, left: Math.abs(bar.left - palette.left), right: Math.abs(bar.right - canvas.right) };
+  });
+  expect(layout.above).toBe(true); expect(layout.left).toBeLessThan(2); expect(layout.right).toBeLessThan(2);
+  await expect(page.locator(".node-toolbar .project-tools")).toHaveCount(0);
+  await bar.getByRole("button", { name: "File", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "New canvas", exact: true })).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(page.getByRole("menuitem", { name: "Import workflow…" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(bar.getByRole("button", { name: "File", exact: true })).toBeFocused();
+  await bar.getByRole("button", { name: "File", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  await bar.getByRole("textbox", { name: "Project name" }).fill("Soccer campaign");
+  await page.keyboard.press("Enter");
+  await expect(bar.getByRole("button", { name: "File", exact: true })).toHaveText("Soccer campaign");
+  await bar.getByRole("button", { name: "Canvas options" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Node palette" }).click();
+  await expect(page.locator(".node-workspace")).toHaveClass(/toolbar-collapsed/);
+  await bar.getByRole("button", { name: "Show node palette" }).click();
+  await bar.getByRole("button", { name: "Recent Projects" }).click();
+  await expect(page.getByRole("menu", { name: "Recent Projects" })).toContainText("No recent projects");
+  await page.locator(".node-canvas").click({ position: { x: 1200, y: 750 } });
+  await expect(page.getByRole("menu", { name: "Recent Projects" })).toHaveCount(0);
+  expect((await wireAttachmentErrors(page, fixture.edges)).every(item => !item.missing && item.start < 2 && item.end < 2)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("canvas-menu-desktop.png") });
+  await bar.screenshot({ path: testInfo.outputPath("canvas-menu-bar.png") });
+  await bar.getByRole("button", { name: "File", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("canvas-menu-file.png") });
+  await page.keyboard.press("Escape");
+  await bar.getByRole("button", { name: "Show project outputs" }).click();
+  await expect(page.locator(".project-output-drawer")).toBeVisible();
+  const outputLayout = await page.evaluate(() => {
+    const bar = document.querySelector(".canvas-menu-bar").getBoundingClientRect(), drawer = document.querySelector(".project-output-drawer").getBoundingClientRect();
+    return bar.bottom <= drawer.top;
+  });
+  expect(outputLayout).toBe(true);
+  await page.setViewportSize({ width: 640, height: 850 });
+  await expect(bar.getByRole("button", { name: "File", exact: true })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Recent Projects" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("canvas-menu-mobile.png") });
+  expect(errors).toEqual([]);
+});
+
+test("Run all executes the canvas without selecting nodes and quick save retains the project name", async ({ page }) => {
+  const nodes = ["a", "b"].map((id, index) => ({ id, type: "textAgent", x: 30 + index * 390, y: 40, data: { title: `Agent ${id}`, agentDraft: `Prompt ${id}` } }));
+  await page.addInitScript(nodes => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes, edges: [], groups: [], projectName: "Campaign", viewport: { x: 20, y: 20, scale: .8 } })), nodes);
+  const { errors } = await openFixture(page, { count: 2 });
+  const calls = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route("**/api/node/process-text", async route => { calls.push(route.request().postDataJSON()); await gate; await route.fulfill({ json: { text: "A complete prompt", model: "fixture" } }); });
+  const bar = page.getByRole("toolbar", { name: "Canvas menu bar" });
+  await expect(page.locator(".react-flow__node.selected")).toHaveCount(0);
+  await bar.getByRole("button", { name: "Run all", exact: true }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  await expect(bar.getByRole("button", { name: "Run all", exact: true })).toBeDisabled();
+  release();
+  await expect(page.locator(".text-agent-response").first()).toHaveValue("A complete prompt");
+  const saved = page.waitForRequest(request => request.url().endsWith("/api/saved-workflows") && request.method() === "POST");
+  await bar.getByRole("button", { name: "Save project", exact: true }).click();
+  expect((await saved).postDataJSON().name).toBe("Campaign");
+  expect(errors).toEqual([]);
+});

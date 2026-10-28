@@ -622,8 +622,8 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             <CanvasPreferences />
             <label className={`settings-preference-toggle ${userPreferences.showPresetPanel ? "enabled" : ""}`}>
               <span>
-                <strong>Show Preset Panel</strong>
-                <small>Display the Presets library in the left node sidebar.</small>
+                <strong>Show Presets Menu</strong>
+                <small>Display the Presets library in the canvas menu bar.</small>
               </span>
               <input
                 type="checkbox"
