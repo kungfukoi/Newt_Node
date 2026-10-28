@@ -1,5 +1,9 @@
 # NewtNode Development Standards
 
+Preview groups expanded batch entries by connected producer/output port and exposes the full result list in its thumbnail browser. Selecting a result on the producer updates Preview even if Preview saved an older index; selecting a Preview thumbnail updates the real producer, never a synthetic batch-entry node. Existing batch outputs must be browsable without rerunning generation.
+
+Connection wire colors follow the current source output port, including Prompt outputs carrying private batch context. Normalize stale saved colors when loading or changing graphs; connection direction must not change the completed wire's type color. Existing selection and inactive-state highlights remain separate visual states.
+
 Resizing a node normalizes automatically laid-out text fields to the available interior height. Text Agent's Response and User prompt fill its available interior together; a draggable, keyboard-accessible divider determines their relative sizes and persists its ratio across node resizing and reload; Batch progress/result footers keep their natural height on every node. Explicit textarea resizing remains a separate saved mode. Saving/reloading automatically sized nodes must not restore stale measured field heights as fixed inline sizes.
 
 Preview video result thumbnails are passive lazy still posters, not one video element per saved result. Keep original video URLs in selection/drag payloads and use actual video elements for active playback. Missing posters fall back to a film placeholder, never another thumbnail player. Canvas motion must draw in the animation frame that computes its viewport; do not queue a second presentation frame. Preserve the existing easing, momentum, reduced-motion and saved preference behavior.

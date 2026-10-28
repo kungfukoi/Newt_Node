@@ -1,6 +1,26 @@
 import { test, expect } from "@playwright/test";
 import { openFixture, wireGeometry, wireAttachmentErrors } from "./helpers.mjs";
 
+test("Prompt wires use the output-port color after reload and new connections", async ({ page }) => {
+  const nodes = [{ id: "agent", type: "textAgent", x: 20, y: 20, data: { title: "Agent", agentDraft: "A prompt" } },
+    ...["first", "second"].map((id, index) => ({ id, type: "videoModel", x: 430 + index * 430, y: 20, data: { title: id, settingsOpen: false } }))];
+  const edge = { id: "stale-prompt", from: { nodeId: "agent", port: "promptOut" }, to: { nodeId: "first", port: "promptIn" }, color: "#3d85ff" };
+  await page.addInitScript(({ nodes, edge }) => { if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes, edges: [edge], groups: [], viewport: { x: 30, y: 20, scale: .7 } })); }, { nodes, edge });
+  const { errors } = await openFixture(page, { count: nodes.length });
+  const wire = page.locator('[data-edge-id="stale-prompt"] .newt-flow-edge-visible');
+  await expect(wire).toHaveAttribute("stroke", "#f0c83b");
+  const input = await page.locator('[data-port-key="second:promptIn"]').boundingBox();
+  const output = await page.locator('[data-port-key="agent:promptOut"]').boundingBox();
+  await page.mouse.move(output.x + output.width / 2, output.y + output.height / 2); await page.mouse.down();
+  await page.mouse.move(input.x + input.width / 2, input.y + input.height / 2, { steps: 8 }); await page.mouse.up();
+  await expect(page.locator(".newt-flow-edge-visible")).toHaveCount(2);
+  for (const path of await page.locator(".newt-flow-edge-visible").all()) await expect(path).toHaveAttribute("stroke", "#f0c83b");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).edges.every(edge => edge.color === "#f0c83b"))).toBe(true);
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  for (const path of await page.locator(".newt-flow-edge-visible").all()) await expect(path).toHaveAttribute("stroke", "#f0c83b");
+  expect(errors).toEqual([]);
+});
+
 test.afterEach(async ({ page }, info) => {
   if (info.status === info.expectedStatus) return;
   const state = await page.evaluate(() => ({

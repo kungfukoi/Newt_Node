@@ -13,6 +13,28 @@ async function seed(page, nodes, edges) {
 }
 const savedNode = (page, id) => page.evaluate(id => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(node => node.id === id)?.data, id);
 
+test("Preview shows every completed batch video and synchronizes model and thumbnail selection", async ({ page }) => {
+  const results = [1, 2, 3].map((index) => ({ id: `take-${index}`, type: "video", url: `/outputs/e2e/take-${index}.mp4`, batchRunIndex: index - 1 }));
+  const { errors, requests } = await seed(page, [{ id: "model", type: "videoModel", x: 20, y: 20,
+    data: { title: "Batch videos", model: "Seedance 2.5", settingsOpen: false, status: "complete", resultItems: results, batchResults: results,
+      batchMediaType: "video", resultUrl: results[0].url, selectedResultIndex: 0 } },
+    { id: "viewer", type: "preview", x: 500, y: 20, data: { title: "Batch preview", previewSourceId: "model:videoOut", previewItemIndex: 0 } }],
+    [{ id: "normal-video", from: { nodeId: "model", port: "videoOut" }, to: { nodeId: "viewer", port: "sourceIn" } }]);
+  const viewer = card(page, "viewer"), model = card(page, "model");
+  await expect(viewer.getByRole("button", { name: /^Select preview \d+$/ })).toHaveCount(3);
+  await model.getByRole("button", { name: "Next generation", exact: true }).click();
+  await expect(viewer.locator(".preview-stage video")).toHaveAttribute("src", /take-2\.mp4$/);
+  await viewer.getByRole("button", { name: "Select preview 3", exact: true }).click();
+  await expect(model.locator(".result-item video")).toHaveAttribute("src", /take-3\.mp4$/);
+  await expect.poll(async () => (await savedNode(page, "model"))?.selectedResultIndex).toBe(2);
+  await expect.poll(async () => (await savedNode(page, "viewer"))?.previewItemIndex).toBe(2);
+  await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(viewer.getByRole("button", { name: /^Select preview \d+$/ })).toHaveCount(3);
+  await expect(viewer.locator(".preview-stage video")).toHaveAttribute("src", /take-3\.mp4$/);
+  expect(requests.filter(request => request.path === "/api/node/generate-video")).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
 test("image Batch processes each source through Utility and exposes its output collection", async ({ page }) => {
   const { errors } = await seed(page, [batch(), { id: "utility", type: "utility", x: 410, y: 20, data: { title: "Depth maps", utilityMode: "image", utilityImageModel: "Depth Anything", prompt: "Shared instruction" } }], [wire("batch", "utility", "imageIn")]);
   const calls = [];
@@ -54,10 +76,10 @@ test("normal Utility image outputs carry all batch entries to processors and Pre
   await expect.poll(async () => (await savedNode(page, "second"))?.status).toBe("complete");
   expect(calls).toHaveLength(4);
   expect(calls.slice(2).flatMap(call => call.imageUrls).sort()).toEqual(["/outputs/e2e/processed-1.png", "/outputs/e2e/processed-2.png"]);
-  await expect(card(page, "viewer").getByRole("combobox").locator("option")).toHaveCount(2);
+  await expect(card(page, "viewer").getByRole("button", { name: /^Select preview \d+$/ })).toHaveCount(2);
   await expect(card(page, "second").locator('[data-port-key="second:batchOut"]')).toHaveCount(0);
   await page.reload(); await page.getByRole("button", { name: "Nodes", exact: true }).click();
-  await expect(card(page, "viewer").getByRole("combobox").locator("option")).toHaveCount(2);
+  await expect(card(page, "viewer").getByRole("button", { name: /^Select preview \d+$/ })).toHaveCount(2);
   expect(errors).toEqual([]);
 });
 
@@ -103,9 +125,9 @@ test("video Batch supplies a separate video reference to every Video Model edit"
 test("Preview and Timeline receive every member of an image Batch", async ({ page }) => {
   const { errors } = await seed(page, [batch(), { id: "preview", type: "preview", x: 360, y: 20, data: { title: "Preview" } },
     { id: "timeline", type: "assembly", x: 740, y: 20, data: { title: "Timeline" } }], [wire("batch", "preview", "sourceIn"), wire("batch", "timeline", "imageIn")]);
-  await expect(card(page, "preview").getByRole("combobox").locator("option")).toHaveCount(2);
-  await card(page, "preview").getByRole("combobox").selectOption({ index: 1 });
-  await expect(card(page, "preview").locator(".preview-thumb-strip img")).toHaveAttribute("data-full-resolution-url", "/outputs/e2e/source-2.png");
+  await expect(card(page, "preview").getByRole("button", { name: /^Select preview \d+$/ })).toHaveCount(2);
+  await card(page, "preview").getByRole("button", { name: "Select preview 2", exact: true }).click();
+  await expect(card(page, "preview").locator(".preview-stage img")).toHaveAttribute("data-full-resolution-url", "/outputs/e2e/source-2.png");
   await expect.poll(async () => (await savedNode(page, "timeline"))?.assembly?.media?.length).toBe(2);
   const media = (await savedNode(page, "timeline")).assembly.media;
   expect(new Set(media.map(item => item.id)).size).toBe(2);

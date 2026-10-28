@@ -247,7 +247,7 @@ import {
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
 import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
-import { previewSelectionForNode } from "./previewSelection.js";
+import { previewSelectionForNode, groupPreviewConnections } from "./previewSelection.js";
 import {
   adjacentPreviewLayoutItem,
   previewLayoutDropBeforeId,
@@ -6150,6 +6150,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
+    const sourceNodeForConnection = nodesRef.current.find((node) => node.id === from.nodeId);
+    color = portDefinitionForNode(sourceNodeForConnection, from.port, "output")?.color || color;
     const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
     const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
     pushUndoSnapshot({
@@ -22971,8 +22973,8 @@ async function createBrushInpaintMaskBlob(maskDataUrl) {
 }
 
 function connectedPreviewSources(items = []) {
-  return items
-    .map(({ source, edge }) => {
+  return groupPreviewConnections(items)
+    .map(({ source, edge, legacyPreviewSources }) => {
       const sourceType = previewMediaType(source, edge);
       const resultItems = previewSourceResultItems(source, edge, sourceType);
       if (!resultItems.length) return null;
@@ -22983,6 +22985,7 @@ function connectedPreviewSources(items = []) {
         id: `${source.id}:${edge.from.port}`,
         sourceNodeId: source.id,
         sourcePort: edge.from.port,
+        legacyPreviewSources,
         label: sourceName,
         type: sourceType,
         items: resultItems.map((item, index, allItems) => ({
@@ -26189,6 +26192,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   if (isVideoModelUnsupportedInput(target, nextEdge.to.port)) return null;
   if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;
 
+  nextEdge.color = portDefinitionForNode(source, nextEdge.from.port, "output")?.color || nextEdge.color;
   return nextEdge;
 }
 
