@@ -74,6 +74,14 @@ export function previewImageUrl(itemOrUrl, thumbnailUrl = "") {
   return `/api/media-thumbnail?url=${encodeURIComponent(sourceUrl)}`;
 }
 
+export function videoPosterUrl(itemOrUrl) {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const thumbnail = String(item?.thumbnailUrl || item?.thumbnailPublicPath || "").trim();
+  if (/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(thumbnail)) return thumbnail;
+  const source = String(item?.url || item?.localUrl || item?.resultUrl || (item ? "" : itemOrUrl) || "").trim();
+  return source ? `/api/video-poster?url=${encodeURIComponent(source)}` : "";
+}
+
 export function fullResolutionImageUrl(itemOrUrl) {
   const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
   if (item) {

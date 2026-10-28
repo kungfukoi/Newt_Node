@@ -4,7 +4,7 @@ import { constrainVideoCrop, dragVideoCrop } from "../videoCrop.js";
 import { clampCropRect } from "../cropGeometry.js";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
 import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, FolderOpen, GripVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
-import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
+import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullResolutionFallbackAttemptAttribute, fullResolutionImageProps, nextFullResolutionImageFallback, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData, videoPosterUrl } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
@@ -318,7 +318,7 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
 
 const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onDragEnd, onPreviewOpen }) {
   const thumbRef = React.useRef(null);
-  const posterUrl = item.thumbnailUrl && /\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(item.thumbnailUrl) ? item.thumbnailUrl : `/api/video-poster?url=${encodeURIComponent(item.url)}`;
+  const posterUrl = videoPosterUrl(item);
   const mediaSrc = useLazyRailMediaSrc(thumbRef, displayMediaUrl(item.type === "image" ? previewImageUrl(item) : item.type === "video" ? posterUrl : item.thumbnailUrl || ""));
   const [failedPoster, setFailedPoster] = React.useState("");
   const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;

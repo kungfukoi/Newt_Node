@@ -1,4 +1,5 @@
 import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
+import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
 import { batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
@@ -2025,7 +2026,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!viewportMotionRef.current) {
       viewportMotionRef.current = createViewportMotion({
         get: () => viewportRef.current,
-        apply: (next) => renderTransientViewport(next, { commitAfterMs: 120 }),
+        apply: (next) => renderTransientViewport(next, { commitAfterMs: 120, inAnimationFrame: true }),
         minScale: viewportScaleFloor,
         maxScale: maxZoom
       });
@@ -2040,10 +2041,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (viewportCommitTimerRef.current) commitTransientViewport();
   }
 
-  function renderTransientViewport(nextViewport, { commitAfterMs = null } = {}) {
+  function renderTransientViewport(nextViewport, { commitAfterMs = null, inAnimationFrame = false } = {}) {
     viewportRef.current = nextViewport;
     canvasRef.current?.classList.add("is-navigating");
-    if (!viewportRenderFrameRef.current) {
+    // The motion loop already runs in rAF. Draw that frame now instead of
+    // placing the visible viewport one frame behind its easing calculation.
+    if (inAnimationFrame) {
+      if (viewportRenderFrameRef.current) {
+        window.cancelAnimationFrame(viewportRenderFrameRef.current);
+        viewportRenderFrameRef.current = null;
+      }
+      applyViewportToCanvas(viewportRef.current, { transient: true });
+    } else if (!viewportRenderFrameRef.current) {
       viewportRenderFrameRef.current = window.requestAnimationFrame(() => {
         viewportRenderFrameRef.current = null;
         applyViewportToCanvas(viewportRef.current, { transient: true });
@@ -13982,7 +13991,7 @@ function NodeBody({
                       aria-label={`Select preview ${index + 1}`}
                     >
                       {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                      {item.type === "video" && <video src={displayMediaUrl(item.url)} muted playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "video" && <VideoThumbnail item={item} />}
                       {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
