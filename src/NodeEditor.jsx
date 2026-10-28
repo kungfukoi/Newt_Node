@@ -1,6 +1,6 @@
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
-import { batchEntries, batchInputEntries, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
 import { runMediaBatch } from "./nodeRunners/batch.js";
 import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
@@ -1659,8 +1659,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady, modelProviderPreferences]);
 
   React.useEffect(() => {
+    const readyNodes = initializeTextAgentBatches(nodes, edges);
+    if (readyNodes !== nodes) { nodesRef.current = readyNodes; setNodes(readyNodes); }
     setEdges((current) => {
-      const normalizedEdges = normalizeEdgesForCurrentGraph(current, nodesRef.current);
+      const normalizedEdges = normalizeEdgesForCurrentGraph(current, readyNodes);
       if (sameEdgeList(current, normalizedEdges)) return current;
       edgesRef.current = normalizedEdges;
       return normalizedEdges;
@@ -2578,9 +2580,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       .filter(item => item.port);
   }
 
+  function canBatchSelection() {
+    const sources = selectedBatchSources();
+    if (sources.length < 2 || sources.length !== selectedNodeIds.length) return false;
+    const kind = portKindForNodePort(sources[0].node, sources[0].port.id, "output");
+    return sources.every(item => portKindForNodePort(item.node, item.port.id, "output") === kind);
+  }
+
   function createBatchFromSelection() {
     const sources = selectedBatchSources();
-    if (!sources.length) { setSaveStatus("Select image or video nodes to create a Batch."); return; }
+    if (sources.length < 2 || sources.length !== selectedNodeIds.length) { setSaveStatus("Select multiple image or video nodes to create a Batch."); return; }
     const kind = portKindForNodePort(sources[0].node, sources[0].port.id, "output");
     if (sources.some(item => portKindForNodePort(item.node, item.port.id, "output") !== kind)) { setSaveStatus("Create separate batches for images and videos."); return; }
     pushUndoSnapshot();
@@ -7275,6 +7284,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function stopNode(node) {
     const token = nodeRunControlRef.current.stop(node.id);
+    for (const id of token?.batchDependencyIds || []) {
+      const dependency = nodesRef.current.find(item => item.id === id);
+      if (dependency && nodeRunControlRef.current.get(id)) await stopNode(dependency);
+    }
     const message = "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish.";
     const scope = generationScope;
     stopGenerationProgress(scope, node.id, token?.groupId);
@@ -7309,8 +7322,29 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function runNode(node, runOptions = {}) {
     if (runOptions === "stop-node") return stopNode(node);
-    return nodeRunControlRef.current.run(node.id, async token => {
+    const batchPromptRuns = runOptions.batchPromptRuns || new Map();
+    if (node.type === "textAgent" && batchPromptRuns.has(node.id)) return batchPromptRuns.get(node.id);
+    const running = nodeRunControlRef.current.run(node.id, async token => {
       const actions = { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved };
+      if (typeof runOptions !== "string" && !runOptions.skipBatchPromptRefresh && !node.data.batchRetryEntry) {
+        try {
+          const agents = upstreamBatchTextAgents(node.id, nodesRef.current, edgesRef.current);
+          if (agents.length) updateNode(node.id, { status: "running", error: "", batchProgress: "Preparing prompts…" });
+          token.batchDependencyIds = new Set();
+          for (const agent of agents) {
+            if (token.stopped) return { status: "error" };
+            if (!batchPromptRuns.has(agent.id)) token.batchDependencyIds.add(agent.id);
+            const current = nodesRef.current.find(item => item.id === agent.id);
+            const outcome = await runNode(current, { batchPromptRuns, skipBatchPromptRefresh: true });
+            if (token.stopped) return { status: "error" };
+            if (outcome?.status !== "complete") throw new Error(`${agent.data.title || "Text Agent"} did not complete. ${outcome?.error?.message || "Wait for its active run or resolve its error before generating."}`);
+          }
+          if (agents.length) node = { ...node, data: { ...node.data, status: "ready" } };
+        } catch (error) {
+          if (!token.stopped) updateNode(node.id, { status: "error", error: error.message, batchProgress: "" });
+          return { status: "error", error };
+        }
+      }
       if (typeof runOptions !== "string" && node.type !== "assembly") {
         const rawIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current, { expandBatches: false });
         const connections = batchInputConnections(rawIncoming[node.id]);
@@ -7318,6 +7352,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
       return executeNode(node, runOptions, token, actions);
     });
+    if (node.type === "textAgent") batchPromptRuns.set(node.id, running);
+    return running;
   }
 
   async function executeBatchNode(node, runOptions, token, actions, connections, rawIncoming) {
@@ -7336,10 +7372,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           const graph = materializeBatchGraph(graphNodes, graphEdges, node.id, entry.inputs);
           const inputs = buildIncomingByNode(graph.nodes, graph.edges)[node.id] || {};
           const preparation = node.data.batchPreparations?.[JSON.stringify([connectedAssetUrls(inputs.referenceVideoIn)[0] || "", connectedAssetUrls(inputs.canvasVideoIn)[0] || ""])];
-          const child = { ...node, data: { ...node.data, status: "ready", title: node.data.title + " · " + entry.label,
-            resultItems: [], resultUrl: "", resultText: "", batchResults: [], batchRetryEntry: null, batchFailedEntries: [],
-            ...(preparation ? { videoOutpaintPrepared: preparation } : {}),
-            ...(["text", "skillDirector"].includes(node.type) ? { text: [node.data.text, entry.prompt].filter(Boolean).join("\n\n") } : {}) } };
+          const child = batchChildNode(node, entry, preparation);
           const options = { ...runOptions, graphNodes: graph.nodes, graphEdges: graph.edges,
             batchGroupId: groupId, batchPrompt: entry.prompt || "",
             ...(node.type === "textAgent" ? { agentMessage: [runOptions.agentMessage ?? node.data.agentDraft, entry.prompt].filter(Boolean).join("\n\n") } : {}) };
@@ -8397,9 +8430,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function runNodesByDependencyOrder(runnableNodes) {
     const controller = new AbortController();
+    const batchPromptRuns = new Map();
     canvasBatchControllersRef.current.add(controller);
     try { return await runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
-      runNode, signal: controller.signal,
+      runNode: node => runNode(node, { batchPromptRuns }), signal: controller.signal,
       maxConcurrent: import.meta.env?.VITE_NEWTNODE_RUN_CONCURRENCY || 4,
       providerLimits: {
         fal: import.meta.env?.VITE_NEWTNODE_FAL_CONCURRENCY || 2,
@@ -8817,7 +8851,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
-            onBatch={createBatchFromSelection}
+            onBatch={canBatchSelection() ? createBatchFromSelection : undefined}
             onSavePreset={newtPresets.beginSave}
             onMoveStart={startSelectionMove}
           />
@@ -8833,7 +8867,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             {nodeCatalog.map((item) => {
               const Icon = item.icon;
               return (
-                <button key={item.type} onClick={() => item.type === "batch" && selectedNodeIds.length ? createBatchFromSelection() : addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
+                <button key={item.type} onClick={() => addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
                   <Icon size={15} />
                   <span>{item.label}</span>
                 </button>
@@ -9600,7 +9634,7 @@ function NodeCard({
         </span>
       </div>
 
-      <BatchRunContext.Provider value={isRunnableNode(node) && node.type !== "assembly" ? batchInputConnections(incoming).reduce((count, item) => Math.max(count, batchInputEntries(item.source, incomingByNode, connectedOutputItem).length), 1) : 1}>
+      <BatchRunContext.Provider value={isRunnableNode(node) && node.type !== "assembly" ? batchInputConnections(incoming).reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, connectedOutputItem)), 1) : 1}>
       <NodeBody
         node={renderedNode}
         defaultOutputPath={defaultOutputPath}
@@ -9667,11 +9701,11 @@ function NodeCard({
         showPriceSnapshot={showPriceSnapshot}
       />
       </BatchRunContext.Provider>
-      {node.type !== "batch" && (node.data.batchResults?.length || node.data.batchProgress || node.data.batchFailedEntries?.length) ? <div className="batch-result-controls" onPointerDown={event => event.stopPropagation()}>
+      {node.type !== "batch" && (Array.isArray(node.data.batchResults) || node.data.batchProgress || node.data.batchFailedEntries?.length) ? <div className="batch-result-controls" onPointerDown={event => event.stopPropagation()}>
         {node.data.batchProgress && <small>Batch {node.data.batchProgress}</small>}
         {(node.data.batchFailedEntries || []).map(entry => <button key={`${entry.id}:${entry.runIndex}`} disabled={node.data.status === "running"}
           title={entry.error} onClick={() => handleNodeRun({ ...node, data: { ...node.data, batchRetryEntry: entry } })}>Retry {entry.label} · 1</button>)}
-        {node.data.batchResults?.length > 0 && <OutputPortRow node={renderedNode} port={outputPortDefinitionsForNode(renderedNode).find(port => port.id === "batchOut")}
+        {Array.isArray(node.data.batchResults) && <OutputPortRow node={renderedNode} port={outputPortDefinitionsForNode(renderedNode).find(port => port.id === "batchOut")}
           label={`Batch · ${node.data.batchResults.length}`} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
       </div> : null}
       <button
@@ -16321,7 +16355,7 @@ function NodeBody({
       { includeComposerCharacterBindings: !isZImage }
     );
     const connectedBatches = batchInputConnections(incoming);
-    const batchEntryCount = connectedBatches.reduce((count, item) => Math.max(count, batchInputEntries(item.source, incomingByNode, connectedOutputItem).length), 0);
+    const batchEntryCount = connectedBatches.reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, connectedOutputItem)), 0);
     const batchRunCount = batchEntryCount * nodeBatchCount(node, 9);
     const imageReferenceCount = imageReferenceItems.length;
     const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
@@ -20565,7 +20599,7 @@ function inputPortDefinitionsForNode(node) {
 
 function outputPortDefinitionsForNode(node) {
   const ports = baseOutputPortDefinitionsForNode(node);
-  return node?.type !== "batch" && node?.data?.batchResults?.length
+  return node?.type !== "batch" && Array.isArray(node?.data?.batchResults)
     ? [...ports, { id: "batchOut", label: "Batch", color: portColors[batchMediaType(node)] }] : ports;
 }
 
@@ -24145,7 +24179,7 @@ function normalizeVoidVideoFrameCount(value) {
 }
 
 function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
-  const normalizedNodes = [];
+  let normalizedNodes = [];
   const legacySplits = new Map();
 
   nodes.forEach((node) => {
@@ -24161,6 +24195,7 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
     normalizedNodes.push(normalizeCurrentNode(node));
   });
 
+  normalizedNodes = initializeTextAgentBatches(normalizedNodes, edges);
   const nodeMap = new Map(normalizedNodes.map((node) => [node.id, node]));
   const normalizedEdges = [];
 

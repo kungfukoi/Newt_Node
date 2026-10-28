@@ -1,5 +1,5 @@
 export const nodeTypeDefinitions = [
-  { type: "batch", label: "Batch" },
+  { type: "batch", label: "Batch", catalog: false },
   { type: "plainText", label: "Text" },
   { type: "text", label: "Text Model", catalog: false },
   { type: "textAgent", label: "Text Agent" },

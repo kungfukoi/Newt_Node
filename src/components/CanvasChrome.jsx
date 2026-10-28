@@ -273,7 +273,7 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
         <Save size={17} />
         <span>Preset</span>
       </button>
-      <button onClick={onBatch} title="Create a Batch from selected images"><Plus size={17} /><span>Batch</span></button>
+      {onBatch && <button onClick={onBatch} title="Create a Batch from selected media"><Plus size={17} /><span>Batch</span></button>}
     </div>
   );
 });

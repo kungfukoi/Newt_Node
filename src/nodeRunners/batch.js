@@ -16,7 +16,7 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
       const annotate = (item, index) => ({ ...item, label: `${entry.label} · ${index + 1}`, batchSourceId: entry.id,
         batchSourceUrl: entry.url, batchPrompt: entry.prompt || "", batchRunIndex: entry.runIndex,
         batchInputs: entry.inputs, batchNodeId: entry.inputs?.[0]?.batchId });
-      if (textMode && data.resultText) {
+      if (textMode && data.resultText && !state.error) {
         texts.push({ label: entry.label, text: data.resultText });
         collection.push({ ...entry, id: `${entry.id}:prompt`, prompt: data.resultText, batchRunIndex: entry.runIndex });
       } else {
@@ -30,6 +30,7 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
     }
     items.sort((a, b) => (a.batchRunIndex || 0) - (b.batchRunIndex || 0));
     collection.sort((a, b) => (a.batchRunIndex || 0) - (b.batchRunIndex || 0));
+    if (textMode) texts.splice(0, texts.length, ...collection.map(item => ({ label: item.label, text: item.prompt })));
     return { items, collection, texts };
   }
   function publish() {
@@ -37,18 +38,21 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
     const { items, collection, texts } = collect();
     const completed = states.filter(state => state.finished).length;
     const active = states.find(state => !state.finished && state.data.status === "running")?.data || {};
-    update({ status: "running", batchProgress: `${completed} / ${plan.length}`, ...(collection.length ? { batchResults: collection, batchMediaType: collection[0].type } : {}),
+    update({ status: "running", batchProgress: `${completed} / ${plan.length}`, batchResults: collection, ...(collection.length ? { batchMediaType: collection[0].type } : {}),
       ...Object.fromEntries(["keyerProgress", "keyerJobId", "videoOutpaintStage"].filter(key => active[key] !== undefined).map(key => [key, active[key]])),
       ...(items.length ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
-      ...(texts.length ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}),
+      ...(textMode ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}),
       remoteVideoRunIds: [...new Set(states.flatMap(state => state.data.remoteVideoRunIds || []))] });
   }
-  update({ status: "running", error: "", batchRunActive: true, batchProgress: `0 / ${plan.length}`, batchFailedEntries: retainedFailures });
+  update({ status: "running", error: "", batchRunActive: true, batchProgress: `0 / ${plan.length}`, batchFailedEntries: retainedFailures,
+    batchResults: retainedBatch, resultItems: retained, resultUrl: retained[0]?.url || "", selectedResultIndex: 0,
+    ...(textMode ? { resultText: retainedBatch.map(item => `${item.label}\n${item.prompt}`).join("\n\n") } : {}) });
   await runBatchEntries(plan, { concurrency, stopped, run: async (entry, index) => {
     const state = states[index];
     try {
       state.outcome = await execute(entry, patch => { state.data = { ...state.data, ...patch }; publish(); });
       state.error = state.outcome?.status === "error" || state.data.error ? state.outcome?.error?.message || state.data.error || "Entry failed." : "";
+      if (textMode && !state.error && !state.data.resultText?.trim()) state.error = "Text Agent returned no prompt for this entry.";
     } catch (error) { state.error = error.message || String(error); }
     state.finished = true;
     publish();
@@ -60,10 +64,15 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
   const last = states.filter(state => !state.error).at(-1)?.data || {};
   // Preserve node-specific viewer/configuration state from a completed entry.
   const { status, error, resultItems, resultUrl, resultText, selectedResultIndex, remoteVideoRunIds, ...lastPatch } = last;
+  // Entry conversations are private. Keep the shared instruction available for
+  // the next explicit batch run instead of publishing the last worker's draft.
+  if (node.type === "textAgent") {
+    for (const key of ["agentDraft", "agentMessages", "textPromptHistoryIndex", "textPromptHistoryDraft"]) delete lastPatch[key];
+  }
   const message = failures.length ? `${plan.length - failures.length} of ${plan.length} batch entries completed. ${failures[0].error}` : "";
   update({ ...lastPatch, status: failures.length ? "error" : "complete", error: message, batchRunActive: false, batchProgress: "", batchRetryEntry: null,
-    batchFailedEntries: [...retainedFailures, ...failures], ...(collection.length ? { batchResults: collection } : {}),
+    batchFailedEntries: [...retainedFailures, ...failures], batchResults: collection,
     ...(items.length ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
-    ...(texts.length ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}) });
+    ...(textMode ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}) });
   return { status: failures.length ? "error" : "complete", ...(failures.length ? { error: new Error(message) } : {}), resultItems: items };
 }

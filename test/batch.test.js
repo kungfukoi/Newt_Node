@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph } from "../src/batch.js";
+import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, batchInputEntryCount } from "../src/batch.js";
 import { runMediaBatch } from "../src/nodeRunners/batch.js";
 import { buildSelectedRunnableDependencies } from "../src/nodeRunner.js";
 import { createFlowConnectionIndex } from "../src/flowNodeConnections.js";
 import { clearStaleRunningState } from "../src/workflowState.js";
 import { nodeBatchConcurrency } from "../src/nodeScheduling.js";
+import { textAgentMessagesForPrompt } from "../src/textAgent.js";
+import { runRunnableNodesByDependencyOrder } from "../src/nodeRunner.js";
 
 const connection = (id, url) => ({ source: { id, data: { title: id, resultUrl: url } }, edge: { from: { nodeId: id, port: "imageOut" } } });
 test("selected consumer waits for selected producers across a passive Batch", () => {
@@ -93,4 +95,88 @@ test("batch admission respects local GPU and media resource limits", () => {
   assert.equal(nodeBatchConcurrency({ type: "utility", data: { utilityMode: "video", utilityVideoModel: "CorridorKey 2.0" } }), 1);
   assert.equal(nodeBatchConcurrency({ type: "edit", data: {} }), 2);
   assert.equal(nodeBatchConcurrency({ type: "videoModel", data: { model: "Kling 4.0 Image-to-Video" } }), 3);
+});
+
+test("agent batch entries start fresh and keep the shared instruction for reruns", async () => {
+  const plan = [0, 1].map(runIndex => ({ id: `image-${runIndex}`, runIndex, type: "image", label: `Image ${runIndex}`, url: `/${runIndex}.png`, inputs: [] }));
+  const node = { id: "agent", type: "textAgent", data: { title: "Agent", agentDraft: "Add a soccer ball", resultText: "Old prompt", agentMessages: [{ role: "user", text: "Old instruction" }, { role: "assistant", text: "Old prompt" }] } };
+  let data = { ...node.data };
+  await runMediaBatch({ node, plan, stopped: () => false, update: patch => { data = { ...data, ...patch }; }, execute: async entry => {
+    const child = batchChildNode(node, entry);
+    assert.deepEqual(textAgentMessagesForPrompt(child.data), []);
+    assert.equal(child.data.agentDraft, "Add a soccer ball");
+    return { status: "error", error: new Error("Retry me") };
+  } });
+  assert.equal(data.agentDraft, node.data.agentDraft);
+  assert.deepEqual(data.agentMessages, node.data.agentMessages);
+  assert.equal(data.resultText, "");
+  assert.deepEqual(data.batchResults, []);
+  assert.equal(data.batchFailedEntries.length, 2);
+});
+
+test("retry preserves every image/prompt pair and its aggregate display in source order", async () => {
+  const entries = [0, 1, 2].map(runIndex => ({ id: `image-${runIndex}`, runIndex, batchRunIndex: runIndex, type: "image", label: `Image ${runIndex}`, url: `/${runIndex}.png`, prompt: `Prompt ${runIndex}` }));
+  let data = {};
+  await runMediaBatch({ node: { type: "textAgent", data: { batchRetryEntry: entries[1], batchResults: [entries[0], entries[2]], batchFailedEntries: [entries[1]] } },
+    plan: [entries[1]], stopped: () => false, update: patch => { data = { ...data, ...patch }; }, execute: async (entry, capture) => {
+      capture({ resultText: "New prompt 1", agentDraft: "", agentMessages: [{ role: "assistant", text: "New prompt 1" }] });
+      return { status: "complete" };
+    } });
+  assert.deepEqual(data.batchResults.map(item => item.prompt), ["Prompt 0", "New prompt 1", "Prompt 2"]);
+  assert.equal(data.resultText, "Image 0\nPrompt 0\n\nImage 1\nNew prompt 1\n\nImage 2\nPrompt 2");
+  assert.deepEqual(data.batchFailedEntries, []);
+  assert.equal(data.agentMessages, undefined);
+});
+
+test("downstream waits for the complete agent batch and uses paired prompts without aggregate prompt wires", async () => {
+  const agent = { id: "agent", type: "textAgent", data: {} }, model = { id: "model", type: "imageModel", data: {} };
+  const edges = [
+    { from: { nodeId: "agent", port: "batchOut" }, to: { nodeId: "model", port: "imagePromptIn" } },
+    { from: { nodeId: "agent", port: "promptOut" }, to: { nodeId: "model", port: "promptIn" } }
+  ];
+  let finished = 0;
+  const result = await runRunnableNodesByDependencyOrder([agent, model], edges, { runNode: async node => {
+    if (node.id === "agent") return runMediaBatch({ node, plan: [0, 1, 2, 3].map(runIndex => ({ id: `entry-${runIndex}`, runIndex, label: `Image ${runIndex}`, type: "image", url: `/${runIndex}.png` })),
+      update: patch => Object.assign(agent.data, patch), stopped: () => false, execute: async (entry, capture) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        capture({ resultText: `Soccer ball in image ${entry.runIndex}` }); finished++;
+        return { status: "complete" };
+      } });
+    assert.equal(finished, 4);
+    const plan = buildBatchPlan([{ source: agent }], {}, () => null);
+    for (const entry of plan) {
+      const graph = materializeBatchGraph([agent, model], edges, model.id, entry.inputs);
+      assert.equal(graph.edges.length, 1);
+      const source = graph.nodes.find(item => item.id === graph.edges[0].from.nodeId);
+      assert.equal(source.data.resultUrl, `/${entry.runIndex}.png`);
+      assert.equal(entry.prompt, `Soccer ball in image ${entry.runIndex}`);
+    }
+    return { status: "complete" };
+  } });
+  assert.equal(result.completed, 2);
+});
+
+test("fresh Text Agent chains expose typed Batch outputs and count pending media before the first run", () => {
+  const nodes = [{ id: "batch", type: "batch", data: { batchFiles: [{ id: "v", type: "video", url: "/v.mp4" }] } },
+    { id: "first", type: "textAgent", data: {} }, { id: "second", type: "textAgent", data: {} }, { id: "model", type: "videoModel", data: {} }];
+  const edge = (from, to) => ({ from: { nodeId: from, port: "batchOut" }, to: { nodeId: to, port: "videoIn" } });
+  const edges = [edge("second", "model"), edge("first", "second"), edge("batch", "first")];
+  const ready = initializeTextAgentBatches(nodes, edges);
+  assert.equal(ready[1].data.batchMediaType, "video");
+  assert.equal(ready[2].data.batchMediaType, "video");
+  assert.deepEqual(ready[1].data.batchResults, []);
+  assert.equal(initializeTextAgentBatches(ready, edges), ready);
+  const byId = new Map(ready.map(node => [node.id, node]));
+  const incoming = Object.fromEntries(["first", "second"].map(id => [id, { videoIn: edges.filter(edge => edge.to.nodeId === id).map(edge => ({ edge, source: byId.get(edge.from.nodeId) })) }]));
+  assert.equal(batchInputEntryCount(byId.get("second"), incoming, () => null), 1);
+  assert.equal(nodes[1].data.batchResults, undefined);
+  assert.deepEqual(upstreamBatchTextAgents("model", ready, edges).map(node => node.id), ["first", "second"]);
+});
+
+test("upstream refresh deduplicates prompt and batch wires, excludes ordinary agents and rejects cycles", () => {
+  const nodes = ["first", "second", "ordinary"].map(id => ({ id, type: "textAgent", data: {} }));
+  const edge = (from, to, port = "batchOut") => ({ from: { nodeId: from, port }, to: { nodeId: to, port: "imageIn" } });
+  const edges = [edge("batch", "first"), edge("first", "second"), edge("second", "model"), edge("second", "model", "promptOut"), edge("ordinary", "model", "promptOut")];
+  assert.deepEqual(upstreamBatchTextAgents("model", nodes, edges).map(node => node.id), ["first", "second"]);
+  assert.throws(() => upstreamBatchTextAgents("model", nodes, [...edges, edge("second", "first")]), /cycle/);
 });

@@ -62,6 +62,65 @@ export function batchMediaType(node) {
   return node?.data?.batchMediaType || node?.data?.batchFiles?.[0]?.type || node?.data?.batchResults?.[0]?.type || "image";
 }
 
+// Expose the paired output as soon as a media Batch is connected, so a new
+// chain can be wired before making any paid Text Agent request.
+export function initializeTextAgentBatches(nodes, edges) {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  let changed = false;
+  for (let pass = 0; pass < nodes.length; pass++) {
+    let added = false;
+    const assigned = new Set();
+    for (const edge of edges) {
+      const source = byId.get(edge.from.nodeId), target = byId.get(edge.to.nodeId);
+      if (target?.type !== "textAgent" || edge.from.port !== "batchOut" || !["imageIn", "videoIn"].includes(edge.to.port)) continue;
+      if (source?.type !== "batch" && !Array.isArray(source?.data?.batchResults)) continue;
+      if (assigned.has(target.id)) continue;
+      assigned.add(target.id);
+      const kind = edge.to.port === "videoIn" ? "video" : "image";
+      if (Array.isArray(target.data?.batchResults) && target.data.batchMediaType === kind) continue;
+      byId.set(target.id, { ...target, data: { ...target.data, batchResults: target.data?.batchResults || [], batchMediaType: kind } });
+      changed = added = true;
+    }
+    if (!added) break;
+  }
+  return changed ? nodes.map(node => byId.get(node.id)) : nodes;
+}
+
+// UI estimates must include an unrun agent's sources, rather than disabling
+// the consumer because its prompts have not been generated yet.
+export function batchInputEntryCount(source, incomingByNode, resolve, seen = new Set()) {
+  if (seen.has(source.id)) return 0;
+  seen = new Set(seen).add(source.id);
+  if (source.type === "textAgent") {
+    const inputs = batchInputConnections(incomingByNode[source.id]);
+    if (inputs.length) return Math.max(...inputs.map(input => batchInputEntryCount(input.source, incomingByNode, resolve, seen)));
+  }
+  return batchInputEntries(source, incomingByNode, resolve).length;
+}
+
+export function upstreamBatchTextAgents(targetId, nodes, edges) {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const incoming = new Map();
+  for (const edge of edges) {
+    if (!incoming.has(edge.to.nodeId)) incoming.set(edge.to.nodeId, []);
+    incoming.get(edge.to.nodeId).push(edge);
+  }
+  const visiting = new Set([targetId]), visited = new Set(), ordered = [];
+  function visit(id) {
+    for (const edge of incoming.get(id) || []) {
+      if (!["batchOut", "promptOut"].includes(edge.from.port)) continue;
+      const source = byId.get(edge.from.nodeId);
+      if (source?.type !== "textAgent" || !(incoming.get(source.id) || []).some(input => input.from.port === "batchOut")) continue;
+      if (visiting.has(source.id)) throw new Error("Batch Text Agent connections contain a cycle.");
+      if (visited.has(source.id)) continue;
+      visiting.add(source.id); visit(source.id); visiting.delete(source.id);
+      visited.add(source.id); ordered.push(source);
+    }
+  }
+  visit(targetId);
+  return ordered;
+}
+
 export function batchEntrySource(batch, entry) {
   return { id: `${batch.id}:entry:${entry.id}`, type: entry.type || "image", x: batch.x, y: batch.y,
     data: { title: entry.label || batch.data?.title, resultUrl: entry.url || "", resultType: entry.type || "image",
@@ -83,10 +142,23 @@ export function buildBatchPlan(connections, incomingByNode, resolve) {
 export function materializeBatchGraph(nodes, edges, targetId, inputs) {
   const nodeMap = new Map(nodes.map(node => [node.id, node]));
   const replacements = new Map(inputs.map(({ batchId, entry }) => [batchId, batchEntrySource(nodeMap.get(batchId), entry)]));
-  return { nodes: [...nodes, ...replacements.values()], edges: edges.map(edge => {
+  // A paired text processor's promptOut is the aggregate display text. Its
+  // matching entry prompt is supplied separately by the batch runner.
+  const pairedTextIds = new Set(inputs.filter(({ batchId }) => ["text", "textAgent", "skillDirector"].includes(nodeMap.get(batchId)?.type)).map(({ batchId }) => batchId));
+  return { nodes: [...nodes, ...replacements.values()], edges: edges.filter(edge =>
+    !(edge.to.nodeId === targetId && edge.from.port === "promptOut" && pairedTextIds.has(edge.from.nodeId))
+  ).map(edge => {
     const source = edge.to.nodeId === targetId && edge.from.port === "batchOut" ? replacements.get(edge.from.nodeId) : null;
     return source ? { ...edge, from: { nodeId: source.id, port: source.type === "video" ? "videoOut" : "imageOut" } } : edge;
   }) };
+}
+
+export function batchChildNode(node, entry, preparation) {
+  return { ...node, data: { ...node.data, status: "ready", title: node.data.title + " · " + entry.label,
+    resultItems: [], resultUrl: "", resultText: "", batchResults: [], batchRetryEntry: null, batchFailedEntries: [],
+    ...(node.type === "textAgent" ? { agentMessages: [], textPromptHistoryIndex: null, textPromptHistoryDraft: "" } : {}),
+    ...(preparation ? { videoOutpaintPrepared: preparation } : {}),
+    ...(["text", "skillDirector"].includes(node.type) ? { text: [node.data.text, entry.prompt].filter(Boolean).join("\n\n") } : {}) } };
 }
 
 export async function runBatchEntries(entries, { run, stopped = () => false, onResult = () => {}, concurrency = 3 }) {

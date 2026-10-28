@@ -25,6 +25,11 @@ test("the legacy skillDirector node is presented as Director", () => {
   assert.equal(nodeTypeLabel("skillDirector"), "Director");
 });
 
+test("Batch stays registered for selected media and saved workflows without an add-node catalog entry", () => {
+  assert.equal(nodeTypeLabel("batch"), "Batch");
+  assert.equal(catalogNodeTypeDefinitions.some(({ type }) => type === "batch"), false);
+});
+
 
 test("Timeline is the public label for the legacy assembly node type", () => {
   assert.equal(nodeTypeLabel("assembly"), "Timeline");

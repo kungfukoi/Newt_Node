@@ -67,8 +67,16 @@ test("selection creates a linked Batch and uploaded files append without replaci
   const nodes = ["a", "b"].map((id, index) => ({ id, type: "image", x: 20 + index * 340, y: 20, data: { title: `Image ${id}`, resultUrl: `/outputs/e2e/${id}.png` } }));
   await page.addInitScript(nodes => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes, edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 } })), nodes);
   await openFixture(page, { count: 2 });
-  await page.locator('[data-node-card-id="a"] .node-title').click();
-  await page.locator('[data-node-card-id="b"] .node-title').click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Show node palette", exact: true }).click();
+  await expect(page.locator(".node-catalog").getByRole("button", { name: "Batch", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Hide node palette", exact: true }).click();
+  await page.locator(".node-canvas").click({ button: "right", position: { x: 1300, y: 800 } });
+  await expect(page.locator(".node-context-menu")).toBeVisible();
+  await expect(page.locator(".node-context-menu").getByRole("button", { name: "Batch", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.locator('[data-node-card-id="a"] .node-title-label > svg').click();
+  await expect(page.locator(".selection-action-bar").getByRole("button", { name: "Batch", exact: true })).toHaveCount(0);
+  await page.locator('[data-node-card-id="b"] .node-title-label > svg').click({ modifiers: ["Shift"] });
   await page.locator(".selection-action-bar").getByRole("button", { name: "Batch", exact: true }).click();
   const batch = page.locator(".batch-body");
   await expect(batch.locator(".batch-entry")).toHaveCount(2);
