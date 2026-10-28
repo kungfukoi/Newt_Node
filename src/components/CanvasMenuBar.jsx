@@ -1,5 +1,5 @@
 import React from "react";
-import { Download, File, Folder, FolderOpen, History, Layers, Plus, Save, Trash2 } from "lucide-react";
+import { Download, Folder, FolderOpen, History, Layers, Plus, Save, Trash2 } from "lucide-react";
 import { NewtPresetLibrary } from "./NewtPresetDialog.jsx";
 import "./CanvasMenuBar.css";
 
@@ -96,7 +96,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
       </div>}
     </div>
     <div className="canvas-document-menu">
-      {trigger("file", "File", <File size={18} />)}
+      {trigger("file", "File", <FolderOpen size={18} />)}
       {fileMenuOpen && <div className="canvas-menu-dropdown" role="menu" aria-label="File" id="canvas-file-menu" data-menu="file">
         {item("New canvas", Plus, onNew)}
         {item("Open…", FolderOpen, onOpen)}
