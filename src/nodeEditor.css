@@ -1202,20 +1202,19 @@
   cursor: grab;
 }
 
-.node-canvas::before {
-  content: "";
+.canvas-grid {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   background-image: radial-gradient(circle, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
-  background-position: var(--grid-x, 0) var(--grid-y, 0);
-  background-size: var(--grid-size, 28px) var(--grid-size, 28px);
+  background-position: 0 0;
+  background-size: 28px 28px;
   opacity: 1;
   transition: opacity 120ms ease;
 }
 
-.node-canvas.is-distant-zoom::before {
+.node-canvas.is-distant-zoom > .canvas-grid {
   opacity: 0;
 }
 

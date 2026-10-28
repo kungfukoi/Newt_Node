@@ -1261,6 +1261,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
 
 export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true, imageEditorModel = imageModelNames.openAiImage2 } = {}) {
   const canvasRef = React.useRef(null);
+  const canvasGridRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
   const flowCanvasRef = React.useRef(null);
   const viewportMotionRef = React.useRef(null);
@@ -2006,12 +2007,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function applyViewportToCanvas(nextViewport, { transient = false } = {}) {
     const canvas = canvasRef.current;
     if (canvas) {
-      const gridSize = 28 * nextViewport.scale;
-      const cssTransform = `translate3d(${nextViewport.x}px, ${nextViewport.y}px, 0) scale(${nextViewport.scale})`;
-      canvas.style.setProperty("--viewport-transform", cssTransform);
-      canvas.style.setProperty("--grid-size", `${gridSize}px`);
-      canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
-      canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
+      updateCanvasGrid(nextViewport);
       if (!transient) syncDistantZoomVisuals(canvas, nextViewport.scale);
     }
     if (transient) flowCanvasRef.current?.setTransientViewport?.(nextViewport);
@@ -2088,14 +2084,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function handleFlowViewportChange(nextViewport) {
     viewportRef.current = nextViewport;
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const gridSize = 28 * nextViewport.scale;
-      canvas.style.setProperty("--grid-size", `${gridSize}px`);
-      canvas.style.setProperty("--grid-x", `${positiveModulo(nextViewport.x, gridSize)}px`);
-      canvas.style.setProperty("--grid-y", `${positiveModulo(nextViewport.y, gridSize)}px`);
-    }
+    updateCanvasGrid(nextViewport);
     if (zoomReadoutRef.current) zoomReadoutRef.current.textContent = `${Math.round(nextViewport.scale * 100)}%`;
+  }
+
+  function updateCanvasGrid(nextViewport) {
+    const grid = canvasGridRef.current;
+    if (!grid) return;
+    const size = 28 * nextViewport.scale;
+    // Keep per-frame paint changes on this leaf, outside the node UI subtree.
+    grid.style.backgroundSize = `${size}px ${size}px`;
+    grid.style.backgroundPosition = `${positiveModulo(nextViewport.x, size)}px ${positiveModulo(nextViewport.y, size)}px`;
   }
 
   function handleFlowViewportCommit(nextViewport) {
@@ -8618,12 +8617,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       <div
         ref={canvasRef}
         className={`node-canvas${distantZoomRef.current ? " is-distant-zoom" : ""}`}
-        style={{
-          "--viewport-transform": `translate3d(${viewportRef.current.x}px, ${viewportRef.current.y}px, 0) scale(${viewportRef.current.scale})`,
-          "--grid-size": `${28 * viewportRef.current.scale}px`,
-          "--grid-x": `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px`,
-          "--grid-y": `${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
-        }}
         onPointerDownCapture={settleViewportForPointer}
         onPointerDown={startCanvasPointerDown}
         onPointerMove={handlePointerMove}
@@ -8634,6 +8627,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDragOver={handleCanvasDragOver}
         onDrop={handleCanvasDrop}
       >
+        <div ref={canvasGridRef} className="canvas-grid" aria-hidden="true" style={{
+          backgroundSize: `${28 * viewportRef.current.scale}px ${28 * viewportRef.current.scale}px`,
+          backgroundPosition: `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px ${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
+        }} />
         {toolbarCollapsed && <button type="button" className="sidebar-restore canvas-panel-tab" title="Show node palette" aria-label="Show node palette"
           onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setToolbarCollapsed(false); }}><PanelLeftOpen size={17} /></button>}
         {outputsCollapsed && <button type="button" className="outputs-restore canvas-panel-tab" title="Show project outputs" aria-label="Show project outputs"

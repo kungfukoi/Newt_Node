@@ -3,7 +3,7 @@ import { expect } from "@playwright/test";
 import { canvasFixture, fixtureProjectId } from "./fixtures.mjs";
 
 export async function openFixture(page, options = {}) {
-  const fixture = canvasFixture(options);
+  const fixture = options.fixture || canvasFixture(options);
   const errors = [];
   const requests = [];
   let dismissed = false;
