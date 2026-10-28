@@ -23,6 +23,10 @@
 }
 
 .node-toolbar {
+  /* Keep this small stationary panel separate from canvas tile repaints. */
+  position: relative;
+  z-index: 2;
+  transform: translateZ(0);
   grid-row: 1;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -1211,11 +1215,6 @@
   background-position: 0 0;
   background-size: 28px 28px;
   opacity: 1;
-  transition: opacity 120ms ease;
-}
-
-.node-canvas.is-distant-zoom > .canvas-grid {
-  opacity: 0;
 }
 
 .node-canvas:active {

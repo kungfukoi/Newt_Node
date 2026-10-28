@@ -2,6 +2,81 @@ import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 import { outputDragMime } from "../src/mediaAssets.js";
 
+test("zoom keeps a stable viewport layer policy through motion and settling", async ({ page }) => {
+  const { errors } = await openFixture(page, { count: 12, scale: .3 });
+  const sample = await page.evaluate(async () => {
+    const canvas = document.querySelector(".node-canvas");
+    const viewport = canvas.querySelector(".react-flow__viewport");
+    const rect = canvas.getBoundingClientRect();
+    const policies = new Set([getComputedStyle(viewport).willChange]);
+    const toolbar = document.querySelector(".node-toolbar");
+    const toolbarStyles = new Set();
+    const initialTransform = viewport.style.transform;
+    let moved = false;
+    const shadows = new Set();
+    let minimumZoom = 1;
+    for (const deltaY of [900, 900, 900, 900, 900, -900, -900, -900, -900, -900]) {
+      canvas.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY,
+        clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+      for (let frame = 0; frame < 36; frame++) {
+        await new Promise(requestAnimationFrame);
+        policies.add(getComputedStyle(viewport).willChange);
+        const style = getComputedStyle(toolbar);
+        toolbarStyles.add(`${style.transform}:${style.opacity}:${style.visibility}`);
+        moved ||= initialTransform !== viewport.style.transform;
+        shadows.add(getComputedStyle(canvas.querySelector(".node-card")).boxShadow);
+        minimumZoom = Math.min(minimumZoom, new DOMMatrix(getComputedStyle(viewport).transform).a);
+      }
+    }
+    return { policies: [...policies], moved, shadows: [...shadows], minimumZoom, toolbarStyles: [...toolbarStyles] };
+  });
+  await expect(page.locator(".node-canvas")).not.toHaveClass(/is-navigating/);
+  expect(sample.moved).toBe(true);
+  expect(sample.minimumZoom).toBeLessThan(.12);
+  expect(sample.shadows).toHaveLength(1);
+  expect(sample.toolbarStyles).toHaveLength(1);
+  expect(sample.policies).toEqual(["auto"]);
+  await expect(page.locator(".react-flow__viewport")).toHaveCSS("will-change", "auto");
+  expect(errors).toEqual([]);
+});
+
+test("Canvas shadows preference applies live and survives reload", async ({ page }) => {
+  const { errors } = await openFixture(page, { count: 4, scale: .3, group: true });
+  const card = page.locator(".node-card").first();
+  await expect(card).not.toHaveCSS("box-shadow", "none");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: /User Preferences/ }).click();
+  const toggle = page.getByRole("checkbox", { name: "Canvas shadows", exact: true });
+  await expect(toggle).toBeChecked();
+  await page.getByText("Canvas shadows", { exact: true }).click();
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(card).toHaveCSS("box-shadow", "none");
+  await expect(page.locator(".node-group-backdrop")).toHaveCSS("box-shadow", "none");
+  await page.reload();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(card).toHaveCSS("box-shadow", "none");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // Section expansion is itself persisted; open it only when necessary.
+  const section = page.getByRole("button", { name: /User Preferences/ });
+  await expect(section).toBeVisible();
+  if (await section.getAttribute("aria-expanded") === "false") await section.click();
+  await expect(toggle).not.toBeChecked();
+  await page.getByText("Canvas shadows", { exact: true }).click();
+  await expect(toggle).toBeChecked();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(card).not.toHaveCSS("box-shadow", "none");
+  const otherWindow = await page.context().newPage();
+  await otherWindow.route("**/*", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Preference check</title>" }));
+  await otherWindow.goto(new URL("/preference-check", page.url()).href);
+  await otherWindow.evaluate(() => localStorage.setItem("newt.canvasShadows", "off"));
+  await expect(card).toHaveCSS("box-shadow", "none");
+  await otherWindow.evaluate(() => localStorage.setItem("newt.canvasShadows", "on"));
+  await expect(card).not.toHaveCSS("box-shadow", "none");
+  await otherWindow.close();
+  expect(errors).toEqual([]);
+});
+
 for (const mode of ["on", "off"]) test(`canvas motion ${mode} draws on its first animation frame`, async ({ page }) => {
   await page.addInitScript(mode => localStorage.setItem("newt.canvasMotion", mode), mode);
   const { errors } = await openFixture(page, { count: 12, scale: .35 });

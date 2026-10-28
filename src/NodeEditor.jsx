@@ -165,7 +165,7 @@ import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
 import ModelProviderOption from "./components/ModelProviderOption.jsx";
-import { shouldUseDistantCanvasVisuals } from "./flowOverview.js";
+import { useCanvasPreference } from "./useCanvasPreference.js";
 import { flowNodeNoDragObserverOptions, guardFlowNodeMouseDown, markFlowNodeNoDragElements, markFlowNodeNoDragMutations } from "./flowNodeInteractions.js";
 import { activeCanvasNodes, stoppedCanvasNodePatch } from "./canvasStop.js";
 import { createAssemblyFramePresenter } from "./assembly/assemblyFramePresenter.js";
@@ -1283,7 +1283,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const nodeDraftPatchesRef = React.useRef({});
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, initialViewport, normalizeEditorGraph }), []);
   const viewportRef = React.useRef(savedDraft.viewport);
-  const distantZoomRef = React.useRef(shouldUseDistantCanvasVisuals(savedDraft.viewport.scale));
+  const canvasShadows = useCanvasPreference("canvasShadows", "on");
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
   const draftFinishesRef = React.useRef(new Set());
@@ -1998,18 +1998,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  function syncDistantZoomVisuals(canvas, scale) {
-    const nextDistant = shouldUseDistantCanvasVisuals(scale, distantZoomRef.current);
-    distantZoomRef.current = nextDistant;
-    canvas?.classList.toggle("is-distant-zoom", nextDistant);
-  }
-
   function applyViewportToCanvas(nextViewport, { transient = false } = {}) {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      updateCanvasGrid(nextViewport);
-      if (!transient) syncDistantZoomVisuals(canvas, nextViewport.scale);
-    }
+    updateCanvasGrid(nextViewport);
     if (transient) flowCanvasRef.current?.setTransientViewport?.(nextViewport);
     else flowCanvasRef.current?.setViewport?.(nextViewport, { duration: 0 });
     if (zoomReadoutRef.current) {
@@ -2095,11 +2085,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     // Keep per-frame paint changes on this leaf, outside the node UI subtree.
     grid.style.backgroundSize = `${size}px ${size}px`;
     grid.style.backgroundPosition = `${positiveModulo(nextViewport.x, size)}px ${positiveModulo(nextViewport.y, size)}px`;
+    grid.style.opacity = canvasGridOpacity(nextViewport.scale);
   }
 
   function handleFlowViewportCommit(nextViewport) {
     handleFlowViewportChange(nextViewport);
-    syncDistantZoomVisuals(canvasRef.current, nextViewport.scale);
     setViewport((current) => (sameViewport(current, nextViewport) ? current : nextViewport));
   }
 
@@ -8616,7 +8606,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       <div
         ref={canvasRef}
-        className={`node-canvas${distantZoomRef.current ? " is-distant-zoom" : ""}`}
+        className={`node-canvas${canvasShadows === "off" ? " canvas-shadows-off" : ""}`}
         onPointerDownCapture={settleViewportForPointer}
         onPointerDown={startCanvasPointerDown}
         onPointerMove={handlePointerMove}
@@ -8628,6 +8618,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onDrop={handleCanvasDrop}
       >
         <div ref={canvasGridRef} className="canvas-grid" aria-hidden="true" style={{
+          opacity: canvasGridOpacity(viewportRef.current.scale),
           backgroundSize: `${28 * viewportRef.current.scale}px ${28 * viewportRef.current.scale}px`,
           backgroundPosition: `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px ${positiveModulo(viewportRef.current.y, 28 * viewportRef.current.scale)}px`
         }} />
@@ -9104,6 +9095,10 @@ function NodeColorPicker({ color, onChange }) {
       )}
     </div>
   );
+}
+
+function canvasGridOpacity(scale) {
+  return clamp((scale - 0.10) / 0.10, 0, 1);
 }
 
 function isCanvasSurface(target, canvas) {

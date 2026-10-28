@@ -9,11 +9,10 @@
 }
 
 .newt-react-flow .react-flow__viewport {
+  /* Let the browser manage the transformed canvas consistently. Toggling a
+     forced layer for each gesture (and again at distant zoom) can flash large
+     canvas tiles and adjacent panels while their GPU backing is rebuilt. */
   will-change: auto;
-}
-
-.node-canvas.is-navigating:not(.is-distant-zoom) .newt-react-flow .react-flow__viewport {
-  will-change: transform;
 }
 
 .newt-react-flow .react-flow__edges,
@@ -102,12 +101,12 @@
   filter: drop-shadow(0 0 3px #38e1ff) drop-shadow(0 0 9px rgba(56, 225, 255, 0.75));
 }
 
-.node-canvas.is-distant-zoom .newt-react-flow .node-card,
-.node-canvas.is-distant-zoom .newt-flow-group-layer .node-group-backdrop {
+.node-canvas.canvas-shadows-off .newt-react-flow .node-card,
+.node-canvas.canvas-shadows-off .newt-flow-group-layer .node-group-backdrop {
   box-shadow: none;
 }
 
-.node-canvas.is-distant-zoom .newt-flow-edge.selected .newt-flow-edge-visible {
+.node-canvas.canvas-shadows-off .newt-flow-edge.selected .newt-flow-edge-visible {
   filter: none;
 }
 

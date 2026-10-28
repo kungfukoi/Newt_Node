@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+Canvas shadows are controlled in Settings > User Preferences, default on, and apply immediately across open windows. The preference affects node/group shadows and selected-wire glow while preserving selected borders and wire colors. Zooming must not abruptly switch shadows at 12–14% or toggle a forced canvas compositor layer. Keep the left toolbar stable and its menus usable during canvas navigation; retain the leaf-only grid update path and all full-detail node content.
+
 Text Agent's User prompt treats Enter and Shift+Enter as text formatting. Typing must never submit a request; use the Send button to submit that field.
 
 File drops/uploads reuse a byte-identical file already inside the current workflow package's inputs tree. Verify content rather than names, keep the existing managed URL, and do not modify the original. Different contents require a new managed file even when names match; imports without a matching managed input are copied into managed storage rather than linked to an external path.

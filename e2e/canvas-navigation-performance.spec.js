@@ -5,6 +5,7 @@ import { openFixture } from "./helpers.mjs";
 // Supply a local, sanitized workflow snapshot to reproduce a particular graph.
 // All APIs/media are still intercepted by openFixture; no provider is contacted.
 test("navigation style work stays independent of node contents", async ({ page }, testInfo) => {
+  if (process.env.NEWTNODE_BENCHMARK_SHADOWS) await page.addInitScript(value => localStorage.setItem("newt.canvasShadows", value), process.env.NEWTNODE_BENCHMARK_SHADOWS);
   const fixture = process.env.NEWTNODE_BENCHMARK_GRAPH
     ? JSON.parse(await readFile(process.env.NEWTNODE_BENCHMARK_GRAPH, "utf8")) : undefined;
   const { errors } = await openFixture(page, { fixture, count: 271, scale: 0.3 });
@@ -35,7 +36,7 @@ test("navigation style work stays independent of node contents", async ({ page }
   });
   const after = await measure();
   const metrics = Object.fromEntries(["RecalcStyleDuration", "LayoutDuration", "TaskDuration", "ScriptDuration", "RecalcStyleCount"].map(name => [name, after[name] - before[name]]));
-  const report = { nodes: await page.locator(".react-flow__node").count(), cpuThrottle: 4, ...sample, ...metrics };
+  const report = { nodes: await page.locator(".react-flow__node").count(), shadows: await page.locator(".node-canvas").evaluate(canvas => !canvas.classList.contains("canvas-shadows-off")), cpuThrottle: 4, ...sample, ...metrics };
   console.log("Navigation benchmark:", JSON.stringify(report));
   await testInfo.attach("navigation-metrics", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   expect(sample.moved).toBe(true);
