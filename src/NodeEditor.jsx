@@ -8581,7 +8581,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           onClose={closePreviewLightbox}
         />
       )}
+      <aside className="node-toolbar">
       <CanvasMenuBar
+        visible={!toolbarCollapsed}
         projectName={projectName} onRename={setProjectName} projectPath={projectPackagePath || workflowFilePath}
         projects={projects} fileMenuOpen={fileMenuOpen} setFileMenuOpen={setFileMenuOpen}
         projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen}
@@ -8590,7 +8592,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         onLoad={loadProject} onDelete={deleteProject}
         presets={showPresetPanel ? newtPresets : null} selectedCount={selectedNodeIds.length}
       />
-      <aside className="node-toolbar">
         <div className="toolbar-header">
           <span>Nodes</span>
           <button className="sidebar-hide" onClick={() => setToolbarCollapsed(true)} title="Hide node palette">

@@ -2,8 +2,8 @@
   position: relative;
   display: grid;
   grid-template-columns: 180px 1fr;
-  grid-template-rows: 50px minmax(0, 1fr);
-  gap: 10px 16px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
   height: calc(100dvh - 104px);
   min-height: 0;
   padding-top: 18px;
@@ -12,6 +12,7 @@
 .node-workspace.toolbar-collapsed {
   grid-template-columns: 1fr;
 }
+
 
 .node-workspace.outputs-open {
   grid-template-columns: 180px minmax(0, 1fr) var(--project-output-drawer-width, 116px);
@@ -22,20 +23,20 @@
 }
 
 .node-toolbar {
-  grid-row: 2;
+  grid-row: 1;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   align-content: start;
   min-height: 0;
   gap: 5px;
   padding: 8px;
-  overflow-y: auto;
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   background: rgba(18, 18, 18, 0.82);
 }
 
-.node-workspace > .project-output-drawer { grid-row: 2; }
+.node-workspace > .project-output-drawer { grid-row: 1; }
 
 .node-catalog {
   --catalog-rows: var(--catalog-row-count);
@@ -46,6 +47,8 @@
   max-height: calc(var(--catalog-rows) * 31px + (var(--catalog-rows) - 1) * 4px);
   min-height: 0;
 }
+
+.node-toolbar > .node-catalog { overflow-y: auto; }
 
 .node-toolbar .node-catalog > button {
   min-height: 0;
@@ -1186,7 +1189,7 @@
 }
 
 .node-canvas {
-  grid-row: 2;
+  grid-row: 1;
   position: relative;
   min-height: 0;
   height: 100%;
@@ -10342,13 +10345,13 @@ video.newtnode-video-fallback {
 }
 
 @media (max-width: 860px) {
-  .node-workspace { grid-template-rows: 50px auto minmax(420px, 1fr); height: auto; min-height: calc(100dvh - 104px); }
-  .node-workspace.toolbar-collapsed { grid-template-rows: 50px minmax(420px, 1fr); }
-  .node-workspace > .node-toolbar { max-height: 260px; grid-row: 2; }
-  .node-workspace > .node-canvas { grid-row: 3; min-height: 420px; }
-  .node-workspace.toolbar-collapsed > .node-canvas { grid-row: 2; }
-  .node-workspace > .project-output-drawer { grid-row: 4; }
-  .node-workspace.toolbar-collapsed > .project-output-drawer { grid-row: 3; }
+  .node-workspace { grid-template-rows: auto minmax(420px, 1fr); height: auto; min-height: calc(100dvh - 104px); }
+  .node-workspace.toolbar-collapsed { grid-template-rows: minmax(420px, 1fr); }
+  .node-workspace > .node-toolbar { max-height: 360px; grid-row: 1; }
+  .node-workspace > .node-canvas { grid-row: 2; min-height: 420px; }
+  .node-workspace.toolbar-collapsed > .node-canvas { grid-row: 1; }
+  .node-workspace > .project-output-drawer { grid-row: 3; }
+  .node-workspace.toolbar-collapsed > .project-output-drawer { grid-row: 2; }
   .node-workspace,
   .node-workspace.outputs-open,
   .node-workspace.toolbar-collapsed.outputs-open {

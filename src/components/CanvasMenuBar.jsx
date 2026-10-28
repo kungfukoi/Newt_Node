@@ -1,23 +1,21 @@
 import React from "react";
-import { ChevronDown, ChevronRight, Download, Folder, FolderOpen, History, Layers, Plus, Save, Trash2 } from "lucide-react";
+import { Download, File, Folder, FolderOpen, History, Layers, Plus, Save, Trash2 } from "lucide-react";
 import { NewtPresetLibrary } from "./NewtPresetDialog.jsx";
 import "./CanvasMenuBar.css";
 
 export default function CanvasMenuBar({ projectName, onRename, projectPath, projects, fileMenuOpen, setFileMenuOpen, projectMenuOpen, setProjectMenuOpen,
-  onNew, onOpen, onSave, onSaveAs, onImport, onLoad, onDelete, presets, selectedCount = 0 }) {
+  onNew, onOpen, onSave, onSaveAs, onImport, onLoad, onDelete, presets, selectedCount = 0, visible = true }) {
   const root = React.useRef(null), renameInput = React.useRef(null), originalName = React.useRef("");
-  const [renaming, setRenaming] = React.useState(false);
   const [presetsOpen, setPresetsOpen] = React.useState(false);
   const openMenu = fileMenuOpen ? "file" : projectMenuOpen ? "recent" : presetsOpen && presets ? "presets" : "";
   const command = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
-  const pathParts = String(projectPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
-  const folderName = pathParts.at(-1) || "Local workspace";
   function open(name) { setFileMenuOpen(name === "file"); setProjectMenuOpen(name === "recent"); setPresetsOpen(name === "presets"); }
   function close(restoreFocus = false) {
     if (restoreFocus) root.current?.querySelector(`[data-menu-trigger="${openMenu}"]`)?.focus();
     open("");
   }
   function action(callback) { close(); callback(); }
+  React.useEffect(() => { if (!visible) close(); }, [visible]);
   React.useEffect(() => {
     const dismiss = event => { if (!root.current?.contains(event.target)) open(""); };
     document.addEventListener("pointerdown", dismiss, true);
@@ -48,7 +46,6 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     fit(); window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [openMenu]);
-  React.useEffect(() => { if (renaming) { renameInput.current?.focus(); renameInput.current?.select(); } }, [renaming]);
   function menuKeys(event) {
     if (!event.target.closest("[data-menu]")) return;
     if (openMenu === "presets") {
@@ -73,7 +70,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     items[next]?.focus();
   }
   const trigger = (name, label, children, className = "") => <button type="button" className={`canvas-menu-trigger ${className}`} data-menu-trigger={name}
-    aria-label={label} aria-haspopup={name === "presets" ? "dialog" : "menu"} aria-expanded={openMenu === name} aria-controls={`canvas-${name}-menu`} title={label === "File" ? projectName : label}
+    aria-label={label} aria-haspopup={name === "presets" ? "dialog" : "menu"} aria-expanded={openMenu === name} aria-controls={`canvas-${name}-menu`} title={label}
     onClick={() => open(openMenu === name ? "" : name)} onKeyDown={event => {
       if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); open(name); }
       if (event.key === "Escape") { event.preventDefault(); close(true); }
@@ -84,7 +81,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
       }
     }}>{children}</button>;
   const item = (label, Icon, callback, shortcut) => <button type="button" role="menuitem" onClick={() => action(callback)}><Icon size={15} /><span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
-  return <header className="canvas-menu-bar" ref={root} role="toolbar" aria-label="Canvas menu bar" onKeyDown={menuKeys}
+  return <div className="canvas-menu-bar" ref={root} role="toolbar" aria-label="Project controls" onKeyDown={menuKeys}
     onBlurCapture={event => { if (openMenu === "presets" && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close(); }}>
     <div className="canvas-recent-menu">
       {trigger("recent", "Recent Projects", <History size={19} />)}
@@ -99,36 +96,33 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
       </div>}
     </div>
     <div className="canvas-document-menu">
-      {renaming ? <input ref={renameInput} aria-label="Project name" className="canvas-document-name" value={projectName} onChange={event => onRename(event.target.value)}
-        onBlur={() => setRenaming(false)} onKeyDown={event => {
-          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") return;
-          event.stopPropagation();
-          if (event.key === "Escape") onRename(originalName.current);
-          if (["Enter", "Escape"].includes(event.key)) setRenaming(false);
-        }} />
-        : trigger("file", "File", <><span>{projectName || "Untitled canvas"}</span><ChevronDown size={14} /></>, "canvas-document-trigger")}
+      {trigger("file", "File", <File size={18} />)}
       {fileMenuOpen && <div className="canvas-menu-dropdown" role="menu" aria-label="File" id="canvas-file-menu" data-menu="file">
         {item("New canvas", Plus, onNew)}
         {item("Open…", FolderOpen, onOpen)}
         <div role="separator" />
         {item("Save", Save, onSave, `${command}S`)}
         {item("Save As…", Save, onSaveAs, `${command}Shift+S`)}
-        {item("Rename…", Folder, () => { originalName.current = projectName; setRenaming(true); })}
+        {item("Rename…", Folder, () => { renameInput.current?.focus(); renameInput.current?.select(); })}
         <div role="separator" />
         {item("Import workflow…", Download, onImport)}
       </div>}
     </div>
-    <span className="canvas-menu-divider" />
-    <button className="canvas-menu-icon canvas-quick-new" title="New canvas" aria-label="New canvas" onClick={onNew}><Plus size={18} /></button>
     <button className="canvas-menu-icon" title={`Save project (${command}S)`} aria-label="Save project" onClick={onSave}><Save size={17} /></button>
+    <button className="canvas-menu-icon canvas-quick-new" title="New canvas" aria-label="New canvas" onClick={onNew}><Plus size={18} /></button>
     {presets && <div className="canvas-presets-menu">
-      {trigger("presets", "Presets", <><Layers size={16} /><span>Presets</span><ChevronDown size={12} /></>)}
+      {trigger("presets", "Presets", <Layers size={18} />)}
       {openMenu === "presets" && <div className="canvas-menu-dropdown canvas-presets-dropdown" role="dialog" aria-label="Workflow presets" id="canvas-presets-menu" data-menu="presets">
         <NewtPresetLibrary controller={presets} canSaveSelection={selectedCount > 0} onSaveSelection={() => { close(true); presets.beginSave(); }} />
       </div>}
     </div>}
-    <span className="canvas-menu-divider canvas-path-divider" />
-    <div className="canvas-project-location" title={projectPath || "Save As to choose a portable workflow folder"}><Folder size={17} /><span>{folderName}</span><ChevronRight size={13} /><small>Canvas</small></div>
-    <div className="canvas-menu-spacer" />
-  </header>;
+    <input ref={renameInput} aria-label="Workflow name" className="canvas-document-name" value={projectName}
+      placeholder="Workflow name" title={projectName || "Workflow name"} onFocus={() => { originalName.current = projectName; close(); }}
+      onChange={event => onRename(event.target.value)} onKeyDown={event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") return;
+        event.stopPropagation();
+        if (event.key === "Escape") onRename(originalName.current);
+        if (["Enter", "Escape"].includes(event.key)) { event.preventDefault(); event.currentTarget.blur(); }
+      }} />
+  </div>;
 }
