@@ -20,8 +20,13 @@ export function preferredOutputExportFormat(data, mediaType, item, { saving = fa
 
 export function outputExportFormatOptions(mediaType = "", item) {
   if (mediaType === "image") return imageFormats;
+  if (mediaType === "video" && item?.videoOutpaint?.prepared?.plan?.sourceFormat?.sourceUrl) return videoFormats.map(option => option.value === "source" ? { ...option, label: "Same as original source" } : option);
   if (mediaType === "video") return item?.videoOutpaint?.outputFormat?.startsWith("ProRes 4444") ? videoFormats.map(option => option.value === "prores" ? { ...option, label: "MOV (ProRes 4444 XQ master)" } : option) : videoFormats;
   return [];
+}
+
+export function originalOutpaintSourceUrl(item) {
+  return item?.videoOutpaint?.prepared?.plan?.sourceFormat?.sourceUrl || "";
 }
 
 export function normalizeOutputExportFormat(mediaType = "", value = "") {

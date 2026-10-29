@@ -38,7 +38,7 @@ export function normalizeUtilityOutpaintSettings(value = {}) {
 }
 export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "") {
   const normalized = normalizeVideoOutpaintSettings(settings);
-  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v17-source-frames" : "outpaint-canvas-v14-frame-grid", sourceUrl, normalized, canvasVideoUrl]);
+  return JSON.stringify([normalized.model === "seedance-2.5" ? "outpaint-canvas-v18-mp4-color" : "outpaint-canvas-v15-mp4-color", sourceUrl, normalized, canvasVideoUrl]);
 }
 export function planVideoOutpaint(metadata, options = {}, timing = {}) {
   const settings = normalizeVideoOutpaintSettings(options);

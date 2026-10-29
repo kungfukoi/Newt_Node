@@ -8,6 +8,7 @@ import path from "node:path";
 import ffmpeg from "ffmpeg-static";
 import ffprobe from "@ffprobe-installer/ffprobe";
 import { createVideoOutpaintService } from "../server/video-outpaint.js";
+import { originalSourceExport, buildOutputExportFfmpegArgs } from "../server/output-export.js";
 const execute = promisify(execFile);
 
 test("RGB seam matching composites both colored surfaces in BT.709 and tags the master", async () => {
@@ -26,9 +27,22 @@ test("RGB seam matching composites both colored surfaces in BT.709 and tags the 
     const service = createVideoOutpaintService({ resolveAsset: async filePath => ({ filePath }), probeVideo: probe, runFfmpeg: run, statFile: stat,
       createTarget: async (_body, kind, ext) => { const filePath = path.join(directory, `${++sequence}-${kind}${ext}`); return { filePath, publicPath: filePath }; } });
     const prepared = await service.prepare({ videoOutpaint: { model: "seedance-2.5", seedanceResolution: "480p", feather: 32, matchExtensionColor: true } }, source);
+    for (const file of [prepared.videoUrl, prepared.generationVideoUrl]) {
+      const canvas = await probe(file);
+      assert.equal(path.extname(file), ".mp4");
+      assert.equal(canvas.codec_name, "h264");
+      assert.equal(canvas.color_space, "bt709");
+      assert.equal(canvas.color_transfer, "bt709");
+      assert.equal(canvas.color_primaries, "bt709");
+      assert.equal(canvas.num_frames, prepared.plan.frames);
+    }
+    assert.equal(prepared.plan.sourceFormat.sourceUrl, source);
     await run(["-y", "-f", "lavfi", "-i", "color=c=0x785028:s=480x854:r=24", "-frames:v", String(prepared.plan.frames), ...encode, raw]);
     const output = await service.finish({}, prepared, { filePath: raw });
     const info = await probe(output.filePath);
+    assert.equal(info.codec_name, "h264");
+    assert.equal(info.num_frames, 24);
+    assert.equal(path.extname(output.filePath), ".mp4");
     assert.equal(output.matching.colorMatching.applied, true);
     assert.equal(info.color_space, "bt709");
     assert.equal(info.color_transfer, "bt709");
@@ -44,5 +58,15 @@ test("RGB seam matching composites both colored surfaces in BT.709 and tags the 
       assert.ok(Math.abs(core[c] - original[c]) <= 2, `Source color changed: ${original} -> ${core}`);
       assert.ok(Math.abs(extension[c] - core[c]) <= 2, `Matrix mismatch at join: ${core} / ${extension}`);
     }
+    const originalFormat = originalSourceExport({ codecName: "prores", profile: "4444 XQ", colorSpace: "bt709" }, "original.mov");
+    const exported = path.join(directory, "output.mov");
+    await run(buildOutputExportFfmpegArgs({ sourcePath: output.filePath, targetPath: exported, mediaType: "video", format: "source", originalSource: originalFormat }));
+    const restored = await probe(exported);
+    assert.equal(restored.codec_name, "prores");
+    assert.equal(restored.profile, "XQ");
+    assert.equal(restored.num_frames, info.num_frames);
+    assert.equal(restored.width, info.width);
+    assert.equal(restored.height, info.height);
+    assert.equal(restored.color_space, "bt709");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

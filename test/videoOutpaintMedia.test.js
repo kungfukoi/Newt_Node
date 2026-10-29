@@ -33,7 +33,7 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const output = await service.finish({}, prepared, { filePath: generated });
     const final = await probe(output.filePath);
     assert.deepEqual([final.width, final.height, final.frames], [720, 1280, 81]); assert.equal(final.audio, true);
-    assert.equal(final.codec, "prores"); assert.equal(final.profile, "XQ"); assert.match(final.pixelFormat, /444p1[02]/);
+    assert.equal(final.codec, "h264"); assert.equal(final.pixelFormat, "yuv420p");
     const pixel = async (x, y, file = output.filePath) => {
       const { stdout } = await execute(ffmpeg, ["-v", "error", "-ss", "1", "-i", file, "-vf", `crop=2:2:${x}:${y},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "pipe:1"], { windowsHide: true, timeout: 10000, encoding: "buffer" });
       return [...stdout.subarray(0, 3)];
@@ -180,7 +180,7 @@ test("real FFmpeg outpainting prep and restoration preserve the source center, g
     const untouchedFill = await pixel(360, 10, matched.filePath), protectedCore = await pixel(360, 640, matched.filePath);
     assert.ok(untouchedFill[0] < 105 && protectedCore[0] > 120, "Keep generated background and original core unchanged");
     assert.equal(reviewCount, 0, "QC must never submit paid review");
-    assert.match(matched.filePath, /video-outpaint\.mov$/);
+    assert.match(matched.filePath, /video-outpaint\.mp4$/);
   } finally {
     const relative = path.relative(os.tmpdir(), directory);
     if (!relative.startsWith("newt-outpaint-media-") || relative.includes(path.sep)) throw new Error("Refusing cleanup outside owned test directory.");

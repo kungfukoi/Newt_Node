@@ -7,7 +7,23 @@ import {
   outputExportMimeType,
   preferredOutputExportFormat
 } from "../src/outputExport.js";
-import { buildOutputExportFfmpegArgs, outputExportRequiresConversion } from "../server/output-export.js";
+import { buildOutputExportFfmpegArgs, outputExportRequiresConversion, originalSourceExport } from "../server/output-export.js";
+
+test("outpaint Same as original source converts the whole MP4 back to the original container and codec", () => {
+  const original = originalSourceExport({ codecName: "prores", profile: "4444 XQ" }, "original.mov");
+  assert.equal(outputExportRequiresConversion("finish.mp4", "video", "source", "h264", original), true);
+  const args = buildOutputExportFfmpegArgs({ sourcePath: "finish.mp4", targetPath: "output.mov", mediaType: "video", format: "source", originalSource: original });
+  assert.ok(args.includes("prores_ks"));
+  assert.equal(args[args.indexOf("-profile:v") + 1], "5");
+  assert.ok(!args.includes("-frames:v") && !args.includes("-t"), "Export must retain the whole clip");
+  const same = originalSourceExport({ codecName: "h264" }, "original.mp4");
+  assert.equal(outputExportRequiresConversion("finish.mp4", "video", "source", "h264", same), false);
+  const tenBit = originalSourceExport({ codecName: "h264", pixelFormat: "yuv420p10le", colorSpace: "smpte170m" }, "original.mp4");
+  assert.equal(outputExportRequiresConversion("finish.mp4", "video", "source", "h264", tenBit, { pixelFormat: "yuv420p", colorSpace: "bt709" }), true);
+  assert.throws(() => originalSourceExport({ codecName: "unknown" }, "original.mov"), /not supported/);
+  const item = { videoOutpaint: { prepared: { plan: { sourceFormat: { sourceUrl: "/original.mov" } } } } };
+  assert.match(outputExportFormatOptions("video", item)[0].label, /original source/);
+});
 
 test("Output export exposes still and video formats", () => {
   assert.deepEqual(outputExportFormatOptions("image").map((option) => option.value), ["png", "jpg"]);

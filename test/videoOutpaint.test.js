@@ -154,8 +154,17 @@ test("QC stays disabled even for saved enabled settings, with one inward blend a
   const { service } = serviceHarness({ reviewVisual: async () => { reviews++; throw new Error("Provider unavailable"); } });
   const prepared = await service.prepare({ videoOutpaint: { finalQc: true, visualQc: true } }, "/outputs/source.mp4");
   const result = await service.finish({}, prepared, { filePath: "/outputs/generated.mp4" });
-  assert.equal(reviews, 0); assert.equal(result.publicPath, "/outputs/video-outpaint.mov");
+  assert.equal(reviews, 0); assert.equal(result.publicPath, "/outputs/video-outpaint.mp4");
   assert.equal(result.qc.status, "off"); assert.equal(result.warning, "");
   assert.equal(result.matching.finishVersion, 3);
   assert.match(result.matching.sourcePolicy, /fully opaque/);
+});
+
+test("retained legacy canvases keep their ProRes finish instead of being silently reinterpreted", async () => {
+  const { service } = serviceHarness();
+  const prepared = await service.prepare({}, "/outputs/source.mp4");
+  delete prepared.plan.colorPipeline;
+  const result = await service.finish({}, prepared, { filePath: "/outputs/generated.mp4" });
+  assert.equal(result.publicPath, "/outputs/video-outpaint.mov");
+  assert.match(result.outputFormat, /ProRes 4444/);
 });

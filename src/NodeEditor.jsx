@@ -137,7 +137,7 @@ import { assemblyRenderPayload, createAssemblyState, normalizeAssemblyState } fr
 import { selectAssemblyPreviewSource } from "./assembly/assemblyPreview.js";
 import { subscribeAssemblyLiveFrame } from "./assembly/assemblyLiveFrameBus.js";
 import { apiErrorMessage } from "./apiErrors.js";
-import { normalizeOutputExportFormat, outputExportFormatOptions, preferredOutputExportFormat } from "./outputExport.js";
+import { normalizeOutputExportFormat, outputExportFormatOptions, preferredOutputExportFormat, originalOutpaintSourceUrl } from "./outputExport.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { SelectionActionBar, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -7205,6 +7205,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
     const { response, data } = await nodeApi.saveOutput({
       sourceUrl: outputItem?.url || "",
+      outputOriginalSourceUrl: originalOutpaintSourceUrl(outputItem),
       sourceText,
       sourceFileName: outputSourceFileName(sourceNode, outputItem, incomingByNode),
       mediaType: sourceMediaType,
@@ -11774,6 +11775,7 @@ function OutputNodeBody({
       outputTargetSourceNodeTitle: sourceInfo.sourceTitle || "",
       outputTargetSourceFileName: sourceInfo.sourceFileName || "",
       sourceFileName: sourceInfo.sourceFileName || "",
+      outputOriginalSourceUrl: originalOutpaintSourceUrl(sourceInfo.outputItem),
       mediaType: sourceInfo.mediaType || "",
       outputFormat
     };
@@ -11812,6 +11814,7 @@ function OutputNodeBody({
     outputFormat,
     sourceInfo.mediaType,
     sourceInfo.sourceFileName,
+    sourceInfo.outputItem?.videoOutpaint?.prepared?.plan?.sourceFormat?.sourceUrl,
     sourceInfo.sourceTitle
   ]);
 

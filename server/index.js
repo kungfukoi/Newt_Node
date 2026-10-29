@@ -171,7 +171,7 @@ import {
   externalOutputFilePathFromPublicPath,
   previewOutputTargetAsset
 } from "./outputTargets.js";
-import { buildOutputExportFfmpegArgs, outputExportRequiresConversion } from "./output-export.js";
+import { buildOutputExportFfmpegArgs, outputExportRequiresConversion, originalSourceExport } from "./output-export.js";
 import { normalizeOutputExportFormat, outputExportExtension, outputExportMimeType } from "../src/outputExport.js";
 import {
   exactWorkflowPackageAssetFilePath,
@@ -3464,7 +3464,11 @@ app.post("/api/node/preview-output", async (req, res) => {
     const mediaType = String(req.body.mediaType || "").trim();
     const requestedFormat = String(req.body.outputFormat || "").trim();
     const outputFormat = requestedFormat ? normalizeOutputExportFormat(mediaType, requestedFormat) : "";
-    const sourceExtension = path.extname(sourceFileName) || outputPreviewExtensionForMediaType(mediaType);
+    let sourceExtension = path.extname(sourceFileName) || outputPreviewExtensionForMediaType(mediaType);
+    if (mediaType === "video" && outputFormat === "source" && req.body.outputOriginalSourceUrl) {
+      const original = await resolveLocalAssetPathFromUrl(req.body.outputOriginalSourceUrl);
+      sourceExtension = originalSourceExport(await probeVideoFile(original.filePath), original.filePath).extension;
+    }
     const extension = outputFormat ? outputExportExtension(mediaType, outputFormat, sourceExtension) : sourceExtension;
     const target = await previewOutputTargetAsset(
       req.body,
@@ -3521,6 +3525,13 @@ app.post("/api/node/save-output", async (req, res) => {
 
     const requestedFormat = String(req.body.outputFormat || "").trim();
     const outputFormat = requestedFormat ? normalizeOutputExportFormat(mediaType, requestedFormat) : "";
+    let originalSource;
+    if (mediaType === "video" && outputFormat === "source" && req.body.outputOriginalSourceUrl) {
+      const original = await resolveLocalAssetPathFromUrl(req.body.outputOriginalSourceUrl);
+      originalSource = originalSourceExport(await probeVideoFile(original.filePath), original.filePath);
+      extension = originalSource.extension;
+      mimeType = mimeForExtension(extension);
+    }
     if (outputFormat) {
       extension = outputExportExtension(mediaType, outputFormat, extension || ".bin");
       mimeType = outputExportMimeType(mediaType, outputFormat, mimeType || mimeForExtension(extension.toLowerCase()));
@@ -3538,9 +3549,9 @@ app.post("/api/node/save-output", async (req, res) => {
 
       if (sourcePath) {
         try {
-          const sourceCodec = mediaType === "video" && outputFormat === "mp4" ? (await probeVideoFile(sourcePath)).codecName : "";
-          if (outputFormat && outputExportRequiresConversion(sourcePath, mediaType, outputFormat, sourceCodec)) {
-            const args = buildOutputExportFfmpegArgs({ sourcePath, targetPath: target.filePath, mediaType, format: outputFormat });
+          const exportMetadata = mediaType === "video" && (outputFormat === "mp4" || originalSource) ? await probeVideoFile(sourcePath) : {};
+          if (outputFormat && outputExportRequiresConversion(sourcePath, mediaType, outputFormat, exportMetadata.codecName || "", originalSource, exportMetadata)) {
+            const args = buildOutputExportFfmpegArgs({ sourcePath, targetPath: target.filePath, mediaType, format: outputFormat, originalSource });
             await runFfmpeg(args, `Output ${outputFormat} export`, mediaType === "video" ? 1800000 : 120000);
           } else if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {
             await copyFileWithRetry(sourcePath, target.filePath);
@@ -13326,7 +13337,7 @@ async function probeVideoFile(filePath, { countFrames = false } = {}) {
         "v:0",
         ...(countFrames ? ["-count_frames"] : []),
         "-show_entries",
-        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,nb_read_frames,codec_name,pix_fmt,color_space,color_transfer,color_primaries,color_range:format=duration",
+        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,nb_read_frames,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,color_range:format=duration",
         "-of",
         "json",
         filePath
@@ -13343,6 +13354,7 @@ async function probeVideoFile(filePath, { countFrames = false } = {}) {
       frameRate: frameRateFromRatio(stream.avg_frame_rate) ? stream.avg_frame_rate : stream.r_frame_rate,
       num_frames: positiveNumber(stream.nb_frames) || positiveNumber(stream.nb_read_frames),
       codecName: stream.codec_name || null,
+      profile: stream.profile || null,
       pixelFormat: stream.pix_fmt || null,
       colorSpace: stream.color_space || null,
       colorTransfer: stream.color_transfer || null,

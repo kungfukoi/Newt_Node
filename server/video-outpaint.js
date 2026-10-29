@@ -5,6 +5,7 @@ import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied
 import { alignOutpaintTiming } from "./outpaint-timing.js";
 import { inspectOutpaintMotion } from "./outpaint-motion.js";
 import { inspectExtensionColor, extensionColorFilter } from "./outpaint-color.js";
+import path from "node:path";
 
 export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
   async function prepare(body, sourceUrl, timing = {}) {
@@ -32,6 +33,12 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     if (body.videoOutpaint?.model === "seedance-2.5" && !(metadata.num_frames > 0 || metadata.frames > 0)) metadata = { ...metadata, ...await probeVideo(asset.filePath, { countFrames: true }) };
     if (body.videoOutpaint?.model === "seedance-2.5" && !(metadata.num_frames > 0 || metadata.frames > 0)) throw new Error("Could not count the source video frames. No generation was submitted; use a readable local video with a valid frame count.");
     const plan = planVideoOutpaint(metadata, body.canvasVideoUrl ? { ...body.videoOutpaint, frame: null, aspectRatio: suppliedCanvasRatio(metadata) } : body.videoOutpaint, timing);
+    // New canvases share one explicit SDR working space. Retained raw jobs keep
+    // their original plan and are never silently rebuilt or reinterpreted.
+    plan.colorPipeline = { version: 1, matrix: "bt709", primaries: "bt709", transfer: "bt709", range: "tv", container: "mp4", codec: "h264" };
+    const originalAsset = originalSourceUrl && originalSourceUrl !== sourceUrl ? await resolveAsset(originalSourceUrl) : asset;
+    const originalMetadata = originalAsset === asset ? metadata : await probeVideo(originalAsset.filePath);
+    plan.sourceFormat = { sourceUrl: originalSourceUrl || sourceUrl, extension: path.extname(originalAsset.filePath).toLowerCase(), codecName: originalMetadata.codecName || originalMetadata.codec_name || "", pixelFormat: originalMetadata.pixelFormat || originalMetadata.pix_fmt || "" };
     if (body.canvasVideoUrl) {
       const detected = await runFfmpeg(["-hide_banner", "-ss", String(plan.sourceStartSeconds ?? plan.settings.start), "-i", asset.filePath, "-t", String(plan.outputDuration || Math.min(plan.settings.duration, metadata.duration - plan.settings.start)), "-vf", "cropdetect=limit=24:round=2:reset=1:skip=0", "-an", "-f", "null", "-"], "Detect supplied canvas picture", 120000);
       Object.assign(plan, suppliedCanvasGeometry(metadata, plan, detected.stderr), { suppliedCanvas: true });
@@ -58,7 +65,9 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const poster = await createTarget(body, "outpaint-canvas", ".png", true);
     const crop = plan.sourceCrop;
     const cropFilter = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-    const encode = ["-an", "-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
+    const colorTags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
+    const normalizeColor = "scale=out_color_matrix=bt709:out_range=tv,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709";
+    const encode = ["-an", "-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", ...colorTags, "-movflags", "+faststart"];
     let preparedSource = asset.filePath;
     let sourceStart = plan.sourceStartSeconds ?? settings.start;
     let loopedSourceUrl;
@@ -74,7 +83,7 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     }
     const repeat = settings.repeatCount > 1 ? `loop=loop=${settings.repeatCount - 1}:size=${plan.outputFrames}:start=0,setpts=N/(${fps}*TB),` : "";
     const temporalPad = plan.tailPadded ? `trim=end_frame=${plan.outputFrames},setpts=PTS-STARTPTS,${repeat}tpad=start_mode=clone:start_duration=${settings.repeatCount > 1 ? 0 : (plan.prerollFrames || 0) / fps}:stop_mode=clone:stop_duration=${plan.duration},` : "";
-    await runFfmpeg(["-y", "-ss", String(sourceStart), "-i", preparedSource, "-vf", `${plan.sourceFps ? `setpts=N/(${fps}*TB),` : ""}fps=${fps},${temporalPad}${cropFilter}scale=${sourceWidth}:${sourceHeight},setsar=1,pad=${width}:${height}:${left}:${top}:black`, "-frames:v", String(frames), ...encode, padded.filePath], "Prepare outpaint source", 120000);
+    await runFfmpeg(["-y", "-ss", String(sourceStart), "-i", preparedSource, "-vf", `${plan.sourceFps ? `setpts=N/(${fps}*TB),` : ""}fps=${fps},${temporalPad}${cropFilter}scale=${sourceWidth}:${sourceHeight},${normalizeColor},setsar=1,pad=${width}:${height}:${left}:${top}:black`, "-frames:v", String(frames), ...encode, padded.filePath], "Prepare outpaint source", 120000);
     if (settings.model === "seedance-2.5" && (await statFile(padded.filePath)).size > 200 * 1024 * 1024) throw new Error("The full-resolution Seedance canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment before generating.");
     // Reserve real generated pixels beneath the inward source-edge feather.
     const overlap = settings.restoreSource ? Math.ceil(settings.feather * width / plan.outputWidth) : 0;
@@ -91,7 +100,10 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       const { x: cx, y: cy, width: cw, height: ch } = plan.generationContentRect;
       const regions = [[0, 0, width, cy], [0, cy + ch, width, height - cy - ch], [0, cy, cx, ch], [cx + cw, cy, width - cx - cw, ch]];
       const bands = regions.filter(([, , w, h]) => w > 0 && h > 0).map(([x, y, w, h]) => `drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=0x00ff00:t=fill`);
-      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", bands.join(",") || "null", "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare Seedance green padding and inward overlap", 120000);
+      // drawbox's named RGB colors use 601 YUV coefficients. Draw in that
+      // matrix, then convert values back to 709; merely tagging them is wrong.
+      const greenCanvas = `scale=out_color_matrix=bt601,setparams=colorspace=smpte170m,${bands.join(",") || "null"},scale=in_color_matrix=bt601:out_color_matrix=bt709:out_range=tv,setparams=colorspace=bt709`;
+      await runFfmpeg(["-y", "-i", padded.filePath, "-vf", greenCanvas, "-frames:v", String(frames), ...encode, generationVideo.filePath], "Prepare Seedance green padding and inward overlap", 120000);
       if ((await statFile(generationVideo.filePath)).size > 200 * 1024 * 1024) throw new Error("The generation canvas exceeds the provider's 200 MB input limit. Choose a shorter source segment.");
     }
     await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=white:s=${width}x${height}:r=${fps}`, "-vf", `drawbox=x=${left + ml}:y=${top + mt}:w=${sourceWidth - ml - mr}:h=${sourceHeight - mt - mb}:color=black:t=fill`, "-frames:v", maskIsImage ? "1" : String(frames), ...(maskIsImage ? [] : [...encode, "-crf", "0"]), mask.filePath], "Prepare local outpaint mask", 120000);
@@ -142,12 +154,14 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const sourceMetadata = await probeVideo(source.filePath);
     const sourceMatrix = sourceMetadata.colorSpace || sourceMetadata.color_space;
     // Unspecified legacy SD sources retain their conventional 601 YUV values.
-    const matrix = ["bt709", "bt470bg", "smpte170m"].includes(sourceMatrix) ? sourceMatrix : "smpte170m";
+    const matrix = submissionPlan.colorPipeline?.matrix || (["bt709", "bt470bg", "smpte170m"].includes(sourceMatrix) ? sourceMatrix : "smpte170m");
+    const mp4Delivery = submissionPlan.colorPipeline?.container === "mp4";
+    const deliveryExtension = mp4Delivery ? ".mp4" : ".mov";
     const sourceStart = prepared.loopedSourceUrl ? 0 : submissionPlan.sourceStartSeconds ?? settings.start;
     // Rejected candidates are dependencies, never the requested export target.
     const motionRejected = !allRepeats && motionValidation?.status === "needs_review";
     const checkSeams = seedance && settings.restoreSource && plan.needsOutpaint;
-    let target = await createTarget(body, motionRejected ? "outpaint-motion-candidate" : checkSeams ? "outpaint-finish-candidate" : "video-outpaint", ".mov", motionRejected || checkSeams);
+    let target = await createTarget(body, motionRejected ? "outpaint-motion-candidate" : checkSeams ? "outpaint-finish-candidate" : "video-outpaint", deliveryExtension, motionRejected || checkSeams);
     const { outputWidth: w, outputHeight: h } = plan;
     const sw = Math.round(plan.sourceWidth / plan.width * w / 2) * 2;
     const sh = Math.round(plan.sourceHeight / plan.height * h / 2) * 2;
@@ -178,13 +192,16 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       filters.push(`[1:v]fps=${plan.fps},${repeatSource}${cropFilter}scale=${sw}:${sh}:out_color_matrix=${matrix}:out_range=tv,${compositeColor},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[source]`);
       filters.push(...overlapBlendFilters({ w, h, sw, sh, x, y, feather }));
     }
-    await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", ...repeatAudio, "-t", String(plan.duration), "-frames:v", String(plan.frames), "-r", deliveryFrameRate, "-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-colorspace", matrix, "-color_primaries", matrix, "-color_trc", matrix === "bt470bg" ? "gamma28" : matrix, "-color_range", "tv", "-c:a", "pcm_s24le", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
+    const deliveryEncode = mp4Delivery
+      ? ["-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k"]
+      : ["-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-c:a", "pcm_s24le"];
+    await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", ...repeatAudio, "-t", String(plan.duration), "-frames:v", String(plan.frames), "-r", deliveryFrameRate, ...deliveryEncode, "-colorspace", matrix, "-color_primaries", matrix, "-color_trc", matrix === "bt470bg" ? "gamma28" : matrix, "-color_range", "tv", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
     let seamValidation;
     if (checkSeams) {
       reportProgress("Finish: Checking the finished color joins in every frame…");
       seamValidation = await inspectFinishedBoundary({ filePath: target.filePath, plan, runFfmpeg });
       if ((!motionRejected && seamValidation.status !== "needs_review") || allRepeats) {
-        const accepted = await createTarget(body, "video-outpaint", ".mov", false);
+        const accepted = await createTarget(body, "video-outpaint", deliveryExtension, false);
         await runFfmpeg(["-y", "-i", target.filePath, "-map", "0", "-c", "copy", "-movflags", "+faststart", accepted.filePath], "Retain checked outpaint master", 120000);
         target = accepted;
       }
@@ -192,10 +209,10 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const stat = await statFile(target.filePath);
     const issues = [temporalAlignment.status === "needs_review" && temporalAlignment.reason, motionValidation?.status === "needs_review" && `${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands`, seamValidation?.status === "needs_review" && "Finished edge seams need review"].filter(Boolean).join(". ");
     const warning = allRepeats ? `Debug outpaint: all ${settings.repeatCount} copies and the held tail are retained from frame zero for inspection.${issues ? " " + issues + "." : ""}` : issues ? `Outpaint needs review: ${issues}. The candidate and paid raw result are retained; this candidate cannot replace an accepted Output.` : "";
-    return { ...target, bytes: stat.size, outputFormat: "ProRes 4444 XQ MOV (10-bit processing)", mimeType: "video/quicktime", warning,
+    return { ...target, bytes: stat.size, outputFormat: mp4Delivery ? "H.264 MP4 (BT.709 SDR)" : "ProRes 4444 XQ MOV (10-bit processing)", mimeType: mp4Delivery ? "video/mp4" : "video/quicktime", warning,
       matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, seamValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
         method: colorMatching.applied ? "Shot-stable extension color matching followed by smooth inward source overlap" : "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
-        sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; delivery scaling and ProRes encoding still apply." : "Source restoration is disabled." },
+        sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; working-space conversion, delivery scaling and encoding still apply." : "Source restoration is disabled." },
       qc: { status: "off", flags: [], segments: [] } };
 
   }

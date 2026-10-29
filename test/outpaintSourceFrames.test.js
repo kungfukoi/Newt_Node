@@ -37,7 +37,7 @@ test("94 native 23.976 source frames repeat in full before source-clock delivery
     assert.ok(Math.abs(debugInfo.duration - 201 * 1001 / 24000) < 0.00001);
     assert.ok(Math.abs(debugInfo.audioDuration - debugInfo.duration) < 0.001);
     const pixels = async (file, filter) => (await execute(ffmpeg, ["-v", "error", "-i", file, "-vf", filter + ",format=gray", "-an", "-f", "rawvideo", "pipe:1"], { windowsHide: true, encoding: "buffer", maxBuffer: 16 * 1024 * 1024 })).stdout;
-    const original = await pixels(source, "scale=480:480,crop=320:320:80:80,scale=32:32");
+    const original = await pixels(source, "scale=480:480:out_color_matrix=bt709,crop=320:320:80:80,scale=32:32");
     const result = await pixels(debug.filePath, `crop=320:320:80:${prepared.plan.top + 80},scale=32:32`);
     for (let frame = 0; frame < 201; frame++) {
       const sourceFrame = frame < 188 ? frame % 94 : 93;

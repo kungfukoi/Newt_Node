@@ -22,7 +22,7 @@ test("Seedance green conditioning and analysis name #00FF00 while retaining old 
   const greenAnalysis = buildOutpaintAnalysisPrompt({ mode: "guided", outpaintModel: "seedance-2.5", maskIsImage: true, preparedPlan: green.plan });
   assert.match(greenAnalysis, /solid green padding \(#00FF00 \/ RGB 0, 255, 0\)/);
   assert.doesNotMatch(greenAnalysis, /solid black padding|gray padding|black-padded|black bars/);
-  assert.equal(JSON.parse(videoOutpaintFingerprint("source", settings))[0], "outpaint-canvas-v17-source-frames");
+  assert.equal(JSON.parse(videoOutpaintFingerprint("source", settings))[0], "outpaint-canvas-v18-mp4-color");
   const gray = { ...prepared, generationVideoUrl: "/outputs/gray.mp4", plan: { ...prepared.plan, generationPaddingColor: "gray" } };
   const result = await prepareSeedanceOutpaint(body, { provider: "fal", apiKey: "fixture", prepare: async () => gray });
   assert.deepEqual(result.body.referenceVideoUrls, [gray.generationVideoUrl]);
@@ -37,7 +37,7 @@ test("Seedance green conditioning and analysis name #00FF00 while retaining old 
   assert.match(seedanceOutpaintPrompt("Direction", false, [], 0, prepared.plan), /^Full frame /);
   const oldFingerprint = JSON.stringify(["outpaint-canvas-v14-frame-grid", "source", normalizeVideoOutpaintSettings(settings), ""]);
   assert.notEqual(videoOutpaintFingerprint("source", settings), oldFingerprint);
-  assert.equal(JSON.parse(videoOutpaintFingerprint("source", { model: "wan-vace" }))[0], "outpaint-canvas-v14-frame-grid");
+  assert.equal(JSON.parse(videoOutpaintFingerprint("source", { model: "wan-vace" }))[0], "outpaint-canvas-v15-mp4-color");
 });
 
 test("legacy preparation timing remains readable and engine changes invalidate preparation", () => {
