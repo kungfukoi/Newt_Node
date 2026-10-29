@@ -90,6 +90,8 @@ test("normal Text Agent Prompt output keeps original videos paired for downstrea
   await page.route("**/api/node/process-text", async route => { const request = route.request().postDataJSON(); await route.fulfill({ json: { text: `Lighting for ${request.videoInputs[0].url}`, model: "fixture" } }); });
   const calls = [];
   await page.route("**/api/node/generate-video", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { video: { localUrl: `/outputs/e2e/edited-${calls.length}.mp4` } } }); });
+  await card(page, "agent").getByRole("button", { name: "Send message", exact: true }).click();
+  await expect.poll(async () => (await savedNode(page, "agent"))?.status).toBe("complete");
   await card(page, "video").getByRole("button", { name: /^Edit Video/ }).click();
   await expect.poll(() => calls.length).toBe(2);
   for (const request of calls) { expect(request.referenceVideoUrls).toHaveLength(1); expect(request.prompt).toContain(request.referenceVideoUrls[0]); }
@@ -150,16 +152,18 @@ test("Text Agent's normal Prompt output pairs each batch prompt with its image b
     await route.fulfill({ json: { text: `${first ? "Use a red background" : "Use a blue background"} with a soccer ball revision ${revision}`, model: "fixture" } });
     active--; completed++;
   });
-  // Wire the fresh agent before any requests, then use only the model button.
+  // Wire the fresh agent, then explicitly run it before consuming its results.
   await expect(card(page, "agent").locator('[data-port-key="agent:batchOut"]')).toHaveCount(0);
   const output = await card(page, "agent").locator('[data-port-key="agent:promptOut"]').boundingBox();
   const input = await card(page, "model").locator('[data-port-key="model:promptIn"]').boundingBox();
   await page.mouse.move(output.x + output.width / 2, output.y + output.height / 2); await page.mouse.down(); await page.mouse.move(input.x + input.width / 2, input.y + input.height / 2, { steps: 8 }); await page.mouse.up();
   await page.route("**/api/node/generate-image", async route => {
-    expect(completed).toBe(revision * 2);
+    expect(completed).toBe(revision === 3 ? 4 : 2);
     const request = route.request().postDataJSON(); images.push(request);
     await route.fulfill({ json: { images: [{ localUrl: `/outputs/e2e/final-${images.length}.png` }] } });
   });
+  await card(page, "agent").getByRole("button", { name: "Send message", exact: true }).click();
+  await expect.poll(async () => (await savedNode(page, "agent"))?.status).toBe("complete");
   await card(page, "model").getByRole("button", { name: /^Run Batch/ }).click();
   await expect.poll(() => images.length).toBe(2);
   expect(texts).toHaveLength(2); expect(texts.every(request => request.imageInputs.length === 1)).toBe(true);
@@ -172,11 +176,11 @@ test("Text Agent's normal Prompt output pairs each batch prompt with its image b
   revision = 2;
   await card(page, "model").getByRole("button", { name: /^Run Batch/ }).click();
   await expect.poll(() => images.length).toBe(4);
-  expect(texts).toHaveLength(4);
+  expect(texts).toHaveLength(2);
   expect(texts.every(request => request.messages.length === 0)).toBe(true);
   for (const request of images.slice(2)) {
-    expect(request.prompt).toContain("revision 2");
-    expect(request.prompt).not.toContain("revision 1");
+    expect(request.prompt).toContain("revision 1");
+    expect(request.prompt).not.toContain("revision 2");
     expect(request.prompt).toContain(request.imagePromptUrls[0].includes("source-1") ? "red background" : "blue background");
     expect(request.prompt).not.toContain(request.imagePromptUrls[0].includes("source-1") ? "blue background" : "red background");
   }
@@ -189,11 +193,11 @@ test("Text Agent's normal Prompt output pairs each batch prompt with its image b
   await expect(page.locator(".react-flow__node.selected")).toHaveCount(2);
   await page.getByRole("button", { name: "Run All", exact: true }).click();
   await expect.poll(async () => (await savedNode(page, "model"))?.batchResults?.[0]?.batchPrompt).toContain("revision 3");
-  expect(texts).toHaveLength(6); expect(images).toHaveLength(6);
+  expect(texts).toHaveLength(4); expect(images).toHaveLength(6);
   expect(errors).toEqual([]);
 });
 
-test("downstream Run blocks generation if its fresh Text Agent batch fails", async ({ page }) => {
+test("downstream Run with missing batch results never starts its Text Agent", async ({ page }) => {
   const { errors } = await seed(page, [batch(),
     { id: "agent", type: "textAgent", x: 380, y: 20, data: { title: "Write prompts", agentDraft: "Add a soccer ball" } },
     { id: "model", type: "imageModel", x: 820, y: 20, data: { title: "Generate", prompt: "Preserve the product", settingsOpen: false } }
@@ -203,13 +207,13 @@ test("downstream Run blocks generation if its fresh Text Agent batch fails", asy
   await page.route("**/api/node/generate-image", async route => { images++; await route.fulfill({ json: { images: [] } }); });
   await card(page, "model").getByRole("button", { name: /^Run Batch/ }).click();
   await expect.poll(async () => (await savedNode(page, "model"))?.status).toBe("error");
-  expect(texts).toBe(2); expect(images).toBe(0);
-  expect((await savedNode(page, "model")).error).toContain("Agent unavailable");
+  expect(texts).toBe(0); expect(images).toBe(0);
+  expect((await savedNode(page, "model")).error).toBeTruthy();
   expect((await savedNode(page, "agent")).batchResults).toEqual([]);
   expect(errors).toEqual([]);
 });
 
-test("Stop while the downstream node prepares prompts prevents later generation", async ({ page }) => {
+test("Stop all during explicitly selected Text Agent execution prevents downstream generation", async ({ page }) => {
   const { errors } = await seed(page, [batch(),
     { id: "agent", type: "textAgent", x: 380, y: 20, data: { title: "Write prompts", agentDraft: "Add a soccer ball" } },
     { id: "model", type: "imageModel", x: 820, y: 20, data: { title: "Generate", settingsOpen: false } }
@@ -221,7 +225,9 @@ test("Stop while the downstream node prepares prompts prevents later generation"
     await route.fulfill({ json: { text: "Late prompt", model: "fixture" } }); finished++;
   });
   await page.route("**/api/node/generate-image", async route => { images++; await route.fulfill({ json: { images: [] } }); });
-  await card(page, "model").getByRole("button", { name: /^Run Batch/ }).click();
+  await card(page, "agent").locator(".node-title-label > svg").click();
+  await card(page, "model").locator(".node-title-label > svg").click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Run All", exact: true }).click();
   await expect.poll(() => started).toBe(2);
   await page.getByRole("button", { name: "Stop all active canvas nodes", exact: true }).click();
   await expect.poll(async () => (await savedNode(page, "model"))?.status).toBe("error");

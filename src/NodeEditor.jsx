@@ -2,7 +2,7 @@ import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
-import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
 import { runMediaBatch } from "./nodeRunners/batch.js";
 import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
@@ -10,7 +10,7 @@ import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpa
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
 import { NodeAbout } from "./components/NodeAbout.jsx";
-import { outpaintNeedsFinishing, outpaintOutputError, outpaintCanRefinish, outpaintCanRegenerate } from "./outpaintQuality.js";
+import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
 import { normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
 import { defaultOutpaintFrame } from "./videoOutpaintFrame.js";
@@ -7197,9 +7197,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!connection?.source) throw new Error("Connect a source to Output.");
     const sourceNode = connection.source;
     const outputItem = connectedOutputItem(sourceNode, connection.edge);
-    if (outpaintNeedsFinishing(outputItem)) throw new Error(outpaintOutputError(outputItem));
+    if (outpaintNeedsFinishing(outputItem)) throw new Error(`${outpaintOutputError(outputItem)} Use Refinish selected result on the source node, or run that node explicitly before saving.`);
     const sourceText = outputItem?.url ? "" : rawConnectedTextForSource(sourceNode);
-    if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet.");
+    if (!outputItem?.url && !sourceText.trim()) throw new Error("Connected source has no saved output yet. Run the source node explicitly before saving.");
     const sourceMediaType = outputItem?.type || (sourceText ? "text" : "");
     const outputFormat = preferredOutputExportFormat(outputNode.data, sourceMediaType, outputItem, { saving: true });
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
@@ -7284,10 +7284,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function stopNode(node) {
     const token = nodeRunControlRef.current.stop(node.id);
-    for (const id of token?.batchDependencyIds || []) {
-      const dependency = nodesRef.current.find(item => item.id === id);
-      if (dependency && nodeRunControlRef.current.get(id)) await stopNode(dependency);
-    }
     const message = "Stopped at user request. Existing results are preserved; a cloud job already accepted may still finish.";
     const scope = generationScope;
     stopGenerationProgress(scope, node.id, token?.groupId);
@@ -7322,29 +7318,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function runNode(node, runOptions = {}) {
     if (runOptions === "stop-node") return stopNode(node);
-    const batchPromptRuns = runOptions.batchPromptRuns || new Map();
-    if (node.type === "textAgent" && batchPromptRuns.has(node.id)) return batchPromptRuns.get(node.id);
     const running = nodeRunControlRef.current.run(node.id, async token => {
       const actions = { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved };
-      if (typeof runOptions !== "string" && !runOptions.skipBatchPromptRefresh && !node.data.batchRetryEntry) {
-        try {
-          const agents = upstreamBatchTextAgents(node.id, nodesRef.current, edgesRef.current);
-          if (agents.length) updateNode(node.id, { status: "running", error: "", batchProgress: "Preparing prompts…" });
-          token.batchDependencyIds = new Set();
-          for (const agent of agents) {
-            if (token.stopped) return { status: "error" };
-            if (!batchPromptRuns.has(agent.id)) token.batchDependencyIds.add(agent.id);
-            const current = nodesRef.current.find(item => item.id === agent.id);
-            const outcome = await runNode(current, { batchPromptRuns, skipBatchPromptRefresh: true });
-            if (token.stopped) return { status: "error" };
-            if (outcome?.status !== "complete") throw new Error(`${agent.data.title || "Text Agent"} did not complete. ${outcome?.error?.message || "Wait for its active run or resolve its error before generating."}`);
-          }
-          if (agents.length) node = { ...node, data: { ...node.data, status: "ready" } };
-        } catch (error) {
-          if (!token.stopped) updateNode(node.id, { status: "error", error: error.message, batchProgress: "" });
-          return { status: "error", error };
-        }
-      }
       if (typeof runOptions !== "string" && node.type !== "assembly") {
         const rawIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current, { expandBatches: false });
         const connections = batchInputConnections(rawIncoming[node.id]);
@@ -7352,7 +7327,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
       return executeNode(node, runOptions, token, actions);
     });
-    if (node.type === "textAgent") batchPromptRuns.set(node.id, running);
     return running;
   }
 
@@ -7569,32 +7543,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "output") {
-        const connection = incoming.sourceIn?.at(-1), source = connection?.source;
-        const isOutpaint = source?.type === "utility" && source.data.utilityMode === "video" && source.data.utilityVideoModel === "Video Outpaint";
-        const item = isOutpaint ? connectedOutputItem(source, connection.edge) : null;
-        if (isOutpaint && (!item || outpaintNeedsFinishing(item))) {
-          if (source.data.status === "running") throw new Error("Outpainting is already running. Wait for its self-QC to finish.");
-          const sourceUrl = connectedAssetUrls(currentIncomingByNode[source.id]?.referenceVideoIn || []).at(-1);
-          if (outpaintCanRefinish(item, source.data.videoOutpaint, sourceUrl)) {
-            updateNode(source.id, { status: "running", videoOutpaintStage: "qc-edits", videoOutpaintQcFindings: [], error: "" });
-            let refinished;
-            try {
-              refinished = await prepareOutpaintCanvas(source, { rawVideoUrl: item.videoOutpaint.rawVideoUrl, prepared: item.videoOutpaint.prepared, videoOutpaint: source.data.videoOutpaint }, { node: currentNode, context: outputTargetContextFromOutputNode(currentNode, source, "", currentIncomingByNode) });
-            } catch (error) { updateNode(source.id, { status: "error", error: error.message }); throw error; }
-            const failed = outpaintNeedsFinishing(refinished);
-            const resultItems = [...existingResultItemsForNode(source, "video"), refinished];
-            updateNode(source.id, { status: failed ? "error" : "complete", error: failed ? outpaintOutputError(refinished) : "", resultItems, selectedResultIndex: resultItems.length - 1, resultUrl: refinished.url, resultType: "video" });
-            if (token.stopped) return { status: "error" };
-            if (!failed) return { status: "complete", resultItems: [refinished] };
-            if (!outpaintCanRegenerate(refinished)) throw new Error(outpaintOutputError(refinished));
-          }
-          const outcome = await runNode(source, { outputTargetNodeId: currentNode.id });
-          if (token.stopped) return { status: "error" };
-          if (outcome?.status !== "complete") throw outcome?.error || new Error("Outpainting could not complete.");
-          const rejected = outcome.resultItems?.find(outpaintNeedsFinishing);
-          if (rejected) throw new Error(outpaintOutputError(rejected));
-          return outcome;
-        }
         const saved = await runOutputNodeSave(currentNode, incoming, requestContext, currentIncomingByNode);
         const resultItems = saved.url ? [saved] : [];
         updateNode(currentNode.id, {
@@ -8430,10 +8378,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function runNodesByDependencyOrder(runnableNodes) {
     const controller = new AbortController();
-    const batchPromptRuns = new Map();
     canvasBatchControllersRef.current.add(controller);
     try { return await runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
-      runNode: node => runNode(node, { batchPromptRuns }), signal: controller.signal,
+      runNode: node => runNode(node), signal: controller.signal,
       maxConcurrent: import.meta.env?.VITE_NEWTNODE_RUN_CONCURRENCY || 4,
       providerLimits: {
         fal: import.meta.env?.VITE_NEWTNODE_FAL_CONCURRENCY || 2,

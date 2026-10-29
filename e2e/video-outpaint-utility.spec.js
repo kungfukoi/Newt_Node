@@ -58,7 +58,7 @@ test("supplied Canvas port sits beside Canvas and routes independently of source
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
 import { normalizeVideoOutpaintSettings, videoOutpaintFingerprint, planVideoOutpaint } from "../src/videoOutpaint.js";
 
-test("Run Output finishes an existing raw outpaint locally before considering a new generation", async ({ page }) => {
+test("Save Output rejects unfinished outpaint without finishing or generating upstream", async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes: [
     { id: "outpaint", type: "utility", x: 30, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", status: "error", resultUrl: "/outputs/e2e/old.mp4", resultItems: [{ type: "video", url: "/outputs/e2e/old.mp4", videoOutpaint: { rawVideoUrl: "/outputs/e2e/raw.mp4", prepared: { sourceUrl: "/outputs/e2e/source.mp4", plan: { settings: { model: "seedance-2.5" } } }, qc: { status: "needs_review" } } }], selectedResultIndex: 0 } },
     { id: "output", type: "output", x: 550, y: 20, data: { title: "Final", outputPath: "C:/fixtures/outputs", outputFileName: "finished" } }
@@ -71,9 +71,11 @@ test("Run Output finishes an existing raw outpaint locally before considering a 
     return route.fulfill({ json: { type: "video", url: "/outputs/e2e/finished.mp4", fileName: "finished.mp4", videoOutpaint: { outputFormat: "ProRes 4444 XQ MOV (10-bit processing)", qc: { status: "passed_checks" } } } });
   });
   await page.locator('[data-node-card-id="output"]').locator(".run-node-button").click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "output")?.data?.resultUrl)).toBe("/outputs/e2e/finished.mp4");
-  expect(finishes).toBe(1);
-  expect(requests.some(request => request.path === "/api/node/generate-video")).toBe(false);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === "output")?.data?.status)).toBe("error");
+  await expect(page.locator('[data-node-card-id="output"]')).toContainText("Use Refinish selected result");
+  expect(finishes).toBe(0);
+  expect(requests.some(request => ["/api/node/generate-video", "/api/node/utility-video", "/api/node/save-output", "/api/node/video-outpaint-prepare"].includes(request.path))).toBe(false);
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(n => n.id === "outpaint").data.resultUrl)).toBe("/outputs/e2e/old.mp4");
   expect(errors).toEqual([]);
 });
 
@@ -124,10 +126,10 @@ for (const entry of ["output", "outpaint"]) for (const succeeds of [true, false]
   });
   const output = page.locator(`[data-node-card-id="${entry}"]`);
   await output.locator(".run-node-button").click();
-  if (succeeds) await expect.poll(() => page.evaluate(id => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === id)?.data?.resultUrl, entry)).toBe("/outputs/e2e/finished.mp4");
+  if (succeeds && entry !== "output") await expect.poll(() => page.evaluate(id => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === id)?.data?.resultUrl, entry)).toBe("/outputs/e2e/finished.mp4");
   else await expect.poll(() => page.evaluate(id => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1"))?.nodes.find(n => n.id === id)?.data?.status, entry)).toBe("error");
-  expect(generations).toHaveLength(1);
-  expect(generations[0].videoOutpaintRepair).toBeUndefined();
+  expect(generations).toHaveLength(entry === "output" ? 0 : 1);
+  if (entry === "outpaint") expect(generations[0].videoOutpaintRepair).toBeUndefined();
   expect(requests.some(r => r.path === "/api/node/save-output")).toBe(false);
   for (const generation of generations) { expect(generation.prompt).toBe("User approved: continue the coat and trees."); expect(generation.videoOutpaint.frame).toEqual(frame); expect(generation.outputTargetNodeId).toBe(entry === "output" ? "output" : ""); }
   expect(requests.some(r => r.path === "/api/node/video-outpaint-prompt")).toBe(false);
