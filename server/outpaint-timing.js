@@ -5,16 +5,51 @@ import path from "node:path";
 export function estimateOutpaintTiming(reference, generated, { stride, start, count, radius }) {
   if (!(stride > 0 && start >= 0 && count >= 3) || reference.length < (start + count) * stride) return { applied: false, offsetFrames: 0, reason: "Insufficient reference coverage" };
   const available = Math.floor(generated.length / stride);
+  // A static set must not outvote a small moving hand/prop. Weight pixels that
+  // actually change in the ORIGINAL, and measure timing on its active frames.
+  const weights = new Float64Array(stride), medians = new Float64Array(stride);
+  let weight = 0;
+  for (let pixel = 0; pixel < stride; pixel++) {
+    const values = Array.from({ length: count }, (_, frame) => reference[(start + frame) * stride + pixel]).sort((a, b) => a - b);
+    medians[pixel] = values[Math.floor(count / 2)];
+    weights[pixel] = values.at(-1) - values[0] >= 20 ? 1 : 0.02;
+    weight += weights[pixel];
+  }
+  const energy = Array.from({ length: count }, (_, frame) => {
+    let value = 0;
+    for (let pixel = 0; pixel < stride; pixel++) value += weights[pixel] * Math.abs(reference[(start + frame) * stride + pixel] - medians[pixel]);
+    return value / weight;
+  });
+  const active = energy.map((value, frame) => value > Math.max(2, Math.max(...energy) * 0.12) ? frame : -1).filter(frame => frame >= 0);
+  if (active.length < 3) return { applied: false, offsetFrames: 0, status: "unresolved", reason: "Insufficient moving source evidence to establish timing" };
+  const score = (frame, delta) => {
+    const a = (start + frame) * stride, b = (start + frame + delta) * stride;
+    if (b < 0 || b + stride > generated.length) return Infinity;
+    let error = 0;
+    for (let pixel = 0; pixel < stride; pixel++) error += weights[pixel] * Math.abs(reference[a + pixel] - generated[b + pixel]);
+    return error / weight;
+  };
+  const frameMatches = active.map(frame => {
+    let best = { frame, delta: 0, error: score(frame, 0), baselineError: score(frame, 0) };
+    for (let delta = -radius; delta <= radius; delta++) {
+      const error = score(frame, delta);
+      if (error + 0.05 < best.error) best = { ...best, delta, error };
+    }
+    return best;
+  });
+  const displaced = frameMatches.filter(match => match.delta !== 0 && match.error < 12 && match.error < match.baselineError * 0.75);
+  const offsets = displaced.map(match => match.delta).sort((a, b) => a - b);
+  const suggestedOffsetFrames = offsets.length ? offsets[Math.floor(offsets.length / 2)] : 0;
+  const offsetRange = offsets.length ? [offsets[0], offsets.at(-1)] : [0, 0];
+  const drift = offsets.length >= 3 && offsetRange[1] - offsetRange[0] > 2;
+  const missingHandle = offsets.length >= 3 && (start + suggestedOffsetFrames < 0 || start + suggestedOffsetFrames + count > available);
+  if (drift || missingHandle) return { applied: false, offsetFrames: 0, status: "needs_review", suggestedOffsetFrames, offsetRange, activeFramesChecked: active.length, frameMatches,
+    reason: drift ? "Generated action changes timing through the shot; a constant shift cannot align it" : "Generated action is shifted beyond the available frame handles; correction would freeze or invent delivery frames" };
   const candidates = [];
   for (let delta = -radius; delta <= radius; delta++) {
     if (start + delta < 0 || start + delta + count > available) continue;
     const segments = [[], [], []];
-    for (let frame = 0; frame < count; frame += Math.max(1, Math.floor(count / 30))) {
-      let error = 0;
-      const a = (start + frame) * stride, b = (start + delta + frame) * stride;
-      for (let pixel = 0; pixel < stride; pixel++) error += Math.abs(reference[a + pixel] - generated[b + pixel]);
-      segments[Math.min(2, Math.floor(frame * 3 / count))].push(error / stride);
-    }
+    for (let index = 0; index < active.length; index++) segments[Math.min(2, Math.floor(index * 3 / active.length))].push(score(active[index], delta));
     const scores = segments.map(values => values.reduce((a, b) => a + b, 0) / values.length);
     candidates.push({ delta, scores, error: scores.reduce((a, b) => a + b, 0) / 3 });
   }
@@ -23,7 +58,7 @@ export function estimateOutpaintTiming(reference, generated, { stride, start, co
   if (!baseline || !best || !Number.isFinite(best.error)) return { applied: false, offsetFrames: 0, reason: "Insufficient frame coverage" };
   const agreement = best.scores.every((_, segment) => Math.abs([...candidates].sort((a, b) => a.scores[segment] - b.scores[segment])[0].delta - best.delta) <= 1);
   const applied = best.delta !== 0 && agreement && best.error < 12 && best.error < baseline.error * 0.75;
-  return { applied, offsetFrames: applied ? best.delta : 0, baselineError: baseline.error, alignedError: best.error, reason: applied ? "Source correspondence agrees across three shot segments" : "No confident consistent timing correction" };
+  return { applied, offsetFrames: applied ? best.delta : 0, status: "checked", suggestedOffsetFrames, offsetRange, activeFramesChecked: active.length, frameMatches, baselineError: baseline.error, alignedError: best.error, reason: applied ? "Moving source correspondence agrees across three action segments" : "No confident consistent timing correction" };
 }
 
 export async function alignOutpaintTiming({ referencePath, generatedPath, plan, runFfmpeg }) {

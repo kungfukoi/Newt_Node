@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 // Evaluate thin strips at native pixel spacing across the join. Only the long
 // axis is reduced, so a one-pixel matte cannot disappear in a whole-frame resize.
 export function boundaryRegions(plan) {
@@ -45,6 +49,21 @@ export function boundaryReport(edges) {
   const temporal = Math.max(0, ...values.map(v => v.temporal));
   const mean = values.reduce((sum, v) => sum + v.mean, 0) / Math.max(1, values.length);
   return { edges, mean, worst, temporal, score: mean + worst * 0.25 + temporal * 0.25, status: worst > 8 ? "needs_review" : "passed_checks", scope: "Every-frame native-spacing boundary strips; this does not certify anatomy or geometry." };
+}
+
+export async function inspectFinishedBoundary({ filePath, plan, runFfmpeg }) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "newt-finished-seams-"));
+  try {
+    const edges = {};
+    for (const region of boundaryRegions(plan)) {
+      const target = path.join(directory, region.name + ".rgb");
+      await runFfmpeg(["-y", "-i", filePath, "-vf", `${region.filter},format=rgb24`, "-frames:v", String(plan.frames), "-an", "-f", "rawvideo", target], "Check finished outpaint seams at native pixel spacing", 120000);
+      const data = await readFile(target);
+      if (data.length !== region.stride * plan.frames) return { status: "needs_review", reason: "Incomplete finished seam evidence", edges };
+      edges[region.name] = measureBoundary(data, region, plan.frames);
+    }
+    return boundaryReport(edges);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 export function improvesBoundary(candidate, baseline) {

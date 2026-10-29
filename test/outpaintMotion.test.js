@@ -27,6 +27,14 @@ test("every-frame correspondence accepts an unchanged shot, rejects a missing na
   drift.set(original.subarray(3 * stride, 4 * stride), 5 * stride);
   assert.equal(measureOutpaintMotion(original, drift, settings).status, "needs_review");
 });
+
+test("timing and final seam failures independently hold Output and explain why", () => {
+  for (const key of ["temporalAlignment", "seamValidation"]) {
+    const details = { qc: { status: "off" }, matching: { finishVersion: 3, motionValidation: { status: "passed_checks" }, [key]: { status: "needs_review", reason: "Generated action changes timing" } } };
+    assert.equal(outpaintNeedsFinishing({ videoOutpaint: details }), true);
+    assert.match(outpaintQcStatus({ details }), /Output is held/);
+  }
+});
 test("short or misaligned media cannot pass, and only a verified uniform offset is compared", () => {
   const original = shot();
   assert.equal(measureOutpaintMotion(original, original.subarray(stride), settings).status, "needs_review");

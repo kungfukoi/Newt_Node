@@ -12,6 +12,7 @@ export function outpaintNeedsFinishing(item) {
   const details = item?.videoOutpaint;
   // Explicit debug delivery keeps defects for inspection and may reach Output.
   if (details?.matching?.repeatOutput === "all" && details.matching.finishVersion === 3 && details.qc?.status === "off") return false;
+  if (details?.matching?.temporalAlignment?.status === "needs_review" || details?.matching?.seamValidation?.status === "needs_review") return true;
   if (details?.matching?.motionValidation?.status === "needs_review") return true;
   const finishedWithoutQc = details?.qc?.status === "off" && details?.matching?.finishVersion === 3;
   return Boolean(details && !details.localCrop && details.qc?.status !== "passed_checks" && !finishedWithoutQc);

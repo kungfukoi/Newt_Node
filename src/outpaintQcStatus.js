@@ -13,8 +13,11 @@ export function outpaintQcStatus({ running, preparing, stage, findings = [], det
   }
   if (details?.localCrop) return "Crop only — no fill to check.";
   const motion = details?.matching?.motionValidation;
+  const timing = details?.matching?.temporalAlignment;
+  if (timing?.status === "needs_review") return `Timing needs review.\n${timing.reason}; Output is held.`;
   if (motion?.coverage?.status === "needs_review") return `Incomplete fill needs review.\n${motion.coverage.missingFillFrames} frames have possible unfilled outer bands; Output is held.`;
   if (motion?.status === "needs_review") return `Motion needs review.\n${motion.flaggedFrames} frames differ from the source; Output is held.`;
+  if (details?.matching?.seamValidation?.status === "needs_review") return "Seams need review.\nThe finished edge joins failed local checks; Output is held.";
   if (motion?.status === "passed_checks") return "Source correspondence checked.\nGenerated anatomy and props still need visual review.";
   if (details?.qc?.status === "off") return "QC disabled.\nSource overlap blended.";
   if (details?.qc?.status === "passed_checks") return "QC passed.";

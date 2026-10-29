@@ -13326,7 +13326,7 @@ async function probeVideoFile(filePath, { countFrames = false } = {}) {
         "v:0",
         ...(countFrames ? ["-count_frames"] : []),
         "-show_entries",
-        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,nb_read_frames,codec_name,pix_fmt:format=duration",
+        "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames,nb_read_frames,codec_name,pix_fmt,color_space,color_transfer,color_primaries,color_range:format=duration",
         "-of",
         "json",
         filePath
@@ -13343,7 +13343,11 @@ async function probeVideoFile(filePath, { countFrames = false } = {}) {
       frameRate: frameRateFromRatio(stream.avg_frame_rate) ? stream.avg_frame_rate : stream.r_frame_rate,
       num_frames: positiveNumber(stream.nb_frames) || positiveNumber(stream.nb_read_frames),
       codecName: stream.codec_name || null,
-      pixelFormat: stream.pix_fmt || null
+      pixelFormat: stream.pix_fmt || null,
+      colorSpace: stream.color_space || null,
+      colorTransfer: stream.color_transfer || null,
+      colorPrimaries: stream.color_primaries || null,
+      colorRange: stream.color_range || null
     };
     return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== null));
   } catch {

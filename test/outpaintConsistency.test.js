@@ -31,6 +31,24 @@ test("shared environment and wardrobe roles survive normalization and match actu
   assert.equal(outpaintRoleInstructions(1, []), "", "Unassigned references retain the existing appearance-only contract");
 });
 
+test("seam color follows spatial lighting instead of averaging opposite color errors away", () => {
+  const width = 192, height = 80, frames = 8;
+  const geometry = { width, height, x: 0, y: 16, sw: width, sh: 48, overlap: 8 };
+  const reference = Buffer.alloc(width * height * 3 * frames, 120), generated = Buffer.from(reference);
+  for (let f = 0; f < frames; f++) for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) for (let c = 0; c < 3; c++) {
+    const offset = x < width / 2 ? 9 : -9;
+    generated[((f * height + y) * width + x) * 3 + c] -= offset;
+  }
+  const report = fitExtensionColor(reference, generated, geometry);
+  assert.equal(report.applied, true);
+  assert.equal(report.edges.top.spatial.length, 8);
+  assert.deepEqual(report.edges.top.spatial[0].offsets, [9, 9, 9]);
+  assert.deepEqual(report.edges.top.spatial.at(-1).offsets, [-9, -9, -9]);
+  const filter = extensionColorFilter(report, { w: width, h: height, sw: width, sh: 48, x: 0, y: 16 });
+  assert.match(filter, /if\(lt\(X/);
+  assert.doesNotMatch(filter, /\bN\b|\bT\b/, "The correction must not vary with frame/time");
+});
+
 test("all reference roles fit the provider budget and require a capable backend", () => {
   const roles = Array.from({ length: 30 }, (_, i) => ["environment", "wardrobe", "appearance"][i % 3]);
   const plan = planVideoOutpaint({ width: 1920, height: 1080, fps: 24, duration: 2 }, { model: "seedance-2.5", referenceRoles: roles });

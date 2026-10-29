@@ -1,6 +1,6 @@
 import { outpaintPreparationError, preparedOutpaintSettings } from "../src/outpaintPreparation.js";
 import { normalizeVideoOutpaintSettings, planVideoOutpaint, videoOutpaintFingerprint } from "../src/videoOutpaint.js";
-import { overlapBlendFilters } from "./outpaint-boundary.js";
+import { overlapBlendFilters, inspectFinishedBoundary } from "./outpaint-boundary.js";
 import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied-canvas.js";
 import { alignOutpaintTiming } from "./outpaint-timing.js";
 import { inspectOutpaintMotion } from "./outpaint-motion.js";
@@ -131,14 +131,23 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       preroll += temporalAlignment.offsetFrames / submissionPlan.fps;
       reportProgress("Finish: Checking source motion and boundary correspondence in every frame…");
       motionValidation = await inspectOutpaintMotion({ referencePath: reference.filePath, generatedPath: generated.filePath, plan: checkedPlan, offset: temporalAlignment.offsetFrames, runFfmpeg });
+      if (temporalAlignment.status === "needs_review") {
+        motionValidation.status = "needs_review";
+        motionValidation.reason = temporalAlignment.reason + ". " + motionValidation.reason;
+      }
     }
     if (!Number.isFinite(Number(native.duration)) || (submissionPlan.tailPadded ? Number(native.duration) + 0.5 / submissionPlan.fps < preroll + plan.frames / submissionPlan.fps : Math.abs(Number(native.duration) - plan.duration) > (seedance ? 0.35 : 0.15))) throw new Error("Generated timing does not cover the source segment; the raw result was kept instead of freezing or repeating delivery frames.");
     if (seedance && Math.abs(Number(native.width) / Number(native.height) - plan.width / plan.height) > 0.02) throw new Error("Seedance changed the canvas aspect ratio; the raw result was kept for review.");
     const source = await resolveAsset(prepared.loopedSourceUrl || prepared.sourceUrl);
+    const sourceMetadata = await probeVideo(source.filePath);
+    const sourceMatrix = sourceMetadata.colorSpace || sourceMetadata.color_space;
+    // Unspecified legacy SD sources retain their conventional 601 YUV values.
+    const matrix = ["bt709", "bt470bg", "smpte170m"].includes(sourceMatrix) ? sourceMatrix : "smpte170m";
     const sourceStart = prepared.loopedSourceUrl ? 0 : submissionPlan.sourceStartSeconds ?? settings.start;
     // Rejected candidates are dependencies, never the requested export target.
     const motionRejected = !allRepeats && motionValidation?.status === "needs_review";
-    const target = await createTarget(body, motionRejected ? "outpaint-motion-candidate" : "video-outpaint", ".mov", motionRejected);
+    const checkSeams = seedance && settings.restoreSource && plan.needsOutpaint;
+    let target = await createTarget(body, motionRejected ? "outpaint-motion-candidate" : checkSeams ? "outpaint-finish-candidate" : "video-outpaint", ".mov", motionRejected || checkSeams);
     const { outputWidth: w, outputHeight: h } = plan;
     const sw = Math.round(plan.sourceWidth / plan.width * w / 2) * 2;
     const sh = Math.round(plan.sourceHeight / plan.height * h / 2) * 2;
@@ -158,19 +167,33 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const colorFilter = extensionColorFilter(colorMatching, { w, h, sw, sh, x, y });
     const crop = plan.sourceCrop;
     const cropFilter = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-    const filters = [`[0:v]fps=${submissionPlan.fps},${seedance && !submissionPlan.tailPadded ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},${colorFilter},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[bg]`];
+    // RGB matching drops YUV matrix metadata. Convert it back explicitly before
+    // overlaying the BT.709 source; otherwise FFmpeg may mix 601 and 709 values.
+    const compositeColor = `format=yuv444p10le,setparams=range=limited:color_primaries=${matrix}:color_trc=${matrix === "bt470bg" ? "gamma28" : matrix}:colorspace=${matrix}`;
+    const filters = [`[0:v]fps=${submissionPlan.fps},${seedance && !submissionPlan.tailPadded ? "tpad=stop_mode=clone:stop_duration=0.35," : ""}scale=${w}:${h},${colorFilter},scale=out_color_matrix=${matrix}:out_range=tv,${compositeColor},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[bg]`];
     const repeatSource = allRepeats ? `trim=end_frame=${submissionPlan.outputFrames},setpts=PTS-STARTPTS,loop=loop=${settings.repeatCount - 1}:size=${submissionPlan.outputFrames}:start=0,setpts=N/(${plan.fps}*TB),tpad=stop_mode=clone:stop_duration=${plan.duration},` : "";
     const repeatAudio = allRepeats ? ["-af", `atrim=duration=${submissionPlan.outputDuration},asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=duration=${submissionPlan.outputDuration},aloop=loop=${settings.repeatCount - 1}:size=${Math.round(submissionPlan.outputDuration * 48000)},asetpts=N/SR/TB,apad,atrim=duration=${plan.duration}`] : [];
     if (settings.restoreSource) {
       // Decode the original plate, never the black padded conditioning canvas.
-      filters.push(`[1:v]fps=${plan.fps},${repeatSource}${cropFilter}scale=${sw}:${sh},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[source]`);
+      filters.push(`[1:v]fps=${plan.fps},${repeatSource}${cropFilter}scale=${sw}:${sh}:out_color_matrix=${matrix}:out_range=tv,${compositeColor},setsar=1,${submissionPlan.sourceFps ? `settb=AVTB,setpts=N/(${deliveryFrameRate}*TB)` : "setpts=PTS-STARTPTS"}[source]`);
       filters.push(...overlapBlendFilters({ w, h, sw, sh, x, y, feather }));
     }
-    await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", ...repeatAudio, "-t", String(plan.duration), "-frames:v", String(plan.frames), "-r", deliveryFrameRate, "-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-c:a", "pcm_s24le", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
+    await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", ...repeatAudio, "-t", String(plan.duration), "-frames:v", String(plan.frames), "-r", deliveryFrameRate, "-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-colorspace", matrix, "-color_primaries", matrix, "-color_trc", matrix === "bt470bg" ? "gamma28" : matrix, "-color_range", "tv", "-c:a", "pcm_s24le", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
+    let seamValidation;
+    if (checkSeams) {
+      reportProgress("Finish: Checking the finished color joins in every frame…");
+      seamValidation = await inspectFinishedBoundary({ filePath: target.filePath, plan, runFfmpeg });
+      if ((!motionRejected && seamValidation.status !== "needs_review") || allRepeats) {
+        const accepted = await createTarget(body, "video-outpaint", ".mov", false);
+        await runFfmpeg(["-y", "-i", target.filePath, "-map", "0", "-c", "copy", "-movflags", "+faststart", accepted.filePath], "Retain checked outpaint master", 120000);
+        target = accepted;
+      }
+    }
     const stat = await statFile(target.filePath);
-    const warning = allRepeats ? `Debug outpaint: all ${settings.repeatCount} copies and the held tail are retained from frame zero for inspection.${motionValidation?.status === "needs_review" ? ` ${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands.` : ""}` : motionValidation?.status === "needs_review" ? `Outpaint needs review: ${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands. The candidate and paid raw result are retained; this candidate cannot replace an accepted Output.` : "";
+    const issues = [temporalAlignment.status === "needs_review" && temporalAlignment.reason, motionValidation?.status === "needs_review" && `${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands`, seamValidation?.status === "needs_review" && "Finished edge seams need review"].filter(Boolean).join(". ");
+    const warning = allRepeats ? `Debug outpaint: all ${settings.repeatCount} copies and the held tail are retained from frame zero for inspection.${issues ? " " + issues + "." : ""}` : issues ? `Outpaint needs review: ${issues}. The candidate and paid raw result are retained; this candidate cannot replace an accepted Output.` : "";
     return { ...target, bytes: stat.size, outputFormat: "ProRes 4444 XQ MOV (10-bit processing)", mimeType: "video/quicktime", warning,
-      matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
+      matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, seamValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
         method: colorMatching.applied ? "Shot-stable extension color matching followed by smooth inward source overlap" : "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
         sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; delivery scaling and ProRes encoding still apply." : "Source restoration is disabled." },
       qc: { status: "off", flags: [], segments: [] } };
