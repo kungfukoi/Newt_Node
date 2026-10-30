@@ -23,3 +23,9 @@ Our application is `kungfukoi/Newt_Node`, normally at `C:\dev\Newt_Node`. Keep a
 Fetch/read current branches and documentation, then compare actual feature behavior with local source and tests. Different commit hashes do not establish that a feature is missing: these repositories have diverged and features are often adapted rather than merged wholesale. Preserve our workflow compatibility, provider routing, durable jobs and Windows/macOS behavior. Record the source SHA and any meaningful adaptations when a feature is adopted.
 
 This list is a durable reference. It does not request automatic merging, publication, messages to the authors, or scheduled monitoring. Obtain fresh user direction for those actions.
+
+## Approved selective integration — October 29, 2026
+
+Source: SugerMilks/NewtNode `72c77e39ea317e174146b10047bcece67c0dbe00`. Approved: multiple canvases; Vector; ReFrame (Auto Refine default off); authored Storyboard shots; PDF script import; camera personality; Explore art direction (retain Style input); menu improvements (retain Image/Video pages); Timeline navigation. Skip Watch Me learning. Commit each feature after validation.
+
+- Explore art direction: adapted in 4.34.0-beta.0, preserving local references and provider behavior.

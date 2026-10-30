@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { exploreDefaults, exploreRequest, exploreDirectionRequest, explorePlanningPrompt, normalizeExploreData, normalizeExplorePlan, explorePlanSchema, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreStyleFamilies, exploreReferenceDescription } from "../src/explore.js";
 import { gradePresetPrompts } from "../src/colorLook.js";
+import { exploreMediumGuidance } from "../src/exploreArtDirection.js";
 import { stylePresetPrompts } from "../src/modelOptions.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { runExploreGeneration } from "../src/nodeRunners/explore.js";
@@ -155,7 +156,7 @@ test("random choices balance each preset pool and resolved guidance remains cons
   const planning = JSON.parse(explorePlanningPrompt(request));
   request.directionLooks.forEach((look, index) => {
     const resolved = exploreDirectionRequest(request, index);
-    assert.equal(resolved.style, stylePresetPrompts[look.styleFamily]);
+    assert.equal(resolved.style, exploreMediumGuidance[look.styleFamily]);
     assert.equal(resolved.grade, gradePresetPrompts[look.gradePreset]);
     assert.equal(planning.lookGuidance.styles[look.styleFamily], resolved.style);
     assert.equal(planning.lookGuidance.grades[look.gradePreset], resolved.grade);
@@ -252,7 +253,7 @@ test("random batches save actual looks per result, resume the same choices and r
 test("new look requests require updated backend support before paid planning", async t => {
   let supported = false, posts = 0;
   t.mock.method(globalThis, "fetch", async (url, options) => {
-    if (String(url).endsWith("/api/health")) return Response.json({ routes: { exploreLookVariation: supported } });
+    if (String(url).endsWith("/api/health")) return Response.json({ routes: { exploreLookVariation: supported, exploreArtDirection: supported } });
     assert.equal(options.method, "POST"); posts++;
     return Response.json({ directions: [direction()] });
   });

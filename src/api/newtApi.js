@@ -335,6 +335,7 @@ export const nodeApi = {
   async planExplore(body) {
     if (body.version >= 2) {
       const health = await getJson("/api/health", "Could not verify Explore look controls.");
+      if (body.version >= 3 && health.routes?.exploreArtDirection !== true) throw new Error("Restart the NewtNode backend to activate broader art directions. No planning or generation was submitted.");
       if (health.routes?.exploreLookVariation !== true) throw new Error("Restart the NewtNode backend to activate Explore's new look controls. No planning or generation was submitted.");
     }
     return postJson("/api/node/explore-plan", body, "Explore planning");

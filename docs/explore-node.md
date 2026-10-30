@@ -48,3 +48,5 @@ New runs generate one image per direction, and More Like This adds one image. Ne
 ## Maintenance
 
 Prompt rules, request construction and result normalization live in `src/explore.js`; provider-independent orchestration in `src/nodeRunners/explore.js`; planning route in `server/routes/explore.js`; UI in `src/components/ExploreNodeBody.jsx`. Update these rules and `test/explore.test.js` together. The `e2e/explore.spec.js` browser tests use mocked providers and bundled media, never paid generations.
+
+Explore art direction v3 assigns contrasting strategies across unlocked composition, camera, lighting, palette and materials within one planning call. Full planned decisions accompany image requests; saved queues retain their original prompt versions. Our connected Style input, reference controls and provider routing remain intact. Requires the exploreArtDirection backend capability. Adapted from SugerMilks/NewtNode 72c77e39ea317e174146b10047bcece67c0dbe00.

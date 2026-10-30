@@ -1234,6 +1234,7 @@ function buildHealthPayload() {
       seedanceVideoEditing: true,
       seedanceKreaVideoEditing: true,
       exploreLookVariation: true,
+      exploreArtDirection: true,
       elevenLabsV4: true,
       explore: true,
       storyboardRevisions: true,
