@@ -6,6 +6,7 @@ import "./CanvasMenuBar.css";
 export default function CanvasMenuBar({ projectName, onRename, projectPath, projects, fileMenuOpen, setFileMenuOpen, projectMenuOpen, setProjectMenuOpen,
   onNew, onOpen, onSave, onSaveAs, onImport, onLoad, onDelete, presets, selectedCount = 0, visible = true }) {
   const root = React.useRef(null), renameInput = React.useRef(null), originalName = React.useRef("");
+  const initialMenuFocus = React.useRef("first");
   const [presetsOpen, setPresetsOpen] = React.useState(false);
   const openMenu = fileMenuOpen ? "file" : projectMenuOpen ? "recent" : presetsOpen && presets ? "presets" : "";
   const command = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -25,7 +26,9 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     if (!openMenu) return;
     const panel = root.current?.querySelector(`[data-menu="${openMenu}"]`);
     const target = openMenu === "presets" ? panel?.querySelector("select:not(:disabled)") || panel?.querySelector("button:not(:disabled)") : panel?.querySelector("[role^='menuitem']");
-    target?.focus();
+    const last = initialMenuFocus.current === "last" && openMenu !== "presets" ? [...(panel?.querySelectorAll("[role^=menuitem]:not(:disabled)") || [])].at(-1) : null;
+    (last || target)?.focus();
+    initialMenuFocus.current = "first";
   }, [openMenu]);
   React.useEffect(() => {
     if (!openMenu) return;
@@ -72,7 +75,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
   const trigger = (name, label, children, className = "") => <button type="button" className={`canvas-menu-trigger ${className}`} data-menu-trigger={name}
     aria-label={label} aria-haspopup={name === "presets" ? "dialog" : "menu"} aria-expanded={openMenu === name} aria-controls={`canvas-${name}-menu`} title={label}
     onClick={() => open(openMenu === name ? "" : name)} onKeyDown={event => {
-      if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); open(name); }
+      if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); initialMenuFocus.current = event.key === "ArrowUp" ? "last" : "first"; open(name); }
       if (event.key === "Escape") { event.preventDefault(); close(true); }
       if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
         event.preventDefault();
@@ -82,7 +85,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
     }}>{children}</button>;
   const item = (label, Icon, callback, shortcut) => <button type="button" role="menuitem" onClick={() => action(callback)}><Icon size={15} /><span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
   return <div className="canvas-menu-bar" ref={root} role="toolbar" aria-label="Project controls" onKeyDown={menuKeys}
-    onBlurCapture={event => { if (openMenu === "presets" && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close(); }}>
+    onBlurCapture={event => { if (openMenu && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close(); }}>
     <div className="canvas-recent-menu">
       {trigger("recent", "Recent Projects", <History size={19} />)}
       {projectMenuOpen && <div className="canvas-menu-dropdown canvas-recent-dropdown" role="menu" aria-label="Recent Projects" id="canvas-recent-menu" data-menu="recent">
