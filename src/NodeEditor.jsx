@@ -4141,7 +4141,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     try {
       setCompilingTransferNodeId(node.id);
       updateNode(node.id, { status: "compiling", error: "" });
-      const collageBlob = await createTransferCollageBlob(transferImages, moodBoardOutputFileName, { contain: node.data.libraryBoard === true });
+      const collageBlob = await createTransferCollageBlob(transferImages, moodBoardOutputFileName);
       if (token.stopped) return;
       const transferFile = new File([collageBlob], moodBoardOutputFileName, { type: "image/png" });
       const form = new FormData();

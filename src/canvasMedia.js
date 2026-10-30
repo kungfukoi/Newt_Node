@@ -1,5 +1,3 @@
-import { clamp } from "./nodeGeometry.js";
-
 const defaultMoodBoardOutputFileName = "MOOD_BOARD.png";
 
 export function canvasToBlob(canvas, type, errorMessage = "Could not render still frame.") {
@@ -11,7 +9,7 @@ export function canvasToBlob(canvas, type, errorMessage = "Could not render stil
   });
 }
 
-export async function createTransferCollageBlob(images, outputLabel = defaultMoodBoardOutputFileName, { contain = false } = {}) {
+export async function createTransferCollageBlob(images, outputLabel = defaultMoodBoardOutputFileName) {
   const loadedImages = await Promise.all(images.map((image) => loadCanvasImage(image.localUrl)));
   const layout = createMoodBoardLayout(loadedImages);
   const canvas = document.createElement("canvas");
@@ -20,12 +18,9 @@ export async function createTransferCollageBlob(images, outputLabel = defaultMoo
 
   const context = canvas.getContext("2d");
   layout.cells.forEach((cell) => {
-    if (contain) {
-      const scale = Math.min(cell.width / cell.image.naturalWidth, cell.height / cell.image.naturalHeight);
-      const width = cell.image.naturalWidth * scale, height = cell.image.naturalHeight * scale;
-      context.fillStyle = "#17171c"; context.fillRect(cell.x, cell.y, cell.width, cell.height);
-      context.drawImage(cell.image, cell.x + (cell.width - width) / 2, cell.y + (cell.height - height) / 2, width, height);
-    } else drawImageCover(context, cell.image, cell.x, cell.y, cell.width, cell.height);
+    // Each integer cell shares its edges with its neighbors. Draw the complete
+    // source into that cell: no background fill, crop, padding or fractional seam.
+    context.drawImage(cell.image, cell.x, cell.y, cell.width, cell.height);
   });
 
   return canvasToBlob(canvas, "image/png", `Could not create ${outputLabel}.`);
@@ -36,8 +31,6 @@ export function createMoodBoardLayout(images) {
 
   const canvasWidth = 1536;
   const preferredAspect = 16 / 9;
-  const minAspect = 1.25;
-  const maxAspect = 2.35;
   const items = images.map((image, index) => ({
     image,
     index,
@@ -57,16 +50,12 @@ export function createMoodBoardLayout(images) {
       const naturalHeights = rows.map((row) => canvasWidth / row.reduce((total, item) => total + item.ratio, 0));
       const naturalHeight = naturalHeights.reduce((total, height) => total + height, 0);
       const naturalAspect = canvasWidth / naturalHeight;
-      const targetAspect = clamp(naturalAspect, minAspect, maxAspect);
-      const targetHeight = canvasWidth / targetAspect;
-      const heightScale = targetHeight / naturalHeight;
       const rowBalancePenalty = rowBalanceScore(naturalHeights);
       const tinyCellPenalty = moodBoardTinyCellPenalty(rows, naturalHeights, canvasWidth);
       const orderPenalty = orderIndex === 0 ? 0 : 0.08;
       const dominantWideBonus = rows[0]?.length === 1 && rows[0][0]?.ratio > 1.45 ? -0.08 : 0;
       const score =
         Math.abs(Math.log(naturalAspect / preferredAspect)) * 0.7 +
-        Math.abs(Math.log(heightScale)) * 1.8 +
         rowBalancePenalty * 0.45 +
         tinyCellPenalty +
         rows.length * 0.025 +
@@ -74,26 +63,36 @@ export function createMoodBoardLayout(images) {
         dominantWideBonus;
 
       if (!bestCandidate || score < bestCandidate.score) {
-        bestCandidate = { rows, naturalHeights, targetHeight, score };
+        bestCandidate = { rows, naturalHeights, naturalHeight, score };
       }
     });
   });
 
-  const canvasHeight = Math.round(bestCandidate.targetHeight);
-  const naturalTotalHeight = bestCandidate.naturalHeights.reduce((total, height) => total + height, 0);
-  const heightScale = canvasHeight / naturalTotalHeight;
+  // The images determine the board's aspect ratio. Bound the raster dimensions
+  // for unusually tall sources without forcing a landscape delivery shape.
+  const scale = Math.min(1, 8192 / bestCandidate.naturalHeight);
+  const outputWidth = Math.max(...bestCandidate.rows.map(row => row.length), Math.round(canvasWidth * scale));
+  const canvasHeight = Math.max(bestCandidate.rows.length, Math.round(bestCandidate.naturalHeight * scale));
   const cells = [];
   let y = 0;
+  let naturalY = 0;
 
   bestCandidate.rows.forEach((row, rowIndex) => {
     const isLastRow = rowIndex === bestCandidate.rows.length - 1;
-    const rowHeight = isLastRow ? canvasHeight - y : bestCandidate.naturalHeights[rowIndex] * heightScale;
+    naturalY += bestCandidate.naturalHeights[rowIndex];
+    const remainingRows = bestCandidate.rows.length - rowIndex - 1;
+    const bottom = isLastRow ? canvasHeight : Math.min(canvasHeight - remainingRows, Math.max(y + 1, Math.round(naturalY / bestCandidate.naturalHeight * canvasHeight)));
+    const rowHeight = bottom - y;
     const ratioTotal = row.reduce((total, item) => total + item.ratio, 0);
     let x = 0;
+    let ratioSoFar = 0;
 
     row.forEach((item, itemIndex) => {
       const isLastItem = itemIndex === row.length - 1;
-      const width = isLastItem ? canvasWidth - x : canvasWidth * (item.ratio / ratioTotal);
+      ratioSoFar += item.ratio;
+      const remainingItems = row.length - itemIndex - 1;
+      const right = isLastItem ? outputWidth : Math.min(outputWidth - remainingItems, Math.max(x + 1, Math.round(outputWidth * ratioSoFar / ratioTotal)));
+      const width = right - x;
       cells.push({
         image: item.image,
         x,
@@ -101,14 +100,14 @@ export function createMoodBoardLayout(images) {
         width,
         height: rowHeight
       });
-      x += width;
+      x = right;
     });
 
-    y += rowHeight;
+    y = bottom;
   });
 
   return {
-    width: canvasWidth,
+    width: outputWidth,
     height: canvasHeight,
     cells
   };
@@ -188,7 +187,9 @@ function moodBoardRowPartitions(count) {
 function imageAspectRatio(image) {
   const width = image.naturalWidth || image.width || 1;
   const height = image.naturalHeight || image.height || 1;
-  return clamp(width / height, 0.25, 4.5);
+  const ratio = width / height;
+  if (!Number.isFinite(ratio) || ratio <= 0) throw new Error("Mood board images must have valid dimensions.");
+  return ratio;
 }
 
 function rowBalanceScore(heights) {
