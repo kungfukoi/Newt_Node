@@ -38,3 +38,16 @@
 .canvas-presets-dropdown .newt-preset-save-selection { padding-top: 12px; border-top: 1px solid #ffffff10; }
 .canvas-presets-dropdown .newt-preset-save-selection button { width: 100%; justify-content: flex-start; border: 0; background: transparent; padding: 0 2px; font-size: 12px; }
 .canvas-presets-dropdown [role="alert"] { color: #ed9b8b; font-size: 11px; overflow-wrap: anywhere; }
+.canvas-presets-dropdown { padding: 8px; }
+.canvas-presets-dropdown .newt-preset-library { gap: 7px; }
+.canvas-presets-dropdown .newt-preset-library-heading { padding: 2px 6px; }
+.preset-workflow-list { display: grid; gap: 2px; }
+.preset-workflow-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.canvas-presets-dropdown .preset-workflow-load { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 2px; padding: 7px 6px; border: 0; background: transparent; text-align: left; }
+.preset-workflow-load span { white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
+.preset-workflow-load small { color: #96938d; font-size: 10px; font-weight: 400; }
+.canvas-presets-dropdown .preset-workflow-tool { flex: 0 0 26px; width: 26px; min-height: 30px; padding: 0; border: 0; background: transparent; color: #aaa; }
+.canvas-presets-dropdown .preset-workflow-delete:not(:disabled):hover { color: #ffa38b; background: #ec5b5b24; }
+.canvas-presets-dropdown .newt-preset-bindings { padding: 8px 6px 0; }
+.canvas-presets-dropdown .newt-preset-library-actions { grid-template-columns: 1fr; }
+.canvas-presets-dropdown .newt-preset-save-selection { padding: 7px 6px 0; }

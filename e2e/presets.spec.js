@@ -9,7 +9,7 @@ test('built-in presets insert as editable nodes and cannot be deleted',async({pa
  await page.route('**/api/newt-presets/*',r=>r.fulfill({json:presets.find(p=>r.request().url().endsWith(p.id))}));
  await page.getByRole('toolbar',{name:'Project controls'}).getByRole('button',{name:'Presets',exact:true}).click();
  await page.getByRole('button',{name:'Refresh presets',exact:true}).click();
- for(const p of presets){await page.getByRole('combobox',{name:'Newt Preset',exact:true}).selectOption(p.id);await expect(page.getByRole('button',{name:'Delete preset',exact:true})).toBeDisabled();const before=await page.locator('[data-node-card-id]').count();await page.getByRole('button',{name:'Insert preset',exact:true}).click();await expect(page.locator('[data-node-card-id]')).toHaveCount(before+p.graph.nodes.length);}
+ for(const p of presets){await expect(page.getByRole('button',{name:`Delete ${p.name}`,exact:true})).toHaveCount(0);const row=page.getByRole('button',{name:`Insert ${p.name}`,exact:true});await expect(row).toContainText('(System)');const before=await page.locator('[data-node-card-id]').count();await row.click();await expect(page.locator('[data-node-card-id]')).toHaveCount(before+p.graph.nodes.length);}
  expect(errors).toEqual([]);
 });
 
@@ -38,10 +38,11 @@ test('toolbar preset library preserves bindings, saves selections and deletes pe
  await bar.getByRole('button', { name: 'Presets', exact: true }).focus();
  await page.keyboard.press('ArrowDown');
  const library = page.getByRole('dialog', { name: 'Workflow presets', exact: true });
- await expect(library.getByRole('combobox', { name: 'Newt Preset', exact: true })).toBeFocused();
+ await expect(library.getByRole('button', { name: 'Refresh presets', exact: true })).toBeFocused();
  await expect(library.getByRole('button', { name: 'Save selection as preset…' })).toBeDisabled();
  await library.getByRole('button', { name: 'Refresh presets', exact: true }).click();
- await library.getByRole('combobox', { name: 'Newt Preset', exact: true }).selectOption(preset.id);
+ await expect(library.getByRole('button', { name: `Insert ${preset.name}`, exact: true })).toContainText('(User)');
+ await library.getByRole('button', { name: `Configure ${preset.name}`, exact: true }).click();
  await library.getByRole('combobox', { name: 'Reference image', exact: true }).selectOption('source');
  await page.screenshot({ path: testInfo.outputPath('toolbar-presets-desktop.png') });
  await library.getByRole('button', { name: 'Insert preset', exact: true }).click();
@@ -54,11 +55,11 @@ test('toolbar preset library preserves bindings, saves selections and deletes pe
  await expect(saveDialog).toHaveCount(0);
  expect(saved.name).toBe('Selected product edit'); expect(saved.graph.nodes).toHaveLength(1);
  await bar.getByRole('button', { name: 'Presets', exact: true }).click();
- await expect(library.getByRole('combobox', { name: 'Newt Preset', exact: true })).toHaveValue('saved-selection');
+ await expect(library.getByRole('button', { name: 'Insert Selected product edit', exact: true })).toBeVisible();
  page.once('dialog', dialog => dialog.accept());
- await library.getByRole('button', { name: 'Delete preset', exact: true }).click();
+ await library.getByRole('button', { name: 'Delete Selected product edit', exact: true }).click();
  await expect.poll(() => deleted).toBe('saved-selection');
- await expect(library.getByRole('combobox', { name: 'Newt Preset', exact: true })).toHaveValue('');
+ await expect(library.getByRole('button', { name: 'Insert Selected product edit', exact: true })).toHaveCount(0);
  await page.setViewportSize({ width: 375, height: 812 });
  await expect(library).toBeVisible();
  const bounds = await library.boundingBox();

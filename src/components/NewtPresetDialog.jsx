@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { newtPresetInputRoles } from "../newtPresets.js";
 
 export function NewtPresetDialog({ controller }) {
@@ -119,18 +119,16 @@ export function NewtPresetLibrary({ controller, canSaveSelection, onSaveSelectio
           <RefreshCw size={14} />
         </button>
       </div>
-      <label className="newt-preset-choice">
-        <span>Choose a preset</span>
-        <select value={controller.selectedId} onChange={(event) => controller.select(event.target.value)} disabled={controller.busy} aria-label="Newt Preset">
-          <option value="">{controller.items.length ? "Select preset" : "No presets saved"}</option>
-          {[true, false].map(system => {
-            const items = controller.items.filter(item => Boolean(item.isSystem) === system);
-            return items.length ? <optgroup key={String(system)} label={system ? "Built-in presets" : "My presets"}>
-              {items.map(item => <option key={item.id} value={item.id}>{item.name} · {item.nodeCount} nodes</option>)}
-            </optgroup> : null;
-          })}
-        </select>
-      </label>
+      <div className="preset-workflow-list" aria-label="Saved presets">
+        {!controller.items.length && <small className="canvas-menu-empty">No saved presets</small>}
+        {controller.items.map(preset => <div className="preset-workflow-row" key={preset.id}>
+          <button type="button" className="preset-workflow-load" aria-label={`Insert ${preset.name}`} title={`Insert ${preset.name}`} disabled={controller.busy} onClick={() => controller.insert(preset.id, {})}>
+            <span>{preset.name}</span><small>({preset.isSystem ? "System" : "User"})</small>
+          </button>
+          {!!preset.slots?.length && <button type="button" className="preset-workflow-tool" aria-label={`Configure ${preset.name}`} title="Choose reusable inputs" disabled={controller.busy} aria-expanded={selected?.id === preset.id} onClick={() => controller.select(selected?.id === preset.id ? "" : preset.id)}><SlidersHorizontal size={14} /></button>}
+          {!preset.isSystem && <button type="button" className="preset-workflow-tool preset-workflow-delete" title={`Delete ${preset.name}`} aria-label={`Delete ${preset.name}`} disabled={controller.busy} onClick={() => controller.remove(preset.id)}><Trash2 size={14} /></button>}
+        </div>)}
+      </div>
       {!!selected?.slots?.length && (
         <div className="newt-preset-bindings">
           {selected.slots.map((slot) => (
@@ -146,14 +144,11 @@ export function NewtPresetLibrary({ controller, canSaveSelection, onSaveSelectio
           ))}
         </div>
       )}
-      <div className="newt-preset-library-actions">
-        <button type="button" className="newt-preset-insert" onClick={controller.insert} disabled={controller.busy || !selected} title="Insert preset" aria-label="Insert preset">
+      {!!selected?.slots?.length && <div className="newt-preset-library-actions">
+        <button type="button" className="newt-preset-insert" onClick={() => controller.insert()} disabled={controller.busy} title="Insert preset" aria-label="Insert preset">
           <Plus size={16} /><span>Insert preset</span>
         </button>
-        <button type="button" className="newt-preset-delete" onClick={controller.remove} disabled={controller.busy || !selected || selected.isSystem} title={selected?.isSystem ? "Built-in presets cannot be deleted" : "Delete preset"} aria-label="Delete preset">
-          <Trash2 size={15} /><span>Delete</span>
-        </button>
-      </div>
+      </div>}
       {controller.error && <small role="alert">{controller.error}</small>}
       <div className="newt-preset-save-selection">
         <button type="button" onClick={onSaveSelection} disabled={controller.busy || !canSaveSelection} title={canSaveSelection ? "Save selected nodes as a reusable preset" : "Select canvas nodes to save a preset"}>

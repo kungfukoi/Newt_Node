@@ -25,7 +25,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
   React.useEffect(() => {
     if (!openMenu) return;
     const panel = root.current?.querySelector(`[data-menu="${openMenu}"]`);
-    const target = openMenu === "presets" ? panel?.querySelector("select:not(:disabled)") || panel?.querySelector("button:not(:disabled)") : panel?.querySelector("[role^='menuitem']");
+    const target = openMenu === "presets" ? panel?.querySelector(".preset-workflow-load:not(:disabled)") || panel?.querySelector("button:not(:disabled)") : panel?.querySelector("[role^='menuitem']");
     const last = initialMenuFocus.current === "last" && openMenu !== "presets" ? [...(panel?.querySelectorAll("[role^=menuitem]:not(:disabled)") || [])].at(-1) : null;
     (last || target)?.focus();
     initialMenuFocus.current = "first";

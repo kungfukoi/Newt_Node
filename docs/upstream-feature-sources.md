@@ -1,5 +1,7 @@
 # Upstream feature sources
 
+Preset dropdown presentation (4.44.2): adapted SugerMilks 72c77e3 `PresetWorkflowPicker.jsx` rows with name and System/User subtitle, direct insertion and per-user-preset deletion. Retains our Layers trigger icon, refresh/save-selection controls and optional reusable-input configuration.
+
 The user requested that these repositories be remembered as sources to evaluate and selectively port features from. Deadmeat is James Fisher (`jamesmfisher1979-source`). The GitHub spelling of Sugarmilks's account is `SugerMilks`.
 
 | Person | Repository | Purpose | Local checkout / tracking |
