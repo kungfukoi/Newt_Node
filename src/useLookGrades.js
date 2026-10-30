@@ -17,6 +17,7 @@ export function useLookGrades(nodes, updateNode, extractPalette) {
         if (node.data.customPaletteLookKey) callbacks.current.updateNode(node.id, releaseLookGrade(node.data));
         continue;
       }
+      if (node.data.customPaletteLookOverride) { pending.current.delete(node.id); continue; }
       if (node.data.customPaletteLookKey === binding.key) {
         // An interrupted local extraction can resume when a workflow is reopened.
         if (node.data.customPaletteColors?.length || node.data.customPaletteError || pending.current.has(node.id)) continue;
@@ -25,11 +26,11 @@ export function useLookGrades(nodes, updateNode, extractPalette) {
       const job = { key: binding.key };
       pending.current.set(node.id, job);
       callbacks.current.updateNode(node.id, lookGradeStart(binding));
-      const isCurrent = () => pending.current.get(node.id) === job && latest.current.some(current => current.id === node.id && lookGradeBinding(current.data.libraryStyle)?.key === binding.key);
+      const isCurrent = () => pending.current.get(node.id) === job && latest.current.some(current => current.id === node.id && !current.data.customPaletteLookOverride && lookGradeBinding(current.data.libraryStyle)?.key === binding.key);
       Promise.resolve().then(() => callbacks.current.extractPalette(binding.reference.localUrl)).then(extracted => {
         if (!isCurrent()) return;
         if (!extracted.colors?.length) throw new Error("No usable colors found in the Look’s first example.");
-        callbacks.current.updateNode(node.id, { customPaletteStatus: "", customPaletteError: "", customPaletteColors: extracted.colors,
+        callbacks.current.updateNode(node.id, { customPaletteLookKey: binding.key, customPaletteStatus: "", customPaletteError: "", customPaletteColors: extracted.colors,
           customPalettePicker: extracted.colors[0].hex, customPalettePreviewUrl: binding.reference.localUrl });
       }).catch(error => {
         if (isCurrent()) callbacks.current.updateNode(node.id, { customPaletteStatus: "", customPaletteError: error.message || "Could not extract the Look’s grade." });

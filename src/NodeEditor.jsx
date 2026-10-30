@@ -177,7 +177,7 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import LibraryStylePicker from "./components/LibraryStylePicker.jsx";
 import { libraryPrompt, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
-import { lookGradeBinding, lookSelectionPatch, releaseLookGrade } from "./lookGrade.js";
+import { lookGradeBinding, lookSelectionPatch, releaseLookGrade, lookGradeEditPatch } from "./lookGrade.js";
 import { useLookGrades } from "./useLookGrades.js";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
@@ -2806,6 +2806,11 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
   }
 
   function updateNode(nodeId, patch) {
+    const gradeNode = nodeMapRef.current.get(nodeId);
+    if (gradeNode?.type === "style") {
+      patch = lookGradeEditPatch(gradeNode.data, patch);
+      if (!patch) return;
+    }
     if (["image", "video"].includes(patch.batchMediaType)) {
       const previous = nodesRef.current.find(node => node.id === nodeId);
       if (previous?.data.batchMediaType !== patch.batchMediaType) setEdges(current => current.filter(edge => {
@@ -13546,7 +13551,7 @@ function NodeBody({
     const selectedPreset = node.data.stylePreset || "None";
     const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
     const customPaletteSelected = selectedGrade === "Custom";
-    const lookGradeLocked = Boolean(lookGradeBinding(node.data.libraryStyle));
+    const lookGradeDefault = Boolean(lookGradeBinding(node.data.libraryStyle)) && !node.data.customPaletteLookOverride;
     const paletteColors = normalizedCustomPaletteColors(node.data);
     const styleSelected = styleOutputEnabled(node.data);
     const customGradeAnalysis = customPaletteSelected && paletteColors.length
@@ -13575,8 +13580,10 @@ function NodeBody({
     }
 
     async function handlePaletteImageSource({ sourceName, extract }) {
+      const paletteRequestId = crypto.randomUUID();
       onUndoSnapshot?.();
       onUpdate(node.id, {
+        customPaletteRequestId: paletteRequestId,
         customPaletteStatus: "extracting",
         customPaletteError: "",
         customPaletteSourceName: sourceName,
@@ -13588,6 +13595,7 @@ function NodeBody({
         const extracted = await extract();
         const firstExtractedColor = extracted.colors?.[0]?.hex;
         onUpdate(node.id, {
+          customPaletteResultFor: paletteRequestId, customPaletteRequestId: paletteRequestId,
           customPaletteStatus: "",
           customPaletteError: "",
           customPaletteSourceName: sourceName,
@@ -13598,6 +13606,7 @@ function NodeBody({
         });
       } catch (error) {
         onUpdate(node.id, {
+          customPaletteResultFor: paletteRequestId, customPaletteRequestId: paletteRequestId,
           customPaletteStatus: "",
           customPaletteError: error.message || "Could not extract palette from image."
         });
@@ -13735,7 +13744,7 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Grade</span>
-          <select aria-label="Grade" disabled={lookGradeLocked} title={lookGradeLocked ? "Grade is locked to the selected Look" : "Choose a grade"} value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
+          <select aria-label="Grade" title="Choose a grade" value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
             {gradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -13744,11 +13753,11 @@ function NodeBody({
 
         <LibraryStylePicker data={node.data} onChange={patch => { onUndoSnapshot?.(); onUpdate(node.id, patch); }} />
         {customPaletteSelected && (
-          <section className={`custom-palette-panel ${lookGradeLocked ? "look-grade-locked" : ""}`} onDragOver={allowFileDrop} onDrop={lookGradeLocked ? allowFileDrop : handlePaletteDrop}>
-            {lookGradeLocked && <small className="custom-palette-status">Grade locked to {node.data.libraryStyle.name} · first example</small>}
-            <fieldset className="look-grade-controls" disabled={lookGradeLocked}>
+          <section className={`custom-palette-panel ${lookGradeDefault ? "look-grade-default" : ""}`} onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
+            {lookGradeDefault && <small className="custom-palette-status">Default grade from {node.data.libraryStyle.name} · replace or edit as needed</small>}
+            <fieldset className="look-grade-controls">
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
-              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={lookGradeLocked ? "First example from the selected Look" : node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
+              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
                   <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={displayMediaUrl(previewImageUrl(node.data.customPalettePreviewUrl))} alt="Extracted custom palette" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 ) : (
@@ -13766,7 +13775,7 @@ function NodeBody({
                   }}
                 />
               </label>
-              {hasImagePalette && !lookGradeLocked && (
+              {hasImagePalette && (
                 <button type="button" className="custom-palette-image-clear" onClick={clearCustomPalette} title="Clear extracted palette">
                   <Trash2 size={15} />
                 </button>
@@ -25802,6 +25811,8 @@ function normalizeStyleData(data = {}) {
     customPalettePreviewUrl: String(data.customPalettePreviewUrl || ""),
     customPaletteSourceName: String(data.customPaletteSourceName || ""),
     customPaletteLookKey: String(data.customPaletteLookKey || ""),
+    customPaletteLookOverride: Boolean(data.customPaletteLookOverride),
+    customPaletteRequestId: "",
     customPaletteStatus: "",
     customPaletteError: ""
   };

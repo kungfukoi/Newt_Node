@@ -10561,4 +10561,4 @@ video.newtnode-video-fallback {
 
 .look-grade-controls { display:grid; gap:9px; border:0; padding:0; margin:0; min-width:0; }
 
-.custom-palette-panel.look-grade-locked .custom-palette-preview { object-fit:contain; }
+.custom-palette-panel.look-grade-default .custom-palette-preview { object-fit:contain; }
