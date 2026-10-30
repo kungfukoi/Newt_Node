@@ -13,6 +13,9 @@ saved_workflows/dependencies/
 saved_workflows/.*.tmp
 server/data/history.json
 server/data/stats-ledger.json
+server/data/feature-usage.json
+server/data/feature-usage.json.bak
+server/data/feature-usage.json.corrupt-*
 server/data/stats-ledger.json.bak
 server/data/history.json.bak
 server/data/history.json.corrupt-*
