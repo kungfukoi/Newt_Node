@@ -1,3 +1,4 @@
+import { storyboardCameraChoices, storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -15,6 +16,7 @@ import { stylePresetPrompts, shotPresetPrompts, lensPresetPrompts, typePresetPro
 const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 function getFunction(source, name, deps = {}) {
+  deps = { storyboardCameraChoices, storyboardCameraRenderingPrompt, ...deps };
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.notEqual(start, -1);
   const rest = source.slice(start);

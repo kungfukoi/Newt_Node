@@ -1,3 +1,4 @@
+import { storyboardCinematographyPlanningPrompt } from "../../src/storyboardCinematography.js";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { creativeOpenAiModel, creativeFalModel, creativeFinalOutputText, creativeSchemas } from "../creative-llm.js";
@@ -68,7 +69,7 @@ Resolve these character staging decisions yourself using the scene, current fram
       assertStoryboardCharacterTags(characters);
       const frames = Array.isArray(body.frames) ? body.frames : [];
       if (frames.length > 35 || new Set(frames.map(frame => frame.id)).size !== frames.length) throw new Error("Storyboard needs up to 35 uniquely identified panels.");
-      const context = `Scene: ${scene}\nPlanning settings: ${JSON.stringify(storyboardPlanningSettings(body))}\nNotes: ${String(body.notes || "").slice(0, 8000)}\nCharacters: ${JSON.stringify(characters.map(({ name, tag }) => ({ name, tag })))}\n${storyboardCastPlanningRules}\n${storyboardSpatialRules}\n${storyboardPromptPolicy(body.useStoryboardStyle !== false)}`;
+      const context = `Scene: ${scene}\nPlanning settings: ${JSON.stringify(storyboardPlanningSettings(body))}\nNotes: ${String(body.notes || "").slice(0, 8000)}\nCharacters: ${JSON.stringify(characters.map(({ name, tag }) => ({ name, tag })))}\n${storyboardCastPlanningRules}\n${storyboardSpatialRules}\n${storyboardCinematographyPlanningPrompt(body.storyboardCameraPersonality)}\n${storyboardPromptPolicy(body.useStoryboardStyle !== false)}`;
       if (mode === "plan-v2") {
         const count = /^auto$/i.test(String(body.frameCount || "Auto")) ? null : Number(body.frameCount);
         if (count !== null && (!Number.isInteger(count) || count < 1 || count > 35)) throw new Error("Choose Auto or between 1 and 35 panels.");

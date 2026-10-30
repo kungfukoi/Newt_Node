@@ -4,7 +4,7 @@ import { storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import { storyboardQcMode } from "../src/storyboardQc.js";
 
-export const storyboardQcPolicyVersion = "balanced-v2";
+export const storyboardQcPolicyVersion = "balanced-v3";
 export const storyboardQcFailureTypes = ["none", "polish", "identity", "missing_cast", "spatial", "action", "prop", "physical", "rendering"];
 const essentialFailures = new Set(storyboardQcFailureTypes.slice(2));
 const totalCost = costs => ({ amountUsd: costs.every(cost => Number.isFinite(cost?.amountUsd)) ? costs.reduce((sum, cost) => sum + cost.amountUsd, 0) : null, currency: "USD", source: "Storyboard QC usage", estimated: true });

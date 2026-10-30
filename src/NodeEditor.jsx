@@ -1,3 +1,4 @@
+import { storyboardCameraPersonalities, normalizeStoryboardCameraPersonality, storyboardCameraChoices, storyboardCameraRenderingPrompt } from "./storyboardCinematography.js";
 import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
@@ -4454,6 +4455,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         storyboardPacing: currentNode.data.storyboardPacing,
         storyboardTargetDuration: currentNode.data.storyboardTargetDuration,
         useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
+        storyboardCameraPersonality: currentNode.data.storyboardCameraPersonality,
         notes: directorControlsScene ? "" : currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode, { includeInternal: !directorControlsScene }),
         locations: storyboardSceneReferenceSources(incoming.sceneReferenceIn || [], currentIncomingByNode),
@@ -4506,7 +4508,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const incomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
       const incoming = expandStoryboardDirectorIncoming(incomingByNode[node.id] || {}, incomingByNode);
       const reviewRequest = current.data.storyboardSkillVersion === storyboardSkillVersion ? nodeApi.reviewStoryboardSequenceV2 : nodeApi.reviewStoryboardSequence;
-      const { response, data } = await reviewRequest({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming), continuity: current.data.storyboardContinuity, useStoryboardStyle: current.data.useStoryboardStyle !== false, characters: storyboardCharacterSummariesForNode(current, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }) });
+      const { response, data } = await reviewRequest({ ...workflowRequestContext(), nodeId:node.id, nodeTitle:current.data.title, frames, boardUrl, sceneDescription:storyboardSceneDescriptionForNode(current,incoming), storyboardCameraPersonality: current.data.storyboardCameraPersonality, continuity: current.data.storyboardContinuity, useStoryboardStyle: current.data.useStoryboardStyle !== false, characters: storyboardCharacterSummariesForNode(current, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }) });
       if (token.stopped) return;
       if (!response.ok) throw new Error(data.error || "Sequence review failed.");
       updateNode(node.id, { status: "complete", storyboardSequenceReview: { ...data.review, signature }, storyboardRevisionWarning: data.warning || "" });
@@ -4539,7 +4541,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       updateNode(node.id, { status: "revising", storyboardRevisionActive: true, error: "", storyboardRevisionWarning: "" });
       const revisionRequest = currentNode.data.storyboardSkillVersion === storyboardSkillVersion ? nodeApi.reviseStoryboardV2 : nodeApi.reviseStoryboard;
       const { response, data } = await revisionRequest({ ...workflowRequestContext(), nodeId: node.id, nodeTitle: currentNode.data.title,
-        continuity: currentNode.data.storyboardContinuity, useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
+        storyboardCameraPersonality: currentNode.data.storyboardCameraPersonality, continuity: currentNode.data.storyboardContinuity, useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
         frames, frameIds, instruction, sceneDescription, notes: currentNode.data.storyboardNotes || "",
         characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, incomingByNode, { includeInternal: !connectedDirectorPackageSource(incoming.directorIn || []) }),
         locations: storyboardSceneReferenceSummaries(incoming.sceneReferenceIn || [], incomingByNode), props: storyboardPropReferenceSummaries(incoming.propsIn || [], incomingByNode) });
@@ -13063,6 +13065,7 @@ function NodeBody({
                 <NodeRow label="Pacing"><select aria-label="Storyboard pacing" disabled={storyboardLocked || directorControlsScene} value={storyboardPlanningSettings(node.data).pacing} onChange={event => onUpdate(node.id, { storyboardPacing: event.target.value })}>{storyboardPacing.map(value => <option key={value}>{value}</option>)}</select></NodeRow>
                 <NodeRow label="Target Duration"><input aria-label="Storyboard target duration" type="number" min="1" max="600" placeholder="Optional seconds" value={node.data.storyboardTargetDuration || ""} disabled={storyboardLocked || directorControlsScene} onChange={event => onUpdate(node.id, { storyboardTargetDuration: event.target.value })} /></NodeRow>
                 <NodeRow label="Character" inputPort={customCharacterPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}><button type="button" disabled={storyboardLocked || directorControlsScene}>{connectedSummary(storyboardIncoming.characterIn, "Optional characters")}</button></NodeRow>
+                <NodeRow label="Camera personality"><select aria-label="Storyboard camera personality" disabled={storyboardLocked} value={normalizeStoryboardCameraPersonality(node.data.storyboardCameraPersonality)} onChange={event => onUpdate(node.id, { storyboardCameraPersonality: event.target.value })}>{storyboardCameraPersonalities.map(value => <option key={value}>{value}</option>)}</select></NodeRow>
                 <NodeRow label="Director" inputPort={directorInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <button type="button" className={directorConnected ? "connected-field" : ""} disabled={storyboardLocked}>
                     {connectedSummary(incoming.directorIn, "Optional Director")}
@@ -13283,7 +13286,7 @@ function NodeBody({
                         {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
                       <select value={frame.angle || "None"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
-                        {typePresetNames.map((option) => <option key={option}>{option}</option>)}
+                        {storyboardCameraChoices.angle.map((option) => <option key={option}>{option}</option>)}
                       </select>
                     </div>
                     <TaggedPromptTextarea
@@ -24664,7 +24667,7 @@ function normalizedStoryboardFrames(frames = []) {
       number: index + 1,
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
-      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", storyboardCameraChoices.angle, "None"),
       prompt: String(frame.prompt || ""),
       beat: String(frame.beat || ""),
       notes: String(frame.notes || ""),
@@ -24989,7 +24992,7 @@ function storyboardFramesFromPlan(frames = [], bindCast = true) {
       ...(bindCast ? storyboardPlannedCastPatch(frame) : {}),
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
-      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", storyboardCameraChoices.angle, "None"),
       beat: frame.beat || "",
       prompt: frame.prompt || "",
       notes: frame.notes || "",
@@ -25488,6 +25491,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     storyboardContinuityInstruction,
     sceneReferenceMap,
     propReferenceMap,
+    storyboardCameraRenderingPrompt(frame),
     ...sceneContinuityPieces,
     ...stylePieces,
     ...moodBoardPieces,

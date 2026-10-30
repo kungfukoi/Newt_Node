@@ -52,7 +52,7 @@ export const creativeSchemas = {
       number,
       shot: { type: "string", enum: ["None", "CU", "MS", "WS", "ECU", "EWS"] },
       lens: { type: "string", enum: ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"] },
-      angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
+      angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Dutch Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
       spatial: storyboardSpatialSchema, cast: storyboardCastSchema,
       beat: nonempty, prompt: { ...nonempty, maxLength: 1400 }, notes: { ...text, maxLength: 240 }
     }), 1, 35)

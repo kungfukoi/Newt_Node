@@ -1243,6 +1243,7 @@ function buildHealthPayload() {
       prepareCharacterDialogue: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
+      storyboardCinematography: true,
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,

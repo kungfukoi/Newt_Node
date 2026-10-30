@@ -189,3 +189,18 @@ test("board assembles automatically, retries failures, rejects stale uploads and
  await page.reload();await page.getByRole("button",{name:"Nodes",exact:true}).click();
  await card.getByRole("button",{name:"Export storyboard",exact:true}).click();await expect(card.getByRole("button",{name:"Export PDF",exact:true})).toBeVisible();expect(errors).toEqual([]);
 });
+
+test("camera personality persists without changing existing panels or submitting generation", async ({page}) => {
+ const {card}=await setup(page,true); let paid=0;
+ await page.route("**/api/node/generate-image",async route=>{paid++;await route.abort();});
+ await card.getByRole("tab",{name:"Storyboard Setup",exact:true}).click();
+ const stable = values => values.map(({id,number,shot,lens,angle,beat,prompt,notes,resultUrl,status})=>({id,number,shot,lens,angle,beat,prompt,notes,resultUrl,status}));
+ const before = stable(await savedFrames(page));
+ const selector=card.getByLabel("Storyboard camera personality");
+ await expect(selector).toHaveValue("Expressive");
+ await selector.selectOption("Bold");
+ await expect.poll(()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.storyboardCameraPersonality)).toBe("Bold");
+ expect(stable(await savedFrames(page))).toEqual(before);expect(paid).toBe(0);
+ await page.reload(); await page.getByRole("button",{name:"Nodes",exact:true}).click();
+ await expect(selector).toHaveValue("Bold");expect(stable(await savedFrames(page))).toEqual(before);
+});

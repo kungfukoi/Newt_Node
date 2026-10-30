@@ -1,3 +1,4 @@
+import { storyboardCameraChoices, normalizeStoryboardCameraPersonality } from "./storyboardCinematography.js";
 import { storyboardCastSchema, storyboardPlannedCastPatch, storyboardCastPlanIssues, storyboardCharacterMentioned, currentStoryboardCast } from "./storyboardCast.js";
 import { cleanReferenceTag } from "./referenceTags.js";
 import { storyboardSpatialSchema, storyboardSpatialPlanIssues, storyboardSpatialPrompt } from "./storyboardSpatial.js";
@@ -23,7 +24,7 @@ export const storyboardFrameSchema = object({
   purpose: requiredText, beat: requiredText, prompt: requiredText, notes: text,
   shot: { type: "string", enum: ["None", "CU", "MS", "WS", "ECU", "EWS"] },
   lens: { type: "string", enum: ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"] },
-  angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
+  angle: { type: "string", enum: storyboardCameraChoices.angle },
   durationSeconds: { type: "number", minimum: 0, maximum: 600 },
   stateBefore: text, stateAfter: text, cameraSide: text, cast: storyboardCastSchema, spatial: storyboardSpatialSchema
 });
@@ -55,6 +56,7 @@ export function storyboardPlanningSettings(data = {}) {
   return {
     approach: storyboardApproaches.includes(data.storyboardApproach) ? data.storyboardApproach : "Narrative",
     pacing: storyboardPacing.includes(data.storyboardPacing) ? data.storyboardPacing : "Balanced",
+    cameraPersonality: normalizeStoryboardCameraPersonality(data.storyboardCameraPersonality),
     targetDuration: Number.isFinite(duration) && duration > 0 ? Math.min(600, duration) : null
   };
 }
