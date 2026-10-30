@@ -11,6 +11,7 @@ On desktop, canvas tabs sit above the canvas in the column to the right of the n
 - Find canvas searches by name when the tab row gets long.
 - Select nodes, then right-click a destination tab to copy or move the selection there. Ordinary node copy/paste also works between canvases.
 - The asset sidebar's Project scope shares local outputs and uploads across the project. Drag an asset into the current canvas to reuse it. Canvas scope filters to the current canvas's assets.
+- The scope selector sits below the asset sidebar's folder, refresh and close buttons. Closing the sidebar hides the selector; reopening retains its current filter.
 - File > Import as Canvases brings existing single- or multi-canvas projects into the open project. File > Open replaces the open project as before, after the unsaved-work prompt.
 - Save and Save As save every canvas together. Each canvas keeps its own pan/zoom and undo history during the session.
 

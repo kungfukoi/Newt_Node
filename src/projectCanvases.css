@@ -42,6 +42,9 @@
 .node-workspace > .project-canvas-area { grid-row: 1; }
 .canvas-navigation-row { flex: 0 0 auto; }
 .canvas-navigation-row > .project-canvas-tabs { margin-left: 0; }
+.output-drawer-header { flex-wrap: wrap; }
+.output-drawer-header .canvas-asset-scope { flex-basis: 100%; min-width: 0; display: grid; gap: 4px; margin-top: 8px; color: #aaa; }
+.output-drawer-header .canvas-asset-scope select { width: 100%; min-width: 0; }
 @media (max-width: 860px) {
   .node-workspace > .project-canvas-area { grid-row: 2; min-height: 420px; }
   .node-workspace.toolbar-collapsed > .project-canvas-area { grid-row: 1; }

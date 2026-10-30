@@ -135,6 +135,8 @@ export function UploadIcon({ type }) {
 export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
   items,
   total = 0,
+  assetScope = "project",
+  onAssetScopeChange,
   onClose,
   onOpenFolder,
   onRefresh,
@@ -293,6 +295,11 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({
             <PanelRightClose size={16} />
           </button>
         </div>
+        {onAssetScopeChange && <label className="canvas-asset-scope">Assets
+          <select aria-label="Asset scope" value={assetScope} onChange={event => onAssetScopeChange(event.target.value)}>
+            <option value="project">Project</option><option value="canvas">Canvas</option>
+          </select>
+        </label>}
       </div>
       <div className="project-output-list" aria-busy={loading}>
         {items.length ? (
