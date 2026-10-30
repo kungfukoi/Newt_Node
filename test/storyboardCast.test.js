@@ -1,3 +1,4 @@
+import * as authoredShotHelpers from "../src/storyboardShotList.js";
 import { storyboardCameraChoices, storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 import test from "node:test";
 import { storyboardFrameContext, storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSignature } from "../src/storyboardWorkflow.js";
@@ -113,7 +114,7 @@ test("new camera-relative assignments are honored, without inheriting a previous
 const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 function getFunction(source, name, deps = {}) {
-  deps = { storyboardCameraChoices, storyboardCameraRenderingPrompt, ...deps };
+  deps = { ...authoredShotHelpers, storyboardCameraChoices, storyboardCameraRenderingPrompt, ...deps };
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.notEqual(start, -1);
   const rest = source.slice(start);

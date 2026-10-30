@@ -1,3 +1,4 @@
+import * as authoredShotHelpers from "../src/storyboardShotList.js";
 import { storyboardCameraChoices, storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +17,7 @@ import { stylePresetPrompts, shotPresetPrompts, lensPresetPrompts, typePresetPro
 const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 function getFunction(source, name, deps = {}) {
-  deps = { storyboardCameraChoices, storyboardCameraRenderingPrompt, ...deps };
+  deps = { ...authoredShotHelpers, storyboardCameraChoices, storyboardCameraRenderingPrompt, ...deps };
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.notEqual(start, -1);
   const rest = source.slice(start);
@@ -24,6 +25,7 @@ function getFunction(source, name, deps = {}) {
   return new Function(...Object.keys(deps), `${end < 0 ? rest : rest.slice(0, end)}; return ${name};`)(...Object.values(deps));
 }
 function editorHandler(name, nextName, deps) {
+ deps = { ...authoredShotHelpers, ...deps };
   const start = editor.search(new RegExp(`\n  (?:async )?function ${name}\\(`));
   const end = editor.search(new RegExp(`\n  (?:async )?function ${nextName}\\(`));
   const body = editor.slice(start, end);

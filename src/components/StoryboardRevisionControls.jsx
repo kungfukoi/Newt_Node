@@ -27,14 +27,14 @@ export function StoryboardExportMenu({ disabled, exporting, onExport }) {
   </div>;
 }
 
-export function StoryboardPlanButton({ busy, disabled, planning, hasPlan, protectedCount, onPlan }) {
+export function StoryboardPlanButton({ shotList = false, busy, disabled, planning, hasPlan, protectedCount, onPlan }) {
   const [confirming, setConfirming] = React.useState(false);
   if (confirming) return <div className="storyboard-plan-confirm" role="alert">
-    <span>Replace the current plan and panels?</span>
-    <button type="button" disabled={busy || disabled || protectedCount > 0} onClick={() => { setConfirming(false); onPlan({ replace: true }); }}>Create New Plan</button>
+    <span>{shotList ? "Update shot directions? Existing media is retained." : "Replace the current plan and panels?"}</span>
+    <button type="button" disabled={busy || disabled || protectedCount > 0} onClick={() => { setConfirming(false); onPlan({ replace: true }); }}>{shotList ? "Plan Shots" : "Create New Plan"}</button>
     <button type="button" className="icon-only" aria-label="Cancel new plan" onClick={() => setConfirming(false)}><X size={14} /></button>
   </div>;
-  return <button type="button" disabled={busy || disabled || protectedCount > 0} title={protectedCount ? "Unprotect panels before replacing the plan" : "Create a new scene plan"} onClick={() => hasPlan ? setConfirming(true) : onPlan()}>{planning ? "Planning..." : "Create New Plan"}</button>;
+  return <button type="button" disabled={busy || disabled || protectedCount > 0} title={protectedCount ? "Unprotect panels before replacing the plan" : "Create a new scene plan"} onClick={() => hasPlan ? setConfirming(true) : onPlan()}>{planning ? "Planning..." : shotList ? "Plan Shots" : "Create New Plan"}</button>;
 }
 
 export function StoryboardRevisionControls({ node, frames, busy, editingLocked = busy, setupChanged, onUpdate, onRevise, onGenerate, onReview }) {

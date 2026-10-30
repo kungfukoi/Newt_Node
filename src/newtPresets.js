@@ -129,7 +129,7 @@ export function bindNewtPresetInputs(graph, bindings = {}, availableNodes = []) 
       if (node.type === "skillDirector") {
         data = { ...data, skillDirectorBuilt: false, skillDirectorLocks: {}, styleDirection: "", motionDirection: "", shotList: "", skillDirectorRevisionHistory: [], skillDirectorScenes: [], skillDirectorActiveSceneId: "", compiledPrompt: "" };
       }
-      if (node.type === "storyboard") data = { ...data, storyboardFrames: [], storyboardBoardUrl: "", storyboardPlanFingerprint: "" };
+      if (node.type === "storyboard") data = { ...data, storyboardFrames: data.storyboardApproach === "Shot List" ? (data.storyboardFrames || []).map(({ id, number, shotDescription, shot, lens, angle }) => ({ id, number, shotDescription, shot, lens, angle, prompt: "", shotPlanSource: "" })) : [], storyboardBoardUrl: "", storyboardPlanFingerprint: "" };
       if (node.type === "preview") data = { ...data, previewLayout: [], previewLayoutItems: [] };
     }
     return { ...node, data };

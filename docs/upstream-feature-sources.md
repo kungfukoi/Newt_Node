@@ -29,3 +29,5 @@ This list is a durable reference. It does not request automatic merging, publica
 Source: SugerMilks/NewtNode `72c77e39ea317e174146b10047bcece67c0dbe00`. Approved: multiple canvases; Vector; ReFrame (Auto Refine default off); authored Storyboard shots; PDF script import; camera personality; Explore art direction (retain Style input); menu improvements (retain Image/Video pages); Timeline navigation. Skip Watch Me learning. Commit each feature after validation.
 
 - Explore art direction: adapted in 4.34.0-beta.0, preserving local references and provider behavior.
+
+Authored Shot List planning (4.36): new boards start with one row; each authored row becomes exactly one frame with preserved IDs, order and explicit camera choices. Plan Shots retains media/versions and marks row provenance. Editing descriptions requires planning before generation; presets retain authored rows while clearing stale media. Existing summary/Director boards retain their approach. Source: SugerMilks 72c77e3.

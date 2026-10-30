@@ -428,10 +428,12 @@ export const nodeApi = {
 
   reviewStoryboardSequence(body) { return fetchJsonApi("/api/node/storyboard-review", jsonBody(body), "Storyboard sequence review"); },
   reviseStoryboard(body) { return fetchJsonApi("/api/node/storyboard-revise", jsonBody(body), "Storyboard revision"); },
-  planStoryboard(body, label = "Storyboard planning") {
+  async planStoryboard(body, label = "Storyboard planning") {
+    if (body.storyboardApproach === "Shot List") { const health = await getJson("/api/health", "Could not verify authored shots."); if (health.routes?.storyboardShotList !== true) throw new Error("Restart NewtNode before planning authored shots. No generation submitted."); }
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
   },
-  planStoryboardV2(body, label = "Storyboard planning") {
+  async planStoryboardV2(body, label = "Storyboard planning") {
+    if (body.storyboardApproach === "Shot List") { const health = await getJson("/api/health", "Could not verify authored shots."); if (health.routes?.storyboardShotList !== true) throw new Error("Restart NewtNode before planning authored shots. No generation submitted."); }
     return fetchJsonApi("/api/node/storyboard-plan-v2", jsonBody(body), label);
   },
   reviseStoryboardV2(body) { return fetchJsonApi("/api/node/storyboard-revise-v2", jsonBody(body), "Storyboard revision"); },

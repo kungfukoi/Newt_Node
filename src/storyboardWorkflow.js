@@ -6,6 +6,7 @@ import { storyboardSpatialSchema, storyboardSpatialPlanIssues, storyboardSpatial
 export const storyboardSkillVersion = "2.2.0";
 // Narrative remains the saved/planner value; Standard is its user-facing name.
 export const storyboardApproachDetails = {
+  "Shot List": { label: "Shot List", description: "One frame per authored shot; preserve your descriptions and camera choices." },
   Narrative: { label: "Standard", description: "Story-first coverage of key actions, reveals, and emotional beats." },
   Dialogue: { label: "Dialogue", description: "Conversation-led coverage of speakers, listeners, reactions, and eyelines." },
   Action: { label: "Action", description: "Clear movement and cause and effect, with readable spatial continuity." },
@@ -189,5 +190,5 @@ export function storyboardBoardSignature(frames = []) {
 }
 
 export function storyboardEditSignature(frames = []) {
-  return JSON.stringify(frames.map(frame => ({ ...storyboardFrameDirection(frame), resultUrl: frame.resultUrl || "", exportUrl: frame.exportUrl || "", protected: frame.protected === true })));
+  return JSON.stringify(frames.map(frame => ({ ...storyboardFrameDirection(frame), shotDescription: frame.shotDescription, shotPlanSource: frame.shotPlanSource, resultUrl: frame.resultUrl || "", exportUrl: frame.exportUrl || "", protected: frame.protected === true })));
 }
