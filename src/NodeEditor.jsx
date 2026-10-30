@@ -2266,12 +2266,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
   const consumedLibraryRequest = React.useRef("");
   React.useEffect(() => {
-    if (!active || !libraryRequest || consumedLibraryRequest.current === libraryRequest.id) return;
+    if (!libraryRequest || consumedLibraryRequest.current === libraryRequest.id) return;
     consumedLibraryRequest.current = libraryRequest.id;
     const { kind, value } = libraryRequest;
     const count = nodesRef.current.filter(node => node.type === kind).length + 1;
     const rect = canvasRef.current?.getBoundingClientRect();
-    const position = rect ? screenToScene(rect.left + rect.width / 2 - 180, rect.top + 100) : defaultNodePosition(count);
+    const position = active && rect?.width ? screenToScene(rect.left + rect.width / 2 - 180, rect.top + 100) : defaultNodePosition(count);
     const data = createNodeData(kind, kind === "style" ? "Style" : "Mood Board", count);
     const node = { id: createNodeId(kind), type: kind, ...position, data: {
       ...data,
@@ -2283,7 +2283,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     pushUndoSnapshot();
     setNodes(current => [...current, node]);
     setSelectedNodeIds([node.id]); recordFeatureUsage(kind, "add");
-    setSaveStatus(`Added ${kind === "style" ? "Style" : "Mood Board"} from Library`);
+    setSaveStatus(`Added ${kind === "style" ? "Style" : "Mood Board"} from Looks`);
     onLibraryRequestConsumed?.();
   }, [active, libraryRequest]);
 

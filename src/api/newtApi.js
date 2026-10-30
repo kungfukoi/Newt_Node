@@ -13,6 +13,15 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  async analyze(style) {
+    const health = await getJson("/api/health", "Could not verify Astra look analysis support.");
+    if (health.routes?.lookStyleAnalysis !== true) throw new Error("Restart NewtNode to activate Astra look analysis. Wait for active generations to finish first.");
+    const { response, data } = await fetchJsonApi("/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: style.name, observations: style.prompt || style.notes || "", examples: (style.examples || []).map(image => image.localUrl) }) }, "Analyze look with Astra", { timeoutMs: 360000, retryLocalApi: false });
+    ensureOk(response, data, "Restart NewtNode to activate Astra look analysis.");
+    if (!data.stylePrompt || !data.fingerprint) throw new Error("Astra returned no saved style description.");
+    return data;
+  },
   async catalog({ query = "", category = "", offset = 0, refresh = false } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
     const { response, data } = await fetchJsonApi(`/api/style-library/catalog?${params}`, {}, "Read local style catalog", { timeoutMs: 60000 });

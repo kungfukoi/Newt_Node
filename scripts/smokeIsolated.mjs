@@ -118,6 +118,10 @@ try {
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
+  assert.equal(health.routes.lookStyleAnalysis, true);
+  const invalidLook = await fetch(api + "/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ observations: "ink", examples: [] }) });
+  assert.equal(invalidLook.status, 400);
+  assert.match((await invalidLook.json()).error, /downloaded example images/);
   assert.equal(health.routes.styleFinderCatalog, true);
   const localCatalog = await (await request("/api/style-library/catalog")).json();
   assert.equal(localCatalog.ready, false);

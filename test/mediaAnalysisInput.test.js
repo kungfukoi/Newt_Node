@@ -5,6 +5,14 @@ import sharp from "sharp";
 
 import { buildMediaAnalysisContent } from "../server/media-analysis-input.js";
 
+test("Inline examples retain distinct image bytes and high detail without resolving an absent URL", async () => {
+  const content = await buildMediaAnalysisContent({ inputs: ["first", "second"].map(value => ({ label: value, detail: "high", asset: { buffer: Buffer.from(value), mimeType: "image/png" } })),
+    readLocalAsset: () => { throw new Error("No URL should be resolved for an inline image"); } });
+  const images = content.filter(item => item.type === "input_image");
+  assert.deepEqual(images.map(item => Buffer.from(item.image_url.split(",")[1], "base64").toString()), ["first", "second"]);
+  assert.ok(images.every(item => item.detail === "high"));
+});
+
 test("Atlas media analysis compacts local images before embedding them", async () => {
   const original = await sharp({
     create: { width: 3200, height: 1800, channels: 3, background: "#825f3d" }

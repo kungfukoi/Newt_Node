@@ -208,8 +208,8 @@ function App() {
   const [libraryRequest, setLibraryRequest] = React.useState(null);
   React.useEffect(() => { if (workspaceMode === "library") setLibraryLoaded(true); }, [workspaceMode]);
   function createFromLibrary(kind, value) {
+    setNodeWorkspaceLoaded(true);
     setLibraryRequest({ id: crypto.randomUUID(), kind, value });
-    setWorkspaceMode("nodes");
   }
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
   const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);

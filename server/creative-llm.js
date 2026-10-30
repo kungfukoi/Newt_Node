@@ -25,6 +25,7 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "look-style-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 6000 } }),
   "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
   "storyboard-script-shotlist": scriptShotsSchema,

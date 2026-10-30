@@ -59,3 +59,5 @@ server/data/corridorkey/
 server/data/ui-state.json
 server/data/.ui-state.json.*.tmp
 server/data/ui-state.json.*.tmp
+
+server/data/look-analyses/

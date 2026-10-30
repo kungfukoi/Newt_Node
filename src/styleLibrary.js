@@ -16,6 +16,11 @@ export function normalizeLibraryStyle(value = {}) {
   return {
     id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt),
     notes: text(value.notes, 4000), sourceUrl,
+    styleAnalysis: value.styleAnalysis?.stylePrompt ? {
+      stylePrompt: text(value.styleAnalysis.stylePrompt, 6000), fingerprint: text(value.styleAnalysis.fingerprint, 64),
+      model: text(value.styleAnalysis.model, 120), provider: text(value.styleAnalysis.provider, 80),
+      createdAt: text(value.styleAnalysis.createdAt, 40), version: Number(value.styleAnalysis.version) || 1
+    } : null,
     sref: text(value.sref, 300), tags: (Array.isArray(value.tags) ? value.tags : []).map(tag => text(tag, 80)).filter(Boolean).slice(0, 40),
     examples: (Array.isArray(value.examples) ? value.examples : []).filter(image => /^\/(uploads|workflow-assets|outputs)\//.test(image?.localUrl || "") && !image.localUrl.includes("..") && !/[?#\\]/.test(image.localUrl)).slice(0, 8).map(image => ({ id: text(image.id, 80), localUrl: image.localUrl, fileName: text(image.fileName, 200), mimeType: text(image.mimeType, 80) }))
   };
@@ -25,7 +30,7 @@ export function portableStylePrompt(value = "") {
 }
 export function libraryStyleSnapshot(style) {
   const value = normalizeLibraryStyle(style);
-  return { id: value.id, name: value.name, prompt: portableStylePrompt(value.prompt), sourceUrl: value.sourceUrl, sref: value.sref };
+  return { id: value.id, name: value.name, prompt: portableStylePrompt(value.styleAnalysis?.stylePrompt || value.prompt), sourceUrl: value.sourceUrl, sref: value.sref };
 }
 export function libraryPrompt(data = {}) { return portableStylePrompt(data.libraryStyle?.prompt); }
 export function libraryStylesMatching(styles, query = "") {

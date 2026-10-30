@@ -32,11 +32,12 @@ export async function buildMediaAnalysisContent({
       continue;
     }
 
-    const asset = await readLocalAsset(item.url);
+    const asset = item.asset || await readLocalAsset(item.url);
     if (item.label) content.push({ type: "input_text", text: item.label });
     const prepared = optimizeImages ? await compactAnalysisImage(asset, maximumImageBytes) : asset;
     content.push({
       type: "input_image",
+      ...(["low", "high", "auto"].includes(item.detail) ? { detail: item.detail } : {}),
       image_url: `data:${prepared.mimeType || "image/png"};base64,${prepared.buffer.toString("base64")}`
     });
   }
