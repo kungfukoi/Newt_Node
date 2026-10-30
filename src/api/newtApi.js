@@ -752,7 +752,8 @@ export const workflowApi = {
     return controlRequestData(`/api/saved-workflows/${encodeURIComponent(fileName)}`, { method: "GET" }, "Could not load workflow.");
   },
 
-  save(workflow) {
+  async save(workflow) {
+    if (workflow.canvases) { const health=await getJson("/api/health","Multi-canvas support"); if(!health.routes?.projectCanvases) throw new Error("Restart NewtNode before saving multi-canvas projects."); }
     return controlRequestData("/api/saved-workflows", jsonBody(workflow), "Could not save workflow.");
   },
 

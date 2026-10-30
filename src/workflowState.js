@@ -62,7 +62,7 @@ export function createWorkflowFingerprint() {
     const projectName = JSON.stringify(String(state.projectName || "Untitled node project").trim() || "Untitled node project");
     const projectPackagePath = JSON.stringify(state.projectPackagePath || "");
     // Exact JSON equality, not a lossy hash; immutable graph objects reuse their serialization.
-    return `{"nodes":[${nodes.join(",")}],"edges":[${edges.join(",")}],"groups":[${groups.join(",")}],"projectName":${projectName},"projectPackagePath":${projectPackagePath}}`;
+    return `{"nodes":[${nodes.join(",")}],"edges":[${edges.join(",")}],"groups":[${groups.join(",")}],"canvases":${JSON.stringify((state.canvases || []).map(({id,name})=>({id,name})))},"projectName":${projectName},"projectPackagePath":${projectPackagePath}}`;
   };
 }
 
@@ -95,6 +95,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (data.outputSettings) data = { ...data, outputSettings: { ...data.outputSettings, autoExport:false }, outputJob:null, outputReceipts:[] };
   if (data.vectorJob) data = { ...data, vectorJob:null, status:data.resultUrl ? "complete":"ready", error:"" };
   if (data.coverageJob || data.coverageEnhancing || data.coverageShotJobs?.length) data = { ...data, coverageJob: null, coverageEnhancing: null, coverageShotJobs: [], status: data.resultUrl ? "complete" : "ready", error: "" };
   if (data.batchRunActive || data.batchFailedEntries?.length) data = { ...data, batchRunActive: false, batchProgress: "", batchFailedEntries: [], batchRetryEntry: null };

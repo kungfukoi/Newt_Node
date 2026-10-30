@@ -11,6 +11,7 @@ export function buildProjectOutputItems({
   projectName,
   getNodeResultMediaType,
   titleFallback,
+  includeInputs = false,
   maxItems = defaultMaxProjectOutputItems
 }) {
   const outputMap = new Map();
@@ -19,9 +20,10 @@ export function buildProjectOutputItems({
     const type = getNodeResultMediaType?.(node) || "";
     if (!type) return;
     normalizedResultItems(node.data.resultItems, node.data.resultUrl, type)
-      .filter((item) => isLocalOutputUrl(item.url))
+      .filter((item) => isLocalOutputUrl(item.url) || includeInputs && /^\/(uploads|workflow-assets)\//.test(item.url))
       .forEach((item, index) => {
         addProjectOutput(outputMap, {
+          managedInput: includeInputs,
           id: `node:${node.id}:${index}:${item.url}`,
           url: item.url,
           thumbnailUrl: item.thumbnailUrl || "",
@@ -74,7 +76,7 @@ export function adjacentProjectOutputImage(items = [], currentItem = null, direc
 }
 
 function addProjectOutput(outputMap, item) {
-  if (!item?.url || !isLocalOutputUrl(item.url)) return;
+  if (!item?.url || !(isLocalOutputUrl(item.url) || item.managedInput && /^\/(uploads|workflow-assets)\//.test(item.url))) return;
   if (outputMap.has(item.url)) {
     const existing = outputMap.get(item.url);
     outputMap.set(item.url, {

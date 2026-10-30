@@ -30,7 +30,7 @@ Source: SugerMilks/NewtNode `72c77e39ea317e174146b10047bcece67c0dbe00`. Approved
 
 - Explore art direction: adapted in 4.34.0-beta.0, preserving local references and provider behavior.
 
-Authored Shot List planning (4.36): new boards start with one row; each authored row becomes exactly one frame with preserved IDs, order and explicit camera choices. Plan Shots retains media/versions and marks row provenance. Editing descriptions requires planning before generation; presets retain authored rows while clearing stale media. Existing summary/Director boards retain their approach. Source: SugerMilks 72c77e3.
+Authored Shot List planning (4.38): new boards start with one row; each authored row becomes exactly one frame with preserved IDs, order and explicit camera choices. Plan Shots retains media/versions and marks row provenance. Editing descriptions requires planning before generation; presets retain authored rows while clearing stale media. Existing summary/Director boards retain their approach. Source: SugerMilks 72c77e3.
 
 PDF Script Import (4.39, SugerMilks 72c77e3): managed PDFs are parsed in a bounded PDF.js worker. Explicit import performs billed script discovery/transcription and drafts authored shots with source pages, dialogue, VO and timing. Alternatives require selection; existing/protected shots are retained. No image generation or automatic paid retry. Limits: 40 MB, 200 document pages, 50 selected script pages, with extra confirmation over 30.
 
@@ -41,3 +41,5 @@ Vector (4.41, SugerMilks 72c77e3): manual Fal SVG generation/vectorization with 
 Menu refinements (4.42): adapt upstream keyboard/focus behavior in our existing CanvasMenuBar. ArrowDown opens the first item, ArrowUp the last; leaving project controls closes the menu; Escape restores focus. Existing project-name/preset controls and Image/Video workspace pages remain.
 
 Timeline navigation (4.43): retain our existing playhead-anchored zoom; add Fit Timeline with track-gutter allowance and a persistent keyboard-operable horizontal range synchronized to scroll/resize. Extra visible tail permits stable zoom anchoring. View changes do not edit clips or media. Adapted behavior from SugerMilks editorViewport into our Assembly owner.
+
+Project Canvases (4.44, SugerMilks 72c77e3): flat version-2 graph with per-node/group canvasId, named/reorderable tabs, independent viewports/session undo, copy/move/duplicate/import, and shared Project or Canvas assets. All canvases save/autosave together; legacy documents migrate to Canvas 1. Server reads/package writes preserve metadata and older writes cannot overwrite version 2. Jobs retain project ownership while switching pauses visible media. Delete/transfer confirmations preserve files; busy/last canvases cannot be deleted. Watch Me remains excluded.

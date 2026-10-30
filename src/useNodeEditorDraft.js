@@ -1,11 +1,13 @@
+import { normalizeProjectCanvases } from "./projectCanvases.js";
 import React from "react";
 import { uiMirrorDraft } from "./uiState.js";
 
 export const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 
 export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], initialGroups = [], initialViewport = { x: 0, y: 0, scale: 1 }, normalizeEditorGraph, storageKey = nodeDraftStorageKey } = {}) {
-  const fallbackGraph = normalizeEditorGraph(initialNodes, initialEdges, initialGroups);
+  const fallbackGraph = normalizeProjectCanvases({ ...normalizeEditorGraph(initialNodes, initialEdges, initialGroups), viewport:initialViewport });
   const fallback = {
+    canvases: fallbackGraph.canvases, activeCanvasId: fallbackGraph.activeCanvasId,
     nodes: fallbackGraph.nodes,
     edges: fallbackGraph.edges,
     groups: fallbackGraph.groups,
@@ -20,8 +22,9 @@ export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], init
   try {
     const parsed = JSON.parse(readNodeEditorDraftValue(storageKey) || "null");
     if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return fallback;
-    const graph = normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups);
+    const graph = normalizeProjectCanvases({ ...parsed, ...normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups) });
     return {
+      canvases: graph.canvases, activeCanvasId: graph.activeCanvasId,
       nodes: graph.nodes,
       edges: graph.edges,
       groups: graph.groups,
@@ -41,6 +44,7 @@ export function nodeEditorDraftSnapshot({
   nodes,
   edges,
   groups,
+  canvases, activeCanvasId,
   viewport,
   projectId,
   projectName,
@@ -52,6 +56,7 @@ export function nodeEditorDraftSnapshot({
     nodes,
     edges,
     groups,
+    canvases, activeCanvasId,
     viewport,
     projectId,
     projectName,

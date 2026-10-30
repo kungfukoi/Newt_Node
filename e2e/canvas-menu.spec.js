@@ -28,7 +28,7 @@ test("project controls share the left toolbar and reclaim the canvas menu row", 
   await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: "New canvas", exact: true })).toBeFocused();
   await page.keyboard.press("End");
-  await expect(page.getByRole("menuitem", { name: "Import workflow…" })).toBeFocused();
+  await expect(page.getByRole("menuitem", { name: "Import as Canvases…" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(controls.getByRole("button", { name: "File", exact: true })).toBeFocused();
   await controls.getByRole("button", { name: "File", exact: true }).click();
@@ -59,4 +59,4 @@ test("project controls share the left toolbar and reclaim the canvas menu row", 
   expect(errors).toEqual([]);
 });
 
-test('project menus open at the last item with ArrowUp and close when focus leaves',async({page})=>{await openFixture(page,{count:1});await page.getByRole('button',{name:'Show node palette',exact:true}).click();const bar=page.getByRole('toolbar',{name:'Project controls'});const file=bar.getByRole('button',{name:'File',exact:true});await file.focus();await page.keyboard.press('ArrowUp');await expect(page.getByRole('menuitem',{name:'Import workflow…'})).toBeFocused();await page.keyboard.press('Escape');await expect(file).toBeFocused();await file.click();await page.getByRole('button',{name:'Stats',exact:true}).focus();await expect(page.getByRole('menu',{name:'File',exact:true})).toHaveCount(0);await expect(page.getByLabel('Workspace mode').getByRole('button',{name:'Image',exact:true})).toBeVisible();await expect(page.getByLabel('Workspace mode').getByRole('button',{name:'Video',exact:true})).toBeVisible();});
+test('project menus open at the last item with ArrowUp and close when focus leaves',async({page})=>{await openFixture(page,{count:1});await page.getByRole('button',{name:'Show node palette',exact:true}).click();const bar=page.getByRole('toolbar',{name:'Project controls'});const file=bar.getByRole('button',{name:'File',exact:true});await file.focus();await page.keyboard.press('ArrowUp');await expect(page.getByRole('menuitem',{name:'Import as Canvases…'})).toBeFocused();await page.keyboard.press('Escape');await expect(file).toBeFocused();await file.click();await page.getByRole('button',{name:'Stats',exact:true}).focus();await expect(page.getByRole('menu',{name:'File',exact:true})).toHaveCount(0);await expect(page.getByLabel('Workspace mode').getByRole('button',{name:'Image',exact:true})).toBeVisible();await expect(page.getByLabel('Workspace mode').getByRole('button',{name:'Video',exact:true})).toBeVisible();});

@@ -108,7 +108,7 @@ export default function CanvasMenuBar({ projectName, onRename, projectPath, proj
         {item("Save As…", Save, onSaveAs, `${command}Shift+S`)}
         {item("Rename…", Folder, () => { renameInput.current?.focus(); renameInput.current?.select(); })}
         <div role="separator" />
-        {item("Import workflow…", Download, onImport)}
+        {item("Import as Canvases…", Download, onImport)}
       </div>}
     </div>
     <button className="canvas-menu-icon" title={`Save project (${command}S)`} aria-label="Save project" onClick={onSave}><Save size={17} /></button>

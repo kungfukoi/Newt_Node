@@ -1,3 +1,4 @@
+import { projectGraphForStorage } from "../src/projectCanvases.js";
 import { writeVectorDelivery } from "./vector-delivery.js";
 import { createIdeogramVectorService } from "./ideogram-vector.js";
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
@@ -1350,6 +1351,7 @@ function buildHealthPayload() {
       storyboardRevisions: true,
       storyboardPlanningV2: true,
       storyboardShotList: true,
+      projectCanvases: true,
       ideogramVector: true, vectorLayers: true, vectorLayerEditor: true, vectorLayerTransforms: true, vectorLayerOrganization: true, vectorLayerAutoGroups: true, vectorSelectionGrouping: true, vectorArtworkEditor: true, vectorDesignLooks: true,
       cameraCoverage: true, cameraCoverageTravel: true, cameraCoverageFraming: true, cameraCoverageLens: true,
       storyboardScriptImport: true,
@@ -3406,6 +3408,7 @@ app.post("/api/saved-workflows", async (req, res) => {
         createId: randomUUID
       });
       const { id, existingWorkflow: existing } = identity;
+      if (existing?.version >= 2 && !Array.isArray(req.body.canvases)) throw new Error("Update NewtNode before overwriting a multi-canvas project.");
       const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
       const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
       const workflow = {
@@ -3415,14 +3418,9 @@ app.post("/api/saved-workflows", async (req, res) => {
         createdAt: existing?.createdAt || now,
         updatedAt: now,
         app: "NewtNode",
-        version: 1,
+        version: req.body.canvases ? 2 : 1,
         packagePath: packagePath || "",
-        graph: {
-          nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-          edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-          groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-          viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-        }
+        graph: projectGraphForStorage(req.body)
       };
 
       await importProjectOutputPackage(sourceWorkflowId || id);
@@ -3502,12 +3500,7 @@ app.post("/api/node-projects", async (req, res) => {
     name,
     createdAt: projects.find((item) => item.id === id)?.createdAt || now,
     updatedAt: now,
-    graph: {
-      nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-      edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-      groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-      viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-    }
+    graph: projectGraphForStorage(req.body)
   };
 
   const nextProjects = [project, ...projects.filter((item) => item.id !== id)];
@@ -11782,12 +11775,7 @@ function normalizeWorkflowPackageRegistration(value) {
       workflowFileName: fileName,
       assetBaseUrl: `${workflowAssetsPrefix}/${encodeURIComponent(id)}`
     },
-    graph: {
-      nodes: Array.isArray(value?.graph?.nodes) ? value.graph.nodes : [],
-      edges: Array.isArray(value?.graph?.edges) ? value.graph.edges : [],
-      groups: Array.isArray(value?.graph?.groups) ? value.graph.groups : [],
-      viewport: value?.graph?.viewport || { x: 0, y: 0, scale: 1 }
-    }
+    graph: projectGraphForStorage(value.graph)
   };
 }
 
@@ -13011,12 +12999,7 @@ async function migrateLegacyNodeProjectsToSavedWorkflows() {
       app: "NewtNode",
       version: 1,
       migratedFrom: "server/data/node-projects.json",
-      graph: {
-        nodes: Array.isArray(project.graph?.nodes) ? project.graph.nodes : [],
-        edges: Array.isArray(project.graph?.edges) ? project.graph.edges : [],
-        groups: Array.isArray(project.graph?.groups) ? project.graph.groups : [],
-        viewport: project.graph?.viewport || { x: 0, y: 0, scale: 1 }
-      }
+      graph: projectGraphForStorage(project.graph)
     };
 
     workflows.push(workflow);
@@ -13130,12 +13113,7 @@ async function readSavedWorkflowFiles({ fileNames = null } = {}) {
         fileName: registryWorkflow.fileName || registryFileName,
         filePath: workflowFilePathForDisplay(workflow, registryFileName),
         registryFileName,
-        graph: {
-          nodes: Array.isArray(workflow.graph?.nodes) ? workflow.graph.nodes : [],
-          edges: Array.isArray(workflow.graph?.edges) ? workflow.graph.edges : [],
-          groups: Array.isArray(workflow.graph?.groups) ? workflow.graph.groups : [],
-          viewport: workflow.graph?.viewport || { x: 0, y: 0, scale: 1 }
-        }
+        graph: projectGraphForStorage(workflow.graph)
       });
     } catch {
       // Ignore malformed workflow files instead of blocking the whole loader.

@@ -498,6 +498,13 @@ try {
   await request("/api/settings", { modelProviderPreferences: expectedRouting });
 
 
+  const canvasDescriptors=[{id:'prep',name:'Preparation',viewport:{x:15,y:30,scale:.7}},{id:'finish',name:'Finishing',viewport:{x:0,y:0,scale:1}}];
+  const canvasNodes=[{id:'c1',type:'plainText',canvasId:'prep',x:10,y:10,data:{text:'First'}},{id:'c2',type:'plainText',canvasId:'finish',x:20,y:20,data:{text:'Second'}}];
+  const multi=await(await request('/api/saved-workflows',{id:'multi-smoke',name:'Multi Smoke',nodes:canvasNodes,edges:[],groups:[],canvases:canvasDescriptors,activeCanvasId:'finish',packageParentPath:path.join(sandbox,'multi')})).json();
+  assert.equal(multi.version,2);assert.deepEqual(multi.graph.canvases,canvasDescriptors);assert.equal(multi.graph.activeCanvasId,'finish');
+  const multiCopy=await(await request('/api/saved-workflows',{id:'multi-copy',sourceWorkflowId:multi.id,name:'Multi Copy',nodes:multi.graph.nodes,edges:[],groups:[],canvases:multi.graph.canvases,activeCanvasId:'prep',packageParentPath:path.join(sandbox,'multi-copies')})).json();
+  const multiOpened=await(await request('/api/saved-workflows/'+encodeURIComponent(multiCopy.fileName))).json();assert.equal(multiOpened.graph.canvases.length,2);assert.deepEqual(multiOpened.graph.nodes.map(n=>n.canvasId),['prep','finish']);assert.equal(multiOpened.graph.activeCanvasId,'prep');
+  console.log("Multi-canvas API passed: version 2, both canvas views, Save As and reopen.");
   console.log("Isolated API passed: startup, history backup recovery, settings and routing persistence, project catalog, video poster, diagnostics, Save As, reopen, clone catalog, uncertain-result import, Director reference completeness, image/video Composite layers and masks; no provider calls.");
 } finally {
   if (clientChild && clientChild.exitCode === null) clientChild.kill("SIGTERM");

@@ -1,3 +1,4 @@
+import { normalizeProjectCanvases } from "./projectCanvases.js";
 import React from "react";
 import { systemApi, workflowApi } from "./api/newtApi.js";
 import {
@@ -18,6 +19,7 @@ export function useWorkflowPersistence({
   edges,
   groups,
   viewport,
+  canvases, activeCanvasId, setCanvases, setActiveCanvasId, importAsCanvases,
   projectId,
   projectName,
   savedProjectName,
@@ -63,8 +65,8 @@ export function useWorkflowPersistence({
 
   const selectedProjectName = selectedWorkflowProjectName(projects, projectId);
   const currentWorkflowFingerprint = React.useMemo(
-    () => workflowStateFingerprint({ nodes, edges, groups, projectName, projectPackagePath }),
-    [nodes, edges, groups, projectName, projectPackagePath]
+    () => workflowStateFingerprint({ nodes, edges, groups, canvases, projectName, projectPackagePath }),
+    [nodes, edges, groups, canvases, projectName, projectPackagePath]
   );
   const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
   const currentWorkflowPath = React.useMemo(
@@ -82,11 +84,12 @@ export function useWorkflowPersistence({
       nodes,
       edges,
       groups,
+      canvases, activeCanvasId,
       viewport,
       currentFingerprint: currentWorkflowFingerprint,
       cleanFingerprint: cleanWorkflowFingerprint
     };
-  }, [projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath, nodes, edges, groups, viewport, currentWorkflowFingerprint, cleanWorkflowFingerprint]);
+  }, [projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath, nodes, edges, groups, viewport, canvases, activeCanvasId, currentWorkflowFingerprint, cleanWorkflowFingerprint]);
 
   React.useEffect(() => {
     lastAutosavedFingerprintRef.current = "";
@@ -189,6 +192,7 @@ export function useWorkflowPersistence({
       nodes: graphNodes,
       edges,
       groups,
+      canvases, activeCanvasId,
       viewport
     });
   }
@@ -213,6 +217,7 @@ export function useWorkflowPersistence({
       nodes: saveNodes,
       edges: state.edges,
       groups: state.groups,
+      canvases: state.canvases, activeCanvasId: state.activeCanvasId,
       projectName: state.projectName,
       projectPackagePath: state.projectPackagePath
     });
@@ -228,6 +233,7 @@ export function useWorkflowPersistence({
       nodes: saveNodes,
       edges: state.edges,
       groups: state.groups,
+      canvases: state.canvases, activeCanvasId: state.activeCanvasId,
       viewport: state.viewport
     });
 
@@ -266,6 +272,7 @@ export function useWorkflowPersistence({
         nodes,
         edges,
         groups,
+        canvases,
         projectName,
         projectPackagePath,
         ...overrides
@@ -369,6 +376,7 @@ export function useWorkflowPersistence({
         nodes: saveNodes,
         edges,
         groups,
+        canvases, activeCanvasId,
         viewport
       });
       setProjectId(project.id);
@@ -385,7 +393,7 @@ export function useWorkflowPersistence({
       let cleanGroups = groups;
       let cleanViewport = viewport;
       if (project.graph) {
-        const graph = normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []);
+        const graph = normalizeProjectCanvases({ ...project.graph, ...normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []) });
         cleanNodes = graph.nodes;
         cleanEdges = graph.edges;
         cleanGroups = graph.groups;
@@ -393,6 +401,7 @@ export function useWorkflowPersistence({
         setNodes(graph.nodes);
         setEdges(graph.edges);
         setGroups(graph.groups);
+      setCanvases?.(graph.canvases); setActiveCanvasId?.(graph.activeCanvasId);
         setViewport(cleanViewport);
       }
       void loadProjects().catch((error) => {
@@ -490,7 +499,7 @@ export function useWorkflowPersistence({
     try {
       if (!(await guardUnsavedWorkflowChange("start a new project"))) return false;
 
-      const graph = normalizeEditorGraph(newProjectNodes, newProjectEdges, newProjectGroups);
+      const graph = normalizeProjectCanvases({ ...normalizeEditorGraph(newProjectNodes, newProjectEdges, newProjectGroups), viewport:newProjectViewport });
       localWorkflowHandleRef.current = null;
       setLocalWorkflowFileName("");
       setProjectId(createWorkflowSessionId());
@@ -501,6 +510,7 @@ export function useWorkflowPersistence({
       setNodes(graph.nodes);
       setEdges(graph.edges);
       setGroups(graph.groups);
+      setCanvases?.(graph.canvases); setActiveCanvasId?.(graph.activeCanvasId);
       setViewport(newProjectViewport);
       setSelectedNodeIds([]);
       setSelectedEdgeId(null);
@@ -511,6 +521,7 @@ export function useWorkflowPersistence({
         nodes: graph.nodes,
         edges: graph.edges,
         groups: graph.groups,
+        canvases: graph.canvases,
         projectName: "Untitled node project",
         projectPackagePath: ""
       });
@@ -523,7 +534,7 @@ export function useWorkflowPersistence({
   }
 
   function applyWorkflow(project, sourceLabel = "Loaded") {
-    const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
+    const graph = normalizeProjectCanvases({ ...project.graph, ...normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []) });
     const nextProjectName = project.name || "Untitled node project";
     const nextPackagePath = project.packagePath || project.package?.rootPath || "";
     const nextViewport = project.graph?.viewport || { x: 0, y: 0, scale: 1 };
@@ -538,6 +549,7 @@ export function useWorkflowPersistence({
     setNodes(graph.nodes);
     setEdges(graph.edges);
     setGroups(graph.groups);
+      setCanvases?.(graph.canvases); setActiveCanvasId?.(graph.activeCanvasId);
     setViewport(nextViewport);
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
@@ -550,6 +562,7 @@ export function useWorkflowPersistence({
         nodes: graph.nodes,
         edges: graph.edges,
         groups: graph.groups,
+        canvases: graph.canvases,
         projectName: nextProjectName,
         projectPackagePath: nextPackagePath
       });
@@ -751,7 +764,8 @@ export function useWorkflowPersistence({
   }
 
   function importWorkflow(project) {
-    const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
+    if (importAsCanvases) { importAsCanvases(project); return; }
+    const graph = normalizeProjectCanvases({ ...project.graph, ...normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []) });
     if (!graph.nodes.length) {
       setSaveStatus("That workflow has no nodes to import");
       return;

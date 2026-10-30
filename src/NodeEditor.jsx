@@ -1,3 +1,5 @@
+import { CanvasTabs } from "./components/CanvasTabs.jsx";
+import { normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasName, defaultCanvasViewport } from "./projectCanvases.js";
 import { vectorOutputSource } from "./outputExport.js";
 import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
 const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
@@ -1308,9 +1310,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const edgesRef = React.useRef(savedDraft.edges);
   const groupsRef = React.useRef(savedDraft.groups);
   const connectedPortKeysRef = React.useRef(emptyPortSet);
-  const [nodes, setNodes] = React.useState(savedDraft.nodes);
+  const [outputScope, setOutputScope] = React.useState("project");
+  const [canvases, setCanvases] = React.useState(savedDraft.canvases);
+  const [activeCanvasId, setActiveCanvasId] = React.useState(savedDraft.activeCanvasId);
+  const activeCanvasRef = React.useRef(savedDraft.activeCanvasId); activeCanvasRef.current = activeCanvasId;
+  const canvasHistoryRef = React.useRef(new Map());
+  const [nodes, setProjectNodes] = React.useState(savedDraft.nodes);
+  const setNodes = React.useCallback(value => { const owner=activeCanvasRef.current; setProjectNodes(current => { const next=typeof value==='function'?value(current):value; const owned=next.map(node=>node.canvasId?node:{...node,canvasId:owner});nodesRef.current=owned;return owned; }); },[]);
   const [edges, setEdges] = React.useState(savedDraft.edges);
-  const [groups, setGroups] = React.useState(savedDraft.groups);
+  const [groups, setProjectGroups] = React.useState(savedDraft.groups);
+  const setGroups = React.useCallback(value => { const owner=activeCanvasRef.current;setProjectGroups(current => (typeof value==='function'?value(current):value).map(group=>group.canvasId?group:{...group,canvasId:owner})); },[]);
   const [dragState, setDragState] = React.useState(null);
   const [draftEdge, setDraftEdge] = React.useState(null);
   const [portPositions, setPortPositions] = React.useState({});
@@ -1404,7 +1413,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   });
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const overviewRendering = false;
-  const renderedNodes = nodes;
+  const visibleGraph = canvasGraph({nodes,edges,groups}, activeCanvasId);
+  const renderedNodes = visibleGraph.nodes;
+  const canvasesForSave = snapshotCanvases(canvases,activeCanvasId,viewport);
   const renderedNodeKey = "";
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {
@@ -1429,6 +1440,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     edges,
     groups,
     viewport,
+    canvases: canvasesForSave, activeCanvasId, setCanvases, setActiveCanvasId, importAsCanvases: importProjectCanvases,
     projectId,
     projectName,
     savedProjectName,
@@ -1520,18 +1532,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         edges,
         groups,
         viewport,
+        canvases: canvasesForSave, activeCanvasId,
         projectId,
         projectName,
         savedProjectName,
         projectPackagePath,
         workflowFilePath
       }),
-    [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
+    [nodes, edges, groups, viewport, canvases, activeCanvasId, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
   );
   useNodeEditorDraftPersistence(draftSnapshot);
   const projectOutputs = React.useMemo(
-    () => buildProjectOutputItems({ nodes, catalog: outputCatalog.items, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
-    [nodes, outputCatalog.items, projectId, projectName]
+    () => buildProjectOutputItems({ nodes:outputScope === "canvas" ? visibleGraph.nodes : nodes, includeInputs:true, catalog: outputScope === "canvas" ? outputCatalog.items.filter(item=>visibleGraph.nodes.some(node => node.id === item.node?.id)) : outputCatalog.items, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
+    [nodes, outputCatalog.items, projectId, projectName, outputScope, activeCanvasId]
   );
   const openPreviewLightbox = React.useCallback((item, context = {}) => {
     setPreviewLightboxSource(context.layoutNodeId ? "previewLayout:" + context.layoutNodeId : "");
@@ -6060,6 +6073,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function getNodeIdsInsideGroup(group) {
     const groupRect = groupToRect(group);
     return nodes
+      .filter(node => !group.canvasId || node.canvasId === group.canvasId)
       .filter((node) => {
         const bounds = getNodeBounds(node.id);
         if (bounds.right > bounds.left && bounds.bottom > bounds.top) {
@@ -6750,11 +6764,26 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
+
+  function switchProjectCanvas(id) {
+    if(id===activeCanvasRef.current || !canvases.some(c=>c.id===id)) return;
+    commitTransientViewport(); canvasRef.current?.querySelectorAll('video,audio').forEach(media=>media.pause());
+    canvasHistoryRef.current.set(activeCanvasRef.current,{undo:undoStackRef.current,redo:redoStackRef.current});
+    const previousOwner = activeCanvasRef.current, previousView = { ...viewportRef.current };
+    setCanvases(current=>snapshotCanvases(current,previousOwner,previousView));
+    const history=canvasHistoryRef.current.get(id)||{undo:[],redo:[]};undoStackRef.current=history.undo;redoStackRef.current=history.redo;
+    activeCanvasRef.current=id;setActiveCanvasId(id);const next=canvases.find(c=>c.id===id).viewport||defaultCanvasViewport;viewportRef.current=next;setViewport(next);applyViewportToCanvas(next);setSelectedNodeIds([]);setSelectedEdgeId(null);setContextMenu(null);
+  }
+  function addProjectCanvas() { const priorView={...viewportRef.current}; const id=createNodeId('canvas');setCanvases(current=>[...snapshotCanvases(current,activeCanvasId,priorView),{id,name:'Canvas '+(current.length+1),viewport:{...defaultCanvasViewport}}]);canvasHistoryRef.current.set(activeCanvasId,{undo:undoStackRef.current,redo:redoStackRef.current});undoStackRef.current=[];redoStackRef.current=[];activeCanvasRef.current=id;setActiveCanvasId(id);setSelectedNodeIds([]);setSelectedEdgeId(null);viewportRef.current={...defaultCanvasViewport};setViewport({...defaultCanvasViewport});applyViewportToCanvas(defaultCanvasViewport); }
+  function editProjectCanvas(action) { try {action();} catch(error){setSaveStatus(error.message);} }
+  function duplicateProjectCanvas(id) { if(nodes.some(n=>n.canvasId===id&&nodeIsWorking(n)))throw new Error('Finish this canvas before duplicating it.');const target=createNodeId('canvas');const copied=copyCanvasGraph({nodes,edges,groups},id,target);setNodes(current=>[...current,...copied.nodes]);setEdges(current=>[...current,...copied.edges]);setGroups(current=>[...current,...copied.groups]);setCanvases(current=>[...current,{id:target,name:canvasName(canvases.find(c=>c.id===id).name+' Copy'),viewport:{...defaultCanvasViewport}}]); }
+  function deleteProjectCanvas(id) {if(canvases.length===1||nodes.some(n=>n.canvasId===id&&nodeIsWorking(n)))throw new Error('The last canvas or a working canvas cannot be deleted.');if(!window.confirm('Delete this canvas and its nodes? Saved files remain on disk.'))return;if(id===activeCanvasId)switchProjectCanvas(canvases.find(c=>c.id!==id).id);const ids=new Set(nodes.filter(n=>n.canvasId===id).map(n=>n.id));setNodes(current=>current.filter(n=>!ids.has(n.id)));setEdges(current=>current.filter(e=>!ids.has(e.from.nodeId)&&!ids.has(e.to.nodeId)));setGroups(current=>current.filter(g=>g.canvasId!==id));setCanvases(current=>current.filter(c=>c.id!==id));canvasHistoryRef.current.delete(id); }
+  function transferProjectSelection(id,copy) {const selected=new Set(selectedNodeIds);const boundary=edges.some(e=>selected.has(e.from.nodeId)!==selected.has(e.to.nodeId));if(!copy&&boundary&&!window.confirm('Moving this selection disconnects wires to nodes left behind. Continue?'))return;const next=transferCanvasNodes({nodes,edges,groups},selectedNodeIds,id,copy);setNodes(next.nodes);setEdges(next.edges);setGroups(next.groups);clearUndoStack();setSelectedNodeIds([]);}
+  function importProjectCanvases(project) {const graph=normalizeProjectCanvases(project.graph);const mapping=new Map(graph.canvases.map(c=>[c.id,createNodeId('canvas')]));const remapped=remapImportedGraph(graph);setNodes(current=>[...current,...remapped.nodes.map(n=>({...n,canvasId:mapping.get(n.canvasId)}))]);setEdges(current=>[...current,...remapped.edges]);setGroups(current=>[...current,...remapped.groups.map(g=>({...g,canvasId:mapping.get(g.canvasId)}))]);setCanvases(current=>[...current,...graph.canvases.map(c=>({...c,id:mapping.get(c.id),name:canvasName((project.name||'Imported')+' / '+c.name)}))]);clearUndoStack();setSaveStatus('Imported workflow as canvases');}
+
   function currentGraphHistoryState() {
     return cloneGraphState({
-      nodes: nodesRef.current,
-      edges: edgesRef.current,
-      groups: groupsRef.current,
+      ...canvasGraph({nodes:nodesRef.current,edges:edgesRef.current,groups:groupsRef.current},activeCanvasRef.current),
       viewport: viewportRef.current,
       selectedNodeIds: selectedNodeIdsRef.current,
       selectedEdgeId: selectedEdgeIdRef.current
@@ -6775,6 +6804,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function clearUndoStack() {
+    canvasHistoryRef.current.clear();
     undoStackRef.current = [];
     redoStackRef.current = [];
   }
@@ -6793,7 +6823,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const current = currentGraphHistoryState();
-    const previous = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
+    const previousSlice = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
+    const previous = {...previousSlice, ...replaceCanvasGraph({nodes:nodesRef.current,edges:edgesRef.current,groups:groupsRef.current},activeCanvasRef.current,previousSlice)};
     redoStackRef.current = [
       ...redoStackRef.current.slice(-39),
       { ...entry, snapshot: current }
@@ -6825,7 +6856,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const current = currentGraphHistoryState();
-    const next = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
+    const nextSlice = restoreGraphHistorySnapshot(entry.snapshot, current, entry);
+    const next = {...nextSlice, ...replaceCanvasGraph({nodes:nodesRef.current,edges:edgesRef.current,groups:groupsRef.current},activeCanvasRef.current,nextSlice)};
     undoStackRef.current = [
       ...undoStackRef.current.slice(-39),
       { ...entry, snapshot: current }
@@ -6905,6 +6937,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       idMap.set(node.id, nextId);
       return {
         ...nextNode,
+        canvasId: activeCanvasRef.current,
         id: nextId,
         x: pastePositions[index].x,
         y: pastePositions[index].y,
@@ -6943,6 +6976,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (!nodeIds.length) return null;
         return {
           ...group,
+          canvasId: activeCanvasRef.current,
           id: `group-${stamp}-${index}-${Math.random().toString(36).slice(2, 8)}`,
           x: Math.round((Number(group.x) || 0) + pasteDelta.x),
           y: Math.round((Number(group.y) || 0) + pasteDelta.y),
@@ -8509,6 +8543,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
 
   return (
+    <div className="multi-canvas-workspace"><div className="canvas-navigation-row"><CanvasTabs canvases={canvases} activeId={activeCanvasId} activity={Object.fromEntries(canvases.map(c=>[c.id,{running:nodes.some(n=>n.canvasId===c.id&&nodeIsWorking(n)),error:nodes.some(n=>n.canvasId===c.id&&n.data?.status==='error')}]))} selectedCount={selectedNodeIds.length} outputsCollapsed={false} onSelect={switchProjectCanvas} onAdd={addProjectCanvas} onRename={(id,name)=>setCanvases(current=>current.map(c=>c.id===id?{...c,name:canvasName(name)}:c))} onReorder={(id,index)=>setCanvases(current=>{const next=current.filter(c=>c.id!==id);next.splice(index,0,current.find(c=>c.id===id));return next;})} onDuplicate={id=>editProjectCanvas(()=>duplicateProjectCanvas(id))} onDelete={id=>editProjectCanvas(()=>deleteProjectCanvas(id))} onTransfer={(id,copy)=>editProjectCanvas(()=>transferProjectSelection(id,copy))} /><label className="canvas-asset-scope">Assets<select aria-label="Asset scope" value={outputScope} onChange={event=>setOutputScope(event.target.value)}><option value="project">Project</option><option value="canvas">Canvas</option></select></label></div>
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
       {composerEditorNode && (
         <ComposerEditorModal
@@ -8605,9 +8640,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         <NewtFlowCanvas
           ref={flowCanvasRef}
           snapToGrid={snapToGrid}
-          graphNodes={nodes}
-          graphEdges={edges}
-          groups={groups}
+          graphNodes={visibleGraph.nodes}
+          graphEdges={visibleGraph.edges}
+          groups={visibleGraph.groups}
           viewport={viewport}
           selectedNodeIds={selectedNodeIds}
           selectedEdgeId={selectedEdgeId}
@@ -8817,7 +8852,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           outputDragMime={outputDragMime}
         />
       )}
-    </section>
+    </section></div>
   );
 }
 
@@ -24222,6 +24257,7 @@ function normalizeGroups(groups = [], nodeMap = new Map()) {
     .map((group, index) => {
       const nodeIds = [...new Set(Array.isArray(group?.nodeIds) ? group.nodeIds.filter((id) => nodeMap.has(id)) : [])];
       return {
+        canvasId: group.canvasId,
         id: String(group?.id || `group-${index + 1}`),
         name: String(group?.name || `Group ${index + 1}`),
         labelFontSize: Math.min(320, Math.max(24, finiteNumber(group?.labelFontSize, 64))),
@@ -24679,6 +24715,7 @@ function normalizeStoryboardData(data = {}) {
   return {
     ...createDefaultNodeData("storyboard", data.title || "Storyboard", 1),
     ...data,
+    storyboardApproach: storyboardPlanningSettings(data).approach,
     storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
     sceneName: data.sceneName || "Scene 1",
     frameCount: normalizeStoryboardFrameCountValue(data.frameCount),
