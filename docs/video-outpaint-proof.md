@@ -1,5 +1,21 @@
 # Video outpainting proof
 
+## Official-source audit, 2026-10-29
+
+Reviewed [fal's Seedance 2.5 prompting guide](https://fal.ai/learn/devs/how-to-use-seedance-2-5), [BytePlus's Seedance 2.5 prompt guide](https://docs.byteplus.com/en/docs/modelark/seedance-2-5-prompt-guide), and [Atlas's reference/edit API](https://www.atlascloud.ai/docs/en/more-models/bytedance/seedance-2.5-reference-to-video/generateVideo). These document editing semantics and limitations; they do not promise a seamless outpainting composite.
+
+| Practice | Current implementation |
+| --- | --- |
+| Explicit editing task, one source master, inherited ratio/duration | Fal task=editing; Atlas omni_reference_task_type=edit, adaptive ratio, duration=-1; Krea uses its separate documented edit inference. No silent provider fallback. |
+| Identify @Video1 as sole editing master and constrain edit scope | Strengthened submission wrapper: only prepared extension/overlap changes; source positions, camera, performance, occlusion and event order remain authoritative. |
+| Keep references few and assign narrowly defined roles | Three visible reference slots; Environment now explicitly preserves source lighting/object positions and excludes reference camera composition and people. Existing larger saved reference sets remain compatible. |
+| Avoid restaging the motion already supplied by the video | Analysis asks for brief boundary interactions and direct inheritance of the source performance, retaining its entrances/exits. Existing user captions remain editable. |
+| Use compatible frame counts for editing and check actual correspondence | Existing 8n+1 provider grid plus guard tail, all native source frames retained, final rational source clock restored. Timing/coverage checks remain required. |
+| Preserve quality through generation and local finishing | Atlas requests MOV/4:4:4 intermediate; Fal requests high bitrate and H.264. New local canvases/finished MP4s explicitly convert/tag BT.709. Higher precision cannot recover lost detail. |
+| Inspect and use the generated plate independently of the restored source | Show composited source selects the video used by Preview, Output, downstream nodes, download and drag; switching views makes no provider call. |
+
+Both fal and BytePlus document approximate editing duration; timestamp guidance is not a guarantee of frame-accurate motion. A generation with incompatible poses at a source boundary cannot be made valid by feathering alone. Full temporal dope-sheet conditioning, tracked foreground mattes, optical-flow correspondence, content-selected seams and multiband lighting/texture integration are additional compositor work, not capabilities already supplied by the current rectangular inward feather. The [CVPR video-outpainting paper](https://openaccess.thecvf.com/content/CVPR2022W/NTIRE/html/Dehan_Complete_and_Temporally_Consistent_Video_Outpainting_CVPRW_2022_paper.html) supports foreground/background estimation and temporal propagation; [Adobe's content-aware fill guidance](https://helpx.adobe.com/after-effects/using/content-aware-fill.html) supports reference-frame and lighting-correction workflows. Those techniques motivate future contextual compositing; this audit does not claim they are implemented.
+
 ## Current controls (4.19)
 
 The proof notes below describe earlier experiments. For current timing/provider behavior, see [the node standards](node-standards.md).

@@ -1,4 +1,5 @@
 import React from "react";
+import { ComparisonVideo } from "./ComparisonVideo.jsx";
 import CropModeControls from "./CropModeControls.jsx";
 import { constrainVideoCrop, dragVideoCrop } from "../videoCrop.js";
 import { clampCropRect } from "../cropGeometry.js";
@@ -1816,7 +1817,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavi
   );
 }
 
-export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult, onPreviewOpen, editContext, sourceNodeId = "", sourcePort = "" }) {
+export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult, onPreviewOpen, editContext, sourceNodeId = "", sourcePort = "", videoPreview }) {
   const items = normalizedResultItems(resultItems, resultUrl, type);
   const activeIndex = Math.min(Math.max(Number(selectedIndex) || 0, 0), Math.max(items.length - 1, 0));
   const activeItem = items[activeIndex];
@@ -1891,7 +1892,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
                 alt={activeItem.label || `Generated image ${activeIndex + 1}`}
               />
             )}
-            {activeItem.type === "video" && <video src={displayMediaUrl(activeItem.url)} controls loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />}
+            {activeItem.type === "video" && (videoPreview ? <ComparisonVideo key={activeItem.originResultUrl || activeItem.url} preview={videoPreview} src={displayMediaUrl(videoPreview.url)} onReady={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} /> : <video src={displayMediaUrl(activeItem.url)} controls loop playsInline preload="metadata" draggable={false} onLoadedMetadata={useNewtNodeVideoReady} onError={useNewtNodeVideoFallback} />)}
             {activeItem.type === "video" && (
               <button
                 type="button"

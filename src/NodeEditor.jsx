@@ -9,6 +9,8 @@ import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./k
 import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpaintNode, migrateOutpaintImageEdges } from "./outpaintReferenceSlots.js";
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
+import { OutpaintResultPane } from "./components/OutpaintResultPane.jsx";
+import { outpaintOutputItem } from "./outpaintPreview.js";
 import { NodeAbout } from "./components/NodeAbout.jsx";
 import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
@@ -13742,7 +13744,7 @@ function NodeBody({
         ? { assemblyFrameUrl: item.url }
         : {
             selectedResultIndex: item.sourceResultIndex ?? nextIndex,
-            resultUrl: item.url
+            resultUrl: item.sourceResultUrl || item.url
           });
       onUpdate(node.id, {
         previewSourceId: previewSource.id,
@@ -15177,7 +15179,9 @@ function NodeBody({
       const mask = incoming[compositeMaskPortId(layer)]?.at(-1);
       return { ...layer, url: source ? connectedOutputUrl(source.source, source.edge) : "", type: source ? previewMediaType(source.source, source.edge) : "", maskUrl: mask ? connectedOutputUrl(mask.source, mask.edge) : "", maskType: mask ? previewMediaType(mask.source, mask.edge) : "" };
     }).filter((layer) => layer.url) : [];
-    const utilityResultPane = <ResultPane
+    const UtilityResultPane = isVideoMode && isOutpaintVideo ? OutpaintResultPane : ResultPane;
+    const utilityResultPane = <UtilityResultPane
+      {...(isVideoMode && isOutpaintVideo ? { node, onUpdate } : {})}
       label={isAutoAspect ? "Aspect outputs will appear here" : isCoverage ? "9 coverage angles will appear here" : "Results will appear here"}
       resultUrl={node.data.resultUrl}
       resultItems={node.data.resultItems}
@@ -21925,10 +21929,12 @@ function sourceResultItemsForPort(source, portId = "", type = "") {
     return item?.url ? [item] : [];
   }
 
-  return normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, type);
+  const items = normalizedResultItems(source?.data?.resultItems, source?.data?.resultUrl, type);
+  return isOutpaintNode(source) ? items.map(item => outpaintOutputItem(item, source.data.outpaintShowComposite !== false)) : items;
 }
 
 function sourceResultUrlForPort(source, portId = "") {
+  if (isOutpaintNode(source)) return currentOrNewestResultItem(source, sourceResultItemsForPort(source, portId, "video"))?.url || "";
   if (isKeyerNode(source)) return keyerResultForPort(source, portId)?.url || "";
   if (source?.type === "assembly") return portId === "frameOut" ? source.data?.assemblyFrameUrl || "" : source.data?.resultUrl || "";
   if (source?.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)) {
@@ -21993,7 +21999,7 @@ function currentOrNewestResultItem(source, items = []) {
   if (!items.length) return null;
   const currentUrl = source?.data?.resultUrl || "";
   if (currentUrl) {
-    const currentItem = items.find((item) => item.url === currentUrl);
+    const currentItem = items.find((item) => item.url === currentUrl || item.originResultUrl === currentUrl);
     if (currentItem) return currentItem;
   }
 
@@ -22950,7 +22956,8 @@ function connectedPreviewSources(items = []) {
           ...item,
           sourceNodeId: source.id,
           sourceResultIndex: index,
-          sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
+          sourceResultUrl: isOutpaintNode(source) ? item.originResultUrl || item.url : item.url,
+          sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl || item.originResultUrl === source.data.resultUrl,
           type: item.type || sourceType,
           label: source.type === "explore" ? item.label : source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
             ? item.label || sourceName
@@ -22978,7 +22985,9 @@ function previewSourceResultItems(source, edge, sourceType = "image") {
     return outputItem?.url ? [{ ...outputItem, type: outputItem.type || sourceType }] : [];
   }
 
-  const resultItems = normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, sourceType);
+  const resultItems = isOutpaintNode(source)
+    ? sourceResultItemsForPort(source, edge?.from?.port, sourceType)
+    : normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, sourceType);
   if (source.type === "coverage" && resultItems.length) return coveragePreviewItems(resultItems);
   if (resultItems.length) return resultItems;
 

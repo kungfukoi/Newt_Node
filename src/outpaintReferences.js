@@ -13,7 +13,7 @@ export function outpaintRoleInstructions(count, roles = []) {
     const labels = Array.from({ length: Math.min(30, count) }, (_, index) => (normalized[index] || "appearance") === role ? `@Image${index + 1}` : "").filter(Boolean);
     if (!labels.length) return "";
     const instruction = role === "environment"
-      ? "defines the shared set: preserve its architecture, object layout, floor, materials and lighting in missing regions, adapting perspective to the source camera; exclude reference people"
+      ? "defines the shared set: guide unseen architecture, surfaces and materials consistent with the source camera; preserve source lighting and existing object positions; exclude reference people and camera composition"
       : role === "wardrobe"
         ? "defines clothing only: guide unseen garment cut, fabric and pattern on the corresponding source actor; visible source-plate clothing determines hue, saturation, brightness and wash; exclude reference pose and background"
         : "guides appearance and materials only; exclude reference composition";

@@ -22,6 +22,9 @@ test("shared environment and wardrobe roles survive normalization and match actu
     assert.match(result.body.prompt, /@Image1 defines the shared set/);
     assert.match(result.body.prompt, /@Image2 defines clothing only/);
     assert.match(result.body.prompt, /Never freeze a reference frame/);
+    assert.match(result.body.prompt, /sole editing master/);
+    assert.match(result.body.prompt, /Change only the prepared spatial extension/);
+    assert.match(result.body.prompt, /preserve source lighting and existing object positions/);
     assert.doesNotMatch(result.body.prompt, /APPEARANCE REFERENCE ONLY/);
     assert.ok(Buffer.byteLength(result.body.prompt) <= outpaintSubmissionByteLimit);
   }

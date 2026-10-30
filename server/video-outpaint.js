@@ -5,6 +5,7 @@ import { suppliedCanvasGeometry, suppliedCanvasRatio } from "./outpaint-supplied
 import { alignOutpaintTiming } from "./outpaint-timing.js";
 import { inspectOutpaintMotion } from "./outpaint-motion.js";
 import { inspectExtensionColor, extensionColorFilter } from "./outpaint-color.js";
+import { registerOutpaintSeams } from "./outpaint-seam-registration.js";
 import path from "node:path";
 
 export function createVideoOutpaintService({ resolveAsset, probeVideo, createTarget, runFfmpeg, statFile, reviewVisual, reportProgress = () => {} }) {
@@ -136,11 +137,22 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const seedance = settings.model === "seedance-2.5";
     let preroll = (plan.prerollFrames || 0) / submissionPlan.fps;
     let temporalAlignment = { applied: false, offsetFrames: 0 };
+    let registration = { applied: false };
     let motionValidation;
     if (seedance && submissionPlan.tailPadded && settings.restoreSource && prepared.videoUrl) {
       const reference = await resolveAsset(prepared.videoUrl);
       temporalAlignment = allRepeats ? { applied: false, offsetFrames: 0, reason: "Debug output preserves all repeats from frame zero" } : await alignOutpaintTiming({ referencePath: reference.filePath, generatedPath: generated.filePath, plan: submissionPlan, runFfmpeg });
       preroll += temporalAlignment.offsetFrames / submissionPlan.fps;
+      if (!allRepeats && settings.autoMatch && submissionPlan.colorPipeline?.matrix === "bt709" && submissionPlan.needsOutpaint) {
+        reportProgress("Finish: Checking matching feature positions at the source seams…");
+        try {
+          const result = await registerOutpaintSeams({ referencePath: reference.filePath, generated, plan: submissionPlan, offset: temporalAlignment.offsetFrames, runFfmpeg, createTarget, body });
+          generated = result.generated;
+          registration = result.report;
+        } catch {
+          registration = { applied: false, reason: "Seam alignment unavailable; original generated geometry retained" };
+        }
+      }
       reportProgress("Finish: Checking source motion and boundary correspondence in every frame…");
       motionValidation = await inspectOutpaintMotion({ referencePath: reference.filePath, generatedPath: generated.filePath, plan: checkedPlan, offset: temporalAlignment.offsetFrames, runFfmpeg });
       if (temporalAlignment.status === "needs_review") {
@@ -210,7 +222,7 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
     const issues = [temporalAlignment.status === "needs_review" && temporalAlignment.reason, motionValidation?.status === "needs_review" && `${motionValidation.flaggedFrames} frames failed source correspondence; ${motionValidation.coverage?.missingFillFrames || 0} frames have possible unfilled outer bands`, seamValidation?.status === "needs_review" && "Finished edge seams need review"].filter(Boolean).join(". ");
     const warning = allRepeats ? `Debug outpaint: all ${settings.repeatCount} copies and the held tail are retained from frame zero for inspection.${issues ? " " + issues + "." : ""}` : issues ? `Outpaint needs review: ${issues}. The candidate and paid raw result are retained; this candidate cannot replace an accepted Output.` : "";
     return { ...target, bytes: stat.size, outputFormat: mp4Delivery ? "H.264 MP4 (BT.709 SDR)" : "ProRes 4444 XQ MOV (10-bit processing)", mimeType: mp4Delivery ? "video/mp4" : "video/quicktime", warning,
-      matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, seamValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration: { applied: false },
+      matching: { finishVersion: 3, requested: colorMatching.requested, applied: colorMatching.applied, colorMatching, repeatOutput: allRepeats ? "all" : "last", deliveredFrames: plan.frames, deliveredFps: deliveryFps, deliveredFrameRate: deliveryFrameRate, temporalAlignment, motionValidation, seamValidation, localApplied: feather > 0, blendWidth: feather, colorFalloffWidth: 0, overlapLimit: overlapWidth, registration,
         method: colorMatching.applied ? "Shot-stable extension color matching followed by smooth inward source overlap" : "Smooth inward source overlap; generated background outside the original rectangle is unchanged",
         sourcePolicy: settings.restoreSource ? "Original core is fully opaque. Only the authorized inward edge overlap mixes generated pixels; working-space conversion, delivery scaling and encoding still apply." : "Source restoration is disabled." },
       qc: { status: "off", flags: [], segments: [] } };
