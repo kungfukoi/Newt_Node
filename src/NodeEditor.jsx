@@ -13864,6 +13864,19 @@ function NodeBody({
       }
     }
 
+    function navigatePreviewWithKeyboard(event, fromThumbnails = false) {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
+          !["ArrowLeft", "ArrowRight"].includes(event.key) || previewItems.length < 2) return;
+      if (!fromThumbnails && (event.target !== event.currentTarget || previewItem?.type !== "image")) return;
+      const focusedIndex = fromThumbnails ? Array.from(event.currentTarget.querySelectorAll("button")).indexOf(event.target.closest("button")) : -1;
+      const nextIndex = ((focusedIndex >= 0 ? focusedIndex : previewIndex) + (event.key === "ArrowLeft" ? -1 : 1) + previewItems.length) % previewItems.length;
+      selectPreviewItem(nextIndex, event);
+      const strip = fromThumbnails ? event.currentTarget : event.currentTarget.parentElement?.querySelector(".preview-thumb-strip");
+      const thumbnail = strip?.querySelectorAll("button")[nextIndex];
+      if (fromThumbnails) thumbnail?.focus({ preventScroll: true });
+      thumbnail?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+
     function previewLayoutDropAllowed(event) {
       const types = Array.from(event.dataTransfer?.types || []);
       return types.includes(previewLayoutDragMime) || hasOutputItemDragData(event.dataTransfer);
@@ -14010,8 +14023,15 @@ function NodeBody({
           <>
             <div
               className={`preview-stage aspect-safe-media-frame nodrag nopan ${previewItem ? "has-preview" : ""}`}
+              role="group"
+              aria-label="Preview image viewer"
+              tabIndex={previewItem?.type === "image" ? 0 : undefined}
+              onKeyDown={navigatePreviewWithKeyboard}
               onMouseDownCapture={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                if (previewItem?.type === "image") event.currentTarget.focus({ preventScroll: true });
+              }}
             >
               {previewItem?.type === "image" && (previewItem.live
                 ? <TimelineLivePreviewImage item={previewItem} sourceLabel={previewSource.label} />
@@ -14037,7 +14057,7 @@ function NodeBody({
             )}
             {previewItems.length > 0 && (
               <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
-                <div className="preview-thumb-strip">
+                <div className="preview-thumb-strip" onKeyDown={event => navigatePreviewWithKeyboard(event, true)}>
                   {previewItems.map((item, index) => (
                     <button
                       key={`${previewSource.id}-${item.url}-${index}`}
@@ -14049,6 +14069,7 @@ function NodeBody({
                       onDragEnd={(event) => finishOutputItemDragData(item, event)}
                       title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
                       aria-label={`Select preview ${index + 1}`}
+                      aria-pressed={index === previewIndex}
                     >
                       {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
                       {item.type === "video" && <VideoThumbnail item={item} />}
