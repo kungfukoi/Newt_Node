@@ -1,0 +1,12 @@
+.feature-usage { min-width: 0; }
+.feature-usage-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
+.feature-usage-controls label { display: grid; gap: 5px; min-width: 145px; flex: 1; }
+.feature-usage-controls input, .feature-usage-controls select { width: 100%; min-width: 0; }
+.feature-usage-table { max-height: 520px; overflow: auto; }
+.feature-usage table { width: 100%; border-collapse: collapse; text-align: left; }
+.feature-usage caption { text-align: left; margin-bottom: 10px; font-weight: 600; }
+.feature-usage th, .feature-usage td { padding: 10px; border-bottom: 1px solid var(--border, #444); vertical-align: middle; }
+.feature-usage tbody th { font-weight: 500; }
+.feature-usage-share { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.feature-usage-share meter { width: 80px; }
+.feature-usage-note { opacity: .75; font-size: .85rem; line-height: 1.5; }

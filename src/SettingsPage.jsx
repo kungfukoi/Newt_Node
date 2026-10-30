@@ -1,4 +1,5 @@
 import { PricingSettings } from "./components/PricingSettings.jsx";
+import { FeatureUsageSettings } from "./components/FeatureUsageSettings.jsx";
 import React from "react";
 import {
   ChevronDown,
@@ -444,6 +445,9 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
       </div>
 
       <div className="settings-grid">
+        <CollapsibleSettingsSection title="Feature Usage" open={openSections.usage} onToggle={() => toggleSection("usage")} wide>
+          {openSections.usage && <FeatureUsageSettings />}
+        </CollapsibleSettingsSection>
         <PricingSettings />
         <CollapsibleSettingsSection
           title="API Credentials"

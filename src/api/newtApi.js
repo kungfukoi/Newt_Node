@@ -267,6 +267,11 @@ export const historyApi = {
   }
 };
 
+export const featureUsageApi = {
+  load() { return getJson("/api/feature-usage", "Could not load feature usage."); },
+  record(event) { return fetchJsonApi("/api/feature-usage", jsonBody(event), "Save feature usage", { retryLocalApi: false, timeoutMs: 5000 }); }
+};
+
 export const statsApi = {
   local() {
     return getJson("/api/stats/local", "Could not load local accounting. Records are preserved.");

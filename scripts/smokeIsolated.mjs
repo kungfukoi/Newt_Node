@@ -81,6 +81,15 @@ try {
   assert.ok(healthy, `Isolated API did not become ready: ${output}`);
   const health = await (await request("/api/health")).json();
   assert.equal(health.routes.windowLifecycle, true);
+  assert.equal(health.routes.featureUsage, true);
+  const usageEvent = { id: "00000000-0000-4000-8000-000000000001", type: "imageModel", action: "run" };
+  for (let i = 0; i < 2; i++) {
+    const response = await request("/api/feature-usage", usageEvent);
+    assert.equal(response.status, 200);
+  }
+  const featureUsage = await (await request("/api/feature-usage")).json();
+  assert.equal(featureUsage.days.length, 1);
+  assert.equal(featureUsage.days[0].count, 1);
   assert.equal((await request("/api/window-session")).status, 204, "Unsupervised API stays available without a browser");
   assert.equal(health.routes.videoOutpaintPrompt, true);
   assert.equal(health.routes.kreaModelProviders, true);

@@ -62,6 +62,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createStatsLedger } from "./stats-ledger.js";
 import { createStatsProviders } from "./stats-providers.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { createFeatureUsageStore, registerFeatureUsageRoutes } from "./feature-usage.js";
 import { canonicalProvider } from "../src/statsAnalytics.js";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -407,6 +408,7 @@ let historyRecoveryNotice = "";
 const projectOutputStore = createProjectOutputStore({ directory: path.join(dataDir, "project-outputs") });
 const projectOutputPackageImports = new Map();
 const statsLedger = createStatsLedger({ filePath: path.join(dataDir, "stats-ledger.json") });
+const featureUsageStore = createFeatureUsageStore(path.join(dataDir, "feature-usage.json"));
 const historyStore = createHistoryStore({
   filePath: historyPath,
   limit: maxHistoryItems,
@@ -962,6 +964,7 @@ registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing
     return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
   }
 }));
+registerFeatureUsageRoutes(app, featureUsageStore);
 registerStatsRoutes(app, { ledger: statsLedger, providers: statsProviders, readHistory, refreshKeys: refreshRuntimeConfigFromEnvFile,
   readKeyIdentities: async () => {
     const keys = ["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", "ATLAS_API_KEY", "ELEVENLABS_API_KEY"];
@@ -1192,6 +1195,7 @@ function buildHealthPayload() {
     version: appVersion,
     routes: {
       windowLifecycle: true,
+      featureUsage: true,
       utilityImage: true,
       utilityVideo: true,
       keyer: true,

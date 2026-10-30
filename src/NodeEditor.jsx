@@ -173,6 +173,7 @@ import { flowNodeNoDragObserverOptions, guardFlowNodeMouseDown, markFlowNodeNoDr
 import { activeCanvasNodes, stoppedCanvasNodePatch } from "./canvasStop.js";
 import { createAssemblyFramePresenter } from "./assembly/assemblyFramePresenter.js";
 import { createNodeRunControl } from "./nodeRunControl.js";
+import { recordFeatureUsage } from "./recordFeatureUsage.js";
 import { runTrackedGeneration, stopGenerationProgress } from "./generationProgressStore.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
@@ -2244,6 +2245,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     pushUndoSnapshot();
     setSelectedEdgeId(null);
     setNodes((current) => [...current, nextNode]);
+    recordFeatureUsage(type, "add");
     setSelectedNodeIds([nodeId]);
     if (pendingConnection && pendingInput) {
       setEdges((current) =>
@@ -7324,6 +7326,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function runNode(node, runOptions = {}) {
     if (runOptions === "stop-node") return stopNode(node);
     const running = nodeRunControlRef.current.run(node.id, async token => {
+      if (isRunnableNode(node) && runOptions !== "finish-seedance-draft") recordFeatureUsage(node.type, "run");
       const actions = { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved };
       if (typeof runOptions !== "string" && node.type !== "assembly") {
         const rawIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current, { expandBatches: false });

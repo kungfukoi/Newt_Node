@@ -8,7 +8,8 @@ export const defaultSettingsOpenSections = Object.freeze({
   repository: false,
   status: true,
   comfy: false,
-  diagnostics: false
+  diagnostics: false,
+  usage: false
 });
 
 export function normalizeSettingsOpenSections(value) {
