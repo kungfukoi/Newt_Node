@@ -1,5 +1,60 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
+import sharp from "sharp";
+
+test("Look selection locks its first example to Custom Grade, replaces it on switch and ignores stale extraction", async ({page}) => {
+  const fixture={nodes:[{id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"None",gradePreset:"Warm"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:1}};
+  const {errors}=await openFixture(page,{fixture});let analyses=0;
+  const look=(id,name,images)=>({id,name,prompt:"Source",styleAnalysis:{stylePrompt:`Rendering treatment for ${name}`},examples:images.map(localUrl=>({localUrl}))});
+  const library={revision:0,collections:[{id:"looks",name:"Looks",styles:[look("red","Red",["/outputs/e2e/red.png","/outputs/e2e/green.png"]),look("green","Green",["/outputs/e2e/green.png","/outputs/e2e/red.png"]),look("slow","Slow",["/outputs/e2e/slow.png"])]}]};
+  await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify(library)}));
+  await page.route("**/api/style-library/analyze",route=>{analyses++;return route.fulfill({status:500,body:"Analysis should not run"});});
+  let releaseSlow;
+  const slowGate=new Promise(resolve=>{releaseSlow=resolve;});
+  for(const [name,color] of [["red","#ff0000"],["green","#00ff00"],["slow","#0000ff"]]){
+    const buffer=await sharp({create:{width:48,height:32,channels:3,background:color}}).png().toBuffer();
+    await page.route(`**/outputs/e2e/${name}.png`,async route=>{if(name==="slow")await slowGate;return route.fulfill({contentType:"image/png",headers:{"Access-Control-Allow-Origin":"*"},body:buffer});});
+  }
+  const node=page.locator('.react-flow__node[data-id="style"]'),picker=node.getByLabel("Look",{exact:true}),grade=node.getByLabel("Grade",{exact:true});
+  await picker.focus();
+  await expect(picker.getByRole("option",{name:"Red",exact:true})).toHaveCount(1);
+  await picker.selectOption({label:"Red"});
+  await expect(grade).toHaveValue("Custom");await expect(grade).toBeDisabled();
+  await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/red\.png/);
+  await expect(node.locator(".custom-palette-preview")).toHaveCSS("object-fit","contain");
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF0000",{ignoreCase:true});
+  await expect(node.locator('.custom-palette-panel input[type="file"]')).toBeDisabled();
+  await expect(node.getByTitle("Clear extracted palette",{exact:true})).toHaveCount(0);
+  const request=page.waitForRequest(request=>request.url().includes("/outputs/e2e/slow.png"));
+  await picker.selectOption({label:"Slow"});await request;
+  await picker.selectOption({label:"Green"});
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#00FF00",{ignoreCase:true});
+  releaseSlow();
+  await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/green\.png/);
+  await page.waitForTimeout(700);await page.reload();
+  await expect(grade).toHaveValue("Custom");await expect(grade).toBeDisabled();
+  await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/green\.png/);
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#00FF00",{ignoreCase:true});
+  await picker.selectOption("");await expect(grade).toHaveValue("None");await expect(grade).toBeEnabled();
+  expect(analyses).toBe(0);expect(errors).toEqual([]);
+});
+
+test("Rejected look analysis clears the progress notice and preserves the open details and collection", async ({page}) => {
+  const {errors}=await openFixture(page,{count:1});let paidCalls=0,saves=0;
+  const style={id:"blade-runner",name:"Blade Runner",prompt:"Source observations",examples:[{localUrl:"/outputs/e2e/example.png"}]};
+  await page.route("**/api/style-library",route=>{if(route.request().method()==="PUT")saves++;return route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections:[{id:"looks",name:"Looks",styles:[style]}]})});});
+  await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,total:0,indexed:0,categories:[],styles:[]})}));
+  await page.route("**/api/style-library/analyze",route=>{paidCalls++;return route.fulfill({status:502,contentType:"application/json",body:JSON.stringify({error:"Atlas Cloud: The model produced invalid content."})});});
+  await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
+  await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
+  const details=page.getByRole("dialog",{name:"Style details",exact:true});
+  await details.getByRole("button",{name:"Use in Style",exact:true}).click();
+  await expect(details.getByRole("alert")).toContainText("invalid content");
+  await expect(details.getByRole("status")).toHaveCount(0);
+  await expect(details.getByRole("button",{name:"Use in Style",exact:true})).toBeEnabled();
+  expect(paidCalls).toBe(1);expect(saves).toBe(0);expect(errors).toEqual([]);
+});
 
 test("Lookbook keeps details open, enlarges whole examples, clears search and reuses its saved Astra description", async ({page}) => {
   const {errors}=await openFixture(page,{count:1});

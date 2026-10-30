@@ -159,7 +159,7 @@ import {
   writeFileWithRetry
 } from "./file-write.js";
 import { copyStoryboardFrameWithVersion, safeStoryboardSceneName, storyboardFrameFileName } from "./storyboard-files.js";
-import { assembleSkillDirectorFinalPrompt, atlasChatLlmBody, atlasCreativeOutputBudget, atlasTextCanFallback, atlasTextModelCandidates, atlasUsesChatCompletions, creativeOpenAiModel, creativeFalModel, extractOpenAiResponseText, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
+import { assembleSkillDirectorFinalPrompt, atlasChatLlmBody, atlasMediaLlmBody, atlasMediaLlmEndpoint, atlasCreativeOutputBudget, atlasTextCanFallback, atlasTextModelCandidates, atlasUsesChatCompletions, creativeOpenAiModel, creativeFalModel, extractOpenAiResponseText, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, skillDirectorSystemPrompt, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { createDirectorMusicAnalyzer } from "./director-music.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
@@ -17428,16 +17428,16 @@ async function runMediaDescriptionLlm({
     optimizeImages: atlas && !inputs.some(item => item.asset)
   });
   const model = atlas ? `openai/${String(openAiModel || "").replace(/^openai\//, "")}` : openAiModel;
-  const body = openAiLlmBody({ model, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route });
-  if (atlas) delete body.store;
+  const body = (atlas ? atlasMediaLlmBody : openAiLlmBody)({ model, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route });
   const options = {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${atlas ? process.env.ATLAS_API_KEY : openAiTextApiKey}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(300000)
   };
+  const atlasEndpoint = atlasMediaLlmEndpoint(route);
   const result = atlas
-    ? await requestAtlasLlm("https://api.atlascloud.ai/v1/responses", options, updateCurrentGenerationProgress)
+    ? await requestAtlasLlm(atlasEndpoint, options, updateCurrentGenerationProgress)
     : await (async () => {
         const response = await fetch("https://api.openai.com/v1/responses", options);
         return { data: await response.json().catch(() => ({})), errorStatus: response.ok ? 0 : response.status };
@@ -17447,7 +17447,8 @@ async function runMediaDescriptionLlm({
     throw httpError(
       errorStatus,
       atlas ? atlasError(data, errorStatus) : data?.error?.message || "OpenAI media analysis failed.",
-      { raw: data }
+      { raw: data, llmResult: { text: "", provider: atlas ? "Atlas Cloud" : "OpenAI", model,
+        endpoint: atlas ? atlasEndpoint : openAiModel, usages: [data?.usage].filter(Boolean) } }
     );
   }
   return checkedCreativeLlmResult({
@@ -17455,7 +17456,7 @@ async function runMediaDescriptionLlm({
     usages: [data.usage].filter(Boolean),
     provider: atlas ? "Atlas Cloud" : "OpenAI",
     model,
-    endpoint: atlas ? "https://api.atlascloud.ai/v1/responses" : openAiModel
+    endpoint: atlas ? atlasEndpoint : openAiModel
   }, data, route);
 }
 

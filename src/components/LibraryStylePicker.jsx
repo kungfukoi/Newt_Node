@@ -1,6 +1,7 @@
 import React from "react";
 import { styleLibraryApi } from "../api/newtApi.js";
 import { libraryStyleSnapshot } from "../styleLibrary.js";
+import { lookSelectionPatch, releaseLookGrade } from "../lookGrade.js";
 import "../LibraryWorkspace.css";
 
 export default function LibraryStylePicker({ data, onChange }) {
@@ -9,7 +10,7 @@ export default function LibraryStylePicker({ data, onChange }) {
   const [loading, setLoading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
   async function choose(value) {
-    if (!value) { onChange({ libraryStyle: null }); return; }
+    if (!value) { onChange({ ...releaseLookGrade(data), libraryStyle: null }); return; }
     if (value === "workflow-style") return;
     setAnalyzing(true); setError("");
     try {
@@ -23,7 +24,7 @@ export default function LibraryStylePicker({ data, onChange }) {
         await styleLibraryApi.save({ ...library, collections: library.collections.map(item => item.id === collectionId ? { ...item, styles: item.styles.map(saved => saved.id === id ? style : saved) } : item) });
         if (styleAnalysis.warning) setError(styleAnalysis.warning);
       }
-      onChange({ libraryStyle: libraryStyleSnapshot(style), stylePreset: "None" });
+      onChange(lookSelectionPatch(style, data));
     } catch (error) { setError(error.message); }
     finally { setAnalyzing(false); }
   }

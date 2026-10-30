@@ -30,7 +30,9 @@ export function portableStylePrompt(value = "") {
 }
 export function libraryStyleSnapshot(style) {
   const value = normalizeLibraryStyle(style);
-  return { id: value.id, name: value.name, prompt: portableStylePrompt(value.styleAnalysis?.stylePrompt || value.prompt), sourceUrl: value.sourceUrl, sref: value.sref };
+  const gradeReference = value.examples[0] || normalizeLibraryStyle({ examples: [style?.gradeReference] }).examples[0];
+  return { id: value.id, name: value.name, prompt: portableStylePrompt(value.styleAnalysis?.stylePrompt || value.prompt), sourceUrl: value.sourceUrl, sref: value.sref,
+    ...(gradeReference ? { gradeReference } : {}) };
 }
 export function libraryPrompt(data = {}) { return portableStylePrompt(data.libraryStyle?.prompt); }
 export function libraryStylesMatching(styles, query = "") {

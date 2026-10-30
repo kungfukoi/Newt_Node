@@ -46,7 +46,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   React.useEffect(()=>{if(activeStyle||detailLoading){if(!dialog.current?.open)dialog.current?.showModal();}},[activeStyle,detailLoading]);
   React.useEffect(() => { if (previewIndex !== null && !previewDialog.current?.open) previewDialog.current?.showModal(); }, [previewIndex]);
   function closePreview() { previewDialog.current?.close(); setPreviewIndex(null); }
-  async function act(action) { setBusy(true);setError("");setNotice("");try{await action();}catch(e){setError(e.message);}finally{setBusy(false);} }
+  async function act(action) { setBusy(true);setError("");setNotice("");try{await action();}catch(e){setNotice("");setError(e.message);}finally{setBusy(false);} }
   async function save(collections) { const value=await styleLibraryApi.save({...library,collections});setLibrary(value);return value; }
   async function createCollection(event) {
     event.preventDefault(); await act(async()=>{const id=crypto.randomUUID();await save([...library.collections,{id,name:collectionName.trim(),styles:[]}]);setCollectionId(id);setCollectionName("");});
@@ -110,7 +110,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
       const existing = existingCollection?.styles.find(saved => sameLook(saved, source));
       const local = await materialize(existing || source);
       if (!local.styleAnalysis?.stylePrompt) {
-        setNotice("Astra is analyzing the examples and observations. This is a paid analysis; the style description will be saved for reuse.");
+        setNotice("This is the first time this Look has been used as a Style, Analyzing the examples and observations.  The Style will be saved for reuse.");
         local.styleAnalysis = await styleLibraryApi.analyze(local);
       }
       let target = existingCollection || collection, collections = library.collections;

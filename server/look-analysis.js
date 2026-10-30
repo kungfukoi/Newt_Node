@@ -49,7 +49,7 @@ export function createLookAnalyzer({ directory, analyze, readAsset, recordHistor
         await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", provider: result.provider, modelName: result.model, endpoint: result.endpoint,
           mode: "Look style analysis", prompt: body.observations, text: error ? "" : result.text, error,
           project: { id: "style-library", name: "Lookbook" }, node: { title: String(body.name || "Look").slice(0, 120) },
-          settings: { analysisVersion: lookAnalysisVersion, fingerprint, exampleCount: inputs.length, reasoningEffort: "high", usage: result.usage || null, helperUsages: result.usages || [] },
+          settings: { analysisVersion: lookAnalysisVersion, fingerprint, exampleCount: inputs.length, reasoningEffort: result.provider === "Atlas Cloud" ? "provider-default" : "high", usage: result.usage || null, helperUsages: result.usages || [] },
           cost: estimateCost({ provider: result.provider, model: result.model, usage: result.usage, helperUsages: result.usages }) });
       };
       try {

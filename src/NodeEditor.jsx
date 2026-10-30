@@ -177,6 +177,8 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import LibraryStylePicker from "./components/LibraryStylePicker.jsx";
 import { libraryPrompt, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
+import { lookGradeBinding, lookSelectionPatch, releaseLookGrade } from "./lookGrade.js";
+import { useLookGrades } from "./useLookGrades.js";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
@@ -1586,6 +1588,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     nodeMapRef.current = nodeMap;
   }, [nodeMap, nodes]);
 
+  useLookGrades(nodes, updateNode, extractCustomPaletteFromUrl);
+
   React.useLayoutEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
@@ -2275,7 +2279,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     const data = createNodeData(kind, kind === "style" ? "Style" : "Mood Board", count);
     const node = { id: createNodeId(kind), type: kind, ...position, data: {
       ...data,
-      ...(kind === "style" ? { libraryStyle: libraryStyleSnapshot(value) } : {
+      ...(kind === "style" ? lookSelectionPatch(value) : {
         title: value.name, transferImages: value.examples.slice(0, maxTransferImages).map(image => ({ ...image, id: crypto.randomUUID() })),
         libraryBoard: true, libraryBoardPrompt: value.prompt, locked: false, activated: false
       })
@@ -13542,6 +13546,7 @@ function NodeBody({
     const selectedPreset = node.data.stylePreset || "None";
     const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
     const customPaletteSelected = selectedGrade === "Custom";
+    const lookGradeLocked = Boolean(lookGradeBinding(node.data.libraryStyle));
     const paletteColors = normalizedCustomPaletteColors(node.data);
     const styleSelected = styleOutputEnabled(node.data);
     const customGradeAnalysis = customPaletteSelected && paletteColors.length
@@ -13721,7 +13726,7 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, libraryStyle: null })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { ...releaseLookGrade(node.data), stylePreset: event.target.value, libraryStyle: null })}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -13730,7 +13735,7 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Grade</span>
-          <select value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
+          <select aria-label="Grade" disabled={lookGradeLocked} title={lookGradeLocked ? "Grade is locked to the selected Look" : "Choose a grade"} value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
             {gradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -13739,9 +13744,11 @@ function NodeBody({
 
         <LibraryStylePicker data={node.data} onChange={patch => { onUndoSnapshot?.(); onUpdate(node.id, patch); }} />
         {customPaletteSelected && (
-          <section className="custom-palette-panel" onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
+          <section className={`custom-palette-panel ${lookGradeLocked ? "look-grade-locked" : ""}`} onDragOver={allowFileDrop} onDrop={lookGradeLocked ? allowFileDrop : handlePaletteDrop}>
+            {lookGradeLocked && <small className="custom-palette-status">Grade locked to {node.data.libraryStyle.name} · first example</small>}
+            <fieldset className="look-grade-controls" disabled={lookGradeLocked}>
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
-              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
+              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={lookGradeLocked ? "First example from the selected Look" : node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
                   <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={displayMediaUrl(previewImageUrl(node.data.customPalettePreviewUrl))} alt="Extracted custom palette" loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
                 ) : (
@@ -13759,7 +13766,7 @@ function NodeBody({
                   }}
                 />
               </label>
-              {hasImagePalette && (
+              {hasImagePalette && !lookGradeLocked && (
                 <button type="button" className="custom-palette-image-clear" onClick={clearCustomPalette} title="Clear extracted palette">
                   <Trash2 size={15} />
                 </button>
@@ -13835,6 +13842,7 @@ function NodeBody({
             )}
             {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
             {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
+            </fieldset>
           </section>
         )}
       </div>
@@ -25793,6 +25801,7 @@ function normalizeStyleData(data = {}) {
     customPaletteColors,
     customPalettePreviewUrl: String(data.customPalettePreviewUrl || ""),
     customPaletteSourceName: String(data.customPaletteSourceName || ""),
+    customPaletteLookKey: String(data.customPaletteLookKey || ""),
     customPaletteStatus: "",
     customPaletteError: ""
   };

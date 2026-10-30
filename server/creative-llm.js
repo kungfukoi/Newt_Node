@@ -114,6 +114,28 @@ export function atlasChatLlmBody({ model, prompt, systemPrompt, route = "" }) {
   };
 }
 
+export function atlasMediaLlmBody(options) {
+  if (options.route === "look-style-analysis") {
+    return {
+      model: options.model,
+      messages: [
+        { role: "system", content: options.systemPrompt },
+        ...options.input.map(message => ({ role: message.role, content: message.content.map(part =>
+          part.type === "input_image" ? { type: "image_url", image_url: { url: part.image_url } }
+            : { type: "text", text: part.text }) }))
+      ],
+      max_tokens: creativeOutputBudget(options.route), stream: false
+    };
+  }
+  const body = openAiLlmBody(options);
+  delete body.store;
+  return body;
+}
+
+export function atlasMediaLlmEndpoint(route) {
+  return route === "look-style-analysis" ? "https://api.atlascloud.ai/v1/chat/completions" : "https://api.atlascloud.ai/v1/responses";
+}
+
 export function atlasUsesChatCompletions({ route = "", responseMimeType = "text/plain" } = {}) {
   return responseMimeType === "text/plain" && !/^(film-director|storyboard)-/.test(route);
 }
