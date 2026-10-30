@@ -1,5 +1,5 @@
 import { CanvasTabs } from "./components/CanvasTabs.jsx";
-import { normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasName, defaultCanvasViewport } from "./projectCanvases.js";
+import { assignCanvasOwnership, normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasName, defaultCanvasViewport } from "./projectCanvases.js";
 import { vectorOutputSource } from "./outputExport.js";
 import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
 const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
@@ -1316,10 +1316,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const activeCanvasRef = React.useRef(savedDraft.activeCanvasId); activeCanvasRef.current = activeCanvasId;
   const canvasHistoryRef = React.useRef(new Map());
   const [nodes, setProjectNodes] = React.useState(savedDraft.nodes);
-  const setNodes = React.useCallback(value => { const owner=activeCanvasRef.current; setProjectNodes(current => { const next=typeof value==='function'?value(current):value; const owned=next.map(node=>node.canvasId?node:{...node,canvasId:owner});nodesRef.current=owned;return owned; }); },[]);
+  const setNodes = React.useCallback(value => {
+    const owner = activeCanvasRef.current;
+    setProjectNodes(current => {
+      const next = typeof value === "function" ? value(current) : value;
+      const owned = assignCanvasOwnership(next, owner);
+      nodesRef.current = owned;
+      return owned;
+    });
+  }, []);
   const [edges, setEdges] = React.useState(savedDraft.edges);
   const [groups, setProjectGroups] = React.useState(savedDraft.groups);
-  const setGroups = React.useCallback(value => { const owner=activeCanvasRef.current;setProjectGroups(current => (typeof value==='function'?value(current):value).map(group=>group.canvasId?group:{...group,canvasId:owner})); },[]);
+  const setGroups = React.useCallback(value => {
+    const owner = activeCanvasRef.current;
+    setProjectGroups(current => assignCanvasOwnership(typeof value === "function" ? value(current) : value, owner));
+  }, []);
   const [dragState, setDragState] = React.useState(null);
   const [draftEdge, setDraftEdge] = React.useState(null);
   const [portPositions, setPortPositions] = React.useState({});
@@ -1413,9 +1424,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   });
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const overviewRendering = false;
-  const visibleGraph = canvasGraph({nodes,edges,groups}, activeCanvasId);
+  const visibleGraph = React.useMemo(() => canvasGraph({ nodes, edges, groups }, activeCanvasId), [nodes, edges, groups, activeCanvasId]);
   const renderedNodes = visibleGraph.nodes;
-  const canvasesForSave = snapshotCanvases(canvases,activeCanvasId,viewport);
+  const canvasesForSave = React.useMemo(() => snapshotCanvases(canvases, activeCanvasId, viewport), [canvases, activeCanvasId, viewport]);
   const renderedNodeKey = "";
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
   const {

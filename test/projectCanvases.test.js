@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, projectGraphForStorage, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasTabDropTarget } from "../src/projectCanvases.js";
+import { assignCanvasOwnership, normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, projectGraphForStorage, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasTabDropTarget } from "../src/projectCanvases.js";
 import { workflowStateFingerprint } from "../src/workflowState.js";
 import { buildWorkflowDocument } from "../src/workflowFiles.js";
 import { buildProjectOutputItems } from "../src/projectOutputs.js";
@@ -9,6 +9,17 @@ import { workflowApi } from "../src/api/newtApi.js";
 
 const node = (id, canvasId, data = {}) => ({ id, canvasId, type: "image", x: 50, y: 60, data });
 const wire = (id, from, to) => ({ id, from: { nodeId: from, port: "imageOut" }, to: { nodeId: to, port: "sourceIn" } });
+test("canvas ownership preserves no-op state identity and only tags new items", () => {
+  const existing = node("existing", "background");
+  const items = [existing];
+  assert.equal(assignCanvasOwnership(items, "active"), items);
+  const empty = [];
+  assert.equal(assignCanvasOwnership(empty, "active"), empty);
+  const added = assignCanvasOwnership([...items, { id: "new" }], "active");
+  assert.equal(added[0], existing);
+  assert.equal(added[1].canvasId, "active");
+  assert.equal(assignCanvasOwnership(added, "other"), added);
+});
 const fixture = () => normalizeProjectCanvases({
   nodes: [node("a", "one", { resultUrl: "/uploads/source.png" }), node("b", "one"), node("c", "two", { resultUrl: "/outputs/other.png" })],
   edges: [wire("ab", "a", "b")], groups: [{ id: "g", nodeIds: ["a", "b"], canvasId: "one", x: 0, y: 0 }],

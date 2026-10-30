@@ -22,6 +22,8 @@ Deleting a canvas removes its nodes, not files on disk. The last canvas and canv
 
 Version-2 documents keep the flat `graph.nodes`, `graph.edges` and `graph.groups` arrays for media packaging. Nodes/groups have `canvasId`; `graph.canvases` stores ordered descriptors and viewports. `activeCanvasId` selects the open view. There are no cross-canvas connections. Unknown canvas owners are recovered into named canvases instead of losing nodes.
 
+Canvas ownership assignment preserves unchanged node/group array identity. Group membership synchronization can therefore return the existing state without triggering another render. Active graph and save-view snapshots are memoized by their source state.
+
 The server must advertise `routes.projectCanvases` before the client saves this format. Older clients cannot overwrite an existing version-2 project through the current backend. Other installations should update NewtNode before opening these projects.
 
 ## Verification

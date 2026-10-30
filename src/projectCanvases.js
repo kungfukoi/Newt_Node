@@ -3,6 +3,12 @@ import { createNodeId, remapImportedGraph, resetCopiedNodeRuntime } from "./work
 export const defaultCanvasId = "canvas-1";
 export const defaultCanvasViewport = { x: 0, y: 0, scale: 1 };
 export const canvasName = value => String(value || "").trim().slice(0, 80) || "Untitled Canvas";
+// Preserve React's no-op state updates once every item already has an owner.
+export function assignCanvasOwnership(items, canvasId) {
+  return items.some(item => !item.canvasId)
+    ? items.map(item => item.canvasId ? item : { ...item, canvasId })
+    : items;
+}
 const viewport = value => value && [value.x, value.y, value.scale].every(Number.isFinite) && value.scale > 0
   ? { x: value.x, y: value.y, scale: value.scale } : { ...defaultCanvasViewport };
 
