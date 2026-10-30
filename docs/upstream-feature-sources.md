@@ -31,3 +31,5 @@ Source: SugerMilks/NewtNode `72c77e39ea317e174146b10047bcece67c0dbe00`. Approved
 - Explore art direction: adapted in 4.34.0-beta.0, preserving local references and provider behavior.
 
 Authored Shot List planning (4.36): new boards start with one row; each authored row becomes exactly one frame with preserved IDs, order and explicit camera choices. Plan Shots retains media/versions and marks row provenance. Editing descriptions requires planning before generation; presets retain authored rows while clearing stale media. Existing summary/Director boards retain their approach. Source: SugerMilks 72c77e3.
+
+PDF Script Import (4.39, SugerMilks 72c77e3): managed PDFs are parsed in a bounded PDF.js worker. Explicit import performs billed script discovery/transcription and drafts authored shots with source pages, dialogue, VO and timing. Alternatives require selection; existing/protected shots are retained. No image generation or automatic paid retry. Limits: 40 MB, 200 document pages, 50 selected script pages, with extra confirmation over 30.

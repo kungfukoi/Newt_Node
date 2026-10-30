@@ -1,3 +1,4 @@
+import { scriptCatalogSchema, scriptShotsSchema, scriptOcrSchema } from "../src/storyboardScriptImport.js";
 import { storyboardQcFailureTypes } from "../src/storyboardQc.js";
 import { storyboardSpatialSchema, storyboardCastSchema } from "../src/storyboardSpatial.js";
 import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema, storyboardCastRepairSchema } from "../src/storyboardWorkflow.js";
@@ -23,6 +24,9 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "storyboard-script-catalog": scriptCatalogSchema,
+  "storyboard-script-shotlist": scriptShotsSchema,
+  "storyboard-script-ocr": scriptOcrSchema,
   "storyboard-plan-v2": storyboardPlanSchema,
   "storyboard-revision-v2": storyboardRevisionSchema,
   "storyboard-cast-repair": storyboardCastRepairSchema,
@@ -71,6 +75,7 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
+  if (/^storyboard-script-/.test(route)) return 24000;
   if (/shotlist|revision|shot-repair|spatial-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;

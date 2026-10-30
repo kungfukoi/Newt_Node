@@ -1,3 +1,4 @@
+import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
 import { StoryboardShotList } from "./components/StoryboardShotList.jsx";
 import { storyboardShotListMode, storyboardShotDescription, storyboardShotRows, storyboardShotListError, storyboardShotListContext, storyboardShotNeedsPlan, storyboardShotSource, storyboardShotGalleryPatch, mergeStoryboardShotPlan } from "./storyboardShotList.js";
 import { storyboardCameraPersonalities, normalizeStoryboardCameraPersonality, storyboardCameraChoices, storyboardCameraRenderingPrompt } from "./storyboardCinematography.js";
@@ -12029,6 +12030,7 @@ function NodeBody({
   modelProviderAvailability = {},
   showPriceSnapshot = true
 }) {
+  const workflowContext = generationScope || {};
   const config = node.type === "batch" ? { ...getNodeConfig(node.type), input: inputPortDefinitionsForNode(node), output: outputPortDefinitionsForNode(node) } : getNodeConfig(node.type);
   if (isRunnableNode(node) && node.type !== "assembly") incoming = representativeBatchIncoming(incoming);
   const outputPort = config.output[0];
@@ -13018,6 +13020,7 @@ function NodeBody({
 
         {activeTab === "setup" ? (
           <section className="storyboard-setup storyboard-scroll-surface">
+            <StoryboardScriptImport key={`${workflowContext?.projectId || ""}:${node.id}`} node={node} frames={frames} busy={storyboardLocked} workflowContext={workflowContext} onUpdate={patch => onUpdate(node.id, patch)} onApply={imported => { onUndoSnapshot?.(); const nextFrames = normalizedStoryboardFrames(imported); onUpdate(node.id, { ...clearStoryboardBoardPatch(), storyboardApproach: "Shot List", storyboardFrames: nextFrames, selectedFrameId: nextFrames[0]?.id || "", resultItems: storyboardResultItems(nextFrames), resultUrl: nextFrames.find(f => f.resultUrl)?.resultUrl || "" }); }} />
             <div className={`storyboard-setup-grid${shotList ? " shot-list-setup" : ""}`}>
               {shotList && <StoryboardShotList frames={frames} busy={storyboardLocked} onAdd={addFrame} onRemove={removeFrame} onMove={moveFrame}
                 onUpdate={(id, patch) => updateFrame(id, { shotDescription: storyboardShotDescription(frames.find(f => f.id === id)), ...patch, shotPlanSource: "" })}
@@ -13295,6 +13298,7 @@ function NodeBody({
                     </div>
                     <details className="storyboard-panel-details" name={`storyboard-panel-editor-${node.id}`}>
                     <summary>Edit panel {frame.number}</summary>
+                    <StoryboardScriptSource source={frame.sourceScript} />
                     <div className="storyboard-frame-controls">
                       <select value={frame.shot || "None"} disabled={storyboardPanelEditingLocked(node, frame) || frame.protected} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
                         {shotPresetNames.map((option) => <option key={option}>{option}</option>)}

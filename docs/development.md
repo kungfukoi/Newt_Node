@@ -263,3 +263,5 @@ for Local/Global behavior and credential requirements. Run focused browser cover
 ## Documentation audits
 
 Use [the feature reference](features-and-workflows.md) and [2026-10-15 audit](documentation-audit-2026-10-15.md) as the current coverage map. Compare catalog visibility in nodeRegistry.js, model/provider lists, real controls and runners, persistence, and tests; do not infer callable behavior from a legacy handler alone. Treat archived notes and dated vendor availability/prices as historical. For bundle measurements, production dist retains old hashed assets for open-window compatibility; aggregate directory size is not the current release payload. Build into a fresh isolated output directory and run reportBundle.mjs against that directory for a reproducible single-build measurement. Never empty an active installation's dist to measure it.
+
+PDF script import uses pinned pdfjs-dist 6.4.299 and its canvas dependency; Node.js 22.13+ is required for that feature. Other app requirements remain as listed.

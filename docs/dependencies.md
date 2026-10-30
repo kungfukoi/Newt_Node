@@ -60,3 +60,5 @@ The 2026-09-04 reliability pass updated compatible lockfile resolutions without 
 SGLang, its Python/CUDA environment, and MiniMax H3 weights are optional machine-level dependencies for the Local MiniMax H3 provider. They are intentionally not npm dependencies; setup and shared-path mapping are documented in `minimaxH3-local.md`.
 
 Pricing catalog parsing uses `marked` for official Markdown token tables and `parse5` for inert HTML table parsing. Provider page scripts and formulas are never evaluated.
+
+PDF script import uses pinned pdfjs-dist 6.4.299 and its canvas dependency; Node.js 22.13+ is required for that feature. Other app requirements remain as listed.

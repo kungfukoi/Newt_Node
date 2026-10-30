@@ -1,3 +1,4 @@
+import { StoryboardScriptSource } from "./StoryboardScriptImport.jsx";
 import "../storyboardShotList.css";
 import React from "react";
 import { Plus, Trash2, ArrowUp, ArrowDown, Clapperboard, Lock, Unlock, Play, CircleCheck, CircleAlert } from "lucide-react";
@@ -35,6 +36,7 @@ export function StoryboardShotList({ frames, busy, onAdd, onUpdate, onRemove, on
             </button>
             {renderDescription(frame, locked)}
           </div>
+          <StoryboardScriptSource source={frame.sourceScript} />
           {frame.error && <small className="upload-error">{frame.error}</small>}
 
         </li>;

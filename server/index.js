@@ -1,3 +1,5 @@
+import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
+import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
 import { isKling4Model, kling4Endpoints } from "../src/kling4.js";
 import { generateKling4, kling4HistorySettings } from "./kling4.js";
 import { registerWindowLifecycle } from "./window-lifecycle.js";
@@ -979,6 +981,7 @@ app.use(["/api/node", "/api/generate"], (req, _res, next) => {
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 // Keep the saved Director/legacy routes while exposing the latest independent planner.
+registerStoryboardScriptRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > scriptFileByteLimit) throw new Error("Choose a PDF no larger than 40 MB."); return { buffer: await readFile(filePath), fileName }; } });
 registerStoryboardRoutes({ post: (route, handler) => app.post(route === "/api/node/storyboard-revise" ? "/api/node/storyboard-revise-v2" : route === "/api/node/storyboard-review" ? "/api/node/storyboard-review-v2" : route, handler) }, {
   runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory,
   estimateCost: estimateTextProcessingCost, readLocalAsset,
@@ -1244,6 +1247,7 @@ function buildHealthPayload() {
       storyboardRevisions: true,
       storyboardPlanningV2: true,
       storyboardShotList: true,
+      storyboardScriptImport: true,
       storyboardCinematography: true,
       directorCharacterDialogue: true,
       prepareCharacterDialogue: true,

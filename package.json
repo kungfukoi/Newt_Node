@@ -1,6 +1,6 @@
 {
   "name": "newtnode",
-  "version": "4.38.0-beta.0",
+  "version": "4.39.0-beta.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -33,6 +33,7 @@
     "marked": "^18.0.12",
     "multer": "^2.0.2",
     "parse5": "^8.0.1",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "^0.35.4",

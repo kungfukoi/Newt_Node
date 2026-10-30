@@ -428,6 +428,11 @@ export const nodeApi = {
 
   reviewStoryboardSequence(body) { return fetchJsonApi("/api/node/storyboard-review", jsonBody(body), "Storyboard sequence review"); },
   reviseStoryboard(body) { return fetchJsonApi("/api/node/storyboard-revise", jsonBody(body), "Storyboard revision"); },
+  async storyboardScript(mode, body) {
+    const health = await getJson("/api/health", "Could not verify PDF import support.");
+    if (health.routes?.storyboardScriptImport !== true) throw new Error("Restart NewtNode to activate PDF script import.");
+    return postJson(`/api/node/storyboard-script-${mode}`, body, "Script PDF import");
+  },
   async planStoryboard(body, label = "Storyboard planning") {
     if (body.storyboardApproach === "Shot List") { const health = await getJson("/api/health", "Could not verify authored shots."); if (health.routes?.storyboardShotList !== true) throw new Error("Restart NewtNode before planning authored shots. No generation submitted."); }
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);

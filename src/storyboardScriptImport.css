@@ -1,0 +1,21 @@
+.storyboard-script-import { min-width: 0; border-bottom: 1px solid #383b35; padding: 0 0 12px; font-size: 12px; color: #d9dcd7; }
+.storyboard-script-import > :not(input) + * { margin-top: 10px; }
+.storyboard-script-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.storyboard-script-toolbar > span { display: inline-flex; gap: 5px; align-items: center; min-width: 0; }
+.storyboard-script-toolbar > .storyboard-script-filename { display: block; flex: 1 1 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aaa; }
+.storyboard-script-import label { display: grid; gap: 5px; min-width: 0; }
+.storyboard-script-import select { box-sizing: border-box; max-width: 100%; width: 100%; padding: 7px 9px; border: 1px solid #3a3c37; border-radius: 5px; background: #10120f; color: #eee; font: inherit; }
+.storyboard-script-import button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; max-width: 100%; border: 1px solid #454841; border-radius: 5px; padding: 6px 10px; font: inherit; background: #2b2d28; color: #eee; cursor: pointer; }
+.storyboard-script-import button:disabled { opacity: .45; cursor: default; }
+.storyboard-script-import svg { flex: 0 0 auto; }
+.storyboard-script-notice { color: #e5ce65; line-height: 1.5; }
+.storyboard-script-import p { margin: 8px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.storyboard-script-selection { max-width: 560px; }
+.storyboard-script-confirm { padding-top: 4px; }
+.storyboard-script-source { font-size: 11px; color: #abb4a5; margin: 8px 0; min-width: 0; overflow-wrap: anywhere; }
+.storyboard-script-source summary { cursor: pointer; line-height: 1.5; }
+.storyboard-script-source summary svg { vertical-align: middle; margin-right: 4px; }
+.storyboard-script-source a { display: inline-flex; align-items: center; gap: 5px; color: #a9cfb8; margin: 8px 0; }
+.storyboard-script-source dl { margin: 0; }
+.storyboard-script-source dt { font-weight: 650; margin-top: 8px; }
+.storyboard-script-source dd { white-space: pre-wrap; margin: 3px 0 8px; line-height: 1.5; }
