@@ -146,7 +146,7 @@ export function exploreReferenceDescription(portId, connections = []) {
   return connections.map(({ source }) => {
     const data = source?.data || {};
     const name = data.title || source?.type || "Reference";
-    const detail = portId === "styleIn" ? [data.stylePreset, data.gradePreset]
+    const detail = portId === "styleIn" ? [data.stylePreset, data.gradePreset, data.libraryStyle?.prompt]
       : portId === "cameraIn" ? [data.shotPreset, data.lensPreset, data.typePreset]
       : [data.characterName, data.resultItems?.[data.selectedResultIndex || 0]?.label || data.fileName];
     const description = [...new Set(detail.filter(value => value && value !== "None" && value !== name))].join(" / ");

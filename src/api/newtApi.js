@@ -12,6 +12,33 @@ const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
+export const styleLibraryApi = {
+  async catalog({ query = "", category = "", offset = 0, refresh = false } = {}) {
+    const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
+    const { response, data } = await fetchJsonApi(`/api/style-library/catalog?${params}`, {}, "Read local style catalog", { timeoutMs: 60000 });
+    ensureOk(response, data, "Restart NewtNode to activate the local style catalog.");
+    if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the local style catalog.");
+    return data;
+  },
+  async detail(id) {
+    const { response, data } = await fetchJsonApi(`/api/style-library/catalog/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 20000 });
+    return ensureOk(response, data, "Could not read this local style.");
+  },
+  catalogAssetUrl(url) { return localApiFetchUrl(url); },
+  async read() {
+    const { response, data } = await fetchJsonApi("/api/style-library", {}, "Read style library", { timeoutMs: 15000 });
+    ensureOk(response, data, "Restart NewtNode to activate Library.");
+    if (!Array.isArray(data.collections) || !Number.isInteger(data.revision)) throw new Error("Restart NewtNode to activate Library.");
+    return data;
+  },
+  async save(library) {
+    const { response, data } = await fetchJsonApi("/api/style-library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(library) }, "Save style library", { timeoutMs: 15000, retryLocalApi: false });
+    ensureOk(response, data, "Could not save the style library.");
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("newtnode:style-library-updated"));
+    return data;
+  }
+};
+
 export function connectWindowSession() {
   return new EventSource(localApiFetchUrl("/api/window-session"));
 }

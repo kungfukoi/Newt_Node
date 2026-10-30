@@ -54,7 +54,7 @@ try {
   }] }));
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|COMSPEC)$/i.test(key)));
-  Object.assign(env, { PORT: String(port), NEWTNODE_CONTROL_PORT: String(port), NODE_ENV: "production", DOTENV_CONFIG_PATH: path.join(sandbox, ".env") });
+  Object.assign(env, { PORT: String(port), NEWTNODE_CONTROL_PORT: String(port), NODE_ENV: "production", DOTENV_CONFIG_PATH: path.join(sandbox, ".env"), NEWTNODE_STYLEFINDER_ROOT: path.join(sandbox, "empty-style-catalog") });
   child = spawn(process.execPath, [path.join(sandbox, "server", "index.js")], { cwd: sandbox, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   exited = once(child, "exit");
   child.stdout.on("data", (data) => { output = (output + data).slice(-16000); });
@@ -117,6 +117,16 @@ try {
   for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
+  assert.equal(health.routes.styleLibrary, true);
+  assert.equal(health.routes.styleFinderCatalog, true);
+  const localCatalog = await (await request("/api/style-library/catalog")).json();
+  assert.equal(localCatalog.ready, false);
+  assert.deepEqual(localCatalog.styles, []);
+  const emptyLibrary = await (await request("/api/style-library")).json();
+  assert.deepEqual(emptyLibrary.collections, []);
+  const savedLibraryResponse = await fetch(api + "/api/style-library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: 0, collections: [{ id: "smoke-collection", name: "Smoke styles", styles: [{ id: "smoke-style", name: "Ink", prompt: "Bold ink on paper", examples: [] }] }] }) });
+  assert.equal(savedLibraryResponse.status, 200);
+  assert.equal((await (await request("/api/style-library")).json()).collections[0].styles[0].prompt, "Bold ink on paper");
   const clientPort = await freePort();
   clientChild = spawn(process.execPath, [path.join(root, "node_modules", "vite", "bin", "vite.js"), "preview", "--host", "127.0.0.1", "--port", String(clientPort), "--strictPort"], { cwd: root, windowsHide: true, stdio: "ignore" });
   clientExited = once(clientChild, "exit");

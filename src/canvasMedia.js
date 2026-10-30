@@ -11,7 +11,7 @@ export function canvasToBlob(canvas, type, errorMessage = "Could not render stil
   });
 }
 
-export async function createTransferCollageBlob(images, outputLabel = defaultMoodBoardOutputFileName) {
+export async function createTransferCollageBlob(images, outputLabel = defaultMoodBoardOutputFileName, { contain = false } = {}) {
   const loadedImages = await Promise.all(images.map((image) => loadCanvasImage(image.localUrl)));
   const layout = createMoodBoardLayout(loadedImages);
   const canvas = document.createElement("canvas");
@@ -20,7 +20,12 @@ export async function createTransferCollageBlob(images, outputLabel = defaultMoo
 
   const context = canvas.getContext("2d");
   layout.cells.forEach((cell) => {
-    drawImageCover(context, cell.image, cell.x, cell.y, cell.width, cell.height);
+    if (contain) {
+      const scale = Math.min(cell.width / cell.image.naturalWidth, cell.height / cell.image.naturalHeight);
+      const width = cell.image.naturalWidth * scale, height = cell.image.naturalHeight * scale;
+      context.fillStyle = "#17171c"; context.fillRect(cell.x, cell.y, cell.width, cell.height);
+      context.drawImage(cell.image, cell.x + (cell.width - width) / 2, cell.y + (cell.height - height) / 2, width, height);
+    } else drawImageCover(context, cell.image, cell.x, cell.y, cell.width, cell.height);
   });
 
   return canvasToBlob(canvas, "image/png", `Could not create ${outputLabel}.`);

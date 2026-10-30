@@ -175,6 +175,8 @@ import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorN
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBehavior.js";
 import { StyleCollage } from "./components/StyleCollage.jsx";
+import LibraryStylePicker from "./components/LibraryStylePicker.jsx";
+import { libraryPrompt, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
@@ -1276,7 +1278,7 @@ function shouldUseOverviewRendering(nodes, viewport) {
   return nodes.length >= largeCanvasNodeCountThreshold && (Number(viewport?.scale) || 1) <= overviewNodeScaleThreshold;
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true, imageEditorModel = imageModelNames.openAiImage2 } = {}) {
+export default function NodeEditor({ active = true, libraryRequest, onLibraryRequestConsumed, onStatusChange, modelPreferences, modelProviderPreferences = defaultModelProviderPreferences, modelProviderAvailability = {}, modelPreferencesReady = true, showPresetPanel = true, showPriceSnapshot = true, imageEditorModel = imageModelNames.openAiImage2 } = {}) {
   const canvasRef = React.useRef(null);
   const canvasGridRef = React.useRef(null);
   const edgeCanvasRef = React.useRef(null);
@@ -2262,6 +2264,29 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  const consumedLibraryRequest = React.useRef("");
+  React.useEffect(() => {
+    if (!active || !libraryRequest || consumedLibraryRequest.current === libraryRequest.id) return;
+    consumedLibraryRequest.current = libraryRequest.id;
+    const { kind, value } = libraryRequest;
+    const count = nodesRef.current.filter(node => node.type === kind).length + 1;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const position = rect ? screenToScene(rect.left + rect.width / 2 - 180, rect.top + 100) : defaultNodePosition(count);
+    const data = createNodeData(kind, kind === "style" ? "Style" : "Mood Board", count);
+    const node = { id: createNodeId(kind), type: kind, ...position, data: {
+      ...data,
+      ...(kind === "style" ? { libraryStyle: libraryStyleSnapshot(value) } : {
+        title: value.name, transferImages: value.examples.slice(0, maxTransferImages).map(image => ({ ...image, id: crypto.randomUUID() })),
+        libraryBoard: true, libraryBoardPrompt: value.prompt, locked: false, activated: false
+      })
+    } };
+    pushUndoSnapshot();
+    setNodes(current => [...current, node]);
+    setSelectedNodeIds([node.id]); recordFeatureUsage(kind, "add");
+    setSaveStatus(`Added ${kind === "style" ? "Style" : "Mood Board"} from Library`);
+    onLibraryRequestConsumed?.();
+  }, [active, libraryRequest]);
+
   function addNode(type, position, options = {}) {
     const count = nodesRef.current.filter((node) => node.type === type).length + 1;
     const spec = nodeCatalog.find((item) => item.type === type);
@@ -2801,7 +2826,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     let nextSkillDirectorData = null;
     let nextVideoModelData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
-    const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "libraryStyle", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const sourceBeforeUpdate = current.find((node) => node.id === nodeId);
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
@@ -4116,7 +4141,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     try {
       setCompilingTransferNodeId(node.id);
       updateNode(node.id, { status: "compiling", error: "" });
-      const collageBlob = await createTransferCollageBlob(transferImages);
+      const collageBlob = await createTransferCollageBlob(transferImages, moodBoardOutputFileName, { contain: node.data.libraryBoard === true });
       if (token.stopped) return;
       const transferFile = new File([collageBlob], moodBoardOutputFileName, { type: "image/png" });
       const form = new FormData();
@@ -6492,6 +6517,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         normalizeGradePresetName(source.data.gradePreset || "None") === "Custom"
         && !customGradePromptPiece(source.data)
         && (!source.data.stylePreset || source.data.stylePreset === "None")
+        && !libraryPrompt(source.data)
       ) return "Add custom grade colors before connecting";
       if (target.type === "utility" && activeInputPortIdsForNode(target).includes("styleIn") && to.port === "styleIn") return "";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
@@ -13695,7 +13721,7 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, libraryStyle: null })}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -13711,6 +13737,7 @@ function NodeBody({
           </select>
         </div>
 
+        <LibraryStylePicker data={node.data} onChange={patch => { onUndoSnapshot?.(); onUpdate(node.id, patch); }} />
         {customPaletteSelected && (
           <section className="custom-palette-panel" onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
@@ -23698,6 +23725,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
     const selectedPreset = source.data.stylePreset || "None";
     return [
       stylePresetPrompts[selectedPreset] || "",
+      libraryPrompt(source.data),
       gradePromptPiece(source.data)
     ].filter(Boolean);
   }
@@ -23716,7 +23744,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
   if (source.type !== "transfer" || !source.data.activated || !source.data.resultUrl) return [];
 
-  return [source.data.hiddenPrompt || transferPromptSuffix].filter(Boolean);
+  return [source.data.hiddenPrompt || transferPromptSuffix, portableStylePrompt(source.data.libraryBoardPrompt)].filter(Boolean);
 }
 
 async function extractCustomPaletteFromFile(file) {
@@ -23871,13 +23899,13 @@ function gradePromptPiece(data = {}) {
 function styleOutputEnabled(data = {}) {
   const selectedPreset = data.stylePreset || "None";
   const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
-  const hasStyle = selectedPreset !== "None";
+  const hasStyle = selectedPreset !== "None" || Boolean(libraryPrompt(data));
   const hasGrade = selectedGrade === "Custom" ? Boolean(customGradePromptPiece(data)) : selectedGrade !== "None";
   return hasStyle || hasGrade;
 }
 
 function styleGradeLabel(data = {}) {
-  const style = data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
+  const style = libraryPrompt(data) ? data.libraryStyle.name || "Library Style" : data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
   const grade = normalizeGradePresetName(data.gradePreset || "None");
   const gradeLabel = grade === "Custom"
     ? (customGradePromptPiece(data) ? "Custom Grade" : "")
@@ -25758,6 +25786,7 @@ function normalizeStyleData(data = {}) {
     ...data,
     title: data.title || "Style",
     stylePreset: normalizeStylePresetName(legacyCustomPalette ? "None" : data.stylePreset || "None"),
+    libraryStyle: data.libraryStyle ? libraryStyleSnapshot(data.libraryStyle) : null,
     gradePreset: normalizeGradePresetName(data.gradePreset || (legacyCustomPalette ? "Custom" : "None")),
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",

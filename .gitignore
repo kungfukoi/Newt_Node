@@ -23,6 +23,8 @@ server/data/node-projects.json
 server/data/recent-workflows.json
 server/data/pricing-catalog.json
 server/data/runtime-settings.json
+server/data/style-library.json
+server/data/style-library.json.tmp
 server/data/remote-video-jobs.json
 server/data/remote-video-jobs.json.d/
 server/data/remote-video-jobs.json.legacy-backup

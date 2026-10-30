@@ -4,6 +4,8 @@ import { createIdeogramVectorService } from "./ideogram-vector.js";
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
 import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-layer-service.js";
 import { registerVectorLookRoutes } from "./vector-design-looks.js";
+import { registerStyleLibraryRoutes } from "./style-library.js";
+import { registerStyleFinderRoutes } from "./stylefinder-catalog.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
@@ -1079,6 +1081,8 @@ registerVectorLayerRoutes(app, { service: createVectorLayerService({
   describeLayers: createVectorLayerNamer({ analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost, recordHistory: appendHistory })
 }), limiter: runtimeThumbnailRequestLimiter, sendError: sendApiError });
 
+registerStyleLibraryRoutes(app, { directory: dataDir });
+registerStyleFinderRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : "") });
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
@@ -1352,6 +1356,8 @@ function buildHealthPayload() {
       storyboardPlanningV2: true,
       storyboardShotList: true,
       projectCanvases: true,
+      styleLibrary: true,
+      styleFinderCatalog: true,
       ideogramVector: true, vectorLayers: true, vectorLayerEditor: true, vectorLayerTransforms: true, vectorLayerOrganization: true, vectorLayerAutoGroups: true, vectorSelectionGrouping: true, vectorArtworkEditor: true, vectorDesignLooks: true,
       cameraCoverage: true, cameraCoverageTravel: true, cameraCoverageFraming: true, cameraCoverageLens: true,
       storyboardScriptImport: true,

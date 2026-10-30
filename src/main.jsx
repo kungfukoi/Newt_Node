@@ -90,6 +90,7 @@ installClientDiagnostics();
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
 const SettingsPage = React.lazy(() => import("./SettingsPage.jsx"));
+const LibraryWorkspace = React.lazy(() => import("./LibraryWorkspace.jsx"));
 
 class WorkspaceErrorBoundary extends React.Component {
   constructor(props) {
@@ -197,12 +198,19 @@ function App() {
   const [imageBatchCount, setImageBatchCount] = React.useState("1");
   const [imageHistory, setImageHistory] = React.useState([]);
   const [workspaceMode, setWorkspaceMode] = React.useState(() => {
-    const saved = uiGet("workspaceMode", "image");
-    return ["image", "video", "nodes", "stats", "settings"].includes(saved) ? saved : "image";
+    const saved = uiGet("workspaceMode", "nodes");
+    return ["library", "nodes", "stats", "settings"].includes(saved) ? saved : "nodes";
   });
   React.useEffect(() => { uiSet("workspaceMode", workspaceMode); }, [workspaceMode]);
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
+  const [libraryLoaded, setLibraryLoaded] = React.useState(workspaceMode === "library");
+  const [libraryRequest, setLibraryRequest] = React.useState(null);
+  React.useEffect(() => { if (workspaceMode === "library") setLibraryLoaded(true); }, [workspaceMode]);
+  function createFromLibrary(kind, value) {
+    setLibraryRequest({ id: crypto.randomUUID(), kind, value });
+    setWorkspaceMode("nodes");
+  }
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
   const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
   const enabledVideoWorkspaceOptions = React.useMemo(() => enabledVideoModelOptions(modelPreferences, { workspaceOnly: true }), [modelPreferences]);
@@ -584,14 +592,11 @@ function App() {
           <img src="/newtnode-logo.png" alt="Versus NewtNode" />
         </div>
         <div className="mode-switch" aria-label="Workspace mode">
-          <button className={workspaceMode === "image" ? "active" : ""} onClick={() => setWorkspaceMode("image")}>
-            Image
-          </button>
-          <button className={workspaceMode === "video" ? "active" : ""} onClick={() => setWorkspaceMode("video")}>
-            Video
-          </button>
           <button className={workspaceMode === "nodes" ? "active" : ""} onClick={() => setWorkspaceMode("nodes")}>
             Nodes
+          </button>
+          <button className={workspaceMode === "library" ? "active" : ""} onClick={() => setWorkspaceMode("library")}>
+            Looks
           </button>
           <button className={workspaceMode === "stats" ? "active" : ""} onClick={() => setWorkspaceMode("stats")}>
             Stats
@@ -860,6 +865,13 @@ function App() {
         </React.Suspense>
       ) : null}
 
+      {libraryLoaded && <div hidden={workspaceMode !== "library"}>
+        <WorkspaceErrorBoundary label="Looks" retryLabel="Reload" onRetry={() => window.location.reload()}>
+          <React.Suspense fallback={<WorkspaceFallback label="Loading looks" />}>
+            <LibraryWorkspace onCreateMoodBoard={value => createFromLibrary("transfer", value)} onCreateStyle={value => createFromLibrary("style", value)} />
+          </React.Suspense>
+        </WorkspaceErrorBoundary>
+      </div>}
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
           <WorkspaceErrorBoundary
@@ -868,7 +880,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} imageEditorModel={userPreferences.imageEditorModel} />
+              <NodeEditor active={workspaceMode === "nodes"} libraryRequest={libraryRequest} onLibraryRequestConsumed={() => setLibraryRequest(null)} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} imageEditorModel={userPreferences.imageEditorModel} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>
