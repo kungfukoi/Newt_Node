@@ -1,3 +1,6 @@
+import { vectorOutputSource } from "./outputExport.js";
+import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
+const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
 import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion } from "./cameraCoverage.js";
 const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCoverageNodeBody.jsx").then(module => ({ default: module.CameraCoverageNodeBody })));
 import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
@@ -635,6 +638,7 @@ const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteCon
 const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
 const nodeIcons = {
+  vector: ImagePlus,
   cameraCoverage: Camera,
   plainText: Type,
   image: FileImage,
@@ -7220,7 +7224,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const outputFormat = preferredOutputExportFormat(outputNode.data, sourceMediaType, outputItem, { saving: true });
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
     const { response, data } = await nodeApi.saveOutput({
-      sourceUrl: outputItem?.url || "",
+      sourceUrl: vectorOutputSource(outputItem, outputFormat),
       outputOriginalSourceUrl: originalOutpaintSourceUrl(outputItem),
       sourceText,
       sourceFileName: outputSourceFileName(sourceNode, outputItem, incomingByNode),
@@ -12064,6 +12068,11 @@ function NodeBody({
     );
   }
 
+  if (node.type === "vector") {
+    const imageInputs = (incoming.imageIn || []).map(({source,edge}) => connectedOutputItem(source,edge)).filter(Boolean);
+    const moodBoardInputs = (incoming.transferIn || []).map(({source,edge}) => connectedOutputItem(source,edge)).filter(Boolean);
+    return <React.Suspense fallback={<div className="node-body">Loading Vector...</div>}><VectorNodeBody node={node} config={config} prompt={incoming.promptIn?.length ? connectedText(incoming.promptIn) : node.data.prompt} promptConnected={Boolean(incoming.promptIn?.length)} imageInputs={imageInputs} imageConnected={Boolean(incoming.imageIn?.length)} moodBoardInputs={moodBoardInputs} moodBoardConnected={Boolean(incoming.transferIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext} onPreviewOpen={onPreviewOpen} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} showApiCosts={showPriceSnapshot}/></React.Suspense>;
+  }
   if (node.type === "cameraCoverage") {
     const sources = (incoming.imageIn || []).map(({ source, edge }) => connectedOutputItem(source, edge)).filter(item => item?.url);
     const provider = generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
@@ -18377,6 +18386,7 @@ function getNodeConfig(type) {
     { id: "styleIn", label: "Style", color: portColors.style }, { id: "cameraIn", label: "Camera", color: portColors.camera }
   ], output: [{ id: "imageOut", label: "Images output", color: portColors.image }] };
   const configs = {
+    vector: { icon: ImagePlus, input: [{ id: "promptIn", label: "Design brief", color: portColors.prompt }, { id: "imageIn", label: "Images", color: portColors.image }, { id: "transferIn", label: "Mood Board", color: portColors.transfer }], output: [{ id: "imageOut", label: "Selected design", color: portColors.image }] },
     cameraCoverage: { icon: Camera, input: [{ id: "imageIn", label: "Master image", color: portColors.image }], output: [{ id: "imageOut", label: "Selected shot", color: portColors.image }] },
     plainText: {
       icon: Type,
@@ -18597,6 +18607,7 @@ function unsupportedNodeConfig(type) {
 }
 
 function createDefaultNodeData(type, label, count) {
+  if (type === "vector") return { ...vectorDefaults(), title: label };
   if (type === "cameraCoverage") return { ...cameraCoverageDefaults(), title: label };
   if (type === "keyer") return normalizeKeyerData({ title: `${label}${count > 1 ? ` ${count}` : ""}` });
   if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
@@ -20925,6 +20936,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (node?.type === "vector") return "image";
   if (node?.type === "cameraCoverage") return "image";
   if (isKeyerNode(node)) return "video";
   if (node.type === "audioModel") return "audio";
@@ -21686,6 +21698,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "vector") return edge?.from?.port === "imageOut" ? normalizeVectorData(source.data).resultItems[normalizeVectorData(source.data).selectedResultIndex] || null : null;
   if (source?.type === "cameraCoverage") return edge?.from?.port === "imageOut" ? normalizeCameraCoverageData(source.data).resultItems[normalizeCameraCoverageData(source.data).selectedResultIndex] || null : null;
   if (isKeyerNode(source)) return keyerResultForPort(source, edge?.from?.port);
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
@@ -23601,6 +23614,7 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
+  if (source.type === "vector") return [];
   if (source.type === "cameraCoverage") return [];
   if (source.type === "explore") return [];
   if (source.type === "camera") {
@@ -24270,6 +24284,7 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 }
 
 function normalizeCurrentNode(node) {
+  if (node.type === "vector") return { ...node, data: normalizeVectorData(node.data) };
   if (node.type === "cameraCoverage") return { ...node, data: normalizeCameraCoverageData(node.data) };
   node = { ...node, data: migrateImageModelSelections(node.data) };
   const nextNode = clearStaleRunningState(node);

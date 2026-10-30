@@ -95,6 +95,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (data.vectorJob) data = { ...data, vectorJob:null, status:data.resultUrl ? "complete":"ready", error:"" };
   if (data.coverageJob || data.coverageEnhancing || data.coverageShotJobs?.length) data = { ...data, coverageJob: null, coverageEnhancing: null, coverageShotJobs: [], status: data.resultUrl ? "complete" : "ready", error: "" };
   if (data.batchRunActive || data.batchFailedEntries?.length) data = { ...data, batchRunActive: false, batchProgress: "", batchFailedEntries: [], batchRetryEntry: null };
   if (data.seedanceFinishing) return { ...data, seedanceFinishing: "", status: data.resultUrl ? "complete" : "ready", error: "", remoteVideoRunIds: [] };
@@ -194,7 +195,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y),
       data: {
-        ...remapDirectorDialogueData(node.type === "cameraCoverage" ? resetCopiedNodeRuntime(clonedNode.data || {}) : clonedNode.data || {}, idMap),
+        ...remapDirectorDialogueData(["cameraCoverage", "vector"].includes(node.type) ? resetCopiedNodeRuntime(clonedNode.data || {}) : clonedNode.data || {}, idMap),
         ...(Object.keys(remappedBindings).length ? { nodeReferenceBindings: remappedBindings } : {})
       }
     };

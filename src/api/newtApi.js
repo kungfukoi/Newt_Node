@@ -42,6 +42,37 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request", { retryLocalApi = true, preferClientProxy = false, preferControlServer = false, timeoutMs = 0 } = {}) {
+  if ((["/api/node/preview-output", "/api/node/save-output"].includes(path) && ["svg","alpha"].includes(JSON.parse(options.body || "{}").outputFormat)) || ["/api/output/validate", "/api/output/export"].includes(path) && ["svg", "alpha"].includes(JSON.parse(options.body || "{}").destinations?.image?.format)) {
+    const health = await getJson("/api/health", "Could not verify Vector export support.");
+    if (health.routes?.vectorArtworkEditor !== true) throw Object.assign(new Error("Restart NewtNode to activate SVG and alpha export. No files were exported."), { status: 409 });
+  }
+  if (path.startsWith("/api/vector-looks")) {
+    const health = await getJson("/api/health", "Could not verify saved looks support.");
+    if (health.routes?.vectorArtworkEditor !== true) throw new Error("Restart NewtNode to activate saved Vector looks.");
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
+  if (path.startsWith("/api/node/vector-layers/")) {
+    const health = await getJson("/api/health", "Could not verify Vector layer support.");
+    if (health.routes?.vectorLayers !== true) throw new Error("Restart NewtNode to activate Vector layers. Your artwork is unchanged.");
+    const layerBody = JSON.parse(options.body || "{}");
+    if (layerBody.editorVersion >= 2 && health.routes?.vectorLayerEditor !== true) throw new Error("Restart NewtNode to activate the expanded Vector Layers editor. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 3 && health.routes?.vectorLayerTransforms !== true) throw new Error("Restart NewtNode to activate moving and resizing Vector layers. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 4 && health.routes?.vectorLayerOrganization !== true) throw new Error("Restart NewtNode to activate Vector grouping and automatic backgrounds. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 5 && health.routes?.vectorLayerAutoGroups !== true) throw new Error("Restart NewtNode to activate automatic Text and Background groups. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 6 && health.routes?.vectorArtworkEditor !== true) throw new Error("Restart NewtNode to activate Edit Artwork, colors and editable text. Your original artwork is unchanged.");
+    const edits = (layerBody.operations || []).flatMap(operation => operation?.type === "batch" ? operation.operations || [] : [operation]);
+    if (edits.some(operation => operation?.type === "group" && operation.mode === "selection") && health.routes?.vectorSelectionGrouping !== true) throw new Error("Restart NewtNode to activate grouping across selected layers. Your original artwork is unchanged.");
+    options.signal?.throwIfAborted();
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
+  if (path === "/api/node/ideogram-vector" && options.method === "POST") {
+    const health = await getJson("/api/health", "Could not verify Ideogram Vector support.");
+    if (health.routes?.ideogramVector !== true) throw Object.assign(new Error("Restart NewtNode to activate Ideogram Vector. No generation was submitted."), { status: 409, noSubmission: true });
+    options.signal?.throwIfAborted();
+  }
+
   if (path === "/api/node/generate-image" && isNanoBanana21Model(JSON.parse(options.body || "{}").model)) {
     const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 support.");
     if (health.routes?.nanoBanana21 !== true) throw new Error("Restart the NewtNode backend to activate Nano Banana 2.1. No generation was submitted.");
@@ -181,6 +212,7 @@ function localApiRouteKey(path) {
 }
 
 async function requestData(path, options, fallbackMessage) {
+  if (path.startsWith("/api/node/ideogram-vector") && options.method === "POST") { const health = await getJson("/api/health", "Vector support"); if (!health.routes?.ideogramVector) throw Object.assign(new Error("Restart NewtNode. No generation submitted."), {status:409,noSubmission:true}); options.signal?.throwIfAborted(); try { const response = await fetch(localApiFetchUrl(path),options); return ensureOk(response, await readJsonResponse(response, fallbackMessage), fallbackMessage); } catch(error) { if(error.noSubmission) throw error; throw new Error(error.message + " NewtNode did not resubmit or cancel the job."); } }
   const { response, data } = await fetchJsonApi(path, options, fallbackMessage || "Request");
   return ensureOk(response, data, fallbackMessage);
 }
@@ -814,4 +846,18 @@ export const cameraCoverageApi = {
 },
   job: id => getJson(`/api/node/camera-coverage/${encodeURIComponent(id)}`, "ReFrame status"),
   capture: body => postJson("/api/node/camera-coverage-capture", body, "Capture coverage shot")
+};
+
+export const ideogramVectorApi = {
+  looks: () => getJson("/api/vector-looks", "Saved Vector looks"),
+  saveLook: body => postJson("/api/vector-looks", body, "Save Vector look"),
+  removeLook: id => deleteJson(`/api/vector-looks/${encodeURIComponent(id)}`, "Remove Vector look"),
+  nameLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/name", { ...jsonBody({ ...body, editorVersion: body.editorVersion || 2 }), signal }, "Name vector layers"),
+  inspectLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/inspect", { ...jsonBody(body), signal }, "Vector layers"),
+  saveLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/save", { ...jsonBody(body), signal }, "Save vector layers"),
+  pricing: () => getJson("/api/node/ideogram-vector-pricing", "Vector pricing"),
+  generate: (body, { signal } = {}) => requestData("/api/node/ideogram-vector", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal
+  }, "Ideogram Vector"),
+  job: requestId => getJson(`/api/node/ideogram-vector/${encodeURIComponent(requestId)}`, "Vector request status")
 };

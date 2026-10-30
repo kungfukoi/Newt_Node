@@ -4,6 +4,7 @@ export const nodeTypeDefinitions = [
   { type: "text", label: "Text Model", catalog: false },
   { type: "textAgent", label: "Text Agent" },
   { type: "imageModel", label: "Image Model" },
+  { type: "vector", label: "Vector Node" },
   { type: "videoModel", label: "Video Model" },
   { type: "audioModel", label: "Audio Model" },
   { type: "preview", label: "Preview" },

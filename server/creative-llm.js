@@ -1,3 +1,4 @@
+import { vectorLayerNameSchema } from "./vector-layer-names.js";
 import { scriptCatalogSchema, scriptShotsSchema, scriptOcrSchema } from "../src/storyboardScriptImport.js";
 import { storyboardQcFailureTypes } from "../src/storyboardQc.js";
 import { storyboardSpatialSchema, storyboardCastSchema } from "../src/storyboardSpatial.js";
@@ -24,6 +25,7 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
   "storyboard-script-shotlist": scriptShotsSchema,
   "storyboard-script-ocr": scriptOcrSchema,
@@ -75,6 +77,7 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
+  if (route === "vector-layer-names") return 4000;
   if (/^storyboard-script-/.test(route)) return 24000;
   if (/shotlist|revision|shot-repair|spatial-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;

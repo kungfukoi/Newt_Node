@@ -1,3 +1,10 @@
+import { writeVectorDelivery } from "./vector-delivery.js";
+import { createIdeogramVectorService } from "./ideogram-vector.js";
+import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
+import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-layer-service.js";
+import { registerVectorLookRoutes } from "./vector-design-looks.js";
+import { createVectorLayerNamer } from "./vector-layer-names.js";
+import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
 import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
 import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
@@ -866,6 +873,7 @@ process.on("message", (message) => {
   process.send?.({ type: "shutdown-ready" });
 });
 app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
+app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -1021,6 +1029,59 @@ registerCameraCoverageRoutes(app, { service: cameraCoverageService, sendError: s
     return { ...result, width: metadata.width, height: metadata.height, frameTime: body.frameTime };
   }
 });
+
+
+const vectorRates = Object.fromEntries(Object.entries(ideogramVectorRates).map(([name, fallback]) => {
+  const key = `IDEOGRAM_VECTOR_${name.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}_USD`;
+  const override = Number(process.env[key]);
+  return [name, process.env[key]?.trim() && Number.isFinite(override) && override >= 0 ? override : fallback];
+}));
+async function saveVectorArtwork(context, artwork) {
+  const request = { body: context }, created = [];
+  const svg = await createManagedAssetTarget(request, "ideogram-vector", ".svg");
+  const png = await createManagedAssetTarget(request, "ideogram-vector-preview", ".png");
+  const alpha = artwork.alpha ? await createManagedAssetTarget(request, "ideogram-vector-alpha", ".png") : null;
+  try {
+    for (const [target, bytes] of [[svg, artwork.svg], [png, artwork.png], ...(alpha ? [[alpha, artwork.alpha]] : [])]) {
+      await writeFile(target.filePath, bytes, { flag: "wx" }); created.push(target.filePath);
+    }
+  } catch (error) { for (const filePath of created) await rm(filePath, { force: true }).catch(() => {}); throw error; }
+  const thumbnail = await createImagePreview(request, png, "ideogram-vector").catch(() => null);
+  return { url: png.publicPath, fileName: png.fileName, bytes: artwork.png.length,
+    svgUrl: svg.publicPath, svgFileName: svg.fileName, svgBytes: Buffer.byteLength(artwork.svg),
+    thumbnailUrl: thumbnail?.publicPath || "", ...(alpha ? { alphaUrl: alpha.publicPath } : {}) };
+}
+const ideogramVectorService = createIdeogramVectorService({
+  directory: path.join(dataDir, "ideogram-vector"),
+  getKey: () => process.env.FAL_KEY,
+  clientFor: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "Ideogram Vector" }),
+  readSource: async (url, mode) => {
+    const { filePath, fileName } = await resolveCoverageAsset(url);
+    const maximum = (mode === "vectorize" ? 50 : 10) * 1024 * 1024;
+    if ((await stat(filePath)).size > maximum) throw httpError(400, `Ideogram Vector accepts ${mode === "vectorize" ? "source images up to 50" : "references up to 10"} MB.`);
+    return { buffer: await readFile(filePath), fileName };
+  },
+  uploadImage: uploadImageInputToFal,
+  subscribe: subscribeFal,
+  estimateCost: request => ideogramVectorCost(request, vectorRates),
+  charge: (requestId, endpoint, key) => providerPricing.falCharge(requestId, endpoint, key),
+  save: saveVectorArtwork,
+  recordHistory: item => appendHistory(item, { deduplicate: true })
+});
+registerIdeogramVectorRoutes(app, { service: ideogramVectorService, getRates: () => vectorRates, limiter: imageGenerationRequestLimiter, sendError: sendApiError });
+registerVectorLayerRoutes(app, { service: createVectorLayerService({
+  readSource: async url => {
+    const { filePath } = await resolveCoverageAsset(url), info = await stat(filePath);
+    if (!info.isFile() || info.size > 16 * 1024 * 1024) throw httpError(400, "Choose an SVG no larger than 16 MB.");
+    return readFile(filePath);
+  }, saveAssets: saveVectorArtwork, recordHistory: item => appendHistory(item, { deduplicate: true }),
+  describeLayers: createVectorLayerNamer({ analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost, recordHistory: appendHistory })
+}), limiter: runtimeThumbnailRequestLimiter, sendError: sendApiError });
+
+registerVectorLookRoutes(app, {
+  directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
+  readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
+}, sendApiError);
 
 
 registerStoryboardScriptRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > scriptFileByteLimit) throw new Error("Choose a PDF no larger than 40 MB."); return { buffer: await readFile(filePath), fileName }; } });
@@ -1289,6 +1350,7 @@ function buildHealthPayload() {
       storyboardRevisions: true,
       storyboardPlanningV2: true,
       storyboardShotList: true,
+      ideogramVector: true, vectorLayers: true, vectorLayerEditor: true, vectorLayerTransforms: true, vectorLayerOrganization: true, vectorLayerAutoGroups: true, vectorSelectionGrouping: true, vectorArtworkEditor: true, vectorDesignLooks: true,
       cameraCoverage: true, cameraCoverageTravel: true, cameraCoverageFraming: true, cameraCoverageLens: true,
       storyboardScriptImport: true,
       storyboardCinematography: true,
@@ -3604,7 +3666,9 @@ app.post("/api/node/save-output", async (req, res) => {
       if (sourcePath) {
         try {
           const exportMetadata = mediaType === "video" && (outputFormat === "mp4" || originalSource) ? await probeVideoFile(sourcePath) : {};
-          if (outputFormat && outputExportRequiresConversion(sourcePath, mediaType, outputFormat, exportMetadata.codecName || "", originalSource, exportMetadata)) {
+          if (mediaType === "image" && outputFormat === "svg") { await writeVectorDelivery(sourcePath, target.filePath, "svg"); }
+          else if (mediaType === "image" && outputFormat === "alpha") { await writeVectorDelivery(sourcePath, target.filePath, "alpha"); }
+          else if (outputFormat && outputExportRequiresConversion(sourcePath, mediaType, outputFormat, exportMetadata.codecName || "", originalSource, exportMetadata)) {
             const args = buildOutputExportFfmpegArgs({ sourcePath, targetPath: target.filePath, mediaType, format: outputFormat, originalSource });
             await runFfmpeg(args, `Output ${outputFormat} export`, mediaType === "video" ? 1800000 : 120000);
           } else if (path.resolve(sourcePath) !== path.resolve(target.filePath)) {

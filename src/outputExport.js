@@ -1,6 +1,8 @@
 const imageFormats = [
   { value: "png", label: "PNG (.png)" },
-  { value: "jpg", label: "JPEG (.jpg)" }
+  { value: "jpg", label: "JPEG (.jpg)" },
+  { value: "svg", label: "SVG artwork (.svg)" },
+  { value: "alpha", label: "Alpha matte (.png)" }
 ];
 
 const videoFormats = [
@@ -19,7 +21,7 @@ export function preferredOutputExportFormat(data, mediaType, item, { saving = fa
 }
 
 export function outputExportFormatOptions(mediaType = "", item) {
-  if (mediaType === "image") return imageFormats;
+  if (mediaType === "image") return item?.svgUrl ? imageFormats : imageFormats.filter(option => !["svg","alpha"].includes(option.value));
   if (mediaType === "video" && item?.videoOutpaint?.prepared?.plan?.sourceFormat?.sourceUrl) return videoFormats.map(option => option.value === "source" ? { ...option, label: "Same as original source" } : option);
   if (mediaType === "video") return item?.videoOutpaint?.outputFormat?.startsWith("ProRes 4444") ? videoFormats.map(option => option.value === "prores" ? { ...option, label: "MOV (ProRes 4444 XQ master)" } : option) : videoFormats;
   return [];
@@ -30,7 +32,7 @@ export function originalOutpaintSourceUrl(item) {
 }
 
 export function normalizeOutputExportFormat(mediaType = "", value = "") {
-  const options = outputExportFormatOptions(mediaType);
+  const options = mediaType === "image" ? imageFormats : outputExportFormatOptions(mediaType);
   if (!options.length) return "";
   const normalized = String(value || "").trim().toLowerCase();
   if (mediaType === "image" && normalized === "jpeg") return "jpg";
@@ -40,6 +42,8 @@ export function normalizeOutputExportFormat(mediaType = "", value = "") {
 
 export function outputExportExtension(mediaType = "", format = "", fallback = "") {
   const normalized = normalizeOutputExportFormat(mediaType, format);
+  if (normalized === "svg") return ".svg";
+  if (normalized === "alpha") return ".png";
   if (normalized === "png") return ".png";
   if (normalized === "jpg") return ".jpg";
   if (normalized === "mp4") return ".mp4";
@@ -49,9 +53,13 @@ export function outputExportExtension(mediaType = "", format = "", fallback = ""
 
 export function outputExportMimeType(mediaType = "", format = "", fallback = "") {
   const normalized = normalizeOutputExportFormat(mediaType, format);
+  if (normalized === "svg") return "image/svg+xml";
+  if (normalized === "alpha") return "image/png";
   if (normalized === "png") return "image/png";
   if (normalized === "jpg") return "image/jpeg";
   if (normalized === "mp4") return "video/mp4";
   if (normalized === "prores") return "video/quicktime";
   return String(fallback || "");
 }
+
+export function vectorOutputSource(item, format) { if (format === "svg") { if (!item?.svgUrl) throw new Error("SVG export requires saved Vector artwork."); return item.svgUrl; } return item?.url || ""; }
