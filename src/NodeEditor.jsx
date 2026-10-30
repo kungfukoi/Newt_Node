@@ -120,6 +120,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
+  PanelsTopLeft,
   Palette,
   Pause,
   PersonStanding,
@@ -663,7 +664,7 @@ const nodeIcons = {
   imageModel: ImagePlus,
   videoModel: Film,
   audioModel: Volume2,
-  storyboard: Clapperboard,
+  storyboard: PanelsTopLeft,
   skillDirector: Megaphone,
   text: Type,
   textAgent: MessageSquareText
@@ -13346,7 +13347,7 @@ function NodeBody({
                         />
                       ) : (
                         <div className="storyboard-frame-empty">
-                          <Clapperboard size={22} />
+                          <PanelsTopLeft size={22} />
                           <span>Frame {String(frame.number).padStart(2, "0")}</span>
                         </div>
                       )}
@@ -18619,7 +18620,7 @@ function getNodeConfig(type) {
       output: [{ id: "imageOut", label: "Coverage", color: portColors.image }]
     },
     storyboard: {
-      icon: Clapperboard,
+      icon: PanelsTopLeft,
       input: [
         filmDirectorInputPort(portColors.director),
         { id: "sceneDescriptionIn", label: "Scene Description", color: portColors.prompt },
