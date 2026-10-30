@@ -1,3 +1,5 @@
+import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion } from "./cameraCoverage.js";
+const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCoverageNodeBody.jsx").then(module => ({ default: module.CameraCoverageNodeBody })));
 import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
 import { StoryboardShotList } from "./components/StoryboardShotList.jsx";
 import { storyboardShotListMode, storyboardShotDescription, storyboardShotRows, storyboardShotListError, storyboardShotListContext, storyboardShotNeedsPlan, storyboardShotSource, storyboardShotGalleryPatch, mergeStoryboardShotPlan } from "./storyboardShotList.js";
@@ -633,6 +635,7 @@ const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteCon
 const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
 const nodeIcons = {
+  cameraCoverage: Camera,
   plainText: Type,
   image: FileImage,
   video: Video,
@@ -12061,6 +12064,11 @@ function NodeBody({
     );
   }
 
+  if (node.type === "cameraCoverage") {
+    const sources = (incoming.imageIn || []).map(({ source, edge }) => connectedOutputItem(source, edge)).filter(item => item?.url);
+    const provider = generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability });
+    return <React.Suspense fallback={<div className="node-body">Loading ReFrame...</div>}><CameraCoverageNodeBody node={node} config={config} sources={sources} connected={Boolean(incoming.imageIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext} onPreviewOpen={onPreviewOpen} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} imageModels={imageModelOptions} provider={provider} showApiCosts={showPriceSnapshot} ratios={imageModelSupportedAspectRatios(node.data.model, provider)} resolutions={imageModelResolutionOptions(node.data.model)} qualities={isOpenAiImageModel(node.data.model) ? ["low","medium","high"] : []} modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
+  }
   if (node.type === "explore") {
     return <React.Suspense fallback={<div className="node-body">Loading Explore...</div>}><ExploreNodeBody node={node} config={config} incoming={incoming}
       prompt={connectedText(incoming.promptIn) || node.data.prompt} onUpdate={onUpdate} onRun={onRun} onPreviewOpen={onPreviewOpen}
@@ -13764,6 +13772,8 @@ function NodeBody({
       const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
       const item = previewItems[nextIndex];
       if (!item?.url) return;
+      const producer = (incoming.sourceIn || []).find(item => item.source.id === previewSource.sourceNodeId)?.source;
+      if (producer?.type === "cameraCoverage") { onUpdate(producer.id, selectCoverageVersion(normalizeCameraCoverageData(producer.data), item.shotId, item.versionId)); onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: nextIndex }); return; }
       onUpdate(previewSource.sourceNodeId, previewSource.sourcePort === "frameOut"
         ? { assemblyFrameUrl: item.url }
         : {
@@ -18367,6 +18377,7 @@ function getNodeConfig(type) {
     { id: "styleIn", label: "Style", color: portColors.style }, { id: "cameraIn", label: "Camera", color: portColors.camera }
   ], output: [{ id: "imageOut", label: "Images output", color: portColors.image }] };
   const configs = {
+    cameraCoverage: { icon: Camera, input: [{ id: "imageIn", label: "Master image", color: portColors.image }], output: [{ id: "imageOut", label: "Selected shot", color: portColors.image }] },
     plainText: {
       icon: Type,
       input: [{ id: "textIn", label: "Text", color: portColors.prompt }],
@@ -18586,6 +18597,7 @@ function unsupportedNodeConfig(type) {
 }
 
 function createDefaultNodeData(type, label, count) {
+  if (type === "cameraCoverage") return { ...cameraCoverageDefaults(), title: label };
   if (type === "keyer") return normalizeKeyerData({ title: `${label}${count > 1 ? ` ${count}` : ""}` });
   if (type === "explore") return { title: `${label} ${count}`, ...exploreDefaults() };
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
@@ -20913,6 +20925,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (node?.type === "cameraCoverage") return "image";
   if (isKeyerNode(node)) return "video";
   if (node.type === "audioModel") return "audio";
   if (node.type === "explore") return "image";
@@ -21673,6 +21686,7 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "cameraCoverage") return edge?.from?.port === "imageOut" ? normalizeCameraCoverageData(source.data).resultItems[normalizeCameraCoverageData(source.data).selectedResultIndex] || null : null;
   if (isKeyerNode(source)) return keyerResultForPort(source, edge?.from?.port);
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "storyboard") return storyboardOutputItem(source, edge);
@@ -21845,6 +21859,7 @@ function assemblyConnectedMediaInputs(incoming = {}) {
       return {
         id: `${edge?.id || `${source.id}:${edge?.from?.port || index}`}:${resultIndex}`,
         sourceItemIndex: resultIndex,
+        sourceNodeType: source.type,
         sourceNodeId: source.id,
         sourcePort: edge?.from?.port || "",
         sourcePortTarget: targetPort,
@@ -22973,6 +22988,7 @@ function connectedPreviewSources(items = []) {
         id: `${source.id}:${edge.from.port}`,
         sourceNodeId: source.id,
         sourcePort: edge.from.port,
+        sourceNodeType: source.type,
         legacyPreviewSources,
         label: sourceName,
         type: sourceType,
@@ -22983,7 +22999,7 @@ function connectedPreviewSources(items = []) {
           sourceResultUrl: isOutpaintNode(source) ? item.originResultUrl || item.url : item.url,
           sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl || item.originResultUrl === source.data.resultUrl,
           type: item.type || sourceType,
-          label: source.type === "explore" ? item.label : source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
+          label: ["explore", "cameraCoverage"].includes(source.type) ? item.label : source.type === "utility" && isUtilityTransitionBuilderModel(source.data?.utilityVideoModel)
             ? item.label || sourceName
             : allItems.length > 1
               ? `${sourceName} ${index + 1}`
@@ -22995,6 +23011,7 @@ function connectedPreviewSources(items = []) {
 }
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
+  if (source?.type === "cameraCoverage") return normalizeCameraCoverageData(source.data).resultItems;
   if (isKeyerNode(source)) return sourceResultItemsForPort(source, edge?.from?.port, "video");
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (!source) return [];
@@ -23584,6 +23601,7 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
+  if (source.type === "cameraCoverage") return [];
   if (source.type === "explore") return [];
   if (source.type === "camera") {
     return cameraPromptPieces(source);
@@ -24252,6 +24270,7 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 }
 
 function normalizeCurrentNode(node) {
+  if (node.type === "cameraCoverage") return { ...node, data: normalizeCameraCoverageData(node.data) };
   node = { ...node, data: migrateImageModelSelections(node.data) };
   const nextNode = clearStaleRunningState(node);
   if (nextNode.type === "batch") return { ...nextNode, data: { ...nextNode.data, batchMediaType: nextNode.data?.batchMediaType ?? nextNode.data?.batchFiles?.[0]?.type ?? "image" } };

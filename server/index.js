@@ -1,3 +1,4 @@
+import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
 import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
 import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
 import { isKling4Model, kling4Endpoints } from "../src/kling4.js";
@@ -981,6 +982,47 @@ app.use(["/api/node", "/api/generate"], (req, _res, next) => {
 registerStoryboardReviewRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 registerStoryboardRevisionRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordUsage: recordStoryboardLlmUsage, estimateCost: estimateTextProcessingCost, getModels: () => ({ openAiModel: storyboardOpenAiModel, falModel: storyboardFalModel }) });
 // Keep the saved Director/legacy routes while exposing the latest independent planner.
+const resolveCoverageAsset = resolveLocalAssetPathFromUrl;
+const cameraCoverageService = createCameraCoverageService({
+  directory: path.join(dataDir, "camera-coverage"),
+  getKey: () => process.env.FAL_KEY,
+  clientFor: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "ReFrame" }),
+  prepareImage: async (url, client) => {
+    const { filePath } = await resolveCoverageAsset(url);
+    if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(400, "Choose an image no larger than 32 MB.");
+    const buffer = await readFile(filePath);
+    const metadata = await sharp(buffer, { limitInputPixels: 64000000 }).metadata();
+    if (!metadata.width || !metadata.height || (metadata.pages || 1) > 1) throw httpError(400, "Choose a still image for ReFrame.");
+    const png = await sharp(buffer, { limitInputPixels: 64000000 }).rotate().png().toBuffer();
+    return uploadImageInputToFal({ buffer: png, mimeType: "image/png", fileName: "coverage-reference.png" }, 0, client);
+  },
+  saveResult: async job => {
+    const video = job.request.kind === "pass";
+    const saved = video ? await downloadVideo({ body: job.context }, job.remote.url, "camera-coverage")
+      : await downloadImage({ body: job.context }, job.remote.url, "coverage-upscale", "image/png");
+    const metadata = video ? await probeVideoFile(saved.filePath) : await sharp((await resolveCoverageAsset(saved.publicPath)).filePath).metadata();
+    return { url: saved.publicPath, fileName: saved.fileName, thumbnailUrl: saved.thumbnailPublicPath || "", type: video ? "video" : "image",
+      width: metadata.width, height: metadata.height, duration: metadata.duration, fps: metadata.fps, bytes: saved.bytes };
+  },
+  charge: (requestId, endpoint, key) => providerPricing.falCharge(requestId, endpoint, key),
+  recordHistory: job => appendHistory({ id: job.id, createdAt: job.createdAt, provider: "fal", requestId: job.requestId,
+    mediaType: job.result.type, modelName: job.request.kind === "pass" ? "H3 Max Camera Controls" : "Topaz Image Upscale",
+    endpoint: job.endpoint, mode: "ReFrame", project: projectFromBody(job.context), node: nodeFromBody(job.context),
+    settings: job.request, cost: job.cost, outputFileName: job.result.fileName, outputBytes: job.result.bytes,
+    ...(job.result.type === "video" ? { localVideo: job.result.url } : { localImage: job.result.url }) }, { deduplicate: true }),
+  log: writeFalDebugLog
+});
+registerCameraCoverageRoutes(app, { service: cameraCoverageService, sendError: sendApiError,
+  capture: async body => {
+    const { filePath } = await resolveCoverageAsset(body.sourceVideoUrl);
+    const metadata = await probeVideoFile(filePath);
+    if (!metadata.width || !metadata.duration || body.frameTime >= metadata.duration) throw httpError(400, "Choose a frame inside the camera pass.");
+    const result = await createExtractFrameResult({ body: { ...body, format: "png", extractFrame: { format: "png", frameTime: body.frameTime } }, sourceVideoUrl: body.sourceVideoUrl });
+    return { ...result, width: metadata.width, height: metadata.height, frameTime: body.frameTime };
+  }
+});
+
+
 registerStoryboardScriptRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > scriptFileByteLimit) throw new Error("Choose a PDF no larger than 40 MB."); return { buffer: await readFile(filePath), fileName }; } });
 registerStoryboardRoutes({ post: (route, handler) => app.post(route === "/api/node/storyboard-revise" ? "/api/node/storyboard-revise-v2" : route === "/api/node/storyboard-review" ? "/api/node/storyboard-review-v2" : route, handler) }, {
   runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory,
@@ -1247,6 +1289,7 @@ function buildHealthPayload() {
       storyboardRevisions: true,
       storyboardPlanningV2: true,
       storyboardShotList: true,
+      cameraCoverage: true, cameraCoverageTravel: true, cameraCoverageFraming: true, cameraCoverageLens: true,
       storyboardScriptImport: true,
       storyboardCinematography: true,
       directorCharacterDialogue: true,

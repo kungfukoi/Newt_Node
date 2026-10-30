@@ -14,6 +14,7 @@ export const nodeTypeDefinitions = [
   { type: "transfer", label: "Mood Board" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
+  { type: "cameraCoverage", label: "ReFrame" },
   { type: "composer", label: "Composer" },
   { type: "frameIt", label: "Frame It", catalog: false },
   { type: "skillDirector", label: "Director" },

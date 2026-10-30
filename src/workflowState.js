@@ -1,3 +1,4 @@
+import { coverageJobState } from "./cameraCoverage.js";
 import { remapDirectorDialogueData } from "./characterDialogue.js";
 
 export function cloneGraphState(state) {
@@ -94,6 +95,7 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
+  if (data.coverageJob || data.coverageEnhancing || data.coverageShotJobs?.length) data = { ...data, coverageJob: null, coverageEnhancing: null, coverageShotJobs: [], status: data.resultUrl ? "complete" : "ready", error: "" };
   if (data.batchRunActive || data.batchFailedEntries?.length) data = { ...data, batchRunActive: false, batchProgress: "", batchFailedEntries: [], batchRetryEntry: null };
   if (data.seedanceFinishing) return { ...data, seedanceFinishing: "", status: data.resultUrl ? "complete" : "ready", error: "", remoteVideoRunIds: [] };
   if (data.storyboardRevisionActive) return clearStaleRunningState({ type: "storyboard", data }).data;
@@ -142,6 +144,7 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
+  if (node.type === "cameraCoverage" || node.data?.coverageJob || node.data?.coverageShotJobs?.length || node.data?.coverageEnhancing) return { ...node, data: { ...node.data, ...coverageJobState(node.data, true), coverageEnhancing: null, ...(node.data.coverageEnhancing ? { error: "Refinement interrupted. Check History before running again." } : {}) } };
   if (node.data?.batchRunActive) return { ...node, data: { ...node.data, batchRunActive: false, batchProgress: "", batchRetryEntry: null,
     status: "error", error: "Batch interrupted. Completed results were kept; check History and provider jobs before running again." } };
   if (node.data?.seedanceFinishing) node = { ...node, data: { ...node.data, seedanceFinishing: "" } };
@@ -191,7 +194,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y),
       data: {
-        ...remapDirectorDialogueData(clonedNode.data || {}, idMap),
+        ...remapDirectorDialogueData(node.type === "cameraCoverage" ? resetCopiedNodeRuntime(clonedNode.data || {}) : clonedNode.data || {}, idMap),
         ...(Object.keys(remappedBindings).length ? { nodeReferenceBindings: remappedBindings } : {})
       }
     };

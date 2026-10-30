@@ -1,6 +1,7 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 
 export function estimatedNodeWidth(type) {
+  if (type === "cameraCoverage") return 780;
   if (type === "audioModel") return 370;
   if (type === "explore") return 650;
   if (type === "assembly") return 1080;

@@ -803,3 +803,15 @@ export const audioModelApi = {
     return ensureOk(response, await readJsonResponse(response, "Audio generation"), "Audio generation failed.");
   }
 };
+
+export const cameraCoverageApi = {
+  async start(body) {
+ const health = await getJson("/api/health", "Could not verify ReFrame support.");
+ const blocked = health.routes?.cameraCoverage !== true || (body.pathMode === "travel" && health.routes?.cameraCoverageTravel !== true) || (body.protectFraming && health.routes?.cameraCoverageFraming !== true);
+ if (blocked) throw Object.assign(new Error("Restart NewtNode to activate ReFrame and Protect Framing. No generation submitted."), { status:409 });
+ try { return await postJson("/api/node/camera-coverage", body, "ReFrame"); }
+ catch (error) { throw new Error(error.message + " NewtNode did not resubmit or cancel the request; check History before rerunning."); }
+},
+  job: id => getJson(`/api/node/camera-coverage/${encodeURIComponent(id)}`, "ReFrame status"),
+  capture: body => postJson("/api/node/camera-coverage-capture", body, "Capture coverage shot")
+};
