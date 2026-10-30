@@ -2,6 +2,8 @@
 
 A project is now the saved container. Its canvases appear as compact tabs above the workspace. Existing projects open intact in Canvas 1, including their saved view. New projects start with one empty canvas.
 
+On desktop, canvas tabs sit above the canvas in the column to the right of the node toolbar, aligned with the toolbar's top. On narrow windows the toolbar stacks above the canvas area.
+
 ## Working With Canvases
 
 - Add a blank canvas with +. Double-click its tab to rename it.

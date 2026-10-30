@@ -38,3 +38,13 @@
 .multi-canvas-workspace > .node-workspace { flex:1; height:auto; padding-top:8px; }
 
 .canvas-navigation-row { display:flex; align-items:center; min-width:0; gap:8px; } .canvas-navigation-row > .project-canvas-tabs { flex:1; } .canvas-asset-scope { display:flex; gap:5px; align-items:center; font-size:11px; } .canvas-asset-scope select { background:#222; color:#eee; border:1px solid #555; border-radius:5px; padding:4px; }
+
+.node-workspace > .project-canvas-area { grid-row: 1; }
+.canvas-navigation-row { flex: 0 0 auto; }
+.canvas-navigation-row > .project-canvas-tabs { margin-left: 0; }
+@media (max-width: 860px) {
+  .node-workspace > .project-canvas-area { grid-row: 2; min-height: 420px; }
+  .node-workspace.toolbar-collapsed > .project-canvas-area { grid-row: 1; }
+  .multi-canvas-workspace { height: auto; min-height: calc(100dvh - 104px); }
+  .project-canvas-area > .node-canvas { min-height: 420px; }
+}

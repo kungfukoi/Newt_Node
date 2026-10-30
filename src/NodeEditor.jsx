@@ -8554,7 +8554,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   );
 
   return (
-    <div className="multi-canvas-workspace"><div className="canvas-navigation-row"><CanvasTabs canvases={canvases} activeId={activeCanvasId} activity={Object.fromEntries(canvases.map(c=>[c.id,{running:nodes.some(n=>n.canvasId===c.id&&nodeIsWorking(n)),error:nodes.some(n=>n.canvasId===c.id&&n.data?.status==='error')}]))} selectedCount={selectedNodeIds.length} outputsCollapsed={false} onSelect={switchProjectCanvas} onAdd={addProjectCanvas} onRename={(id,name)=>setCanvases(current=>current.map(c=>c.id===id?{...c,name:canvasName(name)}:c))} onReorder={(id,index)=>setCanvases(current=>{const next=current.filter(c=>c.id!==id);next.splice(index,0,current.find(c=>c.id===id));return next;})} onDuplicate={id=>editProjectCanvas(()=>duplicateProjectCanvas(id))} onDelete={id=>editProjectCanvas(()=>deleteProjectCanvas(id))} onTransfer={(id,copy)=>editProjectCanvas(()=>transferProjectSelection(id,copy))} /><label className="canvas-asset-scope">Assets<select aria-label="Asset scope" value={outputScope} onChange={event=>setOutputScope(event.target.value)}><option value="project">Project</option><option value="canvas">Canvas</option></select></label></div>
+    <div className="multi-canvas-workspace">
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
       {composerEditorNode && (
         <ComposerEditorModal
@@ -8626,6 +8626,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         </div>
       </aside>
 
+      <div className="project-canvas-area">
+      <div className="canvas-navigation-row"><CanvasTabs canvases={canvases} activeId={activeCanvasId} activity={Object.fromEntries(canvases.map(c=>[c.id,{running:nodes.some(n=>n.canvasId===c.id&&nodeIsWorking(n)),error:nodes.some(n=>n.canvasId===c.id&&n.data?.status==='error')}]))} selectedCount={selectedNodeIds.length} outputsCollapsed={false} onSelect={switchProjectCanvas} onAdd={addProjectCanvas} onRename={(id,name)=>setCanvases(current=>current.map(c=>c.id===id?{...c,name:canvasName(name)}:c))} onReorder={(id,index)=>setCanvases(current=>{const next=current.filter(c=>c.id!==id);next.splice(index,0,current.find(c=>c.id===id));return next;})} onDuplicate={id=>editProjectCanvas(()=>duplicateProjectCanvas(id))} onDelete={id=>editProjectCanvas(()=>deleteProjectCanvas(id))} onTransfer={(id,copy)=>editProjectCanvas(()=>transferProjectSelection(id,copy))} /><label className="canvas-asset-scope">Assets<select aria-label="Asset scope" value={outputScope} onChange={event=>setOutputScope(event.target.value)}><option value="project">Project</option><option value="canvas">Canvas</option></select></label></div>
       <div
         ref={canvasRef}
         className={`node-canvas${canvasShadows === "off" ? " canvas-shadows-off" : ""}`}
@@ -8846,6 +8848,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             <Plus size={14} />
           </button>
         </div>
+      </div>
       </div>
       {!outputsCollapsed && (
         <ProjectOutputDrawer

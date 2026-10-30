@@ -13,7 +13,8 @@ test("project controls share the left toolbar and reclaim the canvas menu row", 
     const file = document.querySelector('[data-menu-trigger="file"]').getBoundingClientRect();
     const add = document.querySelector('.canvas-quick-new').getBoundingClientRect();
     const save = document.querySelector('[aria-label="Save project"]').getBoundingClientRect();
-    return { aligned: Math.abs(toolbar.top - canvas.top), left: controls.right < canvas.left, stacked: recent.bottom < title.top, fileBetween: recent.right <= file.left && file.right <= save.left && save.right <= add.left, inside: controls.left >= toolbar.left && controls.right <= toolbar.right };
+    const navigation = document.querySelector('.canvas-navigation-row').getBoundingClientRect();
+    return { aligned: Math.abs(toolbar.top - navigation.top), left: controls.right < canvas.left && navigation.left > toolbar.right, stacked: recent.bottom < title.top, fileBetween: recent.right <= file.left && file.right <= save.left && save.right <= add.left, inside: controls.left >= toolbar.left && controls.right <= toolbar.right };
   });
   expect(layout.aligned).toBeLessThan(2); expect(layout.left).toBe(true); expect(layout.stacked).toBe(true); expect(layout.inside).toBe(true);
   expect(layout.fileBetween).toBe(true);
