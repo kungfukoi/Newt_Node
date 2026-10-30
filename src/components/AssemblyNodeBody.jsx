@@ -1,3 +1,5 @@
+import { useAssemblyViewport } from "../assembly/useAssemblyViewport.js";
+import { fitAssemblyZoom } from "../assembly/assemblyZoom.js";
 import React from "react";
 import {
   BetweenHorizontalEnd,
@@ -128,7 +130,8 @@ export function AssemblyNodeBody({
 
   const duration = assemblyDuration(timeline);
   const pixelsPerSecond = timeline.zoom;
-  const timelineWidth = Math.max(760, duration * pixelsPerSecond + 80);
+  const scrollMetrics = useAssemblyViewport(scrollRef, duration * pixelsPerSecond);
+  const timelineWidth = Math.max(760, duration * pixelsPerSecond + Math.max(80, scrollMetrics.width - timelineGutterWidth));
   const timelineGridWidth = Math.max(8, assemblyRulerSpacing(duration, pixelsPerSecond, timeline.frameRate).minorStep * pixelsPerSecond);
   const selected = findSelectedClip(timeline);
   const selectedMedia = selected ? timeline.media.find((item) => item.id === selected.clip.mediaId) : null;
@@ -1065,6 +1068,7 @@ export function AssemblyNodeBody({
         </div>
       </div>
 
+      <label className="assembly-scroll-navigation nodrag nowheel" onPointerDown={event => event.stopPropagation()}><span>Timeline position</span><input type="range" aria-label="Timeline horizontal scroll" min="0" max={scrollMetrics.max} step="1" value={Math.min(scrollMetrics.left, scrollMetrics.max)} disabled={!scrollMetrics.max} onChange={event => { if (scrollRef.current) scrollRef.current.scrollLeft = Number(event.target.value); }} /></label>
       <div className="assembly-footer nodrag" onPointerDown={(event) => event.stopPropagation()}>
         <div className="assembly-selection-status">
           {selected && selectedMedia ? (
@@ -1076,6 +1080,7 @@ export function AssemblyNodeBody({
         </div>
         <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
           <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
+          <IconButton title="Fit Timeline" onClick={() => { replaceTimeline(setAssemblyView(timelineRef.current, { zoom: fitAssemblyZoom(duration, scrollRef.current?.clientWidth || 900, timelineGutterWidth) }), true); requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollLeft = 0; }); }}><BetweenHorizontalStart size={14} /></IconButton>
           <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
           <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
         </div>

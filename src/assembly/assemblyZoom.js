@@ -41,3 +41,5 @@ function niceStep(value) {
   const multiplier = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
   return multiplier * magnitude;
 }
+
+export function fitAssemblyZoom(duration, viewportWidth, gutter = 148) { return normalizeAssemblyZoom(Math.max(1, viewportWidth-gutter-24)/Math.max(5, Number(duration)||0)); }

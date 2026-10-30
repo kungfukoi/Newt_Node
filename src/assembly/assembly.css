@@ -8,3 +8,6 @@
 .assembly-split-guide>i{position:absolute;top:6px;left:5px;padding:1px 3px;border-radius:2px;color:#111;background:#f2d820;font-size:9px;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 .assembly-frame-size{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.assembly-frame-size input{width:80px}.assembly-frame-size small{color:#777}
+
+.assembly-scroll-navigation { display:flex; align-items:center; gap:12px; padding:5px 10px; font-size:11px; color:#aaa; }
+.assembly-scroll-navigation input { flex:1; min-width:0; height:18px; accent-color:#ddc631; }
