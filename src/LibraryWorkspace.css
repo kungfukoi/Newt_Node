@@ -39,17 +39,14 @@
 .stylebuilder-tile.selected .stylebuilder-mosaic { outline-color:var(--sb-accent); }
 .stylebuilder-tile-open:hover .stylebuilder-mosaic { outline-color:#6d6977; }
 .stylebuilder-tile-name { font-size:13px; color:#e2e1e8; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.library-workspace .stylebuilder-tile-select { display:flex; position:absolute; right:7px; top:7px; width:23px; height:23px; margin:0; color:transparent; border:1px solid #ffffff6b; border-radius:50%; background:#14141aaa; align-items:center; justify-content:center; cursor:pointer; }
-.stylebuilder-tile-select input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
-.stylebuilder-tile-select:focus-within { outline:2px solid #ffb69e; outline-offset:2px; }
-.stylebuilder-tile.selected .stylebuilder-tile-select { background:var(--sb-accent); color:white; border-color:var(--sb-accent); }
 .library-workspace .stylebuilder-tile-star { position:absolute; top:6px; left:6px; padding:5px; width:28px; height:28px; border:1px solid #ffffff5c; border-radius:50%; background:#14141acc; color:#f3f0e7; }
 .library-workspace .stylebuilder-tile-star.saved { color:#ebcf38; opacity:1; border-color:#ebcf3880; }
 .stylebuilder-no-preview { grid-column:1/-1; grid-row:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:13px; color:#575967; font-size:11px; }
 .stylebuilder-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-height:180px; border:1px dashed #30303b; border-radius:14px; color:#858795; text-align:center; padding:20px; box-sizing:border-box; }
 .stylebuilder-selection { display:flex; justify-content:space-between; gap:15px; align-items:center; margin-top:20px; color:#8f909e; font-size:12px; }
 .stylebuilder-selection button { font-size:12px; }
-.library-workspace .stylebuilder-load-more { margin-top:15px; padding:7px 12px; font-size:12px; }
+.library-workspace .stylebuilder-load-more { margin-top:15px; padding:7px 12px; font-size:12px; background:#ddc631; border-color:#ddc631; color:#17160d; font-weight:650; }
+.library-workspace .stylebuilder-load-more:not(:disabled):hover { background:#efda49; border-color:#efda49; color:#17160d; }
 .library-panel { background:#18181f; border:1px solid #30303b; border-radius:15px; padding:24px; min-width:0; margin-top:28px; }
 .library-panel h2 { margin:0; font-size:20px; }
 .stylebuilder-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }

@@ -175,7 +175,10 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   const rows=await page.locator('.react-flow__node').filter({has:page.getByLabel("Look",{exact:true})}).locator('.style-preset-row > span').allTextContents();
   expect(rows).toEqual(["Style","Grade","Look"]);
   await nav.getByRole("button", { name: "Looks", exact: true }).click();
-  await page.getByRole("checkbox", { name: "Crimson ink", exact: true }).check();
+  await expect(page.locator(".stylebuilder-tile input[type=checkbox]")).toHaveCount(0);
+  await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
+  await page.getByRole("button",{name:"Select style",exact:true}).click();
+  await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await expect(page.locator(".library-board")).toHaveCount(0);
   await page.getByRole("button", { name: "Create Mood Board node", exact: true }).click();
   await nav.getByRole("button",{name:"Nodes",exact:true}).click();
