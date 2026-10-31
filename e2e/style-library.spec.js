@@ -72,7 +72,7 @@ test("Rejected look analysis clears the progress notice and preserves the open d
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,total:0,indexed:0,categories:[],styles:[]})}));
   await page.route("**/api/style-library/analyze",route=>{paidCalls++;return route.fulfill({status:502,contentType:"application/json",body:JSON.stringify({error:"Atlas Cloud: The model produced invalid content."})});});
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"My collection",exact:true}).click();
   await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
   const details=page.getByRole("dialog",{name:"Style details",exact:true});
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();
@@ -159,7 +159,7 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await expect(page.getByLabel("Style direction",{exact:true})).toHaveCount(0);
   await expect(page.getByLabel("Visual description",{exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Add style references",exact:true})).toHaveCount(0);
-  await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"My collection",exact:true}).click();
   await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
   await expect(page.locator(".library-detail-examples img")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("stylebuilder.png"), fullPage: true });
@@ -225,7 +225,7 @@ test("Catalog looks open details, save examples and create a named Style without
   await expect(page.getByRole("button",{name:"Remove from collection: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","true");
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("missing");
   await expect(page.locator(".stylebuilder-tile")).toHaveCount(0);
-  await page.getByLabel("Looks source",{exact:true}).selectOption("selected");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:/^Selected \(/}).click();
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("");
   await expect(page.locator(".stylebuilder-tile")).toHaveCount(1);
   await expect(page.getByLabel("Style direction",{exact:true})).toHaveCount(0);
@@ -310,7 +310,7 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,indexed:1,total:1,categories:[],styles:[look]})}));
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style:look})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"My collection",exact:true}).click();
   const remove=page.getByRole("button",{name:"Remove from collection: Ink drawing",exact:true});
   await remove.click();
   await expect(page.getByRole("alert")).toContainText("Library changed in another window");
@@ -321,7 +321,7 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await expect(page.getByRole("button",{name:"View Other look",exact:true})).toBeVisible();
   expect(library.collections[0].styles.map(style=>style.name)).toEqual(["Other look"]);
   expect(library.collections[1].styles).toHaveLength(0);
-  await page.getByLabel("Looks source",{exact:true}).selectOption("library");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Catalog",exact:true}).click();
   await expect(page.getByRole("button",{name:"Save to collection: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
   await page.getByRole("button",{name:"Save to my collection",exact:true}).click();
@@ -330,7 +330,7 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await expect(page.getByRole("button",{name:"Save to my collection",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
+  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"My collection",exact:true}).click();
   await expect(page.getByRole("button",{name:"View Ink drawing",exact:true})).toHaveCount(0);
   await page.getByRole("button",{name:"Nodes",exact:true}).click();
   await expect(page.getByLabel("Look",{exact:true}).locator("option:checked")).toHaveText("Ink drawing");
