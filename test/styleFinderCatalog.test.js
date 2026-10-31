@@ -15,6 +15,26 @@ test("StyleFinder reads local cards and details without executing source scripts
   const style=parseStyleFinderPage(detail,"library/ink.html")[0];
   assert.equal(style.name,"Ink drawing");assert.equal(style.prompt,"Dark ink, fine lines and warm paper.");assert.deepEqual(style.tags,["Fine lines"]);
 });
+
+test("Detail parser reads only source Colours and Similar styles, rejecting unsafe colour CSS",()=>{
+  const source=detail+`<a class="sp-colour" style="--c:#23502a"><span class="sp-swatch"></span><span>dark green</span><span class="sp-count">17%</span></a><a class="sp-colour" style="--c:url(javascript:bad)"><span>unsafe</span></a><section class="sp-similar">${card("related-ink").replace('src="img/','src="../img/')}</section>`;
+  const style=parseStyleFinderPage(source,"library/ink.html")[0];
+  assert.deepEqual(style.colours,[{name:"dark green",hex:"#23502a",percent:17}]);
+  assert.equal(style.similarStyles[0].id,"related-ink");assert.equal(style.similarStyles[0].examples[0].relativePath,"img/ink-thumb.jpg");
+});
+
+test("Detail routes resolve source similar previews and partial related looks without bloating search",async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),"newt-related-details-"));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,"library"));await mkdir(path.join(root,"img"));
+  await writeFile(path.join(root,"library.html"),card());
+  await writeFile(path.join(root,"library","ink.html"),detail+`<section class="sp-similar">${card("related-ink").replace('src="img/','src="../img/')}</section>`);
+  await writeFile(path.join(root,"img","ink-thumb.jpg"),"fixture");
+  const catalog=createStyleFinderCatalog({root});
+  assert.equal((await catalog.search()).styles[0].similarStyles,undefined);
+  const related=(await catalog.detail("ink")).style.similarStyles[0];
+  assert.equal(related.id,"related-ink");assert.equal(related.examples.length,1);assert.equal(related.examples[0].relativePath,undefined);
+  assert.equal((await catalog.detail("related-ink")).style.name,"Ink drawing");
+});
 test("RSC metadata is parsed as JSON and unsafe remote/traversal images are rejected",()=>{
   const record={slug:"ink",name:"Ink",prompt:"--sref 123 --v 8.2",category:"SREF codes"};
   const stream='1:'+JSON.stringify({styles:[record]})+'\n';

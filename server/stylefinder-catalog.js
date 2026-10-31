@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
-import { parse } from "parse5";
+import { parse, serialize } from "parse5";
 
 const attrs = node => Object.fromEntries((node.attrs || []).map(item => [item.name,item.value]));
 const text = node => node?.nodeName === "#text" ? node.value : (node?.childNodes || []).map(text).join("");
@@ -30,7 +30,16 @@ export function parseStyleFinderPage(html,relativeFile) {
     const slug=path.posix.basename(relativeFile,".html"), rawPrompt=clean(text(first(document,node=>hasClass(node,"sp-prompt"))));
     const observations=first(document,node=>attrs(node).id==="sp-observations"), about=first(document,node=>attrs(node).id==="sp-about");
     const paragraphs=node=>findAll(node||{},item=>hasClass(item,"sp-prose")).map(item=>clean(text(item))).join("\n\n");
-    return [{id:slug,name:clean(text(heading)),sourceUrl:`https://midlibrary.io/library/${slug}`,category:clean(text(first(document,node=>hasClass(node,"sp-kind")))),prompt:paragraphs(observations) || (rawPrompt.startsWith("--")?"":rawPrompt),midjourneyPrompt:rawPrompt,sref:rawPrompt.match(/--sref\s+\d+/)?.[0] || "",notes:paragraphs(about),tags:findAll(document,node=>hasClass(node,"sp-term")).map(node=>clean(text((node.childNodes||[]).find(child=>child.nodeName==="span")))),examples:findAll(document,node=>node.nodeName==="img"&&hasClass(node,"sp-render")).slice(0,4).map(image).filter(Boolean),detailAvailable:true}];
+    const colours=findAll(document,node=>hasClass(node,"sp-colour")).map(node=>{
+      const hex=attrs(node).style?.match(/(?:^|;)\s*--c\s*:\s*(#[a-f0-9]{6}|#[a-f0-9]{3})(?=\s*(?:;|$))/i)?.[1];
+      const count=clean(text(first(node,item=>hasClass(item,"sp-count"))));
+      const name=clean(text((node.childNodes||[]).find(item=>item.nodeName==="span"&&!hasClass(item,"sp-swatch")&&!hasClass(item,"sp-count"))));
+      const percent=/^\d+(?:\.\d+)?%$/.test(count)?Number(count.slice(0,-1)):null;
+      return hex&&name ? {name,hex,percent:percent!=null&&percent<=100?percent:null} : null;
+    }).filter(Boolean).slice(0,20);
+    const similarSection=first(document,node=>hasClass(node,"sp-similar"));
+    const similarStyles=similarSection?parseStyleFinderPage(serialize(similarSection),relativeFile).slice(0,12):[];
+    return [{id:slug,name:clean(text(heading)),sourceUrl:`https://midlibrary.io/library/${slug}`,category:clean(text(first(document,node=>hasClass(node,"sp-kind")))),prompt:paragraphs(observations) || (rawPrompt.startsWith("--")?"":rawPrompt),midjourneyPrompt:rawPrompt,sref:rawPrompt.match(/--sref\s+\d+/)?.[0] || "",notes:paragraphs(about),tags:findAll(document,node=>hasClass(node,"sp-term")).map(node=>clean(text((node.childNodes||[]).find(child=>child.nodeName==="span")))),examples:findAll(document,node=>node.nodeName==="img"&&hasClass(node,"sp-render")).slice(0,4).map(image).filter(Boolean),colours,similarStyles,detailAvailable:true}];
   }
   return findAll(document,node=>hasClass(node,"ml-style")&&attrs(node)["data-tile"]).map(card=>{
     const id=attrs(card)["data-tile"],record=records.get(id)||{};
@@ -38,7 +47,7 @@ export function parseStyleFinderPage(html,relativeFile) {
   }).filter(style=>style.name && /^[a-z0-9-]+$/.test(style.id));
 }
 
-export function createStyleFinderCatalog({root,cacheMs=30000}={}) {
+export function createStyleFinderCatalog({root,cacheMs=30000,createdStore}={}) {
   let snapshot=null,pending=null,expires=0;
   const pages=new Map();
   async function pageStyles(directory,file) {
@@ -56,11 +65,12 @@ export function createStyleFinderCatalog({root,cacheMs=30000}={}) {
     if(relative.startsWith("..")||path.isAbsolute(relative))fail("Invalid catalog image.");
     if(!(await stat(target)).isFile())fail("This example has not downloaded yet.",404);return target;
   }
-  async function available(style) {
+  async function available(style,includeRelated=false) {
+    if (style.catalogId) return {...style,detailAvailable:true,previewUrl:style.examples[0]?.localUrl || ""};
     const examples=[];for(const example of style.examples||[]){try{await asset(example.relativePath);const {relativePath,...publicImage}=example;examples.push(publicImage);}catch{}}
     if(!examples.length)for(const example of style.fallbackExamples||[]){try{await asset(example.relativePath);const {relativePath,...publicImage}=example;examples.push(publicImage);}catch{}}
-    const {fallbackExamples,...publicStyle}=style;
-    return {...publicStyle,examples,previewUrl:examples[0]?.url || ""};
+    const {fallbackExamples,similarStyles,...publicStyle}=style;
+    return {...publicStyle,examples,previewUrl:examples[0]?.url || "",...(includeRelated?{similarStyles:await Promise.all((similarStyles||[]).map(item=>available(item)))}:{})};
   }
   async function index(refresh=false) {
     if(!refresh&&snapshot&&Date.now()<expires)return snapshot;
@@ -79,21 +89,24 @@ export function createStyleFinderCatalog({root,cacheMs=30000}={}) {
   }
   async function search({q="",category="",offset=0,limit=48,refresh=false}={}) {
     const data=await index(refresh), words=String(q).slice(0,300).toLowerCase().split(/\s+/).filter(Boolean);
-    const matched=data.styles.filter(style=>(!category||style.category===category)&&words.every(word=>[style.name,style.prompt,style.sref,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
+    const created=createdStore ? await createdStore.read() : [], styles=[...created,...data.styles];
+    const matched=styles.filter(style=>(!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.sref,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
     const start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
-    return {ready:data.ready,populating:data.populating,total:matched.length,indexed:data.styles.length,offset:start,limit:size,categories:[...new Set(data.styles.map(style=>style.category).filter(Boolean))].sort(),styles:await Promise.all(matched.slice(start,start+size).map(available))};
+    return {ready:data.ready||created.length>0,populating:data.populating,total:matched.length,indexed:styles.length,offset:start,limit:size,categories:[...new Set(styles.flatMap(style=>[style.category,...(style.catalogId?style.tags:[])]).filter(Boolean))].sort(),styles:await Promise.all(matched.slice(start,start+size).map(style=>available(style)))};
   }
   async function detail(id) {
     if(!/^[a-z0-9-]{1,100}$/.test(id||""))fail("Choose a valid style.");
-    const data=await index();let style=data.styles.find(item=>item.id===id);if(!style)fail("This style is not in the local catalog yet.",404);
+    const created=createdStore ? (await createdStore.read()).find(item=>item.id===id) : null;
+    if(created)return {style:await available(created)};
+    const data=await index();let style=data.styles.find(item=>item.id===id)||data.styles.flatMap(item=>item.similarStyles||[]).find(item=>item.id===id);if(!style)fail("This style is not in the local catalog yet.",404);
     try{const directory=await siteRoot();const html=await readFile(path.join(directory,"library",`${id}.html`),"utf8");const detail=parseStyleFinderPage(html,`library/${id}.html`)[0];if(detail)style={...detail,fallbackExamples:style.fallbackExamples||style.examples};}catch{}
-    return {style:await available(style)};
+    return {style:await available(style,true)};
   }
   return {search,detail,asset};
 }
 
-export function registerStyleFinderRoutes(app,{root}={}) {
-  const catalog=createStyleFinderCatalog({root});
+export function registerStyleFinderRoutes(app,{root,createdStore}={}) {
+  const catalog=createStyleFinderCatalog({root,createdStore});
   app.get("/api/style-library/catalog",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1"}));}catch{res.status(500).json({error:"Could not read the local style catalog. Retry after its current download finishes."});}});
   app.get("/api/style-library/catalog/:id",async(req,res)=>{try{res.json(await catalog.detail(req.params.id));}catch(e){res.status(e.status||500).json({error:e.status?e.message:"Could not read this local style."});}});
   app.get("/api/style-library/catalog-image",async(req,res)=>{try{res.sendFile(await catalog.asset(req.query.file),{headers:{"Cache-Control":"private, max-age=60","X-Content-Type-Options":"nosniff"}});}catch(e){res.status(e.status||404).json({error:"This example is not available locally yet."});}});

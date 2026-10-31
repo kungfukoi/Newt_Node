@@ -1,0 +1,46 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import express from "express";
+import { createCustomLookStore, registerCustomLookRoutes } from "../server/custom-looks.js";
+import { createStyleFinderCatalog, registerStyleFinderRoutes } from "../server/stylefinder-catalog.js";
+import { createStyleLibraryStore } from "../server/style-library.js";
+import { libraryStyleSnapshot } from "../src/styleLibrary.js";
+const prompt = "Preserve the requested subject and composition. Use delicate ink lines, translucent watercolor washes, warm paper grain, softly fading shadows and restrained ochre accents.";
+const draft = () => ({ id: `look-${randomUUID()}`, name: "Paper light", category: "Techniques", prompt,
+  tags: ["Techniques", "warm", "Warm"], styleAnalysis: { stylePrompt: prompt, fingerprint: "a".repeat(64), model: "gpt-6-astra" }, examples: [{ id: "first", localUrl: "/uploads/example.png", fileName: "example.png" }] });
+test("Created looks persist independently, enter catalog search without a mirror, and preserve analysis when starred", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "newt-created-looks-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = createCustomLookStore({ directory }), body = draft();
+  const [first, retry] = await Promise.all([store.add(body), store.add(body)]);
+  assert.deepEqual(first, retry); assert.equal((await store.read()).length, 1);
+  assert.deepEqual(first.tags, ["Techniques", "warm"]);
+  const reloaded = createCustomLookStore({ directory }), catalog = createStyleFinderCatalog({ createdStore: reloaded });
+  const result = await catalog.search({ q: "paper warm", category: "warm" });
+  assert.equal(result.ready, true); assert.equal(result.indexed, 1); assert.equal(result.total, 1);
+  assert.equal(result.styles[0].examples[0].localUrl, "/uploads/example.png");
+  assert.equal((await catalog.detail(first.id)).style.catalogId, first.id);
+  const collections = createStyleLibraryStore({ directory });
+  await collections.save({ revision: 0, collections: [{ id: "favorites", name: "Favorites", styles: [{ ...first, id: randomUUID() }] }] });
+  const saved = (await collections.read()).collections[0].styles[0];
+  assert.equal(saved.catalogId, first.id); assert.equal(saved.category, "Techniques");
+  assert.equal(libraryStyleSnapshot(saved).prompt, prompt); assert.equal(libraryStyleSnapshot(saved).gradeReference.localUrl, "/uploads/example.png");
+  await collections.save({ revision: 1, collections: [] });
+  assert.equal((await reloaded.read()).length, 1);
+});
+test("Create routes reject invalid evidence and save retries do not overwrite another look", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "newt-created-route-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = createCustomLookStore({ directory });
+  for (const patch of [{ examples: [] }, { examples: Array(7).fill({ localUrl: "/uploads/a.png" }) }, { examples: [{ localUrl: "https://example.com/a.png" }] }, { styleAnalysis: null }, { name: "" }, { prompt: "brief" }, { tags: "unsafe" }]) await assert.rejects(store.add({ ...draft(), ...patch }));
+  const app = express(); app.use(express.json()); registerCustomLookRoutes(app, store); registerStyleFinderRoutes(app, { createdStore: store });
+  const server = app.listen(0, "127.0.0.1"); await new Promise(resolve => server.once("listening", resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`, body = draft();
+  const post = value => fetch(`${base}/api/style-library/created`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  assert.equal((await post(body)).status, 200); assert.equal((await post(body)).status, 200);
+  assert.equal((await post({ ...body, name: "Conflicting contents" })).status, 409);
+  assert.equal((await (await fetch(`${base}/api/style-library/catalog`)).json()).total, 1);
+  assert.equal((await (await fetch(`${base}/api/style-library/catalog/${body.id}`)).json()).style.name, body.name);
+});

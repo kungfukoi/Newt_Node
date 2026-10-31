@@ -119,6 +119,9 @@ try {
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
   assert.equal(health.routes.lookStyleAnalysis, true);
+  assert.equal(health.routes.createLook, true);
+  const invalidCreatedLook = await fetch(api + "/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Missing images" }) });
+  assert.equal(invalidCreatedLook.status, 400);
   const invalidLook = await fetch(api + "/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ observations: "ink", examples: [] }) });
   assert.equal(invalidLook.status, 400);
   assert.match((await invalidLook.json()).error, /downloaded example images/);

@@ -25,6 +25,7 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "look-create-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 2000 }, tags: list({ ...nonempty, maxLength: 80 }, 1, 8) }),
   "look-style-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 6000 } }),
   "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
@@ -115,7 +116,7 @@ export function atlasChatLlmBody({ model, prompt, systemPrompt, route = "" }) {
 }
 
 export function atlasMediaLlmBody(options) {
-  if (options.route === "look-style-analysis") {
+  if (["look-style-analysis", "look-create-analysis"].includes(options.route)) {
     return {
       model: options.model,
       messages: [
@@ -133,7 +134,7 @@ export function atlasMediaLlmBody(options) {
 }
 
 export function atlasMediaLlmEndpoint(route) {
-  return route === "look-style-analysis" ? "https://api.atlascloud.ai/v1/chat/completions" : "https://api.atlascloud.ai/v1/responses";
+  return ["look-style-analysis", "look-create-analysis"].includes(route) ? "https://api.atlascloud.ai/v1/chat/completions" : "https://api.atlascloud.ai/v1/responses";
 }
 
 export function atlasUsesChatCompletions({ route = "", responseMimeType = "text/plain" } = {}) {

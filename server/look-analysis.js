@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { creativeOpenAiModel, creativeFalModel, creativeFinalOutputText, validateCreativeResponse } from "./creative-llm.js";
+import { lookCategories, lookTags } from "../src/lookCategories.js";
 
 export const lookAnalysisVersion = 1;
 export const lookAnalysisInstructions = `You are a visual style analyst writing a precise, reusable style-transfer instruction for an image generator.
@@ -17,8 +18,12 @@ export function createLookAnalyzer({ directory, analyze, readAsset, recordHistor
   const completed = new Map();
   let active = 0;
   return async function describe(body = {}) {
+    const creating = body.purpose === "create-look";
+    const route = creating ? "look-create-analysis" : "look-style-analysis";
+    const categories = creating ? lookCategories(Array.isArray(body.categories) ? body.categories.slice(0, 40) : []) : [];
     if (typeof body.observations !== "string" || body.observations.length > 12000) throw new Error("Look observations must be text of at most 12,000 characters.");
     if (!Array.isArray(body.examples) || !body.examples.length || body.examples.length > 8) throw new Error("Choose a look with one to eight downloaded example images.");
+    if (creating && body.examples.length > 6) throw new Error("Choose one to six images for a new look.");
     const inputs = [];
     for (const url of body.examples) {
       if (typeof url !== "string" || !/^\/(uploads|outputs|workflow-assets)\//.test(url) || /\.\.|[?#\\]/.test(url)) throw new Error("Look examples must be managed local images.");
@@ -30,7 +35,7 @@ export function createLookAnalyzer({ directory, analyze, readAsset, recordHistor
       const buffer = await sharp(asset.buffer, { limitInputPixels: 40000000, animated: false }).rotate().resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true }).png().toBuffer();
       inputs.push({ label: `Style evidence ${inputs.length + 1}`, asset: { buffer, fileName: `example-${inputs.length + 1}.png`, mimeType: "image/png" }, digest: hash(asset.buffer) });
     }
-    const fingerprint = hash(JSON.stringify({ version: lookAnalysisVersion, model: creativeOpenAiModel, observations: body.observations.trim(), images: inputs.map(item => item.digest).sort() }));
+    const fingerprint = hash(JSON.stringify({ version: lookAnalysisVersion, model: creativeOpenAiModel, observations: body.observations.trim(), images: inputs.map(item => item.digest).sort(), ...(creating ? { purpose: "create-look", categories } : {}) }));
     const filename = path.join(directory, `${fingerprint}.json`);
     if (completed.has(fingerprint)) return { ...completed.get(fingerprint), cached: true };
     try {
@@ -47,17 +52,21 @@ export function createLookAnalyzer({ directory, analyze, readAsset, recordHistor
         if (!result || recorded) return;
         recorded = true;
         await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", provider: result.provider, modelName: result.model, endpoint: result.endpoint,
-          mode: "Look style analysis", prompt: body.observations, text: error ? "" : result.text, error,
+          mode: creating ? "Create look analysis" : "Look style analysis", prompt: body.observations, text: error ? "" : result.text, error,
           project: { id: "style-library", name: "Lookbook" }, node: { title: String(body.name || "Look").slice(0, 120) },
-          settings: { analysisVersion: lookAnalysisVersion, fingerprint, exampleCount: inputs.length, reasoningEffort: result.provider === "Atlas Cloud" ? "provider-default" : "high", usage: result.usage || null, helperUsages: result.usages || [] },
+          settings: { analysisVersion: lookAnalysisVersion, fingerprint, exampleCount: inputs.length, ...(creating ? { categories } : {}), reasoningEffort: result.provider === "Atlas Cloud" ? "provider-default" : "high", usage: result.usage || null, helperUsages: result.usages || [] },
           cost: estimateCost({ provider: result.provider, model: result.model, usage: result.usage, helperUsages: result.usages }) });
       };
       try {
         result = await analyze({ inputs: inputs.map(({ label, asset }) => ({ label, asset, detail: "high" })), mediaType: "image", openAiModel: creativeOpenAiModel, falModel: creativeFalModel,
-          route: "look-style-analysis", responseMimeType: "application/json", reasoningEffort: "high", systemPrompt: lookAnalysisInstructions,
-          prompt: `Analyze all ${inputs.length} example images as evidence of one visual style. Catalog observations (supporting evidence only):\n${JSON.stringify(body.observations.trim())}\nReturn {"stylePrompt":"..."}.` });
-        const parsed = validateCreativeResponse({}, { ...result, route: "look-style-analysis", text: creativeFinalOutputText(result.text) });
-        const saved = { stylePrompt: parsed.stylePrompt.trim(), fingerprint, model: result.model, provider: result.provider, createdAt: new Date().toISOString(), version: lookAnalysisVersion };
+          route, responseMimeType: "application/json", reasoningEffort: "high", systemPrompt: creating
+            ? lookAnalysisInstructions.replace("roughly 150–250 words", "roughly 60–100 words").replace("Return exactly JSON with one nonempty field: stylePrompt.", `Return exactly JSON with stylePrompt and tags. tags must contain 1–8 suitable entries chosen ONLY from these existing catalog categories: ${JSON.stringify(categories)}. Choose categories by the visual medium or treatment, never the depicted subject; use Various when no specific category fits.`)
+            : lookAnalysisInstructions,
+          prompt: `Analyze all ${inputs.length} example images as evidence of one visual style. Catalog observations (supporting evidence only):\n${JSON.stringify(body.observations.trim())}\nReturn ${creating ? '{"stylePrompt":"...","tags":["..."]}' : '{"stylePrompt":"..."}'}.` });
+        const parsed = validateCreativeResponse({}, { ...result, route, text: creativeFinalOutputText(result.text) });
+        const tags = creating ? lookTags(parsed.tags).filter(tag => categories.includes(tag)) : [];
+        if (creating && !tags.length) throw new Error("Astra returned no valid catalog categories. Your images are preserved; try Analyze again.");
+        const saved = { stylePrompt: parsed.stylePrompt.trim(), ...(creating ? { tags } : {}), fingerprint, model: result.model, provider: result.provider, createdAt: new Date().toISOString(), version: lookAnalysisVersion };
         completed.set(fingerprint, saved);
         result.text = saved.stylePrompt;
         let warning = "";

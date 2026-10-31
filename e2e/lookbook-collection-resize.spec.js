@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 
-test("My collection supports drag and keyboard row resizing, persistence and yellow dropdown highlights", async ({page}) => {
+test("Starred supports drag and keyboard row resizing, persistence and yellow dropdown highlights", async ({page}) => {
   const {errors,requests}=await openFixture(page,{count:1});
   let uiState={};
   await page.route("**/api/ui-state",route=>{if(route.request().method()==="PUT")uiState=route.request().postDataJSON().state;return route.fulfill({contentType:"application/json",body:JSON.stringify({state:uiState,revision:0,updatedAt:0})});});
@@ -9,7 +9,7 @@ test("My collection supports drag and keyboard row resizing, persistence and yel
   await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections:[{id:"looks",name:"Looks",styles}]})}));
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,styles,total:48,indexed:48,categories:["Architects","Painters","Techniques"]})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  const handle=page.getByRole("separator",{name:"Resize My collection rows",exact:true}),strip=page.getByLabel("Style previews",{exact:true});
+  const handle=page.getByRole("separator",{name:"Resize Starred rows",exact:true}),strip=page.getByLabel("Style previews",{exact:true});
   await expect(handle).toHaveCount(0);
   const category=page.getByRole("combobox",{name:"Look category",exact:true});await category.click();
   await expect(category).toHaveCSS("border-color","rgb(221, 198, 49)");
@@ -18,7 +18,7 @@ test("My collection supports drag and keyboard row resizing, persistence and yel
   await category.press("ArrowDown");await category.press("Enter");await expect(category).toContainText("Architects");
   await category.click();await category.press("Escape");await expect(page.getByRole("listbox")).toHaveCount(0);
   async function source(name){await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name,exact:true}).click();}
-  await source("My collection");await expect(handle).toHaveAttribute("aria-valuenow","1");await expect(handle).toHaveText("");
+  await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","1");await expect(handle).toHaveText("");
   await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
   async function namesClearScrollbar(){
     await expect.poll(()=>strip.evaluate(node=>{
@@ -49,9 +49,9 @@ test("My collection supports drag and keyboard row resizing, persistence and yel
   const catalogHandle=page.getByRole("separator",{name:"Resize Catalog rows",exact:true});
   await expect(catalogHandle).toHaveAttribute("aria-valuenow","1");
   await drag(208,catalogHandle);await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await namesClearScrollbar();
-  await source("My collection");await expect(handle).toHaveAttribute("aria-valuenow","3");
+  await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","3");
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await source("My collection");
+  await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await source("Starred");
   await expect(handle).toHaveAttribute("aria-valuenow","3");
   await handle.focus();await handle.press("ArrowDown");await expect(handle).toHaveAttribute("aria-valuenow","4");
   await handle.press("Home");await expect(handle).toHaveAttribute("aria-valuenow","1");

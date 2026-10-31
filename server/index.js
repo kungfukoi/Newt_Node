@@ -6,6 +6,7 @@ import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-la
 import { registerVectorLookRoutes } from "./vector-design-looks.js";
 import { registerStyleLibraryRoutes } from "./style-library.js";
 import { registerLookAnalysisRoutes } from "./look-analysis.js";
+import { createCustomLookStore, registerCustomLookRoutes } from "./custom-looks.js";
 import { registerStyleFinderRoutes } from "./stylefinder-catalog.js";
 import { registerStyleFinderEditorialRoutes } from "./stylefinder-editorial.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
@@ -1084,10 +1085,12 @@ registerVectorLayerRoutes(app, { service: createVectorLayerService({
 }), limiter: runtimeThumbnailRequestLimiter, sendError: sendApiError });
 
 registerStyleLibraryRoutes(app, { directory: dataDir });
+const createdLookStore = createCustomLookStore({ directory: dataDir });
+registerCustomLookRoutes(app, createdLookStore);
 registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses"), analyze: runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost,
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
-registerStyleFinderRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : "") });
+registerStyleFinderRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : ""), createdStore: createdLookStore });
 registerStyleFinderEditorialRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : "") });
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
@@ -1364,6 +1367,7 @@ function buildHealthPayload() {
       projectCanvases: true,
       styleLibrary: true,
       lookStyleAnalysis: true,
+      createLook: true,
       styleFinderCatalog: true,
       lookbookEditorial: true,
       ideogramVector: true, vectorLayers: true, vectorLayerEditor: true, vectorLayerTransforms: true, vectorLayerOrganization: true, vectorLayerAutoGroups: true, vectorSelectionGrouping: true, vectorArtworkEditor: true, vectorDesignLooks: true,

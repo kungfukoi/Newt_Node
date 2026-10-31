@@ -61,3 +61,5 @@ server/data/.ui-state.json.*.tmp
 server/data/ui-state.json.*.tmp
 
 server/data/look-analyses/
+server/data/custom-looks.json
+server/data/custom-looks.json.*.tmp

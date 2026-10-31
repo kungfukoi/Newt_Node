@@ -13,6 +13,20 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  async create(style) {
+    const { response, data } = await fetchJsonApi("/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(style) }, "Save created look", { timeoutMs: 20000, retryLocalApi: false });
+    ensureOk(response, data, "Could not save your look. Your draft is preserved; retry Save.");
+    if (!data.style?.catalogId) throw new Error("The server did not confirm the saved look. Keep your draft and retry Save.");
+    return data.style;
+  },
+  async analyzeCreated(style, categories) {
+    const health = await getJson("/api/health", "Could not verify Create Look support.");
+    if (health.routes?.createLook !== true) throw new Error("Restart NewtNode to activate Create Look. Wait for active generations to finish first.");
+    const { response, data } = await fetchJsonApi("/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "create-look", name: style.name, observations: "", categories, examples: style.examples.map(image => image.localUrl) }) }, "Analyze new look", { timeoutMs: 360000, retryLocalApi: false });
+    ensureOk(response, data, "Could not analyze these images.");
+    if (!data.stylePrompt || !Array.isArray(data.tags) || !data.fingerprint) throw new Error("Astra returned an incomplete look analysis. Your images are preserved.");
+    return data;
+  },
   async editorial({ refresh = false } = {}) {
     const health = await getJson("/api/health", "Could not verify local article support.");
     if (health.routes?.lookbookEditorial !== true) throw new Error("Restart NewtNode to activate local Guides, Compilations, and In Focus.");

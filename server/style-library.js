@@ -7,7 +7,10 @@ export function createStyleLibraryStore({ directory }) {
   const target = path.join(directory, "style-library.json");
   let queue = Promise.resolve();
   async function read() {
-    try { return JSON.parse(await readFile(target, "utf8")); }
+    try {
+      const saved = JSON.parse(await readFile(target, "utf8"));
+      return { ...saved, collections: saved.collections.map(collection => collection.name === "My styles" ? { ...collection, name: "My Looks" } : collection) };
+    }
     catch (error) { if (error.code === "ENOENT") return { version: 1, revision: 0, collections: [] }; throw error; }
   }
   function save(body) {

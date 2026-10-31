@@ -6,6 +6,16 @@ import path from "node:path";
 import { createStyleLibraryStore } from "../server/style-library.js";
 import { midlibrarySearchUrl, libraryStyleSnapshot, libraryPrompt, collectionExamples, libraryStylesMatching, normalizeLibraryStyle } from "../src/styleLibrary.js";
 
+test("Legacy My styles displays as My Looks while retaining collection identity and custom names", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "newt-collection-name-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const original = { version: 1, revision: 4, collections: [{ id: "default", name: "My styles", styles: [] }, { id: "custom", name: "Cinema", styles: [] }] };
+  await writeFile(path.join(directory, "style-library.json"), JSON.stringify(original));
+  const store = createStyleLibraryStore({ directory }), read = await store.read();
+  assert.equal(read.collections[0].name, "My Looks"); assert.equal(read.collections[0].id, "default"); assert.equal(read.collections[1].name, "Cinema"); assert.equal(read.revision, 4);
+  await store.save(read); assert.equal((await store.read()).collections[0].name, "My Looks");
+});
+
 test("Midlibrary links encode search text and repeated filters without inventing an API", () => {
   const url = new URL(midlibrarySearchUrl({ query: "ink & paper", terms: ["dark", "vivid-colors"], colours: ["black", "vivid-red"] }));
   assert.equal(url.origin, "https://midlibrary.io"); assert.equal(url.pathname, "/library");

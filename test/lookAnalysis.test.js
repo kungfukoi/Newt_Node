@@ -9,6 +9,20 @@ import { createStyleLibraryStore } from "../server/style-library.js";
 import { libraryStyleSnapshot } from "../src/styleLibrary.js";
 
 const stylePrompt = "Preserve the requested subject and composition. Apply fine, irregular ink contours with broken edges, transparent overlapping washes, muted warm paper tones and restrained crimson accents. Keep shadows soft and textured, with spare highlights and visible paper grain.";
+test("Create Look requests short visual-only descriptions and catalog tags, caches separately, rejects over six images", async t => {
+  const f = await fixture(t);
+  const describe = createLookAnalyzer({ ...f.dependencies, analyze: async options => {
+    f.calls.push(options); return { text: JSON.stringify(options.route === "look-create-analysis" ? { stylePrompt, tags: ["Techniques", "unsupported"] } : { stylePrompt }), model: "gpt-6-astra", provider: "Atlas Cloud", endpoint: "/v1/chat/completions" };
+  } });
+  const body = { ...f.body, purpose: "create-look", categories: ["Techniques"] };
+  const saved = await describe(body); assert.deepEqual(saved.tags, ["Techniques"]);
+  assert.match(f.calls[0].systemPrompt, /60–100 words/); assert.match(f.calls[0].systemPrompt, /Never carry over people/);
+  assert.equal(f.calls[0].route, "look-create-analysis"); assert.equal(f.history[0].mode, "Create look analysis");
+  assert.equal((await describe(body)).cached, true); assert.equal(f.calls.length, 1);
+  assert.equal((await describe(f.body)).cached, false); assert.equal(f.calls.length, 2);
+  await assert.rejects(describe({ ...body, examples: Array(7).fill("/uploads/a.png") }), /six images/);
+  assert.equal(f.calls.length, 2);
+});
 async function fixture(t, override = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-look-analysis-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
