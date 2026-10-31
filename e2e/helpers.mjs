@@ -36,7 +36,7 @@ export async function openFixture(page, options = {}) {
       // Browser fixtures have no supervisor; match the real headless lifecycle response.
       if (path === "/api/window-session") return route.fulfill({ status: 204, body: "" });
       if (path === "/api/ui-state") return json(request.method() === "PUT" ? { ok: true } : { state: options.uiState || {}, revision: 0, updatedAt: 0 });
-      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, lookStyleAnalysis: true, exploreLookVariation: true, exploreArtDirection: true, storyboardShotList: true, projectCanvases: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
+      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, lookStyleAnalysis: true, lookbookEditorial: true, exploreLookVariation: true, exploreArtDirection: true, storyboardShotList: true, projectCanvases: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" }, ...options.settings });
       if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });
       if (path === "/api/node/generate-image") return json({ images: [{ localUrl: "/outputs/e2e/generated.png", fileName: "generated.png", mimeType: "image/png" }] });
@@ -58,6 +58,7 @@ export async function openFixture(page, options = {}) {
       }
       if (path === "/api/node-projects" || path === "/api/saved-workflows" || path === "/api/history") return json([]);
       if (path.includes("output-path")) return json({ path: "C:/fixtures/outputs" });
+      if (path === "/api/style-library/editorial") return json({ready:false,sections:[{id:"guides",title:"Guides",count:0,items:[]},{id:"compilations",title:"Compilations",count:0,items:[]},{id:"in-focus",title:"In Focus",count:0,items:[]}]});
       // All unimplemented APIs are local mocks, never forwarded to a user's API.
       return json({ ok: true, entries: [], items: [] });
     }

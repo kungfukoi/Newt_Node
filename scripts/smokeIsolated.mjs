@@ -123,6 +123,11 @@ try {
   assert.equal(invalidLook.status, 400);
   assert.match((await invalidLook.json()).error, /downloaded example images/);
   assert.equal(health.routes.styleFinderCatalog, true);
+  assert.equal(health.routes.lookbookEditorial, true);
+  const editorial = await (await request("/api/style-library/editorial")).json();
+  assert.equal(editorial.ready, false); assert.equal(editorial.sections.length, 3);
+  const invalidArticle = await fetch(api + "/api/style-library/editorial/article?file=..%2Fsecret.html");
+  assert.equal(invalidArticle.status, 400);
   const localCatalog = await (await request("/api/style-library/catalog")).json();
   assert.equal(localCatalog.ready, false);
   assert.deepEqual(localCatalog.styles, []);

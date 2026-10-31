@@ -13,6 +13,20 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  async editorial({ refresh = false } = {}) {
+    const health = await getJson("/api/health", "Could not verify local article support.");
+    if (health.routes?.lookbookEditorial !== true) throw new Error("Restart NewtNode to activate local Guides, Compilations, and In Focus.");
+    const { response, data } = await fetchJsonApi(`/api/style-library/editorial?refresh=${refresh ? 1 : 0}`, {}, "Read local articles", { timeoutMs: 30000 });
+    ensureOk(response, data, "Could not read local articles.");
+    if (!Array.isArray(data.sections)) throw new Error("The local article catalog is unavailable. Restart NewtNode and retry.");
+    return data;
+  },
+  async article(file) {
+    const { response, data } = await fetchJsonApi(`/api/style-library/editorial/article?file=${encodeURIComponent(file)}`, {}, "Read local article", { timeoutMs: 30000 });
+    ensureOk(response, data, "This article has not downloaded yet.");
+    if (!Array.isArray(data.blocks)) throw new Error("Could not read this local article.");
+    return data;
+  },
   async analyze(style) {
     const health = await getJson("/api/health", "Could not verify Astra look analysis support.");
     if (health.routes?.lookStyleAnalysis !== true) throw new Error("Restart NewtNode to activate Astra look analysis. Wait for active generations to finish first.");

@@ -155,14 +155,10 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await expect(nav.getByRole("button", { name: "Video", exact: true })).toHaveCount(0);
   await nav.getByRole("button", { name: "Looks", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Lookbook", exact: true })).toBeVisible();
-  await page.getByRole("button", {name:"Looks settings",exact:true}).click();
-  await page.getByRole("textbox", { name: "New collection name" }).fill("Other looks");
-  await page.getByRole("button", { name: "Create collection", exact: true }).click();
+  await expect(page.locator(".lookbook-hero").getByRole("button")).toHaveCount(0);
   await expect(page.getByLabel("Style direction",{exact:true})).toHaveCount(0);
   await expect(page.getByLabel("Visual description",{exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Add style references",exact:true})).toHaveCount(0);
-  await page.getByLabel("Collection",{exact:true}).selectOption("film-look");
-  await page.getByRole("button",{name:"Looks settings",exact:true}).click();
   await page.getByLabel("Looks source",{exact:true}).selectOption("collection");
   await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
   await expect(page.locator(".library-detail-examples img")).toHaveCount(1);

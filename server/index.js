@@ -7,6 +7,7 @@ import { registerVectorLookRoutes } from "./vector-design-looks.js";
 import { registerStyleLibraryRoutes } from "./style-library.js";
 import { registerLookAnalysisRoutes } from "./look-analysis.js";
 import { registerStyleFinderRoutes } from "./stylefinder-catalog.js";
+import { registerStyleFinderEditorialRoutes } from "./stylefinder-editorial.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
@@ -1087,6 +1088,7 @@ registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses")
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
 registerStyleFinderRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : "") });
+registerStyleFinderEditorialRoutes(app, { root: process.env.NEWTNODE_STYLEFINDER_ROOT || (process.platform === "win32" ? "D:/_MEDIA/NewtStyle/StyleFinder" : "") });
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
@@ -1363,6 +1365,7 @@ function buildHealthPayload() {
       styleLibrary: true,
       lookStyleAnalysis: true,
       styleFinderCatalog: true,
+      lookbookEditorial: true,
       ideogramVector: true, vectorLayers: true, vectorLayerEditor: true, vectorLayerTransforms: true, vectorLayerOrganization: true, vectorLayerAutoGroups: true, vectorSelectionGrouping: true, vectorArtworkEditor: true, vectorDesignLooks: true,
       cameraCoverage: true, cameraCoverageTravel: true, cameraCoverageFraming: true, cameraCoverageLens: true,
       storyboardScriptImport: true,
