@@ -20,7 +20,7 @@ test("Lookbook matches the shared header and browses all three local editorial s
   await expect(header).toHaveClass(/stats-hero/);await expect(header.getByRole("heading",{name:"Lookbook",exact:true})).toBeVisible();
   await expect(header).toHaveCSS("text-align","left");await expect(header).toHaveCSS("border-radius","14px");
   await expect(page.getByRole("button",{name:"Browse Guides",exact:true})).toContainText("2 articles");
-  const selection=await page.locator(".stylebuilder-selection").boundingBox(),tile=await page.getByRole("button",{name:"Browse Guides",exact:true}).boundingBox();
+  const selection=await page.getByLabel("Style previews",{exact:true}).boundingBox(),tile=await page.getByRole("button",{name:"Browse Guides",exact:true}).boundingBox();
   expect(tile.y).toBeGreaterThan(selection.y+selection.height);
   await page.screenshot({path:test.info().outputPath("lookbook-editorial-tiles.png"),fullPage:true});
   for(const title of ["Compilations","In Focus","Guides"]){await page.getByRole("button",{name:`Browse ${title}`,exact:true}).click();await expect(page.getByLabel(`${title} articles`,{exact:true})).toBeVisible();}
