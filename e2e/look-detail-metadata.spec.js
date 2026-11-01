@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
-test("Look details show the catalog's palette and similar styles with in-popup navigation",async({page})=>{
+test("Look details show the catalog palette without similar styles or recommendation copy",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   const ink={id:"ink",name:"Ink",prompt:"Ink on textured paper",examples:[{localUrl:"/outputs/e2e/ink.png"}],colours:[],similarStyles:[]};
   const blade={id:"blade-runner",name:"Blade Runner",sourceUrl:"https://midlibrary.io/library/blade-runner",prompt:"Dark cinematic tones",examples:[{localUrl:"/outputs/e2e/blade.png"}],colours:[{name:"dark green",hex:"#23502a",percent:17},{name:"muted cyan",hex:"#568b9a",percent:9}],similarStyles:[ink]};
@@ -14,13 +14,13 @@ test("Look details show the catalog's palette and similar styles with in-popup n
   await expect(details.getByRole("heading",{name:"Colours",exact:true})).toBeVisible();
   await expect(details.getByLabel("Look colours")).toContainText("dark green");await expect(details.getByLabel("Look colours")).toContainText("17%");
   await expect(details.locator(".look-colour-list i").first()).toHaveCSS("background-color","rgb(35, 80, 42)");
-  await details.getByRole("button",{name:"View similar look Ink",exact:true}).click();
-  await expect(details.getByRole("heading",{name:"Ink",exact:true})).toBeVisible();
-  await expect(details.getByLabel("Look colours")).toContainText("No colour palette");
+  await expect(details.getByLabel("Similar styles")).toHaveCount(0);
+  await expect(details.getByRole("button",{name:"View similar look Ink",exact:true})).toHaveCount(0);
   await details.getByRole("button",{name:"Close style details",exact:true}).click();
   await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Cinema",exact:true}).click();
   await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
-  await expect(details.getByRole("button",{name:"View similar look Ink",exact:true})).toBeVisible();
-  await page.screenshot({path:test.info().outputPath("look-colours-similar.png"),fullPage:true});
+  await expect(details.getByRole("button",{name:"View similar look Ink",exact:true})).toHaveCount(0);
+  await expect(details.getByText(/No similar styles|does not supply similar-style/)).toHaveCount(0);
+  await page.screenshot({path:test.info().outputPath("look-colours.png"),fullPage:true});
   expect(requests.some(item=>item.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
 });

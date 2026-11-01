@@ -18,5 +18,5 @@ export function lookStyleBlocks(value = {}) {
 export function compileLookStyle(blocks, palette=[]) {
   const active=lookStyleBlocks(blocks).filter(block=>block.enabled&&block.text);
   if(!active.length)return "";
-  return "Preserve the requested subject and composition while applying this visual treatment.\n\n"+active.map(block=>`### ${lookStyleSections.find(section=>section.id===block.id).label} · ${block.weight}\n${block.text}${block.id==="palette"&&palette.length?`\nPalette anchors: ${palette.filter(colour=>/^#[a-f0-9]{6}$/i.test(colour.hex)).slice(0,6).map(colour=>`${colour.name||colour.hex} ${colour.hex}`).join(", ")}`:""}`).join("\n\n");
+  return active.map(block=>`### ${lookStyleSections.find(section=>section.id===block.id).label} · ${block.weight}\n${block.text}${block.id==="palette"&&palette.length?`\nPalette anchors: ${palette.filter(colour=>/^#[a-f0-9]{6}$/i.test(colour.hex)).slice(0,6).map(colour=>`${colour.name||colour.hex} ${colour.hex}`).join(", ")}`:""}`).join("\n\n");
 }

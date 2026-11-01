@@ -9,7 +9,7 @@ import { createCustomLookStore, registerCustomLookRoutes } from "../server/custo
 import { createStyleFinderCatalog, registerStyleFinderRoutes } from "../server/stylefinder-catalog.js";
 import { createStyleLibraryStore } from "../server/style-library.js";
 import { libraryStyleSnapshot } from "../src/styleLibrary.js";
-const prompt = "Preserve the requested subject and composition. Use delicate ink lines, translucent watercolor washes, warm paper grain, softly fading shadows and restrained ochre accents.";
+const prompt = "Delicate ink lines, translucent watercolor washes, warm paper grain, softly fading shadows and restrained ochre accents.";
 const draft = () => ({ id: `look-${randomUUID()}`, name: "Paper light", category: "Techniques", prompt,
   tags: ["Techniques", "warm", "Warm"], styleAnalysis: { stylePrompt: prompt, fingerprint: "a".repeat(64), model: "gpt-6-astra" }, examples: [{ id: "first", localUrl: "/uploads/example.png", fileName: "example.png" }] });
 test("Created looks persist independently, enter catalog search without a mirror, and preserve analysis when starred", async t => {

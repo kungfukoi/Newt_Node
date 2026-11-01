@@ -14,7 +14,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   const referenceImage=await readFile(new URL("./.generated/landscape.png",import.meta.url));
   await page.route("**/api/style-library/styleref-image?**",route=>route.fulfill({contentType:"image/png",body:referenceImage}));
   await page.route("**/api/node/upload-asset",route=>{uploads++;return json(route,{asset:{localUrl:`/outputs/e2e/style-${uploads}.png`,fileName:`style-${uploads}.png`,mimeType:"image/png"}});});
-  await page.route("**/api/style-library/analyze",route=>{analyses++;return json(route,{stylePrompt:"Preserve the requested subject. Apply transparent watercolor washes, soft ink contours, warm paper grain and restrained ochre accents.",fingerprint:"a".repeat(64),provider:"Atlas Cloud",model:"gpt-6-astra"});});
+  await page.route("**/api/style-library/analyze",route=>{analyses++;return json(route,{stylePrompt:"Preserve the user's requested subject and composition while applying this visual treatment. Transparent watercolor washes, soft ink contours, warm paper grain and restrained ochre accents.",fingerprint:"a".repeat(64),provider:"Atlas Cloud",model:"gpt-6-astra"});});
   await page.getByRole("button",{name:"Looks",exact:true}).click();
   await expect(page.getByText("1 StyleRef looks",{exact:true})).toBeVisible();
   await expect(page.getByText("Guides",{exact:true})).toHaveCount(0);
@@ -23,9 +23,14 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   const details=page.getByRole("dialog",{name:"Style details",exact:true});
   await expect(details.getByRole("link",{name:"StyleRef.io",exact:true})).toHaveAttribute("href",look.sourceUrl);
   await expect(details).toContainText("@artist");await expect(details.getByLabel("Look colours")).toContainText("#f4f0e6");
-  await expect(details.getByLabel("Similar styles")).toContainText("StyleRef does not supply");
-  await expect(details.getByLabel("Style description").getByRole("heading",{name:"Rendering",exact:true})).toBeVisible();
-  await expect(details.getByLabel("Style description").getByRole("listitem")).toHaveCount(2);
+  await expect(details.getByLabel("Similar styles")).toHaveCount(0);
+  await expect(details.getByText("StyleRef does not supply similar-style recommendations.",{exact:true})).toHaveCount(0);
+  await expect(details.getByLabel("StyleRef prompt").getByRole("heading",{name:"Rendering",exact:true})).toBeVisible();
+  await expect(details.getByLabel("StyleRef prompt").getByRole("listitem")).toHaveCount(2);
+  expect(await details.evaluate(root=>{
+    const images=root.querySelector('.library-detail-examples'),colours=root.querySelector('[aria-label="Look colours"]'),prompt=root.querySelector('[aria-label="StyleRef prompt"]');
+    return Boolean(images.compareDocumentPosition(colours)&Node.DOCUMENT_POSITION_FOLLOWING)&&Boolean(colours.compareDocumentPosition(prompt)&Node.DOCUMENT_POSITION_FOLLOWING);
+  })).toBe(true);
   await expect(details.locator(".look-description-label")).toHaveText("Palette:");
   await page.screenshot({path:test.info().outputPath("styleref-formatted-description.png"),fullPage:true});
   await details.getByRole("button",{name:"Save to my collection",exact:true}).click();
@@ -35,6 +40,9 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   expect(library.collections[0].styles[0].prompt).toBe(look.prompt);
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();
   await expect(details.getByRole("status")).toContainText("description is saved");expect(analyses).toBe(1);expect(uploads).toBe(4);
+  await expect(details.getByLabel("Style description",{exact:true})).toContainText("Transparent watercolor washes");
+  await expect(details.getByLabel("Style description",{exact:true})).not.toContainText("Preserve the");
+  await expect(details.getByLabel("StyleRef prompt",{exact:true})).toContainText("Translucent warm washes");
   await details.getByRole("button",{name:"Create Mood Board node",exact:true}).click();
   await expect(details.getByRole("status")).toContainText("Created Mood Board");
   await details.getByRole("button",{name:"Close style details",exact:true}).click();
@@ -42,6 +50,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   offline=true;await page.getByRole("button",{name:"Refresh catalog",exact:true}).click();await expect(page.getByRole("alert")).toContainText("Could not connect to StyleRef");
   await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Starred",exact:true}).click();
   await page.getByRole("button",{name:"View Paper washes",exact:true}).click();
+  await expect(details.getByLabel("StyleRef prompt",{exact:true})).toContainText("Translucent warm washes");
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();await expect(details.getByRole("status")).toContainText("description is saved");expect(analyses).toBe(1);expect(detailRequests).toBe(onlineDetailRequests);
   expect(requests.some(item=>item.path.startsWith("/api/style-library/editorial"))).toBe(false);expect(errors).toEqual([]);
   await page.screenshot({path:test.info().outputPath("styleref-look-details.png"),fullPage:true});

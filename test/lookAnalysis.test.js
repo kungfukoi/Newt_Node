@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
@@ -8,7 +8,7 @@ import { createLookAnalyzer, lookAnalysisInstructions } from "../server/look-ana
 import { createStyleLibraryStore } from "../server/style-library.js";
 import { libraryStyleSnapshot } from "../src/styleLibrary.js";
 
-const stylePrompt = "Preserve the requested subject and composition. Apply fine, irregular ink contours with broken edges, transparent overlapping washes, muted warm paper tones and restrained crimson accents. Keep shadows soft and textured, with spare highlights and visible paper grain.";
+const stylePrompt = "Fine, irregular ink contours with broken edges, transparent overlapping washes, muted warm paper tones and restrained crimson accents. Soft, textured shadows, spare highlights and visible paper grain.";
 test("Create Look requests short visual-only descriptions and catalog tags, caches separately, rejects over six images", async t => {
   const f = await fixture(t);
   const describe = createLookAnalyzer({ ...f.dependencies, analyze: async options => {
@@ -43,6 +43,7 @@ test("Astra receives every whole image, evidence boundaries and style-only instr
   assert.equal((await sharp(f.calls[0].inputs[0].asset.buffer).metadata()).height, 39);
   assert.match(f.calls[0].prompt, /ink portrait/);
   assert.match(lookAnalysisInstructions, /untrusted evidence/); assert.match(lookAnalysisInstructions, /Never carry over people/);
+  assert.doesNotMatch(lookAnalysisInstructions,/Begin by preserving/);assert.match(lookAnalysisInstructions,/Begin directly with the distinctive medium/);
   assert.equal(f.history.length, 1); assert.equal(f.history[0].modelName, "gpt-6-astra");
   assert.equal(f.history[0].cost.model, "gpt-6-astra");
   const reloaded = createLookAnalyzer({ ...f.dependencies, analyze: () => { throw new Error("must not bill again"); } });
@@ -56,6 +57,14 @@ test("Concurrent identical evidence coalesces, changed evidence creates a new de
   assert.equal(f.calls.length, 1);
   await f.describe({ ...f.body, observations: "Different source observations" });
   assert.equal(f.calls.length, 2);
+});
+
+test("Legacy cached analysis loses only its stock opening without another paid analysis",async t=>{
+  const f=await fixture(t),first=await f.describe(f.body),filename=path.join(f.directory,`${first.fingerprint}.json`);
+  const saved=JSON.parse(await readFile(filename,"utf8"));
+  await writeFile(filename,JSON.stringify({...saved,stylePrompt:"Preserve the user's requested subject and composition while applying this visual treatment. "+stylePrompt}));
+  const reloaded=createLookAnalyzer({...f.dependencies,analyze:()=>{throw Error("must not bill again");}});
+  const reused=await reloaded(f.body);assert.equal(reused.cached,true);assert.equal(reused.stylePrompt,stylePrompt);assert.equal(f.calls.length,1);
 });
 test("Invalid input cannot reach a paid analysis, malformed responses record failure without a prose fallback", async t => {
   const f = await fixture(t);

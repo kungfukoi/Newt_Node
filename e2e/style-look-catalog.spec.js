@@ -1,0 +1,30 @@
+import { test, expect } from "@playwright/test";
+import { openFixture } from "./helpers.mjs";
+
+test("Style filters saved looks by catalog and retains the chosen catalog across reload",async({page})=>{
+  const {errors}=await openFixture(page,{fixture:{nodes:[{id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"None"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
+  const look=(id,name)=>({id,name,styleAnalysis:{stylePrompt:`Transferable visual treatment for ${name}`},examples:[]});
+  const collections=[{id:"ink",name:"Inks",styles:[look("wash","Ink wash")]},{id:"film",name:"Cinema",styles:[look("noir","Noir")]},{id:"empty",name:"Empty",styles:[]}];
+  await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections})}));
+  const node=page.locator('.react-flow__node[data-id="style"]'),catalog=node.getByLabel("Look catalog",{exact:true}),picker=node.getByLabel("Look",{exact:true});
+  await catalog.focus();await expect(catalog.getByRole("option",{name:"Cinema",exact:true})).toHaveCount(1);
+  await expect(catalog).toHaveValue("none");await expect(picker).toBeDisabled();await expect(picker).toHaveValue("");
+  await expect(node).toContainText("Choose a catalog, then a look.");
+  await catalog.selectOption({label:"Inks"});
+  await expect(picker.getByRole("option",{name:"Ink wash",exact:true})).toHaveCount(1);
+  await expect(picker.getByRole("option",{name:"Noir",exact:true})).toHaveCount(0);
+  await picker.selectOption({label:"Ink wash"});
+  await expect(picker).toBeEnabled();await expect(picker.locator("option:checked")).toHaveText("Ink wash");
+  await catalog.selectOption({label:"Cinema"});await expect(picker).toHaveValue("");
+  await expect(picker.getByRole("option",{name:"Ink wash",exact:true})).toHaveCount(0);
+  await picker.selectOption({label:"Noir"});
+  await expect(picker).toBeEnabled();await expect(picker.locator("option:checked")).toHaveText("Noir");
+  await page.waitForTimeout(700);await page.reload();
+  await expect(catalog).toHaveValue("collection:film");await expect(picker.locator("option:checked")).toHaveText("Noir");
+  await catalog.selectOption({label:"Empty"});await expect(picker.getByRole("option")).toHaveCount(1);await expect(picker).toBeDisabled();await expect(node).toContainText("No looks saved here yet.");
+  await catalog.selectOption({label:"All"});await expect(picker.getByRole("option")).toHaveCount(3);
+  await picker.selectOption({label:"Ink wash"});await expect(picker.locator("option:checked")).toHaveText("Ink wash");await expect(catalog).toHaveValue("all");
+  await catalog.selectOption({label:"None"});await expect(picker).toBeDisabled();await expect(picker).toHaveValue("");
+  await page.waitForTimeout(700);await page.reload();await expect(catalog).toHaveValue("none");await expect(picker).toBeDisabled();
+  expect(errors).toEqual([]);
+});

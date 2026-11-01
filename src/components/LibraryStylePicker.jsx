@@ -2,6 +2,7 @@ import React from "react";
 import { styleLibraryApi } from "../api/newtApi.js";
 import { libraryStyleSnapshot } from "../styleLibrary.js";
 import { lookSelectionPatch, releaseLookGrade } from "../lookGrade.js";
+import { starredCatalogLooks } from "../lookCatalogs.js";
 import "../LibraryWorkspace.css";
 
 export default function LibraryStylePicker({ data, onChange }) {
@@ -10,7 +11,7 @@ export default function LibraryStylePicker({ data, onChange }) {
   const [loading, setLoading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
   async function choose(value) {
-    if (!value) { onChange({ ...releaseLookGrade(data), libraryStyle: null }); return; }
+    if (!value) { onChange({ ...releaseLookGrade(data), libraryStyle: null, lookCatalogId:["none","all"].includes(catalogValue)?catalogValue:catalogValue.slice(11) }); return; }
     if (value === "workflow-style") return;
     setAnalyzing(true); setError("");
     try {
@@ -24,7 +25,7 @@ export default function LibraryStylePicker({ data, onChange }) {
         await styleLibraryApi.save({ ...library, collections: library.collections.map(item => item.id === collectionId ? { ...item, styles: item.styles.map(saved => saved.id === id ? style : saved) } : item) });
         if (styleAnalysis.warning) setError(styleAnalysis.warning);
       }
-      onChange(lookSelectionPatch(style, data));
+      onChange({...lookSelectionPatch(style, data),lookCatalogId:catalogValue==="all"?"all":collectionId});
     } catch (error) { setError(error.message); }
     finally { setAnalyzing(false); }
   }
@@ -41,15 +42,24 @@ export default function LibraryStylePicker({ data, onChange }) {
   }, []);
   const current = data.libraryStyle;
   const selectedCollection = current && collections.find(collection => collection.styles.some(style => style.id === current.id && libraryStyleSnapshot(style).prompt === current.prompt));
-  const value = selectedCollection ? `${selectedCollection.id}:${current.id}` : current ? "workflow-style" : "";
+  const catalogs=[{value:"none",label:"None"},{value:"all",label:"All"},...collections.map(item=>({value:`collection:${item.id}`,label:item.name}))];
+  const requested=["none","all"].includes(data.lookCatalogId)?data.lookCatalogId:data.lookCatalogId==="starred"?"all":data.lookCatalogId?`collection:${data.lookCatalogId}`:"";
+  const inferred=selectedCollection?`collection:${selectedCollection.id}`:current?"all":"none";
+  const catalogValue=catalogs.some(option=>option.value===requested)?requested:catalogs.some(option=>option.value===inferred)?inferred:"none";
+  const visibleStyles=catalogValue==="all"?starredCatalogLooks(collections):collections.find(item=>`collection:${item.id}`===catalogValue)?.styles||[];
+  const rows=visibleStyles.map(style=>({style,owner:collections.find(item=>item.styles.includes(style))}));
+  const selected=rows.find(({style})=>current&&style.id===current.id&&libraryStyleSnapshot(style).prompt===current.prompt);
+  const value = selected ? `${selected.owner.id}:${current.id}` : current ? "workflow-style" : "";
   return <section className="library-style-picker nodrag nowheel" onPointerDown={event => event.stopPropagation()}>
+    <div className="style-preset-row"><span>Catalog</span><select aria-label="Look catalog" title="Choose All saved looks or a catalog" value={catalogValue} disabled={analyzing} onFocus={load} onChange={event=>{setError("");onChange({...releaseLookGrade(data),libraryStyle:null,lookCatalogId:["none","all"].includes(event.target.value)?event.target.value:event.target.value.slice(11)});}}>{catalogs.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
     <div className="style-preset-row"><span>Look</span>
-      <select aria-label="Look" value={value} disabled={analyzing} onFocus={load} onChange={event => choose(event.target.value)}>
-        <option value="">{loading && !collections.length ? "Loading…" : "None"}</option>
-        {current && !selectedCollection && <optgroup label="Saved with workflow"><option value="workflow-style">{current.name || "Custom style"}</option></optgroup>}
-        {collections.map(collection => <optgroup key={collection.id} label={collection.name}>{collection.styles.map(style => <option key={style.id} value={`${collection.id}:${style.id}`} title={!style.styleAnalysis?.stylePrompt ? "First use: paid Astra image analysis, saved for reuse" : "Saved Astra style description"} disabled={!style.styleAnalysis?.stylePrompt && !style.examples?.length}>{style.name}</option>)}</optgroup>)}
+      <select aria-label="Look" title={catalogValue==="none"?"Choose a catalog first":"Choose a look from this catalog"} value={value} disabled={analyzing||catalogValue==="none"||(!rows.length&&!current)} onFocus={load} onChange={event => choose(event.target.value)}>
+        <option value="">None</option>
+        {current && !selected && <optgroup label="Saved with workflow"><option value="workflow-style">{current.name || "Custom style"}</option></optgroup>}
+        {rows.map(({style,owner})=><option key={`${owner.id}:${style.id}`} value={`${owner.id}:${style.id}`} title={!style.styleAnalysis?.stylePrompt ? "First use: paid Astra image analysis, saved for reuse" : "Saved Astra style description"} disabled={!style.styleAnalysis?.stylePrompt && !style.examples?.length}>{style.name}</option>)}
       </select>
     </div>
+    {!error&&!analyzing&&<small className="library-muted">{catalogValue==="none"?"Choose a catalog, then a look.":loading&&!collections.length?"Loading saved looks…":!rows.length&&!current?"No looks saved here yet.":""}</small>}
     {error && <small role="alert">{error}</small>}
     {analyzing && <small role="status">Astra is analyzing this look. Paid analysis runs once; the description is saved for reuse.</small>}
   </section>;

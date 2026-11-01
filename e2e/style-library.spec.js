@@ -16,6 +16,9 @@ test("Look defaults to its first example, permits grade overrides and replaces t
     await page.route(`**/outputs/e2e/${name}.png`,async route=>{if(name==="slow")await slowGate;return route.fulfill({contentType:"image/png",headers:{"Access-Control-Allow-Origin":"*"},body:buffer});});
   }
   const node=page.locator('.react-flow__node[data-id="style"]'),picker=node.getByLabel("Look",{exact:true}),grade=node.getByLabel("Grade",{exact:true});
+  await node.getByLabel("Look catalog",{exact:true}).focus();
+  await expect(node.getByLabel("Look catalog",{exact:true}).getByRole("option",{name:"Looks",exact:true})).toHaveCount(1);
+  await node.getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
   await picker.focus();
   await expect(picker.getByRole("option",{name:"Red",exact:true})).toHaveCount(1);
   await picker.selectOption({label:"Red"});
@@ -173,7 +176,7 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await expect(page.locator(".library-style-picker").getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
   await expect(page.locator('.react-flow__node').filter({ has: page.getByLabel("Look",{exact:true}) }).locator('[data-port-key$=":styleOut"]')).toHaveCount(1);
   const rows=await page.locator('.react-flow__node').filter({has:page.getByLabel("Look",{exact:true})}).locator('.style-preset-row > span').allTextContents();
-  expect(rows).toEqual(["Style","Grade","Look"]);
+  expect(rows).toEqual(["Style","Grade","Catalog","Look"]);
   await nav.getByRole("button", { name: "Looks", exact: true }).click();
   await expect(page.getByRole("checkbox",{name:"Select Crimson ink",exact:true})).toBeVisible();
   await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
@@ -241,6 +244,8 @@ test("Catalog looks open details, save examples and create a named Style without
   const createdPicker=page.locator('.react-flow__node:not([data-id="existing-style"])').getByLabel("Look",{exact:true});
   await expect(createdPicker.locator("option:checked")).toHaveText("Ink drawing");
   const existingPicker=page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look",{exact:true});
+  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).focus();
+  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
   await expect(existingPicker.getByRole("option",{name:"Ink drawing",exact:true})).toHaveCount(1);
   await existingPicker.selectOption({label:"Ink drawing"});
   await expect(existingPicker.locator("option:checked")).toHaveText("Ink drawing");
