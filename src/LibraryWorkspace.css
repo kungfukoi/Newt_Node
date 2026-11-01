@@ -24,6 +24,7 @@
 .library-workspace label.stylebuilder-search { display:flex; align-items:center; gap:8px; margin:0; border:1px solid #ddc6314d; border-radius:24px; padding:9px 12px; color:#858795; background:#15161c; }
 .library-workspace .stylebuilder-search input { border:0; outline:none; background:transparent; padding:0; width:150px; color:#ddd; font-size:14px; min-width:0; }
 .stylebuilder-catalog-meta { display:flex; justify-content:space-between; align-items:center; color:#696c7a; font-size:12px; margin-bottom:14px; gap:12px; }
+.stylebuilder-category-filter { display:flex; align-items:center; gap:8px; color:#9699a7; }
 .library-workspace .stylebuilder-catalog-meta select { font-size:12px; color:#9699a7; }
 .stylebuilder-style-strip { display:flex; gap:18px; overflow-x:auto; overscroll-behavior-x:contain; padding:3px 3px 16px; min-height:199px; scrollbar-width:thin; scrollbar-color:#ddc63166 #18181e; scroll-snap-type:x proximity; }
 .stylebuilder-style-strip::-webkit-scrollbar { height:8px; }
