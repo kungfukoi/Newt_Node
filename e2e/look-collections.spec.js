@@ -1,6 +1,22 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 
+test("The details star persists changes and stays open after unstarring from a named catalog",async({page})=>{
+  const {errors}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
+  const style={id:"ink",catalogId:"styleref-ink",name:"Ink",sourceUrl:"https://styleref.io/share/ink",examples:[{localUrl:"/outputs/e2e/ink.png"}],styleAnalysis:{stylePrompt:"Fine broken ink edges on warm paper"}};
+  let library={revision:0,collections:[{id:"cinema",name:"Cinema",styles:[style]}]},fail=false;
+  const json=(route,value,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(value)});
+  await page.route("**/api/style-library",route=>{if(route.request().method()==="PUT"){if(fail)return json(route,{error:"Collection changed; retry"},409);library={...route.request().postDataJSON(),revision:library.revision+1};}return json(route,library);});
+  await page.route("**/api/style-library/catalog?**",route=>json(route,{ready:true,total:0,styles:[],categories:[]}));
+  await page.getByRole("button",{name:"Looks",exact:true}).click();await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Cinema",exact:true}).click();
+  await page.getByRole("button",{name:"View Ink",exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});
+  fail=true;await details.getByRole("button",{name:"Unstar look",exact:true}).click();await expect(details.getByRole("alert")).toContainText("Collection changed");await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");
+  fail=false;await details.getByRole("button",{name:"Unstar look",exact:true}).click();await expect(details).toBeVisible();await expect(details.getByRole("button",{name:"Star look",exact:true})).toHaveAttribute("aria-pressed","false");expect(library.collections[0].styles).toHaveLength(0);
+  await details.getByRole("button",{name:"Star look",exact:true}).click();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");await expect(details).toBeVisible();
+  await details.screenshot({path:test.info().outputPath("look-details-star.png")});
+  await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Starred",exact:true}).click();await page.getByRole("button",{name:"View Ink",exact:true}).click();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");expect(errors).toEqual([]);
+});
+
 test("Named local collections, bulk selection and save destinations persist independently", async ({ page }) => {
   const { errors } = await openFixture(page, { fixture: { nodes: [], edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 } }, uiState: { lookbookCollectionRows: 4 } });
   let library = { revision: 0, collections: [{ id: "first", name: "First", styles: [] }, { id: "second", name: "Second", styles: [] }] }, conflict = false;

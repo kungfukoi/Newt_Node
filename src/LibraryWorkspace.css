@@ -72,6 +72,11 @@
 .library-style-detail { width:min(850px,calc(100vw - 50px)); box-sizing:border-box; max-height:90vh; overflow:auto; padding:30px; border:1px solid #ddc63133; border-radius:20px; background:#18181f; color:#eaeaf0; box-shadow:0 25px 100px #0009; }
 .library-style-detail::backdrop { background:#06060bd9; backdrop-filter:blur(7px); }
 .library-style-detail h2 { margin:10px 35px 24px 0; font-size:29px; letter-spacing:-.7px; }
+.look-detail-title { display:flex; align-items:center; gap:12px; margin:10px 36px 24px 0; }
+.library-style-detail .look-detail-title h2 { flex:1; min-width:0; margin:0; overflow-wrap:anywhere; }
+.library-workspace .look-detail-star { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:40px; height:40px; padding:8px; border:1px solid #ddc63155; border-radius:50%; background:#111115; color:#bab9ae; }
+.library-workspace .look-detail-star.saved { color:#ddc631; background:#ddc63116; }
+.library-workspace .look-detail-star:hover:not(:disabled),.library-workspace .look-detail-star:focus-visible { color:#ddc631; border-color:#ddc631; outline:none; }
 .library-workspace .stylebuilder-detail-close { position:absolute; right:15px; top:15px; padding:8px; background:transparent; border:0; }
 .stylebuilder-eyebrow { color:#b8b174; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
 .library-detail-examples { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }

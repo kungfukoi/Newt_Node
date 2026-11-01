@@ -33,7 +33,9 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   })).toBe(true);
   await expect(details.locator(".look-description-label")).toHaveText("Palette:");
   await page.screenshot({path:test.info().outputPath("styleref-formatted-description.png"),fullPage:true});
-  await details.getByRole("button",{name:"Save to my collection",exact:true}).click();
+  await expect(details.getByRole("button",{name:"Star look",exact:true})).toHaveAttribute("aria-pressed","false");
+  await details.getByRole("button",{name:"Star look",exact:true}).click();
+  await expect(details).toBeVisible();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");
   await expect(details.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
   expect(uploads).toBe(4);expect(analyses).toBe(0);
   expect(library.collections[0].styles[0].sourceProvider).toBe("StyleRef");expect(library.collections[0].styles[0].sourceUrl).toBe(look.sourceUrl);
