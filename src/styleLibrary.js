@@ -1,4 +1,5 @@
 // Shared, model-neutral catalog contract. No Midjourney parameters enter other models.
+import { lookStyleBlocks } from "./createLookStyle.js";
 export const librarySchemaVersion = 1;
 const text = (value, max = 12000) => typeof value === "string" ? value.trim().slice(0, max) : "";
 export function midlibrarySearchUrl({ query = "", terms = [], colours = [], category = "" } = {}) {
@@ -12,10 +13,11 @@ export function midlibrarySearchUrl({ query = "", terms = [], colours = [], cate
 }
 export function normalizeLibraryStyle(value = {}) {
   let sourceUrl = "";
-  try { const url = new URL(value.sourceUrl); if (url.protocol === "https:" && url.hostname === "midlibrary.io") sourceUrl = url.href; } catch { /* Optional source. */ }
+  try { const url = new URL(value.sourceUrl); if (url.protocol === "https:" && ["midlibrary.io","styleref.io"].includes(url.hostname) && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional source. */ }
   return {
     id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt), category: text(value.category, 80), catalogId: text(value.catalogId, 80),
-    notes: text(value.notes, 4000), sourceUrl,
+    notes: text(value.notes, 4000), sourceUrl, sourceProvider: text(value.sourceProvider,80), sourceAuthor: text(value.sourceAuthor,120), sourceAttribution: text(value.sourceAttribution,200),
+    ...(Array.isArray(value.styleBlocks)?{styleBlocks:lookStyleBlocks(value.styleBlocks)}:{}),
     colours: (Array.isArray(value.colours) ? value.colours : []).filter(colour => typeof colour?.hex === "string" && /^#(?:[a-f0-9]{3}|[a-f0-9]{6})$/i.test(colour.hex)).slice(0,20).map(colour => ({ name: text(colour.name,80), hex: colour.hex, percent: typeof colour.percent === "number" && Number.isFinite(colour.percent) && colour.percent>=0 && colour.percent<=100 ? colour.percent : null })),
     styleAnalysis: value.styleAnalysis?.stylePrompt ? {
       stylePrompt: text(value.styleAnalysis.stylePrompt, 6000), fingerprint: text(value.styleAnalysis.fingerprint, 64),

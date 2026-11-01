@@ -12,10 +12,11 @@ const stylePrompt = "Preserve the requested subject and composition. Apply fine,
 test("Create Look requests short visual-only descriptions and catalog tags, caches separately, rejects over six images", async t => {
   const f = await fixture(t);
   const describe = createLookAnalyzer({ ...f.dependencies, analyze: async options => {
-    f.calls.push(options); return { text: JSON.stringify(options.route === "look-create-analysis" ? { stylePrompt, tags: ["Techniques", "unsupported"] } : { stylePrompt }), model: "gpt-6-astra", provider: "Atlas Cloud", endpoint: "/v1/chat/completions" };
+    f.calls.push(options); return { text: JSON.stringify(options.route === "look-create-analysis" ? { stylePrompt, tags: ["Techniques", "unsupported"],visualStyle:{medium:"Fine ink with transparent washes",palette:"Warm paper and restrained crimson",lighting:"Soft shadows",texture:"Visible paper grain",shape:"Broken edges",depth:"Spare depth cues",mood:"Quiet and tactile"},palette:[{name:"warm paper",hex:"#e8ddc0"}] } : { stylePrompt }), model: "gpt-6-astra", provider: "Atlas Cloud", endpoint: "/v1/chat/completions" };
   } });
   const body = { ...f.body, purpose: "create-look", categories: ["Techniques"] };
   const saved = await describe(body); assert.deepEqual(saved.tags, ["Techniques"]);
+  assert.equal(saved.styleBlocks.length,7);assert.equal(saved.palette[0].hex,"#e8ddc0");assert.equal(saved.version,2);
   assert.match(f.calls[0].systemPrompt, /60–100 words/); assert.match(f.calls[0].systemPrompt, /Never carry over people/);
   assert.equal(f.calls[0].route, "look-create-analysis"); assert.equal(f.history[0].mode, "Create look analysis");
   assert.equal((await describe(body)).cached, true); assert.equal(f.calls.length, 1);

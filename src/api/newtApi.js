@@ -22,23 +22,10 @@ export const styleLibraryApi = {
   async analyzeCreated(style, categories) {
     const health = await getJson("/api/health", "Could not verify Create Look support.");
     if (health.routes?.createLook !== true) throw new Error("Restart NewtNode to activate Create Look. Wait for active generations to finish first.");
+    if (health.routes?.lookStyleBoard !== true) throw new Error("Restart NewtNode to activate the Create Look style board. Wait for active generations to finish first.");
     const { response, data } = await fetchJsonApi("/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "create-look", name: style.name, observations: "", categories, examples: style.examples.map(image => image.localUrl) }) }, "Analyze new look", { timeoutMs: 360000, retryLocalApi: false });
     ensureOk(response, data, "Could not analyze these images.");
-    if (!data.stylePrompt || !Array.isArray(data.tags) || !data.fingerprint) throw new Error("Astra returned an incomplete look analysis. Your images are preserved.");
-    return data;
-  },
-  async editorial({ refresh = false } = {}) {
-    const health = await getJson("/api/health", "Could not verify local article support.");
-    if (health.routes?.lookbookEditorial !== true) throw new Error("Restart NewtNode to activate local Guides, Compilations, and In Focus.");
-    const { response, data } = await fetchJsonApi(`/api/style-library/editorial?refresh=${refresh ? 1 : 0}`, {}, "Read local articles", { timeoutMs: 30000 });
-    ensureOk(response, data, "Could not read local articles.");
-    if (!Array.isArray(data.sections)) throw new Error("The local article catalog is unavailable. Restart NewtNode and retry.");
-    return data;
-  },
-  async article(file) {
-    const { response, data } = await fetchJsonApi(`/api/style-library/editorial/article?file=${encodeURIComponent(file)}`, {}, "Read local article", { timeoutMs: 30000 });
-    ensureOk(response, data, "This article has not downloaded yet.");
-    if (!Array.isArray(data.blocks)) throw new Error("Could not read this local article.");
+    if (!data.stylePrompt || !Array.isArray(data.tags) || !Array.isArray(data.styleBlocks) || !Array.isArray(data.palette) || !data.fingerprint) throw new Error("Astra returned an incomplete style board. Your images are preserved.");
     return data;
   },
   async analyze(style) {
@@ -52,14 +39,14 @@ export const styleLibraryApi = {
   },
   async catalog({ query = "", category = "", offset = 0, refresh = false } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
-    const { response, data } = await fetchJsonApi(`/api/style-library/catalog?${params}`, {}, "Read local style catalog", { timeoutMs: 60000 });
-    ensureOk(response, data, "Restart NewtNode to activate the local style catalog.");
-    if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the local style catalog.");
+    const { response, data } = await fetchJsonApi(`/api/style-library/catalog?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
+    ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
+    if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");
     return data;
   },
   async detail(id) {
-    const { response, data } = await fetchJsonApi(`/api/style-library/catalog/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 20000 });
-    return ensureOk(response, data, "Could not read this local style.");
+    const { response, data } = await fetchJsonApi(`/api/style-library/catalog/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 60000, retryLocalApi: false });
+    return ensureOk(response, data, "Could not read this catalog look.");
   },
   catalogAssetUrl(url) { return localApiFetchUrl(url); },
   async read() {

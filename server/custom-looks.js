@@ -19,7 +19,7 @@ export function createCustomLookStore({ directory }) {
     const pending = queue.then(async () => {
       if (typeof source.name !== "string" || !source.name.trim() || source.name.length > 120) invalid("Name your look using 1–120 characters.");
       if (!Array.isArray(source.examples) || !source.examples.length || source.examples.length > 6) invalid("Choose one to six images.");
-      if (typeof source.prompt !== "string" || source.prompt.trim().length < 80 || source.prompt.length > 2000) invalid("Analyze the images and provide a short style description (80–2,000 characters).");
+      if (typeof source.prompt !== "string" || source.prompt.trim().length < 80 || source.prompt.length > 6000) invalid("Extract the look and provide a style description (80–6,000 characters).");
       if (!source.styleAnalysis?.fingerprint || !source.styleAnalysis?.stylePrompt) invalid("Analyze your look before saving.");
       if (!Array.isArray(source.tags) || source.tags.length > 40 || source.tags.some(tag => typeof tag !== "string" || tag.length > 80)) invalid("Use up to 40 tags, with at most 80 characters each.");
       const look = normalizeLibraryStyle({ ...source, tags: lookTags(source.tags), sourceUrl: "", sref: "" });

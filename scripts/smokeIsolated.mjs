@@ -54,7 +54,7 @@ try {
   }] }));
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|COMSPEC)$/i.test(key)));
-  Object.assign(env, { PORT: String(port), NEWTNODE_CONTROL_PORT: String(port), NODE_ENV: "production", DOTENV_CONFIG_PATH: path.join(sandbox, ".env"), NEWTNODE_STYLEFINDER_ROOT: path.join(sandbox, "empty-style-catalog") });
+  Object.assign(env, { PORT: String(port), NEWTNODE_CONTROL_PORT: String(port), NODE_ENV: "production", DOTENV_CONFIG_PATH: path.join(sandbox, ".env") });
   child = spawn(process.execPath, [path.join(sandbox, "server", "index.js")], { cwd: sandbox, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   exited = once(child, "exit");
   child.stdout.on("data", (data) => { output = (output + data).slice(-16000); });
@@ -119,21 +119,19 @@ try {
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
   assert.equal(health.routes.lookStyleAnalysis, true);
+  assert.equal(health.routes.lookbookStyleRef, true);
   assert.equal(health.routes.createLook, true);
+  assert.equal(health.routes.lookStyleBoard, true);
   const invalidCreatedLook = await fetch(api + "/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Missing images" }) });
   assert.equal(invalidCreatedLook.status, 400);
   const invalidLook = await fetch(api + "/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ observations: "ink", examples: [] }) });
   assert.equal(invalidLook.status, 400);
   assert.match((await invalidLook.json()).error, /downloaded example images/);
-  assert.equal(health.routes.styleFinderCatalog, true);
-  assert.equal(health.routes.lookbookEditorial, true);
-  const editorial = await (await request("/api/style-library/editorial")).json();
-  assert.equal(editorial.ready, false); assert.equal(editorial.sections.length, 3);
-  const invalidArticle = await fetch(api + "/api/style-library/editorial/article?file=..%2Fsecret.html");
-  assert.equal(invalidArticle.status, 400);
-  const localCatalog = await (await request("/api/style-library/catalog")).json();
-  assert.equal(localCatalog.ready, false);
-  assert.deepEqual(localCatalog.styles, []);
+  // Exercise registered routes without contacting the public service in an isolated smoke run.
+  const invalidCatalogImage = await fetch(api + "/api/style-library/styleref-image?url=http://127.0.0.1/private");
+  assert.equal(invalidCatalogImage.status, 400);
+  const unavailableLook = await fetch(api + "/api/style-library/catalog/not-a-styleref-look");
+  assert.equal(unavailableLook.status, 404);
   const emptyLibrary = await (await request("/api/style-library")).json();
   assert.deepEqual(emptyLibrary.collections, []);
   const savedLibraryResponse = await fetch(api + "/api/style-library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: 0, collections: [{ id: "smoke-collection", name: "Smoke styles", styles: [{ id: "smoke-style", name: "Ink", prompt: "Bold ink on paper", examples: [] }] }] }) });

@@ -1,4 +1,4 @@
-export const defaultLookCategories = ["Architects", "Designers", "Fashion designers", "Filmmakers", "Genres", "Illustrators", "Modifiers", "Painters", "Photographers", "Printmakers", "SREF codes", "Sculptors", "Street artists", "Techniques", "Titles", "Various"];
+export const defaultLookCategories = ["Fine art", "Illustration", "Photography", "Graphic design", "Cinematography", "3D visualization", "Character design", "Game art", "Brand identity", "Packaging design", "UI/UX", "Various"];
 export function lookTags(values = []) {
   const seen = new Set();
   return values.filter(value => typeof value === "string").map(value => value.trim().slice(0, 80)).filter(value => {

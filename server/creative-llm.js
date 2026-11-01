@@ -25,7 +25,7 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
-  "look-create-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 2000 }, tags: list({ ...nonempty, maxLength: 80 }, 1, 8) }),
+  "look-create-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 2000 }, tags: list({ ...nonempty, maxLength: 80 }, 1, 8), visualStyle: object(Object.fromEntries(["medium","palette","lighting","texture","shape","depth","mood"].map(key=>[key,{type:"string",maxLength:600}]))), palette: list(object({name:{...nonempty,maxLength:80},hex:{type:"string",pattern:"^#[a-fA-F0-9]{6}$"}}),0,6) }),
   "look-style-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 6000 } }),
   "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
