@@ -120,6 +120,10 @@ try {
   assert.equal(health.routes.styleLibrary, true);
   assert.equal(health.routes.lookStyleAnalysis, true);
   assert.equal(health.routes.lookbookStyleRef, true);
+  assert.equal(health.routes.stylefinderAudition,true);
+  const missingStyleFinder=await fetch(`${api}/api/style-library/stylefinder`);
+  assert.equal(missingStyleFinder.status,503);
+  assert.match((await missingStyleFinder.json()).error,/local StyleFinder audition is unavailable/);
   assert.equal(health.routes.createLook, true);
   assert.equal(health.routes.lookStyleBoard, true);
   const invalidCreatedLook = await fetch(api + "/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Missing images" }) });

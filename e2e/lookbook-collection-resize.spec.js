@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
+import { collectionFrameHeight, collectionRowHeight, collectionRowGap } from "../src/collectionFrame.js";
 
 test("Starred supports drag and keyboard row resizing, persistence and yellow dropdown highlights", async ({page}) => {
   const {errors,requests}=await openFixture(page,{count:1});
@@ -28,9 +29,9 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   }
   await namesClearScrollbar();
   const oneRow=await strip.boundingBox();
-  async function drag(delta,target=handle){const rows=Number(await target.getAttribute("aria-valuenow"));await expect.poll(()=>strip.evaluate(node=>Math.round(parseFloat(getComputedStyle(node).height)))).toBe(rows*190+(rows-1)*18+32);await target.scrollIntoViewIfNeeded();const box=await target.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+delta,{steps:8});await page.mouse.up();}
-  await drag(208);await expect(handle).toHaveAttribute("aria-valuenow","2");
-  expect((await strip.boundingBox()).height).toBeGreaterThan(oneRow.height+190);
+  async function drag(delta,target=handle){const rows=Number(await target.getAttribute("aria-valuenow"));await expect.poll(()=>strip.evaluate(node=>Math.round(parseFloat(getComputedStyle(node).height)))).toBe(Math.round(collectionFrameHeight(rows)));await target.scrollIntoViewIfNeeded();const box=await target.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+delta,{steps:8});await page.mouse.up();}
+  await drag(collectionRowHeight+collectionRowGap);await expect(handle).toHaveAttribute("aria-valuenow","2");
+  expect((await strip.boundingBox()).height).toBeGreaterThan(oneRow.height+collectionRowHeight);
   await handle.scrollIntoViewIfNeeded();
   const before=await strip.boundingBox(),grip=await handle.boundingBox();
   await page.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2);await page.mouse.down();
@@ -42,20 +43,20 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   expect(tops).toHaveLength(3);
   const scrollable=await strip.evaluate(node=>{node.scrollLeft=300;return node.scrollWidth>node.clientWidth&&node.scrollLeft>0;});expect(scrollable).toBe(true);
   await expect(strip.locator("img").first()).toHaveCSS("object-fit","contain");
-  await expect.poll(()=>strip.evaluate(node=>Math.round(parseFloat(getComputedStyle(node).height)))).toBe(638);
+  await expect.poll(()=>strip.evaluate(node=>Math.round(parseFloat(getComputedStyle(node).height)))).toBe(Math.round(collectionFrameHeight(3)));
   await namesClearScrollbar();
   await page.screenshot({path:test.info().outputPath("collection-three-rows.png"),fullPage:true});
   await source("Catalog");await expect(handle).toHaveCount(0);await expect(strip).toHaveCSS("display","grid");
   const catalogHandle=page.getByRole("separator",{name:"Resize Catalog rows",exact:true});
   await expect(catalogHandle).toHaveAttribute("aria-valuenow","1");
-  await drag(208,catalogHandle);await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await namesClearScrollbar();
+  await drag(collectionRowHeight+collectionRowGap,catalogHandle);await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await namesClearScrollbar();
   await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","3");
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
   await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await source("Starred");
   await expect(handle).toHaveAttribute("aria-valuenow","3");
   await handle.focus();await handle.press("ArrowDown");await expect(handle).toHaveAttribute("aria-valuenow","4");
   await handle.press("Home");await expect(handle).toHaveAttribute("aria-valuenow","1");
-  await drag(208);await expect(handle).toHaveAttribute("aria-valuenow","2");
+  await drag(collectionRowHeight+collectionRowGap);await expect(handle).toHaveAttribute("aria-valuenow","2");
   await handle.scrollIntoViewIfNeeded();await handle.dblclick();await expect(handle).toHaveAttribute("aria-valuenow","1");
   expect(requests.some(item=>item.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
 });

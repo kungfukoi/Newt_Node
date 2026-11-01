@@ -1,5 +1,11 @@
 # NewtNode Development Standards
 
+StyleFinder (local audition) is a separate Looks source, using the standard paginated rail, category/search controls, full-image details, collections and explicit Style analysis. It reads an indexed Midlibrary mirror in place, with no source execution, remote browsing, automatic provider work or LucidLink promotion. A local metadata index avoids parsing thousands of HTML files on the app request path. Missing indexes or source folders show explicit errors. The audition has a separate `lookbookStyleFinderRows` preference; saved references still materialize through managed assets for portability.
+
+The StyleRef look Real Moments (`9a2adtz6-cd8d77ee2f51`) is excluded from catalog browsing, search, category results and counts. Existing saved copies, detail lookup and workflow snapshots remain usable.
+
+Lookbook thumbnail audition uses 276.5 px square previews (75% larger than 158 px), with 308.5 px tile rows. Catalog, Starred and named collections keep complete images, readable names and the existing row-count preferences and resize behavior.
+
 Look details group collection/save destination, Mood Board, Style and custom Look deletion controls immediately beneath the example images, before the palette and descriptions. Confirmation stays with that action group; the title star and close control retain their header positions.
 
 User-created Looks expose Delete Look in details with explicit confirmation. Shared deletion warns that the catalog change affects everyone; online StyleRef records cannot be deleted. The DELETE route accepts only stable custom-look ids, rejects a changed storage destination, and is idempotent. Shared deletion publishes a tombstone, hides the Look from all catalog reads and prevents a Save retry from resurrecting it. Reference images and metadata remain available for existing workflow snapshots, including on a new computer. The initiating user's saved collection copies are removed after catalog deletion; if that local save conflicts, report that the source was deleted but copies remain. Failed source deletion leaves the popup/Look intact.

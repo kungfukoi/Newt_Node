@@ -1,4 +1,4 @@
-export const collectionRowHeight = 190;
+export const collectionRowHeight = 308.5;
 export const collectionRowGap = 18;
 // Padding and horizontal scrollbar space sit outside the complete tile rows.
 export const collectionFrameChrome = 32;

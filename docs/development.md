@@ -35,6 +35,8 @@ Provider credentials should be entered and selected in Settings. Do not put real
 
 ## Common Commands
 
+To audition a local StyleFinder/Midlibrary mirror, run `node scripts/indexStyleFinder.mjs "<mirror folder>" "<checkout>/server/data"`. This parses the mirror offline into a private local metadata index; original HTML/images stay in place. Restart after installing the routes, then choose **StyleFinder (local audition)** in Looks source. Re-run indexing after new pages download; the refresh control reloads the index without reparsing the entire mirror in the app process.
+
 | Command | Purpose |
 | --- | --- |
 | `npm run deps:ensure` | Install/update dependencies when the lockfile requires it. |

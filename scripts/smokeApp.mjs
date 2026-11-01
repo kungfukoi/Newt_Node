@@ -4,6 +4,7 @@ const apiHealthUrl = new URL(process.env.NEWT_SMOKE_API_URL || process.argv[3] |
 const requiredHealthRoutes = [
   "styleLibrary",
   "lookbookStyleRef",
+  "stylefinderAudition",
   "createLook",
   "lookStyleBoard",
   "featureUsage",

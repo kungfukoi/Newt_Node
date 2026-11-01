@@ -9,6 +9,7 @@ import { registerLookAnalysisRoutes } from "./look-analysis.js";
 import { registerCustomLookRoutes } from "./custom-looks.js";
 import { createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage } from "./lookbook-storage.js";
 import { registerStyleRefCatalogRoutes } from "./styleref-catalog.js";
+import { registerStyleFinderAuditionRoutes } from "./stylefinder-audition.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
@@ -1092,6 +1093,7 @@ registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses")
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
 registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore });
+registerStyleFinderAuditionRoutes(app, { directory: dataDir });
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
@@ -1367,6 +1369,7 @@ function buildHealthPayload() {
       projectCanvases: true,
       styleLibrary: true,
       lookStyleAnalysis: true,
+      stylefinderAudition: true,
       createLook: true,
       lookStyleBoard: true,
       lookbookStyleRef: true,

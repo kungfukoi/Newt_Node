@@ -1,5 +1,11 @@
 # NewtNode Architecture
 
+`scripts/indexStyleFinder.mjs <mirror folder> <local data directory>` uses the existing inert StyleFinder parser to write ignored `stylefinder-audition.json` metadata without copying source files. `stylefinder-audition.js` reads that index and wraps `createStyleFinderCatalog` with a prebuilt snapshot, distinct `stylefinder-` identities and separate `/api/style-library/stylefinder` list/detail and `/api/style-library/stylefinder-image` routes. Images retain the legacy realpath confinement. StyleRef remains the main Catalog; the mirror is a separately selectable local audition. Reindex to include later mirror downloads.
+
+`styleref-catalog.js` excludes Real Moments by its stable source slug before listing cache, counts and pagination. Detail lookup remains available for existing saved Looks and workflows.
+
+Lookbook's thumbnail audition sizes tiles, mosaics and grid columns to 276.5 px in `LibraryWorkspace.css`; `collectionFrame.js` uses 308.5 px rows to retain caption and scrollbar clearance during resizing.
+
 Look details render the `look-detail-actions` group directly after examples and before Colours and description content. It contains collection/destination, Mood Board, Style and conditional custom-delete actions; the title star/close controls remain in the header.
 
 `custom-looks.js` adds DELETE `/api/style-library/created/:id`. Local mode removes only the authored JSON record; shared mode writes `looks/<id>/deleted.json` atomically. Shared reads still register archived image locations for old managed URLs but omit tombstoned Looks from results and detail lookup; `sharedAdd` rejects those ids to prevent accidental resurrection. Storage-directory confirmation guards cross-window folder changes. Source deletion does not remove image files or rewrite workflow snapshots. `LibraryWorkspace` confirms shared scope, removes current-user collection copies after source success and reports partial collection conflicts honestly.

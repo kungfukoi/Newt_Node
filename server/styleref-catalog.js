@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 const api = "https://styleref.io/api/v1";
 const imageOrigin = "https://piteahvrjstrlirkpoid.supabase.co";
 const prefix = "styleref-";
+// Curated out of browsing; retain detail access for existing saved Looks/workflows.
+const excludedCatalogSlugs = new Set(["9a2adtz6-cd8d77ee2f51"]); // Real Moments
 const fail = (message, status = 502, retryAfter = "") => { throw Object.assign(new Error(message), { status, retryAfter }); };
 const clean = (value, max = 12000) => typeof value === "string" ? value.trim().slice(0, max) : "";
 export function styleRefImageUrl(value) {
@@ -63,7 +65,7 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, cacheMs=3
         const params=new URLSearchParams({limit:"25",offset:String(offset),sort:"recent"});if(q)params.set("query",q);if(category)params.set("category",category);
         const {buffer}=await request(`${api}/styles?${params}`);let data;try{data=JSON.parse(buffer);}catch{fail("StyleRef returned invalid catalog data.");}
         if(!Array.isArray(data.styles))fail("StyleRef returned an unsupported catalog response.");
-        styles.push(...data.styles.map(normalizeStyleRefCard).filter(Boolean));
+        styles.push(...data.styles.filter(record=>!excludedCatalogSlugs.has(record?.slug)).map(normalizeStyleRefCard).filter(Boolean));
         if(!data.hasMore)break;
         const next=Number(data.nextOffset);if(!Number.isInteger(next)||next<=offset)fail("StyleRef returned invalid pagination.");
         if(next>200){truncated=true;break;}offset=next;

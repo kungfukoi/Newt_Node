@@ -30,6 +30,22 @@ test("StyleRef forwards search/category, coalesces and caches paginated reads, a
   assert.ok(f.calls.some(call=>new URL(call.url).searchParams.get("query")==="Watercolor 2"));
   await f.catalog.search({refresh:true});assert.equal(f.calls.filter(call=>new URL(call.url).searchParams.get("offset")==="0").length,3);
 });
+
+test("Real Moments is excluded before catalog counts and pagination, while saved detail access remains available",async()=>{
+  const slug="9a2adtz6-cd8d77ee2f51",hidden={...card(0),slug,name:"Real Moments"};
+  const catalog=createStyleRefCatalog({fetchImpl:async value=>{
+    const url=new URL(value);
+    if(url.pathname.endsWith("/styles"))return Response.json({styles:url.searchParams.get("query")?[hidden]:[hidden,card(1)],hasMore:false});
+    if(url.searchParams.get("format")==="json")return Response.json({name:hidden.name,sections:{},referenceImages:[]});
+    return new Response(prompt,{headers:{"Content-Type":"text/markdown"}});
+  }});
+  const result=await catalog.search({limit:1});
+  assert.equal(result.total,1);assert.equal(result.remoteCount,1);assert.equal(result.indexed,1);
+  assert.equal(result.styles[0].name,"Watercolor 1");
+  assert.equal((await catalog.search({q:"Real Moments"})).total,0);
+  assert.equal((await catalog.search({category:hidden.category})).styles.some(style=>style.id===`styleref-${slug}`),false);
+  assert.equal((await catalog.detail(`styleref-${slug}`)).style.name,hidden.name);
+});
 test("StyleRef details retain provenance, complete references and visual-only source specification; saved snapshots stay managed",async()=>{
   const f=fixture(),detail=await f.catalog.detail("styleref-style-0");
   assert.equal(detail.style.prompt,prompt);assert.equal(detail.style.examples.length,2);assert.equal(detail.style.colours[0].hex,"#f4f0e6");

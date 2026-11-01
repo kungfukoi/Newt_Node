@@ -64,5 +64,7 @@ server/data/look-analyses/
 server/data/custom-looks.json
 server/data/lookbook-storage.json
 server/data/lookbook-image-aliases.json
+server/data/stylefinder-audition.json
+server/data/stylefinder-audition.json.*.tmp
 server/data/lookbook-*.json.*.tmp
 server/data/custom-looks.json.*.tmp

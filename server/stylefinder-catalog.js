@@ -47,7 +47,7 @@ export function parseStyleFinderPage(html,relativeFile) {
   }).filter(style=>style.name && /^[a-z0-9-]+$/.test(style.id));
 }
 
-export function createStyleFinderCatalog({root,cacheMs=30000,createdStore}={}) {
+export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initialSnapshot}={}) {
   let snapshot=null,pending=null,expires=0;
   const pages=new Map();
   async function pageStyles(directory,file) {
@@ -73,6 +73,7 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore}={}) {
     return {...publicStyle,examples,previewUrl:examples[0]?.url || "",...(includeRelated?{similarStyles:await Promise.all((similarStyles||[]).map(item=>available(item)))}:{})};
   }
   async function index(refresh=false) {
+    if(initialSnapshot){await siteRoot();return initialSnapshot;}
     if(!refresh&&snapshot&&Date.now()<expires)return snapshot;
     if(pending)return pending;
     pending=(async()=>{
@@ -102,7 +103,7 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore}={}) {
     try{const directory=await siteRoot();const html=await readFile(path.join(directory,"library",`${id}.html`),"utf8");const detail=parseStyleFinderPage(html,`library/${id}.html`)[0];if(detail)style={...detail,fallbackExamples:style.fallbackExamples||style.examples};}catch{}
     return {style:await available(style,true)};
   }
-  return {search,detail,asset};
+  return {search,detail,asset,snapshot:index};
 }
 
 export function registerStyleFinderRoutes(app,{root,createdStore}={}) {

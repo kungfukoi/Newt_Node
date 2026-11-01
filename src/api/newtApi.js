@@ -47,15 +47,17 @@ export const styleLibraryApi = {
     if (!data.stylePrompt || !data.fingerprint) throw new Error("Astra returned no saved style description.");
     return data;
   },
-  async catalog({ query = "", category = "", offset = 0, refresh = false } = {}) {
+  async catalog({ query = "", category = "", offset = 0, refresh = false, source = "library" } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
-    const { response, data } = await fetchJsonApi(`/api/style-library/catalog?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
+    const endpoint=source==="stylefinder"?"stylefinder":"catalog";
+    const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
     ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
     if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");
     return data;
   },
   async detail(id) {
-    const { response, data } = await fetchJsonApi(`/api/style-library/catalog/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 60000, retryLocalApi: false });
+    const endpoint=id.startsWith("stylefinder-")?"stylefinder":"catalog";
+    const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 60000, retryLocalApi: false });
     return ensureOk(response, data, "Could not read this catalog look.");
   },
   catalogAssetUrl(url) { return localApiFetchUrl(url); },

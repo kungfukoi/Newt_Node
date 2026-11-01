@@ -20,10 +20,11 @@ test("Frames follow sub-row pointer distances continuously and settle to the nea
   const start=collectionFrameHeight(2);
   assert.equal(collectionHeightFromDrag(2,40),start+40);
   assert.equal(collectionRowsFromHeight(start+40),2);
-  assert.equal(collectionRowsFromHeight(start+150),3);
+  assert.equal(collectionRowsFromHeight(start+(collectionRowHeight+collectionRowGap)*0.75),3);
   assert.equal(collectionHeightFromDrag(1,-500),collectionFrameHeight(1));
   assert.equal(collectionHeightFromDrag(12,500),collectionFrameHeight(12));
-  assert.equal(collectionHeightFromDrag(2,10,320),330);
+  const customHeight=collectionFrameHeight(1)+20;
+  assert.equal(collectionHeightFromDrag(2,10,customHeight),customHeight+10);
 });
 
 test("Every settled frame reserves scrollbar and padding space beyond the tile rows", () => {
