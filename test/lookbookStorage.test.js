@@ -69,3 +69,11 @@ test("Retiring local originals removes only verified duplicates and preserves ol
   const next=draft();next.examples=[{localUrl:"/uploads/new.png",fileName:"new.png"}];await writeFile(path.join(uploads,"new.png"),f.buffer);
   const added=await store.add(next);await assert.rejects(stat(path.join(uploads,"new.png")),error=>error.code==="ENOENT");assert.equal(await store.assetAlias("/uploads/new.png"),added.examples[0].localUrl);assert.equal((await store.state()).localCount,0);
 });
+
+test("Deleting a shared Look hides it for all clients while preserving images for existing workflows, including fresh clients",async t=>{
+  const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});const source=draft(),saved=await f.one.add(source);
+  await assert.rejects(f.one.remove(source.id,{directory:"different-folder"}),error=>error.status===409);assert.equal((await f.one.read()).length,1);
+  assert.equal((await f.one.remove(source.id)).removed,true);assert.equal((await f.two.read()).length,0);assert.equal(await f.two.get(source.id),undefined);
+  const filename=await f.two.ensureAsset(saved.examples[0].localUrl);assert.deepEqual(await readFile(filename),f.buffer);assert.ok(await stat(path.join(f.shared,"looks",source.id,"look.json")));assert.ok(await stat(path.join(f.shared,"looks",source.id,"deleted.json")));
+  assert.equal((await f.two.remove(source.id)).removed,false);await assert.rejects(f.one.add(source),error=>error.status===409);await assert.rejects(f.one.remove("styleref-online"),/Only user-created/);
+});

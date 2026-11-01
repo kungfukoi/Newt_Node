@@ -13,6 +13,10 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  async removeCreated(id,directory){
+    const {response,data}=await fetchJsonApi(`/api/style-library/created/${encodeURIComponent(id)}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({directory})},"Delete custom Look",{timeoutMs:60000,retryLocalApi:false});
+    ensureOk(response,data,"Could not delete this Look.");return data;
+  },
   storage(){return getJson("/api/style-library/storage","Could not read Lookbook storage settings.");},
   async saveStorage(body){
     const {response,data}=await fetchJsonApi("/api/style-library/storage",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)},"Save Lookbook folder",{timeoutMs:300000,retryLocalApi:false});

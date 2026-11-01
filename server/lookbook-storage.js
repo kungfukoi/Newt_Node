@@ -47,10 +47,10 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     await rootAvailable(root);let entries;
     try{entries=await readdir(path.join(root,"looks"),{withFileTypes:true});}catch(error){if(error.code==="ENOENT")return [];throw error;}
     const ids=entries.filter(item=>item.isDirectory()&&idPattern.test(item.name)).map(item=>item.name).sort();
-    if(ids.length>5000)fail("The shared Lookbook exceeds 5,000 looks.");
-    const looks=[];for(let offset=0;offset<ids.length;offset+=16)looks.push(...await Promise.all(ids.slice(offset,offset+16).map(async id=>{try{return display(root,await record(root,id));}catch{fail(`Shared look ${id} could not be read. Check the shared folder before saving more looks.`,503);}})));
-    return looks;
+    const looks=[];for(let offset=0;offset<ids.length;offset+=16)looks.push(...await Promise.all(ids.slice(offset,offset+16).map(async id=>{try{const look=display(root,await record(root,id));return await isDeleted(root,id)?null:look;}catch{fail(`Shared look ${id} could not be read. Check the shared folder before saving more looks.`,503);}})));
+    const active=looks.filter(Boolean);if(active.length>5000)fail("The shared Lookbook exceeds 5,000 looks.");return active;
   }
+  async function isDeleted(root,id){try{await stat(path.join(root,"looks",id,"deleted.json"));return true;}catch(error){if(error.code==="ENOENT")return false;throw error;}}
   async function read(){const setting=await config();return setting.directory?readShared(setting.directory):local.read();}
   async function aliases(){if(aliasCache)return aliasCache;try{return aliasCache=JSON.parse(await readFile(aliasPath,"utf8"));}catch(error){if(error.code==="ENOENT")return aliasCache={};throw error;}}
   async function assetAlias(url){
@@ -82,10 +82,10 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     }
     const metadata={...look,examples:[]},hash=digest(JSON.stringify({look:metadata,images:images.map(({buffer,...image})=>image)}));
     const target=path.join(root,"looks",look.id);
-    async function existing(){try{const value=await record(root,look.id);if(value.hash!==hash)fail("This look identity already exists with different contents. Edit the draft to save a new look.",409);return display(root,value);}catch(error){if(error.code==="ENOENT")return null;throw error;}}
+    async function existing(){try{const value=await record(root,look.id);if(await isDeleted(root,look.id))fail("This Look was deleted from the catalog. Create a new Look to save it again.",409);if(value.hash!==hash)fail("This look identity already exists with different contents. Edit the draft to save a new look.",409);return display(root,value);}catch(error){if(error.code==="ENOENT")return null;throw error;}}
     const previous=await existing();if(previous)return previous;
     const parent=path.join(root,"looks");await mkdir(parent,{recursive:true});
-    if((await readdir(parent,{withFileTypes:true})).filter(item=>item.isDirectory()&&idPattern.test(item.name)).length>=5000)fail("The shared Lookbook has reached its 5,000 look limit.");
+    if((await readShared(root)).length>=5000)fail("The shared Lookbook has reached its 5,000 look limit.");
     const temporary=path.join(parent,`.${look.id}.${randomUUID()}.tmp`);await mkdir(path.join(temporary,"images"),{recursive:true});
     const value={version:1,hash,look:metadata,images:images.map(({buffer,...image})=>image)};
     try{
@@ -133,7 +133,16 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     await rm(path.join(directory,"custom-looks.json"),{force:true});
     return {...await state(),retiredLooks:originals.length,removedImages:images};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies};
+  function remove(id,{directory:expectedDirectory}={}){return serial(async()=>{
+    if(!idPattern.test(id||""))fail("Only user-created Looks can be deleted.");
+    const setting=await config();if(expectedDirectory!==undefined&&expectedDirectory!==setting.directory)fail("Lookbook storage changed. Refresh the catalog before deleting this Look.",409);if(!setting.directory)return local.remove(id);
+    const root=setting.directory;await rootAvailable(root);let value;try{value=await record(root,id);}catch(error){if(error.code==="ENOENT")return {id,removed:false};throw error;}
+    display(root,value);if(await isDeleted(root,id))return {id,removed:false};
+    const filename=path.join(root,"looks",id,"deleted.json"),temporary=`${filename}.${randomUUID()}.tmp`;
+    await writeFile(temporary,JSON.stringify({version:1,id,deletedAt:new Date().toISOString()}),{mode:0o644});try{await rename(temporary,filename);}catch(error){await rm(temporary,{force:true});if(!await isDeleted(root,id))throw error;}
+    return {id,removed:true};
+  });}
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove};
 }
 export function registerLookbookStorageRoutes(app,store){
   const error=(res,e)=>res.status(e.status||500).json({error:e.status?e.message:"Could not access Lookbook storage. Check the folder and its permissions; the previous setting is unchanged."});

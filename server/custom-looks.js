@@ -44,9 +44,18 @@ export function createCustomLookStore({ directory }) {
     });
     queue = pending.catch(() => {}); return pending;
   }
-  return { read, add };
+  function remove(id){
+    const pending=queue.then(async()=>{
+      if(!/^look-[a-f0-9-]{36}$/.test(id||""))invalid("Only user-created Looks can be deleted.");
+      const looks=await read(),remaining=looks.filter(look=>look.id!==id);
+      if(looks.length===remaining.length)return {id,removed:false};
+      const temporary=`${filename}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,looks:remaining}),{mode:0o600});await rename(temporary,filename);return {id,removed:true};
+    });queue=pending.catch(()=>{});return pending;
+  }
+  return { read, add, remove };
 }
 export function registerCustomLookRoutes(app, store) {
+  app.delete("/api/style-library/created/:id",async(req,res)=>{try{res.json(await store.remove(req.params.id,req.body));}catch(error){res.status(error.status||500).json({error:error.status?error.message:"Could not delete this Look. Refresh the catalog and retry."});}});
   app.post("/api/style-library/created", async (req, res) => {
     try { res.json({ style: await store.add(req.body) }); }
     catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Could not save your look. Your draft is still available; retry Save." }); }

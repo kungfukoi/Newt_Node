@@ -215,7 +215,8 @@ test("Catalog looks open details, save examples and create a named Style without
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
   await page.route("**/api/node/upload-asset",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({asset:{localUrl:`/outputs/e2e/import-${++uploads}.png`,fileName:"example.png",mimeType:"image/png"}})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await expect(page.locator(".stylebuilder-mosaic img")).toHaveCount(4);
+  await expect(page.locator(".stylebuilder-cover")).toHaveCount(1);
+  await expect(page.locator(".stylebuilder-mosaic-grid img")).toHaveCount(4);
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Style details"})).toBeVisible();
   await expect(page.locator(".library-detail-examples img")).toHaveCount(4);

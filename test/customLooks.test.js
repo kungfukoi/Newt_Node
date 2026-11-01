@@ -12,6 +12,11 @@ import { libraryStyleSnapshot } from "../src/styleLibrary.js";
 const prompt = "Delicate ink lines, translucent watercolor washes, warm paper grain, softly fading shadows and restrained ochre accents.";
 const draft = () => ({ id: `look-${randomUUID()}`, name: "Paper light", category: "Techniques", prompt,
   tags: ["Techniques", "warm", "Warm"], styleAnalysis: { stylePrompt: prompt, fingerprint: "a".repeat(64), model: "gpt-6-astra" }, examples: [{ id: "first", localUrl: "/uploads/example.png", fileName: "example.png" }] });
+
+test("Deleting a local authored Look removes its record idempotently and rejects online ids",async t=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),"newt-local-look-delete-"));t.after(()=>rm(directory,{recursive:true,force:true}));const store=createCustomLookStore({directory}),source=draft();await store.add(source);
+  assert.equal((await store.remove(source.id)).removed,true);assert.deepEqual(await store.read(),[]);assert.equal((await store.remove(source.id)).removed,false);await assert.rejects(store.remove("styleref-online"),/Only user-created/);
+});
 test("Created looks persist independently, enter catalog search without a mirror, and preserve analysis when starred", async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-created-looks-")); t.after(() => rm(directory, { recursive: true, force: true }));
   const store = createCustomLookStore({ directory }), body = draft();
