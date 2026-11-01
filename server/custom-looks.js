@@ -5,6 +5,18 @@ import { normalizeLibraryStyle } from "../src/styleLibrary.js";
 import { lookTags } from "../src/lookCategories.js";
 
 const invalid = message => { throw Object.assign(new Error(message), { status: 400 }); };
+export function prepareCustomLook(source={}) {
+  if(typeof source.name!=="string"||!source.name.trim()||source.name.length>120)invalid("Name your look using 1–120 characters.");
+  if(!Array.isArray(source.examples)||!source.examples.length||source.examples.length>6)invalid("Choose one to six images.");
+  if(typeof source.prompt!=="string"||source.prompt.trim().length<80||source.prompt.length>6000)invalid("Extract the look and provide a style description (80–6,000 characters).");
+  if(!source.styleAnalysis?.fingerprint||!source.styleAnalysis?.stylePrompt)invalid("Analyze your look before saving.");
+  if(!Array.isArray(source.tags)||source.tags.length>40||source.tags.some(tag=>typeof tag!=="string"||tag.length>80))invalid("Use up to 40 tags, with at most 80 characters each.");
+  const look=normalizeLibraryStyle({...source,tags:lookTags(source.tags),sourceUrl:"",sref:""});
+  if(look.examples.length!==source.examples.length)invalid("Look examples must be managed local images.");
+  if(!/^look-[a-f0-9-]{36}$/.test(source.id||""))invalid("Invalid created-look identity.");
+  look.id=source.id;look.catalogId=source.id;look.category||="Various";look.styleAnalysis.stylePrompt=look.prompt;
+  return look;
+}
 export function createCustomLookStore({ directory }) {
   const filename = path.join(directory, "custom-looks.json");
   let queue = Promise.resolve();
@@ -17,18 +29,7 @@ export function createCustomLookStore({ directory }) {
   }
   function add(source = {}) {
     const pending = queue.then(async () => {
-      if (typeof source.name !== "string" || !source.name.trim() || source.name.length > 120) invalid("Name your look using 1–120 characters.");
-      if (!Array.isArray(source.examples) || !source.examples.length || source.examples.length > 6) invalid("Choose one to six images.");
-      if (typeof source.prompt !== "string" || source.prompt.trim().length < 80 || source.prompt.length > 6000) invalid("Extract the look and provide a style description (80–6,000 characters).");
-      if (!source.styleAnalysis?.fingerprint || !source.styleAnalysis?.stylePrompt) invalid("Analyze your look before saving.");
-      if (!Array.isArray(source.tags) || source.tags.length > 40 || source.tags.some(tag => typeof tag !== "string" || tag.length > 80)) invalid("Use up to 40 tags, with at most 80 characters each.");
-      const look = normalizeLibraryStyle({ ...source, tags: lookTags(source.tags), sourceUrl: "", sref: "" });
-      if (look.examples.length !== source.examples.length) invalid("Look examples must be managed local images.");
-      // A client-generated identity makes an explicit Save retry idempotent after a lost response.
-      if (!/^look-[a-f0-9-]{36}$/.test(source.id || "")) invalid("Invalid created-look identity.");
-      look.id = source.id; look.catalogId = source.id;
-      look.category ||= "Various";
-      look.styleAnalysis.stylePrompt = look.prompt;
+      const look = prepareCustomLook(source);
       const looks = await read(), previous = looks.find(item => item.id === look.id);
       if (previous) {
         if (JSON.stringify(previous) !== JSON.stringify(look)) throw Object.assign(new Error("This look identity has already been saved with different contents. Change the draft to save another look."), { status: 409 });

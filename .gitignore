@@ -62,4 +62,7 @@ server/data/ui-state.json.*.tmp
 
 server/data/look-analyses/
 server/data/custom-looks.json
+server/data/lookbook-storage.json
+server/data/lookbook-image-aliases.json
+server/data/lookbook-*.json.*.tmp
 server/data/custom-looks.json.*.tmp

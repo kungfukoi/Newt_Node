@@ -6,7 +6,8 @@ import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-la
 import { registerVectorLookRoutes } from "./vector-design-looks.js";
 import { registerStyleLibraryRoutes } from "./style-library.js";
 import { registerLookAnalysisRoutes } from "./look-analysis.js";
-import { createCustomLookStore, registerCustomLookRoutes } from "./custom-looks.js";
+import { registerCustomLookRoutes } from "./custom-looks.js";
+import { createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage } from "./lookbook-storage.js";
 import { registerStyleRefCatalogRoutes } from "./styleref-catalog.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
@@ -1084,8 +1085,9 @@ registerVectorLayerRoutes(app, { service: createVectorLayerService({
 }), limiter: runtimeThumbnailRequestLimiter, sendError: sendApiError });
 
 registerStyleLibraryRoutes(app, { directory: dataDir });
-const createdLookStore = createCustomLookStore({ directory: dataDir });
+const createdLookStore = createLookbookStorage({ directory: dataDir,cacheDirectory:path.join(uploadsDir,"shared-looks"),removeOriginal:url=>removeOriginalLookImage(url,uploadsDir),readAsset:async url=>{const {filePath,fileName}=await resolveLocalAssetPathFromUrl(url);const info=await stat(filePath);if(!info.isFile()||info.size>16*1024*1024)throw httpError(400,"Look examples must be at most 16 MB.");return {buffer:await readFile(filePath),fileName};} });
 registerCustomLookRoutes(app, createdLookStore);
+registerLookbookStorageRoutes(app,createdLookStore);
 registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses"), analyze: runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost,
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
@@ -22446,6 +22448,9 @@ function localPublicPathFromUrl(value) {
 }
 
 async function resolveLocalAssetPath(publicPath) {
+  if(String(publicPath||"").startsWith("/uploads/shared-looks/"))await createdLookStore.ensureAsset(publicPath);
+  const sharedAlias=await createdLookStore.assetAlias(publicPath);
+  if(sharedAlias)return {filePath:await createdLookStore.ensureAsset(sharedAlias),fileName:path.basename(publicPath)};
   if (String(publicPath || "").startsWith(`${externalOutputsPrefix}/`)) {
     const requestedPath = externalOutputFilePathFromPublicPath(publicPath);
     const filePath = existsSync(requestedPath) ? requestedPath : await relocatedExternalOutputFilePath(publicPath);

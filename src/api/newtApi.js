@@ -13,6 +13,12 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  storage(){return getJson("/api/style-library/storage","Could not read Lookbook storage settings.");},
+  async saveStorage(body){
+    const {response,data}=await fetchJsonApi("/api/style-library/storage",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)},"Save Lookbook folder",{timeoutMs:300000,retryLocalApi:false});
+    ensureOk(response,data,"Could not save the Lookbook folder.");
+    window.dispatchEvent(new Event("newtnode:lookbook-storage-updated"));return data;
+  },
   async create(style) {
     const { response, data } = await fetchJsonApi("/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(style) }, "Save created look", { timeoutMs: 20000, retryLocalApi: false });
     ensureOk(response, data, "Could not save your look. Your draft is preserved; retry Save.");

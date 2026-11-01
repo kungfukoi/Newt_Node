@@ -1,0 +1,71 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import os from "node:os";
+import {randomUUID} from "node:crypto";
+import {mkdtemp,mkdir,readFile,rename,rm,readdir,symlink,writeFile,stat} from "node:fs/promises";
+import sharp from "sharp";
+import express from "express";
+import {createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage} from "../server/lookbook-storage.js";
+
+const draft=()=>({id:`look-${randomUUID()}`,name:"Shared ink",prompt:"Fine irregular ink contours with transparent watercolor washes, softly feathered edges and visible warm paper grain.",sourceProvider:"Newt",notes:"Ink and wash",tags:["Illustration"],examples:[{localUrl:"/uploads/local.png",fileName:"reference.png"}],styleAnalysis:{stylePrompt:"Already extracted",fingerprint:"a".repeat(64)}});
+async function fixture(t){
+  const root=await mkdtemp(path.join(os.tmpdir(),"newt-lookbook-shared-"));assert.equal(path.dirname(root),os.tmpdir());
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const shared=path.join(root,"Lucid Folder"),a=path.join(root,"computer-a"),b=path.join(root,"computer-b");await mkdir(shared);
+  const buffer=await sharp({create:{width:32,height:40,channels:3,background:"#ddc631"}}).png().toBuffer();
+  const store=directory=>createLookbookStorage({directory,cacheDirectory:path.join(directory,"uploads","shared-looks"),readAsset:async()=>({buffer,fileName:"reference.png"})});
+  return {root,shared,a,b,buffer,one:store(a),two:store(b),store};
+}
+test("Shared looks and images use relative records; separate machines hydrate their own portable managed assets",async t=>{
+  const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});
+  const source=draft(),saved=await f.one.add(source);assert.match(saved.examples[0].localUrl,/^\/uploads\/shared-looks\/[a-f0-9]{64}\.png$/);
+  const manifest=await readFile(path.join(f.shared,"looks",source.id,"look.json"),"utf8");assert.equal(manifest.includes("/uploads/"),false);assert.equal(manifest.includes(f.a),false);
+  const other=await f.two.get(source.id);assert.equal(other.name,source.name);assert.equal(other.styleAnalysis.stylePrompt,source.prompt);
+  const filename=await f.two.ensureAsset(other.examples[0].localUrl);assert.ok(filename.startsWith(f.b));assert.deepEqual(await readFile(filename),f.buffer);
+  assert.equal((await f.two.read()).length,1);assert.equal((await f.store(f.b).state()).directory,await (await import('node:fs/promises')).realpath(f.shared));
+});
+test("Independent concurrent writers retain both looks; identical Save retries are idempotent and conflicting ids reject",async t=>{
+  const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});const first=draft(),second={...draft(),name:"Second"};
+  await Promise.all([f.one.add(first),f.two.add(second)]);assert.equal((await f.one.read()).length,2);
+  await Promise.all([f.one.add(first),f.two.add(first)]);assert.equal((await f.two.read()).length,2);
+  await assert.rejects(f.one.add({...first,name:"Changed"}),error=>error.status===409);
+  assert.equal((await readdir(path.join(f.shared,"looks"))).filter(name=>name.startsWith(".")).length,0);
+});
+test("Choosing a shared folder copies local looks without deleting originals and unavailable mounts never receive local fallback saves",async t=>{
+  const f=await fixture(t),source=draft();await f.one.add(source);await f.one.configure({directory:f.shared});assert.equal((await f.two.configure({directory:f.shared})).mode,"shared");assert.equal((await f.two.read()).length,1);
+  assert.equal(JSON.parse(await readFile(path.join(f.a,"custom-looks.json"),"utf8")).looks.length,1);
+  const cached=await f.one.get(source.id),cachedFile=await f.one.ensureAsset(cached.examples[0].localUrl);
+  await rename(f.shared,f.shared+"-offline");await assert.rejects(f.one.add(draft()),error=>error.status===503);await assert.rejects(f.one.read(),error=>error.status===503);
+  assert.equal(await f.one.ensureAsset(cached.examples[0].localUrl),cachedFile);
+  assert.equal(JSON.parse(await readFile(path.join(f.a,"custom-looks.json"),"utf8")).looks.length,1);
+  await f.one.configure({directory:""});assert.equal((await f.one.read()).length,1);
+});
+test("Settings and asset routes reject sharing URIs/traversal and retain the prior setting on invalid paths",async t=>{
+  const f=await fixture(t);await f.one.configure({directory:f.shared});
+  await assert.rejects(f.one.configure({directory:"lucid://filespace/file/12:34/library"}),/absolute filesystem path/);
+  assert.equal((await f.one.state()).directory,await (await import('node:fs/promises')).realpath(f.shared));
+  for(const url of ["/uploads/shared-looks/../../secret","/uploads/shared-looks/a.svg","/uploads/shared-looks/"+"a".repeat(64)+".png?token=x"])await assert.rejects(f.one.ensureAsset(url));
+  const app=express();app.use(express.json());registerLookbookStorageRoutes(app,f.one);const server=app.listen(0,"127.0.0.1");await new Promise(resolve=>server.once("listening",resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`,saved=await f.one.add(draft());assert.equal((await fetch(base+"/api/style-library/storage")).status,200);
+  const image=await fetch(base+saved.examples[0].localUrl);assert.equal(image.status,200);assert.match(image.headers.get("content-type"),/image\/png/);assert.deepEqual(Buffer.from(await image.arrayBuffer()),f.buffer);
+});
+
+test("A filesystem symbolic-link or Windows junction root resolves to the same shared folder",async t=>{
+  const f=await fixture(t),link=path.join(f.root,"linked-library");await symlink(f.shared,link,process.platform==="win32"?"junction":"dir");
+  await f.one.configure({directory:link});const look=draft();await f.one.add(look);await f.two.configure({directory:f.shared});assert.equal((await f.two.get(look.id)).name,look.name);
+});
+
+test("Retiring local originals removes only verified duplicates and preserves old workflow image URLs through shared aliases",async t=>{
+  const f=await fixture(t),uploads=path.join(f.a,"uploads");await mkdir(uploads,{recursive:true});const original=path.join(uploads,"local.png");await writeFile(original,f.buffer);
+  const store=createLookbookStorage({directory:f.a,cacheDirectory:path.join(uploads,"shared-looks"),readAsset:async()=>({buffer:f.buffer,fileName:"reference.png"}),removeOriginal:url=>removeOriginalLookImage(url,uploads)});
+  await store.add(draft());await store.configure({directory:f.shared});const result=await store.retireLocalCopies();assert.equal(result.retiredLooks,1);assert.equal(result.removedImages,1);assert.equal(result.localCount,0);assert.equal((await store.read()).length,1);
+  await assert.rejects(stat(original),error=>error.code==="ENOENT");await assert.rejects(stat(path.join(f.a,"custom-looks.json")),error=>error.code==="ENOENT");
+  const target=await store.assetAlias("/uploads/local.png");assert.match(target,/^\/uploads\/shared-looks\//);assert.deepEqual(await readFile(await store.ensureAsset(target)),f.buffer);
+  const reopened=f.store(f.a);assert.equal(await reopened.assetAlias("/uploads/local.png"),target);
+  const app=express();registerLookbookStorageRoutes(app,reopened);const server=app.listen(0,"127.0.0.1");await new Promise(resolve=>server.once("listening",resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const response=await fetch(`http://127.0.0.1:${server.address().port}/uploads/local.png`);assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),f.buffer);
+  assert.equal(await removeOriginalLookImage("/outputs/history.png",uploads),false);assert.equal(await removeOriginalLookImage("/uploads/../secret.png",uploads),false);assert.equal(await removeOriginalLookImage(target,uploads),false);
+  const next=draft();next.examples=[{localUrl:"/uploads/new.png",fileName:"new.png"}];await writeFile(path.join(uploads,"new.png"),f.buffer);
+  const added=await store.add(next);await assert.rejects(stat(path.join(uploads,"new.png")),error=>error.code==="ENOENT");assert.equal(await store.assetAlias("/uploads/new.png"),added.examples[0].localUrl);assert.equal((await store.state()).localCount,0);
+});

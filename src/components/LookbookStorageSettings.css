@@ -1,0 +1,15 @@
+.lookbook-storage-preference { display:grid; gap:12px; padding:16px 0; border-bottom:1px solid #ddc63133; }
+.lookbook-storage-preference p,.lookbook-storage-preference small { margin:6px 0 0; color:#96969f; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.lookbook-storage-preference > label { display:grid; gap:7px; font-size:12px; }
+.lookbook-storage-preference input:not([type=checkbox]) { width:100%; min-width:0; }
+.lookbook-storage-preference input:not([type=checkbox]) { min-height:36px; padding:8px 10px; color:#eeeeef; background:#111115; border:1px solid #ddc63144; border-radius:8px; font:inherit; outline:none; }
+.lookbook-storage-preference input:not([type=checkbox]):focus-visible { border-color:#ddc631; box-shadow:0 0 0 2px #ddc63122; }
+.lookbook-storage-preference input[type=checkbox] { accent-color:#ddc631; }
+.lookbook-storage-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.lookbook-storage-actions button { display:inline-flex; align-items:center; gap:7px; }
+.lookbook-storage-actions button { min-height:34px; padding:7px 11px; color:#eeeeef; background:#19191f; border:1px solid #ddc63144; border-radius:8px; font:inherit; cursor:pointer; }
+.lookbook-storage-actions button:hover:not(:disabled),.lookbook-storage-actions button:focus-visible { border-color:#ddc631; background:#ddc63118; outline:none; }
+.lookbook-storage-actions button:disabled { opacity:.45; cursor:default; }
+.lookbook-storage-preference .lookbook-storage-copy { display:flex; align-items:flex-start; gap:8px; }
+.lookbook-storage-preference [role=alert] { color:#f0aaaa; }
+.lookbook-storage-preference [role=status] { color:#ddc631; }

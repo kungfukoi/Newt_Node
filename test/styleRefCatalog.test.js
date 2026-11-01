@@ -48,6 +48,14 @@ test("StyleRef image proxy rejects arbitrary hosts, traversal, signed queries an
   const bad=createStyleRefCatalog({fetchImpl:async()=>new Response("<html>",{headers:{"Content-Type":"text/html"}})});
   await assert.rejects(bad.asset(host+"example.webp"),/supported image/);
 });
+
+test("Shared custom looks remain browsable during an online outage and unavailable shared storage is reported beside online looks",async()=>{
+  const local={id:"look-test",name:"Shared ink",category:"Illustration",tags:[],prompt:"Warm paper",examples:[]};
+  const offline=createStyleRefCatalog({createdStore:{read:async()=>[local],get:async()=>local},fetchImpl:async()=>{throw Error("offline");}});
+  const result=await offline.search();assert.equal(result.styles[0].name,"Shared ink");assert.match(result.warning,/Online catalog unavailable/);assert.equal((await offline.detail(local.id)).style,local);
+  const f=fixture({createdStore:{read:async()=>{throw Error("Shared folder unavailable");}}});
+  const online=await f.catalog.search();assert.equal(online.remoteCount,30);assert.equal(online.localCount,0);assert.match(online.warning,/Shared folder unavailable/);
+});
 test("429 sets a retry window without retrying or silently using the legacy catalog",async()=>{
   let calls=0;const catalog=createStyleRefCatalog({fetchImpl:async()=>{calls++;return new Response("limited",{status:429,headers:{"Retry-After":"60"}});},legacyCatalog:{search:()=>{throw Error("must not fall back");}}});
   await assert.rejects(catalog.search(),error=>error.status===429&&error.retryAfter==="60");
