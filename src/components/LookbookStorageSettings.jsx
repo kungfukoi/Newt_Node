@@ -16,7 +16,6 @@ export default function LookbookStorageSettings(){
     <label>Folder path<input aria-label="Shared Lookbook folder" placeholder="Choose a mounted folder, or leave empty for local storage" value={directory} disabled={busy||!state} onChange={event=>setDirectory(event.target.value)}/></label>
     <div className="lookbook-storage-actions"><button type="button" disabled={busy||!state} onClick={browse}><FolderOpen size={14}/>Browse</button><button type="button" disabled={busy||!state} onClick={save}><Save size={14}/>{busy?"Working…":"Save folder"}</button></div>
     {state?.localCount>0&&<label className="lookbook-storage-copy"><input type="checkbox" disabled={busy} checked={copyLocal} onChange={event=>setCopyLocal(event.target.checked)}/>Copy this computer’s {state.localCount} existing local looks when saving a shared folder. Local originals are kept.</label>}
-    {state&&<small>Current storage: {state.mode==="shared"?state.directory:"Local to this Newt installation"}. Personal collections stay local.</small>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
   </section>;
 }
