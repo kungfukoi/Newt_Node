@@ -1,5 +1,9 @@
 # NewtNode Development Standards
 
+The main Catalog category filter includes Shared. This virtual category reads only the currently configured shared Lookbook store, excluding StyleRef, local custom storage, personal saved copies and local auditions. It keeps search/pagination and reports unavailable shared storage explicitly. Shared browsing makes no online catalog or paid provider requests; real Look categories remain unchanged.
+
+Saving the Shared Lookbook folder refreshes an already mounted main Catalog, including while Looks is hidden behind Settings. Clear stale transient selection/detail state and read the new shared records without requiring browser reload or paid work. Keep the current search/category filters and independent saved/local-audition views intact.
+
 StyleFinder (local audition) is a separate Looks source, using the standard paginated rail, category/search controls, full-image details, collections and explicit Style analysis. It reads an indexed Midlibrary mirror in place, with no source execution, remote browsing, automatic provider work or LucidLink promotion. A local metadata index avoids parsing thousands of HTML files on the app request path. Missing indexes or source folders show explicit errors. The audition has a separate `lookbookStyleFinderRows` preference; saved references still materialize through managed assets for portability.
 
 The StyleRef look Real Moments (`9a2adtz6-cd8d77ee2f51`) is excluded from catalog browsing, search, category results and counts. Existing saved copies, detail lookup and workflow snapshots remain usable.

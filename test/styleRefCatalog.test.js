@@ -31,6 +31,19 @@ test("StyleRef forwards search/category, coalesces and caches paginated reads, a
   await f.catalog.search({refresh:true});assert.equal(f.calls.filter(call=>new URL(call.url).searchParams.get("offset")==="0").length,3);
 });
 
+test("Shared category filters the configured shared store with search and pagination without querying StyleRef",async()=>{
+  const looks=["Ink","Wash","Pencil"].map((name,index)=>({id:`look-${index}`,name,category:"Illustration",tags:[],prompt:"Paper texture",examples:[]}));
+  let mode="shared",unavailable=false;
+  const f=fixture({createdStore:{state:async()=>({mode}),read:async()=>{if(unavailable)throw Object.assign(Error("Mount LucidLink"),{status:503});return looks;}}});
+  const first=await f.catalog.search({category:"Shared",limit:2});
+  assert.equal(first.total,3);assert.equal(first.sharedCount,3);assert.deepEqual(first.styles.map(style=>style.name),["Ink","Wash"]);assert.ok(first.categories.includes("Shared"));
+  assert.equal((await f.catalog.search({category:"Shared",offset:2,limit:2})).styles[0].name,"Pencil");
+  assert.equal((await f.catalog.search({category:"Shared",q:"Ink"})).total,1);assert.equal(f.calls.length,0);
+  mode="local";looks[0].category="Shared";looks[0].tags=["Shared"];
+  const local=await f.catalog.search({category:"Shared"});assert.equal(local.total,0);assert.equal(local.sharedCount,0);
+  mode="shared";unavailable=true;await assert.rejects(f.catalog.search({category:"Shared"}),error=>error.status===503&&/LucidLink/.test(error.message));assert.equal(f.calls.length,0);
+});
+
 test("Real Moments is excluded before catalog counts and pagination, while saved detail access remains available",async()=>{
   const slug="9a2adtz6-cd8d77ee2f51",hidden={...card(0),slug,name:"Real Moments"};
   const catalog=createStyleRefCatalog({fetchImpl:async value=>{

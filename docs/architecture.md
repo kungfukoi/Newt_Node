@@ -1,5 +1,9 @@
 # NewtNode Architecture
 
+`styleref-catalog.js` recognizes the virtual `category=Shared`, checks the custom store's actual storage mode, bypasses remote listing and filters/paginates only shared records. Responses include `sharedCount`; cached online categories remain available in the filter. Shared-store failures propagate instead of returning an empty successful result.
+
+The kept-alive `LibraryWorkspace` subscribes to `newtnode:lookbook-storage-updated`, emitted after a successful folder save. When browsing the main Catalog it clears transient details/selection and reloads catalog data with current filters, so changes made while Settings is visible reach the hidden rail immediately.
+
 `scripts/indexStyleFinder.mjs <mirror folder> <local data directory>` uses the existing inert StyleFinder parser to write ignored `stylefinder-audition.json` metadata without copying source files. `stylefinder-audition.js` reads that index and wraps `createStyleFinderCatalog` with a prebuilt snapshot, distinct `stylefinder-` identities and separate `/api/style-library/stylefinder` list/detail and `/api/style-library/stylefinder-image` routes. Images retain the legacy realpath confinement. StyleRef remains the main Catalog; the mirror is a separately selectable local audition. Reindex to include later mirror downloads.
 
 `styleref-catalog.js` excludes Real Moments by its stable source slug before listing cache, counts and pagination. Detail lookup remains available for existing saved Looks and workflows.

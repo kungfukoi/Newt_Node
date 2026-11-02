@@ -75,16 +75,21 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, cacheMs=3
   }
   async function search({q="",category="",offset=0,limit=48,refresh=false}={}) {
     q=clean(q,300);category=clean(category,80);
-    const [remoteResult,createdResult]=await Promise.allSettled([(async()=>{const all=await listing("","",refresh);return {all,matched:category&&!all.styles.some(style=>style.category===category)?{styles:[],truncated:false}:q||category?await listing(q,category,refresh):all};})(),createdStore?createdStore.read():Promise.resolve([])]);
-    if(remoteResult.status==="rejected"&&(createdResult.status==="rejected"||!createdResult.value.length))throw remoteResult.reason;
+    const sharedOnly=category==="Shared";
+    const [remoteResult,createdResult]=await Promise.allSettled([sharedOnly?Promise.resolve({all:{styles:[]},matched:{styles:[],truncated:false}}):(async()=>{const all=await listing("","",refresh);return {all,matched:category&&!all.styles.some(style=>style.category===category)?{styles:[],truncated:false}:q||category?await listing(q,category,refresh):all};})(),(async()=>{
+      if(!createdStore)return {looks:[],shared:false};
+      const state=await createdStore.state?.();return {looks:await createdStore.read(),shared:state?.mode==="shared"};
+    })()]);
+    if(sharedOnly&&createdResult.status==="rejected")throw createdResult.reason;
+    if(remoteResult.status==="rejected"&&(createdResult.status==="rejected"||!createdResult.value.looks.length))throw remoteResult.reason;
     const {all,matched}=remoteResult.status==="fulfilled"?remoteResult.value:{all:{styles:[]},matched:{styles:[],truncated:false}};
-    const created=createdResult.status==="fulfilled"?createdResult.value:[];
+    const created=createdResult.status==="fulfilled"?createdResult.value.looks:[],shared=createdResult.status==="fulfilled"&&createdResult.value.shared;
     const warning=[remoteResult.status==="rejected"?`Online catalog unavailable: ${remoteResult.reason.message}`:"",createdResult.status==="rejected"?`Custom looks unavailable: ${createdResult.reason.message}`:""].filter(Boolean).join(" ");
     const words=q.toLowerCase().split(/\s+/).filter(Boolean);
-    const local=created.filter(style=>(!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
+    const local=created.filter(style=>(sharedOnly?shared:!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
     const styles=[...local,...matched.styles],start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
     return {ready:true,source:"styleref",sourceLabel:"StyleRef",sourceUrl:"https://styleref.io",attribution:"StyleRef.io",populating:false,truncated:matched.truncated,warning,
-      indexed:all.styles.length+created.length,remoteCount:all.styles.length,localCount:created.length,total:styles.length,offset:start,limit:size,categories:[...new Set([...all.styles,...created].map(style=>style.category).filter(Boolean))].sort(),styles:styles.slice(start,start+size)};
+      indexed:all.styles.length+created.length,remoteCount:all.styles.length,localCount:created.length,sharedCount:shared?created.length:0,total:styles.length,offset:start,limit:size,categories:[...new Set(["Shared",...(sharedOnly?cache.get("list::")?.value.styles||[]:all.styles).concat(created).map(style=>style.category).filter(Boolean)])].sort(),styles:styles.slice(start,start+size)};
   }
   async function detail(id) {
     if(!id?.startsWith(prefix)){

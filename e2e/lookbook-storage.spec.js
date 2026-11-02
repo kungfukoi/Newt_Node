@@ -1,5 +1,30 @@
 import {test,expect} from "@playwright/test";
 import {openFixture} from "./helpers.mjs";
+
+test("Saving a shared folder refreshes the kept-alive Catalog when returning from Settings",async({page})=>{
+  const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
+  let storage={directory:"",mode:"local",localCount:0},catalogReads=0;
+  const json=(route,value)=>route.fulfill({contentType:"application/json",body:JSON.stringify(value)});
+  const shared={id:"look-12345678-1234-1234-1234-123456789abc",name:"Shared Ink",sourceProvider:"Newt",category:"Illustration",examples:[{localUrl:"/outputs/e2e/shared-ink.png"}]};
+  await page.route("**/api/style-library",route=>json(route,{revision:0,collections:[]}));
+  await page.route("**/api/style-library/storage",route=>{
+    if(route.request().method()==="PUT")storage={...storage,directory:route.request().postDataJSON().directory,mode:"shared"};
+    return json(route,storage);
+  });
+  await page.route("**/api/style-library/catalog?**",route=>{
+    catalogReads++;const styles=storage.mode==="shared"?[shared]:[];
+    return json(route,{ready:true,source:"styleref",total:styles.length,localCount:styles.length,remoteCount:0,styles,categories:["Illustration"]});
+  });
+  await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await expect(page.getByLabel("Style previews",{exact:true})).toContainText("No styles match this view.");
+  const before=catalogReads;
+  await page.getByRole("button",{name:"Settings",exact:true}).click();await page.getByRole("button",{name:/User Preferences/}).click();
+  const panel=page.getByRole("region",{name:"Lookbook storage",exact:true});
+  await panel.getByLabel("Shared Lookbook folder",{exact:true}).fill("/Volumes/Company/Newt_Node_Lib");
+  await panel.getByRole("button",{name:"Save folder",exact:true}).click();await expect(panel.getByRole("status")).toContainText("Shared Lookbook folder saved");
+  await page.getByRole("button",{name:"Looks",exact:true}).click();await expect(page.getByRole("button",{name:"View Shared Ink",exact:true})).toBeVisible();
+  expect(catalogReads).toBeGreaterThan(before);expect(requests.some(item=>item.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
+});
 test("User Preferences saves this computer's shared Lookbook path, preserves failed settings and supports a different Mac mount",async({page})=>{
   const {errors}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   let state={directory:"",mode:"local",localCount:2},fail=false,last;
