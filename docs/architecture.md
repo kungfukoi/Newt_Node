@@ -8,7 +8,7 @@ The kept-alive `LibraryWorkspace` subscribes to `newtnode:lookbook-storage-updat
 
 `styleref-catalog.js` excludes Real Moments by its stable source slug before listing cache, counts and pagination. Detail lookup remains available for existing saved Looks and workflows.
 
-Lookbook's thumbnail audition sizes tiles, mosaics and grid columns to 276.5 px in `LibraryWorkspace.css`; `collectionFrame.js` uses 308.5 px rows to retain caption and scrollbar clearance during resizing.
+Lookbook's preview rail sizes tiles, mosaics and grid columns to 207.375 px in `LibraryWorkspace.css`; `collectionFrame.js` uses 239.375 px rows to retain caption and scrollbar clearance during resizing.
 
 Look details render the `look-detail-actions` group directly after examples and before Colours and description content. It contains collection/destination, Mood Board, Style and conditional custom-delete actions; the title star/close controls remain in the header.
 

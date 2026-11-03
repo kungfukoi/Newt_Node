@@ -8,7 +8,7 @@ StyleFinder (local audition) is a separate Looks source, using the standard pagi
 
 The StyleRef look Real Moments (`9a2adtz6-cd8d77ee2f51`) is excluded from catalog browsing, search, category results and counts. Existing saved copies, detail lookup and workflow snapshots remain usable.
 
-Lookbook thumbnail audition uses 276.5 px square previews (75% larger than 158 px), with 308.5 px tile rows. Catalog, Starred and named collections keep complete images, readable names and the existing row-count preferences and resize behavior.
+Lookbook preview rail uses 207.375 px square thumbnails (25% smaller in width and height), with 239.375 px tile rows. Catalog, StyleFinder, Starred and named collections keep complete images, readable names and the existing row-count preferences and resize behavior. When more source results are available, More Styles is the final square tile inside the rail; it disables and shows Loading while appending the next page, and disappears when all results are loaded.
 
 Look details group collection/save destination, Mood Board, Style and custom Look deletion controls immediately beneath the example images, before the palette and descriptions. Confirmation stays with that action group; the title star and close control retain their header positions.
 

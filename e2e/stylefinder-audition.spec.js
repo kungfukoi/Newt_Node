@@ -35,10 +35,14 @@ test("StyleFinder local audition has independent paging, search, categories, com
     async function choose(label,name){await page.getByRole("combobox",{name:label,exact:true}).click();await page.getByRole("option",{name,exact:true}).click();}
     const title="StyleFinder (local audition)";
     await choose("Looks source",title);const strip=page.getByLabel("Style previews",{exact:true});await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
-    await expect(strip.locator(".stylebuilder-mosaic").first()).toHaveCSS("width","276.5px");
+    await expect(strip.locator(".stylebuilder-mosaic").first()).toHaveCSS("width","207.375px");
     await expect.poll(()=>strip.locator("img").first().evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);
     await page.screenshot({path:test.info().outputPath("stylefinder-audition.png"),fullPage:true});
-    await page.getByRole("button",{name:"More Styles",exact:false}).click();await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(96,initial.total));
+    const moreStyles=strip.getByRole("button",{name:"More Styles",exact:true});
+    await expect(moreStyles).toHaveCSS("width","207.375px");await expect(moreStyles).toHaveCSS("height","207.375px");
+    await expect(strip.locator(":scope > :last-child")).toHaveAccessibleName("More Styles");
+    await moreStyles.click();await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(96,initial.total));
+    if(initial.total<=96)await expect(moreStyles).toHaveCount(0);
     const search=page.getByRole("textbox",{name:"Search looks",exact:true});await search.fill(first.name);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(48,(await catalog.search({q:first.name})).total));
     await page.getByRole("button",{name:`View ${first.name}`,exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});await expect(details).toBeVisible();await expect(details.getByRole("link",{name:"Midlibrary.io",exact:true})).toHaveAttribute("href",first.sourceUrl);
     await details.getByRole("button",{name:`Enlarge ${first.name} example 1`,exact:true}).click();await expect(page.getByRole("dialog",{name:"Look example preview",exact:true})).toBeVisible();await page.keyboard.press("Escape");await page.screenshot({path:test.info().outputPath("stylefinder-details.png"),fullPage:true});await page.keyboard.press("Escape");
