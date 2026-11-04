@@ -24,12 +24,15 @@ test("draft and submission budgets include the concise edit wrapper without comp
   for (const feather of [0, 32, 128]) {
     const plan = planVideoOutpaint({ width: 1920, height: 1080, fps: 24, duration: 4 }, { model: "seedance-2.5", feather });
     plan.generationContentRect = { x: 0, y: 700, width: 1080, height: 500 };
+    plan.generationPaddingColor = "green";
     const budget = outpaintEditablePromptBudget(plan, plan.settings);
     const text = fitOutpaintPrompt("Continue the visible surfaces. ".repeat(300), budget);
     assert.ok(Buffer.byteLength(text) <= budget);
     const complete = seedanceOutpaintPrompt(text, false, [], feather, plan);
     assert.ok(Buffer.byteLength(complete) <= outpaintSubmissionByteLimit);
     assert.match(complete, /Edit @Video1/);
+    assert.match(complete, /Replace the bright green padding in every frame/);
+    assert.match(complete, /guidance for the extension only/);
     assert.match(complete, /already present from frame one/);
     assert.doesNotMatch(complete, /PREPARED CANVAS|COMPOSITING OVERLAP|transition band|restoration rectangle/);
     assert.ok(Buffer.byteLength(seedanceOutpaintPrompt("", false, [], feather, plan)) < 2400);

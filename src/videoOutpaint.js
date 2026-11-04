@@ -93,9 +93,13 @@ export function seedanceOutpaintRequest(body) {
 }
 
 export function seedanceOutpaintPrompt(prompt, repair = false, findings = [], overlapWidth = 0, preparedPlan = null, referenceImageCount = 0) {
+  const greenBands = preparedPlan?.generationPaddingColor === "green";
+  const editRegion = greenBands
+    ? "Replace the bright green padding in every frame with a continuation of the picture at the adjoining edge. Green is an edit marker. Continue each crossing surface, shadow and object from its exact edge position, without a horizontal shelf, border, exposure jump or duplicated object at the join."
+    : "Extend the picture through the prepared missing regions. Continue each crossing surface, shadow and object from its exact edge position with consistent perspective, lighting and texture.";
   return [
     fullFrameScene(prompt),
-    "Edit @Video1, the sole editing master. Change only the prepared spatial extension and inward overlap. Preserve the existing picture content, people, object positions, camera, performance, occlusion and event order; inherit source timing instead of restaging it. Reference images guide unseen details only. The completed scene has continuous perspective, lighting, exposure and texture.",
+    `Edit @Video1, the sole editing master. Change only the prepared spatial extension and inward overlap. ${editRegion} Preserve the existing picture content, people, object positions, camera, performance, occlusion and event order. Treat the scene description as guidance for the extension only. Keep continuous perspective, lighting and texture across the completed frame.`,
     ...(referenceImageCount > 0 ? [outpaintRoleInstructions(referenceImageCount, preparedPlan?.settings?.referenceRoles) || `${Array.from({ length: Math.min(30, referenceImageCount) }, (_, index) => `@Image${index + 1}`).join(", ")} ${referenceImageCount === 1 ? "is a visual reference" : "are visual references"}. ${outpaintReferenceAppearanceRule}`] : []),
     "SAME-FRAME ATTACHMENT: Each visible person, limb, garment and prop has coherent anatomy and geometry connected to its visible source in that same frame, at the same position, angle, scale and velocity. Legs follow the existing hips and clothing; rigid props follow their visible axes. Subject presence follows the source entrances, exits and occlusion. Background remains continuous around the subjects. Reference images guide appearance; source footage determines motion.",
     ...(repair ? ["Maintain the exact user framing and creative direction, with continuous subject geometry, local exposure, texture and motion."] : []),
