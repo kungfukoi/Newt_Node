@@ -122,7 +122,17 @@ export function syncAssemblyInputs(state, inputs = []) {
   const disconnected = current.media.filter((item) => item.linkedSource
     && !item.derivedFromMediaId && assemblyConnectedSourceKey(item)
     && !sourceKeys.has(assemblyConnectedSourceKey(item)));
-  disconnected.forEach((item) => { next = removeAssemblyMedia(next, item.id); });
+  disconnected.forEach((item) => {
+    // Preserve edits using former alternate results as independent snapshots.
+    const primaryKey = assemblyConnectedSourceKey({ ...item, sourceItemIndex: 0 });
+    const related = next.media.filter((media) => media.id === item.id || media.derivedFromMediaId === item.id);
+    const used = next.tracks.some((track) => track.clips.some((clip) => related.some((media) => media.id === clip.mediaId)));
+    if (item.sourceItemIndex > 0 && sourceKeys.has(primaryKey) && used) {
+      related.forEach((media) => { media.linkedSource = false; });
+    } else {
+      next = removeAssemblyMedia(next, item.id);
+    }
+  });
   let changed = disconnected.length > 0;
 
   normalizedInputs.forEach((input) => {
@@ -806,12 +816,12 @@ function mergeAssemblyConnectedMedia(existing, input) {
     ...input,
     id: existing.id,
     linkedSource: true,
-    duration: Number(input.duration) > 0 ? input.duration : existing.duration,
-    width: Number(input.width) > 0 ? input.width : existing.width,
-    height: Number(input.height) > 0 ? input.height : existing.height,
-    fps: Number(input.fps) > 0 ? input.fps : existing.fps,
-    hasAudio: Boolean(input.hasAudio || existing.hasAudio),
-    hasAudioKnown: Boolean(input.hasAudioKnown || existing.hasAudioKnown),
+    duration: Number(input.duration) > 0 ? input.duration : urlChanged ? undefined : existing.duration,
+    width: Number(input.width) > 0 ? input.width : urlChanged ? undefined : existing.width,
+    height: Number(input.height) > 0 ? input.height : urlChanged ? undefined : existing.height,
+    fps: Number(input.fps) > 0 ? input.fps : urlChanged ? undefined : existing.fps,
+    hasAudio: Boolean(input.hasAudio || (!urlChanged && existing.hasAudio)),
+    hasAudioKnown: Boolean(input.hasAudioKnown || (!urlChanged && existing.hasAudioKnown)),
     waveformUrl: input.waveformUrl || (urlChanged ? "" : existing.waveformUrl)
   });
 }

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
+import { canvasFixture } from "./fixtures.mjs";
 
 test("Timeline accepts successive video drops onto an occupied media bin", async ({ page }) => {
   const { errors } = await openFixture(page, { timeline: true, scale: .8 });
@@ -60,22 +61,33 @@ test("Timeline media bin widens by dragging its divider and remembers the width"
 });
 
 
-test("Timeline imports every connected video result and multiple source nodes", async ({ page }) => {
-  const { fixture, errors } = await openFixture(page, { timeline: true, scale: .8 });
+test("Timeline follows one active video per input and updates existing clips after upload", async ({ page }) => {
+  const fixture = canvasFixture({ timeline: true, scale: .8 });
   const shots = ['batch-one', 'batch-two', 'batch-three'];
   fixture.nodes.push({ id: 'batch-source', type: 'videoModel', x: 1700, y: 20, data: {
     title: 'Batch source', model: 'seedance-1.5-pro', resultUrl: '/outputs/e2e/batch-one.mp4',
     resultItems: shots.map(name => ({ url: `/outputs/e2e/${name}.mp4`, type: 'video', label: name }))
   }});
   fixture.nodes.push({ id: 'other-source', type: 'video', x: 1700, y: 600, data: {
-    title: 'Other source', videoUrl: '/outputs/e2e/other.mp4', resultUrl: '/outputs/e2e/other.mp4'
+    title: 'Other source', videoUrl: '/outputs/e2e/motion.mp4', resultUrl: '/outputs/e2e/motion.mp4'
   }});
   fixture.edges.push(...['batch-source', 'other-source'].map(id => ({ id: `edge-${id}`, from: { nodeId: id, port: 'videoOut' }, to: { nodeId: 'timeline', port: 'videoIn' } })));
-  await page.addInitScript(fixture => sessionStorage.setItem('seedance-node-editor-draft-v1', JSON.stringify(fixture)), fixture);
-  await page.reload();
-  await page.getByRole('button', { name: 'Nodes', exact: true }).click();
-  const bin = page.locator('[aria-label="Timeline media bin"]');
-  await expect(bin.locator('.assembly-media-bin-item')).toHaveCount(5);
-  for (const name of shots) await expect(bin.getByText(name, { exact: true })).toBeVisible();
+  const { errors } = await openFixture(page, { fixture });
+  const bin = page.getByLabel("Timeline media bin", { exact: true });
+  await expect(bin.locator(".assembly-media-bin-item")).toHaveCount(2);
+  await expect(bin.locator('video[src*="batch-one.mp4"]')).toHaveCount(1);
+  await expect(bin.locator('video[src*="batch-two.mp4"], video[src*="batch-three.mp4"]')).toHaveCount(0);
+
+  await page.route("**/api/node/upload-video-asset", route => route.fulfill({ json: { asset: {
+    localUrl: "/outputs/e2e/replacement.mp4", mediaType: "video", mimeType: "video/mp4", fileName: "replacement.mp4"
+  } } }));
+  await page.locator('[data-node-card-id="other-source"] input[type="file"]').setInputFiles("e2e/.generated/motion.mp4");
+  await expect(bin.locator('video[src*="replacement.mp4"]')).toHaveCount(1);
+  await expect(bin.locator(".assembly-media-bin-item")).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => {
+    const timeline = JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(node => node.id === "timeline").data.assembly;
+    const clip = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "clip");
+    return { mediaId: clip?.mediaId, url: timeline.media.find(media => media.id === clip?.mediaId)?.url };
+  })).toEqual({ mediaId: "media", url: "/outputs/e2e/replacement.mp4" });
   expect(errors).toEqual([]);
 });

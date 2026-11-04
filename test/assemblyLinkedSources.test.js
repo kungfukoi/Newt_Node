@@ -104,16 +104,20 @@ test("connecting an already dropped asset adopts it without breaking timeline cl
 });
 
 
-test("multiple videos on one source port keep independent linked bin entries", () => {
+test("older linked alternate results survive only when used in an edit", () => {
   const inputs = [0, 1, 2].map(index => ({ ...connectedVideo,
-    id: `edge-video-1:${index}`, sourceItemIndex: index,
-    url: `/outputs/shot-${index}.mp4`
+    id: "legacy-" + index, sourceItemIndex: index,
+    url: "/outputs/shot-" + index + ".mp4"
   }));
-  const state = syncAssemblyInputs(createAssemblyState(), inputs);
-  assert.deepEqual(state.media.map(item => item.url), inputs.map(item => item.url));
-  const restored = JSON.parse(JSON.stringify(state));
-  const updated = syncAssemblyInputs(restored, inputs.map(item => ({ ...item, url: item.url.replace('shot-', 'new-') })));
-  assert.equal(updated.media.length, 3);
-  assert.deepEqual(updated.media.map(item => item.id), state.media.map(item => item.id));
-  assert.deepEqual(updated.media.map(item => item.url), inputs.map(item => item.url.replace('shot-', 'new-')));
+  const saved = createAssemblyState({ media: inputs.map(item => ({ ...item, linkedSource: true })) });
+  const track = saved.tracks.find(item => item.type === "video");
+  const edited = insertAssemblyMediaClip(saved, inputs[1].id, track.id, 0);
+  const active = { ...inputs[0], url: "/outputs/replacement.mp4" };
+  const synced = syncAssemblyInputs(edited, [active]);
+  assert.deepEqual(synced.media.map(item => [item.id, item.url, item.linkedSource]), [
+    [inputs[0].id, active.url, true],
+    [inputs[1].id, inputs[1].url, false]
+  ]);
+  assert.equal(assemblyActiveClips(synced, 1)[0].media.url, inputs[1].url);
+  assert.deepEqual(syncAssemblyInputs(synced, [active]), synced);
 });

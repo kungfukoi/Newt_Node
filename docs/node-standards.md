@@ -196,7 +196,7 @@ Before completion:
 
 - Canvas node copy/paste uses native clipboard events so selections can move between workflows and app windows without clipboard-read permission. Incoming node clipboard data takes precedence over older local storage; local storage and memory remain fallbacks. Text controls retain normal text copy/paste.
 
-- Timeline media bins accept successive video drops and all results from connected multi-video outputs. Connected batch entries retain independent result positions; legacy single-result connections use position zero. The bin’s right-edge divider resizes its width in canvas coordinates and saves it with the timeline.
+- Timeline media bins accept successive video drops. A connected video input contributes one entry for the current output. Replacing that output updates the linked entry and its clips in place. Older alternate results already used by clips remain independent snapshots; unused alternates are removed. The bin’s right-edge divider resizes its width in canvas coordinates and saves it with the timeline.
 
 - Widening the Timeline media bin adds columns of fixed-width thumbnails rather than enlarging media. Items fill columns in order, retain their aspect ratios, and wrap back into fewer columns when narrowed.
 

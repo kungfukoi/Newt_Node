@@ -178,6 +178,11 @@ export function AssemblyNodeBody({
 
   React.useEffect(() => {
     let canceled = false;
+    let settled = false;
+    const currentKeys = new Set(timeline.media.map((media) => [media.id, media.url].join(":")));
+    for (const key of probedMediaRef.current) {
+      if (!currentKeys.has(key)) probedMediaRef.current.delete(key);
+    }
     const pending = timeline.media.filter((media) => {
       const probeKey = [media.id, media.url].join(":");
       return media.url && !media.derivedFromMediaId && !probedMediaRef.current.has(probeKey);
@@ -190,6 +195,7 @@ export function AssemblyNodeBody({
     Promise.allSettled(pending.map(async (media) => ({ media, result: await probeMedia(node, media) })))
       .then((results) => {
         if (canceled) return;
+        settled = true;
         let next = timelineRef.current;
         let completed = 0;
         results.forEach((entry, index) => {
@@ -198,8 +204,10 @@ export function AssemblyNodeBody({
             if (failedMedia) probedMediaRef.current.delete([failedMedia.id, failedMedia.url].join(":"));
             return;
           }
-          next = updateAssemblyMedia(next, entry.value.media.id, { ...entry.value.result, hasAudioKnown: true });
-          next = ensureAssemblyEmbeddedAudioClips(next, entry.value.media.id);
+          const { media, result } = entry.value;
+          if (!next.media.some((item) => item.id === media.id && item.url === media.url)) return;
+          next = updateAssemblyMedia(next, media.id, { ...result, hasAudioKnown: true });
+          next = ensureAssemblyEmbeddedAudioClips(next, media.id);
           completed += 1;
         });
         if (completed) replaceTimeline(next, true);
@@ -208,6 +216,7 @@ export function AssemblyNodeBody({
 
     return () => {
       canceled = true;
+      if (!settled) pending.forEach((media) => probedMediaRef.current.delete([media.id, media.url].join(":")));
     };
   }, [node.id, mediaProbeKey]);
 
