@@ -8,8 +8,25 @@ import path from "node:path";
 import ffmpeg from "ffmpeg-static";
 import ffprobe from "@ffprobe-installer/ffprobe";
 import { createVideoOutpaintService } from "../server/video-outpaint.js";
+import { fitGeneratedColorJoin } from "../server/outpaint-color.js";
 import { originalSourceExport, buildOutputExportFfmpegArgs } from "../server/output-export.js";
 const execute = promisify(execFile);
+
+test("a stable bottom color step is measured separately from the surface gradient", () => {
+  const geometry = { width: 48, height: 24, x: 0, y: 0, sw: 48, sh: 12 };
+  const content = { x: 0, y: 0, width: 48, height: 12 };
+  const plate = Buffer.alloc(3 * geometry.width * geometry.height * 2);
+  for (let i = 0; i < plate.length; i += 3) {
+    const row = Math.floor(i / (3 * geometry.width)) % geometry.height;
+    plate.set([90 + row + (row >= 12 ? 9 : 0), 100 + row, 110 + row], i);
+  }
+  assert.deepEqual(fitGeneratedColorJoin(plate, geometry, content).bottom.offsets, [-9, 0, 0]);
+  for (let i = 0; i < plate.length; i += 3) {
+    const row = Math.floor(i / (3 * geometry.width)) % geometry.height;
+    if (row >= 12) plate[i] -= 9;
+  }
+  assert.deepEqual(fitGeneratedColorJoin(plate, geometry, content), {});
+});
 
 test("RGB seam matching composites both colored surfaces in BT.709 and tags the master", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-seam-matrix-"));
@@ -44,6 +61,9 @@ test("RGB seam matching composites both colored surfaces in BT.709 and tags the 
     assert.equal(info.num_frames, 24);
     assert.equal(path.extname(output.filePath), ".mp4");
     assert.equal(output.matching.colorMatching.applied, true);
+    const plate = await probe(output.matching.generatedPlateUrl);
+    assert.equal(plate.num_frames, info.num_frames);
+    assert.equal(plate.color_space, "bt709");
     assert.equal(info.color_space, "bt709");
     assert.equal(info.color_transfer, "bt709");
     assert.equal(info.color_primaries, "bt709");

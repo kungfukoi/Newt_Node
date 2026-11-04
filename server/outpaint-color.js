@@ -25,6 +25,7 @@ export function fitExtensionColor(reference, generated, geometry) {
     const samples = [[], [], []];
     const horizontal = side === "top" || side === "bottom";
     const bins = Array.from({ length: Math.max(1, Math.min(8, Math.floor((horizontal ? sw : sh) / 24))) }, () => [[], [], []]);
+    const boundaryBins = bins.map(() => [[], [], []]);
     for (let f = 0; f < frames; f++) for (let py = y + 1; py < y + sh - 1; py++) for (let px = x + 1; px < x + sw - 1; px++) {
       const distance = side === "left" ? px - x : side === "right" ? x + sw - 1 - px : side === "top" ? py - y : y + sh - 1 - py;
       if (distance < 1 || distance > overlap - 1) continue;
@@ -34,9 +35,25 @@ export function fitExtensionColor(reference, generated, geometry) {
       const position = horizontal ? (px - x) / (sw - 1) : (py - y) / (sh - 1);
       const bin = Math.min(bins.length - 1, Math.floor(position * bins.length));
       for (let c = 0; c < 3; c++) { samples[c].push(a[c] - b[c]); bins[bin][c].push(a[c] - b[c]); }
+      if (distance !== 1) continue;
+      const outerX = px + (side === "left" ? -3 : side === "right" ? 3 : 0);
+      const outerY = py + (side === "top" ? -3 : side === "bottom" ? 3 : 0);
+      if (outerX < 0 || outerX >= width || outerY < 0 || outerY >= height) continue;
+      const outerIndex = f * stride + (outerY * width + outerX) * 3;
+      const outer = generated.subarray(outerIndex, outerIndex + 3);
+      if (outer.length !== 3 || [...outer].some((value, c) => value < 8 || value > 247 || Math.abs(value - b[c]) > 8)) continue;
+      for (let c = 0; c < 3; c++) boundaryBins[bin][c].push(a[c] - outer[c]);
     }
     const fit = fitSamples(samples);
-    const local = bins.map((values, index) => ({ position: (index + 0.5) / bins.length, ...fitSamples(values) }));
+    const local = bins.map((values, index) => {
+      const overlapFit = fitSamples(values);
+      const boundaryFit = fitSamples(boundaryBins[index]);
+      // Prefer the color at the actual join when it agrees with the
+      // corresponding overlap and both measurements have reliable support.
+      const agrees = boundaryFit.offsets.every((value, c) => Math.abs(value - overlapFit.offsets[c]) <= 6);
+      const fit = overlapFit.reliable && boundaryFit.reliable && agrees ? boundaryFit : overlapFit;
+      return { position: (index + 0.5) / bins.length, ...fit };
+    });
     // Retain only supported surface samples. A moving limb or a bad tile must
     // not turn into a per-frame grade or an abrupt strip of uncorrected color.
     const supported = local.filter(tile => tile.reliable);
@@ -75,6 +92,56 @@ export function extensionColorFilter(report, { w, h, sw, sh, x, y }) {
   }).join(":");
 }
 
+// Measure a hard exposure step across the conditioning boundary on the plate
+// itself. A grade applied equally on both sides cannot remove that step.
+export function fitGeneratedColorJoin(generated, geometry, content) {
+  const { width, height, x, y, sw, sh } = geometry;
+  const stride = width * height * 3;
+  const frames = Math.floor(generated.length / stride);
+  const edges = {};
+  for (const [side, horizontal, edge, direction, enabled] of [
+    ["top", true, content.y, -1, y > 0],
+    ["bottom", true, content.y + content.height - 1, 1, y + sh < height],
+    ["left", false, content.x, -1, x > 0],
+    ["right", false, content.x + content.width - 1, 1, x + sw < width]
+  ]) {
+    if (!enabled || edge < 2 || edge >= (horizontal ? height : width) - 2) continue;
+    const samples = [[], [], []];
+    const start = horizontal ? content.x : content.y;
+    const length = horizontal ? content.width : content.height;
+    for (let f = 0; f < frames; f++) for (let t = start + 2; t < start + length - 2; t++) {
+      const pixel = n => f * stride + (horizontal ? n * width + t : t * width + n) * 3;
+      const inner = pixel(edge), outer = pixel(edge + direction);
+      const deeper = pixel(edge - direction), farther = pixel(edge + 2 * direction);
+      for (let c = 0; c < 3; c++) {
+        const a = generated[inner + c], b = generated[outer + c];
+        const innerSlope = a - generated[deeper + c], outerSlope = generated[farther + c] - b;
+        // Subtract the local gradient so a naturally sloped surface stays sloped.
+        if (Math.abs(innerSlope) <= 8 && Math.abs(outerSlope) <= 8 && a > 7 && b > 7 && a < 248 && b < 248) {
+          samples[c].push(a - b + (innerSlope + outerSlope) / 2);
+        }
+      }
+    }
+    const fit = fitSamples(samples);
+    if (fit.reliable && fit.offsets.some(value => Math.abs(value) >= 1)) edges[side] = fit;
+  }
+  return edges;
+}
+
+export function generatedColorJoinFilter(edges, content, falloff) {
+  const distances = {
+    top: `${content.y}-Y`, bottom: `Y-${content.y + content.height - 1}`,
+    left: `${content.x}-X`, right: `X-${content.x + content.width - 1}`
+  };
+  const sides = Object.keys(edges || {});
+  if (!sides.length) return "null";
+  const weights = sides.map(side => `gt(${distances[side]},0)*pow(clip(1-((${distances[side]})-1)/${falloff},0,1),2)`);
+  return "format=gbrp10le,geq=" + ["r", "g", "b"].map((channel, c) => {
+    const sum = sides.map((side, i) => `(${round(edges[side].offsets[c])})*(${weights[i]})`).join("+");
+    return `${channel}='clip(${channel}(X,Y)+(1023/255)*(${sum})/max(1,${weights.join("+")}),0,1023)'`;
+  }).join(":");
+}
+
 export async function inspectExtensionColor({ referencePath, generatedPath, plan, offset = 0, runFfmpeg }) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-outpaint-color-"));
   try {
@@ -90,6 +157,9 @@ export async function inspectExtensionColor({ referencePath, generatedPath, plan
     }
     const reference = await readFile(path.join(directory, "source")), generated = await readFile(path.join(directory, "generated"));
     if (reference.length !== generated.length) return { requested: true, applied: false, reason: "Color samples do not cover corresponding frames", edges: {} };
-    return fitExtensionColor(reference, generated, geometry);
+    const result = fitExtensionColor(reference, generated, geometry);
+    const content = plan.generationContentRect || { x: plan.left, y: plan.top, width: plan.sourceWidth, height: plan.sourceHeight };
+    const sampleContent = Object.fromEntries(Object.entries(content).map(([key, value]) => [key, Math.round(value * scale)]));
+    return { ...result, generatedJoins: fitGeneratedColorJoin(generated, geometry, sampleContent) };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
