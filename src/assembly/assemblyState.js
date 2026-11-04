@@ -614,6 +614,14 @@ export function setAssemblyOutPoint(state, time = state?.playhead || 0) {
   return next;
 }
 
+export function setAssemblyInOutToSelectedClip(state) {
+  const next = normalizeAssemblyState(state);
+  const selected = findAssemblyClip(next, next.selectedClipId);
+  if (!selected) return next;
+  const { start, duration } = selected.clip;
+  return { ...next, inPoint: start, outPoint: start + duration };
+}
+
 export function clearAssemblyInOut(state) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   next.inPoint = null;

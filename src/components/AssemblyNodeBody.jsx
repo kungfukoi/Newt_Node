@@ -19,6 +19,7 @@ import {
   Redo2,
   Repeat2,
   Scissors,
+  SquareDashed,
   Trash2,
   Undo2,
   Unlock,
@@ -48,6 +49,7 @@ import {
   replaceAssemblyClipMedia,
   retimeAssemblyClip,
   setAssemblyInPoint,
+  setAssemblyInOutToSelectedClip,
   setAssemblyLoopInOut,
   setAssemblyOutPoint,
   setAssemblyPlayhead,
@@ -934,6 +936,7 @@ export function AssemblyNodeBody({
         <div className="assembly-marker-tools" role="toolbar" aria-label="Timeline range markers">
           <IconButton active={timeline.inPoint !== null} title="Set In point" onClick={() => commitTimeline(setAssemblyInPoint(timelineRef.current))}><BetweenHorizontalStart size={14} /></IconButton>
           <IconButton active={timeline.outPoint !== null} title="Set Out point" onClick={() => commitTimeline(setAssemblyOutPoint(timelineRef.current))}><BetweenHorizontalEnd size={14} /></IconButton>
+          <IconButton title="Set In/Out to selected clip" disabled={!selected} onClick={() => commitTimeline(setAssemblyInOutToSelectedClip(timelineRef.current))}><SquareDashed size={14} /></IconButton>
           <IconButton title="Go to In point" disabled={timeline.inPoint === null} onClick={() => jumpToMarker(timeline.inPoint)}><span className="assembly-marker-jump">{"{"}</span></IconButton>
           <IconButton title="Go to Out point" disabled={timeline.outPoint === null} onClick={() => jumpToMarker(timeline.outPoint)}><span className="assembly-marker-jump">{"}"}</span></IconButton>
           <IconButton title="Clear In and Out points" disabled={timeline.inPoint === null && timeline.outPoint === null} onClick={() => commitTimeline(clearAssemblyInOut(timelineRef.current))}><FlagOff size={14} /></IconButton>
