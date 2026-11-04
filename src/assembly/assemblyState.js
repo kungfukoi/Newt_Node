@@ -130,15 +130,15 @@ export function syncAssemblyInputs(state, inputs = []) {
     let existingIndex = sourceKey
       ? next.media.findIndex((item) => item.linkedSource && assemblyConnectedSourceKey(item) === sourceKey)
       : -1;
-    if (existingIndex < 0) {
-      const mediaKey = assemblyMediaKey(input);
-      existingIndex = next.media.findIndex((item) => assemblyMediaKey(item) === mediaKey);
-    }
     if (existingIndex < 0 && sourceKey) {
       const legacyMatches = next.media
         .map((item, index) => ({ item, index }))
         .filter(({ item }) => assemblyConnectedSourceKey(item) === sourceKey);
       if (legacyMatches.length === 1) existingIndex = legacyMatches[0].index;
+    }
+    if (existingIndex < 0) {
+      const mediaKey = assemblyMediaKey(input);
+      existingIndex = next.media.findIndex((item) => !item.linkedSource && assemblyMediaKey(item) === mediaKey);
     }
 
     if (existingIndex >= 0) {
@@ -155,7 +155,7 @@ export function syncAssemblyInputs(state, inputs = []) {
     changed = true;
     next.media.push(normalizeAssemblyMedia({
       ...input,
-      id: input.id || createAssemblyId("media"),
+      id: next.media.some((item) => item.id === input.id) ? createAssemblyId("media") : input.id,
       linkedSource: true,
       duration: input.duration || (input.type === "image" ? defaultStillDuration : 1)
     }));

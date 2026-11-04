@@ -19,6 +19,18 @@ const connectedVideo = {
   label: "Video Model 1"
 };
 
+test("distinct connected sources sharing a file keep separate bin entries after reload", () => {
+  const second = { ...connectedVideo, id: "second-edge", sourceNodeId: "second-video" };
+  // Older saves could rebind the first media ID to the second source.
+  const saved = createAssemblyState({ media: [{ ...second, id: connectedVideo.id, linkedSource: true }] });
+  const synced = syncAssemblyInputs(saved, [connectedVideo, second]);
+  assert.equal(synced.media.length, 2);
+  assert.equal(new Set(synced.media.map(item => item.id)).size, 2);
+  assert.equal(synced.media.find(item => item.sourceNodeId === second.sourceNodeId).id, connectedVideo.id);
+  assert.deepEqual(syncAssemblyInputs(synced, [connectedVideo, second]), synced);
+  assert.deepEqual(syncAssemblyInputs(synced, [second]).media.map(item => item.sourceNodeId), [second.sourceNodeId]);
+});
+
 test("disconnecting one video removes its bin entry and audio while preserving the remaining source", () => {
   const second = { ...connectedVideo, id: "second-edge", sourceNodeId: "second-video", url: "/outputs/second.mp4", hasAudio: true };
   let state = syncAssemblyInputs(createAssemblyState(), [{ ...connectedVideo, hasAudio: true }, second]);
