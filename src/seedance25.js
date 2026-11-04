@@ -1,5 +1,6 @@
 export const seedance25ModelName = "Seedance 2.5";
 export const seedance25EndpointRoot = "bytedance/seedance-2.5";
+export const seedance25EditMinimumSeconds = 4;
 
 export const seedance25DurationValues = [
   "auto",
@@ -51,7 +52,7 @@ export function validateSeedance25Task({ model, seedanceTask = "reference", prov
 }
 
 export function validateSeedance25EditDuration(duration) {
-  if (!Number.isFinite(duration) || duration < 4 || duration > 30) {
+  if (!Number.isFinite(duration) || duration < seedance25EditMinimumSeconds || duration > 30) {
     throw Object.assign(new Error("Edit Existing Video requires a readable source video between 4 and 30 seconds. No generation was submitted."), { status: 400 });
   }
   return duration;

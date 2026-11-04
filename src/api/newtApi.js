@@ -561,10 +561,11 @@ export const nodeApi = {
       if (health.routes?.flux3Max !== true) throw new Error("Restart the NewtNode backend to activate FLUX 3 Max. No generation was submitted.");
       return fetchJsonApi("/api/node/generate-video", jsonBody(body), label, { retryLocalApi: false });
     }
-    if (body.seedanceDraft || body.seedanceTask === "edit") {
+    if (body.seedanceDraft || body.seedanceTask === "edit" || body.seedanceExtend === true) {
       const health = await getJson("/api/health", "Could not verify Seedance support.");
       if (body.seedanceDraft && (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true)) throw new Error("Restart the backend to activate multi-provider Draft mode. No generation was submitted.");
       if (body.seedanceTask === "edit" && health.routes?.seedanceVideoEditing !== true) throw new Error("Restart the backend to activate video editing. No generation was submitted.");
+      if (body.seedanceExtend === true && health.routes?.seedanceExtend !== true) throw new Error("Restart the backend to activate Extend. No generation was submitted.");
     }
     if (supportsDurableVideo(body.model)) {
       const request = {

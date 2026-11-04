@@ -27,6 +27,7 @@ const requiredHealthRoutes = [
   "seedanceDrafts",
   "seedanceMultiProviderDrafts",
   "seedanceVideoEditing",
+  "seedanceExtend",
   "elevenLabsV4",
   "exploreLookVariation",
   "explore",

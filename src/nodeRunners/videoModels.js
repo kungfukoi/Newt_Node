@@ -199,7 +199,7 @@ export function buildVideoGenerationRequest({
         )
       : prompt,
     model: node.data.model,
-    ...(isSeedance25Model(node.data.model) ? { seedanceTask, seedanceDraft: draft } : {}),
+    ...(isSeedance25Model(node.data.model) ? { seedanceTask, seedanceDraft: draft, ...(node.data.seedanceExtend === true ? { seedanceExtend: true } : {}) } : {}),
     duration: editing ? "auto" : activeFilmDirector
       ? filmDirectorVideoDuration(node.data.model, activeFilmDirector.durationSeconds, node.data.duration)
       : node.data.duration,

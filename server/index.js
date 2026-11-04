@@ -38,6 +38,7 @@ import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedanc
 import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
+import { extendSeedanceVideo } from "./seedance-extend.js";
 import { generateFlux3 } from "./flux3.js";
 import { isFlux3MaxModel, flux3MaxCost } from "../src/flux3Max.js";
 import { generateFlux3Max } from "./flux3Max.js";
@@ -1358,6 +1359,7 @@ function buildHealthPayload() {
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
       seedanceVideoEditing: true,
+      seedanceExtend: true,
       seedanceKreaVideoEditing: true,
       exploreLookVariation: true,
       exploreArtDirection: true,
@@ -6846,6 +6848,13 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const requestedSeedanceProvider = runtimeModelProviderPreferences.seedance;
+    const seedanceExtend = isSeedance25Model(selectedVideoModel.displayName) && req.body.seedanceExtend === true;
+    const extendReference = (url) => extendSeedanceVideo(url, {
+      resolveAsset: resolveLocalAssetPathFromUrl,
+      probeVideo: probeVideoFile,
+      createTarget: () => createManagedAssetTarget({ body: { ...req.body, outputFileNameBase: "" } }, "seedance-extended-reference", ".mp4", workflowPackageDependencyDirName),
+      runFfmpeg
+    });
     const draftProvider = resolveSeedanceRuntimeProvider({ preferredProvider: requestedSeedanceProvider,
       falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY, atlasKey: process.env.ATLAS_API_KEY });
     if (isSeedance25Model(selectedVideoModel.displayName)) {
@@ -6862,10 +6871,16 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });
     let sourceDurationSeconds;
+    let extendedEditSource;
     if (editing) {
       if (!isLocalAssetUrl(req.body.referenceVideoUrls[0])) throw httpError(400, "Edit Existing Video requires a managed Reference Video.");
-      const source = await resolveLocalAssetPathFromUrl(req.body.referenceVideoUrls[0]);
-      sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
+      if (seedanceExtend) {
+        extendedEditSource = await extendReference(req.body.referenceVideoUrls[0]);
+        sourceDurationSeconds = validateSeedance25EditDuration(extendedEditSource.duration);
+      } else {
+        const source = await resolveLocalAssetPathFromUrl(req.body.referenceVideoUrls[0]);
+        sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
+      }
     }
     delete req.body.directorDialogueAudio;
     delete req.body.characterVoiceReferences;
@@ -7106,6 +7121,13 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     } else if (referenceImageUrls.length || referenceVideoUrls.length || referenceAudioUrls.length) {
       routeKind = "reference-to-video";
     }
+    if (seedanceExtend && routeKind === "reference-to-video") {
+      const prepared = new Map();
+      for (const [index, url] of referenceVideoUrls.entries()) {
+        if (!prepared.has(url)) prepared.set(url, extendedEditSource || await extendReference(url));
+        referenceVideoUrls[index] = prepared.get(url).url;
+      }
+    }
     const aspectRatio = editing ? "auto" : seedance25 && runtimeProvider === "fal"
       ? normalizeSeedance25AspectRatio(req.body.aspectRatio, routeKind)
       : seedance25
@@ -7188,6 +7210,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
           ...(req.body.videoOutpaintContext && runtimeProvider === "fal" ? { bitrateMode: "high", codec: "H264" } : {}),
           ...(seedance25 ? { seedanceTask: editing ? "edit" : "reference", sourceDurationSeconds, seedanceDraft: draftMode, ...(runtimeProvider === "atlas" && req.body.videoOutpaintContext ? { seedanceOutputFormat: "mov" } : {}) } : {}),
           startFrameCount: startFrameUrl ? 1 : 0, endFrameCount: endFrameUrl ? 1 : 0,
+          ...(seedance25 && req.body.seedanceExtend === true ? { seedanceExtend: true } : {}),
           referenceImageCount: referenceImageUrls.length, referenceImageNames,
           referenceVideoCount: referenceVideoUrls.length, referenceVideoNames, referenceAudioCount: referenceAudioUrls.length,
           referenceVideoDurations: referenceVideoDurations.map(seconds => seconds > 0 ? seconds : null),

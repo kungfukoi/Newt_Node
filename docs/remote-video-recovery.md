@@ -1,5 +1,7 @@
 # Seedance Generation Recovery
 
+Seedance 2.5 Extend prepares short Reference Video clips locally through `server/seedance-extend.js` before provider upload. The generation route submits the managed dependency in the original reference slot and measures the prepared input for duration validation and pricing. Durable job acceptance retains the existing request identity.
+
 ## User Behavior
 
 Seedance 2.0 and 2.5 requests made through the node API run as saved background jobs for Fal, Krea, and Atlas Cloud. No extra setting is required in the Video Model node. Atlas uploads references before acceptance, then records the job before making the paid submission; prediction polling, downloads, history, and restart recovery use the shared tracker.

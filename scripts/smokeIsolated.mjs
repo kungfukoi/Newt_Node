@@ -114,7 +114,7 @@ try {
   assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
-  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "seedanceExtend", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
