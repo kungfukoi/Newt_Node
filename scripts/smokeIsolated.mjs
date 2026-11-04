@@ -479,6 +479,12 @@ try {
   const hashMaster = async file => { const hash = createHash("sha256"); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest("hex"); };
   assert.equal(await hashMaster(masterCopy.output.filePath), await hashMaster(refinished.filePath), "Same-format Output changed the completed MP4 bytes");
   await promisify(execFile)(ffmpeg, ["-y", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", path.join(sandbox, "outputs", "original.mov")], { windowsHide: true, timeout: 30000 });
+  const movPreviewUrl = api + "/api/video-preview?url=" + encodeURIComponent("/outputs/original.mov");
+  const movPreview = await fetch(movPreviewUrl, { headers: { Range: "bytes=0-127" } });
+  assert.equal(movPreview.status, 206, "MOV preview must support range requests for seeking");
+  assert.equal((await movPreview.arrayBuffer()).byteLength, 128);
+  const cachedPreview = await fetch(movPreviewUrl, { redirect: "manual" });
+  assert.equal(new URL(cachedPreview.headers.get("location"), api).href, movPreview.url);
   const sourceExportBody = { sourceUrl: refinished.url, sourceFileName: "master.mp4", mediaType: "video", outputFormat: "source", outputOriginalSourceUrl: "/outputs/original.mov", outputTargetPath: path.join(sandbox, "source-export"), outputTargetFileName: "finished" };
   const previewOriginal = await (await request("/api/node/preview-output", sourceExportBody)).json();
   const originalExport = await (await request("/api/node/save-output", sourceExportBody, localRenderTimeout)).json();

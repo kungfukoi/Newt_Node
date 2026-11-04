@@ -205,7 +205,7 @@ export function createVideoOutpaintService({ resolveAsset, probeVideo, createTar
       filters.push(...overlapBlendFilters({ w, h, sw, sh, x, y, feather }));
     }
     const deliveryEncode = mp4Delivery
-      ? ["-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k"]
+      ? ["-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*0.5)", "-c:a", "aac", "-b:a", "320k"]
       : ["-c:v", "prores_ks", "-profile:v", "5", "-pix_fmt", "yuv444p10le", "-c:a", "pcm_s24le"];
     await runFfmpeg(["-y", ...(preroll ? ["-ss", String(preroll)] : []), "-i", generated.filePath, "-ss", String(sourceStart), "-i", source.filePath, "-filter_complex", filters.join(";"), "-map", settings.restoreSource ? "[out]" : "[bg]", "-map", "1:a?", ...repeatAudio, "-t", String(plan.duration), "-frames:v", String(plan.frames), "-r", deliveryFrameRate, ...deliveryEncode, "-colorspace", matrix, "-color_primaries", matrix, "-color_trc", matrix === "bt470bg" ? "gamma28" : matrix, "-color_range", "tv", "-movflags", "+faststart", target.filePath], "Blend source overlap and finish video outpaint", 600000);
     let seamValidation;

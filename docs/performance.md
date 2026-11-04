@@ -114,6 +114,8 @@ After stabilizing the compositor policy and toolbar layer, the same isolated Pep
 
 Preview result-strip videos use lazy still posters through the existing cached `/api/video-poster` route. The original video remains the selector/drag source and the active viewer remains a real player. A five-gallery fixture with 61 results previously mounted 71 video elements; it now mounts 10 players and 61 poster images, eliminating 61 thumbnail player instances. This is a media-element count, not a measured FPS improvement on every device. Failed posters show a film placeholder without allocating a player.
 
+Cached MOV playback previews use their own encode queue so a cold video conversion does not hold up poster requests. The queue coalesces requests for the same preview and limits new encodes to one at a time. MOV previews and newly finished H.264 outpaint composites insert keyframes about every half second to reduce seek work.
+
 The canvas motion callback paints within its existing animation frame instead of scheduling a second frame. Easing coefficients, momentum, reduced-motion behavior and the saved Smooth canvas motion preference are unchanged. Direct pointer updates continue to coalesce into a frame. Browser regression checks assert visible movement on the first motion frame with the preference both on and off, as well as original-video selection/drag payloads and poster failure behavior. See `e2e/canvas-media-performance.spec.js`.
 
 The current app uses React Flow for node transforms, handle geometry, selection, viewport transforms, connection gestures, and edge paths. Newt continues to own graph execution, persistence, uploads, previews, model behavior, grouping, and workflow state.

@@ -801,6 +801,7 @@ const composerPoseFieldKeys = [
 const app = express();
 const imageGenerationRequestLimiter = createRequestConcurrencyLimiter(imageGenerationConcurrency);
 const runtimeThumbnailRequestLimiter = createRequestConcurrencyLimiter(2);
+const runtimeVideoPreviewWork = createAsyncWorkLimiter(1);
 const queueMediaPersistence = createAsyncWorkLimiter(mediaPersistenceConcurrency);
 
 await Promise.all([
@@ -915,7 +916,7 @@ app.get("/api/video-poster", runtimeThumbnailRequestLimiter, async (req, res) =>
     sendApiError(res, error, "Could not create video poster.");
   }
 });
-app.get("/api/video-preview", runtimeThumbnailRequestLimiter, async (req, res) => {
+app.get("/api/video-preview", async (req, res) => {
   try {
     const sourceUrl = String(req.query.url || "").trim();
     const previewUrl = await ensureRuntimeVideoPreview(sourceUrl);
@@ -6851,7 +6852,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     const seedanceExtend = isSeedance25Model(selectedVideoModel.displayName) && req.body.seedanceExtend === true;
     const extendReference = (url) => extendSeedanceVideo(url, {
       resolveAsset: resolveLocalAssetPathFromUrl,
-      probeVideo: probeVideoFile,
+      probeVideo: probeAssemblyMediaFile,
       createTarget: () => createManagedAssetTarget({ body: { ...req.body, outputFileNameBase: "" } }, "seedance-extended-reference", ".mp4", workflowPackageDependencyDirName),
       runFfmpeg
     });
@@ -15620,7 +15621,7 @@ async function ensureRuntimeVideoPreview(value) {
   const source = await resolveLocalAssetPath(cleanPath);
   const sourceStats = await stat(source.filePath);
   const cacheKey = createHash("sha256")
-    .update(`${cleanPath}:${sourceStats.size}:${sourceStats.mtimeMs}`)
+    .update(`seekable-v2:${cleanPath}:${sourceStats.size}:${sourceStats.mtimeMs}`)
     .digest("hex")
     .slice(0, 24);
   const targetFileName = `${cacheKey}-preview.mp4`;
@@ -15630,7 +15631,7 @@ async function ensureRuntimeVideoPreview(value) {
   if (existsSync(targetFilePath)) return targetPublicPath;
   if (runtimeVideoPreviewJobs.has(targetFilePath)) return runtimeVideoPreviewJobs.get(targetFilePath);
 
-  const previewJob = (async () => {
+  const previewJob = runtimeVideoPreviewWork(async () => {
     const temporaryPath = `${targetFilePath}.${randomUUID()}.tmp.mp4`;
     try {
       await runFfmpeg([
@@ -15642,6 +15643,7 @@ async function ensureRuntimeVideoPreview(value) {
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
+        "-force_key_frames", "expr:gte(t,n_forced*0.5)",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "160k",
@@ -15655,7 +15657,7 @@ async function ensureRuntimeVideoPreview(value) {
       await rm(temporaryPath, { force: true }).catch(() => {});
       throw error;
     }
-  })().finally(() => {
+  }).finally(() => {
     runtimeVideoPreviewJobs.delete(targetFilePath);
   });
 
