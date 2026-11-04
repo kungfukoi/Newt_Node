@@ -20,7 +20,9 @@ function fakeVideo(extra = {}) {
   const listeners = {};
   return Object.assign({ tagName: "VIDEO", controls: true, paused: true, seeking: false, readyState: 4, duration: 10, currentTime: 0,
     closest: selector => (selector === ".node-card" ? {} : null), getBoundingClientRect: () => rect,
-    addEventListener: (name, fn) => { listeners[name] = fn; }, fire: name => listeners[name]?.() }, extra);
+    addEventListener: (name, fn) => { listeners[name] = fn; },
+    removeEventListener: (name, fn) => { if (listeners[name] === fn) delete listeners[name]; },
+    fire: name => { const fn = listeners[name]; delete listeners[name]; fn?.(); } }, extra);
 }
 function fakeDocument() {
   const handlers = {};
@@ -50,6 +52,25 @@ test("hover moves a paused clip, ignores a playing clip, and queues one seek whi
   const outside = fakeVideo({ closest: () => null });
   doc.move({ target: outside, clientX: 300, clientY: 100, buttons: 0 });
   assert.equal(outside.currentTime, 0);
+  stop();
+});
+
+test("zoomed previews scrub above native controls and drop queued seeks when controls take over", () => {
+  const doc = fakeDocument();
+  const stop = installVideoHoverScrub(doc, { overlay: { show() {}, hide() {} } });
+  const video = fakeVideo({
+    offsetHeight: 200,
+    getBoundingClientRect: () => ({ left: 100, right: 140, top: 50, bottom: 90, width: 40, height: 40 })
+  });
+  doc.move({ target: video, clientX: 120, clientY: 70 });
+  assert.equal(video.currentTime, 5);
+  video.seeking = true;
+  doc.move({ target: video, clientX: 130, clientY: 70 });
+  doc.move({ target: video, clientX: 130, clientY: 86 });
+  video.currentTime = 2;
+  video.seeking = false;
+  video.fire("seeked");
+  assert.equal(video.currentTime, 2, "hover must not overwrite the native seek");
   stop();
 });
 

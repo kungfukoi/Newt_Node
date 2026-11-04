@@ -63,29 +63,37 @@ function domOverlay() {
 
 export function installVideoHoverScrub(target = document, { overlay = domOverlay() } = {}) {
   if (target.__newtHoverScrub) return target.__newtHoverScrub;
-  const flush = video => {
-    video.__scrubWaiting = false;
-    const time = video.__scrubPending;
-    video.__scrubPending = null;
-    if (time != null && !video.seeking && video.paused) video.currentTime = time;
+  let pending = null;
+  const cancelPending = () => {
+    if (!pending) return;
+    pending.video.removeEventListener("seeked", pending.flush);
+    pending = null;
+  };
+  const hide = () => {
+    cancelPending();
+    overlay.hide();
   };
   function onMove(event) {
-    if (canvasPreference("hoverScrub", "on") === "off") { overlay.hide(); return; }
-    if (event.pointerType && event.pointerType !== "mouse") { overlay.hide(); return; }
+    if (canvasPreference("hoverScrub", "on") === "off") { hide(); return; }
+    if (event.pointerType && event.pointerType !== "mouse") { hide(); return; }
     const video = videoUnderPointer(event);
-    if (!video || video.readyState < 1) { overlay.hide(); return; }
+    if (!video || video.readyState < 1) { hide(); return; }
     const rect = video.getBoundingClientRect();
-    const time = scrubTime({ rect, x: event.clientX, y: event.clientY, duration: video.duration, paused: video.paused, buttons: event.buttons });
-    if (time === null) { overlay.hide(); return; }
-    overlay.show({ rect, x: event.clientX, time, duration: video.duration, controlsHeight: controlsBarHeight });
+    const controlsHeight = controlsBarHeight * (video.offsetHeight ? rect.height / video.offsetHeight : 1);
+    const time = scrubTime({ rect, x: event.clientX, y: event.clientY, duration: video.duration, paused: video.paused, buttons: event.buttons, controlsHeight });
+    if (time === null) { hide(); return; }
+    overlay.show({ rect, x: event.clientX, time, duration: video.duration, controlsHeight });
+    cancelPending();
     if (Math.abs(time - video.currentTime) < 0.02) return;
     if (video.seeking) {
-      // Keep only the newest wish; apply it when the current seek lands.
-      video.__scrubPending = time;
-      if (!video.__scrubWaiting) { video.__scrubWaiting = true; video.addEventListener("seeked", () => flush(video), { once: true }); }
+      const flush = () => {
+        pending = null;
+        if (!video.seeking && video.paused && canvasPreference("hoverScrub", "on") !== "off") video.currentTime = time;
+      };
+      pending = { video, flush };
+      video.addEventListener("seeked", flush, { once: true });
     } else video.currentTime = time;
   }
-  const hide = () => overlay.hide();
   // Capture phase: runs before any handler that might stop the event from reaching the document.
   target.addEventListener("pointermove", onMove, { capture: true, passive: true });
   target.addEventListener("pointerdown", hide, { capture: true, passive: true });
@@ -98,7 +106,7 @@ export function installVideoHoverScrub(target = document, { overlay = domOverlay
     target.removeEventListener("pointerleave", hide);
     target.removeEventListener("play", hide, true);
     target.removeEventListener("scroll", hide, true);
-    overlay.hide();
+    hide();
     overlay.destroy?.();
     delete target.__newtHoverScrub;
   };

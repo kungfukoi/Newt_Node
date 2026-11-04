@@ -14072,7 +14072,7 @@ function NodeBody({
               aria-label="Preview image viewer"
               tabIndex={previewItem?.type === "image" ? 0 : undefined}
               onKeyDown={navigatePreviewWithKeyboard}
-              onMouseDownCapture={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
               onPointerDown={(event) => {
                 event.stopPropagation();
                 if (previewItem?.type === "image") event.currentTarget.focus({ preventScroll: true });
