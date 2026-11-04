@@ -1296,7 +1296,7 @@ Seedance 2.5 Draft is toggleable with Fal, Atlas or Krea selected. A connected D
 
 Seedance Draft uses a switch for 480p previews on the selected provider; Fal and Atlas offer 1080p completion within seven days with separate billing per stage, while Krea offers previews only. Saved draft finishing always uses its originating provider and key.
 
-Seedance 2.5 Video Model settings offer Extend, off by default. It loops each submitted Reference Video shorter than four seconds in whole passes, including its audio when present. Clips of four seconds or longer pass through unchanged. Edit Existing Video validates the prepared clip duration, and provider reference limits still apply.
+Seedance 2.5 Video Model settings offer **extend to 4s**, off by default. For each submitted Reference Video shorter than four seconds, it alternates whole forward and reverse passes until the clip is at least four seconds long. Embedded audio follows the same direction as the picture. Clips of four seconds or longer pass through unchanged. Edit Existing Video validates the prepared clip duration, and provider reference limits still apply.
 
 Seedance output directories must be write-tested before paid submission. A completed durable video whose requested and fallback folders both fail enters save_blocked, retains its original ID and generated reference, and offers Save to workflow outputs or Retry original folder without regenerating. Atlas Seedance prompts retain complete creative instructions; the Krea 4 KB compactor and local node/file diagnostic context do not enter Atlas requests.
 

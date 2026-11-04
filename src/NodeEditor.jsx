@@ -16810,8 +16810,8 @@ function NodeBody({
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
         {isSeedance25 && <>
-          <NodeRow label="Extend"><button type="button" className={`node-toggle ${node.data.seedanceExtend === true ? "enabled" : ""}`} role="switch" aria-checked={node.data.seedanceExtend === true} aria-label="Extend"
-            disabled={running} title="Loop short Reference Video clips in full passes until they reach at least 4 seconds"
+          <NodeRow label="extend to 4s"><button type="button" className={`node-toggle ${node.data.seedanceExtend === true ? "enabled" : ""}`} role="switch" aria-checked={node.data.seedanceExtend === true} aria-label="extend to 4s"
+            disabled={running} title="Play short Reference Video clips forward, then backward, until they reach at least 4 seconds"
             onClick={() => onUpdate(node.id, { seedanceExtend: node.data.seedanceExtend !== true })}><span /></button></NodeRow>
           <NodeRow label="Draft (480p)"><button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
             disabled={running || directorConnected || (!seedanceDraft && !supportsSeedanceDraft(seedanceProvider))}

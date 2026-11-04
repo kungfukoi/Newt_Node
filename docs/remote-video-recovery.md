@@ -1,6 +1,6 @@
 # Seedance Generation Recovery
 
-Seedance 2.5 Extend prepares short Reference Video clips locally through `server/seedance-extend.js` before provider upload. The generation route submits the managed dependency in the original reference slot and measures the prepared input for duration validation and pricing. Durable job acceptance retains the existing request identity.
+Seedance 2.5 **extend to 4s** prepares short Reference Video clips locally through `server/seedance-extend.js` before provider upload. The generation route submits the managed dependency in the original reference slot and measures the prepared input for duration validation and pricing. Durable job acceptance retains the existing request identity.
 
 ## User Behavior
 
