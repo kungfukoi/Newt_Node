@@ -59,3 +59,25 @@ test("Timeline playback wraps continuously from Out back to In", () => {
   clock.play();
   assert.equal(times.at(-1), 2);
 });
+
+test("reverse shuttle preserves overshoot when wrapping and stops at zero without a loop", () => {
+  let now = 0;
+  const clock = new AssemblyPlaybackClock({ duration: 10, now: () => now, requestFrame: () => 1, cancelFrame: () => {} });
+  clock.setLoopRange(2, 4);
+  clock.seek(2.25);
+  clock.shuttle(-1);
+  clock.update(now = 500);
+  assert.equal(clock.currentTime, 3.75);
+
+  clock.shuttle(-1);
+  clock.update(now = 1000);
+  assert.equal(clock.currentTime, 2.75);
+
+  clock.setLoopRange(2, 4, false);
+  clock.update(now = 2500);
+  assert.equal(clock.currentTime, 0);
+  assert.equal(clock.state, "paused");
+  clock.shuttle(1);
+  clock.update(3000);
+  assert.equal(clock.currentTime, 0.5);
+});

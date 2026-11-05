@@ -17,7 +17,7 @@ NewtNode connects image, video, audio, text, and 3D tools on a node canvas. Buil
 - **Visual workflows:** Connect typed nodes, run dependent steps, and reuse groups of nodes as presets.
 - **AI generation:** Use supported cloud providers for images, video, audio, text, and 3D assets, with explicit model and provider selection.
 - **Creative planning:** Develop looks with Explore, build character references, and plan shots with Director and Storyboard.
-- **Media editing:** Edit images, assemble video and audio on the Timeline, composite media, and use optional local processing tools.
+- **Media editing:** Edit images, assemble video and audio on the Timeline, composite media, and use optional local processing tools. With Timeline focused, press **J** to play backward, **K** to pause, or **L** to play forward. Tap **J** or **L** again to shuttle faster.
 - **Project management:** Save portable workflow packages, browse project outputs, and restore your workspace after reopening.
 - **Usage tracking:** Review generation history, progress, and available cost estimates in Stats.
 

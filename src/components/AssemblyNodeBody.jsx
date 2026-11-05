@@ -235,7 +235,9 @@ export function AssemblyNodeBody({
         const nextPlaying = state === "playing";
         playingRef.current = nextPlaying;
         setPlaying(nextPlaying);
-        if (!nextPlaying) {
+        if (nextPlaying) {
+          syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
+        } else {
           pauseAllMedia();
           persistTimeline(timelineRef.current);
         }
@@ -321,10 +323,7 @@ export function AssemblyNodeBody({
   function togglePlayback() {
     rootRef.current?.focus({ preventScroll: true });
     if (playingRef.current) clockRef.current?.pause();
-    else {
-      syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
-      clockRef.current?.play();
-    }
+    else clockRef.current?.play();
   }
 
   async function extractPlayheadFrame() {
@@ -381,9 +380,14 @@ export function AssemblyNodeBody({
       const { item, audible } = active;
       if ("muted" in element) element.muted = !audible;
       const sourceTime = assemblyClipSourceTime(item, time);
-      const canPlayForward = shouldPlay && !item.reverse;
-      if ("playbackRate" in element) element.playbackRate = assemblyClipPlaybackRate(item);
-      const seekTarget = assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, canPlayForward);
+      const transportRate = shouldPlay ? clockRef.current?.rate ?? 1 : 1;
+      const mediaRate = transportRate * assemblyClipPlaybackRate(item);
+      const canPlayForward = shouldPlay && !item.reverse && mediaRate > 0 && mediaRate <= 16;
+      if (canPlayForward && "playbackRate" in element && element.playbackRate !== mediaRate) element.playbackRate = mediaRate;
+      // Reverse shuttle uses decoded seeks; let each seek finish before issuing another.
+      const seekTarget = shouldPlay && transportRate !== 1 && !canPlayForward && element.seeking
+        ? null
+        : assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, canPlayForward);
       if (seekTarget !== null) {
         try {
           element.currentTime = seekTarget;
@@ -418,7 +422,8 @@ export function AssemblyNodeBody({
       return {
         element,
         clip: item,
-        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate, playingRef.current && !item.reverse)
+        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate,
+          playingRef.current && (!item.reverse || clockRef.current?.rate !== 1))
       };
     });
     const scrubPreview = timelineScrubbingRef.current || scrubPreviewPendingRef.current;
@@ -480,7 +485,10 @@ export function AssemblyNodeBody({
   }
 
   function handleVideoMediaReady(clipId, element) {
-    handleMediaReady();
+    if (playingRef.current && clockRef.current?.rate < 0) {
+      const current = timelineRef.current;
+      renderCompositionFrame(current, current.playhead, true);
+    } else handleMediaReady();
     videoFrameCancelRef.current.get(clipId)?.();
     const cancel = requestAssemblyVideoFrame(element, () => {
       videoFrameCancelRef.current.delete(clipId);
@@ -806,6 +814,16 @@ export function AssemblyNodeBody({
     if (event.target.closest("input, textarea, select")) return;
     const modifier = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
+    if (!modifier && !event.altKey && !event.shiftKey && (key === "j" || key === "k" || key === "l")) {
+      if (event.isComposing || event.target.isContentEditable) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) {
+        if (key === "k") clockRef.current?.pause();
+        else clockRef.current?.shuttle(key === "j" ? -1 : 1);
+      }
+      return;
+    }
     if (modifier && key === "c") {
       event.preventDefault();
       event.stopPropagation();
@@ -950,7 +968,7 @@ export function AssemblyNodeBody({
           <IconButton title="Go to Out point" disabled={timeline.outPoint === null} onClick={() => jumpToMarker(timeline.outPoint)}><span className="assembly-marker-jump">{"}"}</span></IconButton>
           <IconButton title="Clear In and Out points" disabled={timeline.inPoint === null && timeline.outPoint === null} onClick={() => commitTimeline(clearAssemblyInOut(timelineRef.current))}><FlagOff size={14} /></IconButton>
         </div>
-        <div className="assembly-transport">
+          <div className="assembly-transport" title="Timeline shortcuts: J reverse, K pause, L forward. Tap J or L again to shuttle faster.">
           <IconButton active={timeline.loopInOut} title="Loop playback between In and Out" disabled={timeline.inPoint === null || timeline.outPoint === null || timeline.outPoint <= timeline.inPoint} onClick={toggleLoopInOut}><Repeat2 size={15} /></IconButton>
           <IconButton title={playing ? "Pause" : "Play"} onClick={togglePlayback}>{playing ? <Pause size={15} /> : <Play size={15} />}</IconButton>
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>

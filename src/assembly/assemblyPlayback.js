@@ -8,6 +8,7 @@ export class AssemblyPlaybackClock {
     this.cancelFrame = cancelFrame || ((id) => globalThis.cancelAnimationFrame(id));
     this.now = now || (() => globalThis.performance?.now?.() || Date.now());
     this.state = "paused";
+    this.rate = 1;
     this.currentTime = 0;
     this.startedAt = 0;
     this.startedFrom = 0;
@@ -49,20 +50,40 @@ export class AssemblyPlaybackClock {
     return this.currentTime;
   }
 
-  play() {
-    if (this.state === "playing") return;
+  shuttle(direction) {
+    const speed = this.state === "playing" && Math.sign(this.rate) === direction
+      ? Math.min(4, Math.abs(this.rate) * 2)
+      : 1;
+    this.play(direction * speed);
+  }
+
+  play(rate = 1) {
+    const now = this.now();
+    if (this.state === "playing") {
+      if (rate === this.rate) return;
+      this.update(now);
+      if (this.state === "playing") {
+        this.rate = rate;
+        this.startedAt = now;
+        this.startedFrom = this.currentTime;
+        return;
+      }
+    }
     let timeChanged = false;
     if (this.hasLoopRange() && (this.currentTime < this.loopStart || this.currentTime >= this.loopEnd)) {
       this.currentTime = this.loopStart;
       timeChanged = true;
-    } else if (this.duration > 0 && this.currentTime >= this.duration) {
+    } else if (!this.hasLoopRange() && rate < 0 && this.currentTime === 0) {
+      return;
+    } else if (rate > 0 && this.duration > 0 && this.currentTime >= this.duration) {
       this.currentTime = 0;
       timeChanged = true;
     }
+    this.rate = rate;
     this.state = "playing";
-    if (timeChanged) this.onTime(this.currentTime, this.state);
-    this.startedAt = this.now();
+    this.startedAt = now;
     this.startedFrom = this.currentTime;
+    if (timeChanged) this.onTime(this.currentTime, this.state);
     this.onState(this.state);
     this.schedule();
   }
@@ -70,6 +91,7 @@ export class AssemblyPlaybackClock {
   pause() {
     if (this.state !== "playing") return;
     this.update(this.now());
+    if (this.state !== "playing") return;
     this.state = "paused";
     this.stopFrame();
     this.onState(this.state);
@@ -96,19 +118,18 @@ export class AssemblyPlaybackClock {
 
   update(timestamp) {
     if (this.state !== "playing") return;
-    this.currentTime = this.startedFrom + Math.max(0, timestamp - this.startedAt) / 1000;
+    this.currentTime = this.startedFrom + this.rate * Math.max(0, timestamp - this.startedAt) / 1000;
     if (this.hasLoopRange() && (this.currentTime < this.loopStart || this.currentTime >= this.loopEnd)) {
       const span = this.loopEnd - this.loopStart;
-      this.currentTime = this.currentTime < this.loopStart
-        ? this.loopStart
-        : this.loopStart + ((this.currentTime - this.loopStart) % span);
+      const offset = (this.currentTime - this.loopStart) % span;
+      this.currentTime = this.loopStart + (offset < 0 ? span + offset : offset);
       this.startedAt = timestamp;
       this.startedFrom = this.currentTime;
       this.onTime(this.currentTime, this.state);
       return;
     }
-    if (this.duration > 0 && this.currentTime >= this.duration) {
-      this.currentTime = this.duration;
+    if (this.rate < 0 ? this.currentTime <= 0 : this.duration > 0 && this.currentTime >= this.duration) {
+      this.currentTime = this.rate < 0 ? 0 : this.duration;
       this.onTime(this.currentTime, this.state);
       this.state = "paused";
       this.stopFrame();

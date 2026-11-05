@@ -1,6 +1,34 @@
 import { test, expect } from '@playwright/test';
 import { openFixture } from './helpers.mjs';
 
+test('Timeline J/K/L shuttles the focused transport and leaves text inputs alone', async ({ page }) => {
+  const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
+  const node = page.locator('[data-node-card-id="timeline"]');
+  const body = node.locator('.assembly-node-body');
+  const video = node.locator('.assembly-media-pool video');
+  const canvas = node.locator('.assembly-frame-canvas');
+  const frame = async () => Number((await node.locator('.assembly-frame-number').textContent()).match(/\d+/)[0]);
+
+  await body.press('l');
+  await expect.poll(frame).toBeGreaterThan(8);
+  await body.press('l');
+  await expect.poll(() => video.evaluate(element => element.playbackRate)).toBe(2);
+  await body.press('k');
+  await expect(node.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  const stoppedFrame = await frame();
+  const stoppedImage = await canvas.evaluate(element => element.toDataURL());
+  await body.press('j');
+  await expect.poll(frame).toBeLessThan(stoppedFrame - 2);
+  await expect.poll(() => canvas.evaluate(element => element.toDataURL())).not.toBe(stoppedImage);
+  await body.press('k');
+  await expect(node.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  const input = await body.evaluateHandle(element => element.appendChild(document.createElement('input')));
+  await input.press('l');
+  expect(await input.evaluate(element => element.value)).toBe('l');
+  await expect(node.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('Timeline holds the full composition during a decoder stall instead of flashing the lower clip', async ({ page }) => {
   const { fixture, errors } = await openFixture(page, { timeline: true, scale: 0.7 });
   const timeline = fixture.nodes.find(node => node.id === 'timeline');
