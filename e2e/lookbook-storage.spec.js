@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {openFixture} from "./helpers.mjs";
+import {chooseLookbookSource,openFixture} from "./helpers.mjs";
 
 test("Saving a shared folder refreshes the kept-alive Catalog when returning from Settings",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
@@ -16,6 +16,7 @@ test("Saving a shared folder refreshes the kept-alive Catalog when returning fro
     return json(route,{ready:true,source:"styleref",total:styles.length,localCount:styles.length,remoteCount:0,styles,categories:["Illustration"]});
   });
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await expect(page.getByLabel("Style previews",{exact:true})).toContainText("No styles match this view.");
   const before=catalogReads;
   await page.getByRole("button",{name:"Settings",exact:true}).click();await page.getByRole("button",{name:/User Preferences/}).click();
@@ -35,7 +36,7 @@ test("User Preferences can swap a compact Lookbook between a Windows network pat
   const panel=page.getByRole("region",{name:"Lookbook storage",exact:true}),field=panel.getByLabel("Shared Lookbook folder",{exact:true});
   const uncPath="\\\\server\\Company\\Newt_Node_Lib";
   await field.fill(uncPath);await panel.getByRole("button",{name:"Save folder",exact:true}).click();
-  await expect(panel.getByRole("status")).toContainText("Catalog → Shared");expect(last).toEqual({directory:uncPath,copyLocal:true});
+  await expect(panel.getByRole("status")).toContainText("Commercial → Shared");expect(last).toEqual({directory:uncPath,copyLocal:true});
   fail=true;await field.fill("/Volumes/Company/Newt_Node_Lib");await panel.getByRole("button",{name:"Save folder",exact:true}).click();await expect(panel.getByRole("alert")).toContainText("previous setting unchanged");expect(state.directory).toBe(uncPath);
   fail=false;await panel.getByRole("button",{name:"Save folder",exact:true}).click();await expect(panel.getByRole("status")).toContainText("Shared Lookbook folder saved");expect(state.directory).toBe("/Volumes/Company/Newt_Node_Lib");
   await page.reload();await page.getByRole("button",{name:"Settings",exact:true}).click();

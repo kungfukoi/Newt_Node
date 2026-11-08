@@ -13,7 +13,7 @@ export default function LookbookStorageSettings(){
   async function save(){await run(async()=>{
     const value=await styleLibraryApi.saveStorage({directory,copyLocal});
     setState(value);setDirectory(value.directory);
-    if(value.format==="compact")setNotice("Shared Lookbook folder saved. Browse the compact catalog in Looks under Catalog → Shared.");
+    if(value.format==="compact")setNotice("Shared Lookbook folder saved. Browse the compact catalog in StyleFinder or under Commercial → Shared.");
     else setNotice(value.mode==="shared"?"Shared Lookbook folder saved. New looks and their images will be saved there.":"Local Lookbook storage selected.");
   });}
   return <section className="lookbook-storage-preference" aria-label="Lookbook storage">

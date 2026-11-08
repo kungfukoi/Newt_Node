@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {openFixture} from "./helpers.mjs";
+import {chooseLookbookSource,openFixture} from "./helpers.mjs";
 async function setup(page){
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});let deleted=false,deleteCalls=0,failDelete=false,detailCalls=0;
   const images=Array.from({length:4},(_,index)=>({id:String(index),localUrl:`/outputs/e2e/look-${index}.png`}));
@@ -13,6 +13,7 @@ async function setup(page){
   await page.route("**/api/style-library/catalog/*",route=>{detailCalls++;return json(route,{style:route.request().url().endsWith(custom.id)?custom:{...online,examples:images}});});
   await page.route("**/api/style-library/created/*",route=>{deleteCalls++;if(failDelete)return json(route,{error:"Shared folder is unavailable"},503);deleted=true;return json(route,{id:custom.id,removed:true});});
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   const choose=async(label,name)=>{await page.getByRole("combobox",{name:label,exact:true}).click();await page.getByRole("option",{name,exact:true}).click();};
   return {errors,requests,choose,deleteCalls:()=>deleteCalls,detailCalls:()=>detailCalls,setFail:value=>{failDelete=value;},library:()=>library};
 }

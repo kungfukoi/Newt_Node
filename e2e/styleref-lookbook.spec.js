@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {openFixture} from "./helpers.mjs";
+import {chooseLookbookSource,openFixture} from "./helpers.mjs";
 import {readFile} from "node:fs/promises";
 
 test("StyleRef supplies the catalog, palette and managed imports while preserving first-use analysis and offline saved looks",async({page})=>{
@@ -28,6 +28,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
     return json(route,{stylePrompt:"Preserve the user's requested subject and composition while applying this visual treatment. Transparent watercolor washes, soft ink contours, warm paper grain and restrained ochre accents.",fingerprint:"a".repeat(64),provider:"Atlas Cloud",model:"gpt-6-astra"});
   });
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await expect(page.getByText("1 StyleRef looks",{exact:true})).toBeVisible();
   await expect(page.getByText("Guides",{exact:true})).toHaveCount(0);
   await expect(page.getByText("local styles",{exact:false})).toHaveCount(0);

@@ -37,7 +37,9 @@ test("StyleFinder local audition has independent paging, search, categories, com
     await page.getByRole("button",{name:"Looks",exact:true}).click();
     async function choose(label,name){await page.getByRole("combobox",{name:label,exact:true}).click();await page.getByRole("option",{name,exact:true}).click();}
     const title="StyleFinder";
-    await choose("Looks source",title);const strip=page.getByLabel("Style previews",{exact:true});await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
+    await expect(page.getByRole("combobox",{name:"Looks source",exact:true})).toHaveText(title);
+    const strip=page.getByLabel("Style previews",{exact:true});await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
+    await choose("Looks source",title);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
     await expect(strip.locator(".stylebuilder-mosaic").first()).toHaveCSS("width","207.375px");
     await expect.poll(()=>strip.locator("img").first().evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);
     await page.screenshot({path:test.info().outputPath("stylefinder-audition.png"),fullPage:true});
@@ -57,7 +59,7 @@ test("StyleFinder local audition has independent paging, search, categories, com
     await page.keyboard.press("Escape");await page.screenshot({path:test.info().outputPath("stylefinder-details.png"),fullPage:true});await page.keyboard.press("Escape");
     await search.fill("");await choose("Look category",first.category);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(48,(await catalog.search({category:first.category})).total));await choose("Look category","All categories");
     const handle=page.getByRole("separator",{name:`Resize ${title} rows`,exact:true});await handle.focus();await handle.press("ArrowDown");await expect(handle).toHaveAttribute("aria-valuenow","2");
-    await choose("Looks source","Catalog");await expect(strip.locator(".stylebuilder-tile")).toHaveCount(0);await choose("Looks source",title);await expect(handle).toHaveAttribute("aria-valuenow","2");await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
+    await choose("Looks source","Commercial");await expect(strip.locator(".stylebuilder-tile")).toHaveCount(0);await choose("Looks source",title);await expect(handle).toHaveAttribute("aria-valuenow","2");await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
     await search.fill("no-matching-style-for-this-test");await expect(strip).toContainText("No styles match this view.");
     expect(requests.some(request=>request.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
   }finally{await rm(root,{recursive:true,force:true,maxRetries:3,retryDelay:100});}

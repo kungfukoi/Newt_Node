@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {openFixture} from "./helpers.mjs";
+import {chooseLookbookSource,openFixture} from "./helpers.mjs";
 import {createStyleRefCatalog} from "../server/styleref-catalog.js";
 
 test("Shared category shows only shared-store looks, supports search, and reports unavailable storage",async({page})=>{
@@ -14,6 +14,7 @@ test("Shared category shows only shared-store looks, supports search, and report
     catch(error){return json(route,{error:error.message},error.status||503);}
   });
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await expect(page.getByRole("button",{name:"View Online Ink",exact:true})).toBeVisible();
   await page.getByRole("combobox",{name:"Look category",exact:true}).click();await page.getByRole("option",{name:"Shared",exact:true}).click();
   await expect(page.getByText("2 shared looks",{exact:true})).toBeVisible();await expect(page.getByRole("button",{name:"View Online Ink",exact:true})).toHaveCount(0);

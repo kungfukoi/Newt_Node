@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openFixture } from "./helpers.mjs";
+import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 import { collectionFrameHeight, collectionRowHeight, collectionRowGap } from "../src/collectionFrame.js";
 
 test("Starred supports drag and keyboard row resizing, persistence and yellow dropdown highlights", async ({page}) => {
@@ -10,15 +10,17 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections:[{id:"looks",name:"Looks",styles}]})}));
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,styles,total:48,indexed:48,categories:["Architects","Painters","Techniques"]})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   const handle=page.getByRole("separator",{name:"Resize Starred rows",exact:true}),strip=page.getByLabel("Style previews",{exact:true});
   await expect(handle).toHaveCount(0);
   const category=page.getByRole("combobox",{name:"Look category",exact:true});await category.click();
   await expect(category).toHaveCSS("border-color","rgb(221, 198, 49)");
   const selected=page.getByRole("option",{name:"All categories",exact:true});
   await expect(selected).toHaveCSS("background-color","rgb(221, 198, 49)");
+  await expect(page.getByRole("option",{name:"Architects",exact:true})).toBeVisible();
   await category.press("ArrowDown");await category.press("Enter");await expect(category).toContainText("Architects");
   await category.click();await category.press("Escape");await expect(page.getByRole("listbox")).toHaveCount(0);
-  async function source(name){await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name,exact:true}).click();}
+  const source=name=>chooseLookbookSource(page,name);
   await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","1");await expect(handle).toHaveText("");
   await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
   async function namesClearScrollbar(){
@@ -46,12 +48,13 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   await expect.poll(()=>strip.evaluate(node=>Math.round(parseFloat(getComputedStyle(node).height)))).toBe(Math.round(collectionFrameHeight(3)));
   await namesClearScrollbar();
   await page.screenshot({path:test.info().outputPath("collection-three-rows.png"),fullPage:true});
-  await source("Catalog");await expect(handle).toHaveCount(0);await expect(strip).toHaveCSS("display","grid");
-  const catalogHandle=page.getByRole("separator",{name:"Resize Catalog rows",exact:true});
+  await source("Commercial");await expect(handle).toHaveCount(0);await expect(strip).toHaveCSS("display","grid");
+  const catalogHandle=page.getByRole("separator",{name:"Resize Commercial rows",exact:true});
   await expect(catalogHandle).toHaveAttribute("aria-valuenow","1");
   await drag(collectionRowHeight+collectionRowGap,catalogHandle);await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await namesClearScrollbar();
   await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","3");
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await source("Commercial");
   await expect(catalogHandle).toHaveAttribute("aria-valuenow","2");await source("Starred");
   await expect(handle).toHaveAttribute("aria-valuenow","3");
   await handle.focus();await handle.press("ArrowDown");await expect(handle).toHaveAttribute("aria-valuenow","4");

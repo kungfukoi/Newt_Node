@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openFixture } from "./helpers.mjs";
+import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 
 test("Lookbook shuttle varies speed, stays the same size through paging, and stops on release", async ({ page }) => {
   const { errors } = await openFixture(page, { count: 1 });
@@ -19,6 +19,7 @@ test("Lookbook shuttle varies speed, stays the same size through paging, and sto
   });
 
   await page.getByRole("button", { name: "Looks", exact: true }).click();
+  await chooseLookbookSource(page, "Commercial");
   const strip = page.getByLabel("Style previews", { exact: true });
   const shuttle = page.getByRole("button", { name: "Preview scroll shuttle" });
   await expect(shuttle).toBeEnabled();

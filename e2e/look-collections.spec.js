@@ -34,7 +34,7 @@ test("Named local collections, bulk selection and save destinations persist inde
   await page.getByRole("button", { name: "Looks", exact: true }).click();
   const choose = async (label, name, root = page) => { await root.getByRole("combobox", { name: label, exact: true }).click(); await root.getByRole("option", { name, exact: true }).click(); };
   await page.getByRole("combobox", { name: "Looks source", exact: true }).click();
-  await expect(page.getByRole("option", { name: "Catalog", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Commercial", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "Starred", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "First", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "My collection", exact: true })).toHaveCount(0);
@@ -47,7 +47,7 @@ test("Named local collections, bulk selection and save destinations persist inde
   await page.getByRole("button", { name: "Create Catalog", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Looks source", exact: true })).toHaveText("Cinema references");
   await expect(page.getByRole("combobox", { name: "Collection", exact: true })).toHaveCount(0);
-  await choose("Looks source", "Catalog");
+  await choose("Looks source", "Commercial");
   await page.getByRole("checkbox", { name: "Select Ink", exact: true }).check(); await page.getByRole("checkbox", { name: "Select Wash", exact: true }).check();
   await choose("Add to collection destination", "Second");
   await page.screenshot({ path: test.info().outputPath("lookbook-collections.png"), fullPage: true });

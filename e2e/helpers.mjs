@@ -75,6 +75,11 @@ export async function openFixture(page, options = {}) {
   return { fixture, errors, requests };
 }
 
+export async function chooseLookbookSource(page, name) {
+  await page.getByRole("combobox", { name: "Looks source", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
 export async function wireGeometry(page) {
   return page.locator(".newt-flow-edge-visible").evaluateAll((paths) => paths.map((path) => {
     const length = path.getTotalLength();

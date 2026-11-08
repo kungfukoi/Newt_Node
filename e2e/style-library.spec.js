@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openFixture } from "./helpers.mjs";
+import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 import sharp from "sharp";
 
 test("Look defaults to its first example, permits grade overrides and replaces the default on switch", async ({page}) => {
@@ -100,6 +100,7 @@ test("Lookbook keeps details open, enlarges whole examples, clears search and re
     return route.fulfill({contentType:"application/json",body:JSON.stringify({stylePrompt:prompt,fingerprint:"saved-ink",model:"gpt-6-astra",version:1})});
   });
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("ink");
   await page.getByRole("button",{name:"Clear look search",exact:true}).click();
   await expect(page.getByRole("textbox",{name:"Search looks",exact:true})).toHaveValue("");
@@ -215,6 +216,7 @@ test("Catalog looks open details, save examples and create a named Style without
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
   await page.route("**/api/node/upload-asset",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({asset:{localUrl:`/outputs/e2e/import-${++uploads}.png`,fileName:"example.png",mimeType:"image/png"}})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await expect(page.locator(".stylebuilder-cover")).toHaveCount(1);
   await expect(page.locator(".stylebuilder-mosaic-grid img")).toHaveCount(4);
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
@@ -270,6 +272,7 @@ test("A catalog look must save before its node is created, with retry after a co
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,styles:[style],total:1,categories:[],indexed:1})}));
   await page.route("**/api/style-library/catalog/warm-ink",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await page.getByRole("button",{name:"View Warm ink",exact:true}).click();
   await page.getByRole("button",{name:"Use in Style",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Style details"}).getByRole("alert")).toContainText("Library changed in another window");
@@ -330,7 +333,7 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await expect(page.getByRole("button",{name:"View Other look",exact:true})).toBeVisible();
   expect(library.collections[0].styles.map(style=>style.name)).toEqual(["Other look"]);
   expect(library.collections[1].styles).toHaveLength(0);
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Catalog",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await expect(page.getByRole("button",{name:"Save to collection: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
   await page.getByRole("button",{name:"Save to my collection",exact:true}).click();

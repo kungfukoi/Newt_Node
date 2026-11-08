@@ -36,7 +36,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   React.useEffect(()=>{uiSet("lookbookBrowseCollectionId",browseCollectionId);},[browseCollectionId]);
   const [selectedLooks,setSelectedLooks]=React.useState(()=>new Map());
   const [catalog,setCatalog]=React.useState(null), [catalogLoading,setCatalogLoading]=React.useState(false), [catalogError,setCatalogError]=React.useState("");
-  const [query,setQuery]=React.useState(""), [category,setCategory]=React.useState(""), [scope,setScope]=React.useState("library");
+  const [query,setQuery]=React.useState(""), [category,setCategory]=React.useState(""), [scope,setScope]=React.useState("stylefinder");
   const [savedCollectionRows, setCollectionRows] = React.useState(() => collectionRows(uiGet("lookbookCollectionRows", 1)));
   React.useEffect(() => { uiSet("lookbookCollectionRows", savedCollectionRows); }, [savedCollectionRows]);
   const [savedCatalogRows, setCatalogRows] = React.useState(() => collectionRows(uiGet("lookbookCatalogRows", 1)));
@@ -71,7 +71,11 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   const browserOptions=lookCatalogOptions(library?.collections);
   const saveOptions=lookSaveOptions(library?.collections);
   const browserName=browserOptions.find(option=>option.value===browserValue)?.label || "Catalog";
-  function chooseCatalog(value) { request.current++;setCatalog(null);setCatalogLoading(false);setCatalogError("");setCategory("");if(value.startsWith("collection:")){setBrowseCollectionId(value.slice(11));setScope("collection");}else setScope(value); }
+  function chooseCatalog(value) {
+    if(value===browserValue)return;
+    request.current++;setCatalog(null);setCatalogLoading(false);setCatalogError("");setCategory("");
+    if(value.startsWith("collection:")){setBrowseCollectionId(value.slice(11));setScope("collection");}else setScope(value);
+  }
   const filterCategories=isSourceCatalog?(catalog?.categories||[]):[...new Set(sourceStyles.map(style=>style.category).filter(Boolean))].sort();
   const visibleStyles=isSourceCatalog ? sourceStyles : libraryStylesMatching(sourceStyles,query).filter(style=>!category||style.category===category||style.tags?.includes(category));
   React.useEffect(()=>{if(category&&!filterCategories.includes(category))setCategory("");},[category,filterCategories.join("\n")]);
@@ -136,7 +140,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
       if (!library) throw new Error("Wait for your catalogs to load.");
       const trimmed = name.trim();
       if (!trimmed || trimmed.length > 120) throw new Error("Name your catalog using 1–120 characters.");
-      if (["catalog","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
+      if (["catalog","commercial","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
       const target = crypto.randomUUID();
       await save([...library.collections,{id:target,name:trimmed,styles:[]}]);
       if(!collectionId)setCollectionId(target);setBrowseCollectionId(target);setScope("collection");
