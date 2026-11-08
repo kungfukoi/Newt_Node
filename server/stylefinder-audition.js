@@ -6,11 +6,12 @@ import { createCompactStyleFinderSource, curatedStyleFinderPath } from "./stylef
 
 const prefix="stylefinder-";
 const fail=(message,status=503)=>{throw Object.assign(new Error(message),{status});};
-export function createStyleFinderAudition({directory}) {
+export function createStyleFinderAudition({directory,readSharedCompact=async()=>null}) {
   let cached;
   const readCompact = createCompactStyleFinderSource(directory);
+  async function activeCompact(){return await readSharedCompact() || readCompact();}
   async function read(){
-    const compact = await readCompact();
+    const compact = await activeCompact();
     if (compact) return compact;
     try{
       const filename=path.join(directory,"stylefinder-audition.json"),info=await stat(filename);
@@ -32,6 +33,12 @@ export function createStyleFinderAudition({directory}) {
     return {...value,id,catalogId:id,sourceProvider:value.sourceProvider||"Midlibrary",sourceAttribution:value.sourceAttribution||"Midlibrary.io · local StyleFinder mirror",
       ...(value.similarStyles?{similarStyles:value.similarStyles.map(style)}:{})};
   }
+  async function searchShared(query){
+    const compact=await readSharedCompact();
+    if(!compact)return null;
+    const result=compact.search(query);
+    return {...result,styles:result.styles.map(style)};
+  }
   async function search(query={}){
     try{
       const result=await (await read()).search(query);
@@ -44,12 +51,17 @@ export function createStyleFinderAudition({directory}) {
     try{return {style:style((await (await read()).detail(id.slice(prefix.length))).style)};}
     catch(error){if(error.status)throw error;fail("This StyleFinder look is unavailable in the local source folder.");}
   }
-  async function asset(file){return (await read()).asset(file);}
+  async function asset(file,version){
+    if(version===undefined)return (await read()).asset(file);
+    const compact=await readSharedCompact();
+    if(!compact)fail("The shared catalog image is unavailable. Refresh the catalog.",404);
+    return compact.asset(file,version);
+  }
   async function curatedAsset(url) {
     if (!curatedStyleFinderPath.test(url)) return null;
     return (await readCompact())?.curatedAsset(url);
   }
-  return {search,detail,asset,curatedAsset};
+  return {search,searchShared,detail,asset,curatedAsset};
 }
 export function registerStyleFinderCuratedImages(app, catalog) {
   app.get(curatedStyleFinderPath, async (req,res,next) => {
@@ -68,7 +80,7 @@ export function registerStyleFinderAuditionRoutes(app,options,catalog=createStyl
   app.get("/api/style-library/stylefinder/:id",async(req,res)=>{try{res.json(await catalog.detail(req.params.id));}catch(e){error(res,e);}});
   app.get("/api/style-library/stylefinder-image",async(req,res)=>{
     try{
-      const {filename,mimeType}=await catalog.asset(req.query.file);
+      const {filename,mimeType}=await catalog.asset(req.query.file,req.query.v);
       res.sendFile(filename,{headers:{"Content-Type":mimeType,"Cache-Control":"private, max-age=60","X-Content-Type-Options":"nosniff"}});
     }catch(e){
       if(e.code==="ENOENT")res.status(404).json({error:"This example has not downloaded yet."});

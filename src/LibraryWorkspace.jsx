@@ -119,8 +119,8 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   },[isSourceCatalog,catalog,catalogLoading,catalogError,catalogViewKey,loadCatalog]);
   React.useEffect(()=>{
     const storageChanged=()=>{
-      if(scope!=="library")return;
-      setSelectedLooks(new Map());closeDetails();loadCatalog({source:"library"});
+      if(!isSourceCatalog)return;
+      setSelectedLooks(new Map());closePreview();closeDetails();loadCatalog();
     };
     window.addEventListener("newtnode:lookbook-storage-updated",storageChanged);
     return()=>window.removeEventListener("newtnode:lookbook-storage-updated",storageChanged);

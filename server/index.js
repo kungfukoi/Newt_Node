@@ -883,7 +883,7 @@ process.on("message", (message) => {
 });
 app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
 app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
-const styleFinderAudition = createStyleFinderAudition({ directory: dataDir });
+const styleFinderAudition = createStyleFinderAudition({ directory: dataDir, readSharedCompact: () => createdLookStore.readSharedCompact() });
 registerStyleFinderCuratedImages(app, styleFinderAudition);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
@@ -1097,7 +1097,7 @@ registerLookbookStorageRoutes(app,createdLookStore);
 registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses"), analyze: runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost,
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
-registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore });
+registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore, searchSharedCompact: styleFinderAudition.searchShared });
 registerStyleFinderAuditionRoutes(app, { directory: dataDir }, styleFinderAudition);
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
@@ -1377,6 +1377,7 @@ function buildHealthPayload() {
       lookStyleAnalysis: true,
       stylefinderAudition: true,
       stylefinderCompact: true,
+      lookbookSharedCompact: true,
       createLook: true,
       lookStyleBoard: true,
       lookbookStyleRef: true,

@@ -122,9 +122,42 @@ try {
   assert.equal(health.routes.lookbookStyleRef, true);
   assert.equal(health.routes.stylefinderAudition,true);
   assert.equal(health.routes.stylefinderCompact,true);
+  assert.equal(health.routes.lookbookSharedCompact,true);
   const missingStyleFinder=await fetch(`${api}/api/style-library/stylefinder`);
   assert.equal(missingStyleFinder.status,503);
   assert.match((await missingStyleFinder.json()).error,/local StyleFinder audition is unavailable/);
+  const compactFolder = path.join(sandbox, "Shared catalog");
+  const compactImage = await readFile(path.join(sandbox, "outputs", "panel.png"));
+  const compactBlob = createHash("sha256").update(compactImage).digest("hex") + ".png";
+  const compactImageDirectory = path.join(compactFolder, "images", compactBlob.slice(0, 2));
+  await mkdir(compactImageDirectory, { recursive: true });
+  await writeFile(path.join(compactImageDirectory, compactBlob), compactImage);
+  const curatedUrl = "/uploads/stylefinder-overrides/smoke/reference.png";
+  const compactLook = { id: "smoke-ink", name: "Smoke Ink", category: "Illustration", tags: ["ink"], examples: [{ localUrl: curatedUrl }] };
+  await writeFile(path.join(compactFolder, "catalog.json"), JSON.stringify({
+    version: 1, styles: [compactLook], categories: ["Illustration"], assets: { [curatedUrl]: compactBlob },
+    details: { [compactLook.id]: { ...compactLook, prompt: "Detailed ink description" } }
+  }));
+  const sharedSetting = await fetch(api + "/api/style-library/storage", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory: compactFolder, copyLocal: false }),
+  });
+  assert.equal(sharedSetting.status, 200);
+  assert.equal((await sharedSetting.json()).format, "compact");
+  const sharedPage = await (await request("/api/style-library/catalog?category=Shared&q=ink&limit=1")).json();
+  assert.equal(sharedPage.total, 1);
+  assert.equal(sharedPage.styles[0].id, "stylefinder-smoke-ink");
+  const sharedDetail = await (await request("/api/style-library/stylefinder/stylefinder-smoke-ink")).json();
+  assert.equal(sharedDetail.style.prompt, "Detailed ink description");
+  const sharedImage = sharedDetail.style.examples[0];
+  assert.equal(sharedImage.localUrl, undefined);
+  assert.deepEqual(Buffer.from(await (await request(sharedImage.url)).arrayBuffer()), compactImage);
+  assert.equal((await (await request("/api/style-library/catalog?category=Shared&offset=1")).json()).styles.length, 0);
+  const clearSharedSetting = await fetch(api + "/api/style-library/storage", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ directory: "" }),
+  });
+  assert.equal(clearSharedSetting.status, 200);
+  assert.equal((await fetch(api + sharedImage.url)).status, 404);
   assert.equal(health.routes.createLook, true);
   assert.equal(health.routes.lookStyleBoard, true);
   const invalidCreatedLook = await fetch(api + "/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Missing images" }) });

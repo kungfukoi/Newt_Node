@@ -34,7 +34,7 @@ async function boundedBody(response, maximum) {
   for await (const chunk of response.body || []) { length+=chunk.length; if(length>maximum) { fail("StyleRef returned a file that is too large."); } chunks.push(chunk); }
   return Buffer.concat(chunks);
 }
-export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, cacheMs=300000 }={}) {
+export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, searchSharedCompact, cacheMs=300000 }={}) {
   const cache=new Map(), pending=new Map();let retryUntil=0;
   async function request(url, { binary=false }={}) {
     if(Date.now()<retryUntil)fail("StyleRef is rate limited. Wait before refreshing.",429,String(Math.ceil((retryUntil-Date.now())/1000)));
@@ -87,9 +87,12 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, cacheMs=3
     const warning=[remoteResult.status==="rejected"?`Online catalog unavailable: ${remoteResult.reason.message}`:"",createdResult.status==="rejected"?`Custom looks unavailable: ${createdResult.reason.message}`:""].filter(Boolean).join(" ");
     const words=q.toLowerCase().split(/\s+/).filter(Boolean);
     const local=created.filter(style=>(sharedOnly?shared:!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
-    const styles=[...local,...matched.styles],start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
+    const start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
+    const compact=sharedOnly?await searchSharedCompact?.({q,offset:Math.max(0,start-local.length),limit:size}):null;
+    const styles=[...local,...matched.styles].slice(start,start+size);
+    if(compact)styles.push(...compact.styles.slice(0,size-styles.length));
     return {ready:true,source:"styleref",sourceLabel:"StyleRef",sourceUrl:"https://styleref.io",attribution:"StyleRef.io",populating:false,truncated:matched.truncated,warning,
-      indexed:all.styles.length+created.length,remoteCount:all.styles.length,localCount:created.length,sharedCount:shared?created.length:0,total:styles.length,offset:start,limit:size,categories:[...new Set(["Shared",...(sharedOnly?cache.get("list::")?.value.styles||[]:all.styles).concat(created).map(style=>style.category).filter(Boolean)])].sort(),styles:styles.slice(start,start+size)};
+      indexed:all.styles.length+created.length+(compact?.indexed??0),remoteCount:all.styles.length,localCount:created.length,sharedCount:(shared?created.length:0)+(compact?.indexed??0),total:local.length+matched.styles.length+(compact?.total??0),offset:start,limit:size,categories:[...new Set(["Shared",...(sharedOnly?cache.get("list::")?.value.styles||[]:all.styles).concat(created).map(style=>style.category).filter(Boolean)])].sort(),styles};
   }
   async function detail(id) {
     if(!id?.startsWith(prefix)){

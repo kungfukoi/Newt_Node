@@ -3,6 +3,7 @@ import { createHash,randomUUID } from "node:crypto";
 import { mkdir,readFile,writeFile,rename,readdir,stat,realpath,rm } from "node:fs/promises";
 import sharp from "sharp";
 import { createCustomLookStore,prepareCustomLook } from "./custom-looks.js";
+import { createCompactStyleFinderReader } from "./stylefinder-compact.js";
 import { normalizeLibraryStyle } from "../src/styleLibrary.js";
 
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
@@ -20,12 +21,21 @@ export async function removeOriginalLookImage(url,uploadsDirectory){
 }
 export function createLookbookStorage({directory,cacheDirectory,readAsset,removeOriginal}){
   const local=createCustomLookStore({directory}),configPath=path.join(directory,"lookbook-storage.json"),aliasPath=path.join(directory,"lookbook-image-aliases.json"),assets=new Map();
+  const readCatalog=createCompactStyleFinderReader({shared:true});
   let queue=Promise.resolve(),aliasCache=null;
   function serial(action){const work=queue.then(action);queue=work.catch(()=>{});return work;}
   async function config(){try{const value=JSON.parse(await readFile(configPath,"utf8"));if(typeof value.directory!=="string")throw Error("Invalid Lookbook storage setting.");return value;}catch(error){if(error.code==="ENOENT")return {directory:""};throw error;}}
   async function rootAvailable(root){
     try{if(!(await stat(root)).isDirectory())throw Error("Not a directory");}
     catch{fail("The shared Lookbook folder is unavailable. Mount LucidLink or update its path in Settings → User Preferences. No look was saved locally instead.",503);}
+  }
+  async function openCompact(root,options){
+    try{return await readCatalog(root,options);}
+    catch{fail("The shared compact catalog could not be opened. Check that its folder is mounted and contains a valid catalog.json.",503);}
+  }
+  async function readSharedCompact(){
+    const setting=await config();
+    return setting.format==="compact"?openCompact(setting.directory):null;
   }
   async function record(root,id){
     const filename=path.join(root,"looks",id,"look.json"),info=await stat(filename);
@@ -111,18 +121,22 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     return images;
   }
   function add(source){return serial(async()=>{const setting=await config();if(!setting.directory)return local.add(source);const saved=await sharedAdd(setting.directory,source);await retireImages([source],[saved]);return saved;});}
-  async function state(){const setting=await config();return {directory:setting.directory,mode:setting.directory?"shared":"local",localCount:(await local.read()).length};}
+  async function state(){const setting=await config();return {directory:setting.directory,mode:setting.directory?"shared":"local",localCount:(await local.read()).length,...(setting.format==="compact"?{format:setting.format}:{})};}
   function configure(body={}){return serial(async()=>{
     if(typeof body.directory!=="string"||body.directory.length>4096)fail("Enter a folder path.");
     let root=body.directory.trim();
+    let compact;
     if(root){
       if(!path.isAbsolute(root)||root.includes("\0"))fail("Use the mounted folder's absolute filesystem path, not a lucid:// sharing link.");
       await rootAvailable(root);root=await realpath(root);
-      // Probe permissions without changing any existing shared records.
-      const probe=path.join(root,`.newt-lookbook-${randomUUID()}.tmp`);await writeFile(probe,"",{flag:"wx"});await rm(probe);
+      compact=await openCompact(root,{optional:true});
+      if(!compact){
+        // Legacy storage requires writes. Browsing a compact package only requires read access.
+        const probe=path.join(root,`.newt-lookbook-${randomUUID()}.tmp`);await writeFile(probe,"",{flag:"wx"});await rm(probe);
+      }
       if(body.copyLocal!==false)for(const look of await local.read())await sharedAdd(root,look);
     }
-    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root}),{mode:0o600});await rename(temporary,configPath);
+    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root,...(compact?{format:"compact"}:{})}),{mode:0o600});await rename(temporary,configPath);
     return state();
   });}
   function retireLocalCopies(){return serial(async()=>{
@@ -142,7 +156,7 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     await writeFile(temporary,JSON.stringify({version:1,id,deletedAt:new Date().toISOString()}),{mode:0o644});try{await rename(temporary,filename);}catch(error){await rm(temporary,{force:true});if(!await isDeleted(root,id))throw error;}
     return {id,removed:true};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove};
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,readSharedCompact};
 }
 export function registerLookbookStorageRoutes(app,store){
   const error=(res,e)=>res.status(e.status||500).json({error:e.status?e.message:"Could not access Lookbook storage. Check the folder and its permissions; the previous setting is unchanged."});

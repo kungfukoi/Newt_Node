@@ -5,6 +5,7 @@ const requiredHealthRoutes = [
   "styleLibrary",
   "lookbookStyleRef",
   "stylefinderAudition",
+  "lookbookSharedCompact",
   "createLook",
   "lookStyleBoard",
   "featureUsage",
