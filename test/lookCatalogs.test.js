@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { lookCatalogOptions, lookSaveOptions, starredCatalogLooks } from "../src/lookCatalogs.js";
 test("Catalog and Starred are always present; personal catalogs appear by name without duplicating Starred",()=>{
   const collections=[{id:"fav",name:"Starred",styles:[]},{id:"cinema",name:"Cinema",styles:[]}];
-  assert.deepEqual(lookCatalogOptions(collections).map(item=>item.label),["Catalog","StyleFinder (local audition)","Starred","Cinema"]);
-  assert.deepEqual(lookCatalogOptions([]).map(item=>item.label),["Catalog","StyleFinder (local audition)","Starred"]);
+  assert.deepEqual(lookCatalogOptions(collections).map(item=>item.label),["Catalog","StyleFinder","Starred","Cinema"]);
+  assert.deepEqual(lookCatalogOptions([]).map(item=>item.label),["Catalog","StyleFinder","Starred"]);
   assert.equal(lookSaveOptions(collections)[0].value,"fav");assert.equal(lookSaveOptions([])[0].label,"Starred");
 });
 test("Starred deduplicates saved copies and keeps an available saved analysis",()=>{

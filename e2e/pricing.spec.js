@@ -20,3 +20,40 @@ test("pricing refresh is opt-in and provider quotes update Run without generatin
  expect(requests.filter(r=>r.path==="/api/node/generate-image")).toHaveLength(0);expect(errors).toEqual([]);
  await page.screenshot({path:testInfo.outputPath("run-price.png")});
 });
+
+test("API Pricing reconciles Local Stats and an unpriced ledger row accepts a verified charge", async ({ page }) => {
+  const { errors } = await openFixture(page);
+  const history = ["estimate", "manual"].map(id => ({
+    id, createdAt: new Date().toISOString(), provider: "fal", modelName: id, mediaType: "video", cost: { amountUsd: null }
+  }));
+  await page.route("**/api/pricing", route => route.fulfill({ json: { enabled: false, running: false, sources: {}, catalog: { version: 1, entries: {} } } }));
+  await page.route("**/api/stats/local", route => route.fulfill({ json: { history } }));
+  await page.route("**/api/pricing/reconcile", route => {
+    expect(route.request().headers()["x-newt-local"]).toBe("1");
+    history[0].cost = { amountUsd: 0.5, estimated: true, pricingBasis: "Historical estimate" };
+    return route.fulfill({ json: { updated: 1, unpriced: 1, total: 2 } });
+  });
+  await page.route("**/api/pricing/record-charge", route => {
+    expect(route.request().postDataJSON()).toEqual({ provider: "fal", runId: "manual", amountUsd: 1.25 });
+    history[1].cost = { amountUsd: 1.25, estimated: false, pricingSource: "manual-provider-billing" };
+    return route.fulfill({ json: { cost: history[1].cost, historySynced: true } });
+  });
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Reconcile unpriced runs" }).click();
+  await expect(page.getByText("Priced 1 of 2 unpriced runs. 1 still unpriced in Local Stats.")).toBeVisible();
+  await page.getByRole("button", { name: "Stats", exact: true }).click();
+  const ledger = page.locator(".analytics-ledger");
+  await expect(ledger.getByText("Estimate / unverified")).toBeVisible();
+  await page.getByRole("button", { name: "Show all unpriced runs" }).click();
+  await expect(ledger.locator("tbody tr")).toHaveCount(1);
+  await ledger.locator("summary").click();
+  await ledger.getByLabel("Verified charge in USD").fill("1.25");
+  await ledger.getByRole("button", { name: "Record charge" }).click();
+  await expect(ledger.getByText("Recorded a $1.25 charge in Local Stats.")).toBeVisible();
+  await expect(ledger.locator("tbody tr")).toHaveCount(0);
+  await page.getByLabel("Cost / run state").selectOption("");
+  await expect(ledger.getByText("Manual charge")).toBeVisible();
+  await expect(ledger.getByText("$1.25", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});

@@ -72,11 +72,23 @@ permitted read-only provider queries. No service is provisioned and no local usa
 uploaded to a third party. Provider queries send date ranges and optional public IDs.
 Mock-based tests exercise provider contracts; real account queries were not performed.
 
-## Unpriced runs: findings and reconciliation design
+## Resolving unpriced runs
 
-The current `createHistoryPricing` reconciliation only visits retained recent history,
-not ledger-only runs. It fills text usage and selected Atlas media estimates. It does
-not recover original invoices; Atlas calculate quotes use current account rates.
+Settings → API Pricing checks rates for new estimates. **Reconcile unpriced runs**
+is a separate action available there and in Stats → Local. It uses the saved inputs
+for retained runs and the available rate catalog. Supported text usage and selected
+Atlas runs can be filled as historical estimates. Selected Atlas video runs can use
+the original saved inputs with a matching credential to request a current quote.
+The resulting estimates are labeled and written to Local Stats and recent History.
+
+Use **Show all unpriced runs** in the Local run ledger to find unresolved entries.
+Open **Details** on a run with a recorded ID and enter the verified USD charge
+from provider billing. This also works for ledger-only runs. A manual charge is
+labeled as such. Both actions preserve existing prices, including zero. They
+do not submit generation jobs. Global totals still come from provider queries.
+
+## Further billing recovery design
+
 `ProviderPricing.falCharge` attempts one immediate lookup after a request, so delayed
 billing or missing billing permissions leaves runs without a settled charge. The
 history store also refuses to replace existing estimates, although the ledger merge
@@ -110,7 +122,7 @@ then apply supported matches. Tests must cover delayed billing, account changes,
 multi-output requests, duplicate events, discounts, ledger-only runs and unavailable
 provider APIs. Every run can have an explicit pricing state; a guaranteed accurate
 numeric price is impossible when original usage/rates or billing evidence is missing.
-This design is investigated, not implemented; this UI change does not rewrite costs.
+The remaining provider-specific recovery and preview steps above are design notes.
 
 Sources checked: [Fal billing events](https://fal.ai/docs/platform-apis/v1/models/billing-events),
 [Atlas public billing API](https://www.atlascloud.ai/docs/public-api), and

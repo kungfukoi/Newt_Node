@@ -26,7 +26,13 @@ export function mergeStatsRecords(existing, incoming) {
     if (prior) {
       duplicates++;
       // Reconciliation may fill unknown costs; never replace a known charge with an estimate.
-      if (prior.cost.amountUsd !== null && !(prior.cost.estimated && row.cost.estimated === false && row.cost.amountUsd !== null)) continue;
+      const keepPrior = prior.cost.amountUsd !== null && !(prior.cost.estimated && row.cost.estimated === false && row.cost.amountUsd !== null);
+      records.set(id, {
+        ...(keepPrior ? prior : row),
+        videoDurationSeconds: prior.videoDurationSeconds ?? row.videoDurationSeconds,
+        fastMode: prior.fastMode || row.fastMode
+      });
+      continue;
     }
     records.set(id, row);
   }
@@ -45,19 +51,34 @@ export function createStatsLedger({ filePath, now = () => new Date().toISOString
       throw Object.assign(new Error("Accounting ledger unavailable; existing records preserved."), { status: 503 });
     }
   }
-  async function ingest(rows) {
-    const document = await read();
-    const merged = mergeStatsRecords(document.records, rows);
-    const next = { ...document, records: merged.records };
+  async function save(document, records) {
+    const next = { ...document, records };
     if (JSON.stringify(next) !== JSON.stringify(document) || !document.savedAt) {
       if (document.savedAt) await writeJsonAtomic(`${filePath}.bak`, document);
       next.savedAt = now(); await writeJsonAtomic(filePath, next);
     }
     return next;
   }
+  async function ingest(rows) {
+    const document = await read();
+    return save(document, mergeStatsRecords(document.records, rows).records);
+  }
   return {
     append: item => enqueue(() => ingest([item.id || item.generationRunId ? item : { ...item, id: `ledger-anonymous-${randomUUID()}` }])),
     snapshot: history => enqueue(() => ingest(history)),
+    recordCharge: (identity, cost) => enqueue(async () => {
+      const document = await read();
+      const index = document.records.findIndex(row => (row.generationRunId || row.id) && statsEventId(row) === identity);
+      if (index < 0) throw Object.assign(new Error("Run not found. Refresh Stats and try again."), { status: 404 });
+      const row = document.records[index];
+      if (row.cost.amountUsd !== null) {
+        if (row.cost.pricingSource === cost.pricingSource && row.cost.amountUsd === cost.amountUsd) return row.cost;
+        throw Object.assign(new Error("This run already has a recorded price. Refresh Stats to see it."), { status: 409 });
+      }
+      const updated = normalizeStatsRecord({ ...row, cost });
+      await save(document, document.records.with(index, updated));
+      return updated.cost;
+    }),
     // Preview is intentionally read-only. No imports are silently added to Local scope.
     preview: rows => enqueue(async () => mergeStatsRecords((await read()).records, rows))
   };

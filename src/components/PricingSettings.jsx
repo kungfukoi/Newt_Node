@@ -2,6 +2,7 @@ import React from "react";
 import { RefreshCcw } from "lucide-react";
 import { pricingApi } from "../api/newtApi.js";
 import { setPricingCatalog } from "../pricingCatalog.js";
+import { ReconcilePrices } from "./ReconcilePrices.jsx";
 
 const providerLabels = { fal: "Fal", krea: "Krea", atlas: "Atlas Cloud", openai: "OpenAI", google: "Google" };
 const date = (value) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat("en-US", {
@@ -65,6 +66,10 @@ export function PricingSettings() {
       <span>{state?.enabled ? "Daily refresh" : "Auto refresh off"}</span>
     </div>
     <div role="status" className="pricing-settings-status">{working ? "Checking official prices..." : error || state?.error || ""}</div>
+    <div>
+      <p>Rate checks update estimates for future runs. Reconciliation fills missing costs in Local Stats where saved run details support an estimate. Existing amounts are preserved.</p>
+      <div className="settings-actions"><ReconcilePrices disabled={!state || working} /></div>
+    </div>
     <details className="pricing-change-log"><summary>Pricing details</summary>
     <div className="pricing-provider-list">
       {active.map(([provider, label]) => {

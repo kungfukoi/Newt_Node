@@ -1,14 +1,22 @@
 # NewtNode Development Standards
 
+StyleFinder's Filter menu includes the original source categories and a Characters option when looks carry that tag. Search can narrow the Characters results or any source category. Other locally curated descriptive tags remain searchable without adding Filter choices.
+
+The optional compact StyleFinder source is a private, movable snapshot of the indexed catalog and effective curation. It preserves stable IDs, catalog order, displayed details, example order and bytes, and managed curated image URLs. A configured compact folder opens independently of the mirror and legacy override files.
+
 The main Catalog category filter includes Shared. This virtual category reads only the currently configured shared Lookbook store, excluding StyleRef, local custom storage, personal saved copies and local auditions. It keeps search/pagination and reports unavailable shared storage explicitly. Shared browsing makes no online catalog or paid provider requests; real Look categories remain unchanged.
 
 Saving the Shared Lookbook folder refreshes an already mounted main Catalog, including while Looks is hidden behind Settings. Clear stale transient selection/detail state and read the new shared records without requiring browser reload or paid work. Keep the current search/category filters and independent saved/local-audition views intact.
 
-StyleFinder (local audition) is a separate Looks source, using the standard paginated rail, category/search controls, full-image details, collections and explicit Style analysis. It reads an indexed Midlibrary mirror in place, with no source execution, remote browsing, automatic provider work or LucidLink promotion. A local metadata index avoids parsing thousands of HTML files on the app request path. Missing indexes or source folders show explicit errors. The audition has a separate `lookbookStyleFinderRows` preference; saved references still materialize through managed assets for portability.
+StyleFinder is a separate Looks source with the standard paginated rail, category/search controls, full-image details, collections and explicit Style analysis. It reads the configured compact catalog or the indexed Midlibrary mirror, with no source execution, remote browsing, automatic provider work or LucidLink promotion. The local metadata index avoids parsing thousands of HTML files on the app request path. Missing indexes or source folders show explicit errors. StyleFinder has a separate `lookbookStyleFinderRows` preference, and saved references materialize through managed assets for portability.
+
+Explicitly curated StyleFinder entries use a separate private local override, never edits to the downloaded mirror. Apply replacement examples and the authored visual prompt consistently in search, tiles and details, even after reindexing. Keep stable look identities and existing saved snapshots; preserve complete frame compositions and source credits. Do not carry old render codes, inferred palettes or paid-analysis results onto replacement images. Curation itself submits no paid analysis and does not publish reference images.
 
 The StyleRef look Real Moments (`9a2adtz6-cd8d77ee2f51`) is excluded from catalog browsing, search, category results and counts. Existing saved copies, detail lookup and workflow snapshots remain usable.
 
-Lookbook preview rail uses 207.375 px square thumbnails (25% smaller in width and height), with 239.375 px tile rows. Catalog, StyleFinder, Starred and named collections keep complete images, readable names and the existing row-count preferences and resize behavior. When more source results are available, More Styles is the final square tile inside the rail; it disables and shows Loading while appending the next page, and disappears when all results are loaded.
+Lookbook preview rail uses 207.375 px square thumbnails (25% smaller in width and height), with 239.375 px tile rows. Catalog, StyleFinder, Starred and named collections keep complete images, readable names and the existing row-count preferences and resize behavior. When the last loaded preview comes into view, the rail automatically appends the next page for the current source and filters while retaining the scroll position. The rail shows a loading message while fetching and stops at the end of the results. Use Refresh catalog to recover from a failed request.
+
+The preview rail uses a fixed-size shuttle in place of the native scrollbar. Pull left or right to scroll in that direction and farther from center to scroll faster. Releasing the handle stops scrolling and returns it to center. Holding a pull continues scrolling when another page arrives. The focused shuttle also supports the Left and Right arrow keys, and the rail supports direct trackpad and touch scrolling.
 
 Look details group collection/save destination, Mood Board, Style and custom Look deletion controls immediately beneath the example images, before the palette and descriptions. Confirmation stays with that action group; the title star and close control retain their header positions.
 
@@ -1391,6 +1399,10 @@ Project Canvases (4.44, SugerMilks 72c77e3): flat version-2 graph with per-node/
 
 
 ### Saved Astra look descriptions
+
+Use in Style takes its default grade reference from the first image in the open Look preview, preserving preview order when it imports or reuses managed examples. A previously saved analysis can be reused even if the saved images were in a different order. Existing workflow snapshots stay intact.
+
+Locking a Mood Board with four similarly shaped images (within 5% in aspect ratio) arranges them in two rows and two columns in upload order, without cropping or padding. Matching shapes get equal cells, including 16:9 and wider cinema formats.
 
 Looks first Use in Style (including selection in the Style node dropdown) analyzes the downloaded examples and catalog observations with pinned Astra through the configured LLM provider. Separate whole-image inputs and high reasoning identify transferable medium, palette, lighting, texture, edges and depth while excluding subjects, names and sample composition. Source observations remain in `prompt`; `styleAnalysis` stores the generated description and provenance. Snapshots prefer that description, preserve legacy workflow prompts, and never require another analysis for a saved description. New analyses require downloaded examples; failures preserve the current node and do not fall back to source prose. First use is labeled as paid; stars and Mood Board creation do not request analysis.
 

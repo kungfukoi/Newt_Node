@@ -1,10 +1,16 @@
 # NewtNode Architecture
 
+`stylefinder-catalog.js` derives category choices from the source index and created-look metadata. It also exposes Characters when the active tags include it. Both filtering and search use tags after local curation overrides are applied.
+
+`stylefinder-compact.js` opens a relocatable snapshot selected by `server/data/stylefinder-compact-source.json`. The offline packer freezes resolved list and detail data and saves the exact raster bytes in a hash-addressed image folder. Both readers use the same search and pagination function. The compact reader preserves existing catalog image URLs and serves packed curated images at their original managed URLs through HTTP and the local asset resolver.
+
+`stylefinder-overrides.js` reads an optional ignored local curation manifest alongside the audition index. Its mtime/size participates in the audition cache identity. Validated managed-upload references, authored prompts and credits overlay the stable source slug before search filtering and after live detail reads; raw mirror/index files remain untouched. Override image files use existing managed uploads/static serving and normal saved-look portability. Old source codes, palettes and analyses are cleared unless a new curated palette is supplied. These private overrides are separate from shared Lookbook storage and existing collection/workflow snapshots.
+
 `styleref-catalog.js` recognizes the virtual `category=Shared`, checks the custom store's actual storage mode, bypasses remote listing and filters/paginates only shared records. Responses include `sharedCount`; cached online categories remain available in the filter. Shared-store failures propagate instead of returning an empty successful result.
 
 The kept-alive `LibraryWorkspace` subscribes to `newtnode:lookbook-storage-updated`, emitted after a successful folder save. When browsing the main Catalog it clears transient details/selection and reloads catalog data with current filters, so changes made while Settings is visible reach the hidden rail immediately.
 
-`scripts/indexStyleFinder.mjs <mirror folder> <local data directory>` uses the existing inert StyleFinder parser to write ignored `stylefinder-audition.json` metadata without copying source files. `stylefinder-audition.js` reads that index and wraps `createStyleFinderCatalog` with a prebuilt snapshot, distinct `stylefinder-` identities and separate `/api/style-library/stylefinder` list/detail and `/api/style-library/stylefinder-image` routes. Images retain the legacy realpath confinement. StyleRef remains the main Catalog; the mirror is a separately selectable local audition. Reindex to include later mirror downloads.
+`scripts/indexStyleFinder.mjs <mirror folder> <local data directory>` uses the inert StyleFinder parser to write ignored `stylefinder-audition.json` metadata without copying source files. It follows the unfiltered catalog's local paging links and reads mirrored detail pages. `stylefinder-audition.js` reads that index and wraps `createStyleFinderCatalog` with a prebuilt snapshot, distinct `stylefinder-` identities and separate `/api/style-library/stylefinder` list/detail and `/api/style-library/stylefinder-image` routes. Each example resolves its original local image reference or a responsive variant from the same source element. The image route confines reads to the mirror's image directory and serves recognized raster signatures with their detected MIME type, including images stored with an `.html` extension by HTTrack. StyleRef remains the main Catalog. Reindex to include later mirror downloads or recover references omitted by earlier indexing.
 
 `styleref-catalog.js` excludes Real Moments by its stable source slug before listing cache, counts and pagination. Detail lookup remains available for existing saved Looks and workflows.
 
@@ -448,7 +454,9 @@ configured provider, credential, model and policy scope. See
 ## Spend analytics ownership
 
 `src/statsAnalytics.js` owns sanitized accounting records, composable filters and exact
-aggregation; `StatsDashboard.jsx` / `stats.css` own the Local/Global interface.
+aggregation. `StatsDashboard.jsx` / `stats.css` own the Local/Global workspace.
+`server/history-pricing.js` connects explicit reconciliation and manual USD charges
+to the durable ledger and retained History. Settings API Pricing owns rate refresh.
 `server/stats-ledger.js` retains accounting beyond the recent-history cache.
 `server/stats-providers.js` owns read-only official provider adapters and scope validation;
 `server/routes/stats.js` exposes local, account, export and readonly import-preview routes.
@@ -592,7 +600,9 @@ Looks first Use in Style (including selection in the Style node dropdown) analyz
 
 `server/look-analysis.js` validates bounded managed raster inputs, records provider/model/endpoint/usage/cost in History/Stats, and persists completed analysis under ignored `server/data/look-analyses/`, keyed by source image content, observations, pinned model and instruction version. Same-evidence in-flight requests coalesce; persisted cache survives restarts and collection-save conflicts. No automatic provider/model switch or client retry. Image resizing preserves whole examples at up to 2048px each; descriptive analysis improves evidence grounding, not a guarantee of generative style fidelity.
 
-Look details remain open after saving, creating a Mood Board or creating a Style node; nodes are added to the canvas without leaving Looks. Click example images for a contained larger preview with Previous/Next, arrow keys and Escape. Search has a clear button that restores input focus.
+Look details remain open after saving, creating a Mood Board or creating a Style node; nodes are added to the canvas without leaving Looks. Use in Style materializes examples in the open detail preview's order; an existing saved description is reused and matching imports are reused by catalog image URL. The workflow snapshot only needs the managed first image. Click example images for a contained larger preview with Previous/Next, arrow keys and Escape. Search has a clear button that restores input focus.
+
+`createMoodBoardLayout` in `src/canvasMedia.js` uses an ordered 2 × 2 partition for four references whose aspect ratios are within 5% of each other. Matching ratios get equal cells; slightly different ratios retain their own shape. Other sets use the existing layout scoring.
 
 Naming: top navigation remains **Looks**, the page heading is **Lookbook**, and the Style node dropdown is **Look**. Internal `library` identifiers remain compatible.
 

@@ -26,7 +26,11 @@ export function normalizeLibraryStyle(value = {}) {
       createdAt: text(value.styleAnalysis.createdAt, 40), version: Number(value.styleAnalysis.version) || 1
     } : null,
     sref: text(value.sref, 300), tags: (Array.isArray(value.tags) ? value.tags : []).map(tag => text(tag, 80)).filter(Boolean).slice(0, 40),
-    examples: (Array.isArray(value.examples) ? value.examples : []).filter(image => /^\/(uploads|workflow-assets|outputs)\//.test(image?.localUrl || "") && !image.localUrl.includes("..") && !/[?#\\]/.test(image.localUrl)).slice(0, 8).map(image => ({ id: text(image.id, 80), localUrl: image.localUrl, fileName: text(image.fileName, 200), mimeType: text(image.mimeType, 80) }))
+    examples: (Array.isArray(value.examples) ? value.examples : []).filter(image => /^\/(uploads|workflow-assets|outputs)\//.test(image?.localUrl || "") && !image.localUrl.includes("..") && !/[?#\\]/.test(image.localUrl)).slice(0, 8).map(image => {
+      // This is an identity for reusing an import, never a fetch target.
+      const catalogUrl = typeof image.catalogUrl === "string" && image.catalogUrl.length <= 2048 ? image.catalogUrl : "";
+      return { id: text(image.id, 80), localUrl: image.localUrl, fileName: text(image.fileName, 200), mimeType: text(image.mimeType, 80), ...(catalogUrl ? { catalogUrl } : {}) };
+    })
   };
 }
 export function portableStylePrompt(value = "") {
@@ -34,9 +38,9 @@ export function portableStylePrompt(value = "") {
 }
 export function libraryStyleSnapshot(style) {
   const value = normalizeLibraryStyle(style);
-  const gradeReference = value.examples[0] || normalizeLibraryStyle({ examples: [style?.gradeReference] }).examples[0];
+  const { catalogUrl: _catalogUrl, ...gradeReference } = value.examples[0] || normalizeLibraryStyle({ examples: [style?.gradeReference] }).examples[0] || {};
   return { id: value.id, name: value.name, prompt: lookStyleText(portableStylePrompt(value.styleAnalysis?.stylePrompt || value.prompt)), sourceUrl: value.sourceUrl, sref: value.sref,
-    ...(gradeReference ? { gradeReference } : {}) };
+    ...(gradeReference.localUrl ? { gradeReference } : {}) };
 }
 export function libraryPrompt(data = {}) { return portableStylePrompt(data.libraryStyle?.prompt); }
 export function libraryStylesMatching(styles, query = "") {

@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity, ArrowDownToLine, BarChart3, DollarSign, Globe2, HardDrive, RefreshCcw, SlidersHorizontal } from "lucide-react";
-import { statsApi } from "./api/newtApi.js";
+import { pricingApi, statsApi } from "./api/newtApi.js";
+import { ReconcilePrices } from "./components/ReconcilePrices.jsx";
 import { buildAnalytics, dateKey, defaultFilters, formatMoney, providerLabels, resolveDateRange } from "./statsAnalytics.js";
 import "./stats.css";
 
@@ -21,10 +22,11 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
   const [limit, setLimit] = React.useState(25);
   const [transferStatus, setTransferStatus] = React.useState("");
   const [comparison, setComparison] = React.useState(null);
+  const [chargeNotice, setChargeNotice] = React.useState("");
   const mounted = React.useRef(false), request = React.useRef(0), busy = React.useRef(false);
   const importInput = React.useRef(null);
-  const refresh = React.useCallback(async () => {
-    if (busy.current) return;
+  const refresh = React.useCallback(async ({ supersede = false } = {}) => {
+    if (busy.current && !supersede) return;
     busy.current = true; const id = ++request.current;
     setStatus(current => current === "loading" ? "loading" : "refreshing");
     try {
@@ -34,12 +36,12 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
       setData(result); setStatus("ready"); setError("");
     } catch {
       if (mounted.current && id === request.current) { setStatus("error"); setError("Local accounting could not refresh. Existing data may be stale. Records are preserved; retry when the server is available."); }
-    } finally { busy.current = false; }
+    } finally { if (id === request.current) busy.current = false; }
   }, [api]);
   React.useEffect(() => {
     mounted.current = true; refresh();
     const interval = window.setInterval(refresh, 30000);
-    return () => { mounted.current = false; request.current++; window.clearInterval(interval); };
+    return () => { mounted.current = false; request.current++; busy.current = false; window.clearInterval(interval); };
   }, [refresh]);
   React.useEffect(() => { setLimit(25); }, [filters]);
   const analytics = React.useMemo(() => buildAnalytics(data?.history || [], filters, new Date(), data?.keyIdentities || []), [data, filters]);
@@ -82,6 +84,14 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
     } catch { setTransferStatus("Import preview unavailable. Use a Newt accounting JSON export; nothing was changed."); }
   };
   const count = [filters.workflow, filters.provider, filters.model, filters.key, filters.status, filters.search].filter(Boolean).length;
+  const hasUnpriced = data?.history.some(row => row.cost?.amountUsd == null);
+  const refreshAfterPricing = () => refresh({ supersede: true });
+  function chargeRecorded(result) {
+    setChargeNotice(result.historySynced
+      ? `Recorded a ${formatMoney(result.cost.amountUsd)} charge in Local Stats.`
+      : "Charge saved in Local Stats. Run reconciliation to retry updating recent History.");
+    refreshAfterPricing();
+  }
 
   return <section className="stats-page analytics-page" aria-label="Spend analytics">
     <header className="stats-hero analytics-hero">
@@ -118,14 +128,24 @@ export default function StatsDashboard({ api = statsApi, demo = false } = {}) {
           <Metric icon={<DollarSign size={18}/>} label="Recorded spend" value={formatMoney(analytics.total)} detail={`${analytics.pricedCount} priced · ${analytics.unpricedCount} unpriced`}/>
           <Metric icon={<Activity size={18}/>} label="Runs / jobs" value={analytics.rows.length} detail="Recorded operations in this view"/>
           <Metric icon={<BarChart3 size={18}/>} label="Average / priced run" value={formatMoney(analytics.average)} detail="Unpriced records excluded"/>
-          <Metric icon={<DollarSign size={18}/>} label="Charge confidence" value={analytics.pricedCount ? `${formatMoney(analytics.actual)} reported` : "No priced records"} detail={`${formatMoney(analytics.estimated)} estimated or unverified`}/>
+          <Metric icon={<DollarSign size={18}/>} label="Charge confidence" value={analytics.pricedCount ? `${formatMoney(analytics.actual)} charges` : "No priced records"} detail={`${formatMoney(analytics.estimated)} estimated or unverified`}/>
         </div>
         {!analytics.rows.length && <div className="analytics-empty"><h2>{data?.history?.length ? "No runs match this view" : "Your first recorded run starts the story"}</h2><p>{data?.history?.length ? "Broaden a filter or change the date range." : "Records appear after generation. Missing historical amounts remain unpriced."}</p><button onClick={reset}>Reset all filters</button></div>}
         <div className="analytics-grid">
           <section className="stats-panel analytics-trend"><Panel title="Spend over time" aside="USD · recorded amounts"/><Trend days={analytics.days}/></section>
           <section className="stats-panel analytics-breakdown"><Panel title="Where it went" aside="Click a row to filter"/><div className="analytics-tabs" role="group" aria-label="Breakdown dimension">{["provider", "model", "workflow", "key"].map(id => <button key={id} aria-pressed={dimension === id} onClick={() => setDimension(id)}>{id === "key" ? "Keys" : id === "workflow" ? "Workflows" : `${labels[id]}s`}</button>)}</div><Breakdown rows={analytics.breakdowns[dimension]} onSelect={id => change(dimension, id)}/></section>
         </div>
-        <section className="stats-panel analytics-ledger"><Panel title="Run ledger" aside={`${Math.min(limit, analytics.rows.length)} of ${analytics.rows.length} matching records`}/><RunLedger rows={analytics.rows.slice(0, limit)}/>{limit < analytics.rows.length && <button className="analytics-load" onClick={() => setLimit(current => current + 25)}>Show 25 more runs</button>}</section>
+        <section className="stats-panel analytics-ledger">
+          <Panel title="Run ledger" aside={`${Math.min(limit, analytics.rows.length)} of ${analytics.rows.length} matching records`}/>
+          {!demo && data?.history.length > 0 && <div className="analytics-reconcile">
+            <p className="analytics-note">Reconciliation uses saved run details to fill missing prices across Local Stats. You can enter a verified USD charge on an individual unpriced run.</p>
+            <button className="analytics-load" disabled={!hasUnpriced} onClick={() => setFilters({ ...defaultFilters(), range: "all", status: "unpriced" })}>Show all unpriced runs</button>
+            <ReconcilePrices className="analytics-load" disabled={!hasUnpriced} onComplete={refreshAfterPricing} />
+          </div>}
+          {chargeNotice && <p role="status">{chargeNotice}</p>}
+          <RunLedger rows={analytics.rows.slice(0, limit)} onChargeRecorded={demo ? undefined : chargeRecorded}/>
+          {limit < analytics.rows.length && <button className="analytics-load" onClick={() => setLimit(current => current + 25)}>Show 25 more runs</button>}
+        </section>
         <details className="analytics-coverage"><summary>Coverage & portable accounting</summary><p>{data?.coverage?.note || "Retained history only; complete past billing cannot be reconstructed locally."}</p><p>Durable tracking began {readableDate(data?.coverage?.trackingStartedAt)}. {analytics.duplicates} duplicate records excluded; {analytics.invalidDates} records with invalid dates excluded from date views. Deleted recent history does not delete accounting records.</p><p>Workflow IDs distinguish same-named JSON files. Renames retain existing identity; Save As uses the app's new package identity. Legacy records without file/key attribution remain unknown.</p><div className="analytics-transfer"><button disabled={demo} onClick={exportRecords}><ArrowDownToLine size={15}/>Export local accounting</button><button disabled={demo} onClick={() => importInput.current?.click()}>Preview another machine's export</button><input ref={importInput} hidden type="file" accept=".json,application/json" onChange={previewImport}/></div><p role="status">{transferStatus}</p>{comparison && <ImportComparison comparison={comparison}/>}</details>
       </>}
     </> : <>
@@ -148,10 +168,64 @@ function Breakdown({ rows, onSelect }) {
   const max = Math.max(0.000001, ...rows.map(row => row.cost));
   return rows.length ? <div className="analytics-ranked">{rows.map(row => <button key={row.id} onClick={() => onSelect(row.id)}><span><strong>{row.name}</strong><small>{row.count} runs · {row.unpricedCount} unpriced</small></span><b>{row.pricedCount ? formatMoney(row.cost) : "Unpriced"}</b><i style={{ width: `${row.cost / max * 100}%` }}/></button>)}</div> : <p className="analytics-note">No spend breakdown in this view.</p>;
 }
-function RunLedger({ rows }) {
-  if (!rows.length) return <p className="analytics-note">No matching recorded runs.</p>;
-  return <div className="analytics-table-scroll"><table><caption className="analytics-sr-only">Recorded runs. Expand Details for attribution and pricing.</caption><thead><tr><th>Run / job</th><th>Workflow / file</th><th>Provider / key</th><th>Date</th><th>Recorded cost</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.provider}:${row.generationRunId || row.id}:${index}`}><td><details><summary><strong>{row.modelName}</strong><small>{row.mediaType} · {row.status} · Details</small></summary><dl><dt>Run ID</dt><dd>{row.generationRunId || "Not recorded"}</dd><dt>Request / record ID</dt><dd>{row.id || "Not recorded"}</dd><dt>Endpoint</dt><dd>{row.endpoint || "Not recorded"}</dd><dt>Workflow ID</dt><dd>{row.project.id}</dd><dt>Pricing basis</dt><dd>{row.cost.pricingBasis || "No verified basis recorded"}</dd><dt>Pricing source</dt><dd>{row.cost.pricingSource || "Unknown"}</dd><dt>Price checked</dt><dd>{row.cost.pricingCheckedAt ? readableDate(row.cost.pricingCheckedAt) : "Not recorded"}</dd></dl></details></td><td>{row.project.name}<small>{row.project.fileName || "JSON filename not recorded"}</small></td><td>{providerLabels[row.provider]}<small>{row.keyLabel}</small></td><td><time dateTime={row.createdAt}>{readableDate(row.createdAt)}</time></td><td><strong>{row.cost.amountUsd === null ? "Unpriced" : formatMoney(row.cost.amountUsd)}</strong><small>{row.cost.amountUsd === null ? "Billing details missing" : row.cost.estimated ? "Estimate / unverified" : "Provider reported"}</small></td></tr>)}</tbody></table></div>;
+function RunLedger({ rows, onChargeRecorded }) {
+  return <div className="analytics-table-scroll"><table>
+    <caption className="analytics-sr-only">Recorded runs. Expand Details for attribution and pricing.</caption>
+    <thead><tr><th>Run / job</th><th>Workflow / file</th><th>Provider / key</th><th>Date</th><th>Recorded cost</th></tr></thead>
+    <tbody>{rows.map((row, index) => {
+      const runId = row.generationRunId || row.id;
+      const unpriced = row.cost.amountUsd === null;
+      const chargeLabel = unpriced ? "Billing details missing" : row.cost.estimated ? "Estimate / unverified"
+        : row.cost.pricingSource === "manual-provider-billing" ? "Manual charge" : row.cost.pricingSource === "local" ? "Local" : "Provider reported";
+      return <tr key={`${row.provider}:${runId}:${index}`}>
+        <td><details><summary><strong>{row.modelName}</strong><small>{row.mediaType} · {row.status} · Details</small></summary>
+          <dl>
+            <dt>Run ID</dt><dd>{row.generationRunId || "Not recorded"}</dd>
+            <dt>Request / record ID</dt><dd>{row.id || "Not recorded"}</dd>
+            <dt>Endpoint</dt><dd>{row.endpoint || "Not recorded"}</dd>
+            <dt>Workflow ID</dt><dd>{row.project.id}</dd>
+            <dt>Pricing basis</dt><dd>{row.cost.pricingBasis || "No verified basis recorded"}</dd>
+            <dt>Pricing source</dt><dd>{row.cost.pricingSource || "Unknown"}</dd>
+            <dt>Price checked</dt><dd>{readableDate(row.cost.reconciledAt || row.cost.pricingCheckedAt)}</dd>
+          </dl>
+          {onChargeRecorded && unpriced && runId && <RecordRunCharge provider={row.provider} runId={runId} onRecorded={onChargeRecorded}/>}
+          {onChargeRecorded && unpriced && !runId && <p>A recorded run ID is needed to enter a charge.</p>}
+        </details></td>
+        <td>{row.project.name}<small>{row.project.fileName || "JSON filename not recorded"}</small></td>
+        <td>{providerLabels[row.provider]}<small>{row.keyLabel}</small></td>
+        <td><time dateTime={row.createdAt}>{readableDate(row.createdAt)}</time></td>
+        <td><strong>{unpriced ? "Unpriced" : formatMoney(row.cost.amountUsd)}</strong><small>{chargeLabel}</small></td>
+      </tr>;
+    })}</tbody>
+  </table></div>;
 }
+
+function RecordRunCharge({ provider, runId, onRecorded }) {
+  const [amount, setAmount] = React.useState("");
+  const [status, setStatus] = React.useState("idle");
+  const [error, setError] = React.useState("");
+  async function submit(event) {
+    event.preventDefault();
+    setStatus("saving");
+    setError("");
+    try {
+      const result = await pricingApi.recordCharge({ provider, runId, amountUsd: Number(amount) });
+      if (typeof result?.cost?.amountUsd !== "number") throw new Error("Restart Newt Node to enable manual charges.");
+      setStatus("saved");
+      onRecorded(result);
+    } catch (failure) {
+      setError(failure.message || "Could not record the charge.");
+      setStatus("idle");
+    }
+  }
+
+  return <form className="analytics-charge-form" onSubmit={submit}>
+    <label>Verified charge in USD<input type="number" min="0" step="any" required value={amount} disabled={status !== "idle"} onChange={event => setAmount(event.target.value)} /></label>
+    <button type="submit" className="analytics-load" disabled={!amount.trim() || status !== "idle"}>{status === "saving" ? "Saving…" : "Record charge"}</button>
+    {error && <p role="alert">{error}</p>}
+  </form>;
+}
+
 function GlobalAccounts({ data, stale }) {
   const ready = data.providers.filter(row => row.spend.status === "ready");
   const total = ready.length ? ready.reduce((sum, row) => sum + row.spend.amount, 0) : null;

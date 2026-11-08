@@ -2,6 +2,11 @@
 .analytics-page button, .analytics-page input, .analytics-page select { font: inherit; }
 .analytics-page button { cursor: pointer; }
 .analytics-page button:disabled { cursor: default; opacity: .5; }
+.analytics-reconcile { margin-bottom: 14px; }
+.analytics-reconcile .analytics-load { margin: 4px 0; }
+.analytics-charge-form { display: grid; gap: 8px; margin: 12px 0; justify-items: start; }
+.analytics-charge-form label { display: grid; gap: 5px; }
+.analytics-charge-form input { width: 12em; max-width: 100%; padding: 6px; color: inherit; background: #101112; border: 1px solid #494943; border-radius: 6px; }
 .analytics-page :is(button, input, select, summary, a):focus-visible { outline: 2px solid #f0d442; outline-offset: 4px; }
 .analytics-hero h1 { font-size: clamp(30px, 4vw, 48px); }
 .analytics-hero p { color: #bfbab0; margin: 12px 0 0; font-size: 14px; }

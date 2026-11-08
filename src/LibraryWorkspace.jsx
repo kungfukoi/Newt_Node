@@ -5,6 +5,7 @@ import { normalizeLibraryStyle, libraryStylesMatching, libraryStyleSnapshot, col
 import { displayMediaUrl } from "./mediaAssets.js";
 import "./LibraryWorkspace.css";
 import CollectionResizeHandle from "./components/CollectionResizeHandle.jsx";
+import LookbookShuttle from "./components/LookbookShuttle.jsx";
 import LookbookSelect from "./components/LookbookSelect.jsx";
 import CreateLookDialog from "./components/CreateLookDialog.jsx";
 import LookDetailExtras from "./components/LookDetailExtras.jsx";
@@ -69,7 +70,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
   const browserOptions=lookCatalogOptions(library?.collections);
   const saveOptions=lookSaveOptions(library?.collections);
-  const browserName=scope==="library" ? "Catalog" : scope==="stylefinder" ? "StyleFinder (local audition)" : scope==="starred" ? "Starred" : browseCollection?.name || "Catalog";
+  const browserName=browserOptions.find(option=>option.value===browserValue)?.label || "Catalog";
   function chooseCatalog(value) { request.current++;setCatalog(null);setCatalogLoading(false);setCatalogError("");setCategory("");if(value.startsWith("collection:")){setBrowseCollectionId(value.slice(11));setScope("collection");}else setScope(value); }
   const filterCategories=isSourceCatalog?(catalog?.categories||[]):[...new Set(sourceStyles.map(style=>style.category).filter(Boolean))].sort();
   const visibleStyles=isSourceCatalog ? sourceStyles : libraryStylesMatching(sourceStyles,query).filter(style=>!category||style.category===category||style.tags?.includes(category));
@@ -82,14 +83,40 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
     try { const value=await styleLibraryApi.read(); setLibrary(value); setCollectionId(current=>value.collections.some(item=>item.id===current)?current:lookSaveOptions(value.collections)[0].value); setBrowseCollectionId(current=>value.collections.some(item=>item.id===current)?current:value.collections[0]?.id||""); }
     catch(e) { setError(e.message); } finally { setBusy(false); }
   }
-  async function loadCatalog({offset=0,refresh=false,search=query,filter=category,source=scope}={}) {
+  const loadCatalog = React.useCallback(async ({offset=0,refresh=false,search=query,filter=category,source=scope}={}) => {
     const version=++request.current; setCatalogLoading(true); setCatalogError("");
-    try { const value=await styleLibraryApi.catalog({query:search,category:filter,offset,refresh,source}); if(version===request.current)setCatalog(current=>offset?{...value,styles:[...(current?.styles||[]),...value.styles]}:value); }
+    try {
+      const value=await styleLibraryApi.catalog({query:search,category:filter,offset,refresh,source});
+      if(version!==request.current)return;
+      if(offset && offset<value.total && !value.styles.length)throw new Error("Could not load more looks. Refresh the catalog to try again.");
+      if(!offset && frameRef.current)frameRef.current.scrollLeft=0;
+      setCatalog(current=>({
+        ...value,
+        viewKey:JSON.stringify([source,search,filter]),
+        styles:offset?[...current.styles,...value.styles]:value.styles,
+      }));
+    }
     catch(e) { if(version===request.current)setCatalogError(e.message); } finally { if(version===request.current)setCatalogLoading(false); }
-  }
+  },[query,category,scope]);
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{setSelectedLooks(new Map());},[scope,query,category,browseCollectionId]);
-  React.useEffect(()=>{if(!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[query,category,scope]);
+  React.useEffect(()=>{if(!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[isSourceCatalog,loadCatalog]);
+  const catalogViewKey=JSON.stringify([scope,query,category]);
+  React.useEffect(()=>{
+    if(!isSourceCatalog || catalogLoading || catalogError || catalog?.viewKey!==catalogViewKey) return;
+    const offset=catalog.styles.length;
+    if(!offset || offset>=catalog.total) return;
+    const strip=frameRef.current;
+    const lastTile=strip?.lastElementChild;
+    if(!lastTile) return;
+
+    const version=request.current;
+    const observer=new IntersectionObserver(([entry])=>{
+      if(entry.intersectionRatio>=0.99 && version===request.current)loadCatalog({offset});
+    },{root:strip,threshold:0.99});
+    observer.observe(lastTile);
+    return ()=>observer.disconnect();
+  },[isSourceCatalog,catalog,catalogLoading,catalogError,catalogViewKey,loadCatalog]);
   React.useEffect(()=>{
     const storageChanged=()=>{
       if(scope!=="library")return;
@@ -138,18 +165,20 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
       setNotice(`Deleted catalog ${target.name}.`);
     });
   }
-  async function materialize(style) {
+  async function materialize(style, savedExamples = []) {
     const examples=[];
+    const savedByUrl=new Map(savedExamples.filter(image=>image.catalogUrl).map(image=>[image.catalogUrl,image]));
     for(const image of (style.examples||[]).slice(0,8)) {
       if(image.localUrl){examples.push(image);continue;}
-      if(imported.current.has(image.url)){examples.push(imported.current.get(image.url));continue;}
+      const cached=savedByUrl.get(image.url)||imported.current.get(image.url);
+      if(cached){examples.push(cached);continue;}
       const response=await fetch(styleLibraryApi.catalogAssetUrl(image.url));
       if(!response.ok)throw new Error("Could not import this example image. Refresh the catalog and try again.");
       const file=new File([await response.blob()],image.fileName||"style-example.jpg",{type:response.headers.get("content-type")||"image/jpeg"});
       const form=new FormData();form.append("nodeType","transfer");form.append("asset",file);
       const {response:upload,data}=await nodeApi.uploadAsset(form);
       if(!upload.ok||!data.asset?.localUrl)throw new Error(data.error||"Could not import this example.");
-      const asset={...data.asset,id:crypto.randomUUID()};examples.push(asset);imported.current.set(image.url,asset);
+      const asset={...data.asset,id:crypto.randomUUID(),catalogUrl:image.url};examples.push(asset);imported.current.set(image.url,asset);
     }
     return normalizeLibraryStyle({...style,examples});
   }
@@ -192,7 +221,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
       const additions=[];
       for(const style of styles.filter(item=>!collection?.styles.some(saved=>sameLook(saved,item)))) {
         const existing=library.collections.flatMap(item=>item.styles).find(saved=>sameLook(saved,style));
-        const source=existing || (style.catalog?(await styleLibraryApi.detail(style.id)).style:style);
+        const source=existing || (style.catalog&&style!==activeStyle?(await styleLibraryApi.detail(style.id)).style:style);
         additions.push({...await materialize(source),id:crypto.randomUUID()});
       }
       if(!additions.length){setNotice("These styles are already in this collection.");succeeded=true;return;}
@@ -217,10 +246,13 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   async function createStyleNode(style) {
     await act(async () => {
       if (!library) throw new Error("Wait for your library to load before creating a Style node.");
-      const source = style.catalog ? (await styleLibraryApi.detail(style.id)).style : style;
-      const existingCollection = library.collections.find(item => item.styles.some(saved => sameLook(saved, source)));
-      const existing = existingCollection?.styles.find(saved => sameLook(saved, source));
-      const local = await materialize(existing || source);
+      // The open details supply the exact examples the user sees. A saved
+      // copy can supply its analysis and matching assets, but not their order.
+      const matches = saved => style.catalog ? sameLook(saved, style) : saved.id === style.id;
+      const existingCollection = library.collections.find(item => item.styles.some(matches));
+      const existing = existingCollection?.styles.find(matches);
+      const local = await materialize(style, existing?.examples);
+      if (!local.styleAnalysis?.stylePrompt && existing?.styleAnalysis?.stylePrompt) local.styleAnalysis = existing.styleAnalysis;
       if (!local.styleAnalysis?.stylePrompt) {
         setNotice("This is the first time this Look has been used as a Style, Analyzing the examples and observations.  The Style will be saved for reuse.");
         local.styleAnalysis = await styleLibraryApi.analyze(local);
@@ -232,14 +264,14 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
       await save(collections.map(item => item.id === target.id ? { ...item, styles } : item));
       if (!collectionId) setCollectionId(target.id);
       if (!browseCollectionId) setBrowseCollectionId(target.id);
-      setActiveStyle(current => current && sameLook(current, source) ? { ...current, styleAnalysis: savedStyle.styleAnalysis } : current);
+      setActiveStyle(current => current && sameLook(current, style) ? { ...current, styleAnalysis: savedStyle.styleAnalysis } : current);
       setNotice(local.styleAnalysis.warning || `Created ${savedStyle.name} Style node. Its description is saved for reuse.`);
       onCreateStyle(libraryStyleSnapshot(savedStyle));
     });
   }
   async function addToBoard(styles) {
     await act(async()=>{
-      const local=await Promise.all(styles.map(materialize));
+      const local=await Promise.all(styles.map(style=>materialize(style)));
       const examples=collectionExamples(local).slice(0,6);
       if(!examples.length)throw new Error("This look has no reference images to use in a mood board.");
       const prompt=styles.map(style=>libraryStyleSnapshot(style).prompt||style.notes).filter(Boolean).join("\n\n");
@@ -252,17 +284,18 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
     {error&&<div className="library-error" role="alert">{error}<button disabled={busy} onClick={loadLibrary}>Retry</button></div>}{notice&&<p className="stylebuilder-notice" role="status">{notice}</p>}
     <section className="stylebuilder-browse" aria-label="Looks catalog"><div className="stylebuilder-browse-toolbar"><p>Explore the catalog. <span>Choose a look</span></p><div className="stylebuilder-browse-controls"><button className="lookbook-compact-action" disabled={busy||!library||library.collections.length>=100} onClick={()=>setCreatingCatalog(value=>!value)}>New Catalog</button><LookbookSelect label="Looks source" value={browserValue} onChange={chooseCatalog} options={browserOptions}/><label className="stylebuilder-search"><Search size={18}/><input ref={searchInput} aria-label="Search looks" placeholder="Search looks" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="stylebuilder-search-clear" aria-label="Clear look search" onClick={()=>{setQuery("");searchInput.current?.focus();}}><X size={15}/></button>}</label><button className="stylebuilder-icon" aria-label="Refresh catalog" title="Refresh the look catalog" disabled={catalogLoading} onClick={()=>loadCatalog({refresh:true})}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button></div></div>
     {creatingCatalog&&<form className="library-inline look-collection-form" onSubmit={async event=>{event.preventDefault();if(await createCatalog(newCatalogName)){setCreatingCatalog(false);setNewCatalogName("");}}}><label>Catalog name<input autoFocus maxLength={120} disabled={busy} value={newCatalogName} onChange={event=>setNewCatalogName(event.target.value)} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setCreatingCatalog(false);}}}/></label><button type="submit" className="library-primary" disabled={busy||!newCatalogName.trim()}>Create Catalog</button><button type="button" disabled={busy} onClick={()=>setCreatingCatalog(false)}>Cancel</button></form>}
-      <div className="stylebuilder-catalog-meta"><span>{scope==="library"?category==="Shared"?`${catalog?.total??0} shared ${catalog?.total===1?"look":"looks"}`:`${catalog?.remoteCount??catalog?.indexed??0} StyleRef looks${catalog?.localCount?` · ${catalog.localCount} custom`:""}`:scope==="stylefinder"?`${catalog?.total??0} StyleFinder looks · local audition`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
+      <div className="stylebuilder-catalog-meta"><span>{scope==="library"?category==="Shared"?`${catalog?.total??0} shared ${catalog?.total===1?"look":"looks"}`:`${catalog?.remoteCount??catalog?.indexed??0} StyleRef looks${catalog?.localCount?` · ${catalog.localCount} custom`:""}`:scope==="stylefinder"?`${catalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
       {scope==="library"&&catalog?.truncated&&<p className="library-muted">StyleRef has reached its gallery browsing limit. Refine your search to explore more looks.</p>}
       {catalogError&&isSourceCatalog&&<p className="library-error" role="alert">{catalogError}</p>}
       {catalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{catalog.warning}</p>}
       {canDeleteCatalog&&<div className="library-inline" style={{justifyContent:"flex-end",marginBottom:12}}>{deletingCatalog===browseCollection.id?<><span>Delete “{browseCollection.name}” and its saved memberships? Original looks, other collections and workflow nodes are kept.</span><button className="lookbook-compact-action" disabled={busy} onClick={deleteCatalog}>Confirm delete</button><button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog("")}>Cancel</button></>:<button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog(browseCollection.id)}>Delete Catalog</button>}</div>}
       <div key={`strip:${browserValue}`} ref={frameRef} data-row-count={frameRows} className={`stylebuilder-style-strip ${resizable ? `collection-grid ${!visibleStyles.length ? "collection-grid-empty" : ""}` : ""}`} style={resizable ? {"--collection-rows":frameRows,"--collection-row-height":`${collectionRowHeight}px`,"--collection-row-gap":`${collectionRowGap}px`,"--collection-frame-chrome":`${collectionFrameChrome}px`} : undefined} aria-label="Style previews" tabIndex={0}>
         {visibleStyles.map(style=><article className="stylebuilder-tile" key={keyOf(style)} onPointerEnter={()=>preloadMosaic(style)} onFocusCapture={()=>preloadMosaic(style)}><label className="stylebuilder-tile-selection"><input type="checkbox" aria-label={`Select ${style.name}`} checked={selectedLooks.has(keyOf(style))} onChange={event=>{const checked=event.target.checked;setSelectedLooks(current=>{const next=new Map(current);if(checked)next.set(keyOf(style),style);else next.delete(keyOf(style));return next;});}}/></label><button className="stylebuilder-tile-open" onClick={()=>openDetails(style)} aria-label={`View ${style.name}`}><StyleMosaic style={mosaicDetails.has(style.id)?{...style,examples:mosaicDetails.get(style.id)}:style}/><span className="stylebuilder-tile-name">{style.sref?.replace(/^--sref\s+/,"")||style.name}</span></button><button className={`stylebuilder-tile-star ${isSaved(style)?"saved":""}`} aria-label={`${isSaved(style)?"Remove from collection":"Save to collection"}: ${style.name}`} aria-pressed={isSaved(style)} title={isSaved(style)?"Unstar and remove from your collection":"Save to your collection"} disabled={busy||!library} onClick={()=>toggleSavedLook(style)}><Star size={16} fill={isSaved(style)?"currentColor":"none"}/></button></article>)}
-        {isSourceCatalog&&catalog&&catalog.styles.length<catalog.total&&<button type="button" className="stylebuilder-load-more" aria-label="More Styles" aria-busy={catalogLoading} disabled={catalogLoading} onClick={()=>loadCatalog({offset:catalog.styles.length})}><ArrowRight size={28} aria-hidden="true"/><span>{catalogLoading?"Loading…":"More Styles"}</span></button>}
         {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{catalogLoading?"Loading looks…":isSourceCatalog&&!catalog?.ready?"The catalog is not available yet. Refresh to retry.":"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog("library")}>Browse catalog <ArrowRight size={15}/></button>}</div>}
       </div>
+      <LookbookShuttle key={`shuttle:${browserValue}`} frameRef={frameRef} previewCount={visibleStyles.length} rows={frameRows}/>
       {resizable&&<CollectionResizeHandle key={`resize:${browserValue}`} rows={frameRows} frameRef={frameRef} label={browserName} onChange={changeFrameRows}/>}
+      {isSourceCatalog&&catalogLoading&&visibleStyles.length>0&&<p className="library-muted" role="status">Loading looks…</p>}
     </section>
     <div className="lookbook-selection-actions"><span className="library-muted">{selectedLooks.size ? `${selectedLooks.size} selected` : ""}</span><div className="library-inline"><button disabled={busy||!library||!selectedLooks.size} onClick={async()=>{if(await saveReferences([...selectedLooks.values()]))setSelectedLooks(new Map());}}>Add to collection</button>{library&&<fieldset disabled={busy}><LookbookSelect label="Add to collection destination" value={collectionId} onChange={setCollectionId} options={saveOptions}/></fieldset>}<button className="library-primary lookbook-compact-action" onClick={()=>setCreatingLook(true)}>Create Look</button></div></div>
     <CreateLookDialog open={creatingLook} categories={catalog?.categories} onClose={()=>setCreatingLook(false)} onSaved={style=>{setQuery("");setCategory("");setScope("library");setNotice(`Saved ${style.name} to the catalog.`);loadCatalog({refresh:true,search:"",filter:"",source:"library"});}}/>

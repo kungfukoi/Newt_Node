@@ -121,6 +121,7 @@ try {
   assert.equal(health.routes.lookStyleAnalysis, true);
   assert.equal(health.routes.lookbookStyleRef, true);
   assert.equal(health.routes.stylefinderAudition,true);
+  assert.equal(health.routes.stylefinderCompact,true);
   const missingStyleFinder=await fetch(`${api}/api/style-library/stylefinder`);
   assert.equal(missingStyleFinder.status,503);
   assert.match((await missingStyleFinder.json()).error,/local StyleFinder audition is unavailable/);
@@ -198,6 +199,19 @@ try {
   assert.equal(priceStatus.catalog.version, 1);
   const pricingWrite = await fetch(api + "/api/pricing/settings", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:true})});
   assert.equal(pricingWrite.status, 403);
+  assert.equal((await (await request("/api/health")).json()).routes.statsPriceReconciliation, true);
+  const pricingAction = (action, body) => fetch(api + "/api/pricing/" + action, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: JSON.stringify(body)
+  });
+  const reconciliation = await pricingAction("reconcile", {});
+  assert.equal(reconciliation.status, 200);
+  assert.deepEqual(await reconciliation.json(), { updated: 0, unpriced: 1, total: 1 });
+  const charge = await pricingAction("record-charge", { provider: "unknown", runId: "smoke-generation", amountUsd: 0.25 });
+  assert.equal(charge.status, 200);
+  assert.equal((await charge.json()).historySynced, true);
+  assert.equal((await (await request("/api/stats/local")).json()).history[0].cost.amountUsd, 0.25);
+  assert.equal((await (await request("/api/history")).json())[0].cost.pricingSource, "manual-provider-billing");
+  assert.equal((await pricingAction("record-charge", { provider: "unknown", runId: "smoke-generation", amountUsd: 2 })).status, 409);
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);

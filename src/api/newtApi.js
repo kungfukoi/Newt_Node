@@ -872,6 +872,18 @@ export const pricingApi = {
       method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: JSON.stringify({ enabled })
     }, "Pricing settings");
     return ensureOk(response, data, "Could not save pricing settings.");
+  },
+  async reconcile() {
+    const { response, data } = await fetchJsonApi("/api/pricing/reconcile", {
+      ...jsonBody({}), headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }
+    }, "Reconcile unpriced runs", { retryLocalApi: false, timeoutMs: 60000 });
+    return ensureOk(response, data, "Could not reconcile unpriced runs.");
+  },
+  async recordCharge(charge) {
+    const { response, data } = await fetchJsonApi("/api/pricing/record-charge", {
+      ...jsonBody(charge), headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }
+    }, "Record USD charge", { retryLocalApi: false, timeoutMs: 60000 });
+    return ensureOk(response, data, "Could not record this charge.");
   }
 };
 

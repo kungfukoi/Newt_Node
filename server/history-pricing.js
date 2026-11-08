@@ -1,5 +1,7 @@
 import { recordedCostAmount, catalogTokenCost, getPricingCatalog } from "../src/pricingCatalog.js";
 import { estimateAtlasVideoCost, estimateAtlasImageCost } from "../src/atlasPricing.js";
+import { statsEventId } from "./stats-ledger.js";
+import { providerLabels, recordedAmount } from "../src/statsAnalytics.js";
 
 // Never replace recorded money with today's rates. Historical estimates are an
 // explicit reconciliation operation, distinct from ordinary history reads.
@@ -31,30 +33,79 @@ export function completeGenerationCost(item, snapshot = getPricingCatalog()) {
     pricingBasis: cost?.pricingBasis || item.cost?.pricingBasis || "Provider charge or sufficient billing settings were not returned." };
 }
 
-export function createHistoryPricing({ store, snapshot, quoteAtlas = async () => null }) {
+export function createHistoryPricing({ store, ledger, snapshot, quoteAtlas = async () => null }) {
   let pending;
+  let operations = Promise.resolve();
+  function enqueue(operation) {
+    const result = operations.then(operation);
+    operations = result.catch(() => {});
+    return result;
+  }
   async function reconcile() {
     const history = await store.read();
+    const before = await ledger.snapshot(history);
+    const ledgerCosts = new Map(before.records.filter(row => row.cost.amountUsd !== null).map(row => [statsEventId(row), row.cost]));
     const prices = snapshot();
     const updates = new Map();
+    const estimated = new Set();
     const checkedAt = new Date().toISOString();
+    const quoteDeadline = Date.now() + 20000;
     for (const item of history) {
-      if (recordedCostAmount(item.cost) !== null) continue;
+      const identity = statsEventId(item);
+      if (!(item.generationRunId || item.id) || recordedCostAmount(item.cost) !== null || updates.has(identity)) continue;
+      const ledgerCost = ledgerCosts.get(identity);
+      if (ledgerCost) {
+        updates.set(identity, ledgerCost);
+        continue;
+      }
       let cost = completeGenerationCost(item, prices);
       // Serialized lookups avoid a burst of provider requests. Only original,
       // saved inputs may be quoted; never synthesize reference media.
-      if (item.provider === "Atlas Cloud" && item.mediaType === "video") {
+      if (recordedCostAmount(cost) === null && item.provider === "Atlas Cloud" && item.mediaType === "video" && Date.now() < quoteDeadline) {
         const quote = await quoteAtlas(item).catch(() => null);
         if (recordedCostAmount(quote) !== null) cost = { ...cost, ...quote };
       }
       if (recordedCostAmount(cost) === null) continue;
-      updates.set(item.id, { ...cost, reconciledAt: checkedAt, previousCost: item.cost ?? null,
+      estimated.add(identity);
+      updates.set(identity, { ...cost, reconciledAt: checkedAt, previousCost: item.cost ?? null,
         ...(cost.pricingStatus === "local" ? {} : { estimated: true, pricingStatus: "estimated",
           pricingBasis: "Historical estimate using the recorded price source and current account rates where quoted; not the original billed charge. " + cost.pricingBasis }) });
     }
-    const saved = await store.updateCosts(updates);
-    return { updated: saved.filter(item => updates.has(item.id) && item.cost?.reconciledAt === checkedAt).length,
-      unpriced: saved.filter(item => recordedCostAmount(item.cost) === null).length, total: saved.length };
+    const saved = await store.updateCosts(updates, statsEventId);
+    const retained = new Set(saved.map(statsEventId));
+    const evicted = history.flatMap(item => {
+      const identity = statsEventId(item);
+      const cost = updates.get(identity);
+      return cost && !retained.has(identity) ? [{ ...item, cost }] : [];
+    });
+    const after = await ledger.snapshot([...saved, ...evicted]);
+    return { updated: after.records.filter(row => estimated.has(statsEventId(row)) && row.cost.reconciledAt === checkedAt).length,
+      unpriced: after.records.filter(row => row.cost.amountUsd === null).length, total: after.records.length };
   }
-  return { reconcile: () => pending ||= reconcile().finally(() => { pending = null; }) };
+
+  async function recordCharge(input) {
+    const { provider, runId, amountUsd } = input || {};
+    if (typeof provider !== "string" || !Object.hasOwn(providerLabels, provider) || typeof runId !== "string" ||
+        !runId.trim() || runId.length > 300 || typeof amountUsd !== "number" || recordedAmount({ amountUsd }) === null) {
+      throw Object.assign(new Error("Choose a recorded run and enter a valid non-negative USD charge."), { status: 400 });
+    }
+    const identity = statsEventId({ provider, id: runId });
+    const history = await store.read();
+    await ledger.snapshot(history);
+    const cost = await ledger.recordCharge(identity, {
+      amountUsd, currency: "USD", estimated: false, pricingSource: "manual-provider-billing",
+      pricingBasis: "USD charge entered from provider billing for this run.",
+      pricingCheckedAt: new Date().toISOString()
+    });
+    // The ledger is authoritative. A retry with the same charge can repair a failed History write.
+    let historySynced = true;
+    try { await store.updateCosts(new Map([[identity, cost]]), statsEventId); }
+    catch { historySynced = false; }
+    return { cost, historySynced };
+  }
+
+  return {
+    reconcile: () => pending ||= enqueue(reconcile).finally(() => { pending = null; }),
+    recordCharge: input => enqueue(() => recordCharge(input))
+  };
 }

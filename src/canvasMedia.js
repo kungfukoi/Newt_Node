@@ -36,10 +36,16 @@ export function createMoodBoardLayout(images) {
     index,
     ratio: imageAspectRatio(image)
   }));
+  // Keep four like-shaped references balanced, including widescreen exports
+  // with slightly different dimensions. Fit each at its own native aspect.
+  const ratios = items.map(item => item.ratio);
+  const balancedGrid = items.length === 4 && Math.max(...ratios) <= Math.min(...ratios) * 1.05;
+  const partitions = balancedGrid ? [[2, 2]] : moodBoardRowPartitions(items.length);
+  const orders = balancedGrid ? [items] : moodBoardOrders(items);
   let bestCandidate = null;
 
-  moodBoardOrders(items).forEach((orderedItems, orderIndex) => {
-    moodBoardRowPartitions(orderedItems.length).forEach((rowLengths) => {
+  orders.forEach((orderedItems, orderIndex) => {
+    partitions.forEach((rowLengths) => {
       const rows = [];
       let cursor = 0;
       rowLengths.forEach((length) => {

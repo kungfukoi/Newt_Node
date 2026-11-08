@@ -9,7 +9,7 @@ import { registerLookAnalysisRoutes } from "./look-analysis.js";
 import { registerCustomLookRoutes } from "./custom-looks.js";
 import { createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage } from "./lookbook-storage.js";
 import { registerStyleRefCatalogRoutes } from "./styleref-catalog.js";
-import { registerStyleFinderAuditionRoutes } from "./stylefinder-audition.js";
+import { createStyleFinderAudition, registerStyleFinderAuditionRoutes, registerStyleFinderCuratedImages } from "./stylefinder-audition.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
@@ -883,6 +883,8 @@ process.on("message", (message) => {
 });
 app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
 app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
+const styleFinderAudition = createStyleFinderAudition({ directory: dataDir });
+registerStyleFinderCuratedImages(app, styleFinderAudition);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -974,12 +976,13 @@ registerCoreRoutes(app, {
 });
 
 registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing({
-  store: historyStore, snapshot: () => pricingRefresh.snapshot(),
+  store: historyStore, ledger: statsLedger, snapshot: () => pricingRefresh.snapshot(),
   quoteAtlas: async (item) => {
     if (!item.generationRunId || !process.env.ATLAS_API_KEY) return null;
     const name = createHash("sha256").update(item.generationRunId).digest("hex");
     const spec = JSON.parse(await readFile(path.join(dataDir, "remote-video-jobs.json.d", name + ".spec.json"), "utf8"));
-    if (spec.provider !== "atlas" || spec.input?.model !== item.endpoint) return null;
+    if (spec.provider !== "atlas" || spec.input?.model !== item.endpoint ||
+        spec.credentialFingerprint !== providerKeyFingerprint(process.env.ATLAS_API_KEY)) return null;
     // Explicit historical reconciliation quotes saved inputs at current account rates.
     return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
   }
@@ -1095,7 +1098,7 @@ registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses")
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
 registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore });
-registerStyleFinderAuditionRoutes(app, { directory: dataDir });
+registerStyleFinderAuditionRoutes(app, { directory: dataDir }, styleFinderAudition);
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
@@ -1373,6 +1376,7 @@ function buildHealthPayload() {
       styleLibrary: true,
       lookStyleAnalysis: true,
       stylefinderAudition: true,
+      stylefinderCompact: true,
       createLook: true,
       lookStyleBoard: true,
       lookbookStyleRef: true,
@@ -1398,6 +1402,7 @@ function buildHealthPayload() {
       skillDirector: true,
       storyboardQc: true,
       providerPricing: true,
+      statsPriceReconciliation: true,
       spendAnalytics: true,
       storyboardSequenceReview: true,
       newtPresets: true,
@@ -22476,6 +22481,8 @@ function localPublicPathFromUrl(value) {
 }
 
 async function resolveLocalAssetPath(publicPath) {
+  const curated = await styleFinderAudition.curatedAsset(publicPath);
+  if (curated) return {filePath:curated.filename,fileName:path.basename(publicPath)};
   if(String(publicPath||"").startsWith("/uploads/shared-looks/"))await createdLookStore.ensureAsset(publicPath);
   const sharedAlias=await createdLookStore.assetAlias(publicPath);
   if(sharedAlias)return {filePath:await createdLookStore.ensureAsset(sharedAlias),fileName:path.basename(publicPath)};

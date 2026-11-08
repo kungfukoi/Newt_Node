@@ -20,6 +20,19 @@ export function recordedAmount(cost) {
   if (!(typeof value === "number" || typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) return null;
   return Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 }
+
+function videoDurationSeconds(item) {
+  const recorded = [item.videoDurationSeconds, item.video?.duration, item.durationSeconds,
+    item.settings?.durationSeconds, item.settings?.duration, item.cost?.durationSeconds];
+  for (const value of recorded) {
+    if (typeof value !== "number" && typeof value !== "string") continue;
+    const match = String(value).trim().match(/^(\d+(?:\.\d+)?)(?:\s*(?:s|seconds?))?$/i);
+    const seconds = Number(match?.[1]);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  }
+  return null;
+}
+
 export function normalizeStatsRecord(item = {}) {
   const provider = canonicalProvider(item.provider);
   const fingerprint = String(item.keyIdentity?.fingerprint || "");
@@ -31,12 +44,15 @@ export function normalizeStatsRecord(item = {}) {
     id: safeLabel(item.id), generationRunId: safeLabel(item.generationRunId), createdAt,
     provider, modelName: safeLabel(item.modelName || "Unknown model"),
     mediaType: ["image", "video", "text", "audio", "model3d"].includes(item.mediaType) ? item.mediaType : "other",
+    videoDurationSeconds: item.mediaType === "video" ? videoDurationSeconds(item) : null,
+    fastMode: item.mediaType === "video" && (item.fastMode === true || item.settings?.speed === "fast" || /(?:\/|[-_])fast(?:\/|$)/i.test(String(item.endpoint || ""))),
     project: { id: workflowId, name: safeLabel(item.project?.name || item.workflow?.name || "Unassigned workflow"), fileName: safeLabel(String(item.project?.fileName || item.workflow?.fileName || "").split(/[\\/]/).at(-1)) },
     keyIdentity: keyId === "unknown" ? null : { fingerprint }, keyId,
     keyLabel: keyId === "unknown" ? "Unknown key (legacy / unattributed)" : `${providerLabels[provider]} key ${fingerprint.slice(0, 10)}`,
     status: safeLabel(item.status || "completed"), endpoint: safeLabel(item.endpoint),
     cost: { amountUsd, currency: "USD", estimated: amountUsd === null ? null : item.cost?.estimated !== false,
-      pricingBasis: safeLabel(item.cost?.pricingBasis), pricingSource: safeLabel(item.cost?.pricingSource), pricingCheckedAt: safeLabel(item.cost?.pricingCheckedAt) }
+      pricingBasis: safeLabel(item.cost?.pricingBasis), pricingSource: safeLabel(item.cost?.pricingSource), pricingCheckedAt: safeLabel(item.cost?.pricingCheckedAt),
+      reconciledAt: safeLabel(item.cost?.reconciledAt) }
   };
 }
 
