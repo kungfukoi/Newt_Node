@@ -24,13 +24,18 @@ test("Kling 4.0 is independently enabled only through selected Fal/Atlas routes"
 });
 
 for (const provider of ["fal", "atlas"]) {
-  test(`${provider} maps frames, settings, result identity and unpriced Stats without fallback`, async () => {
+  test(`${provider} maps frames, result identity and provider-specific pricing`, async () => {
     const uploads = [], calls = [];
     const result = await generateKling4(body, provider, {
       isManagedUrl: url => url.startsWith("/uploads/"),
       upload: async url => { uploads.push(url); return `https://example.test${url}`; },
       subscribe: async (endpoint, { input }) => { calls.push({ endpoint, input }); return { requestId: "fal-job", data: { video: { url: "https://example.test/out.mp4" } } }; },
-      atlasGenerate: async input => { calls.push({ endpoint: input.model, input }); return { requestId: "atlas-job", url: "https://example.test/out.mp4" }; }
+      atlasGenerate: async input => { calls.push({ endpoint: input.model, input }); return { requestId: "atlas-job", url: "https://example.test/out.mp4" }; },
+      quoteInput: async input => {
+        assert.equal(provider, "atlas");
+        assert.equal(input.model, kling4Endpoints.atlas);
+        return { amountUsd: 2, estimated: true };
+      }
     });
     assert.equal(calls.length, 1);
     assert.equal(result.endpoint, kling4Endpoints[provider]);
@@ -52,9 +57,15 @@ for (const provider of ["fal", "atlas"]) {
     const row = normalizeStatsRecord({ id: result.result.requestId, provider, modelName: kling4ModelName, endpoint: result.endpoint, cost: result.cost });
     assert.equal(row.provider, provider);
     assert.equal(row.endpoint, kling4Endpoints[provider]);
-    assert.equal(aggregateRecords([row], "model")[0].unpricedCount, 1);
+    assert.equal(aggregateRecords([row], "model")[0].unpricedCount, provider === "atlas" ? 0 : 1);
   });
 }
+
+test("Atlas Kling requires a quote before submitting", async () => {
+  await assert.rejects(generateKling4(body, "atlas", { isManagedUrl: () => true,
+    upload: async () => "https://example.test/frame.png", atlasGenerate: () => assert.fail("No paid submission") }),
+  /No generation was submitted/);
+});
 
 test("invalid settings and unsupported inputs fail before upload or paid submission", async () => {
   let calls = 0;

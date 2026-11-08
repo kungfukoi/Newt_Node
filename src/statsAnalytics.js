@@ -1,3 +1,5 @@
+import { atlasTextUsageRecords } from "./atlasBillingUsage.js";
+
 // Shared analytics contract: recorded amounts only, never today's model prices.
 export const providerLabels = { atlas: "Atlas Cloud", fal: "Fal", krea: "Krea", openai: "OpenAI", google: "Google", elevenlabs: "ElevenLabs", local: "Local", unknown: "Unknown provider" };
 export const defaultFilters = () => ({ range: "30", start: "", end: "", provider: "", workflow: "", model: "", key: "", status: "", search: "" });
@@ -40,6 +42,7 @@ export function normalizeStatsRecord(item = {}) {
   const amountUsd = recordedAmount(item.cost);
   const createdAt = Number.isFinite(Date.parse(item.createdAt)) ? new Date(item.createdAt).toISOString() : "";
   const workflowId = safeLabel(item.project?.id || item.workflow?.id || "unknown");
+  const atlasUsage = provider === "atlas" && item.mediaType === "text" ? atlasTextUsageRecords(item.atlasUsage ?? item.usage) : [];
   return {
     id: safeLabel(item.id), generationRunId: safeLabel(item.generationRunId), createdAt,
     provider, modelName: safeLabel(item.modelName || "Unknown model"),
@@ -50,7 +53,10 @@ export function normalizeStatsRecord(item = {}) {
     keyIdentity: keyId === "unknown" ? null : { fingerprint }, keyId,
     keyLabel: keyId === "unknown" ? "Unknown key (legacy / unattributed)" : `${providerLabels[provider]} key ${fingerprint.slice(0, 10)}`,
     status: safeLabel(item.status || "completed"), endpoint: safeLabel(item.endpoint),
+    ...(atlasUsage.length ? { atlasUsage } : {}),
     cost: { amountUsd, currency: "USD", estimated: amountUsd === null ? null : item.cost?.estimated !== false,
+      ...(typeof item.cost?.unit === "string" && Number.isFinite(item.cost?.units) && item.cost.units >= 0
+        ? { unit: safeLabel(item.cost.unit), units: item.cost.units } : {}),
       pricingBasis: safeLabel(item.cost?.pricingBasis), pricingSource: safeLabel(item.cost?.pricingSource), pricingCheckedAt: safeLabel(item.cost?.pricingCheckedAt),
       reconciledAt: safeLabel(item.cost?.reconciledAt) }
   };

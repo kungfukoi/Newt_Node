@@ -33,7 +33,7 @@ test("Seedance finalization after restart passes and returns the saved dialogue 
   } });
   assert.deepEqual(downloadedBody.directorDialogueAudio, dialogue);
   assert.deepEqual(result.directorDialogueAudio, dialogue);
-  const specStart = source.indexOf("    function seedanceJobSpec(input)");
+  const specStart = source.indexOf("    function seedanceJobSpec(");
   const specEnd = source.indexOf("    async function acceptSeedanceJob", specStart);
   const specFunction = source.slice(specStart, specEnd);
   // Exercise the real persisted spec builder with its enclosing route bindings.

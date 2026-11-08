@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { completeGenerationCost, createHistoryPricing } from "../server/history-pricing.js";
@@ -22,6 +23,19 @@ test("legacy Atlas endpoint and saved integer duration yield an estimate", () =>
 test("reference video and missing reference metadata cannot use no-reference prices", () => {
   for (const referenceVideoCount of [1, undefined]) assert.equal(completeGenerationCost({ ...video, settings: { ...video.settings, referenceVideoCount } }, snapshot).amountUsd, null);
 });
+test("Atlas 1080p draft completion uses measured duration for automatic runs", () => {
+  const cost = completeGenerationCost({ ...video, endpoint: "bytedance/seedance-2.5/draft-complete",
+    settings: { duration: "auto" }, remoteVideo: { duration: 10 } }, snapshot);
+  assert.equal(cost.amountUsd, 5.92);
+  assert.equal(cost.unitRateUsd, 0.592);
+  assert.equal(cost.estimated, true);
+});
+test("Atlas edits use native outpaint duration and dimensions instead of the finished cut", () => {
+  const cost = completeGenerationCost({ ...video, settings: { ...video.settings, duration: "auto", referenceVideoCount: 1,
+    seedanceTask: "edit", sourceDurationSeconds: 5, videoOutpaint: { nativeWidth: 1920, nativeHeight: 1080, nativeDuration: 5 } },
+    remoteVideo: { width: 1280, height: 720, duration: 2, fps: 24 } }, snapshot);
+  assert.equal(cost.amountUsd, 5.0544);
+});
 test("only known local Director records without provider usage become free", () => {
   const local = { provider: "local", modelName: "NewtNode Director", mediaType: "text", usage: null };
   assert.equal(completeGenerationCost(local).amountUsd, 0);
@@ -42,8 +56,36 @@ async function pricingFixture(t, history, quoteAtlas) {
   const ledger = createStatsLedger({ filePath });
   const store = createHistoryStore({ filePath: join(dir, "history.json") });
   for (const row of history) await store.append(row);
-  return { service: createHistoryPricing({ snapshot: () => snapshot, store, ledger, quoteAtlas }), store, ledger, filePath };
+  return { service: createHistoryPricing({ snapshot: () => snapshot, store, ledger, atlasJobsDirectory: dir, quoteAtlas }), store, ledger, filePath, dir };
 }
+
+test("ledger-only Atlas runs recover billing settings from the completed job once", async t => {
+  const { service, ledger, dir } = await pricingFixture(t, [], () => assert.fail("No account quote needed"));
+  const generationRunId = "seedance-run";
+  const item = { ...video, generationRunId, settings: undefined };
+  await ledger.append(item);
+  const name = createHash("sha256").update(generationRunId).digest("hex");
+  await writeFile(join(dir, name + ".spec.json"), JSON.stringify({ provider: "atlas", input: { model: endpoint }, settings: video.settings }));
+  await writeFile(join(dir, name + ".state.json"), JSON.stringify({ state: "completed", runId: generationRunId, result: { video: { duration: 8 } } }));
+  assert.deepEqual(await service.reconcile(), { updated: 1, unpriced: 0, total: 1 });
+  assert.equal((await ledger.snapshot([])).records[0].cost.amountUsd, 5.913646);
+  assert.deepEqual(await service.reconcile(), { updated: 0, unpriced: 0, total: 1 });
+});
+
+test("Atlas token counts and billing IDs survive History eviction and reconcile once", async t => {
+  const { service, ledger } = await pricingFixture(t, []);
+  await ledger.append({ ...video, id: "text", mediaType: "text", modelName: "openai/gpt-6-astra", usage: {
+    request: { atlasRequestId: "req_provider", input_tokens: 100, output_tokens: 20, prompt: "private prompt" },
+    helpers: [{ atlasRequestId: "apikey-private-credential", atlasModel: "openai/gpt-5.6-luna", input_tokens: 200, output_tokens: 30 }]
+  } });
+  assert.deepEqual(await service.reconcile(), { updated: 1, unpriced: 0, total: 1 });
+  const [row] = (await ledger.snapshot([])).records;
+  assert.ok(Math.abs(row.cost.amountUsd - 0.002076) < 1e-12);
+  assert.equal(row.atlasUsage[0].atlasRequestId, "req_provider");
+  assert.equal(row.atlasUsage[1].atlasRequestId, "");
+  assert.ok(!JSON.stringify(row).includes("private prompt"));
+  assert.deepEqual(await service.reconcile(), { updated: 0, unpriced: 0, total: 1 });
+});
 
 test("reconciliation coalesces, preserves priced records and labels account quotes as historical estimates", async t => {
   const history = [{ ...video, settings: { ...video.settings, referenceVideoCount: 1 } }, { ...video, id: "priced", cost: { amountUsd: 3 } }];

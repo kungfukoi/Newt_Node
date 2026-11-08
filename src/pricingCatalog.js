@@ -1,4 +1,6 @@
 import { generationQuoteKey, priceState, QUOTE_TTL_MS } from "./pricingTrust.js";
+import { atlasLlmCatalogRates } from "./atlasLlmPricing.js";
+import { atlasTextUsage } from "./atlasBillingUsage.js";
 
 let catalog = { version: 1, revision: "bundled", entries: {} };
 let reader = () => catalog;
@@ -88,11 +90,33 @@ export function currentOpenAiRates(bundled, snapshot = reader()) {
 
 export function catalogTokenCost(provider, model, usage, snapshot = reader()) {
   const normalized = String(provider || "").toLowerCase().replace(" cloud", "");
-  if (!["openai", "atlas"].includes(normalized) || !model || !usage) return null;
+  if (!["openai", "atlas"].includes(normalized) || !usage || !model && !usage.atlasModel) return null;
+  if (normalized === "atlas") {
+    const measured = atlasTextUsage(usage);
+    if (measured?.input_tokens == null) return null;
+    const selectedModel = measured.atlasModel || String(model);
+    const endpoint = selectedModel.includes("/") ? selectedModel : `openai/${selectedModel}`;
+    const baseline = atlasLlmCatalogRates[endpoint];
+    if (!baseline) return null;
+    const { input_tokens: input, output_tokens: output, input_tokens_details: { cached_tokens: cached, cache_write_tokens: writes } } = measured;
+    const context = baseline.long && input >= 272000 ? "long" : "short";
+    const rates = context === "long" ? baseline.long : baseline;
+    if (writes && !Object.hasOwn(rates, "writes")) return null;
+    const entry = snapshot?.entries?.[`atlas:${endpoint}`];
+    const captured = Object.fromEntries(Object.keys(rates).filter(metric => metric !== "long").map(metric =>
+      [metric, pricingQuote("atlas", endpoint, { context, metric }, 1, snapshot)]));
+    if (entry && Object.values(captured).some(rate => !rate)) return null;
+    const rate = metric => captured[metric]?.amountUsd ?? rates[metric] ?? 0;
+    const amountUsd = ((input - cached - writes) * rate("input") + cached * rate("cached") + writes * rate("writes") + output * rate("output")) / 1e6;
+    return { currency: "USD", estimated: true, pricingStatus: "estimated", pricingSource: "https://api.atlascloud.ai/api/v1/pricing/models",
+      pricingCheckedAt: captured.input?.pricingCheckedAt ?? (baseline.long ? "2026-09-10" : "2026-11-08"),
+      amountUsd, unit: "million tokens", units: (input + output) / 1e6,
+      pricingBasis: "Atlas Cloud reported input, cache and output tokens at verified list rates." };
+  }
   const input = usage.input_tokens ?? usage.prompt_tokens, output = usage.output_tokens ?? usage.completion_tokens;
   if (![input,output].every(value=>typeof value === "number" && Number.isFinite(value) && value >= 0)) return null;
-  const endpoint = (normalized === "atlas" ? "openai/" : "") + String(model).replace(/^openai\//, "");
-  const context = (normalized === "atlas" ? input >= 272000 : input > 272000) ? "long" : "short";
+  const endpoint = String(model).replace(/^openai\//, "");
+  const context = input > 272000 ? "long" : "short";
   const rates = Object.fromEntries(["input","cached","writes","output"].map(metric=>[metric,pricingQuote(normalized,endpoint,{context,metric},1,snapshot)]));
   if (Object.values(rates).some(rate=>!rate)) return null;
   const details = usage.input_tokens_details || usage.prompt_tokens_details || {};

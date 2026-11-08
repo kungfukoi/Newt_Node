@@ -27,8 +27,10 @@ export function mergeStatsRecords(existing, incoming) {
       duplicates++;
       // Reconciliation may fill unknown costs; never replace a known charge with an estimate.
       const keepPrior = prior.cost.amountUsd !== null && !(prior.cost.estimated && row.cost.estimated === false && row.cost.amountUsd !== null);
+      const atlasUsage = row.atlasUsage ?? prior.atlasUsage;
       records.set(id, {
         ...(keepPrior ? prior : row),
+        ...(atlasUsage ? { atlasUsage } : {}),
         videoDurationSeconds: prior.videoDurationSeconds ?? row.videoDurationSeconds,
         fastMode: prior.fastMode || row.fastMode
       });

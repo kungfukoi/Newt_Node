@@ -174,6 +174,7 @@ function RunLedger({ rows, onChargeRecorded }) {
     <thead><tr><th>Run / job</th><th>Workflow / file</th><th>Provider / key</th><th>Date</th><th>Recorded cost</th></tr></thead>
     <tbody>{rows.map((row, index) => {
       const runId = row.generationRunId || row.id;
+      const atlasRequestIds = row.atlasUsage?.map(usage => usage.atlasRequestId || usage.atlasResponseId).filter(Boolean);
       const unpriced = row.cost.amountUsd === null;
       const chargeLabel = unpriced ? "Billing details missing" : row.cost.estimated ? "Estimate / unverified"
         : row.cost.pricingSource === "manual-provider-billing" ? "Manual charge" : row.cost.pricingSource === "local" ? "Local" : "Provider reported";
@@ -182,9 +183,11 @@ function RunLedger({ rows, onChargeRecorded }) {
           <dl>
             <dt>Run ID</dt><dd>{row.generationRunId || "Not recorded"}</dd>
             <dt>Request / record ID</dt><dd>{row.id || "Not recorded"}</dd>
+            {atlasRequestIds?.length > 0 && <><dt>Atlas request IDs</dt><dd>{atlasRequestIds.join(", ")}</dd></>}
             <dt>Endpoint</dt><dd>{row.endpoint || "Not recorded"}</dd>
             <dt>Workflow ID</dt><dd>{row.project.id}</dd>
             <dt>Pricing basis</dt><dd>{row.cost.pricingBasis || "No verified basis recorded"}</dd>
+            {row.cost.unit && <><dt>Billable quantity</dt><dd>{row.cost.units} {row.cost.unit}</dd></>}
             <dt>Pricing source</dt><dd>{row.cost.pricingSource || "Unknown"}</dd>
             <dt>Price checked</dt><dd>{readableDate(row.cost.reconciledAt || row.cost.pricingCheckedAt)}</dd>
           </dl>

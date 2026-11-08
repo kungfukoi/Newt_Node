@@ -56,6 +56,7 @@ test("Atlas upload preparation applies only to video references", async () => {
     },
     readLocalAsset: async (source) => ({ fileName: path.basename(source), buffer: source.endsWith(".png") ? image : Buffer.from(source), mimeType: source.endsWith(".png") ? "image/png" : "application/octet-stream" }),
     prepareVideoSource: async () => ({ fileName: "prepared-reference.mp4", buffer: Buffer.from("prepared"), mimeType: "video/mp4" }),
+    quoteInput: async () => ({ amountUsd: 1, estimated: true }),
     imageSize: () => "1024x1024",
     labelPrompt: (prompt) => prompt
   });

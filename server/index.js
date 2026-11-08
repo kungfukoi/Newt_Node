@@ -50,6 +50,7 @@ import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { createDirectorDialoguePreparation } from "./director-dialogue.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
+import { estimateAtlasSeedance25Run } from "../src/atlasPricing.js";
 import { statsCredentialIdentities } from "./stats-credentials.js";
 import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { ProviderPricing } from "./provider-pricing.js";
@@ -135,7 +136,7 @@ import {
 } from "./provider-credentials.js";
 import { validateProviderKey } from "./provider-key-validation.js";
 import { atlasError, createAtlasClient } from "./atlas.js";
-import { createAtlasLlmRequest } from "./atlas-llm-request.js";
+import { atlasLlmBillingUsage, createAtlasLlmRequest } from "./atlas-llm-request.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
@@ -155,7 +156,7 @@ import {
   githubArchiveUrl,
   maxUpdateArchiveBytes
 } from "./runtime-update.js";
-import { supportsAtlasImageModel, supportsAtlasVideoModel, estimateAtlasVideoCost } from "../src/atlasMedia.js";
+import { supportsAtlasImageModel, supportsAtlasVideoModel } from "../src/atlasMedia.js";
 import {
   copyFileWithRetry,
   readFileWithRetry,
@@ -977,14 +978,14 @@ registerCoreRoutes(app, {
 
 registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing({
   store: historyStore, ledger: statsLedger, snapshot: () => pricingRefresh.snapshot(),
-  quoteAtlas: async (item) => {
-    if (!item.generationRunId || !process.env.ATLAS_API_KEY) return null;
-    const name = createHash("sha256").update(item.generationRunId).digest("hex");
-    const spec = JSON.parse(await readFile(path.join(dataDir, "remote-video-jobs.json.d", name + ".spec.json"), "utf8"));
-    if (spec.provider !== "atlas" || spec.input?.model !== item.endpoint ||
-        spec.credentialFingerprint !== providerKeyFingerprint(process.env.ATLAS_API_KEY)) return null;
+  atlasJobsDirectory: path.join(dataDir, "remote-video-jobs.json.d"),
+  quoteAtlas: async (_item, spec) => {
+    if (!spec?.credentialFingerprint) return null;
+    const { credentials } = await readRuntimeSettingsStore();
+    const key = [process.env.ATLAS_API_KEY, ...credentials.atlas.map(entry => entry.key)]
+      .find(value => value && providerKeyFingerprint(value) === spec.credentialFingerprint);
     // Explicit historical reconciliation quotes saved inputs at current account rates.
-    return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
+    return key ? providerPricing.atlasInput(spec.input, key) : null;
   }
 }));
 registerFeatureUsageRoutes(app, featureUsageStore);
@@ -7194,10 +7195,10 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     let runtimeDurationSeconds = durationToSeconds(duration);
 
     const atlasReferencePreparation = [];
-    function seedanceJobSpec(input) {
+    function seedanceJobSpec(input, atlasKey) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
-        credentialFingerprint: providerKeyFingerprint(draftMode ? draftKey : runtimeProvider === "fal" ? process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
+        credentialFingerprint: providerKeyFingerprint(atlasKey ?? (draftMode ? draftKey : runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY)),
         body: {
           ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
           outputFileNameBase: req.body.outputFileNameBase,
@@ -7227,12 +7228,13 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         }
       };
     }
-    async function acceptSeedanceJob(input) {
-      const job = await remoteVideoJobs.create(req.body.generationRunId, seedanceJobSpec(input), req.durableRequestHash);
+    async function acceptSeedanceJob(input, atlasKey) {
+      const job = await remoteVideoJobs.create(req.body.generationRunId, seedanceJobSpec(input, atlasKey), req.durableRequestHash);
       return res.status(202).json({ job });
     }
 
     if (runtimeProvider === "atlas") {
+      const atlasKey = draftMode ? draftKey : process.env.ATLAS_API_KEY;
       if (!supportsAtlasVideoModel(selectedVideoModel.displayName)) {
         return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by Atlas Cloud.` });
       }
@@ -7244,6 +7246,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         endImage: endFrameUrl,
         images: routeKind === "reference-to-video" ? referenceImageUrls : [],
         videos: routeKind === "reference-to-video" ? referenceVideoUrls : [],
+        referenceVideoDurationSeconds: referenceVideoDurations.every(seconds => seconds > 0) ? referenceVideoDurationSeconds : null,
         audios: routeKind === "reference-to-video" ? referenceAudioUrls : [],
         duration,
         resolution,
@@ -7253,22 +7256,21 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         ...(req.body.videoOutpaintContext && seedance25 ? { outputFormat: "mov" } : {})
       };
       if (req.durableRequestHash) {
-        const input = await atlasMedia.prepareVideo(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
+        const input = await atlasMedia.prepareVideo(atlasOptions, atlasKey);
         endpoint = input.model;
-        cost = draftMode ? seedanceDraftCost("preview", "atlas") : editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." } : { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
-        return await acceptSeedanceJob(input);
+        ({ cost } = await atlasMedia.videoCost(input, atlasOptions, atlasKey));
+        return await acceptSeedanceJob(input, atlasKey);
       }
-      const atlasResult = await atlasMedia.video(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
+      const atlasResult = await atlasMedia.video(atlasOptions, atlasKey);
       if (draftMode) {
         endpoint = atlasResult.endpoint;
-        cost = seedanceDraftCost("preview", "atlas");
-        return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+        cost = atlasResult.cost;
+        return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input, atlasKey), requestId: atlasResult.requestId,
           remote: { video: atlasResult.remoteVideo, draft_id: atlasResult.job?.draft_id } }));
       }
-      if (editing) atlasResult.cost = { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." };
       endpoint = atlasResult.endpoint;
       cost = atlasResult.cost;
-      return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+      return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input, atlasKey), requestId: atlasResult.requestId,
         remote: { video: atlasResult.remoteVideo, seed: atlasResult.job?.seed ?? null } }));
     }
 
@@ -7388,24 +7390,24 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   let output = storage.output;
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-    if (!settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
+    if (spec.provider !== "atlas" && !settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
-    }) : spec.provider === "atlas" ? (recordedCostAmount(spec.cost) !== null ? spec.cost : estimateAtlasVideoCost({
-      model: modelName, endpoint, duration: settings.duration || spec.runtimeDurationSeconds,
-      resolution: settings.resolution, referenceImageCount: settings.referenceImageCount,
-      startFrameCount: settings.startFrameCount, hasVideoReference: settings.referenceVideoCount > 0
-    })) : estimateKreaSeedanceCost({
+    }) : estimateKreaSeedanceCost({
       modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
     }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
-  if (spec.provider === "atlas" && !settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit" && recordedCostAmount(cost) === null &&
+  if (spec.provider === "atlas" && recordedCostAmount(cost) === null &&
       spec.credentialFingerprint === providerKeyFingerprint(process.env.ATLAS_API_KEY)) {
     const quote = await providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
     if (quote) cost = { ...cost, ...quote };
+  }
+  if (spec.provider === "atlas" && spec.seedance25 && recordedCostAmount(cost) === null) {
+    cost = estimateAtlasSeedance25Run({ endpoint, settings: { ...settings, resolution: spec.input?.resolution ?? settings.resolution },
+      video: remoteVideo, snapshot: spec.pricingSnapshot || pricingRefresh.snapshot() }) ?? cost;
   }
   let draftMetadata = job.seedanceDraft || null;
   let draftWarning = "";
@@ -8615,6 +8617,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
 
 async function runKling4Video(req, res) {
   const provider = runtimeModelProviderPreferences.veo;
+  const atlasKey = process.env.ATLAS_API_KEY;
   const atlasClient = createAtlasClient({ onProgress: ({ status }) => updateCurrentGenerationProgress({ status: "running", phase: "generating", message: `Atlas Cloud: ${status || "processing"}` }) });
   const generated = await generateKling4(req.body, provider, {
     isManagedUrl: isLocalAssetUrl,
@@ -8623,11 +8626,11 @@ async function runKling4Video(req, res) {
       if (!["image/png", "image/jpeg"].includes(asset.mimeType)) throw httpError(400, "Kling 4.0 keyframes must be PNG or JPEG images.");
       const metadata = imageDimensionsFromBuffer(asset.buffer, asset.mimeType) || {};
       if (!metadata.width || !metadata.height || asset.buffer.length > 30 * 1024 * 1024 || metadata.width < 300 || metadata.height < 300 || metadata.width / metadata.height < 0.4 || metadata.width / metadata.height > 2.5) throw httpError(400, "Kling 4.0 keyframes must be at least 300px per side, at most 30MB, with an aspect ratio from 2:5 to 5:2.");
-      return provider === "atlas" ? atlasClient.upload(asset, process.env.ATLAS_API_KEY) : uploadLocalOutputToFal(url);
+      return provider === "atlas" ? atlasClient.upload(asset, atlasKey) : uploadLocalOutputToFal(url);
     },
     subscribe: (endpoint, options) => subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.kling4 }),
-    atlasGenerate: input => atlasClient.generate({ mediaType: "video", input, key: process.env.ATLAS_API_KEY }),
-    quoteInput: input => providerPricing.atlasInput(input, process.env.ATLAS_API_KEY)
+    atlasGenerate: input => atlasClient.generate({ mediaType: "video", input, key: atlasKey }),
+    quoteInput: input => providerPricing.atlasInput(input, atlasKey)
   });
   const { endpoint, input, result, remoteVideo, cost } = generated;
   const output = await downloadVideo(req, remoteVideo.url, `kling-4-${provider}`);
@@ -17056,7 +17059,8 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
 
   if (normalizedProvider !== "fal") {
     const measured = [usage, ...helperUsages].filter(Boolean).map(item => catalogTokenCost(provider, model, item));
-    if (measured.length && measured.every(Boolean)) return { ...measured[0], amountUsd: measured.reduce((sum,item)=>sum+item.amountUsd,0), units: measured.length };
+    if (measured.length && measured.every(Boolean)) return { ...measured[0], amountUsd: measured.reduce((sum,item)=>sum+item.amountUsd,0),
+      units: measured[0].unit === "million tokens" ? measured.reduce((sum, item) => sum + item.units, 0) : measured.length };
     return {
       amountUsd: null,
       currency: "USD",
@@ -17064,7 +17068,8 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
       units: 1,
       unit: "request",
       mediaType: "text",
-      pricingBasis: "Token usage or verified rates are unavailable for this provider/model",
+      pricingBasis: normalizedProvider === "atlas cloud" ? "Atlas Cloud billing requires complete token usage for each request. Check the saved Atlas request IDs."
+        : "Token usage or verified rates are unavailable for this provider/model",
       pricingSource: "usage-no-local-pricing"
     };
   }
@@ -17381,12 +17386,14 @@ async function runTextLlm({
         }
       }
 
-      const { data, errorStatus } = await requestAtlasLlm(endpoint, {
+      requireAtlasLlmPrice(model);
+      const atlasResult = await requestAtlasLlm(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(300000)
       }, updateCurrentGenerationProgress);
+      const { data, errorStatus } = atlasResult;
       const text = extractOpenAiResponseText(data).trim();
       const hasFallback = index < models.length - 1;
       if (errorStatus !== 429 && hasFallback && atlasTextCanFallback({ status: errorStatus, hasText: Boolean(text), hasProviderError: Boolean(data?.error) })) {
@@ -17395,7 +17402,7 @@ async function runTextLlm({
       if (errorStatus) {
         throw httpError(errorStatus, atlasError(data, errorStatus), { raw: data });
       }
-      return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint, usage: data.usage || null }, data, route);
+      return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint, usage: atlasLlmBillingUsage(atlasResult, model) }, data, route);
     }
     throw httpError(502, "Atlas Cloud text generation failed.");
   }
@@ -17421,6 +17428,12 @@ function checkedCreativeLlmResult(result, data, route) {
       hasMainRequest: Object.hasOwn(result, "usage")
     });
     throw error;
+  }
+}
+
+function requireAtlasLlmPrice(model) {
+  if (!catalogTokenCost("atlas", model, { input_tokens: 1, output_tokens: 1 })) {
+    throw httpError(503, `Atlas Cloud has no verified token rates for ${model}. No request was submitted. Check API Pricing.`);
   }
 }
 
@@ -17477,6 +17490,7 @@ async function runMediaDescriptionLlm({
     signal: AbortSignal.timeout(300000)
   };
   const atlasEndpoint = atlasMediaLlmEndpoint(route);
+  if (atlas) requireAtlasLlmPrice(model);
   const result = atlas
     ? await requestAtlasLlm(atlasEndpoint, options, updateCurrentGenerationProgress)
     : await (async () => {
@@ -17484,17 +17498,18 @@ async function runMediaDescriptionLlm({
         return { data: await response.json().catch(() => ({})), errorStatus: response.ok ? 0 : response.status };
       })();
   const { data, errorStatus } = result;
+  const usage = atlas ? atlasLlmBillingUsage(result, model) : data.usage;
   if (errorStatus) {
     throw httpError(
       errorStatus,
       atlas ? atlasError(data, errorStatus) : data?.error?.message || "OpenAI media analysis failed.",
       { raw: data, llmResult: { text: "", provider: atlas ? "Atlas Cloud" : "OpenAI", model,
-        endpoint: atlas ? atlasEndpoint : openAiModel, usages: [data?.usage].filter(Boolean) } }
+        endpoint: atlas ? atlasEndpoint : openAiModel, usages: [usage].filter(Boolean) } }
     );
   }
   return checkedCreativeLlmResult({
     text: extractOpenAiResponseText(data).trim(),
-    usages: [data.usage].filter(Boolean),
+    usages: [usage].filter(Boolean),
     provider: atlas ? "Atlas Cloud" : "OpenAI",
     model,
     endpoint: atlas ? atlasEndpoint : openAiModel
