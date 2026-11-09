@@ -13,9 +13,10 @@ test("fresh window restores the workspace and draft; reload retains its own edit
   const draft = canvasFixture({ count: 3, scale: .3 });
   const { errors } = await openFixture(page, { count: 3, restoreWorkspace: true, uiState: { workspaceMode: "nodes", nodePaletteCollapsed: false, draft } });
   await expect(page.getByRole("button", { name: "Reset zoom" })).toHaveText("30%");
-  await page.getByLabel("Workspace mode").getByRole("button", { name: "Video", exact: true }).click();
+  const stats = page.getByLabel("Workspace mode").getByRole("button", { name: "Stats", exact: true });
+  await stats.click();
   await page.reload();
-  await expect(page.getByLabel("Workspace mode").getByRole("button", { name: "Video", exact: true })).toHaveClass(/active/);
+  await expect(stats).toHaveClass(/active/);
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(3);
   expect(errors).toEqual([]);
@@ -34,7 +35,7 @@ test("canvas interaction preferences persist and recovery failure is visible", a
   await expect(page.getByLabel("Hover to scrub videos")).not.toBeChecked();
   await expect(page.getByLabel("Smooth canvas motion")).not.toBeChecked();
   await page.route("**/api/ui-state", route => route.fulfill({ status: 500, json: { error: "Disk full" } }));
-  await page.getByRole("button", { name: "Video", exact: true }).click();
+  await page.getByRole("button", { name: "Stats", exact: true }).click();
   await expect(page.getByRole("button", { name: "Retry recovery save" })).toBeVisible();
 });
 
