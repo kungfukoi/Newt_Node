@@ -21,8 +21,13 @@ export function batchEntries(node, connections = [], resolve = source => source.
   });
 }
 
-export function validateBatchEntries(entries) {
-  if (!entries.length) throw new Error("Add media to the Batch before running.");
+export function validateBatchEntries(entries, source) {
+  if (!entries.length) {
+    if (!source || source.type === "batch") throw new Error("Add media to the Batch before running.");
+    const name = source.data?.title ? `“${source.data.title}”` : "the connected node";
+    const output = source.type === "textAgent" ? "batch prompts" : "batch results";
+    throw new Error(`Run ${name} to produce ${output}, then run this node again.`);
+  }
   if (entries.length > 100) throw new Error("This audition supports up to 100 batch entries.");
   const missing = entries.find(item => !item.url);
   if (missing) throw new Error(`Batch source “${missing.label}” has no media. Generate or reconnect it before running.`);
@@ -127,7 +132,7 @@ export function batchEntrySource(batch, entry) {
 }
 
 export function buildBatchPlan(connections, incomingByNode, resolve) {
-  const collections = connections.map(({ source }) => ({ source, entries: validateBatchEntries(batchInputEntries(source, incomingByNode, resolve)) }));
+  const collections = connections.map(({ source }) => ({ source, entries: validateBatchEntries(batchInputEntries(source, incomingByNode, resolve), source) }));
   const count = Math.max(...collections.map(item => item.entries.length));
   if (collections.some(item => item.entries.length !== 1 && item.entries.length !== count)) throw new Error("Connected batches must have matching lengths, or contain a single shared entry.");
   return Array.from({ length: count }, (_, runIndex) => {

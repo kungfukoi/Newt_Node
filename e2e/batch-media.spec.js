@@ -197,19 +197,41 @@ test("Text Agent's normal Prompt output pairs each batch prompt with its image b
   expect(errors).toEqual([]);
 });
 
-test("downstream Run with missing batch results never starts its Text Agent", async ({ page }) => {
+test("Seedance identifies missing Text Agent prompts even when its Batch has media", async ({ page }) => {
   const { errors } = await seed(page, [batch(),
     { id: "agent", type: "textAgent", x: 380, y: 20, data: { title: "Write prompts", agentDraft: "Add a soccer ball" } },
-    { id: "model", type: "imageModel", x: 820, y: 20, data: { title: "Generate", prompt: "Preserve the product", settingsOpen: false } }
-  ], [wire("batch", "agent", "imageIn"), wire("agent", "model", "imagePromptIn")]);
-  let texts = 0, images = 0;
-  await page.route("**/api/node/process-text", async route => { texts++; await route.fulfill({ status: 500, json: { error: "Agent unavailable" } }); });
-  await page.route("**/api/node/generate-image", async route => { images++; await route.fulfill({ json: { images: [] } }); });
-  await card(page, "model").getByRole("button", { name: /^Run Batch/ }).click();
-  await expect.poll(async () => (await savedNode(page, "model"))?.status).toBe("error");
-  expect(texts).toBe(0); expect(images).toBe(0);
-  expect((await savedNode(page, "model")).error).toBeTruthy();
+    { id: "model", type: "videoModel", x: 820, y: 20, data: { model: "Seedance 2.5", prompt: "Preserve the product", resolution: "720p", duration: "4 seconds", aspectRatio: "16:9", batchCount: "1", settingsOpen: false } }
+  ], [wire("batch", "agent", "imageIn"), wire("batch", "model", "referenceImageIn"),
+    { id: "normal-prompt", from: { nodeId: "agent", port: "promptOut" }, to: { nodeId: "model", port: "promptIn" } }]);
+  const videos = [];
+  let texts = 0;
+  await page.route("**/api/node/process-text", async route => {
+    texts++;
+    const source = route.request().postDataJSON().imageInputs[0].url;
+    await route.fulfill({ json: { text: `Add a soccer ball to ${source}`, model: "fixture" } });
+  });
+  await page.route("**/api/node/generate-video", async route => {
+    videos.push(route.request().postDataJSON());
+    await route.fulfill({ json: { video: { localUrl: `/outputs/e2e/seedance-${videos.length}.mp4` } } });
+  });
+  await expect(card(page, "batch").locator(".batch-entry img")).toHaveCount(2);
+  await card(page, "model").getByRole("button", { name: /^Run Video/ }).click();
+  await expect.poll(async () => (await savedNode(page, "model"))?.error).toBe("Run “Write prompts” to produce batch prompts, then run this node again.");
+  expect(texts).toBe(0);
+  expect(videos).toHaveLength(0);
   expect((await savedNode(page, "agent")).batchResults).toEqual([]);
+
+  await card(page, "agent").locator(".node-title-label > svg").click();
+  await card(page, "model").locator(".node-title-label > svg").click({ modifiers: ["Shift"] });
+  await expect(page.locator(".react-flow__node.selected")).toHaveCount(2);
+  await page.getByRole("button", { name: "Run All", exact: true }).click();
+  await expect.poll(async () => (await savedNode(page, "model"))?.status).toBe("complete");
+  expect(texts).toBe(2);
+  expect(videos).toHaveLength(2);
+  for (const request of videos) {
+    expect(request.referenceImageUrls).toHaveLength(1);
+    expect(request.prompt).toContain(`Add a soccer ball to ${request.referenceImageUrls[0]}`);
+  }
   expect(errors).toEqual([]);
 });
 
