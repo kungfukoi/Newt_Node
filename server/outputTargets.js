@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { rebaseOutputPathToProjectOutputs } from "../src/outputPaths.js";
+import { seedanceDraftPairStem, seedanceDraftSuffix } from "../src/seedanceDraft.js";
 
 export const defaultExternalOutputsPrefix = "/external-outputs";
 const reservedOutputFilePaths = new Map();
@@ -33,6 +34,7 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
   const forceExtension = Boolean(options.forceExtension);
   const extensionWithDot = normalizedOutputExtension(extension || path.extname(String(kind || "")) || ".bin");
   const fileNameTemplate = String(body.outputTargetFileName || body.outputFileName || "").trim() || "$node_$date_$time";
+  const draft = body.seedanceDraftOutput === true;
   const hasIndexToken = outputTemplateHasIndexToken(rawDirectory) || outputTemplateHasIndexToken(fileNameTemplate);
 
   if (hasIndexToken) {
@@ -45,15 +47,16 @@ async function resolveOutputTargetAsset(body = {}, kind = "output", extension = 
       outputPrefix,
       now,
       forceExtension,
-      reserveFile
+      reserveFile,
+      draft
     });
   }
 
   const tokenContext = outputTokenContext(body, now, 1);
   const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
-  const fileName = outputTargetFileName(fileNameTemplate, extensionWithDot, tokenContext, forceExtension);
+  const fileName = outputTargetFileName(fileNameTemplate, extensionWithDot, tokenContext, forceExtension, body.seedanceFinishedFileName);
   if (reserveFile) await mkdir(directory, { recursive: true });
-  const finalFileName = await reserveUniqueOutputTargetFileName(directory, fileName, { reserveFile });
+  const finalFileName = await reserveUniqueOutputTargetFileName(directory, fileName, { reserveFile, draft });
   return outputTargetAssetFromPath(path.join(directory, finalFileName), outputPrefix);
 }
 
@@ -75,14 +78,13 @@ export function externalOutputFilePathFromPublicPath(publicPath, outputPrefix = 
   return filePath;
 }
 
-async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate, extension, rootDir, outputPrefix, now, forceExtension, reserveFile }) {
+async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate, extension, rootDir, outputPrefix, now, forceExtension, reserveFile, draft }) {
   for (let outputIndex = 1; outputIndex < 10000; outputIndex += 1) {
     const tokenContext = outputTokenContext(body, now, outputIndex);
     const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
-    const fileName = outputTargetFileName(fileNameTemplate, extension, tokenContext, forceExtension);
-    const filePath = path.join(directory, fileName);
+    const fileName = outputTargetFileName(fileNameTemplate, extension, tokenContext, forceExtension, body.seedanceFinishedFileName);
     try {
-      await resolveOutputFileCandidate(filePath, reserveFile);
+      const filePath = await resolveNamedOutputCandidate(directory, fileName, reserveFile, draft);
       return outputTargetAssetFromPath(filePath, outputPrefix);
     } catch (error) {
       if (error?.code === "EEXIST") continue;
@@ -94,8 +96,7 @@ async function reserveIndexedOutputTarget({ body, rawDirectory, fileNameTemplate
   const directory = resolveOutputDirectory(expandOutputTokens(rawDirectory, tokenContext), rootDir);
   if (reserveFile) await mkdir(directory, { recursive: true });
   const fallbackName = outputTargetFileName(`${fileNameTemplate}-${randomUUID().slice(0, 8)}`, extension, tokenContext, forceExtension);
-  const filePath = path.join(directory, fallbackName);
-  await resolveOutputFileCandidate(filePath, reserveFile);
+  const filePath = await resolveNamedOutputCandidate(directory, fallbackName, reserveFile, draft);
   return outputTargetAssetFromPath(filePath, outputPrefix);
 }
 
@@ -178,7 +179,7 @@ function resolveOutputDirectory(value, rootDir) {
   return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(rootDir, expanded);
 }
 
-function outputTargetFileName(template, extension, tokenContext = {}, forceExtension = false) {
+function outputTargetFileName(template, extension, tokenContext = {}, forceExtension = false, finishedFileName = "") {
   const rawBaseName = path.basename(String(template || "$node_$date_$time"));
   const parsedTemplate = path.parse(rawBaseName);
   const templateExtension = parsedTemplate.ext && !parsedTemplate.ext.includes("$")
@@ -187,7 +188,7 @@ function outputTargetFileName(template, extension, tokenContext = {}, forceExten
   const baseNameTemplate = templateExtension
     ? rawBaseName.slice(0, -parsedTemplate.ext.length)
     : rawBaseName;
-  const expanded = expandOutputTokens(baseNameTemplate, tokenContext);
+  const expanded = finishedFileName ? path.parse(String(finishedFileName)).name : expandOutputTokens(baseNameTemplate, tokenContext);
   const cleanBaseName = path.basename(expanded).replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_").replace(/[. ]+$/g, "").trim() || "output";
   const safeBase = cleanBaseName
     .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "_")
@@ -206,25 +207,31 @@ function outputTemplateHasIndexToken(template) {
   return /\$index\b/.test(String(template || ""));
 }
 
-async function reserveUniqueOutputTargetFileName(directory, fileName, { reserveFile = true } = {}) {
+async function reserveUniqueOutputTargetFileName(directory, fileName, { reserveFile = true, draft = false } = {}) {
   const parsed = path.parse(fileName || "output.bin");
-  const base = parsed.name || "output";
+  const base = (draft ? seedanceDraftPairStem(fileName) : parsed.name) || "output";
   const extension = parsed.ext || ".bin";
   for (let index = 0; index < 500; index += 1) {
     const suffix = index === 0 ? "" : `-${index + 1}`;
     const candidate = `${base}${suffix}${extension}`;
-    const filePath = path.join(directory, candidate);
     try {
-      await resolveOutputFileCandidate(filePath, reserveFile);
-      return candidate;
+      return path.basename(await resolveNamedOutputCandidate(directory, candidate, reserveFile, draft));
     } catch (error) {
       if (error?.code === "EEXIST") continue;
       throw error;
     }
   }
   const fallback = `${base}-${randomUUID().slice(0, 8)}${extension}`;
-  await resolveOutputFileCandidate(path.join(directory, fallback), reserveFile);
-  return fallback;
+  return path.basename(await resolveNamedOutputCandidate(directory, fallback, reserveFile, draft));
+}
+
+async function resolveNamedOutputCandidate(directory, fileName, reserveFile, draft) {
+  const extension = path.extname(fileName);
+  const stem = draft ? seedanceDraftPairStem(fileName) || "output" : "";
+  if (draft) await resolveOutputFileCandidate(path.join(directory, stem + extension), false);
+  const filePath = path.join(directory, draft ? stem + seedanceDraftSuffix + extension : fileName);
+  await resolveOutputFileCandidate(filePath, reserveFile);
+  return filePath;
 }
 
 async function resolveOutputFileCandidate(filePath, reserveFile = true) {

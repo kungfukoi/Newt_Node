@@ -26,6 +26,8 @@ const requiredHealthRoutes = [
   "timelineExtractFrame",
   "nanoBanana21",
   "seedanceDrafts",
+  "seedanceDraftBatchDelivery",
+  "seedanceDraftPairedFilenames",
   "seedanceMultiProviderDrafts",
   "seedanceVideoEditing",
   "seedanceExtend",

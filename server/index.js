@@ -35,7 +35,7 @@ import { wanOutpaintPrompt, wanOutpaintNegativePrompt } from "../src/wanOutpaint
 import { registerVideoOutpaintPromptRoute } from "./routes/videoOutpaintPrompt.js";
 import { createOutpaintFramePresence } from "./outpaint-frame-presence.js";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
-import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
+import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName, seedanceDraftPairStem, seedanceDraftSuffix } from "../src/seedanceDraft.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { extendSeedanceVideo } from "./seedance-extend.js";
@@ -948,7 +948,7 @@ app.get("/api/generation-progress", (req, res) => {
     : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
   res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
-const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs });
+const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs, checkOutput: verifySeedanceVideoOutput });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
@@ -1363,6 +1363,8 @@ function buildHealthPayload() {
       nanoBanana21: true,
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
+      seedanceDraftBatchDelivery: true,
+      seedanceDraftPairedFilenames: true,
       seedanceVideoEditing: true,
       seedanceExtend: true,
       seedanceKreaVideoEditing: true,
@@ -3714,6 +3716,8 @@ app.post("/api/node/save-output", async (req, res) => {
       return res.status(400).json({ error: "Set an Output path before saving." });
     }
     const { target, outputStats, thumbnail } = savedOutput;
+    const draftReceipt = mediaType === "video" && req.body.seedanceDraftOutput === true ? req.body.seedanceDraftReceiptId : "";
+    const draftFileName = draftReceipt ? await seedanceDrafts.rememberOutput(draftReceipt, target.fileName) : "";
     res.json({
       output: {
         localUrl: target.publicPath,
@@ -3723,7 +3727,8 @@ app.post("/api/node/save-output", async (req, res) => {
         mediaType,
         bytes: outputStats.size,
         thumbnailUrl: thumbnail?.publicPath || "",
-        outputFormat
+        outputFormat,
+        ...(draftFileName ? { seedanceDraftExportFileName: draftFileName } : {})
       }
     });
   } catch (error) {
@@ -6873,8 +6878,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: draftProvider });
     const draftKey = draftMode ? String(({ fal: process.env.FAL_KEY, atlas: process.env.ATLAS_API_KEY, krea: process.env.KREA_API_KEY })[draftProvider] || "").trim() : "";
     if (/^Seedance 2\.[05]$/i.test(selectedVideoModel.displayName)) {
-      const packagePath = String(req.body.workflowPackagePath || "");
-      req.videoStorageFallback = (await verifyVideoOutputDestination(req.body, { rootDir, fallbackDirectory: packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(req.body)) }))?.fallback === true;
+      req.videoStorageFallback = (await verifySeedanceVideoOutput({ ...req.body, seedanceDraftOutput: draftMode }))?.fallback === true;
     }
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });
@@ -7371,6 +7375,12 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
 }, remoteVideoJobs);
 app.post("/api/node/generate-video", handleVideoGeneration);
 
+async function verifySeedanceVideoOutput(body) {
+  const packagePath = String(body.workflowPackagePath || "");
+  const fallbackDirectory = packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(body));
+  return verifyVideoOutputDestination(body, { rootDir, fallbackDirectory });
+}
+
 async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const spec = job.spec;
   const { body, settings, endpoint, routeKind, modelName } = spec;
@@ -7381,7 +7391,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const storage = await saveGeneratedVideoWithFallback({ ...job, savedOutput: availableOutput }, {
     checkpoint,
     reserve: async storageBody => {
-      const target = await createManagedAssetTarget({ body: storageBody }, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4", body.videoOutpaintContext ? workflowPackageDependencyDirName : workflowPackageOutputDirName);
+      const target = await createManagedAssetTarget({ body: { ...storageBody, seedanceDraftOutput: settings.seedanceDraft === true } }, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4", body.videoOutpaintContext ? workflowPackageDependencyDirName : workflowPackageOutputDirName);
       if (job.runId) await writeFile(target.filePath, "", { flag: "wx" });
       return target;
     },
@@ -7414,7 +7424,8 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   if (settings.seedanceDraft && !draftMetadata) {
     draftMetadata = spec.provider === "krea" ? { provider: "krea", resolution: "480p", completionSupported: false }
       : await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint, provider: spec.provider,
-        startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec });
+        startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec, previewFileName: output.fileName,
+        exportFileName: output.outputTarget ? output.fileName : undefined });
     if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
     else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.`;
   }
@@ -7441,9 +7452,13 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     submittedPrompt: spec.submittedPrompt, cost,
     ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}),
     ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
+    ...(settings.seedanceDraft && output.outputTarget ? { seedanceDraftExportFileName: output.fileName } : {}),
+    ...(settings.seedanceDraft && !draftMetadata ? { seedanceDraftPreviewOnly: true } : {}),
     ...([draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).join(" ") } : {}),
     ...(storage.fallback ? { storageFallback: true } : {}),
     ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
+    ...(settings.seedanceDraftSource ? { seedanceDraftPreviewFileName: settings.seedanceDraftPreviewFileName,
+      seedanceDraftDeliveryFileName: settings.seedanceDraftDeliveryFileName, seedanceDraftOutputNodeId: body.outputTargetNodeId || "" } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
@@ -11680,7 +11695,9 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const body = requestLike?.body || {};
   const packageContext = workflowPackageContextFromBody(body);
   const inputExtension = extension || path.extname(String(kind || ""));
-  const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
+  const finishedBaseName = path.parse(String(body.seedanceFinishedFileName || "")).name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").slice(0, 160);
+  const preferredBaseName = finishedBaseName || safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
+  const draft = body.seedanceDraftOutput === true && assetGroup === workflowPackageOutputDirName;
   const outputTarget = assetGroup === workflowPackageOutputDirName
     ? await createOutputTargetAsset(body, kind, inputExtension, preferredBaseName, { rootDir, outputPrefix: externalOutputsPrefix, forceExtension: Boolean(options.forceExtension) })
     : null;
@@ -11691,7 +11708,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
     const assetDir = path.join(packageContext.packagePath, assetGroup);
     await mkdir(assetDir, { recursive: true });
     const fileName = inputExtension
-      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension)
+      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension, draft)
       : safePackageFileName(kind || "asset");
     const relativePath = path.join(assetGroup, fileName);
     return {
@@ -11709,7 +11726,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   await mkdir(targetDir, { recursive: true });
 
   const fileName = inputExtension
-    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension)
+    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension, draft)
     : safePackageFileName(kind || "asset");
   const relativePath = path.join(relativeRoot, fileName);
   return {
@@ -15788,13 +15805,18 @@ function uniqueOutputFileName(kind, extension) {
   return `${timestamp}-${safeKind}-${randomUUID().slice(0, 8)}${safeExtension}`;
 }
 
-async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension) {
+async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension, draft = false) {
   const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
-  if (!preferredBaseName) return uniqueOutputFileName(kind, safeExtension);
+  const draftSuffix = draft ? seedanceDraftSuffix : "";
+  if (!preferredBaseName) {
+    const generated = uniqueOutputFileName(kind, safeExtension);
+    return path.parse(generated).name + draftSuffix + safeExtension;
+  }
+  const baseName = draft ? seedanceDraftPairStem(preferredBaseName + safeExtension) || "output" : preferredBaseName;
 
   for (let index = 0; index < 500; index += 1) {
     const suffix = index === 0 ? "" : `-${index + 1}`;
-    const candidate = `${preferredBaseName}${suffix}${safeExtension}`;
+    const candidate = `${baseName}${suffix}${draftSuffix}${safeExtension}`;
     try {
       await stat(path.join(targetDir, candidate));
     } catch (error) {
@@ -15803,7 +15825,7 @@ async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extensi
     }
   }
 
-  return `${preferredBaseName}-${randomUUID().slice(0, 8)}${safeExtension}`;
+  return `${baseName}-${randomUUID().slice(0, 8)}${draftSuffix}${safeExtension}`;
 }
 
 function safeOutputFileBaseName(value) {

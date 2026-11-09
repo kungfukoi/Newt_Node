@@ -563,7 +563,7 @@ export const nodeApi = {
     }
     if (body.seedanceDraft || body.seedanceTask === "edit" || body.seedanceExtend === true) {
       const health = await getJson("/api/health", "Could not verify Seedance support.");
-      if (body.seedanceDraft && (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true)) throw new Error("Restart the backend to activate multi-provider Draft mode. No generation was submitted.");
+      if (body.seedanceDraft && (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true || health.routes?.seedanceDraftPairedFilenames !== true)) throw new Error("Restart the backend to activate Draft mode with paired filenames. No generation was submitted.");
       if (body.seedanceTask === "edit" && health.routes?.seedanceVideoEditing !== true) throw new Error("Restart the backend to activate video editing. No generation was submitted.");
       if (body.seedanceExtend === true && health.routes?.seedanceExtend !== true) throw new Error("Restart the backend to activate Extend. No generation was submitted.");
     }
@@ -583,6 +583,8 @@ export const nodeApi = {
   async completeSeedanceDraft(body) {
     const health = await getJson("/api/health", "Could not verify draft finishing support.");
     if (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true) throw new Error("Restart the backend to activate multi-provider draft finishing. No generation was submitted.");
+    if (body.draftCompletionDestination && health.routes?.seedanceDraftBatchDelivery !== true) throw new Error("Restart the backend to activate draft batch delivery. No generation was submitted.");
+    if (health.routes?.seedanceDraftPairedFilenames !== true) throw new Error("Restart the backend to activate paired draft filenames. No generation was submitted.");
     const request = { ...body, generationRunId: "seedance-finish-" + body.receiptId };
     const { response, data } = await waitForRemoteVideo(request, {
       submit: payload => fetchJsonApi("/api/node/seedance-draft/complete", jsonBody(payload), "Draft completion", { retryLocalApi: false, timeoutMs: 120000 }),
@@ -632,7 +634,11 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
   },
 
-  saveOutput(body, label = "Output save") {
+  async saveOutput(body, label = "Output save") {
+    if (body.seedanceDraftOutput || body.seedanceFinishedFileName) {
+      const health = await getJson("/api/health", "Could not verify paired draft filename support.");
+      if (health.routes?.seedanceDraftPairedFilenames !== true) throw new Error("Restart the backend to activate paired draft filenames.");
+    }
     return fetchJsonApi("/api/node/save-output", jsonBody(body), label);
   },
 

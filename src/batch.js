@@ -36,6 +36,7 @@ export function validateBatchEntries(entries, source) {
 }
 
 export function isBatchConnection(connection) {
+  if (connection?.useSelectedResult) return false;
   return connection?.source?.type === "batch" || Array.isArray(connection?.source?.data?.batchResults);
 }
 

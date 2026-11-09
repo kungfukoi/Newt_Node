@@ -5,6 +5,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { createSeedanceDraftStore } from "../server/seedance-drafts.js";
 import { createRemoteVideoJobs } from "../server/remote-video-jobs.js";
+import { previewOutputTargetAsset } from "../server/outputTargets.js";
 import { providerKeyFingerprint, createSeedanceJobAdapter } from "../server/seedance-job-provider.js";
 import { validateSeedanceDraft, seedanceDraftLifetimeMs, seedanceAtlasDraftCompletionEndpoint } from "../src/seedanceDraft.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
@@ -55,7 +56,7 @@ for (const provider of ["fal", "atlas"]) test(`${provider} durable receipts dedu
   let jobs = await createRemoteVideoJobs(options);
   let store = createSeedanceDraftStore({ directory: path.join(scratch, "receipts"), jobs, getKey: () => key, now: () => now });
   const original = { body: { projectId: "project", nodeId: "video" }, settings: { generateAudio: true, resolution: "480p", seedanceDraft: true }, prompt: "original prompt", submittedPrompt: "original prompt" };
-  const input = { provider, draftId: "provider-draft", keyFingerprint: providerKeyFingerprint(key), startedAt: now, original };
+  const input = { provider, draftId: "provider-draft", keyFingerprint: providerKeyFingerprint(key), startedAt: now, original, previewFileName: "shot-03-draft.mp4" };
   const receipt = await store.recordDraft(input);
   assert.deepEqual(await store.recordDraft({ ...input, startedAt: now + 1000 }), receipt);
   assert.equal(receipt.provider, provider);
@@ -64,6 +65,7 @@ for (const provider of ["fal", "atlas"]) test(`${provider} durable receipts dedu
     const receiptPath = path.join(scratch, "receipts", receipt.receiptId + ".json");
     const legacy = JSON.parse(await readFile(receiptPath, "utf8"));
     delete legacy.provider;
+    delete legacy.previewFileName;
     await writeFile(receiptPath, JSON.stringify(legacy));
     assert.deepEqual(await store.recordDraft(input), receipt);
   }
@@ -71,12 +73,24 @@ for (const provider of ["fal", "atlas"]) test(`${provider} durable receipts dedu
   key = "other-account";
   await assert.rejects(store.complete(receipt.receiptId), /original (Fal|Atlas Cloud)/); assert.equal(submits, 0);
   key = "fake-original";
-  const [a,b] = await Promise.all([store.complete(receipt.receiptId), store.complete(receipt.receiptId)]);
+  assert.deepEqual(await Promise.all([store.rememberOutput(receipt.receiptId, "Cartoon Subway_03_draft.mp4"),
+    store.rememberOutput(receipt.receiptId, "another-name_draft.mp4")]), Array(2).fill("Cartoon Subway_03_draft.mp4"));
+  store = createSeedanceDraftStore({ directory: path.join(scratch, "receipts"), jobs, getKey: () => key, now: () => now });
+  const destination = { draftCompletionDestination: true, projectId: "project", nodeId: "video", previewFileName: "shot-03-draft.mp4",
+    outputTargetPath: "current-delivery", outputTargetFileName: "regular-output-template", outputTargetNodeId: "output", generationGroupId: "finish-batch", generationBatchIndex: 2, generationBatchTotal: 3 };
+  const [a,b] = await Promise.all([store.complete(receipt.receiptId, destination), store.complete(receipt.receiptId)]);
   assert.equal(a.runId, b.runId);
   await jobs.step(a.runId);
   assert.equal(submits, 1); assert.equal(saves, 1);
   assert.deepEqual(calls[0].input, provider === "atlas" ? { model: seedanceAtlasDraftCompletionEndpoint, draft_id: "provider-draft" } : { draft_id: "provider-draft", resolution: "1080p", codec: "auto" });
   assert.equal(calls[0].provider, provider);
+  assert.equal(calls[0].body.outputTargetPath, "current-delivery");
+  const target = await previewOutputTargetAsset(calls[0].body, "video", ".mp4", { rootDir: scratch });
+  assert.equal(target.fileName, "Cartoon Subway_03.mp4");
+  assert.equal(calls[0].body.seedanceFinishedFileName, "Cartoon Subway_03.mp4");
+  assert.equal(calls[0].body.generationGroupId, "finish-batch");
+  assert.equal(calls[0].body.generationBatchIndex, 2);
+  assert.equal(calls[0].settings.seedanceDraftPreviewFileName, "Cartoon Subway_03_draft.mp4");
   assert.equal(calls[0].prompt, "original prompt"); assert.equal(calls[0].cost.amountUsd, null);
   await jobs.close();
   now += seedanceDraftLifetimeMs + 1000; failSave = false;
@@ -110,6 +124,28 @@ test("finishing preserves the draft after prompt changes and selects a saved com
   assert.equal(node.data.selectedResultIndex, 1);
   node.data.selectedResultIndex = 0;
   await finishSeedanceDraft(deps); assert.equal(calls, 1);
+});
+
+test("batch finishing keeps successful 1080p siblings and reports each failed draft by name", async () => {
+  const drafts = ["one", "two", "three"].map(name => ({
+    type: "video", url: `/outputs/${name}.mp4`, fileName: `${name}.mp4`, seedanceDraft: { receiptId: name }
+  }));
+  const node = { id: "video", data: { resultItems: drafts } };
+  const submitted = [];
+  const result = await finishSeedanceDraft({
+    node, receiptIds: ["two", "three"], groupId: "batch", getCurrent: () => node, update: patch => Object.assign(node.data, patch),
+    complete: async request => {
+      submitted.push(request.receiptId);
+      if (request.receiptId === "two") throw new Error("Provider rejected this draft.");
+      return { video: { localUrl: "/outputs/three_1080p.mp4" }, seedanceDraftSource: request.receiptId };
+    }
+  });
+  assert.deepEqual(submitted, ["two", "three"]);
+  assert.equal(result.status, "complete");
+  assert.match(node.data.error, /two: Provider rejected/);
+  assert.equal(node.data.resultItems.length, 4);
+  assert.equal(node.data.resultItems.at(-1).label, "three (HD · 1080p)");
+  assert.equal(node.data.resultUrl, "/outputs/three_1080p.mp4");
 });
 
 test("copying or reopening an in-flight finish preserves the preview and receipt", () => {

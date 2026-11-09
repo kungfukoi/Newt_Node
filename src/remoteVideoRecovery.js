@@ -2,6 +2,18 @@ import { appendUniqueVideoResults, remoteVideoTerminal, remoteVideoNeedsAttentio
 import { existingResultItemsForNode } from "./mediaResults.js";
 import { normalizeVideoGenerationResult } from "./nodeRunners/videoModels.js";
 import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
+import { seedanceVersion } from "./seedanceDraft.js";
+
+export function recoveredVideoOutputPatch(output, items, lastSavedAt) {
+  const resultItems = appendUniqueVideoResults(existingResultItemsForNode(output, "video"), items);
+  const latest = items.at(-1);
+  return {
+    status: items.some(item => item.storageFallback) ? "error" : "complete",
+    error: items.filter(item => item.storageFallback).map(item => item.warning).join(" "),
+    resultType: "video", resultItems, resultUrl: latest.url, selectedResultIndex: resultItems.findIndex(item => item.url === latest.url),
+    lastSavedAt, lastSavedFileName: latest.fileName, lastSavedPath: latest.filePath
+  };
+}
 
 export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), edges = []) {
   const patches = [];
@@ -14,8 +26,12 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
     const unseen = owned.filter((job) => !seen.has(job.runId));
     if (!unseen.length) continue;
     const completed = unseen.filter((job) => job.state === "completed" && job.result?.video?.localUrl);
-    const incoming = completed.map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
     const previous = existingResultItemsForNode(node, "video");
+    const incoming = completed.map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
+    const versionContext = [...previous, ...incoming];
+    for (const item of incoming) {
+      if (item.seedanceDraftSource) item.label = seedanceVersion(item, versionContext).label;
+    }
     const resultItems = appendUniqueVideoResults(previous, incoming);
     const latestGroup = owned.at(-1).groupId;
     const group = owned.filter((job) => job.groupId === latestGroup);
@@ -38,15 +54,11 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
     for (const outputId of outputIds) {
       const output = nodes.find((item) => item.id === outputId && item.type === "output");
       if (!output || !edges.some((edge) => edge.from.nodeId === node.id && edge.to.nodeId === outputId)) continue;
-      const items = completed.filter((job) => job.outputTargetNodeId === outputId).map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
+      const jobsForOutput = completed.filter((job) => job.outputTargetNodeId === outputId);
+      const items = incoming.filter((_item, index) => completed[index].outputTargetNodeId === outputId);
       const rejected = items.find(outpaintNeedsFinishing);
       if (rejected) { patches.push({ nodeId: outputId, patch: { status: "error", error: outpaintOutputError(rejected) } }); continue; }
-      const outputItems = appendUniqueVideoResults(existingResultItemsForNode(output, "video"), items);
-      patches.push({ nodeId: outputId, patch: {
-        status: items.some(item => item.storageFallback) ? "error" : "complete", error: items.filter(item => item.storageFallback).map(item => item.warning).join(" "), resultType: "video", resultItems: outputItems,
-        resultUrl: outputItems.at(-1).url, selectedResultIndex: outputItems.length - 1,
-        lastSavedAt: completed.at(-1).updatedAt, lastSavedFileName: outputItems.at(-1).fileName, lastSavedPath: outputItems.at(-1).filePath
-      } });
+      patches.push({ nodeId: outputId, patch: recoveredVideoOutputPatch(output, items, jobsForOutput.at(-1).updatedAt) });
     }
   }
   return patches;

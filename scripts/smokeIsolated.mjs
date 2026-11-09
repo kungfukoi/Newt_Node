@@ -114,7 +114,7 @@ try {
   assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
-  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "seedanceExtend", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceDraftBatchDelivery", "seedanceDraftPairedFilenames", "seedanceVideoEditing", "seedanceExtend", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
@@ -525,6 +525,25 @@ try {
   const masterCopy = await (await request("/api/node/save-output", { sourceUrl: refinished.url, sourceFileName: "master.mp4", mediaType: "video", outputFormat: "source", outputOriginalSourceUrl: "/outputs/outpaint-source.mp4", outputTargetPath: path.join(sandbox, "master-export"), outputTargetFileName: "master" })).json();
   const hashMaster = async file => { const hash = createHash("sha256"); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest("hex"); };
   assert.equal(await hashMaster(masterCopy.output.filePath), await hashMaster(refinished.filePath), "Same-format Output changed the completed MP4 bytes");
+  const seedanceHdPath = path.join(sandbox, "outputs", "seedance-hd.mp4");
+  await promisify(execFile)(ffmpeg, ["-y", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-vf", "scale=1920:1080", "-frames:v", "1", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", seedanceHdPath], { windowsHide: true, timeout: 30000 });
+  const draftDeliveryBody = {
+    sourceUrl: "/outputs/seedance-hd.mp4", sourceFileName: "seedance-hd.mp4", mediaType: "video", outputFormat: "source",
+    outputTargetPath: path.join(sandbox, "seedance-automatic"), outputTargetFileName: "$filename", outputTargetSourceFileName: "Scene 04.mp4",
+    seedanceFinishedFileName: "Scene 04.mp4"
+  };
+  const draftCopy = await (await request("/api/node/save-output", {
+    ...draftDeliveryBody, seedanceFinishedFileName: undefined, seedanceDraftOutput: true,
+    sourceUrl: "/outputs/clip.mp4", sourceFileName: "clip.mp4"
+  })).json();
+  assert.equal(draftCopy.output.fileName, "Scene 04_draft.mp4");
+  const autoDraftDelivery = await (await request("/api/node/save-output", draftDeliveryBody)).json();
+  const manualDraftDelivery = await (await request("/api/node/save-output", {
+    ...draftDeliveryBody, sourceUrl: autoDraftDelivery.output.localUrl, sourceFileName: autoDraftDelivery.output.fileName,
+    outputTargetPath: path.join(sandbox, "seedance-manual")
+  })).json();
+  assert.equal(manualDraftDelivery.output.fileName, "Scene 04.mp4");
+  assert.equal(await hashMaster(manualDraftDelivery.output.filePath), await hashMaster(seedanceHdPath), "Run Output must copy the selected finished Seedance clip");
   await promisify(execFile)(ffmpeg, ["-y", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", path.join(sandbox, "outputs", "original.mov")], { windowsHide: true, timeout: 30000 });
   const movPreviewUrl = api + "/api/video-preview?url=" + encodeURIComponent("/outputs/original.mov");
   const movPreview = await fetch(movPreviewUrl, { headers: { Range: "bytes=0-127" } });

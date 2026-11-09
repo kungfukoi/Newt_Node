@@ -26,6 +26,23 @@ test("simultaneous window exports reserve distinct filenames in a shared output 
   });
 });
 
+test("draft output allocates an index once and leaves the matching stem available for finishing", async () => {
+  await withTempOutputDir(async directory => {
+    await writeFile(path.join(directory, "CartoonSubway_2k_01.mp4"), "existing clip");
+    const request = { outputTargetPath: directory, outputTargetFileName: "CartoonSubway_2k_$index", seedanceDraftOutput: true };
+    const preview = await previewOutputTargetAsset(request, "video", ".mp4");
+    assert.equal(preview.fileName, "CartoonSubway_2k_02_draft.mp4");
+    const drafts = await Promise.all([createOutputTargetAsset(request, "video", ".mp4"), createOutputTargetAsset(request, "video", ".mp4")]);
+    assert.deepEqual(drafts.map(item => item.fileName).sort(), ["CartoonSubway_2k_02_draft.mp4", "CartoonSubway_2k_03_draft.mp4"]);
+    const finished = await createOutputTargetAsset({ ...request, outputTargetFileName: "$filename", seedanceDraftOutput: false,
+      seedanceFinishedFileName: "CartoonSubway_2k_02.mp4" }, "video", ".mp4");
+    assert.equal(finished.fileName, "CartoonSubway_2k_02.mp4");
+    const explicit = { ...request, outputTargetFileName: "extra_draft.mov" };
+    assert.equal((await createOutputTargetAsset(explicit, "video", ".mp4")).fileName, "extra_draft.mov");
+    assert.equal((await createOutputTargetAsset(explicit, "video", ".mp4")).fileName, "extra-2_draft.mov");
+  });
+});
+
 test("Output filename tokens use the input node name, date, and timestamp", async () => {
   await withTempOutputDir(async (directory) => {
     const target = await createOutputTargetAsset(
