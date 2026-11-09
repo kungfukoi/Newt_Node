@@ -85,6 +85,8 @@ Playwright uses its own production preview server on port 5286 (`NEWTNODE_E2E_PO
 
 `.github/workflows/validation.yml` runs Node tests, performance budget, build, isolated API smoke, and Chromium tests on Windows and macOS. The macOS lane uses `macos-15-intel` to avoid the hosted ARM runner capacity failures seen with `macos-latest`; this validates Intel macOS, not native Apple Silicon. Revisit the runner choice when ARM capacity recovers. CI configuration is not evidence that a native Mac check passed locally. Native folder dialogs, launch-from-Finder behavior, GPU drivers, and paid provider completion need separate authorized checks.
 
+CI runs at most two Node test files at once because media fixtures launch multithreaded FFmpeg processes. This keeps media and process-supervision checks from competing with the rest of the suite for every runner core.
+
 ### Production Runtime
 
 After the last app window closes, production sessions wait 15 seconds for refresh/reconnection, then stop the API, preview server and their child processes. Another open window (including a background window) keeps the session running. Reopen with the launcher; the previous browser URL alone cannot restart stopped servers. The supervisor also stops MiniMax WSL units it started from an inactive state, leaving pre-existing services and the WSL distro itself alone. ComfyUI and cloud jobs remain independently managed. No browser connection ever established means no automatic shutdown; headless startup and `npm run dev` remain available.

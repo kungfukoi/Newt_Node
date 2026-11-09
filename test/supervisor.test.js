@@ -88,7 +88,11 @@ test("production supervisor restarts a crashed child, rejects duplicate owners a
   assert.equal((await readStarts()).count, 3);
   await writeFile(path.join(root, "server", "restart-marker.js"), `// requested ${Date.now()}\n`);
   assert.equal((await until(async () => { const value = await readStarts(); return value?.count === 4 ? value : null; })).restarts, "3");
-  const log = await readFile(path.join(root, ".newtnode_logs", "server-5297.log"), "utf8");
+  const logPath = path.join(root, ".newtnode_logs", "server-5297.log");
+  const log = await until(async () => {
+    const contents = await readFile(logPath, "utf8");
+    return contents.includes("restart in 250ms") ? contents : null;
+  });
   assert.match(log, /restart in 1000ms/);
   assert.match(log, /restart in 2000ms/);
   assert.match(log, /requested restart/);

@@ -21,7 +21,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm test
+      # Media tests launch FFmpeg subprocesses that also use multiple threads.
+      - run: npm test -- --test-concurrency=2
       - run: npm run test:performance
       - run: npm run build
       - run: npm run smoke:isolated
