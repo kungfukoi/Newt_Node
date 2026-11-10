@@ -4,10 +4,35 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { atlasLlmBillingUsage, createAtlasLlmRequest } from "../server/atlas-llm-request.js";
 import { atlasError } from "../server/atlas.js";
 import { catalogTokenCost } from "../src/pricingCatalog.js";
+import { atlasChatLlmBody, atlasMediaLlmBody, openAiLlmBody } from "../server/creative-llm.js";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
 const endpoint = "https://api.atlascloud.ai/v1/responses";
 const options = { method: "POST", body: JSON.stringify({ model: "selected-model", input: "Test" }) };
+
+test("Atlas Text Agent and Text Model image requests carry the same bounded output budget as text requests", async () => {
+  for (const route of ["text-agent", "text-processing"]) {
+    const input = [{ role: "user", content: [
+      { type: "input_text", text: "Conversation and the complete current prompt." },
+      { type: "input_image", image_url: "data:image/jpeg;base64,reference", detail: "high" }
+    ] }];
+    const settings = { model: "openai/gpt-5.6-sol", route, input, systemPrompt: "Edit the prompt.", reasoningEffort: "low" };
+    const body = atlasMediaLlmBody(settings);
+    let submitted;
+    const request = createAtlasLlmRequest({ fetchImpl: async (_url, init) => {
+      submitted = JSON.parse(init.body);
+      return json({ output_text: "Revised prompt." });
+    } });
+    await request(endpoint, { ...options, body: JSON.stringify(body) });
+    assert.equal(submitted.max_output_tokens, 8000);
+    assert.equal(submitted.max_output_tokens, atlasChatLlmBody(settings).max_tokens);
+    assert.equal(submitted.model, settings.model);
+    assert.equal(submitted.instructions, settings.systemPrompt);
+    assert.deepEqual(submitted.input, input);
+    assert.deepEqual(submitted.reasoning, { effort: "low" });
+    assert.equal(openAiLlmBody(settings).max_output_tokens, undefined);
+  }
+});
 
 test("Atlas preserves request IDs and prices reported DeepSeek tokens at their own rates", async () => {
   const data = { id: "response-123", usage: { prompt_tokens: "1000", prompt_cache_hit_tokens: 200, completion_tokens: 100 } };

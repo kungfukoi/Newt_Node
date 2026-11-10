@@ -141,6 +141,9 @@ export function atlasMediaLlmBody(options) {
   }
   const body = openAiLlmBody(options);
   delete body.store;
+  if (["text-agent", "text-processing"].includes(options.route)) {
+    body.max_output_tokens = atlasCreativeOutputBudget(options.route);
+  }
   return body;
 }
 

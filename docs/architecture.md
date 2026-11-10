@@ -445,6 +445,8 @@ Audio Model (`audioModel`) uses `src/audioModel.js` for defaults, validation and
 
 `src/userPreferences.js` owns the independent Text Agent model choice (GPT-5.6 Sol or GPT-6 Astra). Settings persists it through the shared runtime settings store; each Text Agent request reads the current preference before provider submission, and existing result/history metadata records the actual model. Text Model and media-analysis helper defaults remain independent.
 
+Atlas Text Agent and Text Model requests with images use the Responses adapter in `server/creative-llm.js` with an explicit 8,000-token output limit. This matches the text-only chat request budget and avoids requesting an unspecified output allowance. The request retains its conversation and image context.
+
 `src/textAgent.js` owns Text Agent's image/video prompt editing instructions, conversation normalization, current-output synchronization and request prompt assembly. NodeEditor persists synchronized turns; the text runner sends the current visible prompt in assistant history, and all three server provider routes share the same complete-prompt revision contract. Existing workflow fields and Prompt/Output routing stay compatible.
 
 ## Storyboard upstream planner
