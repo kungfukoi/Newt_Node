@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import * as seedance from "../src/seedance25.js";
 import * as drafts from "../src/seedanceDraft.js";
 import { buildAtlasVideoRequest, supportsAtlasVideoModel } from "../src/atlasMedia.js";
+import { estimateAtlasSeedance25Run } from "../src/atlasPricing.js";
 import { createAtlasMedia } from "../server/atlas-media.js";
 import { createSeedanceDraftStore } from "../server/seedance-drafts.js";
 import { createSeedanceJobAdapter, providerKeyFingerprint } from "../server/seedance-job-provider.js";
@@ -108,22 +109,31 @@ test("selected draft providers with missing keys never fall back", async () => {
 });
 
 function finalizerHarness() {
-  const histories = [], receipts = [], checkpoints = [];
+  const histories = [], receipts = [], checkpoints = [], quotes = [];
   const deps = { ...drafts, path, saveGeneratedVideoWithFallback, existsSync: () => true, enrichVideoMetadata: (video, metadata) => ({ ...video, ...metadata }),
     probeVideoFile: async () => ({ width: 854, height: 480, duration: 12 }), recordedCostAmount: cost => cost.amountUsd,
     process: { env: { ATLAS_API_KEY: "atlas-key" } }, providerKeyFingerprint,
-    providerPricing: { atlasInput: () => assert.fail("Do not borrow normal quotes for drafts or completion") },
+    pricingRefresh: { snapshot: () => ({ entries: {} }) }, estimateAtlasSeedance25Run,
+    providerPricing: { atlasInput: input => {
+      quotes.push(input);
+      return input.omni_reference_task_type === "edit" ? { amountUsd: 2, estimated: true } : null;
+    } },
     seedanceDrafts: { recordDraft: async input => { receipts.push(input); return input.draftId ? { provider: input.provider, receiptId: "receipt", draftId: input.draftId } : null; } },
     finishSeedanceOutpaint, videoOutpaintService: { finish: async () => ({ filePath: "/finished.mp4", publicPath: "/outputs/finished.mp4", fileName: "finished.mp4", bytes: 100 }) },
     appendHistory: async (item, options) => histories.push({ item, options }), routeKindLabel: value => value,
     projectFromBody: () => ({}), nodeFromBody: () => ({}), jobTimingDiagnostic: () => ({ totalMs: 1000 }) };
   const finalize = new Function(...Object.keys(deps), `${finalizerSource}; return finalizeSeedanceVideo;`)(...Object.values(deps));
-  return { histories, receipts, checkpoints, run: (provider, { missingId = false, completion = false, outpaint = false } = {}) => finalize({
+  return { histories, receipts, checkpoints, quotes, run: (provider, { missingId = false, completion = false, outpaint = false } = {}) => {
+    const endpoint = completion ? drafts.seedanceAtlasDraftCompletionEndpoint : "bytedance/seedance-2.5/reference-to-video";
+    const input = completion ? { model: endpoint, draft_id: "provider-draft" }
+      : outpaint ? { model: endpoint, omni_reference_task_type: "edit", duration: -1 } : { model: endpoint, draft: true, resolution: "480p" };
+    return finalize({
     runId: "run", requestId: "request", remote: { video: { url: "https://example.test/draft.mp4" }, ...(missingId ? {} : { draft_id: "provider-draft" }) },
     target: {}, savedOutput: { filePath: "/saved.mp4", publicPath: "/outputs/saved.mp4" },
-    spec: { provider, modelName: "Seedance 2.5", seedance25: true, body: outpaint ? { videoOutpaintContext: outpaintFixture } : {}, settings: { seedanceDraft: !completion && !outpaint, ...(outpaint ? { seedanceTask: "edit" } : {}), generateAudio: true, ...(completion ? { seedanceDraftSource: "receipt" } : {}) },
-      endpoint: completion ? drafts.seedanceAtlasDraftCompletionEndpoint : "generation", routeKind: "text-to-video", cost: drafts.seedanceDraftCost(completion ? "completion" : "preview", provider), credentialFingerprint: providerKeyFingerprint("atlas-key") }
-  }, async patch => checkpoints.push(patch)) };
+    spec: { provider, modelName: "Seedance 2.5", seedance25: true, body: outpaint ? { videoOutpaintContext: outpaintFixture } : {}, settings: { seedanceDraft: !completion && !outpaint, referenceVideoCount: outpaint ? 1 : 0, ...(outpaint ? { seedanceTask: "edit" } : {}), generateAudio: true, ...(completion ? { seedanceDraftSource: "receipt" } : {}) },
+      endpoint, input, routeKind: "text-to-video", cost: drafts.seedanceDraftCost(completion ? "completion" : "preview", provider), credentialFingerprint: providerKeyFingerprint("atlas-key") }
+    }, async patch => checkpoints.push(patch));
+  } };
 }
 
 test("older automatic QC retry requests are rejected before uploads or provider submission", async () => {
@@ -178,25 +188,31 @@ test("outpaint preserves repeated image slots so numbered role references remain
   }
 });
 
-test("Seedance outpaint finalization checkpoints restoration and records raw/source metadata with unknown cost", async () => {
+test("Atlas outpaint finalization keeps the edit quote and raw/source metadata", async () => {
   const h = finalizerHarness();
   const result = await h.run("atlas", { outpaint: true });
   assert.equal(result.video.localUrl, "/outputs/finished.mp4");
   assert.equal(result.videoOutpaint.rawVideoUrl, "/outputs/saved.mp4");
-  assert.equal(result.videoOutpaint.restoredSource, true); assert.equal(result.cost.amountUsd, null);
+  assert.equal(result.videoOutpaint.restoredSource, true); assert.equal(result.cost.amountUsd, 2);
+  assert.equal(h.quotes[0].omni_reference_task_type, "edit");
   assert.equal(h.checkpoints.at(-1).outpaintFinished.output.publicPath, result.video.localUrl);
   assert.equal(h.histories.at(-1).item.mode, "Video outpainting");
   assert.equal(h.histories.at(-1).item.settings.videoOutpaint.model, "seedance-2.5");
 });
 
-test("Atlas finalization preserves draft ID, History provider, unknown costs and timing metadata", async () => {
+test("Atlas finalization quotes each draft stage and estimates separately when unavailable", async () => {
   const h = finalizerHarness();
   const result = await h.run("atlas");
   assert.equal(result.seedanceDraft.provider, "atlas"); assert.equal(h.receipts[0].draftId, "provider-draft");
   assert.equal(h.histories[0].item.provider, "Atlas Cloud"); assert.equal(h.histories[0].item.settings.draft.receiptId, "receipt");
-  assert.equal(h.histories[0].options.deduplicate, true); assert.equal(result.cost.amountUsd, null); assert.equal(result.generationTimings.totalMs, 1000);
+  assert.equal(h.histories[0].options.deduplicate, true); assert.equal(result.cost.amountUsd, 1.608); assert.equal(result.generationTimings.totalMs, 1000);
   const completed = await h.run("atlas", { completion: true });
   assert.equal(completed.seedanceDraftSource, "receipt"); assert.equal(h.receipts.length, 1);
+  assert.equal(completed.cost.amountUsd, 7.104);
+  assert.deepEqual(h.quotes, [
+    { model: "bytedance/seedance-2.5/reference-to-video", draft: true, resolution: "480p" },
+    { model: drafts.seedanceAtlasDraftCompletionEndpoint, draft_id: "provider-draft" }
+  ]);
   const missing = await h.run("atlas", { missingId: true });
   assert.equal(missing.seedanceDraft, undefined); assert.match(missing.warning, /Atlas Cloud/); assert.equal(missing.video.localUrl, "/outputs/saved.mp4");
 });

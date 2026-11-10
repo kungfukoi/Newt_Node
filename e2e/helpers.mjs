@@ -36,9 +36,12 @@ export async function openFixture(page, options = {}) {
       // Browser fixtures have no supervisor; match the real headless lifecycle response.
       if (path === "/api/window-session") return route.fulfill({ status: 204, body: "" });
       if (path === "/api/ui-state") return json(request.method() === "PUT" ? { ok: true } : { state: options.uiState || {}, revision: 0, updatedAt: 0 });
-      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, lookStyleAnalysis: true, createLook: true, lookStyleBoard: true, lookbookEditorial: true, exploreLookVariation: true, exploreArtDirection: true, storyboardShotList: true, projectCanvases: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
+      if (path === "/api/health") return json({ ok: true, version: "e2e", routes: { settings: true, lookStyleAnalysis: true, createLook: true, lookStyleBoard: true, lookbookEditorial: true, exploreLookVariation: true, exploreArtDirection: true, storyboardShotList: true, projectCanvases: true, elevenLabsV4: true, nanoBanana21: true, seedanceDrafts: true, seedanceMultiProviderDrafts: true, seedanceDraftBatchDelivery: true, seedanceDraftPairedFilenames: true, seedanceVideoEditing: true, generationProgress: true, remoteVideoJobs: true, mediaThumbnail: true } });
       if (path === "/api/settings") return json({ version: "e2e", branch: "fixture", apiKeysFound: false, modelProviderPreferences: { seedance: "fal" }, ...options.settings });
       if (path === "/api/style-library/storage") return json({directory:"",mode:"local",localCount:0});
+      if (["/api/style-library/catalog", "/api/style-library/stylefinder"].includes(path)) {
+        return json({ ready: true, indexed: 0, total: 0, categories: [], styles: [] });
+      }
       if (path === "/api/generation-progress") return json({ entries: options.progressEntries ? options.progressEntries(url.searchParams.get("scope")) : [] });
       if (path === "/api/node/generate-image") return json({ images: [{ localUrl: "/outputs/e2e/generated.png", fileName: "generated.png", mimeType: "image/png" }] });
       if (path === "/api/remote-video-jobs") return json({ jobs: options.attention ? [{ runId: "uncertain-fixture", nodeId: "model", groupId: "group", batchIndex: 1, state: dismissed ? "dismissed" : "uncertain", provider: "fal", scope: JSON.stringify([fixtureProjectId, "", ""]), createdAt: "2026-09-04T00:00:00Z", message: "Needs attention: acceptance unknown" }] : [], cursor: "fixture:0", reset: true, pollAfterMs: 15000 });
@@ -73,6 +76,11 @@ export async function openFixture(page, options = {}) {
   await expect(page.locator(".react-flow__node")).toHaveCount(fixture.nodes.length);
   await expect(page.getByText("Nodes failed to load.", { exact: false })).toHaveCount(0);
   return { fixture, errors, requests };
+}
+
+export async function chooseLookbookSource(page, name) {
+  await page.getByRole("combobox", { name: "Looks source", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
 }
 
 export async function wireGeometry(page) {

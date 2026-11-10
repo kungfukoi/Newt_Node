@@ -67,6 +67,8 @@ export function fitExtensionColor(reference, generated, geometry) {
 function seamOffset(edge, channel, coordinate, start, length) {
   const tiles = edge.spatial || [];
   if (!tiles.length) return String(round(edge.offsets[channel]));
+  const first = tiles[0].offsets[channel];
+  if (tiles.every(tile => tile.offsets[channel] === first)) return String(round(first));
   let expression = String(round(tiles.at(-1).offsets[channel]));
   for (let i = tiles.length - 2; i >= 0; i--) {
     const a = tiles[i], b = tiles[i + 1];
@@ -83,11 +85,21 @@ export function extensionColorFilter(report, { w, h, sw, sh, x, y }) {
   // Include uncorrected sides at zero to blend gently at corners, rather than
   // extending a bottom grade abruptly into a differently lit upper expansion.
   const sides = Object.keys(report.edges);
+  const channels = ["r", "g", "b"];
+  const offsets = channels.map((_, c) => sides.map(side => {
+    const horizontal = side === "top" || side === "bottom";
+    return seamOffset(report.edges[side], c, horizontal ? "X" : "Y", horizontal ? x : y, horizontal ? sw : sh);
+  }));
+  // Equal offsets cancel the seam weights. A LUT evaluates the same correction
+  // once per 10-bit channel value instead of interpolating it at every pixel.
+  if (offsets.every(values => Number.isFinite(Number(values[0])) && values.every(value => value === values[0]))) {
+    return "format=gbrp10le,lutrgb=" + channels.map((channel, c) => `${channel}='clip(val+(1023/255)*(${offsets[c][0]}),0,1023)'`).join(":");
+  }
   // At the join, that seam's fit must dominate the opposite seam's lighting.
   const weights = sides.map(side => `1/(1+pow((${distance[side]})/32,2))`);
   const denominator = weights.map(weight => `(${weight})`).join("+");
-  return "format=gbrp10le,geq=" + ["r", "g", "b"].map((channel, c) => {
-    const numerator = sides.map((side, i) => `(( ${seamOffset(report.edges[side], c, side === "top" || side === "bottom" ? "X" : "Y", side === "top" || side === "bottom" ? x : y, side === "top" || side === "bottom" ? sw : sh)} )*(${weights[i]}))`).join("+");
+  return "format=gbrp10le,geq=" + channels.map((channel, c) => {
+    const numerator = offsets[c].map((offset, i) => `((${offset})*(${weights[i]}))`).join("+");
     return `${channel}='clip(${channel}(X,Y)+(1023/255)*(${numerator})/(${denominator}),0,1023)'`;
   }).join(":");
 }

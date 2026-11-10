@@ -1,4 +1,5 @@
 import { getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
+import { seedanceAtlasDraftCompletionEndpoint } from "./seedanceDraft.js";
 const seedream5ProModelName = "Seedream 5.0 Pro", seedream5ProAtlasBase = "bytedance/seedream-v5.0-pro";
 
 export const ATLAS_PRICING_URL = "https://api.atlascloud.ai/api/v1/pricing/models";
@@ -17,20 +18,34 @@ const videoModels = { "Seedance 2.0": "bytedance/seedance-2.0", "Seedance 2.5": 
 const routeAliases = { t2i: "text-to-image", i2i: "edit", t2v: "text-to-video", i2v: "image-to-video", r2v: "reference-to-video" };
 
 // Published standard-column estimates, not fixed quotes or final token charges.
-// Only these native-resolution tiers without reference video were verified.
 export const atlasSeedanceEstimateRates = Object.freeze({ "480p": 0.17464005, "720p": 0.37557, "1080p": 0.739205699895 });
 // Seedance 2.0 native-resolution reference route, verified 2026-10-06.
 export const atlasSeedance20EstimateEndpoint = "bytedance/seedance-2.0/reference-to-video";
 export const atlasSeedance20EstimateRates = Object.freeze({ "480p": 0.1124928, "720p": 0.24192, "1080p": 0.54432 });
 export const atlasSeedanceEstimateEndpoints = ["text-to-video", "image-to-video", "reference-to-video"].map(route => `bytedance/seedance-2.5/${route}`);
+export function atlasSeedance25Rates(endpoint) {
+  const reference = endpoint.endsWith("/reference-to-video");
+  return { ...atlasSeedanceEstimateRates, "720p-esr": 0.31435209, "720p-sr": 0.2741848785,
+    "1080p-esr": 0.563355, "1080p-esr & 60fps": 0.6196905, "1080p-sr": 0.5070195,
+    "1440p-esr": reference ? 0.42230759999983308 : 0.95019209999962443,
+    "1440p-sr": reference ? 0.38888833311147807 : 0.8749987495008256575,
+    "4k-esr": reference ? 0.94476720000016692 : 2.12572620000037557 };
+}
+const seedance25DraftPriceSource = "https://www.atlascloud.ai/blog/tips/seedance-2-5-draft-mode-cost-test";
+const seedance25ReferencePriceSource = "https://www.atlascloud.ai/pricing/models";
+const seedance25ReferenceVideoTokenRate = 10.4;
+
+export function isAtlasSeedance25PricingEndpoint(endpoint) {
+  return atlasSeedanceEstimateEndpoints.includes(endpoint) || endpoint === seedanceAtlasDraftCompletionEndpoint;
+}
 export function atlasSeedanceEstimateEntry(rates = atlasSeedanceEstimateRates) {
   return { currency: "USD", unit: "request", source: ATLAS_PRICING_URL, priceKind: "standard-estimate", rulesVersion: 1,
     points: Object.entries(rates).flatMap(([resolution, rate]) => Array.from({ length: 27 }, (_, i) => ({
       amount: round(rate * (i + 4)), dimensions: { resolution, duration: i + 4, hasVideoReference: false }
     }))) };
 }
-const bundledSeedanceEstimates = { version: 1, revision: "atlas-seedance-estimates-2026-09-11", entries: Object.fromEntries(
-  atlasSeedanceEstimateEndpoints.map(endpoint => [`atlas:${endpoint}`, { ...atlasSeedanceEstimateEntry(), checkedAt: "2026-09-11" }])) };
+const bundledSeedanceEstimates = { version: 1, revision: "atlas-seedance-estimates-2026-11-08", entries: Object.fromEntries(
+  atlasSeedanceEstimateEndpoints.map(endpoint => [`atlas:${endpoint}`, { ...atlasSeedanceEstimateEntry(atlasSeedance25Rates(endpoint)), checkedAt: "2026-11-08" }])) };
 
 // Only these standard routes have sufficiently explicit, non-token billing rules.
 export const atlasPricingSpecs = Object.fromEntries([
@@ -183,7 +198,7 @@ function seedanceEstimate(endpoint, options, references, startFrames, hasVideo) 
     || !Number.isFinite(startFrames) || startFrames > 1 || (startFrames && !endpoint.endsWith("/image-to-video"))
     || (options.referenceVideoDuration ?? 0) !== 0 || options.refers != null || options.video_urls?.length
     || options.promptExpansion === true || options.prompt_expansion === true
-    || !Object.hasOwn(atlasSeedanceEstimateRates, resolution)
+    || !Object.hasOwn(endpoint === atlasSeedance20EstimateEndpoint ? atlasSeedance20EstimateRates : atlasSeedance25Rates(endpoint), resolution)
     || (endpoint.endsWith("/text-to-video") && references !== 0)) return unknown();
   const current = options.snapshot ?? getPricingCatalog();
   const entry = current?.entries?.[`atlas:${endpoint}`];
@@ -192,8 +207,54 @@ function seedanceEstimate(endpoint, options, references, startFrames, hasVideo) 
     ? { version: 1, revision: "atlas-seedance20-2026-10-06", entries: {
       [`atlas:${endpoint}`]: { ...atlasSeedanceEstimateEntry(atlasSeedance20EstimateRates), checkedAt: "2026-10-06" }
     } } : bundledSeedanceEstimates;
-  const quote = pricingQuote("atlas", endpoint, { resolution, duration, hasVideoReference: false }, 1, entry ? current : bundled);
+  const dimensions = { resolution, duration, hasVideoReference: false };
+  const quote = pricingQuote("atlas", endpoint, dimensions, 1, entry ? current : bundled)
+    ?? (entry && !entry.invalidatedAt && !entry.points?.some(point => point.dimensions.resolution === resolution)
+      ? pricingQuote("atlas", endpoint, dimensions, 1, bundled) : null);
   if (!quote) return unknown();
   return { ...result(endpoint, "Atlas Cloud published standard per-second estimate without reference video. Final billing uses actual video tokens and may differ; this is not a guaranteed quote.", quote),
     billingMode: "token_postpaid", unit: "second", units: duration };
+}
+
+const positive = value => Number.isFinite(value) && value > 0 ? value : null;
+
+export function estimateAtlasSeedance25Run({ endpoint, settings, video, snapshot }) {
+  const outpaint = settings.videoOutpaint;
+  const measuredDuration = positive(outpaint ? outpaint.nativeDuration : video?.duration);
+  const requestedDuration = String(settings.duration ?? "").trim().match(/^(\d+)(?: seconds?)?$/i);
+  const seconds = measuredDuration ?? (settings.seedanceTask === "edit"
+    ? positive(settings.sourceDurationSeconds) : positive(Number(requestedDuration?.[1])));
+  if (!isAtlasSeedance25PricingEndpoint(endpoint) || !seconds || seconds > 31) return null;
+
+  const completion = endpoint === seedanceAtlasDraftCompletionEndpoint;
+  const resolution = String(settings.resolution ?? "").toLowerCase();
+  const references = count(settings.referenceVideoCount);
+  if (completion || settings.seedanceDraft && references === 0) {
+    const rate = completion ? 0.592 : 0.134;
+    return { ...result(endpoint, `Atlas Cloud published ${completion ? "1080p draft completion" : "480p draft preview"} benchmark per second.`),
+      amountUsd: round(rate * seconds), pricingStatus: "estimated", pricingSource: seedance25DraftPriceSource,
+      pricingCheckedAt: "2026-11-04", unit: "second", units: seconds, unitRateUsd: rate };
+  }
+  if (references === 0) {
+    const tier = estimateAtlasVideoCost({ model: endpoint, duration: 30, resolution,
+      referenceImageCount: settings.referenceImageCount, startFrameCount: settings.startFrameCount, snapshot });
+    if (tier.amountUsd === null) return null;
+    const rate = tier.amountUsd / 30;
+    return { ...tier, amountUsd: round(rate * seconds), units: seconds, unitRateUsd: rate };
+  }
+  if (!(references > 0) || !endpoint.endsWith("/reference-to-video")
+    || !Object.hasOwn(atlasSeedanceEstimateRates, resolution)) return null;
+
+  const inputSeconds = positive(settings.referenceVideoDurationSeconds)
+    ?? (references === 1 && settings.seedanceTask === "edit" ? positive(settings.sourceDurationSeconds) : null);
+  const width = positive(outpaint ? outpaint.nativeWidth : video?.width);
+  const height = positive(outpaint ? outpaint.nativeHeight : video?.height);
+  const fps = positive(video?.fps);
+  if (!inputSeconds || inputSeconds > 30.1 || !width || !height || !fps) return null;
+  // Atlas's worked Seedance example prices input seconds at the output video token density.
+  const tokens = width * height * fps * (seconds + inputSeconds) / 1024;
+  return { ...result(endpoint, "Atlas Cloud list estimate using output and reference seconds at the output video token density."),
+    amountUsd: round(tokens * seedance25ReferenceVideoTokenRate / 1e6), pricingStatus: "estimated",
+    pricingSource: seedance25ReferencePriceSource, pricingCheckedAt: "2026-11-08",
+    billingMode: "token_postpaid", unit: "million video tokens", units: tokens / 1e6, unitRateUsd: seedance25ReferenceVideoTokenRate };
 }

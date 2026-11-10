@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openFixture } from "./helpers.mjs";
+import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 test("Look details show the catalog palette without similar styles or recommendation copy",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   const ink={id:"ink",name:"Ink",prompt:"Ink on textured paper",examples:[{localUrl:"/outputs/e2e/ink.png"}],colours:[],similarStyles:[]};
@@ -9,6 +9,7 @@ test("Look details show the catalog palette without similar styles or recommenda
   await page.route("**/api/style-library/catalog?**",route=>json(route,{ready:true,total:1,indexed:1,categories:[],styles:[blade]}));
   await page.route("**/api/style-library/catalog/**",route=>json(route,{style:route.request().url().endsWith("/ink")?ink:blade}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await chooseLookbookSource(page,"Commercial");
   await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
   const details=page.getByRole("dialog",{name:"Style details",exact:true});
   await expect(details.getByRole("heading",{name:"Colours",exact:true})).toBeVisible();

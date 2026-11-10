@@ -70,10 +70,10 @@ export function createHistoryStore({ filePath, limit = 500, onWrite = async () =
       if (deduplicate && item.generationRunId && items.some((entry) => entry.generationRunId === item.generationRunId)) return items;
       return [item, ...items].slice(0, limit);
     }),
-    updateCosts: (updates) => mutate((items) => {
+    updateCosts: (updates, keyFor = item => item.id) => mutate((items) => {
       let changed = false;
       const next = items.map(item => {
-        const cost = updates.get(item.id);
+        const cost = updates.get(keyFor(item));
         if (recordedCostAmount(item.cost) !== null || recordedCostAmount(cost) === null) return item;
         changed = true;
         return { ...item, cost };

@@ -27,8 +27,11 @@ test("Video Outpaint drafts an editable guided prompt without generating video a
   const node = page.locator('[data-node-card-id="vace"]');
   const about = node.getByRole("button", { name: "About this Node", exact: true });
   await expect(page.getByRole("tooltip")).toHaveCount(0);
-  await about.hover();
-  await expect(page.getByRole("tooltip")).toContainText("Analyze and Run reuse the last canvas");
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await about.hover({ timeout: 3000 });
+    await expect(page.getByRole("tooltip")).toContainText("Analyze and Run reuse the last canvas", { timeout: 1000 });
+  }).toPass({ timeout: 10000 });
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await about.focus();

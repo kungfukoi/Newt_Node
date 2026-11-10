@@ -17,8 +17,12 @@ export function registerPricingRoutes(app, pricing, quotes, historyPricing) {
         return res.json(await quotes.quote(req.body));
       }
       if (req.params.action === "reconcile" && historyPricing) return res.json(await historyPricing.reconcile());
+      if (req.params.action === "record-charge" && historyPricing) return res.json(await historyPricing.recordCharge(req.body));
       if (req.params.action === "settings") return res.json(await pricing.setEnabled(req.body.enabled));
       res.status(404).json({ error: "Unknown pricing action." });
-    } catch (error) { res.status(400).json({ error: error.message || "Pricing update failed." }); }
+    } catch (error) {
+      const status = error.status || error.statusCode || 400;
+      res.status(status).json({ error: error.message || "Pricing update failed." });
+    }
   });
 }

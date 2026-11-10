@@ -66,5 +66,8 @@ server/data/lookbook-storage.json
 server/data/lookbook-image-aliases.json
 server/data/stylefinder-audition.json
 server/data/stylefinder-audition.json.*.tmp
+server/data/stylefinder-overrides.json
+server/data/stylefinder-overrides.json.*.tmp
+server/data/stylefinder-compact-source.json
 server/data/lookbook-*.json.*.tmp
 server/data/custom-looks.json.*.tmp

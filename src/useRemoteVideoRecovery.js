@@ -4,7 +4,7 @@ import { activeRemoteVideoNodeIds } from "./remoteVideoJobClient.js";
 import { remoteVideoScope } from "./remoteVideoJobs.js";
 import { recoveredVideoPatches } from "./remoteVideoRecovery.js";
 
-export function useRemoteVideoRecovery({ context, nodesRef, edgesRef, updateNode, loadOutputHistory }) {
+export function useRemoteVideoRecovery({ context, nodesRef, edgesRef, draftFinishesRef, updateNode, loadOutputHistory }) {
   const scope = remoteVideoScope(context);
   const callbacks = useRef({ updateNode, loadOutputHistory });
   callbacks.current = { updateNode, loadOutputHistory };
@@ -23,7 +23,9 @@ export function useRemoteVideoRecovery({ context, nodesRef, edgesRef, updateNode
           cursor = data.cursor || "";
           pollAfterMs = Math.min(15000, Math.max(3000, Number(data.pollAfterMs) || 3000));
           const jobs = [...knownJobs.values()];
-          const patches = recoveredVideoPatches(nodesRef.current, jobs, activeRemoteVideoNodeIds(scope), edgesRef.current);
+          const active = activeRemoteVideoNodeIds(scope);
+          for (const id of draftFinishesRef.current) active.add(id);
+          const patches = recoveredVideoPatches(nodesRef.current, jobs, active, edgesRef.current);
           patches.forEach(({ nodeId, patch }) => callbacks.current.updateNode(nodeId, patch));
           if (patches.some(({ patch }) => patch.resultItems)) callbacks.current.loadOutputHistory();
         }
@@ -35,5 +37,5 @@ export function useRemoteVideoRecovery({ context, nodesRef, edgesRef, updateNode
     }
     poll();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [scope, nodesRef, edgesRef]);
+  }, [scope, nodesRef, edgesRef, draftFinishesRef]);
 }

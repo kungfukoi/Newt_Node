@@ -19,6 +19,20 @@ test("overlap does not double count; reconciliation fills missing and prefers ac
   assert.equal(merged.records.length, 3); assert.equal(merged.duplicates, 3);
   assert.deepEqual(merged.records.map(row => row.cost.amountUsd), [3, 4, 2]);
 });
+test("legacy video records gain safe duration metadata without changing recorded cost", () => {
+  const original = { ...record("video", 3), mediaType: "video" };
+  const historical = { ...record("video", 8), mediaType: "video", settings: { duration: "auto", speed: "fast", prompt: "private" }, video: { duration: 5.25 } };
+  const [enriched] = mergeStatsRecords([original], [historical]).records;
+  assert.equal(enriched.cost.amountUsd, 3);
+  assert.equal(enriched.videoDurationSeconds, 5.25);
+  assert.equal(enriched.fastMode, true);
+  assert.ok(!Object.hasOwn(enriched, "settings"));
+  const [reconciled] = mergeStatsRecords([enriched], [{ ...original, cost: { amountUsd: 4, estimated: false } }]).records;
+  assert.equal(reconciled.cost.amountUsd, 4);
+  assert.equal(reconciled.videoDurationSeconds, 5.25);
+  assert.equal(reconciled.fastMode, true);
+  assert.equal(mergeStatsRecords([], [{ ...original, settings: { duration: "auto" } }]).records[0].videoDurationSeconds, null);
+});
 test("corruption refuses unsafe writes and does not erase data", async t => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "newt-stats-corrupt-")); t.after(() => rm(folder, { recursive: true, force: true }));
   const filePath = path.join(folder, "ledger.json"); await writeFile(filePath, "broken");

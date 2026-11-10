@@ -114,16 +114,50 @@ try {
   assert.equal(invalidKeyer.status, 400);
   const invalidOutpaint = await fetch(api + "/api/node/video-outpaint-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "guided" }), signal: AbortSignal.timeout(15000) });
   assert.equal(invalidOutpaint.status, 400);
-  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceVideoEditing", "seedanceExtend", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
+  for (const flag of ["kling4ImageToVideo", "timelineExtractFrame", "flux3Max", "seedanceDrafts", "seedanceMultiProviderDrafts", "seedanceDraftBatchDelivery", "seedanceDraftPairedFilenames", "seedanceVideoEditing", "seedanceExtend", "elevenLabsV4", "exploreLookVariation"]) assert.equal(health.routes[flag], true);
   const missingReceipt = await fetch(api + "/api/node/seedance-draft/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ receiptId: "12345678-1234-1234-1234-123456789012" }) });
   assert.equal(missingReceipt.status, 404);
   assert.equal(health.routes.styleLibrary, true);
   assert.equal(health.routes.lookStyleAnalysis, true);
   assert.equal(health.routes.lookbookStyleRef, true);
   assert.equal(health.routes.stylefinderAudition,true);
+  assert.equal(health.routes.stylefinderCompact,true);
+  assert.equal(health.routes.lookbookSharedCompact,true);
   const missingStyleFinder=await fetch(`${api}/api/style-library/stylefinder`);
   assert.equal(missingStyleFinder.status,503);
   assert.match((await missingStyleFinder.json()).error,/local StyleFinder audition is unavailable/);
+  const compactFolder = path.join(sandbox, "Shared catalog");
+  const compactImage = await readFile(path.join(sandbox, "outputs", "panel.png"));
+  const compactBlob = createHash("sha256").update(compactImage).digest("hex") + ".png";
+  const compactImageDirectory = path.join(compactFolder, "images", compactBlob.slice(0, 2));
+  await mkdir(compactImageDirectory, { recursive: true });
+  await writeFile(path.join(compactImageDirectory, compactBlob), compactImage);
+  const curatedUrl = "/uploads/stylefinder-overrides/smoke/reference.png";
+  const compactLook = { id: "smoke-ink", name: "Smoke Ink", category: "Illustration", tags: ["ink"], examples: [{ localUrl: curatedUrl }] };
+  await writeFile(path.join(compactFolder, "catalog.json"), JSON.stringify({
+    version: 1, styles: [compactLook], categories: ["Illustration"], assets: { [curatedUrl]: compactBlob },
+    details: { [compactLook.id]: { ...compactLook, prompt: "Detailed ink description" } }
+  }));
+  const sharedSetting = await fetch(api + "/api/style-library/storage", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory: compactFolder, copyLocal: false }),
+  });
+  assert.equal(sharedSetting.status, 200);
+  assert.equal((await sharedSetting.json()).format, "compact");
+  const sharedPage = await (await request("/api/style-library/catalog?category=Shared&q=ink&limit=1")).json();
+  assert.equal(sharedPage.total, 1);
+  assert.equal(sharedPage.styles[0].id, "stylefinder-smoke-ink");
+  const sharedDetail = await (await request("/api/style-library/stylefinder/stylefinder-smoke-ink")).json();
+  assert.equal(sharedDetail.style.prompt, "Detailed ink description");
+  const sharedImage = sharedDetail.style.examples[0];
+  assert.equal(sharedImage.localUrl, undefined);
+  assert.deepEqual(Buffer.from(await (await request(sharedImage.url)).arrayBuffer()), compactImage);
+  assert.equal((await (await request("/api/style-library/catalog?category=Shared&offset=1")).json()).styles.length, 0);
+  const clearSharedSetting = await fetch(api + "/api/style-library/storage", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ directory: "" }),
+  });
+  assert.equal(clearSharedSetting.status, 200);
+  assert.equal((await fetch(api + sharedImage.url)).status, 404);
   assert.equal(health.routes.createLook, true);
   assert.equal(health.routes.lookStyleBoard, true);
   const invalidCreatedLook = await fetch(api + "/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Missing images" }) });
@@ -198,6 +232,19 @@ try {
   assert.equal(priceStatus.catalog.version, 1);
   const pricingWrite = await fetch(api + "/api/pricing/settings", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:true})});
   assert.equal(pricingWrite.status, 403);
+  assert.equal((await (await request("/api/health")).json()).routes.statsPriceReconciliation, true);
+  const pricingAction = (action, body) => fetch(api + "/api/pricing/" + action, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: JSON.stringify(body)
+  });
+  const reconciliation = await pricingAction("reconcile", {});
+  assert.equal(reconciliation.status, 200);
+  assert.deepEqual(await reconciliation.json(), { updated: 0, unpriced: 1, total: 1 });
+  const charge = await pricingAction("record-charge", { provider: "unknown", runId: "smoke-generation", amountUsd: 0.25 });
+  assert.equal(charge.status, 200);
+  assert.equal((await charge.json()).historySynced, true);
+  assert.equal((await (await request("/api/stats/local")).json()).history[0].cost.amountUsd, 0.25);
+  assert.equal((await (await request("/api/history")).json())[0].cost.pricingSource, "manual-provider-billing");
+  assert.equal((await pricingAction("record-charge", { provider: "unknown", runId: "smoke-generation", amountUsd: 2 })).status, 409);
   const invalidExplore = await fetch(api + "/api/node/explore-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: 0, references: [], parents: [] }) });
   assert.equal(invalidExplore.status, 400);
   assert.equal((await (await request("/api/health")).json()).routes.storyboardRevisions, true);
@@ -478,6 +525,25 @@ try {
   const masterCopy = await (await request("/api/node/save-output", { sourceUrl: refinished.url, sourceFileName: "master.mp4", mediaType: "video", outputFormat: "source", outputOriginalSourceUrl: "/outputs/outpaint-source.mp4", outputTargetPath: path.join(sandbox, "master-export"), outputTargetFileName: "master" })).json();
   const hashMaster = async file => { const hash = createHash("sha256"); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest("hex"); };
   assert.equal(await hashMaster(masterCopy.output.filePath), await hashMaster(refinished.filePath), "Same-format Output changed the completed MP4 bytes");
+  const seedanceHdPath = path.join(sandbox, "outputs", "seedance-hd.mp4");
+  await promisify(execFile)(ffmpeg, ["-y", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-vf", "scale=1920:1080", "-frames:v", "1", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", seedanceHdPath], { windowsHide: true, timeout: 30000 });
+  const draftDeliveryBody = {
+    sourceUrl: "/outputs/seedance-hd.mp4", sourceFileName: "seedance-hd.mp4", mediaType: "video", outputFormat: "source",
+    outputTargetPath: path.join(sandbox, "seedance-automatic"), outputTargetFileName: "$filename", outputTargetSourceFileName: "Scene 04.mp4",
+    seedanceFinishedFileName: "Scene 04.mp4"
+  };
+  const draftCopy = await (await request("/api/node/save-output", {
+    ...draftDeliveryBody, seedanceFinishedFileName: undefined, seedanceDraftOutput: true,
+    sourceUrl: "/outputs/clip.mp4", sourceFileName: "clip.mp4"
+  })).json();
+  assert.equal(draftCopy.output.fileName, "Scene 04_draft.mp4");
+  const autoDraftDelivery = await (await request("/api/node/save-output", draftDeliveryBody)).json();
+  const manualDraftDelivery = await (await request("/api/node/save-output", {
+    ...draftDeliveryBody, sourceUrl: autoDraftDelivery.output.localUrl, sourceFileName: autoDraftDelivery.output.fileName,
+    outputTargetPath: path.join(sandbox, "seedance-manual")
+  })).json();
+  assert.equal(manualDraftDelivery.output.fileName, "Scene 04.mp4");
+  assert.equal(await hashMaster(manualDraftDelivery.output.filePath), await hashMaster(seedanceHdPath), "Run Output must copy the selected finished Seedance clip");
   await promisify(execFile)(ffmpeg, ["-y", "-i", path.join(sandbox, "outputs", "clip.mp4"), "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", path.join(sandbox, "outputs", "original.mov")], { windowsHide: true, timeout: 30000 });
   const movPreviewUrl = api + "/api/video-preview?url=" + encodeURIComponent("/outputs/original.mov");
   const movPreview = await fetch(movPreviewUrl, { headers: { Range: "bytes=0-127" } });

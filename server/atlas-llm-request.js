@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { AsyncResource } from "node:async_hooks";
 import { createWorkScheduler } from "../src/workScheduler.js";
+import { atlasTextUsage } from "../src/atlasBillingUsage.js";
 
 // Share admission across text and image analysis, including rate-limit backoff.
 // Only explicit rejections are retried; an interrupted paid request is uncertain.
@@ -37,4 +38,11 @@ export function createAtlasLlmRequest({ fetchImpl = fetch, wait = sleep, random 
       }
     }, { signal });
   };
+}
+
+export function atlasLlmBillingUsage(result, model) {
+  const { data, response } = result;
+  return atlasTextUsage(data?.usage ?? data?.data?.usage, {
+    requestId: response.headers.get("x-request-id"), responseId: data?.id ?? data?.data?.id, model
+  });
 }

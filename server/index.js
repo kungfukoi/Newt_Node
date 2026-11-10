@@ -9,7 +9,7 @@ import { registerLookAnalysisRoutes } from "./look-analysis.js";
 import { registerCustomLookRoutes } from "./custom-looks.js";
 import { createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage } from "./lookbook-storage.js";
 import { registerStyleRefCatalogRoutes } from "./styleref-catalog.js";
-import { registerStyleFinderAuditionRoutes } from "./stylefinder-audition.js";
+import { createStyleFinderAudition, registerStyleFinderAuditionRoutes, registerStyleFinderCuratedImages } from "./stylefinder-audition.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
@@ -35,7 +35,7 @@ import { wanOutpaintPrompt, wanOutpaintNegativePrompt } from "../src/wanOutpaint
 import { registerVideoOutpaintPromptRoute } from "./routes/videoOutpaintPrompt.js";
 import { createOutpaintFramePresence } from "./outpaint-frame-presence.js";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
-import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName } from "../src/seedanceDraft.js";
+import { validateSeedanceDraft, seedanceDraftCost, seedanceDraftProviderName, seedanceDraftPairStem, seedanceDraftSuffix } from "../src/seedanceDraft.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { validateSeedance25Task, validateSeedance25EditDuration, validateSeedance25ReferenceTags } from "../src/seedance25.js";
 import { extendSeedanceVideo } from "./seedance-extend.js";
@@ -50,6 +50,7 @@ import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { createDirectorDialoguePreparation } from "./director-dialogue.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
+import { estimateAtlasSeedance25Run } from "../src/atlasPricing.js";
 import { statsCredentialIdentities } from "./stats-credentials.js";
 import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { ProviderPricing } from "./provider-pricing.js";
@@ -135,7 +136,7 @@ import {
 } from "./provider-credentials.js";
 import { validateProviderKey } from "./provider-key-validation.js";
 import { atlasError, createAtlasClient } from "./atlas.js";
-import { createAtlasLlmRequest } from "./atlas-llm-request.js";
+import { atlasLlmBillingUsage, createAtlasLlmRequest } from "./atlas-llm-request.js";
 import { createAtlasMedia } from "./atlas-media.js";
 import { buildMediaAnalysisContent } from "./media-analysis-input.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
@@ -155,7 +156,7 @@ import {
   githubArchiveUrl,
   maxUpdateArchiveBytes
 } from "./runtime-update.js";
-import { supportsAtlasImageModel, supportsAtlasVideoModel, estimateAtlasVideoCost } from "../src/atlasMedia.js";
+import { supportsAtlasImageModel, supportsAtlasVideoModel } from "../src/atlasMedia.js";
 import {
   copyFileWithRetry,
   readFileWithRetry,
@@ -883,6 +884,8 @@ process.on("message", (message) => {
 });
 app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
 app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
+const styleFinderAudition = createStyleFinderAudition({ directory: dataDir, readSharedCompact: () => createdLookStore.readSharedCompact() });
+registerStyleFinderCuratedImages(app, styleFinderAudition);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get(/^\/external-outputs\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -945,7 +948,7 @@ app.get("/api/generation-progress", (req, res) => {
     : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
   res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
-const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs });
+const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs, checkOutput: verifySeedanceVideoOutput });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
@@ -974,14 +977,15 @@ registerCoreRoutes(app, {
 });
 
 registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing({
-  store: historyStore, snapshot: () => pricingRefresh.snapshot(),
-  quoteAtlas: async (item) => {
-    if (!item.generationRunId || !process.env.ATLAS_API_KEY) return null;
-    const name = createHash("sha256").update(item.generationRunId).digest("hex");
-    const spec = JSON.parse(await readFile(path.join(dataDir, "remote-video-jobs.json.d", name + ".spec.json"), "utf8"));
-    if (spec.provider !== "atlas" || spec.input?.model !== item.endpoint) return null;
+  store: historyStore, ledger: statsLedger, snapshot: () => pricingRefresh.snapshot(),
+  atlasJobsDirectory: path.join(dataDir, "remote-video-jobs.json.d"),
+  quoteAtlas: async (_item, spec) => {
+    if (!spec?.credentialFingerprint) return null;
+    const { credentials } = await readRuntimeSettingsStore();
+    const key = [process.env.ATLAS_API_KEY, ...credentials.atlas.map(entry => entry.key)]
+      .find(value => value && providerKeyFingerprint(value) === spec.credentialFingerprint);
     // Explicit historical reconciliation quotes saved inputs at current account rates.
-    return providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
+    return key ? providerPricing.atlasInput(spec.input, key) : null;
   }
 }));
 registerFeatureUsageRoutes(app, featureUsageStore);
@@ -1094,8 +1098,8 @@ registerLookbookStorageRoutes(app,createdLookStore);
 registerLookAnalysisRoutes(app, { directory: path.join(dataDir, "look-analyses"), analyze: runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost,
   readAsset: async url => { const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url); const info = await stat(filePath); if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error("Look examples must be at most 16 MB."); return { buffer: await readFile(filePath), fileName }; }
 });
-registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore });
-registerStyleFinderAuditionRoutes(app, { directory: dataDir });
+registerStyleRefCatalogRoutes(app, { createdStore: createdLookStore, searchSharedCompact: styleFinderAudition.searchShared });
+registerStyleFinderAuditionRoutes(app, { directory: dataDir }, styleFinderAudition);
 registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
@@ -1359,6 +1363,8 @@ function buildHealthPayload() {
       nanoBanana21: true,
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
+      seedanceDraftBatchDelivery: true,
+      seedanceDraftPairedFilenames: true,
       seedanceVideoEditing: true,
       seedanceExtend: true,
       seedanceKreaVideoEditing: true,
@@ -1373,6 +1379,8 @@ function buildHealthPayload() {
       styleLibrary: true,
       lookStyleAnalysis: true,
       stylefinderAudition: true,
+      stylefinderCompact: true,
+      lookbookSharedCompact: true,
       createLook: true,
       lookStyleBoard: true,
       lookbookStyleRef: true,
@@ -1398,6 +1406,7 @@ function buildHealthPayload() {
       skillDirector: true,
       storyboardQc: true,
       providerPricing: true,
+      statsPriceReconciliation: true,
       spendAnalytics: true,
       storyboardSequenceReview: true,
       newtPresets: true,
@@ -3707,6 +3716,8 @@ app.post("/api/node/save-output", async (req, res) => {
       return res.status(400).json({ error: "Set an Output path before saving." });
     }
     const { target, outputStats, thumbnail } = savedOutput;
+    const draftReceipt = mediaType === "video" && req.body.seedanceDraftOutput === true ? req.body.seedanceDraftReceiptId : "";
+    const draftFileName = draftReceipt ? await seedanceDrafts.rememberOutput(draftReceipt, target.fileName) : "";
     res.json({
       output: {
         localUrl: target.publicPath,
@@ -3716,7 +3727,8 @@ app.post("/api/node/save-output", async (req, res) => {
         mediaType,
         bytes: outputStats.size,
         thumbnailUrl: thumbnail?.publicPath || "",
-        outputFormat
+        outputFormat,
+        ...(draftFileName ? { seedanceDraftExportFileName: draftFileName } : {})
       }
     });
   } catch (error) {
@@ -6866,8 +6878,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     const draftMode = validateSeedanceDraft({ model: selectedVideoModel.displayName, seedanceDraft: req.body.seedanceDraft, provider: draftProvider });
     const draftKey = draftMode ? String(({ fal: process.env.FAL_KEY, atlas: process.env.ATLAS_API_KEY, krea: process.env.KREA_API_KEY })[draftProvider] || "").trim() : "";
     if (/^Seedance 2\.[05]$/i.test(selectedVideoModel.displayName)) {
-      const packagePath = String(req.body.workflowPackagePath || "");
-      req.videoStorageFallback = (await verifyVideoOutputDestination(req.body, { rootDir, fallbackDirectory: packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(req.body)) }))?.fallback === true;
+      req.videoStorageFallback = (await verifySeedanceVideoOutput({ ...req.body, seedanceDraftOutput: draftMode }))?.fallback === true;
     }
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       provider: requestedSeedanceProvider, videos: req.body.referenceVideoUrls || [], startFrames: req.body.startFrameUrls || [], endFrames: req.body.endFrameUrls || [], filmDirector: req.body.filmDirector });
@@ -7188,10 +7199,10 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
     let runtimeDurationSeconds = durationToSeconds(duration);
 
     const atlasReferencePreparation = [];
-    function seedanceJobSpec(input) {
+    function seedanceJobSpec(input, atlasKey) {
       return {
         provider: runtimeProvider, modelName: selectedVideoModel.displayName, endpoint, input,
-        credentialFingerprint: providerKeyFingerprint(draftMode ? draftKey : runtimeProvider === "fal" ? process.env.FAL_KEY : runtimeProvider === "atlas" ? process.env.ATLAS_API_KEY : process.env.KREA_API_KEY),
+        credentialFingerprint: providerKeyFingerprint(atlasKey ?? (draftMode ? draftKey : runtimeProvider === "fal" ? process.env.FAL_KEY : process.env.KREA_API_KEY)),
         body: {
           ...workflowContextPayload(req.body), nodeId: req.body.nodeId, nodeTitle: req.body.nodeTitle,
           outputFileNameBase: req.body.outputFileNameBase,
@@ -7221,12 +7232,13 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         }
       };
     }
-    async function acceptSeedanceJob(input) {
-      const job = await remoteVideoJobs.create(req.body.generationRunId, seedanceJobSpec(input), req.durableRequestHash);
+    async function acceptSeedanceJob(input, atlasKey) {
+      const job = await remoteVideoJobs.create(req.body.generationRunId, seedanceJobSpec(input, atlasKey), req.durableRequestHash);
       return res.status(202).json({ job });
     }
 
     if (runtimeProvider === "atlas") {
+      const atlasKey = draftMode ? draftKey : process.env.ATLAS_API_KEY;
       if (!supportsAtlasVideoModel(selectedVideoModel.displayName)) {
         return res.status(400).json({ error: `${selectedVideoModel.displayName} is not supported by Atlas Cloud.` });
       }
@@ -7238,6 +7250,7 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         endImage: endFrameUrl,
         images: routeKind === "reference-to-video" ? referenceImageUrls : [],
         videos: routeKind === "reference-to-video" ? referenceVideoUrls : [],
+        referenceVideoDurationSeconds: referenceVideoDurations.every(seconds => seconds > 0) ? referenceVideoDurationSeconds : null,
         audios: routeKind === "reference-to-video" ? referenceAudioUrls : [],
         duration,
         resolution,
@@ -7247,22 +7260,21 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         ...(req.body.videoOutpaintContext && seedance25 ? { outputFormat: "mov" } : {})
       };
       if (req.durableRequestHash) {
-        const input = await atlasMedia.prepareVideo(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
+        const input = await atlasMedia.prepareVideo(atlasOptions, atlasKey);
         endpoint = input.model;
-        cost = draftMode ? seedanceDraftCost("preview", "atlas") : editing ? { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." } : { ...estimateAtlasVideoCost({ model: selectedVideoModel.displayName, duration, resolution, referenceImageCount: referenceImageUrls.length, hasVideoReference: referenceVideoUrls.length > 0, endpoint }), ...await providerPricing.atlasInput(input, process.env.ATLAS_API_KEY).catch(() => null) };
-        return await acceptSeedanceJob(input);
+        ({ cost } = await atlasMedia.videoCost(input, atlasOptions, atlasKey));
+        return await acceptSeedanceJob(input, atlasKey);
       }
-      const atlasResult = await atlasMedia.video(atlasOptions, draftMode ? draftKey : process.env.ATLAS_API_KEY);
+      const atlasResult = await atlasMedia.video(atlasOptions, atlasKey);
       if (draftMode) {
         endpoint = atlasResult.endpoint;
-        cost = seedanceDraftCost("preview", "atlas");
-        return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+        cost = atlasResult.cost;
+        return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input, atlasKey), requestId: atlasResult.requestId,
           remote: { video: atlasResult.remoteVideo, draft_id: atlasResult.job?.draft_id } }));
       }
-      if (editing) atlasResult.cost = { amountUsd: null, currency: "USD", estimated: true, pricingBasis: "Video editing cost depends on source and provider usage." };
       endpoint = atlasResult.endpoint;
       cost = atlasResult.cost;
-      return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input), requestId: atlasResult.requestId,
+      return res.json(await finalizeSeedanceVideo({ spec: seedanceJobSpec(atlasResult.input, atlasKey), requestId: atlasResult.requestId,
         remote: { video: atlasResult.remoteVideo, seed: atlasResult.job?.seed ?? null } }));
     }
 
@@ -7363,6 +7375,12 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
 }, remoteVideoJobs);
 app.post("/api/node/generate-video", handleVideoGeneration);
 
+async function verifySeedanceVideoOutput(body) {
+  const packagePath = String(body.workflowPackagePath || "");
+  const fallbackDirectory = packagePath ? path.join(packagePath, workflowPackageOutputDirName) : path.join(outputsDir, localWorkflowAssetDirName(body));
+  return verifyVideoOutputDestination(body, { rootDir, fallbackDirectory });
+}
+
 async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const spec = job.spec;
   const { body, settings, endpoint, routeKind, modelName } = spec;
@@ -7373,7 +7391,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   const storage = await saveGeneratedVideoWithFallback({ ...job, savedOutput: availableOutput }, {
     checkpoint,
     reserve: async storageBody => {
-      const target = await createManagedAssetTarget({ body: storageBody }, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4", body.videoOutpaintContext ? workflowPackageDependencyDirName : workflowPackageOutputDirName);
+      const target = await createManagedAssetTarget({ body: { ...storageBody, seedanceDraftOutput: settings.seedanceDraft === true } }, routeKind, path.extname(new URL(remoteVideo.url).pathname) || ".mp4", body.videoOutpaintContext ? workflowPackageDependencyDirName : workflowPackageOutputDirName);
       if (job.runId) await writeFile(target.filePath, "", { flag: "wx" });
       return target;
     },
@@ -7382,31 +7400,32 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   let output = storage.output;
   if (spec.seedance25) {
     remoteVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-    if (!settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
+    if (spec.provider !== "atlas" && !settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit") cost = generationPricingScope.run(spec.pricingSnapshot || pricingRefresh.snapshot(), () => spec.provider === "fal" ? estimateSeedanceCost({
       duration: settings.duration, durationSeconds: remoteVideo.duration,
       inputVideoDurationSeconds: spec.referenceVideoDurationSeconds, resolution: settings.resolution,
       aspectRatio: spec.runtimeAspectRatio, endpoint, routeKind, modelName
-    }) : spec.provider === "atlas" ? (recordedCostAmount(spec.cost) !== null ? spec.cost : estimateAtlasVideoCost({
-      model: modelName, endpoint, duration: settings.duration || spec.runtimeDurationSeconds,
-      resolution: settings.resolution, referenceImageCount: settings.referenceImageCount,
-      startFrameCount: settings.startFrameCount, hasVideoReference: settings.referenceVideoCount > 0
-    })) : estimateKreaSeedanceCost({
+    }) : estimateKreaSeedanceCost({
       modelName, durationSeconds: positiveNumber(remoteVideo.duration) || spec.runtimeDurationSeconds,
       resolution: settings.resolution, hasVideoReference: settings.referenceVideoCount > 0
     }));
     if (spec.provider === "krea") Object.assign(cost, { aspectRatio: spec.runtimeAspectRatio, routeKind });
   }
-  if (spec.provider === "atlas" && !settings.seedanceDraft && !settings.seedanceDraftSource && settings.seedanceTask !== "edit" && recordedCostAmount(cost) === null &&
+  if (spec.provider === "atlas" && recordedCostAmount(cost) === null &&
       spec.credentialFingerprint === providerKeyFingerprint(process.env.ATLAS_API_KEY)) {
     const quote = await providerPricing.atlasInput(spec.input, process.env.ATLAS_API_KEY);
     if (quote) cost = { ...cost, ...quote };
+  }
+  if (spec.provider === "atlas" && spec.seedance25 && recordedCostAmount(cost) === null) {
+    cost = estimateAtlasSeedance25Run({ endpoint, settings: { ...settings, resolution: spec.input?.resolution ?? settings.resolution },
+      video: remoteVideo, snapshot: spec.pricingSnapshot || pricingRefresh.snapshot() }) ?? cost;
   }
   let draftMetadata = job.seedanceDraft || null;
   let draftWarning = "";
   if (settings.seedanceDraft && !draftMetadata) {
     draftMetadata = spec.provider === "krea" ? { provider: "krea", resolution: "480p", completionSupported: false }
       : await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint, provider: spec.provider,
-        startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec });
+        startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec, previewFileName: output.fileName,
+        exportFileName: output.outputTarget ? output.fileName : undefined });
     if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
     else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.`;
   }
@@ -7433,9 +7452,13 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     submittedPrompt: spec.submittedPrompt, cost,
     ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}),
     ...(draftMetadata ? { seedanceDraft: draftMetadata } : {}),
+    ...(settings.seedanceDraft && output.outputTarget ? { seedanceDraftExportFileName: output.fileName } : {}),
+    ...(settings.seedanceDraft && !draftMetadata ? { seedanceDraftPreviewOnly: true } : {}),
     ...([draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).join(" ") } : {}),
     ...(storage.fallback ? { storageFallback: true } : {}),
     ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
+    ...(settings.seedanceDraftSource ? { seedanceDraftPreviewFileName: settings.seedanceDraftPreviewFileName,
+      seedanceDraftDeliveryFileName: settings.seedanceDraftDeliveryFileName, seedanceDraftOutputNodeId: body.outputTargetNodeId || "" } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
     video: { ...remoteVideo, localUrl: output.publicPath, fileName: output.fileName, filePath: output.filePath }
@@ -8609,6 +8632,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
 
 async function runKling4Video(req, res) {
   const provider = runtimeModelProviderPreferences.veo;
+  const atlasKey = process.env.ATLAS_API_KEY;
   const atlasClient = createAtlasClient({ onProgress: ({ status }) => updateCurrentGenerationProgress({ status: "running", phase: "generating", message: `Atlas Cloud: ${status || "processing"}` }) });
   const generated = await generateKling4(req.body, provider, {
     isManagedUrl: isLocalAssetUrl,
@@ -8617,11 +8641,11 @@ async function runKling4Video(req, res) {
       if (!["image/png", "image/jpeg"].includes(asset.mimeType)) throw httpError(400, "Kling 4.0 keyframes must be PNG or JPEG images.");
       const metadata = imageDimensionsFromBuffer(asset.buffer, asset.mimeType) || {};
       if (!metadata.width || !metadata.height || asset.buffer.length > 30 * 1024 * 1024 || metadata.width < 300 || metadata.height < 300 || metadata.width / metadata.height < 0.4 || metadata.width / metadata.height > 2.5) throw httpError(400, "Kling 4.0 keyframes must be at least 300px per side, at most 30MB, with an aspect ratio from 2:5 to 5:2.");
-      return provider === "atlas" ? atlasClient.upload(asset, process.env.ATLAS_API_KEY) : uploadLocalOutputToFal(url);
+      return provider === "atlas" ? atlasClient.upload(asset, atlasKey) : uploadLocalOutputToFal(url);
     },
     subscribe: (endpoint, options) => subscribeFal(endpoint, options, { route: "generate-video", model: videoModelNames.kling4 }),
-    atlasGenerate: input => atlasClient.generate({ mediaType: "video", input, key: process.env.ATLAS_API_KEY }),
-    quoteInput: input => providerPricing.atlasInput(input, process.env.ATLAS_API_KEY)
+    atlasGenerate: input => atlasClient.generate({ mediaType: "video", input, key: atlasKey }),
+    quoteInput: input => providerPricing.atlasInput(input, atlasKey)
   });
   const { endpoint, input, result, remoteVideo, cost } = generated;
   const output = await downloadVideo(req, remoteVideo.url, `kling-4-${provider}`);
@@ -11671,7 +11695,9 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const body = requestLike?.body || {};
   const packageContext = workflowPackageContextFromBody(body);
   const inputExtension = extension || path.extname(String(kind || ""));
-  const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
+  const finishedBaseName = path.parse(String(body.seedanceFinishedFileName || "")).name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").slice(0, 160);
+  const preferredBaseName = finishedBaseName || safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
+  const draft = body.seedanceDraftOutput === true && assetGroup === workflowPackageOutputDirName;
   const outputTarget = assetGroup === workflowPackageOutputDirName
     ? await createOutputTargetAsset(body, kind, inputExtension, preferredBaseName, { rootDir, outputPrefix: externalOutputsPrefix, forceExtension: Boolean(options.forceExtension) })
     : null;
@@ -11682,7 +11708,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
     const assetDir = path.join(packageContext.packagePath, assetGroup);
     await mkdir(assetDir, { recursive: true });
     const fileName = inputExtension
-      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension)
+      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension, draft)
       : safePackageFileName(kind || "asset");
     const relativePath = path.join(assetGroup, fileName);
     return {
@@ -11700,7 +11726,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   await mkdir(targetDir, { recursive: true });
 
   const fileName = inputExtension
-    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension)
+    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension, draft)
     : safePackageFileName(kind || "asset");
   const relativePath = path.join(relativeRoot, fileName);
   return {
@@ -15779,13 +15805,18 @@ function uniqueOutputFileName(kind, extension) {
   return `${timestamp}-${safeKind}-${randomUUID().slice(0, 8)}${safeExtension}`;
 }
 
-async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension) {
+async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension, draft = false) {
   const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
-  if (!preferredBaseName) return uniqueOutputFileName(kind, safeExtension);
+  const draftSuffix = draft ? seedanceDraftSuffix : "";
+  if (!preferredBaseName) {
+    const generated = uniqueOutputFileName(kind, safeExtension);
+    return path.parse(generated).name + draftSuffix + safeExtension;
+  }
+  const baseName = draft ? seedanceDraftPairStem(preferredBaseName + safeExtension) || "output" : preferredBaseName;
 
   for (let index = 0; index < 500; index += 1) {
     const suffix = index === 0 ? "" : `-${index + 1}`;
-    const candidate = `${preferredBaseName}${suffix}${safeExtension}`;
+    const candidate = `${baseName}${suffix}${draftSuffix}${safeExtension}`;
     try {
       await stat(path.join(targetDir, candidate));
     } catch (error) {
@@ -15794,7 +15825,7 @@ async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extensi
     }
   }
 
-  return `${preferredBaseName}-${randomUUID().slice(0, 8)}${safeExtension}`;
+  return `${baseName}-${randomUUID().slice(0, 8)}${draftSuffix}${safeExtension}`;
 }
 
 function safeOutputFileBaseName(value) {
@@ -17050,7 +17081,8 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
 
   if (normalizedProvider !== "fal") {
     const measured = [usage, ...helperUsages].filter(Boolean).map(item => catalogTokenCost(provider, model, item));
-    if (measured.length && measured.every(Boolean)) return { ...measured[0], amountUsd: measured.reduce((sum,item)=>sum+item.amountUsd,0), units: measured.length };
+    if (measured.length && measured.every(Boolean)) return { ...measured[0], amountUsd: measured.reduce((sum,item)=>sum+item.amountUsd,0),
+      units: measured[0].unit === "million tokens" ? measured.reduce((sum, item) => sum + item.units, 0) : measured.length };
     return {
       amountUsd: null,
       currency: "USD",
@@ -17058,7 +17090,8 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
       units: 1,
       unit: "request",
       mediaType: "text",
-      pricingBasis: "Token usage or verified rates are unavailable for this provider/model",
+      pricingBasis: normalizedProvider === "atlas cloud" ? "Atlas Cloud billing requires complete token usage for each request. Check the saved Atlas request IDs."
+        : "Token usage or verified rates are unavailable for this provider/model",
       pricingSource: "usage-no-local-pricing"
     };
   }
@@ -17375,12 +17408,14 @@ async function runTextLlm({
         }
       }
 
-      const { data, errorStatus } = await requestAtlasLlm(endpoint, {
+      requireAtlasLlmPrice(model);
+      const atlasResult = await requestAtlasLlm(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(300000)
       }, updateCurrentGenerationProgress);
+      const { data, errorStatus } = atlasResult;
       const text = extractOpenAiResponseText(data).trim();
       const hasFallback = index < models.length - 1;
       if (errorStatus !== 429 && hasFallback && atlasTextCanFallback({ status: errorStatus, hasText: Boolean(text), hasProviderError: Boolean(data?.error) })) {
@@ -17389,7 +17424,7 @@ async function runTextLlm({
       if (errorStatus) {
         throw httpError(errorStatus, atlasError(data, errorStatus), { raw: data });
       }
-      return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint, usage: data.usage || null }, data, route);
+      return checkedCreativeLlmResult({ text, model, provider: "Atlas Cloud", endpoint, usage: atlasLlmBillingUsage(atlasResult, model) }, data, route);
     }
     throw httpError(502, "Atlas Cloud text generation failed.");
   }
@@ -17415,6 +17450,12 @@ function checkedCreativeLlmResult(result, data, route) {
       hasMainRequest: Object.hasOwn(result, "usage")
     });
     throw error;
+  }
+}
+
+function requireAtlasLlmPrice(model) {
+  if (!catalogTokenCost("atlas", model, { input_tokens: 1, output_tokens: 1 })) {
+    throw httpError(503, `Atlas Cloud has no verified token rates for ${model}. No request was submitted. Check API Pricing.`);
   }
 }
 
@@ -17471,6 +17512,7 @@ async function runMediaDescriptionLlm({
     signal: AbortSignal.timeout(300000)
   };
   const atlasEndpoint = atlasMediaLlmEndpoint(route);
+  if (atlas) requireAtlasLlmPrice(model);
   const result = atlas
     ? await requestAtlasLlm(atlasEndpoint, options, updateCurrentGenerationProgress)
     : await (async () => {
@@ -17478,17 +17520,18 @@ async function runMediaDescriptionLlm({
         return { data: await response.json().catch(() => ({})), errorStatus: response.ok ? 0 : response.status };
       })();
   const { data, errorStatus } = result;
+  const usage = atlas ? atlasLlmBillingUsage(result, model) : data.usage;
   if (errorStatus) {
     throw httpError(
       errorStatus,
       atlas ? atlasError(data, errorStatus) : data?.error?.message || "OpenAI media analysis failed.",
       { raw: data, llmResult: { text: "", provider: atlas ? "Atlas Cloud" : "OpenAI", model,
-        endpoint: atlas ? atlasEndpoint : openAiModel, usages: [data?.usage].filter(Boolean) } }
+        endpoint: atlas ? atlasEndpoint : openAiModel, usages: [usage].filter(Boolean) } }
     );
   }
   return checkedCreativeLlmResult({
     text: extractOpenAiResponseText(data).trim(),
-    usages: [data.usage].filter(Boolean),
+    usages: [usage].filter(Boolean),
     provider: atlas ? "Atlas Cloud" : "OpenAI",
     model,
     endpoint: atlas ? atlasEndpoint : openAiModel
@@ -22476,6 +22519,8 @@ function localPublicPathFromUrl(value) {
 }
 
 async function resolveLocalAssetPath(publicPath) {
+  const curated = await styleFinderAudition.curatedAsset(publicPath);
+  if (curated) return {filePath:curated.filename,fileName:path.basename(publicPath)};
   if(String(publicPath||"").startsWith("/uploads/shared-looks/"))await createdLookStore.ensureAsset(publicPath);
   const sharedAlias=await createdLookStore.assetAlias(publicPath);
   if(sharedAlias)return {filePath:await createdLookStore.ensureAsset(sharedAlias),fileName:path.basename(publicPath)};

@@ -1,13 +1,23 @@
 import { createHash } from "node:crypto";
 import { buildAtlasImageRequest, buildAtlasVideoRequest } from "../src/atlasMedia.js";
-import { atlasPricingEndpoints } from "../src/atlasPricing.js";
+import { atlasPricingEndpoints, isAtlasSeedance25PricingEndpoint } from "../src/atlasPricing.js";
 import { generationEstimate } from "../src/generationPricing.js";
 import { generationQuoteSettings, QUOTE_TTL_MS } from "../src/pricingTrust.js";
+import { atlasTokenCount } from "../src/atlasBillingUsage.js";
+import { recordedCostAmount } from "../src/pricingCatalog.js";
 
 export const ATLAS_CALCULATE_URL = "https://api.atlascloud.ai/api/v1/model/calculate";
 export const FAL_BILLING_URL = "https://api.fal.ai/v1/models/billing-events";
+const atlasQuoteOnlyEndpoints = ["text-to-image", "edit", "remix"].map(route => `reve-ai/reve-2.1/${route}`);
 const amount = value => (typeof value === "number" || typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))
   && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+
+export function requireAtlasPrice(cost) {
+  if (recordedCostAmount(cost) === null) {
+    throw Object.assign(new Error("Atlas Cloud pricing is unavailable for these settings. No generation was submitted. Check API Pricing or retry the quote."), { status: 503 });
+  }
+  return cost;
+}
 
 async function jsonRequest(fetchImpl, url, key, body, timeout = 8000) {
   const response = await fetchImpl(url, { method: body ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(timeout),
@@ -21,14 +31,17 @@ async function jsonRequest(fetchImpl, url, key, body, timeout = 8000) {
   return data;
 }
 
-export function parseAtlasQuote(data, now = Date.now()) {
+export function parseAtlasQuote(data, now = Date.now(), model = "") {
   const value = data?.data;
   const price = amount(value?.price);
   if (!value || price === null || (value.currency != null && value.currency !== "USD")
     || (value.estimated != null && typeof value.estimated !== "boolean")) return null;
+  const tokens = atlasTokenCount(value.estimated_tokens);
   return { amountUsd: price, currency: "USD", estimated: true, pricingStatus: "estimated", pricingSource: ATLAS_CALCULATE_URL,
+    ...(tokens !== null ? { unit: "million estimated tokens", units: tokens / 1e6 } : {}),
     pricingCheckedAt: new Date(now).toISOString(), pricingBasis: value.estimated
-      ? "Atlas account estimate; final token usage may differ." : "Atlas account quote for the submitted settings; not a settled charge." };
+      ? `Atlas account estimate for ${model.startsWith("openai/gpt-image-") ? "image" : "video"} token usage; final billing may differ.`
+      : "Atlas account quote for the submitted settings; not a settled charge." };
 }
 
 export function parseFalBilling(data, requestId, endpoint) {
@@ -46,8 +59,8 @@ export class ProviderPricing {
   }
 
   async atlasInput(input, key) {
-    if (!key || !atlasPricingEndpoints.includes(input?.model)) return null;
-    try { return parseAtlasQuote(await jsonRequest(this.fetchImpl, ATLAS_CALCULATE_URL, key, input), this.now()); }
+    if (!key || !(atlasPricingEndpoints.includes(input?.model) || atlasQuoteOnlyEndpoints.includes(input?.model) || isAtlasSeedance25PricingEndpoint(input?.model))) return null;
+    try { return parseAtlasQuote(await jsonRequest(this.fetchImpl, ATLAS_CALCULATE_URL, key, input), this.now(), input.model); }
     catch { return null; } // Price lookup failure must never cancel or replay a generation.
   }
 

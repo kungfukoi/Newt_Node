@@ -1,12 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createAtlasLlmRequest } from "../server/atlas-llm-request.js";
+import { atlasLlmBillingUsage, createAtlasLlmRequest } from "../server/atlas-llm-request.js";
 import { atlasError } from "../server/atlas.js";
+import { catalogTokenCost } from "../src/pricingCatalog.js";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
 const endpoint = "https://api.atlascloud.ai/v1/responses";
 const options = { method: "POST", body: JSON.stringify({ model: "selected-model", input: "Test" }) };
+
+test("Atlas preserves request IDs and prices reported DeepSeek tokens at their own rates", async () => {
+  const data = { id: "response-123", usage: { prompt_tokens: "1000", prompt_cache_hit_tokens: 200, completion_tokens: 100 } };
+  const request = createAtlasLlmRequest({ fetchImpl: async () => json(data, 200, { "X-Request-ID": "req_123" }) });
+  const usage = atlasLlmBillingUsage(await request(endpoint, options), "deepseek-ai/deepseek-v3.2");
+  assert.equal(usage.atlasRequestId, "req_123");
+  assert.equal(usage.atlasResponseId, "response-123");
+  const cost = catalogTokenCost("Atlas Cloud", "openai/gpt-6-astra", usage, { entries: {} });
+  assert.ok(Math.abs(cost.amountUsd - 0.0002843) < 1e-12);
+  assert.equal(cost.unit, "million tokens");
+  const missing = atlasLlmBillingUsage({ response: json({}, 200, { "X-Request-ID": "req_456" }), data: {} }, "openai/gpt-6-astra");
+  assert.equal(missing.atlasRequestId, "req_456");
+  assert.equal(catalogTokenCost("Atlas Cloud", "openai/gpt-6-astra", missing, { entries: {} }), null);
+});
 
 test("Atlas retries HTTP and envelope rate limits without changing the request", async () => {
   const calls = [], waits = [], progress = [];

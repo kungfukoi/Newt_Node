@@ -1,4 +1,4 @@
-import { atlasLlmRates } from "../src/atlasLlmPricing.js";
+import { atlasLlmCatalogRates } from "../src/atlasLlmPricing.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "./json-store.js";
@@ -19,7 +19,7 @@ const blank = () => ({ version: 1, enabled: false, autoRefreshPreferenceVersion,
 
 const supportedPricingEntry = (id) => id.startsWith("openai:")
   || kreaPricingModels.some(([endpoint]) => id === `krea:${endpoint}`)
-  || [...atlasPricingEndpoints, ...Object.keys(atlasLlmRates).map(model => `openai/${model}`)].some(endpoint => id === `atlas:${endpoint}`);
+  || [...atlasPricingEndpoints, ...Object.keys(atlasLlmCatalogRates)].some(endpoint => id === `atlas:${endpoint}`);
 
 export class PricingRefresh {
   constructor({ filePath, getFalKey = () => "", getProviderKey = () => "", getEnabledProviders, refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic, enableAtlasPricing = false }) {
@@ -175,7 +175,7 @@ export class PricingRefresh {
     const tasks = [
       ...(this.enableAtlasPricing ? [["atlas", async () => parseAtlasPricing(JSON.parse(await this.read(ATLAS_PRICING_URL))).filter(result => {
         const endpoint = result.id.slice(6);
-        return atlasPricingSpecs[endpoint] || atlasSeedanceEstimateEndpoints.includes(endpoint) || endpoint === atlasSeedance20EstimateEndpoint || Object.keys(atlasLlmRates).some(model => endpoint === `openai/${model}`);
+        return atlasPricingSpecs[endpoint] || atlasSeedanceEstimateEndpoints.includes(endpoint) || endpoint === atlasSeedance20EstimateEndpoint || Object.hasOwn(atlasLlmCatalogRates, endpoint);
       })]] : []),
       ["krea", async () => parseKreaPricing(JSON.parse(await this.read(KREA_PRICING_URL))).filter(result => kreaPricingModels.find(([endpoint]) => `krea:${endpoint}` === result.id)?.[1])],
       ["openai", async () => parseOpenAiPricing(await this.read(OPENAI_PRICING_URL))]

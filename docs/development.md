@@ -35,7 +35,15 @@ Provider credentials should be entered and selected in Settings. Do not put real
 
 ## Common Commands
 
-To audition a local StyleFinder/Midlibrary mirror, run `node scripts/indexStyleFinder.mjs "<mirror folder>" "<checkout>/server/data"`. This parses the mirror offline into a private local metadata index; original HTML/images stay in place. Restart after installing the routes, then choose **StyleFinder (local audition)** in Looks source. Re-run indexing after new pages download; the refresh control reloads the index without reparsing the entire mirror in the app process.
+To index a local StyleFinder/Midlibrary mirror, run `node scripts/indexStyleFinder.mjs "<mirror folder>" "<checkout>/server/data"`. This parses the mirror offline into a private local metadata index; original HTML/images stay in place. Restart after installing the routes, then open **Looks** to browse StyleFinder. Re-run indexing after new pages download; the refresh control reloads the index without reparsing the entire mirror in the app process.
+
+To package the currently indexed looks and local curation, run `node scripts/packStyleFinder.mjs "<checkout>" "<new folder>" 10149` with the expected style count for that installation. The destination's parent must exist. The private package contains `catalog.json` and an `images` folder. Copy or move them together. After verification, set `server/data/stylefinder-compact-source.json` to `{"directory":"D:/Library/StyleFinder-Compact"}` using the package's absolute path, then refresh the catalog. Update the path after moving the package. Removing that setting selects the legacy indexed mirror on the next request. Repack to include further changes to the mirror or curation.
+
+After the mirror and its images finish updating, run `node scripts/packStyleFinder.mjs "<checkout>" "<next compact folder>" --refresh --reuse "<active compact folder>"`. This scans the refreshed mirror, reports additions and revisions, and rejects updates missing existing IDs. The new folder reuses byte-identical blobs through hard links where supported. Treat image blobs as immutable. Verify the new package and change the folder setting to switch versions.
+
+To open the package from Settings, go to **User Preferences → Shared Lookbook folder** and save the folder containing `catalog.json` and `images`. On Windows use a local path, mapped drive or UNC share. On macOS use the local path or mounted volume. Each installation saves its own path. Clear the option to copy local looks when selecting a read-only share. Browse the package in the default **StyleFinder** view, or select **Commercial → Shared** in Looks.
+
+Personal StyleFinder curation lives in ignored `server/data/stylefinder-overrides.json`, separately from the mirror and regenerated index. Use `{ "version": 1, "styles": { "source-slug": { "prompt": "Visual style prompt", "notes": "Credits and source URLs", "tags": [], "colours": [], "examples": [{ "id": "reference-1", "localUrl": "/uploads/stylefinder-overrides/source-slug/reference-1.jpg", "fileName": "reference-1.jpg", "mimeType": "image/jpeg" }] } } }`. Keep the reference images in that managed uploads directory and retain their source/rights metadata in the manifest. A server restart is needed only when first installing support; subsequent override edits reload on the next catalog request. Curation replaces list/detail examples and description together, clears source render parameters and stale analyses, and survives mirror refresh/reindexing. It does not rewrite existing saved collection/workflow snapshots. Removing the override restores source metadata without deleting either set of images. These personal reference files are not published with source code.
 
 | Command | Purpose |
 | --- | --- |
@@ -76,6 +84,8 @@ npm run smoke:isolated
 Playwright uses its own production preview server on port 5286 (`NEWTNODE_E2E_PORT` overrides it) and refuses to reuse an existing listener. All application APIs are mocked; external requests are blocked. Generated test-pattern PNG/MP4 fixtures live in ignored `e2e/.generated/`. Failure screenshots/traces are under ignored `test-results/` and `playwright-report/`.
 
 `.github/workflows/validation.yml` runs Node tests, performance budget, build, isolated API smoke, and Chromium tests on Windows and macOS. The macOS lane uses `macos-15-intel` to avoid the hosted ARM runner capacity failures seen with `macos-latest`; this validates Intel macOS, not native Apple Silicon. Revisit the runner choice when ARM capacity recovers. CI configuration is not evidence that a native Mac check passed locally. Native folder dialogs, launch-from-Finder behavior, GPU drivers, and paid provider completion need separate authorized checks.
+
+CI runs at most two Node test files at once because media fixtures launch multithreaded FFmpeg processes. This keeps media and process-supervision checks from competing with the rest of the suite for every runner core.
 
 ### Production Runtime
 

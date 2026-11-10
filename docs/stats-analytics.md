@@ -72,11 +72,41 @@ permitted read-only provider queries. No service is provisioned and no local usa
 uploaded to a third party. Provider queries send date ranges and optional public IDs.
 Mock-based tests exercise provider contracts; real account queries were not performed.
 
-## Unpriced runs: findings and reconciliation design
+## Resolving unpriced runs
 
-The current `createHistoryPricing` reconciliation only visits retained recent history,
-not ledger-only runs. It fills text usage and selected Atlas media estimates. It does
-not recover original invoices; Atlas calculate quotes use current account rates.
+Settings → API Pricing checks rates for new estimates. **Reconcile unpriced runs**
+is a separate action available there and in Stats → Local. It uses the saved inputs
+for retained runs and the available rate catalog. Supported text usage and selected
+Atlas runs can be filled as historical estimates. Atlas Seedance 2.5 also uses saved
+completed jobs to recover billing inputs for ledger-only runs. Selected Atlas video runs can use
+the original saved inputs with the same saved credential to request a current quote.
+The resulting estimates are labeled and written to Local Stats and recent History.
+
+New Atlas Seedance 2.5 runs use the account's Calculate API when available, including
+draft previews, 1080p draft completions, and video edits. Offline estimates use the
+published resolution rate and video seconds for ordinary runs, the published per-second
+benchmarks for drafts and completions, and the published video-token rate for native
+reference-video runs with saved input duration and output dimensions. Video Outpaint
+uses the provider's raw render dimensions and duration before local finishing. Reference
+runs with incomplete billing inputs need an account quote or a verified provider charge.
+
+Atlas text and vision runs record the provider request IDs and the returned input,
+cached, cache-write and output token counts. Stats retains this limited billing
+metadata after recent History expires. Verified list rates price the main request
+and each helper using its own model. Media checks an account quote or a verified
+fallback before submitting. Token-based quotes and list calculations are estimates.
+The public Atlas costs API reports daily aggregates by model and key. Resolving old
+runs without saved billing inputs requires itemized provider evidence. If Atlas
+omits usage on a successful text response, its request ID remains available in Details.
+
+Use **Show all unpriced runs** in the Local run ledger to find unresolved entries.
+Open **Details** on a run with a recorded ID and enter the verified USD charge
+from provider billing. This also works for ledger-only runs. A manual charge is
+labeled as such. Both actions preserve existing prices, including zero. They
+do not submit generation jobs. Global totals still come from provider queries.
+
+## Further billing recovery design
+
 `ProviderPricing.falCharge` attempts one immediate lookup after a request, so delayed
 billing or missing billing permissions leaves runs without a settled charge. The
 history store also refuses to replace existing estimates, although the ledger merge
@@ -110,7 +140,7 @@ then apply supported matches. Tests must cover delayed billing, account changes,
 multi-output requests, duplicate events, discounts, ledger-only runs and unavailable
 provider APIs. Every run can have an explicit pricing state; a guaranteed accurate
 numeric price is impossible when original usage/rates or billing evidence is missing.
-This design is investigated, not implemented; this UI change does not rewrite costs.
+The remaining provider-specific recovery and preview steps above are design notes.
 
 Sources checked: [Fal billing events](https://fal.ai/docs/platform-apis/v1/models/billing-events),
 [Atlas public billing API](https://www.atlascloud.ai/docs/public-api), and

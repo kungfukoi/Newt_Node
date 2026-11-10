@@ -444,8 +444,10 @@ import {
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
-import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint } from "./seedanceDraft.js";
+import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint, seedanceDraftsToFinish, seedanceVersion, seedanceDraftDeliveryContext } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
+import { SeedanceDraftBatchPicker } from "./components/SeedanceDraftBatchPicker.jsx";
+import { recoveredVideoOutputPatch } from "./remoteVideoRecovery.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isIdeogram45Model, ideogram45AspectRatios, ideogram45ResolutionOptions } from "./ideogram45.js";
@@ -1425,7 +1427,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
   currentVideoScopeRef.current = generationScope;
   useRemoteVideoRecovery({
     context: { projectId, workflowPackageId: projectPackagePath ? projectId : "", workflowPackagePath: projectPackagePath },
-    nodesRef, edgesRef, updateNode, loadOutputHistory
+    nodesRef, edgesRef, draftFinishesRef, updateNode, loadOutputHistory
   });
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const overviewRendering = false;
@@ -7304,23 +7306,43 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     const sourceMediaType = outputItem?.type || (sourceText ? "text" : "");
     const outputFormat = preferredOutputExportFormat(outputNode.data, sourceMediaType, outputItem, { saving: true });
     const outputContext = outputTargetContextFromOutputNode(outputNode, sourceNode, "", incomingByNode);
+    const draftDelivery = seedanceDraftDeliveryContext(outputItem, sourceNode.data.resultItems, outputContext.outputTargetFileName);
+    const sourceFileName = outputItem?.seedanceDraft || outputItem?.seedanceDraftSource
+      ? outputItem.fileName || fileNameFromLocalUrl(outputItem.url)
+      : outputSourceFileName(sourceNode, outputItem, incomingByNode);
     const { response, data } = await nodeApi.saveOutput({
       sourceUrl: vectorOutputSource(outputItem, outputFormat),
       outputOriginalSourceUrl: originalOutpaintSourceUrl(outputItem),
       sourceText,
-      sourceFileName: outputSourceFileName(sourceNode, outputItem, incomingByNode),
+      sourceFileName,
       mediaType: sourceMediaType,
       outputFormat,
-      ...workflowContextPayload({ ...requestContext, ...outputContext }),
+      ...workflowContextPayload({ ...requestContext, ...outputContext, ...draftDelivery }),
+      ...draftDelivery,
+      seedanceDraftReceiptId: outputItem?.seedanceDraft?.receiptId,
       nodeId: outputNode.id,
       nodeTitle: outputNode.data.title || "Output"
     });
     if (!response.ok) throw new Error(data.error || "Output save failed.");
     const output = data.output || {};
+    const draftReceipt = outputItem?.seedanceDraft?.receiptId;
+    if (draftReceipt && output.seedanceDraftExportFileName) {
+      const liveSource = nodesRef.current.find(item => item.id === sourceNode.id);
+      if (liveSource?.data.resultItems?.some(item => item.seedanceDraft?.receiptId === draftReceipt)) {
+        updateNode(sourceNode.id, { resultItems: liveSource.data.resultItems.map(item => item.seedanceDraft?.receiptId === draftReceipt
+          ? { ...item, seedanceDraftExportFileName: output.seedanceDraftExportFileName } : item) });
+      }
+    }
     return {
       url: output.localUrl || "",
       type: output.mediaType || outputItem?.type || (sourceText ? "text" : ""),
       label: output.fileName || outputItem?.label || sourceLabel(sourceNode),
+      ...(outputItem?.seedanceDraft ? { seedanceDraft: outputItem.seedanceDraft, seedanceDraftExportFileName: output.seedanceDraftExportFileName } : {}),
+      ...(outputItem?.seedanceDraftSource ? {
+        seedanceDraftSource: outputItem.seedanceDraftSource,
+        seedanceDraftPreviewFileName: outputItem.seedanceDraftPreviewFileName,
+        seedanceDraftDeliveryFileName: outputItem.seedanceDraftDeliveryFileName
+      } : {}),
       fileName: output.fileName || "",
       filePath: output.filePath || "",
       mimeType: output.mimeType || outputItem?.mimeType || "",
@@ -7420,10 +7442,11 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
   function runNode(node, runOptions = {}) {
     if (runOptions === "stop-node") return stopNode(node);
+    const finishingDrafts = runOptions === "finish-seedance-draft" || Array.isArray(runOptions.finishDraftReceiptIds);
     const running = nodeRunControlRef.current.run(node.id, async token => {
-      if (isRunnableNode(node) && runOptions !== "finish-seedance-draft") recordFeatureUsage(node.type, "run");
+      if (isRunnableNode(node) && !finishingDrafts) recordFeatureUsage(node.type, "run");
       const actions = { updateNode, markOutputTargetRunning, markOutputTargetFailed, markOutputTargetSaved };
-      if (typeof runOptions !== "string" && node.type !== "assembly") {
+      if (!finishingDrafts && typeof runOptions !== "string" && node.type !== "assembly") {
         const rawIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current, { expandBatches: false });
         const connections = batchInputConnections(rawIncoming[node.id]);
         if (connections.length) return executeBatchNode(node, runOptions, token, actions, connections, rawIncoming);
@@ -7479,15 +7502,42 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     const markOutputTargetRunning = (...args) => { token.outputTarget = args[0]; if (!token.stopped) actions.markOutputTargetRunning(...args); };
     const markOutputTargetFailed = (...args) => { if (!token.stopped) actions.markOutputTargetFailed(...args); };
     const markOutputTargetSaved = (...args) => { if (!token.stopped) actions.markOutputTargetSaved(...args); };
-    if (runOptions === "finish-seedance-draft") {
+    if (runOptions === "finish-seedance-draft" || Array.isArray(runOptions.finishDraftReceiptIds)) {
       const current = nodesRef.current.find(item => item.id === node.id);
       if (current?.type !== "videoModel" || draftFinishesRef.current.has(node.id)) return { status: "skipped" };
+      const receiptIds = runOptions.finishDraftReceiptIds;
+      const selectedReceipt = selectedSeedanceDraft(current.data)?.seedanceDraft.receiptId;
+      const requested = receiptIds ?? [selectedReceipt];
+      const newWork = seedanceDraftsToFinish(current.data.resultItems).some(item => requested.includes(item.seedanceDraft.receiptId));
+      const scope = currentVideoScopeRef.current;
+      const stillCurrent = () => !token.stopped && currentVideoScopeRef.current === scope;
       draftFinishesRef.current.add(node.id);
       try {
-        const result = await finishSeedanceDraft({ node: current, workflowContext: workflowRequestContext(),
-          getCurrent: () => nodesRef.current.find(item => item.id === node.id), update: patch => updateNode(node.id, patch) });
-        loadOutputHistory();
+        const outputNode = newWork && connectedOutputNodesForSource(node.id, nodesRef.current,
+          edgesRef.current.filter(edge => edge.from.port === "videoOut")).at(0);
+        const target = outputNode ? { node: outputNode, context: outputTargetContextFromOutputNode(outputNode, current) } : null;
+        token.groupId = createGenerationGroupId("seedance-finish");
+        markOutputTargetRunning(target);
+        const result = await finishSeedanceDraft({ node: current, receiptIds, groupId: token.groupId,
+          workflowContext: workflowRequestContext(target?.context || {}),
+          getCurrent: () => stillCurrent() ? nodesRef.current.find(item => item.id === node.id) : null,
+          update: patch => updateNode(node.id, patch) });
+        if (!stillCurrent()) return result;
+        if (target && edgesRef.current.some(edge => edge.from.nodeId === node.id && edge.from.port === "videoOut"
+          && edge.to.nodeId === target.node.id && edge.to.port === "sourceIn")) {
+          const saved = (result.items || []).filter(item => item.seedanceDraftOutputNodeId === target.node.id);
+          const output = nodesRef.current.find(item => item.id === target.node.id);
+          if (saved.length) updateNode(output.id, recoveredVideoOutputPatch(output, saved, new Date().toISOString()));
+          else if (result.status !== "skipped") markOutputTargetFailed(target, result.error || "The existing 1080p render is available on the Video Model. Use Run Output to write a copy here.");
+        }
+        if (result.items?.length) loadOutputHistory();
         return result;
+      } catch (error) {
+        if (stillCurrent()) {
+          updateNode(node.id, { status: "error", error: error.message });
+          if (error.outputTargetNodeId) markOutputTargetFailed({ node: { id: error.outputTargetNodeId } }, error.message);
+        }
+        return { status: "error", error };
       } finally { if (!token.stopped) draftFinishesRef.current.delete(node.id); }
     }
     const storedNode = graphNodes.find((item) => item.id === node.id);
@@ -7647,6 +7697,10 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
       if (currentNode.type === "output") {
         const saved = await runOutputNodeSave(currentNode, incoming, requestContext, currentIncomingByNode);
+        if (saved.url && saved.seedanceDraftSource) {
+          updateNode(currentNode.id, recoveredVideoOutputPatch(currentNode, [saved], new Date().toISOString()));
+          return { status: "complete" };
+        }
         const resultItems = saved.url ? [saved] : [];
         updateNode(currentNode.id, {
           status: "complete",
@@ -11841,7 +11895,7 @@ function OutputNodeBody({
 }) {
   const sourcePort = config.input.find((port) => port.id === "sourceIn");
   const sourceSummary = outputSourceSummary(incoming.sourceIn);
-  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn, incomingByNode);
+  const sourceInfo = outputPreviewSourceInfo(incoming.sourceIn, incomingByNode, node.data.outputFileName);
   const formatOptions = outputExportFormatOptions(sourceInfo.mediaType, sourceInfo.outputItem);
   const outputFormat = preferredOutputExportFormat(node.data, sourceInfo.mediaType, sourceInfo.outputItem);
   const outputFormatDataKey = sourceInfo.mediaType === "video" ? "outputVideoFormat" : "outputImageFormat";
@@ -11891,7 +11945,8 @@ function OutputNodeBody({
       sourceFileName: sourceInfo.sourceFileName || "",
       outputOriginalSourceUrl: originalOutpaintSourceUrl(sourceInfo.outputItem),
       mediaType: sourceInfo.mediaType || "",
-      outputFormat
+      outputFormat,
+      ...sourceInfo.draftDelivery
     };
 
     setFilenamePreview((current) => ({ ...current, status: current.fileName ? "ready" : "loading", error: "" }));
@@ -11928,6 +11983,9 @@ function OutputNodeBody({
     outputFormat,
     sourceInfo.mediaType,
     sourceInfo.sourceFileName,
+    sourceInfo.draftDelivery?.outputTargetSourceFileName,
+    sourceInfo.draftDelivery?.seedanceDraftOutput,
+    sourceInfo.draftDelivery?.seedanceFinishedFileName,
     sourceInfo.outputItem?.videoOutpaint?.prepared?.plan?.sourceFormat?.sourceUrl,
     sourceInfo.sourceTitle
   ]);
@@ -11978,15 +12036,17 @@ function OutputNodeBody({
 
   const savedAt = node.data.lastSavedAt ? new Date(node.data.lastSavedAt) : null;
   const savedTime = savedAt && Number.isFinite(savedAt.getTime()) ? savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const savedDraftVersion = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraftSource;
   const resolvedFilename = filenamePreview.fileName || node.data.lastSavedFileName || "";
   const statusText =
     node.data.error ||
+    (!running && savedDraftVersion && node.data.lastSavedFileName ? `Saved ${node.data.lastSavedFileName}` : "") ||
     filenamePreview.error ||
     (running && resolvedFilename ? `Saving as ${resolvedFilename}` : "") ||
     (resolvedFilename ? `Filename: ${resolvedFilename}` : "") ||
     (node.data.lastSavedFileName ? `Saved ${node.data.lastSavedFileName}${savedTime ? ` at ${savedTime}` : ""}` : "") ||
     (filenamePreview.status === "loading" ? "Resolving filename..." : "Set a path to preview the filename.");
-  const statusTitle = filenamePreview.filePath || node.data.lastSavedPath || "";
+  const statusTitle = (!running && savedDraftVersion && node.data.lastSavedPath) || filenamePreview.filePath || node.data.lastSavedPath || "";
 
   return (
     <div className="node-body output-node-body">
@@ -14109,29 +14169,34 @@ function NodeBody({
             {previewItems.length > 0 && (
               <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
                 <div className="preview-thumb-strip" onKeyDown={event => navigatePreviewWithKeyboard(event, true)}>
-                  {previewItems.map((item, index) => (
-                    <button
-                      key={`${previewSource.id}-${item.url}-${index}`}
-                      type="button"
-                      className={index === previewIndex ? "active" : ""}
-                      draggable
-                      onClick={(event) => selectPreviewItem(index, event)}
-                      onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
-                      onDragEnd={(event) => finishOutputItemDragData(item, event)}
-                      title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
-                      aria-label={`Select preview ${index + 1}`}
-                      aria-pressed={index === previewIndex}
-                    >
-                      {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                      {item.type === "video" && <VideoThumbnail item={item} />}
-                      {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
-                      {item.type === "model3d" && (
-                        <span className="preview-thumb-model">
-                          <Box size={18} />
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                  {previewItems.map((item, index) => {
+                    const version = seedanceVersion(item, previewItems);
+                    const name = version ? version.name + (item.seedanceDraft ? " (Draft)" : "") : "";
+                    return (
+                      <button
+                        key={`${previewSource.id}-${item.url}-${index}`}
+                        type="button"
+                        className={[index === previewIndex && "active", item.seedanceDraft && "seedance-draft-thumb"].filter(Boolean).join(" ")}
+                        draggable
+                        onClick={(event) => selectPreviewItem(index, event)}
+                        onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
+                        onDragEnd={(event) => finishOutputItemDragData(item, event)}
+                        title={`Select or drag ${name || item.label || `${previewSource.label} ${index + 1}`}`}
+                        aria-label={`Select preview ${index + 1}${name ? `: ${name}` : ""}`}
+                        aria-pressed={index === previewIndex}
+                      >
+                        {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+                        {item.type === "video" && <VideoThumbnail item={item} />}
+                        {item.seedanceDraft && <span className="seedance-preview-badge">Draft</span>}
+                        {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
+                        {item.type === "model3d" && (
+                          <span className="preview-thumb-model">
+                            <Box size={18} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -16719,7 +16784,9 @@ function NodeBody({
   const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(seedanceProvider);
   const editingUnavailable = seedanceEditing && (!["fal", "atlas", "krea"].includes(seedanceProvider) || directorConnected);
   const selectedDraft = selectedSeedanceDraft(node.data);
-  const previewOnlyDraft = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft?.completionSupported === false;
+  const selectedDraftMetadata = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft;
+  const finishableDrafts = seedanceDraftsToFinish(node.data.resultItems);
+  const selectedDraftExpired = Date.parse(selectedDraft?.seedanceDraft.expiresAt) <= Date.now();
   const draftProviderName = seedanceDraftProviderName(selectedDraft?.seedanceDraft.provider);
   const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
   const preparedSpeechCurrent = !seedanceEditing && Boolean(node.data.preparedCharacterDialogueSignature) && node.data.preparedCharacterDialogueSignature === JSON.stringify({ model: node.data.model, dialogue: videoModelRequestForNode({ node, prompt: promptValue, incoming, incomingByNode }).characterDialogue });
@@ -16785,12 +16852,17 @@ function NodeBody({
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       {selectedDraft && <div className="seedance-draft-actions">
         <small title={`Finish with the original ${draftProviderName} key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
-        <button type="button" disabled={running} onClick={() => onRun(node, "finish-seedance-draft")}
+        <button type="button" disabled={running || (selectedDraftExpired && !completedDraft)} onClick={() => onRun(node, "finish-seedance-draft")}
           title={completedDraft ? "Select the saved 1080p render" : `Separately billed completion using the original draft inputs; requires the original ${draftProviderName} key within seven days`}>
-          {completedDraft ? "View 1080p" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
+          {completedDraft ? "View 1080p" : selectedDraftExpired ? "Draft expired" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
         </button>
       </div>}
-      {previewOnlyDraft && <div className="seedance-draft-actions"><small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small></div>}
+      {selectedDraftMetadata?.completionSupported === false && <div className="seedance-draft-actions">
+        {selectedDraftMetadata.provider === "krea" ? <small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small> : <small>Draft / Preview only</small>}
+      </div>}
+      {finishableDrafts.length > 0 && (finishableDrafts.length > 1 || !selectedDraft || completedDraft) && (
+        <SeedanceDraftBatchPicker key={node.id} drafts={finishableDrafts} running={running} onFinish={finishDraftReceiptIds => onRun(node, { finishDraftReceiptIds })} />
+      )}
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt || draftUnavailable || editingUnavailable}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
@@ -21088,9 +21160,13 @@ function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
   const raw = edges.reduce((incoming, edge) => {
     const source = nodeMap.get(edge.from.nodeId);
     if (!source) return incoming;
+    const useSelectedResult = nodeMap.get(edge.to.nodeId)?.type === "output"
+      && source.type === "videoModel" && edge.from.port === "videoOut"
+      && Array.isArray(source.data?.batchResults)
+      && source.data.resultItems?.some(item => item?.seedanceDraftSource);
     incoming[edge.to.nodeId] ||= {};
     incoming[edge.to.nodeId][edge.to.port] ||= [];
-    incoming[edge.to.nodeId][edge.to.port].push({ edge, source });
+    incoming[edge.to.nodeId][edge.to.port].push({ edge, source, ...(useSelectedResult ? { useSelectedResult } : {}) });
     return incoming;
   }, {});
   if (!expandBatches) return raw;
@@ -21874,18 +21950,21 @@ function outputExportFormatForNode(data = {}, mediaType = "") {
   return "";
 }
 
-function outputPreviewSourceInfo(items = [], incomingByNode = {}) {
+function outputPreviewSourceInfo(items = [], incomingByNode = {}, fileNameTemplate = "") {
   const connection = items.at(-1);
   const source = connection?.source;
   if (!source) return { sourceTitle: "", sourceFileName: "", mediaType: "" };
   const outputItem = connectedOutputItem(source, connection.edge);
   const isTextSource = ["plainText", "text", "textAgent", "skillDirector"].includes(source.type);
   const mediaType = outputItem?.type || (isTextSource ? "text" : previewMediaType(source, connection.edge));
-  const outputFileName = outputSourceFileName(source, outputItem, incomingByNode);
+  const outputFileName = outputItem?.seedanceDraft || outputItem?.seedanceDraftSource
+    ? outputItem.fileName || fileNameFromLocalUrl(outputItem.url)
+    : outputSourceFileName(source, outputItem, incomingByNode);
   const sourceTitle = outputSourceNodeTitle(source, sourceLabel(source) || nodeTypeLabel(source.type) || "source");
   return {
     sourceTitle,
     outputItem,
+    draftDelivery: seedanceDraftDeliveryContext(outputItem, source.data.resultItems, fileNameTemplate),
     sourceFileName: outputFileName || `${safeStillFrameName(sourceTitle)}${outputPreviewDefaultExtension(mediaType)}`,
     mediaType
   };

@@ -1,7 +1,7 @@
 import { ATLAS_PRICING_URL, atlasPricingEndpoints, atlasPricingSpecs, atlasPriceRows, atlasPricingEntry,
-  atlasSeedanceEstimateEndpoints, atlasSeedance20EstimateEndpoint, atlasSeedance20EstimateRates, atlasSeedanceEstimateEntry, atlasSeedanceEstimateRates } from "../src/atlasPricing.js";
+  atlasSeedanceEstimateEndpoints, atlasSeedance20EstimateEndpoint, atlasSeedance20EstimateRates, atlasSeedanceEstimateEntry, atlasSeedance25Rates } from "../src/atlasPricing.js";
 import { validatePricingEntry } from "./pricing-sources.js";
-import { atlasLlmRates } from "../src/atlasLlmPricing.js";
+import { atlasLlmCatalogRates } from "../src/atlasLlmPricing.js";
 
 export { ATLAS_PRICING_URL };
 const sorted = (values) => JSON.stringify([...values].sort());
@@ -69,7 +69,7 @@ export function parseAtlasPricing(data) {
 
 function parseSeedanceEstimate(model) {
   const legacy = model.id === atlasSeedance20EstimateEndpoint;
-  const baseline = legacy ? atlasSeedance20EstimateRates : atlasSeedanceEstimateRates;
+  const baseline = legacy ? atlasSeedance20EstimateRates : atlasSeedance25Rates(model.id);
   const reference = model.id.endsWith("/reference-to-video");
   const finalRule = "The final charge uses actual completion tokens after the task finishes.";
   const lines = reference ? [
@@ -95,18 +95,18 @@ function parseSeedanceEstimate(model) {
 }
 
 export function parseAtlasLlmPricing(data) {
-  const metrics = { input: "input", cached: "cache_read", writes: "cache_write", output: "output" };
-  return Object.entries(atlasLlmRates).map(([id, baseline]) => {
-    const modelId = `openai/${id}`;
+  return Object.entries(atlasLlmCatalogRates).map(([modelId, baseline]) => {
+    const metrics = { input: "input", cached: "cache_read", output: "output", ...(Object.hasOwn(baseline, "writes") ? { writes: "cache_write" } : {}) };
+    const contexts = baseline.long ? ["short", "long"] : ["short"];
     const result = { id: `atlas:${modelId}`, label: modelId, source: ATLAS_PRICING_URL };
     try {
       const matches = data.data?.filter(model => model.id === modelId) || [];
       const model = matches[0];
       if (matches.length !== 1 || !model.display || model.billing_category !== "llm_token" || model.type !== "chat"
-        || (model.currency != null && model.currency !== "USD") || model.price_rows?.length !== 8
+        || (model.currency != null && model.currency !== "USD") || model.price_rows?.length !== contexts.length * Object.keys(metrics).length
         || model.requires_runtime_quote !== false) throw new Error("Atlas LLM billing contract unavailable or changed; existing rates retained.");
       const points = [], basePoints = [];
-      for (const context of ["short", "long"]) for (const [metric, name] of Object.entries(metrics)) {
+      for (const context of contexts) for (const [metric, name] of Object.entries(metrics)) {
         const rowId = context === "short" ? name : `${name.replaceAll("_", "-")}-threshold-272000`;
         const rows = model.price_rows.filter(row => row.row_id === rowId);
         const row = rows[0];

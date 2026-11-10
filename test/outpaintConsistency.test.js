@@ -87,7 +87,8 @@ test("paired overlap color offsets are bounded and stable despite moving texture
   assert.equal(report.applied, true);
   assert.deepEqual(report.edges.bottom.offsets, [6, -3, 9]);
   assert.equal(report.framesSampled, 4);
-  assert.match(extensionColorFilter(report, { w: 32, h: 48, sw: 32, sh: 32, x: 0, y: 8 }), /geq=/);
+  assert.equal(extensionColorFilter(report, { w: 32, h: 48, sw: 32, sh: 32, x: 0, y: 8 }),
+    "format=gbrp10le,lutrgb=r='clip(val+(1023/255)*(6),0,1023)':g='clip(val+(1023/255)*(-3),0,1023)':b='clip(val+(1023/255)*(9),0,1023)'");
   generated.fill(255);
   assert.equal(fitExtensionColor(reference, generated, geometry).applied, false);
   for (let i = 0; i < reference.length; i++) generated[i] = Math.max(8, reference[i] - 25);

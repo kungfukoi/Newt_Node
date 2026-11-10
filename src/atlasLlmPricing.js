@@ -8,6 +8,11 @@ export const atlasLlmRates = Object.freeze({
   "gpt-6-astra": { input: 10, cached: 1, writes: 12.5, output: 50, long: { input: 20, cached: 2, writes: 25, output: 75 } }
 });
 
+export const atlasLlmCatalogRates = Object.freeze({
+  ...Object.fromEntries(Object.entries(atlasLlmRates).map(([model, rates]) => [`openai/${model}`, rates])),
+  "deepseek-ai/deepseek-v3.2": { input: 0.287, cached: 0.058, output: 0.431 }
+});
+
 export function currentAtlasLlmRates() {
   return Object.fromEntries(Object.entries(atlasLlmRates).map(([model, base]) => {
     const rate = { ...base };

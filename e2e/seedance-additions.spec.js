@@ -52,6 +52,125 @@ for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish
   expect(errors).toEqual([]);
 });
 
+test("finishing selected saved drafts labels both versions and updates the connected Output", async ({ page }) => {
+  const drafts = ["shot-one", "shot-two", "shot-three"].map((name, index) => ({
+    type: "video", url: `/outputs/e2e/${name}_draft.mp4`, fileName: `${name}_draft.mp4`, label: "Draft 1 (480p)",
+    seedanceDraft: { provider: "fal", receiptId: `draft-receipt-${index}`, expiresAt: "2099-10-20T00:00:00Z" }
+  }));
+  const graph = {
+    nodes: [
+      { id: "video", type: "videoModel", x: 0, y: 20, data: { title: "Video", model: "Seedance 2.5", resultItems: drafts, resultUrl: drafts[0].url } },
+      { id: "preview", type: "preview", x: 430, y: 20, data: { title: "Preview" } },
+      { id: "delivery", type: "output", x: 850, y: 20, data: { title: "Delivery", outputPath: "deliveries" } },
+      { id: "reference", type: "video", x: 1250, y: 20, data: { title: "Reference", fileName: "camera-original.mov", resultUrl: "/outputs/e2e/camera-original.mov" } }
+    ],
+    edges: [
+      ...["preview", "delivery"].map(id => ({ id, from: { nodeId: "video", port: "videoOut" }, to: { nodeId: id, port: "sourceIn" } })),
+      { id: "reference-video", from: { nodeId: "reference", port: "videoOut" }, to: { nodeId: "video", port: "referenceVideoIn" } }
+    ],
+    groups: [], viewport: { x: 70, y: 90, scale: .8 }
+  };
+  await page.addInitScript(graph => {
+    if (!sessionStorage.getItem("seedance-node-editor-draft-v1")) sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify(graph));
+  }, graph);
+  const { errors } = await openFixture(page, { count: 4, settings: { falKeyConfigured: true } });
+  const requests = [];
+  await page.route("**/api/node/seedance-draft/complete", route => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    const runId = "seedance-finish-" + body.receiptId;
+    const fileName = body.previewFileName.replace("_draft.mp4", ".mp4");
+    const result = { video: { localUrl: `/outputs/e2e/${fileName}`, fileName }, seedanceDraftSource: body.receiptId, generationRunId: runId,
+      seedanceDraftPreviewFileName: body.previewFileName, seedanceDraftDeliveryFileName: fileName, seedanceDraftOutputNodeId: "delivery" };
+    return route.fulfill({ status: 202, json: { job: { runId, state: "completed", result } } });
+  });
+
+  const video = card(page);
+  await video.getByText("Finish multiple drafts (3 available)").click();
+  await video.getByRole("checkbox", { name: "shot-one" }).check();
+  await video.getByRole("checkbox", { name: "shot-three" }).check();
+  await video.getByRole("button", { name: "Finish selected at 1080p (2)" }).click();
+  const preview = page.locator('[data-node-card-id="preview"]');
+  const hdThumb = preview.getByRole("button", { name: /shot-one$/ });
+  const draftThumb = preview.getByRole("button", { name: /shot-one \(Draft\)$/ });
+  await expect(hdThumb).toBeVisible();
+  await expect(hdThumb).toHaveText("");
+  await expect(draftThumb).toHaveText("Draft");
+  expect(requests.map(body => body.receiptId).sort()).toEqual(["draft-receipt-0", "draft-receipt-2"]);
+  expect(requests.every(body => body.outputTargetPath === "deliveries" && body.outputTargetNodeId === "delivery")).toBe(true);
+  expect(requests[0].generationGroupId).toBe(requests[1].generationGroupId);
+
+  const output = page.locator('[data-node-card-id="delivery"]');
+  await expect(output.getByText("Saved shot-three.mp4")).toBeVisible();
+  await draftThumb.click();
+  await expect(preview.locator("video").first()).toHaveAttribute("src", /shot-one_draft\.mp4/);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes
+    .find(node => node.id === "delivery").data.resultItems?.map(item => item.fileName))).toEqual(["shot-one.mp4", "shot-three.mp4"]);
+
+  let manualSave;
+  await page.route("**/api/node/save-output", route => {
+    manualSave = route.request().postDataJSON();
+    const fileName = "shot-one-2.mp4";
+    return route.fulfill({ json: { output: { localUrl: `/outputs/e2e/${fileName}`, fileName, mediaType: "video" } } });
+  });
+  await hdThumb.click();
+  await expect(preview.locator("video").first()).toHaveAttribute("src", /shot-one\.mp4/);
+  await output.getByRole("button", { name: "Run Output", exact: true }).click();
+  await expect(output.getByText("Saved shot-one-2.mp4")).toBeVisible();
+  expect(manualSave).toMatchObject({
+    sourceUrl: "/outputs/e2e/shot-one.mp4",
+    sourceFileName: "shot-one.mp4",
+    outputTargetSourceFileName: "shot-one.mp4",
+    outputTargetFileName: "$filename",
+    seedanceFinishedFileName: "shot-one.mp4",
+    outputFormat: "source"
+  });
+  expect(requests).toHaveLength(2);
+  await page.reload();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(preview.getByRole("button", { name: /Select preview \d+: shot-three$/ })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("Run Output exports only the HD take selected on a batch-generated Video Model", async ({ page }) => {
+  const drafts = [1, 2].map(index => ({
+    id: `entry-${index}`, type: "video", url: `/outputs/e2e/draft-${index}.mp4`, fileName: `draft-${index}.mp4`,
+    seedanceDraft: { receiptId: `receipt-${index}`, provider: "fal" }
+  }));
+  const finished = drafts.map((draft, index) => ({
+    type: "video", url: `/outputs/e2e/hd-${index + 1}.mp4`, fileName: `hd-${index + 1}.mp4`,
+    seedanceDraftSource: draft.seedanceDraft.receiptId
+  }));
+  const fixture = {
+    nodes: [
+      { id: "video", type: "videoModel", x: 20, y: 20, data: { title: "Video Model", model: "Seedance 2.5", status: "complete",
+        batchMediaType: "video", batchResults: drafts, resultItems: [...drafts, ...finished], selectedResultIndex: 1, resultUrl: drafts[1].url } },
+      { id: "delivery", type: "output", x: 480, y: 20, data: { title: "Output", outputPath: "deliveries", outputFileName: "CartoonSubway_2k_$index" } }
+    ],
+    edges: [{ id: "video-delivery", from: { nodeId: "video", port: "videoOut" }, to: { nodeId: "delivery", port: "sourceIn" } }],
+    groups: [], viewport: { x: 50, y: 70, scale: .8 }
+  };
+  const { errors, requests } = await openFixture(page, { fixture, settings: { falKeyConfigured: true } });
+  const saves = [];
+  await page.route("**/api/node/save-output", route => {
+    saves.push(route.request().postDataJSON());
+    const fileName = `CartoonSubway_2k_0${saves.length}.mp4`;
+    return route.fulfill({ json: { output: { localUrl: `/outputs/e2e/${fileName}`, fileName, mediaType: "video" } } });
+  });
+  const video = card(page);
+  const output = page.locator('[data-node-card-id="delivery"]');
+  for (const index of [1, 2]) {
+    await video.getByRole("button", { name: "Next generation", exact: true }).click();
+    await expect(video.locator(".result-item video")).toHaveAttribute("src", new RegExp(`/hd-${index}\\.mp4$`));
+    await output.getByRole("button", { name: "Run Output", exact: true }).click();
+    await expect(output.getByText(`Saved CartoonSubway_2k_0${index}.mp4`)).toBeVisible();
+  }
+  expect(saves.map(save => save.sourceUrl)).toEqual(finished.map(item => item.url));
+  expect(saves.map(save => save.outputTargetFileName)).toEqual(Array(2).fill("CartoonSubway_2k_$index"));
+  expect(requests.filter(request => request.path === "/api/node/generate-video")).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
 for (const provider of ["fal", "krea"]) test(`${provider} editing sends the explicit task and restores saved duration and framing`, async ({ page }) => {
   const { errors } = await setup(page, provider, true);
   const video = card(page);
