@@ -8,6 +8,7 @@ const requiredHealthRoutes = [
   "lookbookSharedCompact",
   "createLook",
   "lookStyleBoard",
+  "lookAnalysisSeparateGrade",
   "featureUsage",
   "workspaceRecovery",
   "keyerInstallCancel",

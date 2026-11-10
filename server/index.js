@@ -1378,6 +1378,7 @@ function buildHealthPayload() {
       projectCanvases: true,
       styleLibrary: true,
       lookStyleAnalysis: true,
+      lookAnalysisSeparateGrade: true,
       stylefinderAudition: true,
       stylefinderCompact: true,
       lookbookSharedCompact: true,

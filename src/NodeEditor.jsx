@@ -383,7 +383,7 @@ import {
   seedream5ResolutionOptions,
   shotPresetNames,
   shotPresetPrompts,
-  stylePresetNames,
+  styleNodePresetNames,
   normalizeStylePresetName,
   stylePresetPrompts,
   topazImageUpscalerEnhancementStrengthOptions,
@@ -13833,9 +13833,10 @@ function NodeBody({
             onUndoSnapshot?.();
             onUpdate(node.id, { stylePreset: event.target.value });
           }}>
-            {stylePresetNames.map((presetName) => (
+            {styleNodePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
+            {!styleNodePresetNames.includes(selectedPreset) && <option value={selectedPreset} disabled>{selectedPreset} (legacy)</option>}
           </select>
         </div>
 

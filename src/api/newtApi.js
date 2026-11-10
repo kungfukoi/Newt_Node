@@ -33,6 +33,7 @@ export const styleLibraryApi = {
     const health = await getJson("/api/health", "Could not verify Create Look support.");
     if (health.routes?.createLook !== true) throw new Error("Restart NewtNode to activate Create Look. Wait for active generations to finish first.");
     if (health.routes?.lookStyleBoard !== true) throw new Error("Restart NewtNode to activate the Create Look style board. Wait for active generations to finish first.");
+    if (health.routes?.lookAnalysisSeparateGrade !== true) throw new Error("Restart NewtNode to use the updated Look extraction. Wait for active generations to finish first.");
     const { response, data } = await fetchJsonApi("/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "create-look", name: style.name, observations: style.observations||"", categories, examples: style.examples.map(image => image.localUrl) }) }, "Analyze new look", { timeoutMs: 360000, retryLocalApi: false });
     ensureOk(response, data, "Could not analyze these images.");
     if (!data.stylePrompt || !Array.isArray(data.tags) || !Array.isArray(data.styleBlocks) || !Array.isArray(data.palette) || !data.fingerprint) throw new Error("Astra returned an incomplete style board. Your images are preserved.");
@@ -41,6 +42,7 @@ export const styleLibraryApi = {
   async analyze(style) {
     const health = await getJson("/api/health", "Could not verify Astra look analysis support.");
     if (health.routes?.lookStyleAnalysis !== true) throw new Error("Restart NewtNode to activate Astra look analysis. Wait for active generations to finish first.");
+    if (health.routes?.lookAnalysisSeparateGrade !== true) throw new Error("Restart NewtNode to use the updated Look extraction. Wait for active generations to finish first.");
     const { response, data } = await fetchJsonApi("/api/style-library/analyze", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: style.name, observations: style.prompt || style.notes || "", examples: (style.examples || []).map(image => image.localUrl) }) }, "Analyze look with Astra", { timeoutMs: 360000, retryLocalApi: false });
     ensureOk(response, data, "Restart NewtNode to activate Astra look analysis.");

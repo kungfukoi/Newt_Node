@@ -7,7 +7,7 @@ import { exploreMediumGuidance, exploreContrastBriefs, describeExploreContrast }
 export const exploreTasks = ["Auto", "Product", "Fashion", "Environment", "Brand / Logo", "Illustration", "Abstract"];
 export const exploreInfluences = ["Follow closely", "Reinterpret", "Explore beyond"];
 export const exploreModels = imageModelOptions;
-export const exploreStyleFamilies = ["Auto", "Random", ...stylePresetNames.filter(name => name !== "None")];
+export const exploreStyleFamilies = ["Auto", "Random", ...stylePresetNames.filter(name => name !== "None" && name !== "Vintage 8mm")];
 export const exploreGrades = ["None", "Random", ...gradePresetNames.filter(name => !["Custom", "None"].includes(name))];
 export const exploreActions = ["explore", "more", "push", "refine", "combine", "retry"];
 export const exploreVersion = 3;

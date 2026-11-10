@@ -3,7 +3,7 @@ import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 import sharp from "sharp";
 
 test("Look defaults to its first example, permits grade overrides and replaces the default on switch", async ({page}) => {
-  const fixture={nodes:[{id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"None",gradePreset:"Warm"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:1}};
+  const fixture={nodes:[{id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"Found Footage",gradePreset:"Warm"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:1}};
   const {errors}=await openFixture(page,{fixture});let analyses=0;
   const look=(id,name,images)=>({id,name,prompt:"Source",styleAnalysis:{stylePrompt:`Rendering treatment for ${name}`},examples:images.map(localUrl=>({localUrl}))});
   const library={revision:0,collections:[{id:"looks",name:"Looks",styles:[
@@ -31,7 +31,13 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   await expect(picker.getByRole("option",{name:"Red",exact:true})).toHaveCount(1);
   await picker.selectOption({label:"Red"});
   const stylePreset = node.getByLabel("Style preset", {exact:true});
+  await expect(stylePreset).toHaveValue("Found Footage");
+  await expect(stylePreset.getByRole("option",{name:"Found Footage (legacy)",exact:true})).toBeDisabled();
+  expect((await stylePreset.getByRole("option").allTextContents()).slice(0, 6)).toEqual([
+    "None", "Cinematic Indie", "Cinematic Standard", "Cinematic Commercial", "Vintage 8mm", "UGC Device"
+  ]);
   await stylePreset.selectOption("Painterly 3D");
+  await expect(stylePreset.getByRole("option",{name:/Found Footage/})).toHaveCount(0);
   await expect(picker.locator("option:checked")).toHaveText("Red");
   await expect(grade).toHaveValue("Custom");await expect(grade).toBeEnabled();
   await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/red\.png/);
@@ -126,6 +132,14 @@ test("Rejected look analysis clears the progress notice and preserves the open d
   await expect(details.getByRole("status")).toHaveCount(0);
   await expect(details.getByRole("button",{name:"Use in Style",exact:true})).toBeEnabled();
   expect(paidCalls).toBe(1);expect(saves).toBe(0);expect(errors).toEqual([]);
+  await page.route("**/api/health", route => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, routes: { lookStyleAnalysis: true } })
+  }));
+  await details.getByRole("button",{name:"Use in Style",exact:true}).click();
+  await expect(details.getByRole("alert")).toContainText("Restart NewtNode to use the updated Look extraction");
+  expect(paidCalls).toBe(1);
+  expect(saves).toBe(0);
 });
 
 test("Lookbook keeps details open, enlarges whole examples, clears search and reuses its saved Astra description", async ({page}) => {
@@ -340,7 +354,7 @@ test("A catalog look must save before its node is created, with retry after a co
 
 test("Library style reaches image generation and remains independent of later collection edits", async ({ page }) => {
   const fixture = { nodes: [
-    { id: "style", type: "style", x: 20, y: 20, data: { title: "Style", stylePreset: "Painterly 3D", gradePreset: "Custom", customPaletteRgbText: "#123456", libraryStyle: { id: "ink", name: "Ink", prompt: "Heavy ink with crimson accents" } } },
+    { id: "style", type: "style", x: 20, y: 20, data: { title: "Style", stylePreset: "Vintage 8mm", gradePreset: "Custom", customPaletteRgbText: "#123456", libraryStyle: { id: "ink", name: "Ink", prompt: "Heavy ink with crimson accents" } } },
     { id: "model", type: "imageModel", x: 450, y: 20, data: { title: "Image Model", model: "Nano Banana Pro", prompt: "An old lighthouse" } }
   ], edges: [{ id: "style-wire", from: { nodeId: "style", port: "styleOut" }, to: { nodeId: "model", port: "styleIn" }, color: "#9b5cff" }], groups: [], viewport: { x: 0, y: 0, scale: 1 } };
   const { errors } = await openFixture(page, { fixture });
@@ -355,6 +369,7 @@ test("Library style reaches image generation and remains independent of later co
   await expect.poll(() => submitted?.prompt || "").toContain("Use irregular ink edges with crimson accents");
   expect(submitted.prompt).toContain("Ignore any reference colors");
   expect(submitted.prompt).toContain("Style preset controls the rendering medium");
+  expect(submitted.prompt).toContain("heavy 8mm film grain");
   expect(submitted.prompt).toMatch(/#123456/i);
   expect(errors).toEqual([]);
 });

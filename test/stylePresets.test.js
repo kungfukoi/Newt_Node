@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeStylePresetName, stylePresetNames, stylePresetPrompts } from "../src/modelOptions.js";
+import { normalizeStylePresetName, styleNodePresetNames, stylePresetNames, stylePresetPrompts } from "../src/modelOptions.js";
 import { gradePresetNames, gradePresetPrompts, normalizeGradePresetName } from "../src/colorLook.js";
 
 const addedStylePresetNames = [
   "Cinematic Indie",
   "Cinematic Standard",
   "Cinematic Commercial",
+  "Vintage 8mm",
   "UGC Device",
-  "Found Footage",
   "Photography Color",
   "Photography B&W",
   "Photography Film",
@@ -19,11 +19,14 @@ const addedStylePresetNames = [
   "Pixel Art"
 ];
 
-test("new Style Node presets are exposed in their intended order", () => {
-  const startIndex = stylePresetNames.indexOf("Cinematic Indie");
-
-  assert.notEqual(startIndex, -1);
-  assert.deepEqual(stylePresetNames.slice(startIndex, startIndex + addedStylePresetNames.length), addedStylePresetNames);
+test("Style node options match the upstream order while keeping Found Footage readable", () => {
+  assert.deepEqual(styleNodePresetNames, [
+    "None", ...addedStylePresetNames, "Storyboard", "Anime", "Claymation", "2D Animation", "3D Animation",
+    "Dark as Fuk", "Pop as Fuk", "Sexy as Fuk", "Strange as Fuk"
+  ]);
+  assert.equal(normalizeStylePresetName("Found Footage"), "Found Footage");
+  assert.match(stylePresetPrompts["Found Footage"], /consumer camcorder/);
+  assert.equal(normalizeStylePresetName("Vintage 8mm"), "Vintage 8mm");
 });
 
 test("new Style Node presets provide complete prompt suffixes", () => {
