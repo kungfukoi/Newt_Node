@@ -61,10 +61,16 @@ for (const provider of ["fal", "atlas"]) {
   });
 }
 
-test("Atlas Kling requires a quote before submitting", async () => {
-  await assert.rejects(generateKling4(body, "atlas", { isManagedUrl: () => true,
-    upload: async () => "https://example.test/frame.png", atlasGenerate: () => assert.fail("No paid submission") }),
-  /No generation was submitted/);
+test("Atlas Kling submits once and reports an unpriced run when the quote fails", async () => {
+  let submissions = 0;
+  const result = await generateKling4(body, "atlas", { isManagedUrl: () => true,
+    upload: async () => "https://example.test/frame.png",
+    quoteInput: async () => { throw new Error("Pricing service unavailable"); },
+    atlasGenerate: async () => { submissions++; return { url: "https://example.test/out.mp4" }; } });
+  assert.equal(submissions, 1);
+  assert.equal(result.endpoint, kling4Endpoints.atlas);
+  assert.equal(result.cost.amountUsd, null);
+  assert.equal(result.cost.pricingStatus, "unpriced");
 });
 
 test("invalid settings and unsupported inputs fail before upload or paid submission", async () => {

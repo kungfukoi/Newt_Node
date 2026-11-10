@@ -7250,7 +7250,6 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
         endImage: endFrameUrl,
         images: routeKind === "reference-to-video" ? referenceImageUrls : [],
         videos: routeKind === "reference-to-video" ? referenceVideoUrls : [],
-        referenceVideoDurationSeconds: referenceVideoDurations.every(seconds => seconds > 0) ? referenceVideoDurationSeconds : null,
         audios: routeKind === "reference-to-video" ? referenceAudioUrls : [],
         duration,
         resolution,
@@ -17090,7 +17089,7 @@ function estimateTextProcessingCost({ provider, model, usage = null, helperUsage
       units: 1,
       unit: "request",
       mediaType: "text",
-      pricingBasis: normalizedProvider === "atlas cloud" ? "Atlas Cloud billing requires complete token usage for each request. Check the saved Atlas request IDs."
+      pricingBasis: normalizedProvider === "atlas cloud" ? "Atlas Cloud token usage or verified rates are unavailable. Use the saved request IDs to check provider billing."
         : "Token usage or verified rates are unavailable for this provider/model",
       pricingSource: "usage-no-local-pricing"
     };
@@ -17408,7 +17407,6 @@ async function runTextLlm({
         }
       }
 
-      requireAtlasLlmPrice(model);
       const atlasResult = await requestAtlasLlm(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.ATLAS_API_KEY}` },
@@ -17450,12 +17448,6 @@ function checkedCreativeLlmResult(result, data, route) {
       hasMainRequest: Object.hasOwn(result, "usage")
     });
     throw error;
-  }
-}
-
-function requireAtlasLlmPrice(model) {
-  if (!catalogTokenCost("atlas", model, { input_tokens: 1, output_tokens: 1 })) {
-    throw httpError(503, `Atlas Cloud has no verified token rates for ${model}. No request was submitted. Check API Pricing.`);
   }
 }
 
@@ -17512,7 +17504,6 @@ async function runMediaDescriptionLlm({
     signal: AbortSignal.timeout(300000)
   };
   const atlasEndpoint = atlasMediaLlmEndpoint(route);
-  if (atlas) requireAtlasLlmPrice(model);
   const result = atlas
     ? await requestAtlasLlm(atlasEndpoint, options, updateCurrentGenerationProgress)
     : await (async () => {

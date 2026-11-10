@@ -1,6 +1,7 @@
 export const settingsSectionStorageKey = "newtnode.settings.open-sections.v1";
 
 export const defaultSettingsOpenSections = Object.freeze({
+  pricing: true,
   credentials: true,
   providers: true,
   models: false,

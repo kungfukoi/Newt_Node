@@ -10,7 +10,17 @@ test("pricing refresh is opt-in and provider quotes update Run without generatin
  const quotes=[];
  await page.route("**/api/pricing/quote",r=>{const body=r.request().postDataJSON();quotes.push(body);return r.fulfill({json:{amountUsd:0.42,pricingStatus:"estimated",pricingBasis:"Mock account estimate",accountRevision:"test-account",checkedAt:new Date().toISOString()}});});
  await page.getByRole("button",{name:"Settings",exact:true}).click();
- const auto=page.getByRole("switch",{name:"Automatic pricing refresh"});await expect(auto).toHaveAttribute("aria-checked","false");expect(refreshes).toBe(0);
+ const pricing = page.getByRole("button", { name: "API Pricing", exact: true });
+ const auto = page.getByRole("switch", { name: "Automatic pricing refresh" });
+ await expect(pricing).toHaveAttribute("aria-expanded", "true");
+ await pricing.click();
+ await expect(pricing).toHaveAttribute("aria-expanded", "false");
+ await expect(auto).toBeHidden();
+ await expect(page.getByRole("button", { name: /API Credentials/ })).toHaveAttribute("aria-expanded", "true");
+ await pricing.press("Enter");
+ await expect(pricing).toHaveAttribute("aria-expanded", "true");
+ await expect(auto).toHaveAttribute("aria-checked", "false");
+ expect(refreshes).toBe(0);
  await auto.click();await expect(auto).toHaveAttribute("aria-checked","true");await auto.click();await expect(auto).toHaveAttribute("aria-checked","false");
  await page.getByRole("button",{name:"Check prices now"}).click();await expect.poll(()=>refreshes).toBe(1);
  await page.screenshot({path:testInfo.outputPath("pricing-settings.png")});

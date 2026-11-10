@@ -5,9 +5,7 @@ import {
 } from "../src/atlasMedia.js";
 import { prepareAtlasSeedanceImageAsset } from "./atlas-video-input.js";
 import { seedanceDraftCost } from "../src/seedanceDraft.js";
-import { atlasSeedanceEstimateRates, estimateAtlasImageCost as catalogImageCost, isAtlasSeedance25PricingEndpoint } from "../src/atlasPricing.js";
-import { recordedCostAmount } from "../src/pricingCatalog.js";
-import { requireAtlasPrice } from "./provider-pricing.js";
+import { estimateAtlasImageCost as catalogImageCost } from "../src/atlasPricing.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null, quoteInput = async () => null }) {
   async function uploadSource(source, key, kind = "", model = "", onReferencePrepared) {
@@ -66,14 +64,13 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const fallback = catalogImageCost({ model: input.model, resolution: input.resolution ?? resolution, referenceCount: imageInputs.length,
       enableWebSearch: input.enable_web_search, enableImageSearch: input.enable_image_search, numImages: input.n });
     let quote = await quoteInput(input, key).catch(() => null);
-    const cost = requireAtlasPrice({ ...fallback, ...quote });
     const result = await client.generate({ mediaType: "image", input, key });
     if (!quote) quote = await quoteInput(input, key).catch(() => null);
     return {
       ...result,
       endpoint: input.model,
       provider: "Atlas Cloud",
-      cost: { ...cost, ...quote },
+      cost: { ...fallback, ...quote },
       remoteImage: { url: result.url, content_type: "image/png" },
       size,
       quality: input.quality || quality,
@@ -125,14 +122,10 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const hasVideoReference = Boolean(options.videos?.length);
     if (input.draft && !hasVideoReference) return { cost: seedanceDraftCost("preview", "atlas"), quoted: false };
     const quote = await quoteInput(input, key).catch(() => null);
-    const estimate = duration => estimateAtlasVideoCost({ model: options.model, duration, resolution: input.resolution,
+    const estimate = estimateAtlasVideoCost({ model: options.model, duration: input.duration, resolution: input.resolution,
       referenceImageCount: options.images?.length || 0, hasVideoReference, endpoint: input.model });
-    const cost = { ...(input.draft ? seedanceDraftCost("preview", "atlas") : estimate(input.duration)), ...quote };
-    const canPriceOutput = isAtlasSeedance25PricingEndpoint(input.model) && (hasVideoReference
-      ? Object.hasOwn(atlasSeedanceEstimateRates, input.resolution) && options.referenceVideoDurationSeconds > 0
-      : recordedCostAmount(estimate(5)) !== null);
-    // Automatic duration and native reference-video pricing can use the completed render's measured clock.
-    return { cost: canPriceOutput ? cost : requireAtlasPrice(cost), quoted: Boolean(quote) };
+    const cost = { ...(input.draft ? seedanceDraftCost("preview", "atlas") : estimate), ...quote };
+    return { cost, quoted: Boolean(quote) };
   }
 
   async function video(options, key) {

@@ -1,5 +1,4 @@
 import { buildKling4Request, kling4Cost } from "../src/kling4.js";
-import { requireAtlasPrice } from "./provider-pricing.js";
 
 export async function generateKling4(body, provider, { isManagedUrl, upload, subscribe, atlasGenerate, quoteInput = async () => null }) {
   const { endpoint, input } = buildKling4Request(body, provider);
@@ -15,7 +14,7 @@ export async function generateKling4(body, provider, { isManagedUrl, upload, sub
   }
   let result, remoteVideo, quote;
   if (provider === "atlas") {
-    quote = requireAtlasPrice(await quoteInput(input).catch(() => null));
+    quote = await quoteInput(input).catch(() => null);
     result = await atlasGenerate(input);
     remoteVideo = result.url ? { url: result.url, content_type: "video/mp4" } : null;
   } else {

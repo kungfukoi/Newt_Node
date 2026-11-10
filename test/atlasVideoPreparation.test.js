@@ -3,13 +3,23 @@ import assert from "node:assert/strict";
 import { createAtlasMedia } from "../server/atlas-media.js";
 import sharp from "sharp";
 
-test("Atlas blocks media without a verified price before any generation is submitted", async () => {
-  const media = createAtlasMedia({ client: { generate: () => assert.fail("Paid generation should not run"),
+test("Atlas submits image and video once with an unpriced result when pricing is unavailable", async () => {
+  const submissions = [];
+  const media = createAtlasMedia({ client: { generate: async ({ mediaType }) => {
+    submissions.push(mediaType);
+    return { url: `https://example.test/${mediaType}` };
+  },
     upload: async () => "https://example.test/frame.png" }, readLocalAsset: async () => ({}),
+    quoteInput: async () => { throw new Error("Pricing service unavailable"); },
     labelPrompt: prompt => prompt, imageSize: () => "2048x1152" });
-  await assert.rejects(media.image({ model: "OpenAI Image 2.5", prompt: "Test" }, "key"), /No generation was submitted/);
-  await assert.rejects(media.video({ model: "Kling 4.0 Image-to-Video", prompt: "Test", startImage: "/outputs/test.png",
-    duration: "5 seconds", resolution: "1080p" }, "key"), /No generation was submitted/);
+  const image = await media.image({ model: "OpenAI Image 2.5", prompt: "Test" }, "key");
+  const video = await media.video({ model: "Kling 4.0 Image-to-Video", prompt: "Test", startImage: "/outputs/test.png",
+    duration: "5 seconds", resolution: "1080p" }, "key");
+  assert.deepEqual(submissions, ["image", "video"]);
+  for (const result of [image, video]) {
+    assert.equal(result.provider, "Atlas Cloud");
+    assert.equal(result.cost.amountUsd, null);
+  }
 });
 test("durable Atlas preparation uploads references without submitting a paid job", async () => {
   const uploads = [];

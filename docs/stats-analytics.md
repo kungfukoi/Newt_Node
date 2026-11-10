@@ -93,8 +93,10 @@ runs with incomplete billing inputs need an account quote or a verified provider
 Atlas text and vision runs record the provider request IDs and the returned input,
 cached, cache-write and output token counts. Stats retains this limited billing
 metadata after recent History expires. Verified list rates price the main request
-and each helper using its own model. Media checks an account quote or a verified
-fallback before submitting. Token-based quotes and list calculations are estimates.
+and each helper using its own model. Media uses account quotes or verified local
+estimates when available. Atlas requests proceed when quotes or rates are unavailable.
+History and Stats show those runs as unpriced until pricing can be resolved.
+Token-based quotes and list calculations are estimates.
 The public Atlas costs API reports daily aggregates by model and key. Resolving old
 runs without saved billing inputs requires itemized provider evidence. If Atlas
 omits usage on a successful text response, its request ID remains available in Details.

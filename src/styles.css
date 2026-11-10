@@ -2164,7 +2164,6 @@ textarea::placeholder {
   }
 }
 
-.pricing-settings-heading,
 .pricing-settings-actions,
 .pricing-settings-meta {
   display: flex;
@@ -2173,8 +2172,6 @@ textarea::placeholder {
   gap: 12px;
 }
 
-.pricing-settings-heading { justify-content: space-between; }
-.pricing-settings-heading h2 { margin: 0; font-size: 16px; }
 .pricing-settings-meta { color: #aaa; font-size: 12px; column-gap: 24px; }
 .pricing-settings-status:empty { display: none; }
 .pricing-settings-status { font-size: 13px; color: #e1c938; overflow-wrap: anywhere; }

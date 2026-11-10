@@ -4,20 +4,12 @@ import { atlasPricingEndpoints, isAtlasSeedance25PricingEndpoint } from "../src/
 import { generationEstimate } from "../src/generationPricing.js";
 import { generationQuoteSettings, QUOTE_TTL_MS } from "../src/pricingTrust.js";
 import { atlasTokenCount } from "../src/atlasBillingUsage.js";
-import { recordedCostAmount } from "../src/pricingCatalog.js";
 
 export const ATLAS_CALCULATE_URL = "https://api.atlascloud.ai/api/v1/model/calculate";
 export const FAL_BILLING_URL = "https://api.fal.ai/v1/models/billing-events";
 const atlasQuoteOnlyEndpoints = ["text-to-image", "edit", "remix"].map(route => `reve-ai/reve-2.1/${route}`);
 const amount = value => (typeof value === "number" || typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))
   && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
-
-export function requireAtlasPrice(cost) {
-  if (recordedCostAmount(cost) === null) {
-    throw Object.assign(new Error("Atlas Cloud pricing is unavailable for these settings. No generation was submitted. Check API Pricing or retry the quote."), { status: 503 });
-  }
-  return cost;
-}
 
 async function jsonRequest(fetchImpl, url, key, body, timeout = 8000) {
   const response = await fetchImpl(url, { method: body ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(timeout),

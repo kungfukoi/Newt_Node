@@ -45,20 +45,17 @@ export function PricingSettings() {
   const verified = active.reduce((sum, [provider]) => sum + (state?.sources?.[provider]?.current || 0), 0);
   const older = active.reduce((sum, [provider]) => sum + (state?.sources?.[provider]?.stale || 0), 0);
   const unavailable = active.reduce((sum, [provider]) => sum + (state?.sources?.[provider]?.unavailable || 0), 0);
-  return <section className="stats-panel settings-panel wide pricing-settings">
-    <div className="pricing-settings-heading">
-      <h2>API Pricing</h2>
-      <div className="pricing-settings-actions">
-        <button type="button" className={`settings-key-toggle ${state?.enabled ? "enabled" : ""}`} role="switch"
-          aria-label="Automatic pricing refresh" aria-checked={Boolean(state?.enabled)} disabled={!state || busy}
-          onClick={() => update(() => pricingApi.setEnabled(!state.enabled))}>
-          <span className="settings-key-toggle-track" aria-hidden="true"><span /></span><em>Auto refresh</em>
-        </button>
-        <button type="button" className="settings-key-version-action" title="Check prices now" aria-label="Check prices now"
-          disabled={!state || working} onClick={() => update(pricingApi.refresh)}>
-          <RefreshCcw size={16} className={working ? "spin" : ""} />
-        </button>
-      </div>
+  return <>
+    <div className="pricing-settings-actions">
+      <button type="button" className={`settings-key-toggle ${state?.enabled ? "enabled" : ""}`} role="switch"
+        aria-label="Automatic pricing refresh" aria-checked={Boolean(state?.enabled)} disabled={!state || busy}
+        onClick={() => update(() => pricingApi.setEnabled(!state.enabled))}>
+        <span className="settings-key-toggle-track" aria-hidden="true"><span /></span><em>Auto refresh</em>
+      </button>
+      <button type="button" className="settings-key-version-action" title="Check prices now" aria-label="Check prices now"
+        disabled={!state || working} onClick={() => update(pricingApi.refresh)}>
+        <RefreshCcw size={16} className={working ? "spin" : ""} />
+      </button>
     </div>
     <div className="pricing-settings-meta">
       <span>{verified} current rate tables{older ? ` / ${older} older` : ""}{unavailable ? ` / ${unavailable} unavailable` : ""}</span>
@@ -82,5 +79,5 @@ export function PricingSettings() {
       })}
     </div>
     </details>
-  </section>;
+  </>;
 }

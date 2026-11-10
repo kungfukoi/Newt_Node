@@ -449,7 +449,9 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
         <CollapsibleSettingsSection title="Feature Usage" open={openSections.usage} onToggle={() => toggleSection("usage")} wide>
           {openSections.usage && <FeatureUsageSettings />}
         </CollapsibleSettingsSection>
-        <PricingSettings />
+        <CollapsibleSettingsSection title="API Pricing" open={openSections.pricing} onToggle={() => toggleSection("pricing")} wide>
+          <PricingSettings />
+        </CollapsibleSettingsSection>
         <CollapsibleSettingsSection
           title="API Credentials"
           aside="One active key per service"
