@@ -27,8 +27,8 @@ test("user preferences ignore retired visibility switches", () => {
 
 test("image editor preference preserves Ideogram and migrates old settings", () => {
   assert.equal(normalizeUserPreferences({ imageEditorModel: "Ideogram 4.5" }).imageEditorModel, "Ideogram 4.5");
-  assert.equal(normalizeUserPreferences({ imageEditorModel: "unknown" }).imageEditorModel, "OpenAI Image 2.5 Sunburst");
-  assert.equal(normalizeUserPreferences({}).imageEditorModel, "OpenAI Image 2.5 Sunburst");
+  assert.equal(normalizeUserPreferences({ imageEditorModel: "unknown" }).imageEditorModel, "OpenAI Image 2.6 Sunburst");
+  assert.equal(normalizeUserPreferences({}).imageEditorModel, "OpenAI Image 2.6 Sunburst");
 });
 
 test("Director processing preferences switch every Astra default to GPT-5.6 Sol", () => {

@@ -12,11 +12,11 @@ import {
 } from "./atlasMedia.js";
 import { estimateMinimaxH3Cost, isMinimaxH3Model } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
-import { estimateLegacyOpenAiImage2Cost, estimateOpenAiImage2Cost } from "./openAiImage2.js";
+import { estimateLegacyOpenAiImage2Cost } from "./openAiImage2.js";
 import { reve21CostPerImage } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { normalizeModelProviderPreferences, providerSupportedModels } from "./modelProviderRouting.js";
-import { isGptImage25Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
+import { isGptImage26Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
 
 const falImageRates = Object.freeze({
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
@@ -76,7 +76,7 @@ export function generationProviderForModel({
     if (isNanoBanana21Model(model)) return preferences.imageGeneration === "atlas" ? null : preferences.imageGeneration === "krea" ? "krea" : "fal";
     if (preferences.imageGeneration === "krea") return supportsKreaModel("image", model) ? "krea" : null;
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
-    if (isGptImage25Model(model)) return "fal";
+    if (isGptImage26Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
     if (model === "Ideogram 4.5") return "fal";
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
@@ -108,15 +108,10 @@ export function estimateImageRunCost({
     unitCost = estimateFlux3Cost({ resolution }).amountUsd;
   } else if (provider === "atlas" && supportsAtlasImageModel(model)) {
     unitCost = estimateAtlasImageCost({ model, resolution, referenceCount: references }).amountUsd;
-  } else if (provider === "krea" && isGptImage25Model(model)) {
+  } else if (provider === "krea" && isGptImage26Model(model)) {
     unitCost = estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd;
-  } else if (isGptImage25Model(model)) {
-    unitCost = estimateOpenAiImage2Cost({
-      resolution,
-      size: orientationSize(aspectRatio),
-      quality,
-      edit: references > 0
-    });
+  } else if (isGptImage26Model(model)) {
+    unitCost = null;
   } else if (isLegacyOpenAiImage2Model(model)) {
     unitCost = provider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd

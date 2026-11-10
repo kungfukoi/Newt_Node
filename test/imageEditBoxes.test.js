@@ -72,7 +72,7 @@ test("every editable box mode includes context beyond its footprint while Keep s
   }
 });
 
-for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
+for (const model of ["OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
   test(`${model}: full scene output survives box edges while Keep protects original pixels`, async () => {
     const source = await solid("#123456");
     const moving = { ...box(), target: { x: .7, y: .7, w: .25, h: .2, rotation: 45 } };

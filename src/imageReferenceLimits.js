@@ -4,7 +4,7 @@ const imageReferenceLimits = Object.freeze({
     "seedream-5-pro": 10,
     "nano-banana-2": 14,
     "nano-banana-pro": 14,
-    "openai-image-2-5": 16,
+    "openai-image-2-6": 16,
     "openai-image-2": 16,
     "ideogram-4-5": 5,
     "flux-3": 10,
@@ -12,7 +12,7 @@ const imageReferenceLimits = Object.freeze({
     "krea-2-large": 10
   }),
   atlas: Object.freeze({
-    "openai-image-2-5": 16,
+    "openai-image-2-6": 16,
     "openai-image-2": 10,
     "nano-banana-2": 14,
     "nano-banana-pro": 10,
@@ -21,7 +21,7 @@ const imageReferenceLimits = Object.freeze({
   krea: Object.freeze({
     "ideogram-4-5": 5,
     "nano-banana-2-1": 14,
-    "openai-image-2-5": 10,
+    "openai-image-2-6": 10,
     "z-image": 1,
     "seedream-5-pro": 10,
     "nano-banana-2": 14,
@@ -33,7 +33,7 @@ const imageReferenceLimits = Object.freeze({
 
 function imageReferenceModelKey(model = "") {
   const normalized = String(model || "").trim().toLowerCase();
-  if (normalized.includes("openai image 2.5") || normalized.includes("gpt image 2.5")) return "openai-image-2-5";
+  if (/(?:openai|gpt)[ -]image[ -]2\.[56]/.test(normalized)) return "openai-image-2-6";
   if (normalized.includes("openai image 2") || normalized.includes("gpt image 2")) return "openai-image-2";
   // Fal's 2.1 schema declares no maximum reference count; do not inherit 2.0's limit.
   if (normalized === "nano banana 2.1") return "nano-banana-2-1";

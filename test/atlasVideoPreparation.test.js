@@ -12,7 +12,7 @@ test("Atlas submits image and video once with an unpriced result when pricing is
     upload: async () => "https://example.test/frame.png" }, readLocalAsset: async () => ({}),
     quoteInput: async () => { throw new Error("Pricing service unavailable"); },
     labelPrompt: prompt => prompt, imageSize: () => "2048x1152" });
-  const image = await media.image({ model: "OpenAI Image 2.5", prompt: "Test" }, "key");
+  const image = await media.image({ model: "OpenAI Image 2.6", prompt: "Test" }, "key");
   const video = await media.video({ model: "Kling 4.0 Image-to-Video", prompt: "Test", startImage: "/outputs/test.png",
     duration: "5 seconds", resolution: "1080p" }, "key");
   assert.deepEqual(submissions, ["image", "video"]);

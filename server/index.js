@@ -64,7 +64,7 @@ import { registerStoryboardRevisionRoutes } from "./routes/storyboardRevisions.j
 import { registerStoryboardRoutes } from "./routes/storyboard.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
 import { storyboardQcCharacterInputs } from "../src/storyboardCast.js";
-import { openAiImage25Models, openAiImage25Variant, normalizeOpenAiImage25Model, isOpenAiImage25Model } from "../src/openAiImageModels.js";
+import { openAiImage26Models, openAiImage26Variant, normalizeOpenAiImage26Model, isOpenAiImage26Model } from "../src/openAiImageModels.js";
 import "dotenv/config";
 
 import cors from "cors";
@@ -229,7 +229,7 @@ import {
 } from "./comfyWanPreflight.js";
 import { createWanWarpBlendRefineResult, createWanWarpComfyResult, createWanWarpFullWorkflowResult } from "./wanwarp/engine.js";
 import { createWanBlendComfyResult } from "./wanblend/engine.js";
-import { buildOpenAiImage2FalInput, estimateLegacyOpenAiImage2Cost as estimateLegacyOpenAiImage2OutputCost, estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Background, normalizeOpenAiImage2Quality, normalizeOpenAiImage2Variant, openAiImage2Costs, openAiImage2FalEndpoint, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
+import { buildOpenAiImage2FalInput, estimateLegacyOpenAiImage2Cost as estimateLegacyOpenAiImage2OutputCost, normalizeOpenAiImage2Background, normalizeOpenAiImage2Quality, normalizeOpenAiImage2Variant, openAiImage2FalEndpoint, openAiImage2Quality } from "../src/openAiImage2.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import {
   buildNanoBanana2FalInput,
@@ -559,8 +559,8 @@ const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: openAiImage25Models.flare,
-  openAiImage25Sunburst: openAiImage25Models.sunburst,
+  openAiImage2: openAiImage26Models.flare,
+  openAiImage26Sunburst: openAiImage26Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
   flux3: "Flux 3",
@@ -574,7 +574,7 @@ const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage26Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
@@ -1211,7 +1211,7 @@ registerImageEditRoutes(app, {
     if (maskUrl) input.mask_url = maskUrl;
     const result = await subscribeFal(endpoint, { input, logs: true }, { route: "edit-image", model });
     const remoteImage = firstFalImageResult(result?.data);
-    if (!remoteImage?.url) throw httpError(502, "OpenAI Image 2.5 returned no edited image. Check Fal history before rerunning.");
+    if (!remoteImage?.url) throw httpError(502, "OpenAI Image 2.6 returned no edited image. Check Fal history before rerunning.");
     return {
       endpoint,
       provider: "fal.ai",
@@ -1379,6 +1379,7 @@ function buildHealthPayload() {
       styleLibrary: true,
       lookStyleAnalysis: true,
       lookAnalysisSeparateGrade: true,
+      openAiImage26: true,
       stylefinderAudition: true,
       stylefinderCompact: true,
       lookbookSharedCompact: true,
@@ -3235,8 +3236,9 @@ app.get("/api/stats", async (_req, res) => {
       },
       openAiImage2: {
         quality: openAiImage2Quality,
-        costs: openAiImage2Costs,
-        highCosts: openAiImage2HighCosts,
+        costs: null,
+        highCosts: null,
+        pricingBasis: "Image 2.6 uses variable token billing; no verified fixed image estimate.",
         currency: "USD"
       },
       krea2Large: {
@@ -4236,7 +4238,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       return res.status(400).json({ error: "Prompt is required." });
     }
 
-    const selectedModel = resolveImageModel(normalizeOpenAiImage25Model(req.body.model, req.body.openAiImageVariant));
+    const selectedModel = resolveImageModel(normalizeOpenAiImage26Model(req.body.model, req.body.openAiImageVariant));
     if (isNanoBanana21Model(selectedModel.displayName) && req.body.imagePromptUrls !== undefined && (!Array.isArray(req.body.imagePromptUrls) || req.body.imagePromptUrls.some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Nano Banana 2.1 requires valid managed image references; none were submitted.");
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
@@ -4297,7 +4299,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     if (runtimeModelProviderPreferences.imageGeneration === "atlas") {
       if (!supportsAtlasImageModel(selectedModel.displayName)) {
         return res.status(400).json({
-          error: `${selectedModel.displayName} is not supported by Atlas Cloud. Choose OpenAI Image 2.5, OpenAI Image 2, Nano Banana 2, Nano Banana Pro, or REVE 2.1, or change Image Generation in Settings.`
+          error: `${selectedModel.displayName} is not supported by Atlas Cloud. Choose OpenAI Image 2.6, OpenAI Image 2, Nano Banana 2, Nano Banana Pro, or REVE 2.1, or change Image Generation in Settings.`
         });
       }
       if (!process.env.ATLAS_API_KEY) {
@@ -4475,7 +4477,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (["fal-gpt-image-2-5", "fal-openai-image-2"].includes(selectedModel.provider)) {
+    if (["fal-gpt-image-2-6", "fal-openai-image-2"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "No active Fal API key is selected in Settings." });
       }
@@ -4495,7 +4497,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       const output = await downloadImage(
         req,
         openAiImage.remoteImage.url,
-        selectedModel.provider === "fal-gpt-image-2-5" ? "gpt-image-2-5" : "openai-image-2",
+        selectedModel.provider === "fal-gpt-image-2-6" ? "gpt-image-2-6" : "openai-image-2",
         openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType
       );
 
@@ -5095,7 +5097,7 @@ async function runKreaImageModel(
       aspectRatio,
       requestedAspectRatio: requestedAspectRatio || aspectRatio,
       resolution,
-      quality: isOpenAiImage25Model(selectedModel.displayName)
+      quality: isOpenAiImage26Model(selectedModel.displayName)
         ? normalizeOpenAiImage2Quality(req.body.quality)
         : undefined,
       creativity: selectedModel.displayName === imageModelNames.krea2Large
@@ -5643,7 +5645,7 @@ app.post("/api/node/utility-image", async (req, res) => {
       return runTopazImageUpscaler(req, res, { imageUrl, selectedModel });
     }
 
-    if (selectedModel.provider === "fal-gpt-image-2-5-image-to-id") {
+    if (selectedModel.provider === "fal-gpt-image-2-6-image-to-id") {
       return runImageToIdUtilityImage(req, res, { imageUrl, selectedModel });
     }
 
@@ -6016,7 +6018,7 @@ async function runImageToIdUtilityImage(req, res, { imageUrl, selectedModel }) {
     size: openAiImage.size,
     quality: openAiImage.quality
   });
-  const text = "OpenAI Image 2.5 Cryptomatte-style ID matte.";
+  const text = "OpenAI Image 2.6 Cryptomatte-style ID matte.";
 
   await appendHistory({
     id: randomUUID(),
@@ -17016,12 +17018,9 @@ function estimateRodin25Cost({ generateType, enablePbr, faceCount, inputImageCou
 function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelName = imageModelNames.openAiImage2 }) {
   const edit = String(endpoint || "").includes("/edit");
   const legacyModel = modelName === imageModelNames.legacyOpenAiImage2;
-  const variant = String(endpoint || "").includes("/sunburst/") ? "Sunburst" : "Flare";
-  const amountUsd = legacyModel
-    ? estimateLegacyOpenAiImage2OutputCost({ resolution, size, quality, edit })
-    : estimateOpenAiImage2OutputCost({ resolution, size, quality, edit });
+  const amountUsd = legacyModel ? estimateLegacyOpenAiImage2OutputCost({ resolution, size, quality, edit }) : null;
   return {
-    amountUsd: roundCurrency(amountUsd),
+    amountUsd: amountUsd === null ? null : roundCurrency(amountUsd),
     currency: "USD",
     unitRateUsd: amountUsd,
     units: 1,
@@ -17030,10 +17029,12 @@ function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint, modelNa
     resolution,
     size,
     quality,
+    model: modelName,
+    endpoint,
     pricingBasis: legacyModel
       ? `OpenAI Image 2 ${quality} image output estimate`
-      : `OpenAI Image 2.5 ${variant} ${quality} image output estimate`,
-    pricingSource: legacyModel ? "fal-model-page-2026-08-18" : "fal-model-page-2026-09-09"
+      : "OpenAI Image 2.6 uses variable token billing; no verified fixed image estimate.",
+    pricingSource: legacyModel ? "fal-model-page-2026-08-18" : "fal-model-page-2026-11-10"
   };
 }
 
@@ -19476,11 +19477,11 @@ function resolveImageModel(model) {
     };
   }
 
-  if (normalized.includes("openai image 2.5") || normalized.includes("gpt image 2.5") || normalized.includes("gpt-image-2.5") || normalized.includes("image 2.5")) {
+  if (isOpenAiImage26Model(model)) {
     return {
-      provider: "fal-gpt-image-2-5",
-      displayName: normalizeOpenAiImage25Model(model),
-      id: openAiImage2FalEndpoint({ variant: openAiImage25Variant(model) })
+      provider: "fal-gpt-image-2-6",
+      displayName: normalizeOpenAiImage26Model(model),
+      id: openAiImage2FalEndpoint({ variant: openAiImage26Variant(model) })
     };
   }
 
@@ -19533,9 +19534,9 @@ function resolveUtilityImageModel(model) {
 
   if (normalized.includes("cryptomatte") || (normalized.includes("image") && normalized.includes("id"))) {
     return {
-      provider: "fal-gpt-image-2-5-image-to-id",
+      provider: "fal-gpt-image-2-6-image-to-id",
       displayName: "Image to Color ID",
-      id: "openai/gpt-image-2.5/flare/edit"
+      id: "openai/gpt-image-2.6/flare/edit"
     };
   }
 
@@ -19976,7 +19977,7 @@ function imageAspectRatiosForProvider(provider) {
   if (provider === "fal-ideogram-4-5") return ideogram45AspectRatios;
   if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;
-  return ["fal-gpt-image-2-5", "fal-openai-image-2"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return ["fal-gpt-image-2-6", "fal-openai-image-2"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isAutoImageAspectRatio(value) {
@@ -21778,7 +21779,7 @@ async function runAtlasImageModel(req, res, {
     : null;
   const atlasImage = await atlasMedia.image({
     model: selectedModel.displayName,
-    variant: openAiImage25Variant(req.body.model, req.body.openAiImageVariant),
+    variant: openAiImage26Variant(req.body.model, req.body.openAiImageVariant),
     prompt,
     imageInputs,
     aspectRatio,
@@ -21842,7 +21843,7 @@ async function runAtlasImageModel(req, res, {
 
 async function generateOpenAiImage2FromInputs(options) {
   if (process.env.FAL_KEY) return generateFalOpenAiImage2FromInputs(options);
-  throw httpError(400, "OpenAI Image 2.5 needs an enabled Fal API key in Settings.");
+  throw httpError(400, "OpenAI Image 2.6 needs an enabled Fal API key in Settings.");
 }
 
 async function generateKreaOpenAiImage2FromInputs({
@@ -21900,7 +21901,7 @@ async function generateFalOpenAiImage2FromInputs({ modelName = imageModelNames.o
   const requestedQualityValue = normalizeOpenAiImage2Quality(requestedQuality);
   const quality = legacyModel && !["low", "medium", "high"].includes(requestedQualityValue) ? "high" : requestedQualityValue;
   const background = normalizeOpenAiImage2Background(requestedBackground);
-  const variant = openAiImage25Variant(modelName, requestedVariant);
+  const variant = openAiImage26Variant(modelName, requestedVariant);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
   const endpoint = legacyModel
     ? imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2"

@@ -48,7 +48,7 @@ test("Atlas submits a generation once and polls the returned job", async () => {
 
   const result = await client.generate({
     mediaType: "image",
-    input: { model: "openai/gpt-image-2.5-flare/text-to-image", prompt: "Test" },
+    input: { model: "openai/gpt-image-2.6-flare/text-to-image", prompt: "Test" },
     key: "atlas-key"
   });
 
@@ -93,7 +93,7 @@ test("Atlas rejects insecure output URLs", async () => {
   await assert.rejects(
     client.generate({
       mediaType: "image",
-      input: { model: "openai/gpt-image-2.5-flare/text-to-image", prompt: "Test" },
+      input: { model: "openai/gpt-image-2.6-flare/text-to-image", prompt: "Test" },
       key: "atlas-key"
     }),
     /without a usable output/i

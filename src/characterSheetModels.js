@@ -1,4 +1,4 @@
-import { imageModelNames, normalizeGptImage25Model, isGptImage25Model } from "./modelOptions.js";
+import { imageModelNames, normalizeGptImage26Model, isGptImage26Model } from "./modelOptions.js";
 import { openAiImage2Quality } from "./openAiImage2.js";
 export const characterSheetDefaultModel = imageModelNames.nanoBananaPro;
 
@@ -7,14 +7,14 @@ export const characterSheetModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.seedream5Pro,
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage26Sunburst,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
   imageModelNames.nanoBanana21
 ];
 
 export function normalizeCharacterSheetModel(value) {
-  const model = normalizeGptImage25Model(value);
+  const model = normalizeGptImage26Model(value);
   return characterSheetModelOptions.includes(model) ? model : characterSheetDefaultModel;
 }
 
@@ -23,7 +23,7 @@ export function characterSheetGenerationSettings(value) {
   return {
     model,
     resolution: model === imageModelNames.ideogram45 || model === imageModelNames.seedream5Pro ? "2K" : "4K",
-    ...(isGptImage25Model(model) ? { quality: openAiImage2Quality } : {})
+    ...(isGptImage26Model(model) ? { quality: openAiImage2Quality } : {})
   };
 }
 

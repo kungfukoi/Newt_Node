@@ -17,8 +17,8 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
     { id: "preview", type: "preview", x: 760, y: 20, data: { title: "Explore preview" } }
   ], edges);
   const card = nodeCard(page, "explore");
-  await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.5 Flare");
-  await card.getByLabel("Explore image model").selectOption("OpenAI Image 2.5 Sunburst");
+  await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.6 Flare");
+  await card.getByLabel("Explore image model").selectOption("OpenAI Image 2.6 Sunburst");
   await expect(card.getByLabel("Variant", { exact: true })).toHaveCount(0);
   await expect(card.getByLabel("Explore Mode")).toBeChecked();
   await card.getByLabel("Explore Mode").uncheck();
@@ -39,7 +39,7 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
   await card.getByRole("button", { name: "Stop remaining generations" }).click();
   release();
   await expect(card.getByRole("button", { name: "Resume 2" })).toBeVisible();
-  expect(images[0].model).toBe("OpenAI Image 2.5 Sunburst");
+  expect(images[0].model).toBe("OpenAI Image 2.6 Sunburst");
   expect(images[0].openAiImageVariant).toBe("sunburst");
   await card.getByRole("button", { name: "Resume 2" }).click();
   await expect(card.locator(".explore-result")).toHaveCount(3);
@@ -67,29 +67,29 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(card.locator(".explore-result")).toHaveCount(5);
-  await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.5 Sunburst");
+  await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.6 Sunburst");
   expect(errors).toEqual([]);
 });
 
 test("old variant fields migrate and both choices reach all existing image model selectors", async ({ page }) => {
   const { errors } = await seed(page, [
-    { id: "model", type: "imageModel", x: 20, y: 20, data: { title: "Legacy Sunburst", model: "OpenAI Image 2.5", openAiImageVariant: "sunburst", prompt: "A bottle", settingsOpen: true } },
-    { id: "board", type: "storyboard", x: 850, y: 20, data: { title: "Board", storyboardTab: "advanced", model: "OpenAI Image 2.5", openAiImageVariant: "sunburst" } }
+    { id: "model", type: "imageModel", x: 20, y: 20, data: { title: "Legacy Sunburst", model: "OpenAI Image 2.6", openAiImageVariant: "sunburst", prompt: "A bottle", settingsOpen: true } },
+    { id: "board", type: "storyboard", x: 850, y: 20, data: { title: "Board", storyboardTab: "advanced", model: "OpenAI Image 2.6", openAiImageVariant: "sunburst" } }
   ]);
   const card = nodeCard(page, "model");
-  await expect(card.locator("select").filter({ has: page.locator('option:checked', { hasText: /^OpenAI Image 2.5 Sunburst$/ }) })).toHaveCount(1);
+  await expect(card.locator("select").filter({ has: page.locator('option:checked', { hasText: /^OpenAI Image 2.6 Sunburst$/ }) })).toHaveCount(1);
   await expect(card.getByText("Variant", { exact: true })).toHaveCount(0);
   const board = nodeCard(page, "board");
-  await expect(board.getByLabel("Storyboard image model")).toHaveValue("OpenAI Image 2.5 Sunburst");
-  await board.getByLabel("Storyboard image model").selectOption("OpenAI Image 2.5 Flare");
+  await expect(board.getByLabel("Storyboard image model")).toHaveValue("OpenAI Image 2.6 Sunburst");
+  await board.getByLabel("Storyboard image model").selectOption("OpenAI Image 2.6 Flare");
   await board.getByLabel("Storyboard image model").selectOption("Flux 3");
   await expect(board.getByLabel("Storyboard image model")).toHaveValue("Flux 3");
-  const modelPicker = card.locator("select").filter({ has: page.locator('option:checked', { hasText: /^OpenAI Image 2.5 Sunburst$/ }) });
+  const modelPicker = card.locator("select").filter({ has: page.locator('option:checked', { hasText: /^OpenAI Image 2.6 Sunburst$/ }) });
   await modelPicker.selectOption("Flux 3");
   await expect(card.locator("select").filter({ has: page.locator('option:checked', { hasText: /^Flux 3$/ }) })).toHaveCount(1);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: /User Preferences/ }).click();
   const editor = page.getByLabel("Image Editor Model", { exact: true });
-  await expect(editor.locator("option")).toHaveText(["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]);
+  await expect(editor.locator("option")).toHaveText(["OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]);
   expect(errors).toEqual([]);
 });

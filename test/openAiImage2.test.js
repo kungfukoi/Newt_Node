@@ -5,8 +5,6 @@ import { imageModelNames, imageModelOptions } from "../src/modelOptions.js";
 import {
   buildOpenAiImage2FalInput,
   estimateLegacyOpenAiImage2Cost,
-  estimateOpenAiImage2Cost,
-  estimateOpenAiImage2HighCost,
   normalizeOpenAiImage2Background,
   normalizeOpenAiImage2Quality,
   normalizeOpenAiImage2Variant,
@@ -15,13 +13,13 @@ import {
   openAiImage2Quality
 } from "../src/openAiImage2.js";
 
-test("Image Model catalog exposes OpenAI Image 2.5 and the explicit legacy Image 2 choice", () => {
+test("Image Model catalog exposes OpenAI Image 2.6 and the explicit legacy Image 2 choice", () => {
   assert.ok(imageModelOptions.includes(imageModelNames.openAiImage2));
   assert.ok(imageModelOptions.includes(imageModelNames.legacyOpenAiImage2));
   assert.ok(imageModelOptions.indexOf(imageModelNames.openAiImage2) < imageModelOptions.indexOf(imageModelNames.legacyOpenAiImage2));
 });
 
-test("OpenAI Image 2.5 defaults to high quality and accepts every Fal quality tier", () => {
+test("OpenAI Image 2.6 defaults to high quality and accepts every Fal quality tier", () => {
   assert.equal(openAiImage2Quality, "high");
   assert.equal(normalizeOpenAiImage2Quality("medium"), "medium");
   assert.equal(normalizeOpenAiImage2Quality("LOW"), "low");
@@ -30,7 +28,7 @@ test("OpenAI Image 2.5 defaults to high quality and accepts every Fal quality ti
   assert.equal(normalizeOpenAiImage2Quality("unsupported"), "high");
 });
 
-test("OpenAI Image 2.5 supports explicit transparent PNG output", () => {
+test("OpenAI Image 2.6 supports explicit transparent PNG output", () => {
   assert.equal(openAiImage2Background, "auto");
   assert.equal(normalizeOpenAiImage2Background("TRANSPARENT"), "transparent");
   assert.equal(normalizeOpenAiImage2Background("unsupported"), "auto");
@@ -50,22 +48,14 @@ test("OpenAI Image 2.5 supports explicit transparent PNG output", () => {
   });
 });
 
-test("OpenAI Image 2.5 routes Flare and Sunburst generation and editing", () => {
+test("OpenAI Image 2.6 routes Flare and Sunburst generation and editing", () => {
   assert.equal(normalizeOpenAiImage2Variant(), "flare");
   assert.equal(normalizeOpenAiImage2Variant("SUNBURST"), "sunburst");
   assert.equal(normalizeOpenAiImage2Variant("unsupported"), "flare");
-  assert.equal(openAiImage2FalEndpoint(), "openai/gpt-image-2.5/flare/text-to-image");
-  assert.equal(openAiImage2FalEndpoint({ variant: "flare", edit: true }), "openai/gpt-image-2.5/flare/edit");
-  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst" }), "openai/gpt-image-2.5/sunburst/text-to-image");
-  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst", edit: true }), "openai/gpt-image-2.5/sunburst/edit");
-});
-
-test("OpenAI Image 2.5 estimates use Fal's published Flare quality tiers", () => {
-  assert.equal(estimateOpenAiImage2HighCost({ resolution: "1K", size: "1024x1024" }), 0.05268);
-  assert.equal(estimateOpenAiImage2HighCost({ resolution: "2K", size: "2048x1152", edit: true }), 0.0396);
-  assert.equal(estimateOpenAiImage2HighCost({ resolution: "4K", size: "3840x2160", edit: true }), 0.10008);
-  assert.equal(estimateOpenAiImage2Cost({ resolution: "4K", size: "3840x2160", quality: "medium" }), 0.02595);
-  assert.equal(estimateOpenAiImage2Cost({ resolution: "1K", size: "1024x1024", quality: "low", edit: true }), 0.00588);
+  assert.equal(openAiImage2FalEndpoint(), "openai/gpt-image-2.6/flare/text-to-image");
+  assert.equal(openAiImage2FalEndpoint({ variant: "flare", edit: true }), "openai/gpt-image-2.6/flare/edit");
+  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst" }), "openai/gpt-image-2.6/sunburst/text-to-image");
+  assert.equal(openAiImage2FalEndpoint({ variant: "sunburst", edit: true }), "openai/gpt-image-2.6/sunburst/edit");
 });
 
 test("legacy OpenAI Image 2 keeps its original generation and edit estimates", () => {

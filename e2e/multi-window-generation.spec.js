@@ -6,7 +6,7 @@ test("two Newt windows keep separate drafts and can submit concurrent generation
   const requests = [], pending = [];
   async function windowFixture(window, id) {
     await window.addInitScript(({ id }) => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
-      nodes: [{ id, type: "imageModel", x: 20, y: 20, data: { title: id, model: "OpenAI Image 2.5 Flare", prompt: `A ${id} image` } }],
+      nodes: [{ id, type: "imageModel", x: 20, y: 20, data: { title: id, model: "OpenAI Image 2.6 Flare", prompt: `A ${id} image` } }],
       edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
     })), { id });
     const fixture = await openFixture(window, { count: 1, settings: { falKeyConfigured: true, modelProviderPreferences: { imageGeneration: "fal" } } });

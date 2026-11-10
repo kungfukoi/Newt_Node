@@ -61,7 +61,7 @@ import { normalizeStoryboardVersions, versionStoryboardReplacement, restoreStory
 import { StoryboardPanelHistory } from "./components/StoryboardPanelHistory.jsx";
 import { storyboardFrameDirection, storyboardRevisionTargets, validateStoryboardRevision, storyboardRevisionSourceMatches } from "./storyboardRevisions.js";
 import { StoryboardRevisionControls, StoryboardPlanButton, StoryboardExportMenu } from "./components/StoryboardRevisionControls.jsx";
-import { migrateImageModelSelections, openAiImage25Variant, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
+import { migrateImageModelSelections, openAiImage26Variant, normalizeOpenAiImage26Model } from "./openAiImageModels.js";
 import React from "react";
 import { normalizeCompositeLayers, compositeInputPorts, compositeLayerPortId, compositeMaskPortId, isCompositeLayerPort, migrateCompositeEdges } from "./compositeLayers.js";
 import { CompositeLayerControls } from "./components/CompositeLayerControls.jsx";
@@ -346,8 +346,8 @@ import {
   imageBatchOptions,
   imageModelNames,
   imageModelOptions,
-  isGptImage25Model,
-  normalizeGptImage25Model,
+  isGptImage26Model,
+  normalizeGptImage26Model,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   geminiOmniAspectRatioOptions,
@@ -875,7 +875,7 @@ const moodBoardOutputFileName = "MOOD_BOARD.png";
 const colorIdToMatteOriginalReferenceLabel = "Original RGB source image";
 const colorIdToMatteEditMaskReferenceLabel = "Color ID to Matte edit mask";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage25Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.openAiImage26Sunburst, imageModelNames.nanoBananaPro, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
 const editVideoOutputOptions = [
   ["mp4", "MP4"],
   ["webm", "WebM"],
@@ -901,7 +901,7 @@ const editDefaultBrushSize = 42;
 const editLocalImageEffectIds = new Set(["imageCrop", "tone", "curves", "textOverlay", "brushInpaint"]);
 const coverageModelOptions = [
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage26Sunburst,
   imageModelNames.nanoBananaPro,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
@@ -12238,7 +12238,7 @@ function NodeBody({
       imageModels={imageModelOptions} showApiCosts={showPriceSnapshot} providerOptionProps={providerOptionProps}
       provider={generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability })}
       ratios={imageModelSupportedAspectRatios(node.data.model, generationProviderForModel({ model: node.data.model, mediaType: "image", providerPreferences: modelProviderPreferences, providerAvailability: modelProviderAvailability }))} resolutions={imageModelResolutionOptions(node.data.model)}
-      qualities={isOpenAiImageModel(node.data.model) ? (isGptImage25Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
+      qualities={isOpenAiImageModel(node.data.model) ? (isGptImage26Model(node.data.model) ? openAiImage2QualityOptions : ["low", "medium", "high"]) : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model)} /></React.Suspense>;
   }
   if (isKeyerNode(node)) {
@@ -16561,7 +16561,7 @@ function NodeBody({
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
     const isSeedream5 = isSeedream5ImageModel(node.data.model);
     const isOpenAiImage2 = isOpenAiImageModel(node.data.model);
-    const openAiQualityOptions = isGptImage25Model(node.data.model)
+    const openAiQualityOptions = isGptImage26Model(node.data.model)
       ? openAiImage2QualityOptions
       : openAiImage2QualityOptions.filter((option) => ["low", "medium", "high"].includes(option));
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, displayIncoming);
@@ -16717,7 +16717,7 @@ function NodeBody({
             </NodeRow>
           )}
           <ImageModelAdvancedOptions node={node} onUpdate={onUpdate} referenceCount={imageReferenceCount} Row={NodeRow} />
-          {isGptImage25Model(node.data.model) && (
+          {isGptImage26Model(node.data.model) && (
             <NodeRow label="Background">
               <select
                 value={normalizeOpenAiImage2Background(node.data.imageBackground)}
@@ -19500,7 +19500,7 @@ function imageModelSelectionPatch(data = {}, model) {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImageQualityForModel(data.quality, model),
     imageBackground: normalizeOpenAiImage2Background(data.imageBackground),
-    openAiImageVariant: openAiImage25Variant(model, data.openAiImageVariant),
+    openAiImageVariant: openAiImage26Variant(model, data.openAiImageVariant),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
     batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
@@ -19560,7 +19560,7 @@ function formatOpenAiImage2Background(value) {
 
 function normalizeOpenAiImageQualityForModel(value, model) {
   const quality = normalizeOpenAiImage2Quality(value);
-  if (isOpenAiImageModel(model) && !isGptImage25Model(model) && !["low", "medium", "high"].includes(quality)) {
+  if (isOpenAiImageModel(model) && !isGptImage26Model(model) && !["low", "medium", "high"].includes(quality)) {
     return openAiImage2Quality;
   }
   return quality;
@@ -21188,7 +21188,7 @@ function resetCoverageOutputPatch() {
 }
 
 function coverageModelLabel(model) {
-  if (isGptImage25Model(model)) return model;
+  if (isGptImage26Model(model)) return model;
   if (model === imageModelNames.reve21) return "REVE 2.1";
   if (model === imageModelNames.seedream5Pro) return "Seedream";
   return model;
@@ -25914,7 +25914,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const selectedModel = normalizeOpenAiImage25Model(data.model, data.openAiImageVariant) || imageModelNames.openAiImage2;
+  const selectedModel = normalizeOpenAiImage26Model(data.model, data.openAiImageVariant) || imageModelNames.openAiImage2;
   const model = imageModelOptions.includes(selectedModel) ? selectedModel : imageModelNames.openAiImage2;
   const isSeedream5 = isSeedream5ImageModel(model);
   return {
@@ -25958,7 +25958,7 @@ function normalizeAutoAspectData(data = {}) {
 }
 
 function normalizeCoverageData(data = {}) {
-  const selectedModel = normalizeGptImage25Model(data.model);
+  const selectedModel = normalizeGptImage26Model(data.model);
   const model = coverageModelOptions.includes(selectedModel) ? selectedModel : imageModelNames.openAiImage2;
   const resultItems = normalizedResultItems(data.resultItems, data.resultUrl, "image");
   const selectedResultIndex = Math.min(

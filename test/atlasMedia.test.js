@@ -36,7 +36,7 @@ test("Atlas video input dimensions preserve compliant media and scale undersized
 });
 
 test("Atlas media support is limited to verified Newt models", () => {
-  assert.equal(supportsAtlasImageModel("OpenAI Image 2.5"), true);
+  assert.equal(supportsAtlasImageModel("OpenAI Image 2.6"), true);
   assert.equal(supportsAtlasImageModel("OpenAI Image 2"), true);
   assert.equal(supportsAtlasImageModel("Nano Banana 2"), true);
   assert.equal(supportsAtlasImageModel("Nano Banana Pro"), true);
@@ -49,9 +49,9 @@ test("Atlas media support is limited to verified Newt models", () => {
   assert.equal(supportsAtlasVideoModel("Kling O3 Pro"), false);
 });
 
-test("OpenAI Image 2.5 preserves the selected Atlas variant and transparency", () => {
+test("OpenAI Image 2.6 preserves the selected Atlas variant and transparency", () => {
   const input = buildAtlasImageRequest({
-    model: "OpenAI Image 2.5",
+    model: "OpenAI Image 2.6",
     variant: "sunburst",
     prompt: "Transparent product cutout",
     aspectRatio: "1:1",
@@ -59,15 +59,15 @@ test("OpenAI Image 2.5 preserves the selected Atlas variant and transparency", (
     quality: "xhigh",
     background: "transparent"
   });
-  assert.equal(input.model, "openai/gpt-image-2.5-sunburst/text-to-image");
+  assert.equal(input.model, "openai/gpt-image-2.6-sunburst/text-to-image");
   assert.equal(input.size, "2048x2048");
   assert.equal(input.quality, "xhigh");
   assert.equal(input.background, "transparent");
 });
 
-test("OpenAI Image 2.5 masked edits match Atlas's strict field schema", () => {
+test("OpenAI Image 2.6 masked edits match Atlas's strict field schema", () => {
   const input = buildAtlasImageRequest({
-    model: "OpenAI Image 2.5",
+    model: "OpenAI Image 2.6",
     variant: "sunburst",
     prompt: "Replace only the selected object",
     images: ["https://example.com/source.png"],
@@ -86,7 +86,7 @@ test("OpenAI Image 2.5 masked edits match Atlas's strict field schema", () => {
     "quality",
     "size"
   ]);
-  assert.equal(input.model, "openai/gpt-image-2.5-sunburst/edit");
+  assert.equal(input.model, "openai/gpt-image-2.6-sunburst/edit");
   assert.equal(Object.hasOwn(input, "enable_sync_mode"), false);
 });
 
@@ -131,7 +131,7 @@ test("Atlas MiniMax H3 emits typed references", () => {
 
 test("Atlas fixed-price estimates are emitted only for verified price shapes", () => {
   assert.equal(estimateAtlasImageCost({ model: "Nano Banana 2", resolution: "4K" }).amountUsd, 0.16);
-  assert.equal(estimateAtlasImageCost({ model: "OpenAI Image 2.5", resolution: "2K" }).amountUsd, null);
+  assert.equal(estimateAtlasImageCost({ model: "OpenAI Image 2.6", resolution: "2K" }).amountUsd, null);
   assert.equal(estimateAtlasVideoCost({ model: "MiniMax H3", duration: 5, resolution: "2K" }).amountUsd, 0.65);
   const seedance = estimateAtlasVideoCost({ model: "Seedance 2.5", duration: 5, resolution: "720p" });
   assert.equal(seedance.amountUsd, 1.87785);

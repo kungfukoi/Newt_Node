@@ -9,7 +9,7 @@ const mask = { width: 10, height: 10, runs: [11, 2, 21, 2], area: 4 };
 
 test("native and cutout moves submit explicit source erasure and guide removal requirements", async () => {
   const source = await sharp({ create: { width: 200, height: 200, channels: 4, background: "#112233" } }).png().toBuffer();
-  for (const model of ["Flux 3", "Nano Banana 2.1", "OpenAI Image 2.5 Flare"]) {
+  for (const model of ["Flux 3", "Nano Banana 2.1", "OpenAI Image 2.6 Flare"]) {
     for (const rotation of [0, 35]) {
       const moved = { ...box, target: { ...box.target, x: .7, rotation } };
       const native = model === "Flux 3" && rotation === 0;

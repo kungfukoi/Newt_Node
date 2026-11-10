@@ -1,16 +1,16 @@
 import { isFlux3Model } from "./flux3.js";
 import { drawObjectMask } from "./objectSelection.js";
 import { isNanoBanana21Model } from "./nanoBanana21.js";
-import { openAiImage25Models, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
+import { openAiImage26Models, normalizeOpenAiImage26Model } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 import { isIdeogram45Model } from "./ideogram45.js";
 
-export const imageEditModelOptions = [openAiImage25Models.sunburst, openAiImage25Models.flare, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
+export const imageEditModelOptions = [openAiImage26Models.sunburst, openAiImage26Models.flare, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
 export const imageEditUsesSelectionGuide = model => isFlux3Model(model) || isNanoBanana21Model(model);
 export const imageEditRequiresFal = model => isIdeogram45Model(model) || imageEditUsesSelectionGuide(model);
 export const normalizeImageEditModel = (model) => {
-  const normalized = normalizeOpenAiImage25Model(model, "sunburst");
-  return imageEditModelOptions.includes(normalized) ? normalized : openAiImage25Models.sunburst;
+  const normalized = normalizeOpenAiImage26Model(model, "sunburst");
+  return imageEditModelOptions.includes(normalized) ? normalized : openAiImage26Models.sunburst;
 };
 
 export const imageEditColors = ["#f4f4f4", "#191919", "#ed5959", "#f4a340", "#e4cf37", "#57bd83", "#42b9d0", "#648cf5"];
@@ -33,7 +33,7 @@ export function imageEditSize(width, height, model) {
   if (![width, height].every((value) => Number.isInteger(value) && value > 0) || width * height > imageEditMaxPixels)
     throw new Error("This image is too large for the editor. Use an image up to 24 megapixels.");
   if (imageEditRequiresFal(model)) return { width, height };
-  if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.5 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
+  if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.6 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
   let scale = Math.min(1, 3840 / Math.max(width, height), Math.sqrt(8294400 / (width * height)));
   scale = Math.max(scale, Math.sqrt(655360 / (width * height)));
   let w = Math.min(3840, Math.round(width * scale / 16) * 16);

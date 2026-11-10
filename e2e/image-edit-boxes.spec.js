@@ -9,7 +9,7 @@ test("new boxes name themselves, respect manual edits and save the annotated ima
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
   })));
-  const { errors } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.5 Flare" } } });
+  const { errors } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.6 Flare" } } });
   let naming = 0, delayed, requested;
   let waitRequest = new Promise(resolve => { requested = resolve; });
   await page.route("**/api/node/identify-image-box", async route => {
@@ -19,7 +19,7 @@ test("new boxes name themselves, respect manual edits and save the annotated ima
     return route.fulfill({ json: { label: naming === 1 ? "pickleball" : "Object", confidence: naming === 1 ? .95 : .3, provider: "fal", model: "fixture" } });
   });
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
-  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.5 Flare", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   const save = editor.getByRole("button", { name: "Save image to disk", exact: true });
   await expect(save).toBeVisible();
@@ -73,9 +73,9 @@ test("Save Selection creates a tagged PNG output and canvas copy with more than 
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
   })));
-  await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.5 Flare" } } });
+  await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.6 Flare" } } });
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
-  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.5 Flare", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   const surface = await editor.locator(".ies-surface").boundingBox();
@@ -112,9 +112,9 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
     nodes: [{ id: "edit-source", type: "image", x: 30, y: 30, data: { title: "Edit source", resultUrl: "/outputs/e2e/landscape.png", fileName: "landscape.png", status: "complete" } }],
     edges: [], groups: [], viewport: { x: 20, y: 20, scale: .8 }
   })));
-  const { errors } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.5 Flare" } } });
+  const { errors } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, userPreferences: { imageEditorModel: "OpenAI Image 2.6 Flare" } } });
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
-  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.5 Flare", exact: true }).click();
+  await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
   const surface = await editor.locator(".ies-surface").boundingBox();
@@ -213,7 +213,7 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
   await expect.poll(() => Boolean(form)).toBe(true);
   expect(selections).toBe(1);
-  expect(form.get("model")).toBe("OpenAI Image 2.5 Flare");
+  expect(form.get("model")).toBe("OpenAI Image 2.6 Flare");
   expect(form.get("boxObjects")).toBeTruthy();
   const [box] = JSON.parse(form.get("boxes"));
   expect(box.contextPadding).toBe(.6); expect(box.label).toBe("Cat"); expect(box.mode).toBe("move");

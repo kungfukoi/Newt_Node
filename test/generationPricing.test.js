@@ -42,12 +42,12 @@ test("provider routing follows explicit model preferences and real fallback avai
     providerAvailability: { google: false, fal: true }
   }), "fal");
   assert.equal(generationProviderForModel({
-    model: "OpenAI Image 2.5",
+    model: "OpenAI Image 2.6",
     mediaType: "image",
     providerAvailability: { fal: true, krea: true }
   }), "fal");
   assert.equal(generationProviderForModel({
-    model: "OpenAI Image 2.5",
+    model: "OpenAI Image 2.6",
     mediaType: "image",
     providerPreferences: { imageGeneration: "atlas" },
     providerAvailability: { atlas: true }
@@ -63,14 +63,14 @@ test("image estimates are provider and batch aware", () => {
   assert.equal(generationProviderForModel({ model: "Nano Banana 2", mediaType: "image", providerPreferences: { imageGeneration: "krea" }, providerAvailability: { fal: true, krea: true } }), "krea");
   assert.equal(generationProviderForModel({ model: "Ideogram 4.5", mediaType: "image", providerPreferences: { imageGeneration: "krea" }, providerAvailability: { fal: true, krea: true } }), "krea");
   assert.equal(estimateImageRunCost({
-    model: "OpenAI Image 2.5",
+    model: "OpenAI Image 2.6",
     resolution: "4K",
     aspectRatio: "16:9",
     quality: "high",
     referenceCount: 1,
     batchCount: 4,
     provider: "fal"
-  }), 0.40032);
+  }), null);
   assert.equal(estimateImageRunCost({
     model: "Nano Banana Pro",
     resolution: "4K",

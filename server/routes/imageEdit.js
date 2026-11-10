@@ -2,7 +2,7 @@ import { isFlux3Model, flux3ResolutionOptions } from "../../src/flux3.js";
 import { validateEditBoxes } from "../../src/imageEditBoxes.js";
 import { isNanoBanana21Model, nanoBanana21ResolutionOptions } from "../../src/nanoBanana21.js";
 import { imageEditRequiresFal, imageEditUsesSelectionGuide } from "../../src/imageEdit.js";
-import { openAiImage25Variant } from "../../src/openAiImageModels.js";
+import { isOpenAiImage26Model, normalizeOpenAiImage26Model, openAiImage26Variant } from "../../src/openAiImageModels.js";
 import multer from "multer";
 import { createHash, randomUUID } from "node:crypto";
 import { prepareImageEdit, finishImageEdit } from "../image-edit.js";
@@ -45,7 +45,9 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
   });
   app.post("/api/node/edit-image", limiter, upload.fields([{ name: "drawing", maxCount: 1 }, { name: "selection", maxCount: 1 }, { name: "boxObjects", maxCount: 1 }]), async (req, res) => {
     try {
-      const model = !req.body.model || ["OpenAI Image 2.5", "GPT Image 2.5"].includes(req.body.model) ? normalizeImageEditModel(req.body.model) : req.body.model;
+      const model = !req.body.model || isOpenAiImage26Model(req.body.model)
+        ? normalizeImageEditModel(normalizeOpenAiImage26Model(req.body.model, "sunburst"))
+        : req.body.model;
       if (!imageEditModelOptions.includes(model)) throw Object.assign(new Error("Choose a supported image editor model."), { status: 400 });
       if (imageEditRequiresFal(model) && req.body.provider !== "fal") throw Object.assign(new Error(`${model} edits require Fal. Enable a Fal key in Settings.`), { status: 400 });
       const provider = getProvider?.(req, String(req.body.provider || "").trim().toLowerCase()) || "";
@@ -87,7 +89,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
       selection: req.files?.selection?.[0]?.buffer, prompt, mode, blank: req.body.blank === "true", model, boxes, references, boxObjects })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
-    const variant = imageEditRequiresFal(model) ? undefined : openAiImage25Variant(model);
+    const variant = imageEditRequiresFal(model) ? undefined : openAiImage26Variant(model);
     let generation;
     let generationProvider = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
     try {

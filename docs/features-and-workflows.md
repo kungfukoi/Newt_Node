@@ -87,7 +87,7 @@ The project output rail has a permanent project catalog independent of the bound
 
 ## Providers and models
 
-Image catalog: Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana Pro, OpenAI Image 2.5 Flare, OpenAI Image 2.5 Sunburst, OpenAI Image 2, Ideogram 4.5, Flux 3, Nano Banana 2.1, REVE 2.1, Krea 2 Large.
+Image catalog: Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana Pro, OpenAI Image 2.6 Flare, OpenAI Image 2.6 Sunburst, OpenAI Image 2, Ideogram 4.5, Flux 3, Nano Banana 2.1, REVE 2.1, Krea 2 Large.
 
 Video catalog: Seedance 2.0, Seedance 2.5, MiniMax H3, Kling O3 Pro, Kling O3 4K, Gemini Omni Flash, Wan 2.7 Reference-to-Video, Creatify Aurora.
 
@@ -95,10 +95,10 @@ Provider support below is the configured source contract from `src/modelProvider
 
 | Route | Provider | Configured model support |
 | --- | --- | --- |
-| Image Generation | fal | Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana Pro, OpenAI Image 2.5 Flare, OpenAI Image 2.5 Sunburst, OpenAI Image 2, Ideogram 4.5, Flux 3, Nano Banana 2.1, REVE 2.1, Krea 2 Large |
+| Image Generation | fal | Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana Pro, OpenAI Image 2.6 Flare, OpenAI Image 2.6 Sunburst, OpenAI Image 2, Ideogram 4.5, Flux 3, Nano Banana 2.1, REVE 2.1, Krea 2 Large |
 | Image Generation | google | Nano Banana Pro |
-| Image Generation | krea | Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana 2.1, Nano Banana Pro, OpenAI Image 2.5 Flare, OpenAI Image 2.5 Sunburst, OpenAI Image 2, Krea 2 Large |
-| Image Generation | atlas | OpenAI Image 2.5 Flare, OpenAI Image 2.5 Sunburst, OpenAI Image 2, Nano Banana 2, Nano Banana Pro, REVE 2.1 |
+| Image Generation | krea | Z-Image, Seedream 5.0 Pro, Nano Banana 2, Nano Banana 2.1, Nano Banana Pro, OpenAI Image 2.6 Flare, OpenAI Image 2.6 Sunburst, OpenAI Image 2, Krea 2 Large |
+| Image Generation | atlas | OpenAI Image 2.6 Flare, OpenAI Image 2.6 Sunburst, OpenAI Image 2, Nano Banana 2, Nano Banana Pro, REVE 2.1 |
 | Seedance | fal | Seedance 2.0, Seedance 2.5 |
 | Seedance | krea | Seedance 2.0, Seedance 2.5 |
 | Seedance | atlas | Seedance 2.0, Seedance 2.5 |

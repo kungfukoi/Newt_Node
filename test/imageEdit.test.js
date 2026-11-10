@@ -67,7 +67,7 @@ test("annotations retain a clean original as the first reference", async () => {
   assert.notDeepEqual(await pixel(prepared.images[1], 10, 10), [34, 68, 102, 255]);
 });
 
-for (const model of ["OpenAI Image 2.5 Sunburst", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
+for (const model of ["OpenAI Image 2.6 Sunburst", "Ideogram 4.5", "Flux 3", "Nano Banana 2.1"]) {
   test(`${model} removes copied annotation ink while keeping the circled edit`, async () => {
     const source = await solid(96, 96, "#224466");
     const drawing = await sharp(Buffer.from('<svg width="96" height="96"><circle cx="48" cy="48" r="28" fill="none" stroke="red" stroke-width="4"/></svg>')).png().toBuffer();

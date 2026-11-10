@@ -30,7 +30,7 @@ test("character sheets add Seedream without removing local model choices", () =>
     imageModelNames.nanoBananaPro,
     imageModelNames.seedream5Pro,
     imageModelNames.openAiImage2,
-    imageModelNames.openAiImage25Sunburst,
+    imageModelNames.openAiImage26Sunburst,
     imageModelNames.ideogram45,
     imageModelNames.flux3,
     imageModelNames.nanoBanana21
@@ -42,7 +42,7 @@ test("character sheets add Seedream without removing local model choices", () =>
   });
 });
 
-test("legacy OpenAI Image 2 character sheets migrate to OpenAI Image 2.5", () => {
+test("legacy OpenAI Image 2 character sheets migrate to OpenAI Image 2.6", () => {
   assert.equal(normalizeCharacterSheetModel("OpenAI Image 2"), imageModelNames.openAiImage2);
 });
 

@@ -6,10 +6,11 @@ for (const provider of ["atlas", "krea", "fal"]) {
     await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
       nodes: [
         { id: "image-model", type: "imageModel", x: 20, y: 20, data: { model: "Flux 3", settingsOpen: true } },
-        { id: "video-model", type: "videoModel", x: 650, y: 20, data: { model: "Seedance 2.5", settingsOpen: true } }
+        { id: "video-model", type: "videoModel", x: 650, y: 20, data: { model: "Seedance 2.5", settingsOpen: true } },
+        { id: "legacy-image", type: "imageModel", x: 1100, y: 20, data: { model: "OpenAI Image 2.5 Sunburst", settingsOpen: true } }
       ], edges: [], groups: [], viewport: { x: 20, y: 20, scale: 0.8 }
     })));
-    const { errors } = await openFixture(page, { count: 2, settings: {
+    const { errors } = await openFixture(page, { count: 3, settings: {
       falKeyConfigured: true, modelProviderPreferences: { imageGeneration: provider, veo: "google", seedance: "atlas" }
     } });
     const image = page.locator('[data-node-card-id="image-model"] select').filter({ has: page.locator('option[value="Flux 3"]') });
@@ -19,7 +20,9 @@ for (const provider of ["atlas", "krea", "fal"]) {
       if (provider === "fal" || (provider === "krea" && model === "Ideogram 4.5")) await expect(option).toBeEnabled();
       else { await expect(option).toBeDisabled(); await expect(option).toContainText("unavailable"); }
     }
-    await expect(image.locator('option[value="OpenAI Image 2.5 Flare"]')).toBeEnabled();
+    await expect(image.locator('option[value="OpenAI Image 2.6 Flare"]')).toBeEnabled();
+    await expect(image.locator('option[value*="Image 2.5"]')).toHaveCount(0);
+    await expect(page.locator('[data-node-card-id="legacy-image"] select').filter({ has: page.locator('option[value="OpenAI Image 2.6 Sunburst"]') })).toHaveValue("OpenAI Image 2.6 Sunburst");
     const video = page.locator('[data-node-card-id="video-model"] select').filter({ has: page.locator('option[value="Seedance 2.5"]') });
     await expect(video.locator('option[value="Seedance 2.5"]')).toBeEnabled();
     await expect(video.locator('option[value="Kling O3 Pro"]')).toBeDisabled();

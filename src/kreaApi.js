@@ -1,6 +1,6 @@
 import { isNanoBanana21Model, nanoBanana21KreaEndpoint, nanoBanana21KreaPrices, buildNanoBanana21KreaInput } from "./nanoBanana21.js";
 import { applyPricingQuote } from "./pricingCatalog.js";
-import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
+import { isOpenAiImage26Model, normalizeOpenAiImage26Model, openAiImage26Variant } from "./openAiImageModels.js";
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
 export const kreaEndpoints = Object.freeze({
@@ -11,8 +11,8 @@ export const kreaEndpoints = Object.freeze({
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana 2.1": nanoBanana21KreaEndpoint,
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
-    "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare",
-    "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
+    "OpenAI Image 2.6 Flare": "/generate/image/openai/gpt-image-2.6-flare",
+    "OpenAI Image 2.6 Sunburst": "/generate/image/openai/gpt-image-2.6-sunburst",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
     "Krea 2 Large": "/generate/image/krea/krea-2/large"
   }),
@@ -51,7 +51,7 @@ export function resolveFalKreaProvider({ falKey, kreaKey } = {}) {
 }
 
 export function kreaEndpointForModel(kind, modelName) {
-  return kreaEndpoints[kind]?.[modelName] || "";
+  return kreaEndpoints[kind]?.[kind === "image" ? normalizeOpenAiImage26Model(modelName) : modelName] || "";
 }
 
 export function supportsKreaModel(kind, modelName) {
@@ -99,13 +99,13 @@ export function buildKreaImageInput({
     return { ...input, quality: "high", image_urls: refs, aspect_ratio: normalizedAspectRatio, resolution: "2K" };
   }
 
-  if (isOpenAiImage25Model(modelName)) {
-    if (refs.length > 10) throw Object.assign(new Error("Krea Image 2.5 supports at most 10 references."), { status: 400 });
-    if (!["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"].includes(aspectRatio)) throw Object.assign(new Error("Choose a supported Krea Image 2.5 aspect ratio."), { status: 400 });
-    if (openAiImage25Variant(modelName) === "sunburst" && background !== "auto") throw Object.assign(new Error("Krea Sunburst does not support background controls. Choose Auto or use Fal/Atlas."), { status: 400 });
+  if (isOpenAiImage26Model(modelName)) {
+    if (refs.length > 10) throw Object.assign(new Error("Krea Image 2.6 supports at most 10 references."), { status: 400 });
+    if (!["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"].includes(aspectRatio)) throw Object.assign(new Error("Choose a supported Krea Image 2.6 aspect ratio."), { status: 400 });
+    if (openAiImage26Variant(modelName) === "sunburst" && background !== "auto") throw Object.assign(new Error("Krea Sunburst does not support background controls. Choose Auto or use Fal/Atlas."), { status: 400 });
     return { ...input, quality: normalizeChoice(quality, ["low", "medium", "high", "xhigh", "max"], "high"), image_urls: refs,
       aspect_ratio: aspectRatio, resolution: normalizedResolution,
-      ...(openAiImage25Variant(modelName) === "flare" ? { background } : {}) };
+      ...(openAiImage26Variant(modelName) === "flare" ? { background } : {}) };
   }
   if (modelName === "OpenAI Image 2") {
     return compact({
@@ -180,7 +180,7 @@ export function normalizeKreaImageAspectRatio(modelName, value) {
       ? ["1:1", "4:3", "2:3", "16:9", "9:16"]
       : modelName === "Krea 2 Large"
         ? ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "2:3", "9:16"]
-        : (modelName === "OpenAI Image 2" || isOpenAiImage25Model(modelName))
+        : (modelName === "OpenAI Image 2" || isOpenAiImage26Model(modelName))
           ? ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"]
           : ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
   return closestRatio(ratio, options);

@@ -13,7 +13,7 @@ const legacyRequest = (model, cu = false) => ({
   editMaskDataUrl: "data:image/png;base64,obsolete-rectangles", resolution: "4K", quality: "high"
 });
 
-for (const model of ["OpenAI Image 2", "OpenAI Image 2.5"]) {
+for (const model of ["OpenAI Image 2", "OpenAI Image 2.6"]) {
   for (const cu of [false, true]) {
     test(`${model} ${cu ? "CU" : "regular"} legacy wardrobe request loses only its obsolete mask`, () => {
       const original = legacyRequest(model, cu);
@@ -42,13 +42,13 @@ for (const model of ["OpenAI Image 2", "OpenAI Image 2.5"]) {
 
 test("ordinary image edits keep their intentional masks", () => {
   for (const overrides of [{ nodeId: "imageModel-1" }, { nodeTitle: "Character 1" }, { imagePromptLabels: ["Original image", "Drawing guide"] }]) {
-    const request = { ...legacyRequest("OpenAI Image 2.5"), ...overrides };
+    const request = { ...legacyRequest("OpenAI Image 2.6"), ...overrides };
     assert.strictEqual(normalizeCharacterWardrobeRequest(request), request);
   }
 });
 
 test("explicit wardrobe mode protects renamed/imported Character nodes", () => {
-  const request = { ...legacyRequest("OpenAI Image 2.5"), nodeId: "imported", nodeTitle: "Renamed", characterWardrobeEdit: true };
+  const request = { ...legacyRequest("OpenAI Image 2.6"), nodeId: "imported", nodeTitle: "Renamed", characterWardrobeEdit: true };
   const normalized = normalizeCharacterWardrobeRequest(request);
   assert.equal(normalized.editMaskDataUrl, undefined);
   assert.deepEqual(normalizeCharacterWardrobeRequest(normalized), normalized);

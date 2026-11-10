@@ -5,69 +5,6 @@ export const openAiImage2BackgroundOptions = ["auto", "transparent", "opaque"];
 export const openAiImage2Variant = "flare";
 export const openAiImage2VariantOptions = ["flare", "sunburst"];
 
-export const openAiImage2Costs = {
-  low: {
-    text: {
-      "1K": { landscape: 0.00441, square: 0.00588, portrait: 0.00474 },
-      "2K": { landscape: 0.00441, square: 0.00615, portrait: 0.00615 },
-      "4K": { landscape: 0.01113, square: 0.01113, portrait: 0.01113 }
-    },
-    edit: {
-      "1K": { landscape: 0.00441, square: 0.00588, portrait: 0.00474 },
-      "2K": { landscape: 0.00441, square: 0.00615, portrait: 0.00615 },
-      "4K": { landscape: 0.01113, square: 0.01113, portrait: 0.01113 }
-    }
-  },
-  medium: {
-    text: {
-      "1K": { landscape: 0.01029, square: 0.01317, portrait: 0.01029 },
-      "2K": { landscape: 0.01029, square: 0.01434, portrait: 0.01434 },
-      "4K": { landscape: 0.02595, square: 0.02595, portrait: 0.02595 }
-    },
-    edit: {
-      "1K": { landscape: 0.01029, square: 0.01317, portrait: 0.01029 },
-      "2K": { landscape: 0.01029, square: 0.01434, portrait: 0.01434 },
-      "4K": { landscape: 0.02595, square: 0.02595, portrait: 0.02595 }
-    }
-  },
-  high: {
-    text: {
-      "1K": { landscape: 0.0396, square: 0.05268, portrait: 0.04116 },
-      "2K": { landscape: 0.0396, square: 0.05529, portrait: 0.05529 },
-      "4K": { landscape: 0.10008, square: 0.10008, portrait: 0.10008 }
-    },
-    edit: {
-      "1K": { landscape: 0.0396, square: 0.05268, portrait: 0.04116 },
-      "2K": { landscape: 0.0396, square: 0.05529, portrait: 0.05529 },
-      "4K": { landscape: 0.10008, square: 0.10008, portrait: 0.10008 }
-    }
-  },
-  xhigh: {
-    text: {
-      "1K": { landscape: 0.07041, square: 0.09366, portrait: 0.07377 },
-      "2K": { landscape: 0.07041, square: 0.09828, portrait: 0.09828 },
-      "4K": { landscape: 0.1779, square: 0.1779, portrait: 0.1779 }
-    },
-    edit: {
-      "1K": { landscape: 0.07041, square: 0.09366, portrait: 0.07377 },
-      "2K": { landscape: 0.07041, square: 0.09828, portrait: 0.09828 },
-      "4K": { landscape: 0.1779, square: 0.1779, portrait: 0.1779 }
-    }
-  },
-  max: {
-    text: {
-      "1K": { landscape: 0.1584, square: 0.21072, portrait: 0.16464 },
-      "2K": { landscape: 0.1584, square: 0.2211, portrait: 0.2211 },
-      "4K": { landscape: 0.40026, square: 0.40026, portrait: 0.40026 }
-    },
-    edit: {
-      "1K": { landscape: 0.1584, square: 0.21072, portrait: 0.16464 },
-      "2K": { landscape: 0.1584, square: 0.2211, portrait: 0.2211 },
-      "4K": { landscape: 0.40026, square: 0.40026, portrait: 0.40026 }
-    }
-  }
-};
-
 export const legacyOpenAiImage2Costs = {
   low: {
     text: {
@@ -107,8 +44,6 @@ export const legacyOpenAiImage2Costs = {
   }
 };
 
-export const openAiImage2HighCosts = openAiImage2Costs.high;
-
 export function normalizeOpenAiImage2Quality(value, fallback = openAiImage2Quality) {
   const normalized = String(value || "").trim().toLowerCase();
   return openAiImage2QualityOptions.includes(normalized) ? normalized : fallback;
@@ -125,7 +60,7 @@ export function normalizeOpenAiImage2Variant(value, fallback = openAiImage2Varia
 }
 
 export function openAiImage2FalEndpoint({ variant, edit = false } = {}) {
-  return `openai/gpt-image-2.5/${normalizeOpenAiImage2Variant(variant)}/${edit ? "edit" : "text-to-image"}`;
+  return `openai/gpt-image-2.6/${normalizeOpenAiImage2Variant(variant)}/${edit ? "edit" : "text-to-image"}`;
 }
 
 export function buildOpenAiImage2FalInput({ prompt, imageSize, quality, background }) {
@@ -140,31 +75,12 @@ export function buildOpenAiImage2FalInput({ prompt, imageSize, quality, backgrou
   };
 }
 
-export function estimateOpenAiImage2Cost({ resolution, size, quality = openAiImage2Quality, edit = false, pricing = openAiImage2Costs }) {
+export function estimateLegacyOpenAiImage2Cost({ resolution, size, quality = openAiImage2Quality, edit = false }) {
   const normalizedQuality = normalizeOpenAiImage2Quality(quality);
-  const qualityKey = normalizedQuality === "auto" ? openAiImage2Quality : normalizedQuality;
+  const qualityKey = ["low", "medium", "high"].includes(normalizedQuality) ? normalizedQuality : "high";
   const resolutionKey = normalizeOpenAiImage2Resolution(resolution, size);
   const orientation = openAiImage2Orientation(size);
-  const qualityPricing = pricing?.[qualityKey] || openAiImage2Costs[qualityKey];
-  const routePricing = qualityPricing?.[edit ? "edit" : "text"];
-  return Number(routePricing?.[resolutionKey]?.[orientation] ?? openAiImage2Costs[qualityKey][edit ? "edit" : "text"][resolutionKey][orientation]);
-}
-
-export function estimateLegacyOpenAiImage2Cost({ resolution, size, quality = openAiImage2Quality, edit = false }) {
-  const legacyQuality = ["low", "medium", "high"].includes(normalizeOpenAiImage2Quality(quality))
-    ? normalizeOpenAiImage2Quality(quality)
-    : openAiImage2Quality;
-  return estimateOpenAiImage2Cost({ resolution, size, quality: legacyQuality, edit, pricing: legacyOpenAiImage2Costs });
-}
-
-export function estimateOpenAiImage2HighCost({ resolution, size, edit = false, pricing = openAiImage2HighCosts }) {
-  return estimateOpenAiImage2Cost({
-    resolution,
-    size,
-    quality: "high",
-    edit,
-    pricing: { high: pricing }
-  });
+  return legacyOpenAiImage2Costs[qualityKey][edit ? "edit" : "text"][resolutionKey][orientation];
 }
 
 function normalizeOpenAiImage2Resolution(resolution, size) {

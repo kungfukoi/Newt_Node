@@ -1,4 +1,4 @@
-import { openAiImage25Models, isOpenAiImage25Model, normalizeOpenAiImage25Model } from "./openAiImageModels.js";
+import { openAiImage26Models, isOpenAiImage26Model, normalizeOpenAiImage26Model } from "./openAiImageModels.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -28,9 +28,9 @@ export const imageModelNames = {
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
-  openAiImage2: openAiImage25Models.flare,
-  openAiImage25Flare: openAiImage25Models.flare,
-  openAiImage25Sunburst: openAiImage25Models.sunburst,
+  openAiImage2: openAiImage26Models.flare,
+  openAiImage26Flare: openAiImage26Models.flare,
+  openAiImage26Sunburst: openAiImage26Models.sunburst,
   legacyOpenAiImage2: "OpenAI Image 2",
   ideogram45: "Ideogram 4.5",
   flux3: "Flux 3",
@@ -39,16 +39,16 @@ export const imageModelNames = {
   krea2Large: "Krea 2 Large"
 };
 export const legacyOpenAiImage2ModelName = imageModelNames.legacyOpenAiImage2;
-export const legacyGptImage25ModelName = "GPT Image 2.5";
+export const legacyGptImage26ModelName = "GPT Image 2.6";
 
-export const isGptImage25Model = isOpenAiImage25Model;
+export const isGptImage26Model = isOpenAiImage26Model;
 
 export function isLegacyOpenAiImage2Model(value) {
   return String(value || "").trim().toLowerCase() === legacyOpenAiImage2ModelName.toLowerCase();
 }
 
-export function normalizeGptImage25Model(value, fallback = "", variant = "flare") {
-  return isLegacyOpenAiImage2Model(value) ? imageModelNames.openAiImage2 : normalizeOpenAiImage25Model(value, variant) || fallback;
+export function normalizeGptImage26Model(value, fallback = "", variant = "flare") {
+  return isLegacyOpenAiImage2Model(value) ? imageModelNames.openAiImage2 : normalizeOpenAiImage26Model(value, variant) || fallback;
 }
 export const imageModelOptions = [
   imageModelNames.zImage,
@@ -56,7 +56,7 @@ export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage26Sunburst,
   imageModelNames.legacyOpenAiImage2,
   imageModelNames.ideogram45,
   imageModelNames.flux3,
@@ -64,8 +64,8 @@ export const imageModelOptions = [
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
-export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
-export const storyboardImageModelOptions = [storyboardImageDefaultModel, imageModelNames.openAiImage25Sunburst, imageModelNames.legacyOpenAiImage2, imageModelNames.seedream5Pro, imageModelNames.flux3, imageModelNames.nanoBanana21];
+export const storyboardImageDefaultModel = imageModelNames.openAiImage26Flare;
+export const storyboardImageModelOptions = [storyboardImageDefaultModel, imageModelNames.openAiImage26Sunburst, imageModelNames.legacyOpenAiImage2, imageModelNames.seedream5Pro, imageModelNames.flux3, imageModelNames.nanoBanana21];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
 export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
@@ -408,7 +408,9 @@ export function normalizeModelPreferences(value = {}) {
 
   Object.entries(modelPreferenceGroups).forEach(([kind, options]) => {
     const incoming = value?.[kind] && typeof value[kind] === "object" ? value[kind] : {};
-    normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? (isGptImage25Model(model) ? incoming["OpenAI Image 2.5"] ?? incoming["GPT Image 2.5"] : undefined) ?? defaultModelPreferences[kind]?.[model])]));
+    normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? (isGptImage26Model(model)
+      ? incoming[model.replace("2.6", "2.5")] ?? incoming["OpenAI Image 2.6"] ?? incoming["GPT Image 2.6"] ?? incoming["OpenAI Image 2.5"] ?? incoming["GPT Image 2.5"]
+      : undefined) ?? defaultModelPreferences[kind]?.[model])]));
     if (!Object.values(normalized[kind]).some(Boolean) && options[0]) normalized[kind][options[0]] = true;
   });
 
@@ -540,7 +542,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into selected delivery aspect ratios while preserving the subject and composition.",
   [utilityImageModelNames.coverage]: "Generates a standard nine-angle coverage set from one connected reference image.",
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white matte from a picked source-image Color ID.",
-  [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2.5 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
+  [utilityImageModelNames.imageToId]: "Uses OpenAI Image 2.6 to convert a connected image into a flat Cryptomatte-style RGB Color ID pass.",
   [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",

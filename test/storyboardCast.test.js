@@ -208,7 +208,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
     };
     const reviewStoryboardGeneratedFrame = new Function(...Object.keys(reviewDeps), `${reviewSource}\nreturn reviewStoryboardGeneratedFrame;`)(...Object.values(reviewDeps));
     const deps = {
-      storyboardFixedModel: "OpenAI Image 2.5 Flare",
+      storyboardFixedModel: "OpenAI Image 2.6 Flare",
       storyboardRevisionRunsRef: { current: new Set() }, storyboardQcMode,
       storyboardCharacterReferenceItemForSource,
       storyboardMissingRequiredCharacterTags: () => [],

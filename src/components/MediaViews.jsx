@@ -1407,7 +1407,7 @@ export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavi
           </span>
           <div className="output-lightbox-header-actions">
             {displayItem.type === "image" && typeof onAcceptAiEdit === "function" && (
-              <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.5"}`} aria-label={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.5"}`}>
+              <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.6"}`} aria-label={`Draw and edit with ${imageEditorModel || "OpenAI Image 2.6"}`}>
                 <Pencil size={15} />
               </button>
             )}

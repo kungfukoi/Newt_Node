@@ -5,7 +5,7 @@ import { generationProviderForModel } from "./generationPricing.js";
 import { isFlux3Model, flux3AspectRatios, flux3ResolutionOptions } from "./flux3.js";
 import { isNanoBanana21Model, nanoBanana21AspectRatios, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import { usePricingSync } from "./usePricing.js";
-import { isOpenAiImage25Model } from "./openAiImageModels.js";
+import { isOpenAiImage26Model } from "./openAiImageModels.js";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -1121,7 +1121,7 @@ function imageAspectRatiosForModel(model) {
   if (isIdeogram45Model(model)) return ideogram45AspectRatios;
   if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  return isOpenAiImage25Model(model) || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return isOpenAiImage26Model(model) || model === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isKrea2LargeImageModel(model) {

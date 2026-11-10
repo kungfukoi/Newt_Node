@@ -146,7 +146,7 @@ export async function runAutoAspectGeneration({
 
   const { response, data } = await nodeApi.generateImage({
     prompt,
-    model: node.data.model || "OpenAI Image 2.5 Flare",
+    model: node.data.model || "OpenAI Image 2.6 Flare",
     aspectRatio,
     requestedAspectRatio: aspectRatio,
     resolution: node.data.resolution || "2K",

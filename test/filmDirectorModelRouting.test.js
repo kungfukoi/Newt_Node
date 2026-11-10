@@ -159,7 +159,7 @@ test("Image generation request preserves propagated Director prompt and assets",
       id: "image-model",
       data: {
         title: "Image Model",
-        model: "OpenAI Image 2.5",
+        model: "OpenAI Image 2.6",
         aspectRatio: "16:9",
         resolution: "2K",
         quality: "high"

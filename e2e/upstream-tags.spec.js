@@ -6,12 +6,12 @@ for (const type of ["videoModel", "imageModel", "text"]) {
     const targetPort = type === "videoModel" ? "referenceImageIn" : type === "imageModel" ? "imagePromptIn" : "imageIn";
     const fixture = { projectId: "upstream-tags", projectName: "Upstream tags", groups: [], viewport: { x: 0, y: 0, scale: 0.8 },
       nodes: [
-        { id: "model", type, x: 30, y: 30, data: { title: "Consumer", model: type === "videoModel" ? "Seedance 2.5" : "OpenAI Image 2.5 Flare", prompt: "Use @Hero @Ghost @After", text: "Use @Hero @Ghost @After", nodeReferenceBindings: { hero: "hero", ghost: "ghost", after: "after" } } },
+        { id: "model", type, x: 30, y: 30, data: { title: "Consumer", model: type === "videoModel" ? "Seedance 2.5" : "OpenAI Image 2.6 Flare", prompt: "Use @Hero @Ghost @After", text: "Use @Hero @Ghost @After", nodeReferenceBindings: { hero: "hero", ghost: "ghost", after: "after" } } },
         { id: "prompt", type: "plainText", x: 2000, y: 0, data: { title: "Prompt", text: "Use @Hero @Ghost @After", nodeReferenceBindings: { hero: "hero", ghost: "ghost", after: "after" } } },
         { id: "hero", type: "image", x: 2000, y: 500, data: { title: "Hero", resultUrl: "/outputs/e2e/hero.png" } },
-        { id: "relay", type: "imageModel", x: 3000, y: 500, data: { title: "Relay", model: "OpenAI Image 2.5 Flare", resultUrl: "/outputs/e2e/relay.png", status: "complete" } },
+        { id: "relay", type: "imageModel", x: 3000, y: 500, data: { title: "Relay", model: "OpenAI Image 2.6 Flare", resultUrl: "/outputs/e2e/relay.png", status: "complete" } },
         { id: "ghost", type: "image", x: 2000, y: 1000, data: { title: "Ghost", resultUrl: "/outputs/e2e/ghost.png" } },
-        { id: "after", type: "imageModel", x: 3000, y: 1000, data: { title: "After", model: "OpenAI Image 2.5 Flare", resultUrl: "/outputs/e2e/after.png" } }
+        { id: "after", type: "imageModel", x: 3000, y: 1000, data: { title: "After", model: "OpenAI Image 2.6 Flare", resultUrl: "/outputs/e2e/after.png" } }
       ], edges: [
         { id: "prompt-model", from: { nodeId: "prompt", port: "promptOut" }, to: { nodeId: "model", port: type === "text" ? "textIn" : "promptIn" } },
         { id: "hero-relay", from: { nodeId: "hero", port: "imageOut" }, to: { nodeId: "relay", port: "imagePromptIn" } },

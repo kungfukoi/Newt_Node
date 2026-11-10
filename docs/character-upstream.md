@@ -39,7 +39,7 @@ Retained local behavior:
   in addition to the CU master and wardrobe, preserving finished-outfit matching.
 - Base Identity remains a selectable downstream reference. Upstream instead
   reserves Base sheets for preparation and selects another non-base sheet.
-- Full-sheet GPT Image 2.5 routes remain available through supported providers.
+- Full-sheet GPT Image 2.6 routes remain available through supported providers.
   Upstream's Krea mask restriction is not copied into our mask-free wardrobe flow.
 
 Prompt versions are advanced to regular base 3, CU base 6 and wardrobe edit 5.

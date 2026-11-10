@@ -9,6 +9,7 @@ const requiredHealthRoutes = [
   "createLook",
   "lookStyleBoard",
   "lookAnalysisSeparateGrade",
+  "openAiImage26",
   "featureUsage",
   "workspaceRecovery",
   "keyerInstallCancel",

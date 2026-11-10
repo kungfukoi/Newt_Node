@@ -19,7 +19,7 @@ async function withEditor(run, overrides = {}) {
     readSource: async () => ({ buffer: source }),
     generate: async (request) => {
       calls.push(request);
-      return { endpoint: "openai/gpt-image-2.5/sunburst/edit", provider: request.provider === "atlas" ? "Atlas Cloud" : "fal.ai", remoteImage: { url: "mock-result" } };
+      return { endpoint: "openai/gpt-image-2.6/sunburst/edit", provider: request.provider === "atlas" ? "Atlas Cloud" : "fal.ai", remoteImage: { url: "mock-result" } };
     },
     readGenerated: async () => source,
     save: async (req, buffer) => {
@@ -96,13 +96,13 @@ test("Save Selection preserves embedded PNG metadata in managed outputs with no 
   assert.equal(saves.length, 1);
 }));
 
-test("image edits use OpenAI Image 2.5 Sunburst and retain workflow context", () => withEditor(async ({ post, calls, saves, histories }) => {
+test("image edits use OpenAI Image 2.6 Sunburst and retain workflow context", () => withEditor(async ({ post, calls, saves, histories }) => {
   const response = await post();
   assert.equal(response.status, 200);
   const { item } = await response.json();
   assert.equal(item.width, 64);
   assert.equal(item.height, 96);
-  assert.equal(calls[0].model, "OpenAI Image 2.5 Sunburst");
+  assert.equal(calls[0].model, "OpenAI Image 2.6 Sunburst");
   assert.equal(calls[0].variant, "sunburst");
   assert.equal(saves[0].body.workflowPackagePath, "/fixture/project");
   assert.equal(histories[0].localImage, item.url);
@@ -111,6 +111,10 @@ test("image edits use OpenAI Image 2.5 Sunburst and retain workflow context", ()
 test("image edits preserve the explicitly selected supported provider", () => withEditor(async ({ post, calls }) => {
   assert.equal((await post({ provider: "atlas" })).status, 200);
   assert.equal(calls[0].provider, "atlas");
+  assert.equal((await post({ provider: "atlas", model: "OpenAI Image 2.5 Flare" })).status, 200);
+  assert.equal(calls[1].model, "OpenAI Image 2.6 Flare");
+  assert.equal(calls[1].variant, "flare");
+  assert.equal(calls[1].provider, "atlas");
 }));
 
 test("Ideogram editor requests retain their model and history and reject unsupported routes", () => withEditor(async ({ post, calls, histories }) => {
@@ -198,9 +202,9 @@ test("Nano Banana 2.1 editor preserves routing, resolution and history", () => w
 test("boxes retain preferred model, reference image, workflow context and history", () => withEditor(async ({ post, calls, saves, histories }) => {
   const rect = { x: .3, y: .3, w: .2, h: .2, rotation: 0 };
   const box = { id: "reference", mode: "reference", label: "cat", referenceUrl: "/uploads/cat.jpg", source: rect, target: { ...rect, x: .7, rotation: 20 } };
-  const response = await post({ model: "OpenAI Image 2.5 Flare", provider: "atlas", boxes: JSON.stringify([box]) });
+  const response = await post({ model: "OpenAI Image 2.6 Flare", provider: "atlas", boxes: JSON.stringify([box]) });
   assert.equal(response.status, 200, JSON.stringify(await response.json()));
-  assert.equal(calls[0].model, "OpenAI Image 2.5 Flare"); assert.equal(calls[0].provider, "atlas");
+  assert.equal(calls[0].model, "OpenAI Image 2.6 Flare"); assert.equal(calls[0].provider, "atlas");
   assert.equal(calls[0].images.length, 3); assert.match(calls[0].prompt, /reference image 3/);
   assert.equal(histories[0].settings.boxes[0].target.rotation, 20);
   assert.equal(saves[0].body.workflowPackageId, "package");

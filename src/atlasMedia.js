@@ -3,7 +3,7 @@ import { validateSeedance25Task } from "./seedance25.js";
 import { validateSeedanceDraft } from "./seedanceDraft.js";
 import { getPricingCatalog } from "./pricingCatalog.js";
 import { estimateAtlasImageCost as catalogImageCost, estimateAtlasVideoCost as catalogVideoCost } from "./atlasPricing.js";
-import { isOpenAiImage25Model, openAiImage25Variant } from "./openAiImageModels.js";
+import { isOpenAiImage26Model, openAiImage26Variant } from "./openAiImageModels.js";
 import { imageModelNames } from "./modelOptions.js";
 
 export const atlasVideoInputPixelLimits = Object.freeze({
@@ -53,7 +53,7 @@ const videoModels = new Map([
 ]);
 
 export function supportsAtlasImageModel(model) {
-  return isOpenAiImage25Model(model) || Object.hasOwn(imageModels, model);
+  return isOpenAiImage26Model(model) || Object.hasOwn(imageModels, model);
 }
 
 export function supportsAtlasVideoModel(model) {
@@ -72,17 +72,17 @@ export function buildAtlasImageRequest({
   size,
   maskUrl = ""
 } = {}) {
-  const isImage25 = isOpenAiImage25Model(model);
-  const config = isImage25
-    ? { id: `openai/gpt-image-2.5-${openAiImage25Variant(model, variant)}`, family: "openai25", maxReferences: 16 }
+  const isImage26 = isOpenAiImage26Model(model);
+  const config = isImage26
+    ? { id: `openai/gpt-image-2.6-${openAiImage26Variant(model, variant)}`, family: "openai26", maxReferences: 16 }
     : imageModels[model];
   if (!config) fail(`Atlas Cloud does not support ${model || "this image model"}.`);
   if (!String(prompt || "").trim()) fail(`Atlas Cloud ${model} needs a prompt.`);
   if (!Array.isArray(images) || images.length > config.maxReferences || images.some((url) => !validRemoteUrl(url))) {
     fail(`Atlas Cloud ${model} accepts up to ${config.maxReferences} uploaded image references.`);
   }
-  if (maskUrl && (config.family !== "openai25" || !images.length || !validRemoteUrl(maskUrl))) {
-    fail("Atlas Cloud edit masks require OpenAI Image 2.5 and a reference image.");
+  if (maskUrl && (config.family !== "openai26" || !images.length || !validRemoteUrl(maskUrl))) {
+    fail("Atlas Cloud edit masks require OpenAI Image 2.6 and a reference image.");
   }
 
   const route = config.family === "reve" && images.length > 1 ? "remix" : images.length ? "edit" : "text-to-image";
@@ -91,22 +91,22 @@ export function buildAtlasImageRequest({
     prompt: String(prompt).trim(),
     output_format: "png"
   };
-  // GPT Image 2.5 has a strict per-model schema and rejects this legacy
+  // GPT Image 2.6 has a strict per-model schema and rejects this legacy
   // Atlas envelope option as an extra field, especially on masked edits.
-  if (config.family !== "openai25") request.enable_sync_mode = false;
+  if (config.family !== "openai26") request.enable_sync_mode = false;
   const normalizedResolution = config.family === "reve"
     ? "4K"
     : normalizedChoice(resolution, ["1K", "2K", "4K"], "2K");
-  const ratio = normalizedAspectRatio(aspectRatio, config.family === "openai25");
+  const ratio = normalizedAspectRatio(aspectRatio, config.family === "openai26");
 
-  if (config.family === "openai" || config.family === "openai25") {
+  if (config.family === "openai" || config.family === "openai26") {
     request.size = size || atlasImageSize(ratio, normalizedResolution);
     request.quality = normalizedChoice(
       quality,
-      config.family === "openai25" ? ["auto", "low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high"],
+      config.family === "openai26" ? ["auto", "low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high"],
       "high"
     );
-    if (config.family === "openai25") {
+    if (config.family === "openai26") {
       request.background = normalizedChoice(background, ["auto", "transparent", "opaque"], "auto");
       request.n = 1;
       if (maskUrl) request.mask = maskUrl;
