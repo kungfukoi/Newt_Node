@@ -1,4 +1,5 @@
 import { minimumAssemblyZoom } from "./assemblyZoom.js";
+import { assemblyLocalX } from "./assemblyPointer.js";
 
 export function startAssemblyClipDrag({
   event,
@@ -24,7 +25,8 @@ export function startAssemblyClipDrag({
   event.stopPropagation();
   const pps = Math.max(minimumAssemblyZoom, Number(pixelsPerSecond) || minimumAssemblyZoom);
   const originRect = originLane.getBoundingClientRect();
-  const grabOffsetSeconds = (event.clientX - originRect.left) / pps - clip.start;
+  const grabOffsetSeconds = assemblyLocalX(originLane, event.clientX) / pps - clip.start;
+  const originPointerX = event.clientX;
   const originPointerY = event.clientY;
   const trackSwitchThreshold = Math.max(18, originRect.height * 0.34);
   const previousUserSelect = document.body.style.userSelect;
@@ -34,6 +36,7 @@ export function startAssemblyClipDrag({
   let pendingPointer = null;
   let animationFrame = 0;
   let finished = false;
+  let moved = false;
 
   const laneElements = () => Array.from(scrollElement.querySelectorAll(".assembly-track-lane[data-track-id]"));
   const laneForTrack = (trackId) => laneElements().find((lane) => lane.dataset.trackId === trackId) || originLane;
@@ -49,17 +52,20 @@ export function startAssemblyClipDrag({
       : candidate.type === "video" && ["image", "video"].includes(media.type);
   };
   const renderMove = (pointer) => {
+    if (!moved && Math.hypot(pointer.clientX - originPointerX, pointer.clientY - originPointerY) < 3) return;
+    moved = true;
     const hovered = hoveredLane(pointer.clientY);
     const hoveredTrackId = hovered?.dataset.trackId || "";
     if (hoveredTrackId && acceptsMedia(hoveredTrackId)) {
       const crossedThreshold = hoveredTrackId === track.id || Math.abs(pointer.clientY - originPointerY) >= trackSwitchThreshold;
       if (crossedThreshold) activeTrackId = hoveredTrackId;
     }
-    const laneRect = laneForTrack(activeTrackId).getBoundingClientRect();
-    const requestedStart = (pointer.clientX - laneRect.left) / pps - grabOffsetSeconds;
+    const lane = laneForTrack(activeTrackId);
+    const scale = lane.getBoundingClientRect().width / lane.offsetWidth || 1;
+    const requestedStart = assemblyLocalX(lane, pointer.clientX) / pps - grabOffsetSeconds;
     const nextStart = pointer.altKey
       ? Math.max(0, requestedStart)
-      : snapStart(state, clip.id, activeTrackId, requestedStart, pps, 12);
+      : snapStart(state, clip.id, activeTrackId, requestedStart, pps * scale, 8);
     latest = moveClip(state, clip.id, activeTrackId, nextStart);
     onMove?.(latest, activeTrackId);
   };
@@ -97,7 +103,7 @@ export function startAssemblyClipDrag({
     }
     renderMove({ clientX: pointerEvent.clientX, clientY: pointerEvent.clientY, altKey: pointerEvent.altKey });
     cleanup();
-    onFinish?.(latest, activeTrackId);
+    onFinish?.(latest, moved);
   };
   const cancel = () => {
     if (finished) return;

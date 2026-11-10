@@ -115,32 +115,15 @@ export function assemblyPreviewElementState(media, element, sourceTime = 0, fram
   const atRequestedFrame = Number.isFinite(currentTime) && Math.abs(currentTime - expectedTime) <= tolerance;
   const decoded = Boolean(element.readyState >= 2 && width && height);
   return {
-    ready: Boolean(decoded && (atRequestedFrame || (playing && !element.seeking))),
+    ready: Boolean(decoded && !element.seeking && (atRequestedFrame || playing)),
     decoded,
     width,
     height
   };
 }
 
-export function assemblyRenderablePreviewLayers(layers = []) {
-  return layers.filter((layer) => (
-    layer?.ready &&
-    layer.element &&
-    Number(layer.width) > 0 &&
-    Number(layer.height) > 0
-  ));
-}
-
-export function assemblyScrubPreviewLayers(layers = []) {
-  const topLayer = layers.at(-1);
-  if (!topLayer) return [];
-  // A null result keeps the last published frame visible until the requested frame is ready.
-  if (!topLayer.ready || !topLayer.element || Number(topLayer.width) <= 0 || Number(topLayer.height) <= 0) return null;
-  return [topLayer];
-}
-
 export function assemblyPlaybackPreviewLayers(layers = []) {
-  // A temporarily seeking/loading upper layer must not reveal a lower clip.
+  // A temporarily seeking or loading layer must not expose a partial composition.
   if (layers.some(layer => !layer?.ready || !layer.element || !(layer.width > 0) || !(layer.height > 0))) return null;
   return layers;
 }

@@ -8388,10 +8388,16 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           completedVideos.push(generated);
           if (token.stopped || currentVideoScopeRef.current !== runScope) return generated;
           const resultItems = appendUniqueVideoResults(previousVideoResults, completedVideos);
+          // Keep the Preview player on the current take while other takes finish.
+          const selectedUrl = nodesRef.current.find((node) => node.id === currentNode.id)?.data.resultUrl;
+          const selectedIndex = resultItems.findIndex((item) => item.url === selectedUrl);
           updateNode(currentNode.id, {
-            status: "running", resultItems, resultUrl: generated.url,
+            status: "running", resultItems,
             remoteVideoRunIds: [...new Set([...(currentNode.data.remoteVideoRunIds || []), ...completedVideos.map((item) => item.generationRunId).filter(Boolean)])],
-            selectedResultIndex: resultItems.findIndex((item) => item.url === generated.url), resultText: ""
+            ...(selectedIndex >= 0
+              ? { resultUrl: selectedUrl, selectedResultIndex: selectedIndex }
+              : { resultUrl: resultItems[0]?.url || "", selectedResultIndex: 0 }),
+            resultText: ""
           });
           markOutputTargetSaved(outputTarget, completedVideos, "video");
           loadOutputHistory();
@@ -23502,7 +23508,7 @@ function TimelineLivePreviewImage({ item, sourceLabel }) {
     presenter.current = next;
     return () => { next.dispose(); presenter.current = null; };
   }, [item.sourceNodeId]);
-  React.useEffect(() => { presenter.current?.offer(displayMediaUrl(frame?.url || item.url)); }, [frame?.url, item.url, item.sourceNodeId]);
+  React.useEffect(() => { presenter.current?.offer(displayMediaUrl(frame?.url || item.url), frame?.decoded); }, [frame?.url, frame?.decoded, item.url, item.sourceNodeId]);
   return <img src={decodedUrl || undefined} alt={item.label || sourceLabel} draggable={false} loading="eager" decoding="async" onError={useNewtNodeImageFallback} />;
 }
 

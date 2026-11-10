@@ -4,6 +4,8 @@ import React from "react";
 import {
   BetweenHorizontalEnd,
   BetweenHorizontalStart,
+  ChevronDown,
+  ChevronUp,
   ClipboardPaste,
   Copy,
   Eye,
@@ -42,6 +44,7 @@ import {
   importAssemblyOutputItem,
   insertAssemblyMediaWithLinkedAudio,
   moveAssemblyClip,
+  moveAssemblyVideoTrack,
   normalizeAssemblyState,
   pasteAssemblyClip,
   removeAssemblyClip,
@@ -64,10 +67,11 @@ import {
   updateAssemblyTrack
 } from "../assembly/assemblyState.js";
 import { AssemblyPlaybackClock } from "../assembly/assemblyPlayback.js";
-import { clearAssemblyLiveFrame, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
-import { assemblyMediaTechnicalReadout, assemblyPlaybackPreviewLayers, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
+import { clearAssemblyLiveFrame, observeAssemblyLiveFrameDemand, publishAssemblyLiveFrame } from "../assembly/assemblyLiveFrameBus.js";
+import { assemblyMediaTechnicalReadout, assemblyPlaybackPreviewLayers, assemblyPreviewElementState, assemblyPreviewMediaInstances, assemblyPreviewSeekTarget, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../assembly/assemblyLivePreview.js";
+import { createAssemblyPreviewCache, drawAssemblyLayer } from "../assembly/assemblyPreviewCache.js";
 import { startAssemblyClipDrag } from "../assembly/assemblyClipDrag.js";
-import { assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
+import { assemblyLocalX, assemblySplitGuide, assemblyTimeAtClientX } from "../assembly/assemblyPointer.js";
 import { assemblyRulerSpacing, assemblyZoomLabel, stepAssemblyZoom } from "../assembly/assemblyZoom.js";
 import { assemblyOutputPortState } from "../assembly/assemblyPreview.js";
 import { AssemblyDetailsPanel } from "./AssemblyDetailsPanel.jsx";
@@ -98,6 +102,7 @@ export function AssemblyNodeBody({
   const initialState = React.useMemo(() => normalizeAssemblyState(node.data.assembly), [node.id]);
   const [timeline, setTimeline] = React.useState(initialState);
   const [playing, setPlaying] = React.useState(false);
+  const [cachedFrames, setCachedFrames] = React.useState(0);
   const [probeStatus, setProbeStatus] = React.useState("");
   const [extractingFrame, setExtractingFrame] = React.useState(false);
   const [extractionError, setExtractionError] = React.useState("");
@@ -108,13 +113,18 @@ export function AssemblyNodeBody({
   const [draggingClipId, setDraggingClipId] = React.useState("");
   const [clipClipboard, setClipClipboard] = React.useState(null);
   const [splitGuide, setSplitGuide] = React.useState(null);
+  const [clipSelection, setClipSelection] = React.useState(null);
+  const [marquee, setMarquee] = React.useState(null);
   const historyRef = React.useRef(createAssemblyHistory(initialState));
   const timelineRef = React.useRef(initialState);
   const clockRef = React.useRef(null);
   const rootRef = React.useRef(null);
   const scrollRef = React.useRef(null);
+  const trackAreaRef = React.useRef(null);
+  const marqueeRef = React.useRef(null);
   const rulerRef = React.useRef(null);
   const canvasRef = React.useRef(null);
+  const previewCacheRef = React.useRef(null);
   const mediaElementsRef = React.useRef(new Map());
   const mediaElementCallbacksRef = React.useRef(new Map());
   const onProbeMediaRef = React.useRef(onProbeMedia);
@@ -128,14 +138,14 @@ export function AssemblyNodeBody({
   const previewFailureRef = React.useRef("");
   const videoFrameCancelRef = React.useRef(new Map());
   const timelineScrubbingRef = React.useRef(false);
-  const scrubPreviewPendingRef = React.useRef(false);
 
   const duration = assemblyDuration(timeline);
   const pixelsPerSecond = timeline.zoom;
   const scrollMetrics = useAssemblyViewport(scrollRef, duration * pixelsPerSecond);
   const timelineWidth = Math.max(760, duration * pixelsPerSecond + Math.max(80, scrollMetrics.width - timelineGutterWidth));
   const timelineGridWidth = Math.max(8, assemblyRulerSpacing(duration, pixelsPerSecond, timeline.frameRate).minorStep * pixelsPerSecond);
-  const selected = findSelectedClip(timeline);
+  const selectedClipIds = new Set(marquee?.ids ?? getSelectedClipIds(timeline));
+  const selected = selectedClipIds.size === 1 ? findClip(timeline, selectedClipIds.values().next().value) : null;
   const selectedMedia = selected ? timeline.media.find((item) => item.id === selected.clip.mediaId) : null;
   const selectedLinkGroupId = selected?.clip.linkGroupId || "";
   const binMedia = timeline.media.filter((media) => !media.derivedFromMediaId);
@@ -159,6 +169,18 @@ export function AssemblyNodeBody({
     videoFrameCancelRef.current.clear();
   }, []);
   React.useEffect(() => () => clearAssemblyLiveFrame(node.id), [node.id]);
+
+  React.useEffect(() => {
+    const cache = createAssemblyPreviewCache(setCachedFrames);
+    previewCacheRef.current = cache;
+    cache.update(timelineRef.current, timelineRef.current.playhead, {});
+    const unsubscribe = observeAssemblyLiveFrameDemand(node.id, cache.setEnabled);
+    return () => {
+      unsubscribe();
+      cache.dispose();
+      previewCacheRef.current = null;
+    };
+  }, [node.id]);
 
   React.useEffect(() => {
     const external = normalizeAssemblyState(node.data.assembly);
@@ -225,7 +247,7 @@ export function AssemblyNodeBody({
       duration,
       onTime: (time, playbackState) => {
         const current = timelineRef.current;
-        const next = setAssemblyPlayhead(current, time);
+        const next = { ...current, playhead: time };
         timelineRef.current = next;
         setTimeline(next);
         syncMediaElements(next, time, playbackState === "playing");
@@ -235,8 +257,11 @@ export function AssemblyNodeBody({
         const nextPlaying = state === "playing";
         playingRef.current = nextPlaying;
         setPlaying(nextPlaying);
-        if (!nextPlaying) {
+        if (nextPlaying) {
+          syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
+        } else {
           pauseAllMedia();
+          renderCompositionFrame(timelineRef.current, timelineRef.current.playhead, true);
           persistTimeline(timelineRef.current);
         }
       }
@@ -258,6 +283,15 @@ export function AssemblyNodeBody({
   React.useEffect(() => {
     clockRef.current?.setLoopRange(timeline.inPoint, timeline.outPoint, timeline.loopInOut);
   }, [timeline.inPoint, timeline.outPoint, timeline.loopInOut]);
+
+  React.useEffect(() => {
+    const current = timelineRef.current;
+    previewCacheRef.current?.update(current, current.playhead, {
+      active: playingRef.current,
+      reverse: clockRef.current?.rate < 0,
+      scrubbing: timelineScrubbingRef.current
+    });
+  }, [timeline.tracks, timeline.media, timeline.frameRate, timeline.outputWidth, timeline.outputHeight]);
 
   React.useEffect(() => {
     syncMediaElements(timeline, timeline.playhead, playingRef.current);
@@ -288,6 +322,7 @@ export function AssemblyNodeBody({
   }
 
   function undo() {
+    setClipSelection(null);
     const next = historyRef.current.undo();
     timelineRef.current = next;
     setTimeline(next);
@@ -296,6 +331,7 @@ export function AssemblyNodeBody({
   }
 
   function redo() {
+    setClipSelection(null);
     const next = historyRef.current.redo();
     timelineRef.current = next;
     setTimeline(next);
@@ -304,6 +340,8 @@ export function AssemblyNodeBody({
   }
 
   function seek(time, persist = false) {
+    const fps = timelineRef.current.frameRate;
+    time = Math.round(time * fps) / fps;
     if (clockRef.current) {
       clockRef.current.seek(time);
       if (persist) persistTimeline(timelineRef.current);
@@ -321,10 +359,7 @@ export function AssemblyNodeBody({
   function togglePlayback() {
     rootRef.current?.focus({ preventScroll: true });
     if (playingRef.current) clockRef.current?.pause();
-    else {
-      syncMediaElements(timelineRef.current, timelineRef.current.playhead, true);
-      clockRef.current?.play();
-    }
+    else clockRef.current?.play();
   }
 
   async function extractPlayheadFrame() {
@@ -366,9 +401,8 @@ export function AssemblyNodeBody({
   }
 
   function syncMediaElementsUnsafe(state, time, shouldPlay) {
-    const allVisualItems = assemblyActiveClips(state, time, "visual");
     const scrubbing = timelineScrubbingRef.current;
-    const visualItems = scrubbing ? allVisualItems.slice(0, 1) : allVisualItems;
+    const visualItems = assemblyActiveClips(state, time, "visual");
     const audioItems = scrubbing ? [] : assemblyActiveClips(state, time, "audio");
     const activeByClip = new Map(visualItems.map((item) => [item.id, { item, audible: false }]));
     audioItems.forEach((item) => activeByClip.set(item.id, { item, audible: true }));
@@ -381,9 +415,14 @@ export function AssemblyNodeBody({
       const { item, audible } = active;
       if ("muted" in element) element.muted = !audible;
       const sourceTime = assemblyClipSourceTime(item, time);
-      const canPlayForward = shouldPlay && !item.reverse;
-      if ("playbackRate" in element) element.playbackRate = assemblyClipPlaybackRate(item);
-      const seekTarget = assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, canPlayForward);
+      const transportRate = shouldPlay ? clockRef.current?.rate ?? 1 : 1;
+      const mediaRate = transportRate * assemblyClipPlaybackRate(item);
+      const canPlayForward = shouldPlay && !item.reverse && mediaRate > 0 && mediaRate <= 16;
+      if (canPlayForward && "playbackRate" in element && element.playbackRate !== mediaRate) element.playbackRate = mediaRate;
+      // Reverse shuttle uses decoded seeks; let each seek finish before issuing another.
+      const seekTarget = element.seeking && (scrubbing || (shouldPlay && transportRate !== 1 && !canPlayForward))
+        ? null
+        : assemblyPreviewSeekTarget(element, sourceTime, state.frameRate, canPlayForward);
       if (seekTarget !== null) {
         try {
           element.currentTime = seekTarget;
@@ -411,6 +450,24 @@ export function AssemblyNodeBody({
     const canvas = canvasRef.current;
     const context = canvas?.getContext?.("2d");
     if (!canvas || !context) return;
+    const playing = playingRef.current;
+    const cached = previewCacheRef.current?.update(state, time, {
+      active: playing,
+      reverse: clockRef.current?.rate < 0,
+      scrubbing: timelineScrubbingRef.current
+    });
+    const now = globalThis.performance?.now?.() || Date.now();
+    const emission = nextAssemblyPreviewEmission(lastPreviewEmitRef.current, now, state.frameRate, force && !playing);
+    if (!emission.emit) return;
+    if (cached) {
+      const height = Math.max(1, Math.round(640 * state.outputHeight / state.outputWidth));
+      if (canvas.width !== 640) canvas.width = 640;
+      if (canvas.height !== height) canvas.height = height;
+      context.drawImage(cached, 0, 0, canvas.width, canvas.height);
+      lastPreviewEmitRef.current = emission.scheduledAt;
+      publishPreviewFrame(cached.src, state, time, now, true);
+      return;
+    }
     const layers = [...assemblyActiveClips(state, time, "visual")].reverse();
     const drawableLayers = layers.map((item) => {
       const element = mediaElementsRef.current.get(item.id);
@@ -418,14 +475,12 @@ export function AssemblyNodeBody({
       return {
         element,
         clip: item,
-        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate, playingRef.current && !item.reverse)
+        ...assemblyPreviewElementState(item.media, element, sourceTime, state.frameRate,
+          playingRef.current && (!item.reverse || clockRef.current?.rate !== 1))
       };
     });
-    const scrubPreview = timelineScrubbingRef.current || scrubPreviewPendingRef.current;
-    const renderableLayers = scrubPreview ? assemblyScrubPreviewLayers(drawableLayers) : playingRef.current ? assemblyPlaybackPreviewLayers(drawableLayers) : assemblyRenderablePreviewLayers(drawableLayers);
+    const renderableLayers = assemblyPlaybackPreviewLayers(drawableLayers);
     if (renderableLayers === null) return;
-    if (scrubPreview && !layers.length && !timelineScrubbingRef.current) scrubPreviewPendingRef.current = false;
-    if (layers.length && !renderableLayers.length && !scrubPreview) return;
 
     const aspect = state.outputWidth / state.outputHeight;
     if (canvas.width !== 640) canvas.width = 640;
@@ -438,30 +493,19 @@ export function AssemblyNodeBody({
       drawAssemblyLayer(context, element, clip, canvas.width, canvas.height, width, height, state.outputWidth, state.outputHeight);
     });
 
-    const now = globalThis.performance?.now?.() || Date.now();
-    const emission = nextAssemblyPreviewEmission(lastPreviewEmitRef.current, now, state.frameRate, force);
-    if (!emission.emit) return;
     lastPreviewEmitRef.current = emission.scheduledAt;
     try {
-      const frameUrl = canvas.toDataURL("image/jpeg", 0.72);
-      publishAssemblyLiveFrame({
-        nodeId: node.id,
-        url: frameUrl,
-        frameTime: time,
-        targetFrameRate: state.frameRate,
-        emittedAt: now
-      });
-      if (scrubPreview && !timelineScrubbingRef.current && renderableLayers.at(-1)?.ready) scrubPreviewPendingRef.current = false;
-      const shouldCheckpointGraph = !node.data.assemblyFrameUrl || now - lastGraphPreviewCheckpointRef.current >= graphPreviewCheckpointIntervalMs;
-      if (shouldCheckpointGraph) {
-        lastGraphPreviewCheckpointRef.current = now;
-        onUpdate(node.id, {
-          assemblyFrameUrl: frameUrl,
-          assemblyFrameTime: time
-        });
-      }
+      publishPreviewFrame(canvas.toDataURL("image/jpeg", 0.72), state, time, now);
     } catch (error) {
       console.warn("Timeline could not export its live preview frame.", error);
+    }
+  }
+
+  function publishPreviewFrame(url, state, time, now, decoded = false) {
+    publishAssemblyLiveFrame({ nodeId: node.id, url, frameTime: time, targetFrameRate: state.frameRate, emittedAt: now, decoded });
+    if (lastGraphPreviewCheckpointRef.current === 0 || now - lastGraphPreviewCheckpointRef.current >= graphPreviewCheckpointIntervalMs) {
+      lastGraphPreviewCheckpointRef.current = now;
+      onUpdate(node.id, { assemblyFrameUrl: url, assemblyFrameTime: time });
     }
   }
 
@@ -480,7 +524,10 @@ export function AssemblyNodeBody({
   }
 
   function handleVideoMediaReady(clipId, element) {
-    handleMediaReady();
+    if (playingRef.current && clockRef.current?.rate < 0) {
+      const current = timelineRef.current;
+      renderCompositionFrame(current, current.playhead, true);
+    } else handleMediaReady();
     videoFrameCancelRef.current.get(clipId)?.();
     const cancel = requestAssemblyVideoFrame(element, () => {
       videoFrameCancelRef.current.delete(clipId);
@@ -499,7 +546,6 @@ export function AssemblyNodeBody({
     if (playingRef.current) clockRef.current?.pause();
     scrubCleanupRef.current?.();
     timelineScrubbingRef.current = true;
-    scrubPreviewPendingRef.current = true;
     const captureTarget = event.currentTarget;
     const pointerId = event.pointerId;
     const pointerTime = (pointerEvent) => assemblyTimeAtClientX(ruler, pointerEvent.clientX, pixelsPerSecond);
@@ -565,26 +611,52 @@ export function AssemblyNodeBody({
   }
 
   function beginTrim(event, clipId, edge) {
+    if (event.shiftKey || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    rootRef.current?.focus({ preventScroll: true });
     const base = timelineRef.current;
     const found = findClip(base, clipId);
-    if (!found) return;
-    const startX = event.clientX;
+    const lane = event.currentTarget.closest(".assembly-track-lane");
+    if (!found || found.track.locked || !lane) return;
+    clipDragCleanupRef.current?.();
+    selectClips([clipId]);
+    const startState = timelineRef.current;
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = assemblyLocalX(lane, event.clientX);
     const boundary = edge === "left" ? found.clip.start : found.clip.start + found.clip.duration;
-    let latest = base;
+    let latest = startState;
     const move = (pointerEvent) => {
-      latest = trimAssemblyClip(base, clipId, edge, boundary + (pointerEvent.clientX - startX) / pixelsPerSecond, base.ripple);
+      if (pointerEvent.pointerId !== pointerId) return;
+      const delta = (assemblyLocalX(lane, pointerEvent.clientX) - startX) / pixelsPerSecond;
+      latest = trimAssemblyClip(startState, clipId, edge, boundary + delta, startState.ripple);
       timelineRef.current = latest;
       setTimeline(latest);
     };
-    const finish = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      commitTimeline(latest);
+      window.removeEventListener("pointercancel", cancel);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      clipDragCleanupRef.current = null;
     };
+    const finish = (pointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId) return;
+      cleanup();
+      if (latest !== startState) commitTimeline(latest);
+    };
+    const cancel = (pointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId) return;
+      cleanup();
+      timelineRef.current = startState;
+      setTimeline(startState);
+    };
+    handle.setPointerCapture(pointerId);
+    clipDragCleanupRef.current = cleanup;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
   }
 
   function beginSlip(event, clipId) {
@@ -629,11 +701,12 @@ export function AssemblyNodeBody({
         setTimeline(next);
         setDragTargetTrackId(trackId);
       },
-      onFinish: (next) => {
+      onFinish: (next, moved) => {
         clipDragCleanupRef.current = null;
         setDraggingClipId("");
         setDragTargetTrackId("");
-        commitTimeline(next);
+        if (moved) commitTimeline(next);
+        else selectClips([clip.id]);
       },
       onCancel: (next) => {
         clipDragCleanupRef.current = null;
@@ -652,7 +725,16 @@ export function AssemblyNodeBody({
   }
 
   function handleClipPointerDown(event, clip, track) {
+    if (event.button !== 0) return;
     rootRef.current?.focus({ preventScroll: true });
+    if (event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      const ids = getSelectedClipIds(timelineRef.current);
+      selectClips(ids.includes(clip.id) ? ids.filter(id => id !== clip.id) : [...ids, clip.id]);
+      return;
+    }
+    setClipSelection(null);
     if (timeline.tool === "slip" && beginSlip(event, clip.id)) return;
     if (timeline.tool === "select" && beginClipMove(event, clip, track)) return;
     const next = setAssemblyView(timelineRef.current, { selectedClipId: clip.id });
@@ -662,11 +744,94 @@ export function AssemblyNodeBody({
 
   function handleClipClick(event, clip) {
     event.stopPropagation();
-    if (timeline.tool !== "blade") return;
+    if (event.shiftKey || timeline.tool !== "blade") return;
     const guide = assemblySplitGuide(event.currentTarget.parentElement, event.clientX, pixelsPerSecond, clip, timeline.frameRate);
     if (!guide) return;
     setSplitGuide(null);
     commitTimeline(splitAssemblyClip(timelineRef.current, clip.id, guide.time));
+  }
+
+  function getSelectedClipIds(state) {
+    const primary = state.selectedClipId;
+    if (clipSelection?.primary === primary) {
+      const existing = new Set(state.tracks.flatMap(track => track.clips.map(clip => clip.id)));
+      return clipSelection.ids.filter(id => existing.has(id));
+    }
+    return primary && findClip(state, primary) ? [primary] : [];
+  }
+
+  function selectClips(ids) {
+    const primary = ids.at(-1) || "";
+    const next = { ...timelineRef.current, selectedClipId: primary };
+    setClipSelection(ids.length > 1 ? { primary, ids } : null);
+    timelineRef.current = next;
+    setTimeline(next);
+  }
+
+  function beginMarquee(event) {
+    if (event.target !== event.currentTarget || event.button !== 0 || marqueeRef.current) return;
+    rootRef.current?.focus({ preventScroll: true });
+    if (timeline.tool !== "select") {
+      seek(assemblyTimeAtClientX(event.currentTarget, event.clientX, pixelsPerSecond), true);
+      return;
+    }
+    const area = trackAreaRef.current;
+    if (!area) return;
+    event.preventDefault();
+    const bounds = area.getBoundingClientRect();
+    const scaleX = bounds.width / area.offsetWidth || 1;
+    const scaleY = bounds.height / area.offsetHeight || 1;
+    const x = (event.clientX - bounds.left) / scaleX;
+    const y = (event.clientY - bounds.top) / scaleY;
+    marqueeRef.current = {
+      pointerId: event.pointerId, x, y, scaleX, scaleY,
+      clientX: event.clientX, clientY: event.clientY,
+      time: assemblyTimeAtClientX(event.currentTarget, event.clientX, pixelsPerSecond),
+      additive: event.shiftKey,
+      base: event.shiftKey ? getSelectedClipIds(timelineRef.current) : []
+    };
+    area.setPointerCapture(event.pointerId);
+  }
+
+  function updateMarquee(event) {
+    const drag = marqueeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.box && Math.hypot(event.clientX - drag.clientX, event.clientY - drag.clientY) < 4) return;
+    const area = trackAreaRef.current;
+    const bounds = area.getBoundingClientRect();
+    drag.clips ??= Array.from(area.querySelectorAll("[data-clip-id]"), element => {
+      const rect = element.getBoundingClientRect();
+      return {
+        id: element.dataset.clipId,
+        left: (rect.left - bounds.left) / drag.scaleX,
+        right: (rect.right - bounds.left) / drag.scaleX,
+        top: (rect.top - bounds.top) / drag.scaleY,
+        bottom: (rect.bottom - bounds.top) / drag.scaleY
+      };
+    });
+    const x = (event.clientX - bounds.left) / drag.scaleX;
+    const y = (event.clientY - bounds.top) / drag.scaleY;
+    const left = Math.min(x, drag.x), right = Math.max(x, drag.x);
+    const top = Math.min(y, drag.y), bottom = Math.max(y, drag.y);
+    const hits = drag.clips.filter(clip => clip.right >= left && clip.left <= right && clip.bottom >= top && clip.top <= bottom);
+    drag.box = { left, top, width: right - left, height: bottom - top, ids: [...new Set([...drag.base, ...hits.map(clip => clip.id)])] };
+    setMarquee(drag.box);
+  }
+
+  function finishMarquee(event, cancel = false) {
+    const drag = marqueeRef.current;
+    if (!drag || (event.pointerId !== undefined && drag.pointerId !== event.pointerId)) return;
+    if (!cancel) updateMarquee(event);
+    marqueeRef.current = null;
+    setMarquee(null);
+    const area = trackAreaRef.current;
+    if (area?.hasPointerCapture(drag.pointerId)) area.releasePointerCapture(drag.pointerId);
+    if (cancel) return;
+    if (drag.box) selectClips(drag.box.ids);
+    else {
+      if (!drag.additive) selectClips([]);
+      seek(drag.time, true);
+    }
   }
 
   function handleClipPointerMove(event, clip) {
@@ -755,6 +920,7 @@ export function AssemblyNodeBody({
   }
 
   function copySelectedClip() {
+    if (getSelectedClipIds(timelineRef.current).length !== 1) return false;
     const clipboard = createAssemblyClipClipboard(timelineRef.current);
     if (!clipboard) return false;
     setClipClipboard(clipboard);
@@ -766,8 +932,20 @@ export function AssemblyNodeBody({
     const current = timelineRef.current;
     const next = pasteAssemblyClip(current, clipClipboard, current.playhead);
     if (next === current) return false;
+    setClipSelection(null);
     commitTimeline(next);
     return true;
+  }
+
+  function deleteSelectedClips() {
+    const current = timelineRef.current;
+    const ids = getSelectedClipIds(current).sort((a, b) => findClip(current, b).clip.start - findClip(current, a).clip.start);
+    const next = ids.reduce((state, id) => findClip(state, id) ? removeAssemblyClip(state, id, current.ripple) : state, current);
+    if (ids.every(id => findClip(next, id))) return;
+    const remaining = ids.filter(id => findClip(next, id));
+    const primary = remaining.at(-1) || "";
+    setClipSelection(remaining.length > 1 ? { primary, ids: remaining } : null);
+    commitTimeline({ ...next, selectedClipId: primary });
   }
 
   function previewSelectedClip(patch) {
@@ -804,8 +982,24 @@ export function AssemblyNodeBody({
 
   function handleKeyDown(event) {
     if (event.target.closest("input, textarea, select")) return;
+    if (marqueeRef.current) {
+      if (event.key === "Escape") finishMarquee(event, true);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const modifier = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
+    if (!modifier && !event.altKey && !event.shiftKey && (key === "j" || key === "k" || key === "l")) {
+      if (event.isComposing || event.target.isContentEditable) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) {
+        if (key === "k") clockRef.current?.pause();
+        else clockRef.current?.shuttle(key === "j" ? -1 : 1);
+      }
+      return;
+    }
     if (modifier && key === "c") {
       event.preventDefault();
       event.stopPropagation();
@@ -853,11 +1047,10 @@ export function AssemblyNodeBody({
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
       event.stopPropagation();
-      const current = timelineRef.current;
-      if (current.selectedClipId) commitTimeline(removeAssemblyClip(current, current.selectedClipId, current.ripple));
+      deleteSelectedClips();
       return;
     }
-    if (event.key.toLowerCase() === "s" && timeline.selectedClipId) {
+    if (event.key.toLowerCase() === "s" && selected) {
       event.preventDefault();
       commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead));
       return;
@@ -917,10 +1110,9 @@ export function AssemblyNodeBody({
 
       <AssemblyDetailsPanel
         selection={selected}
+        selectionCount={selectedClipIds.size}
         media={selectedMedia}
         frameRate={timeline.frameRate}
-        outputWidth={timeline.outputWidth}
-        outputHeight={timeline.outputHeight}
         onPreviewUpdate={previewSelectedClip}
         onUpdate={updateSelectedClip}
         onPreviewRetime={previewRetimeSelectedClip}
@@ -931,16 +1123,16 @@ export function AssemblyNodeBody({
         <div className="assembly-tool-group" role="toolbar" aria-label="Timeline edit tools">
           <IconButton active={timeline.tool === "select"} title="Select and move clips" onClick={() => selectTool("select")}><MousePointer2 size={14} /></IconButton>
           <IconButton active={timeline.tool === "blade"} title="Split clips" onClick={() => selectTool("blade")}><Scissors size={14} /></IconButton>
-          <IconButton title="Split selected clip at playhead" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><PanelLeftDashed size={14} /></IconButton>
+          <IconButton title="Split selected clip at playhead" disabled={!selected} onClick={() => commitTimeline(splitAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.playhead))}><PanelLeftDashed size={14} /></IconButton>
           <IconButton active={timeline.tool === "slip"} title="Slip clip source timing" onClick={() => selectTool("slip")}><span className="assembly-slip-icon">Slip</span></IconButton>
           <IconButton active={timeline.ripple} title="Ripple trim and delete" onClick={() => replaceTimeline(setAssemblyView(timelineRef.current, { ripple: !timeline.ripple }), true)}><span className="assembly-ripple-icon">Ripple</span></IconButton>
         </div>
         <div className="assembly-tool-group">
           <IconButton title="Undo" disabled={!historyRef.current.canUndo()} onClick={undo}><Undo2 size={14} /></IconButton>
           <IconButton title="Redo" disabled={!historyRef.current.canRedo()} onClick={redo}><Redo2 size={14} /></IconButton>
-          <IconButton title="Copy selected clip (Ctrl/Cmd+C)" disabled={!timeline.selectedClipId} onClick={copySelectedClip}><Copy size={14} /></IconButton>
+          <IconButton title="Copy selected clip (Ctrl/Cmd+C)" disabled={!selected} onClick={copySelectedClip}><Copy size={14} /></IconButton>
           <IconButton title="Paste clip at playhead (Ctrl/Cmd+V)" disabled={!clipClipboard} onClick={pasteCopiedClip}><ClipboardPaste size={14} /></IconButton>
-          <IconButton title="Delete selected clip (Delete/Backspace)" disabled={!timeline.selectedClipId} onClick={() => commitTimeline(removeAssemblyClip(timelineRef.current, timeline.selectedClipId, timeline.ripple))}><Trash2 size={14} /></IconButton>
+          <IconButton title={selectedClipIds.size > 1 ? "Delete selected clips (Delete/Backspace)" : "Delete selected clip (Delete/Backspace)"} disabled={!selectedClipIds.size} onClick={deleteSelectedClips}><Trash2 size={14} /></IconButton>
         </div>
         <div className="assembly-marker-tools" role="toolbar" aria-label="Timeline range markers">
           <IconButton active={timeline.inPoint !== null} title="Set In point" onClick={() => commitTimeline(setAssemblyInPoint(timelineRef.current))}><BetweenHorizontalStart size={14} /></IconButton>
@@ -950,12 +1142,13 @@ export function AssemblyNodeBody({
           <IconButton title="Go to Out point" disabled={timeline.outPoint === null} onClick={() => jumpToMarker(timeline.outPoint)}><span className="assembly-marker-jump">{"}"}</span></IconButton>
           <IconButton title="Clear In and Out points" disabled={timeline.inPoint === null && timeline.outPoint === null} onClick={() => commitTimeline(clearAssemblyInOut(timelineRef.current))}><FlagOff size={14} /></IconButton>
         </div>
-        <div className="assembly-transport">
+          <div className="assembly-transport" title="Timeline shortcuts: J reverse, K pause, L forward. Tap J or L again to shuttle faster.">
           <IconButton active={timeline.loopInOut} title="Loop playback between In and Out" disabled={timeline.inPoint === null || timeline.outPoint === null || timeline.outPoint <= timeline.inPoint} onClick={toggleLoopInOut}><Repeat2 size={15} /></IconButton>
           <IconButton title={playing ? "Pause" : "Play"} onClick={togglePlayback}>{playing ? <Pause size={15} /> : <Play size={15} />}</IconButton>
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
           <span className="assembly-frame-number" aria-label="Timeline frame number" title="Frame index from the start of the timeline (first frame is 0)">Frame {Math.round(timeline.playhead * Math.max(1, Math.round(timeline.frameRate)))}</span>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
+          {cachedFrames > 0 && <small className="assembly-cache-count" title="Decoded frames ready for Live Preview">{cachedFrames} cached</small>}
         </div>
         <div className="assembly-track-actions">
           <button type="button" onClick={() => commitTimeline(addAssemblyTrack(timelineRef.current, "video"))}><Plus size={13} /> Video</button>
@@ -963,8 +1156,10 @@ export function AssemblyNodeBody({
         </div>
       </div>
 
-      <div ref={scrollRef} className="assembly-timeline-scroll nodrag nowheel" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
-        <div className="assembly-timeline" style={{ width: timelineGutterWidth + timelineWidth }}>
+      <div ref={scrollRef} className="assembly-timeline-scroll nodrag nowheel nokey" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        <div ref={trackAreaRef} className="assembly-timeline" style={{ width: timelineGutterWidth + timelineWidth }}
+          onPointerMove={updateMarquee} onPointerUp={event => finishMarquee(event)}
+          onPointerCancel={event => finishMarquee(event, true)} onLostPointerCapture={event => finishMarquee(event, true)}>
           <div className="assembly-ruler-row">
             <div className="assembly-ruler-gutter">Tracks</div>
             <div ref={rulerRef} className="assembly-ruler" style={{ width: timelineWidth }} onPointerDown={beginRulerScrub}>
@@ -975,11 +1170,11 @@ export function AssemblyNodeBody({
               ))}
             </div>
           </div>
-          {timeline.tracks.map((track) => (
+          {timeline.tracks.map((track, trackIndex) => (
             <div key={track.id} className={`assembly-track-row ${track.type}`}>
               <div className="assembly-track-header">
-                <strong>{track.name}</strong>
-                <div>
+                <strong title={track.name}>{track.name}</strong>
+                <div className="assembly-track-actions-row">
                   {track.type !== "audio" && (
                     <IconButton title={track.hidden ? "Show track" : "Hide track"} onClick={() => commitTimeline(updateAssemblyTrack(timelineRef.current, track.id, { hidden: !track.hidden }))}>
                       {track.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -991,6 +1186,10 @@ export function AssemblyNodeBody({
                   <IconButton title={track.locked ? "Unlock track" : "Lock track"} onClick={() => commitTimeline(updateAssemblyTrack(timelineRef.current, track.id, { locked: !track.locked }))}>
                     {track.locked ? <Lock size={12} /> : <Unlock size={12} />}
                   </IconButton>
+                  {track.type === "video" && <>
+                    <IconButton title={`Move ${track.name} up`} disabled={timeline.tracks[trackIndex - 1]?.type !== "video"} onClick={() => commitTimeline(moveAssemblyVideoTrack(timelineRef.current, track.id, -1))}><ChevronUp size={13} /></IconButton>
+                    <IconButton title={`Move ${track.name} down`} disabled={timeline.tracks[trackIndex + 1]?.type !== "video"} onClick={() => commitTimeline(moveAssemblyVideoTrack(timelineRef.current, track.id, 1))}><ChevronDown size={13} /></IconButton>
+                  </>}
                 </div>
               </div>
               <div
@@ -1011,10 +1210,7 @@ export function AssemblyNodeBody({
                 }}
                 onDragEnd={() => { setDragTargetTrackId(""); setReplacementClipId(""); }}
                 onDrop={(event) => handleLaneDrop(event, track.id)}
-                onPointerDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  seek(assemblyTimeAtClientX(event.currentTarget, event.clientX, pixelsPerSecond), true);
-                }}
+                onPointerDown={beginMarquee}
               >
                 {track.clips.map((clip) => {
                   const media = timeline.media.find((item) => item.id === clip.mediaId);
@@ -1023,7 +1219,7 @@ export function AssemblyNodeBody({
                     <div
                       key={clip.id}
                       data-clip-id={clip.id}
-                      className={`assembly-clip ${media.type} ${timeline.selectedClipId === clip.id ? "selected" : ""} ${selectedLinkGroupId && selectedLinkGroupId === clip.linkGroupId ? "linked-selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""} ${replacementClipId === clip.id ? "is-replace-target" : ""}`}
+                      className={`assembly-clip ${media.type} ${selectedClipIds.has(clip.id) ? "selected" : ""} ${selectedLinkGroupId && selectedLinkGroupId === clip.linkGroupId ? "linked-selected" : ""} ${timeline.tool === "blade" ? "blade-ready" : ""} ${timeline.tool === "slip" ? "slip-ready" : ""} ${draggingClipId === clip.id ? "dragging" : ""} ${replacementClipId === clip.id ? "is-replace-target" : ""}`}
                       style={{ left: clip.start * pixelsPerSecond, width: Math.max(10, clip.duration * pixelsPerSecond), "--assembly-waveform": media.waveformUrl ? `url("${displayMediaUrl(media.waveformUrl)}")` : "none" }}
                       onPointerDown={(event) => handleClipPointerDown(event, clip, track)}
                       onPointerMove={(event) => handleClipPointerMove(event, clip)}
@@ -1031,7 +1227,7 @@ export function AssemblyNodeBody({
                       onClick={(event) => handleClipClick(event, clip)}
                       title={`${media.label}\n${formatTimecode(clip.duration, timeline.frameRate)}`}
                     >
-                      <button type="button" className="assembly-trim-handle left" aria-label="Trim clip start" onPointerDown={(event) => beginTrim(event, clip.id, "left")} />
+                      <button type="button" className="assembly-trim-handle left" aria-label="Trim clip start" title="Drag to trim the head" disabled={track.locked || timeline.tool === "blade"} onPointerDown={(event) => beginTrim(event, clip.id, "left")} />
                       <span>{media.label}</span>
                       <small>{formatClipDuration(clip.duration)}{clip.speed !== 100 ? ` | ${clip.speed}%` : ""}{clip.reverse ? " | R" : ""}</small>
                       {timeline.tool === "blade" && splitGuide?.clipId === clip.id ? (
@@ -1039,13 +1235,14 @@ export function AssemblyNodeBody({
                           <i>{formatTimecode(splitGuide.time, timeline.frameRate)}</i>
                         </div>
                       ) : null}
-                      <button type="button" className="assembly-trim-handle right" aria-label="Trim clip end" onPointerDown={(event) => beginTrim(event, clip.id, "right")} />
+                      <button type="button" className="assembly-trim-handle right" aria-label="Trim clip end" title="Drag to trim the tail" disabled={track.locked || timeline.tool === "blade"} onPointerDown={(event) => beginTrim(event, clip.id, "right")} />
                     </div>
                   );
                 })}
               </div>
             </div>
           ))}
+          {marquee && <div className="assembly-selection-marquee" aria-hidden="true" style={{ left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height }} />}
           {timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint >= timeline.inPoint ? (
             <div
               className="assembly-marked-range"
@@ -1085,7 +1282,7 @@ export function AssemblyNodeBody({
         <div className="assembly-selection-status">
           {selected && selectedMedia ? (
             <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
-          ) : <span>{timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
+          ) : <span>{selectedClipIds.size > 1 ? `${selectedClipIds.size} clips selected` : timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
           {probeStatus && <small>{probeStatus}</small>}
           {extractionError && <small role="alert">{extractionError}</small>}
           {replacementError && <small role="alert">{replacementError}</small>}
@@ -1149,27 +1346,12 @@ function IconButton({ active = false, disabled = false, title, onClick, children
   return <button type="button" className={`assembly-icon-button ${active ? "active" : ""}`} disabled={disabled} title={title} aria-label={title} onClick={onClick}>{children}</button>;
 }
 
-function drawAssemblyLayer(context, element, clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth, outputHeight) {
-  const geometry = assemblyPreviewLayerGeometry(clip, frameWidth, frameHeight, mediaWidth, mediaHeight, outputWidth, outputHeight);
-  context.save();
-  context.globalAlpha = geometry.opacity;
-  context.translate(geometry.centerX, geometry.centerY);
-  context.rotate(geometry.rotation);
-  context.scale(geometry.flipX, geometry.flipY);
-  context.drawImage(element, -geometry.width / 2, -geometry.height / 2, geometry.width, geometry.height);
-  context.restore();
-}
-
 function findClip(state, clipId) {
   for (const track of state.tracks) {
     const clip = track.clips.find((item) => item.id === clipId);
     if (clip) return { track, clip };
   }
   return null;
-}
-
-function findSelectedClip(state) {
-  return state.selectedClipId ? findClip(state, state.selectedClipId) : null;
 }
 
 function rulerTicks(duration, pixelsPerSecond, frameRate) {

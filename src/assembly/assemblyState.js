@@ -1,4 +1,4 @@
-import { minimumAssemblyZoom, normalizeAssemblyZoom } from "./assemblyZoom.js";
+import { normalizeAssemblyZoom } from "./assemblyZoom.js";
 
 const assemblySchemaVersion = 1;
 const defaultStillDuration = 5;
@@ -432,6 +432,18 @@ export function addAssemblyTrack(state, type) {
   return next;
 }
 
+export function moveAssemblyVideoTrack(state, trackId, direction) {
+  if (direction !== -1 && direction !== 1) return state;
+  const next = normalizeAssemblyState(state);
+  const index = next.tracks.findIndex((track) => track.id === trackId);
+  const targetIndex = index + direction;
+  if (next.tracks[index]?.type !== "video" || next.tracks[targetIndex]?.type !== "video") return state;
+  const track = next.tracks[index];
+  next.tracks[index] = next.tracks[targetIndex];
+  next.tracks[targetIndex] = track;
+  return next;
+}
+
 export function updateAssemblyTrack(state, trackId, patch = {}) {
   const next = cloneAssemblyState(normalizeAssemblyState(state));
   const track = next.tracks.find((item) => item.id === trackId);
@@ -510,9 +522,9 @@ export function snapAssemblyClipMoveStart(state, clipId, targetTrackId, start, p
   const requestedStart = snapAssemblyTime(current, start);
   if (!source || !target || target.locked || !assemblyTrackAcceptsMedia(target, source.media)) return requestedStart;
 
-  const threshold = Math.max(assemblyFrameDuration(current), Math.abs(Number(thresholdPixels) || 0) / Math.max(minimumAssemblyZoom, Number(pixelsPerSecond) || minimumAssemblyZoom));
-  const edges = [0, ...target.clips
-    .filter((clip) => clip.id !== clipId)
+  const threshold = Math.max(assemblyFrameDuration(current), Math.min(0.2, Math.abs(Number(thresholdPixels) || 0) / Math.max(Number.EPSILON, Number(pixelsPerSecond) || 72)));
+  const edges = [current.playhead, 0, ...target.clips
+    .filter((clip) => clip.id !== clipId && (!source.clip.linkGroupId || clip.linkGroupId !== source.clip.linkGroupId))
     .flatMap((clip) => [clip.start, clip.start + clip.duration])];
   const candidates = edges.flatMap((edge) => [edge, edge - source.clip.duration]).filter((value) => value >= 0);
   let snappedStart = requestedStart;

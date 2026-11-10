@@ -1,17 +1,17 @@
 import React from "react";
-import { FlipHorizontal2, FlipVertical2, Gauge, PanelRight, RotateCcw } from "lucide-react";
+import { ChevronsLeftRight, FlipHorizontal2, FlipVertical2, Gauge, PanelRight, RotateCcw } from "lucide-react";
 import { assemblyClipSourceSpan } from "../assembly/assemblyState.js";
 import { assemblyMediaTechnicalReadout } from "../assembly/assemblyLivePreview.js";
 import "../assembly/assemblyInspector.css";
 
-export function AssemblyDetailsPanel({ selection, media, frameRate, outputWidth, outputHeight, onPreviewUpdate, onUpdate, onPreviewRetime, onRetime }) {
+export function AssemblyDetailsPanel({ selection, selectionCount, media, frameRate, onPreviewUpdate, onUpdate, onPreviewRetime, onRetime }) {
   const clip = selection?.clip;
   const track = selection?.track;
   if (!clip || !media || !track) {
     return (
       <aside className="assembly-inspector nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
         <header><PanelRight size={14} /><strong>Details</strong></header>
-        <div className="assembly-inspector-empty"><PanelRight size={22} /><span>Select a timeline clip</span></div>
+        <div className="assembly-inspector-empty"><PanelRight size={22} /><span>{selectionCount > 1 ? "Select one clip to edit its details" : "Select a timeline clip"}</span></div>
       </aside>
     );
   }
@@ -38,12 +38,12 @@ export function AssemblyDetailsPanel({ selection, media, frameRate, outputWidth,
 
         {visual && (
           <>
-            <section className="assembly-inspector-tile">
+            <section className="assembly-inspector-tile" key={clip.id}>
               <div className="assembly-inspector-title"><strong>Motion</strong><button type="button" title="Reset motion" onClick={resetMotion}><RotateCcw size={12} /></button></div>
-              <InspectorRange label="Position X" value={clip.translateX} min={-outputWidth} max={outputWidth} step={1} suffix="px" onPreview={(value) => onPreviewUpdate({ translateX: value })} onCommit={(value) => onUpdate({ translateX: value })} />
-              <InspectorRange label="Position Y" value={clip.translateY} min={-outputHeight} max={outputHeight} step={1} suffix="px" onPreview={(value) => onPreviewUpdate({ translateY: value })} onCommit={(value) => onUpdate({ translateY: value })} />
-              <InspectorRange label="Scale" value={clip.scale} min={1} max={400} numberMax={1000} step={1} suffix="%" onPreview={(value) => onPreviewUpdate({ scale: value })} onCommit={(value) => onUpdate({ scale: value })} />
-              <InspectorRange label="Rotation" value={clip.rotation} min={-180} max={180} numberMin={-3600} numberMax={3600} step={1} suffix="deg" onPreview={(value) => onPreviewUpdate({ rotation: value })} onCommit={(value) => onUpdate({ rotation: value })} />
+              <MotionControl label="Position X" value={clip.translateX} min={-100000} max={100000} dragRate={1} suffix="px" onPreview={(value) => onPreviewUpdate({ translateX: value })} onCommit={(value) => onUpdate({ translateX: value })} />
+              <MotionControl label="Position Y" value={clip.translateY} min={-100000} max={100000} dragRate={1} suffix="px" onPreview={(value) => onPreviewUpdate({ translateY: value })} onCommit={(value) => onUpdate({ translateY: value })} />
+              <MotionControl label="Scale" value={clip.scale} min={1} max={1000} dragRate={0.25} suffix="%" onPreview={(value) => onPreviewUpdate({ scale: value })} onCommit={(value) => onUpdate({ scale: value })} />
+              <MotionControl label="Rotation" value={clip.rotation} min={-3600} max={3600} dragRate={0.25} suffix="deg" onPreview={(value) => onPreviewUpdate({ rotation: value })} onCommit={(value) => onUpdate({ rotation: value })} />
               <div className="assembly-inspector-actions" role="group" aria-label="Clip flips">
                 <button type="button" className={clip.flipHorizontal ? "active" : ""} title="Flip horizontally" onClick={() => onUpdate({ flipHorizontal: !clip.flipHorizontal })}><FlipHorizontal2 size={14} /><span>Horizontal</span></button>
                 <button type="button" className={clip.flipVertical ? "active" : ""} title="Flip vertically" onClick={() => onUpdate({ flipVertical: !clip.flipVertical })}><FlipVertical2 size={14} /><span>Vertical</span></button>
@@ -73,6 +73,59 @@ export function AssemblyDetailsPanel({ selection, media, frameRate, outputWidth,
         </section>
       </div>
     </aside>
+  );
+}
+
+function MotionControl({ label, value, min, max, dragRate, suffix, onPreview, onCommit }) {
+  const dragRef = React.useRef(null);
+  const inputId = React.useId();
+
+  function finishDrag(event, cancel = false) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (drag.value === drag.startValue) return;
+    if (cancel) onPreview(drag.startValue);
+    else onCommit(drag.value);
+  }
+
+  return (
+    <div className="assembly-motion-control">
+      <label
+        htmlFor={inputId}
+        tabIndex={-1}
+        title="Drag left or right. Hold Shift for finer adjustments."
+        onPointerDown={(event) => {
+          if (event.button !== 0 || dragRef.current) return;
+          event.preventDefault();
+          const handle = event.currentTarget;
+          const input = handle.control;
+          const typedValue = input === input.ownerDocument.activeElement ? input.valueAsNumber : NaN;
+          const startValue = Number.isFinite(typedValue) ? Math.min(max, Math.max(min, typedValue)) : value;
+          handle.focus({ preventScroll: true });
+          handle.setPointerCapture(event.pointerId);
+          dragRef.current = { pointerId: event.pointerId, x: event.clientX, startValue, raw: startValue, value: startValue };
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current;
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          const delta = (event.clientX - drag.x) * dragRate * (event.shiftKey ? 0.1 : 1);
+          drag.x = event.clientX;
+          if (!delta) return;
+          drag.raw = Math.min(max, Math.max(min, drag.raw + delta));
+          const next = Number(drag.raw.toFixed(2));
+          if (next === drag.value) return;
+          drag.value = next;
+          onPreview(next);
+        }}
+        onPointerUp={(event) => finishDrag(event)}
+        onPointerCancel={(event) => finishDrag(event, true)}
+        onLostPointerCapture={(event) => finishDrag(event, true)}
+        onClick={(event) => event.preventDefault()}
+      ><ChevronsLeftRight size={12} />{label}</label>
+      <InspectorNumberInput id={inputId} value={value} min={min} max={max} step={0.1} onCommit={onCommit} />
+      <small>{suffix}</small>
+    </div>
   );
 }
 
@@ -108,7 +161,7 @@ function InspectorNumber({ label, value, min, max, step, suffix, onChange }) {
   );
 }
 
-function InspectorNumberInput({ value, min, max, step, onCommit }) {
+function InspectorNumberInput({ id, value, min, max, step, onCommit }) {
   const [draft, setDraft] = React.useState(String(value));
   const focusedRef = React.useRef(false);
 
@@ -117,9 +170,10 @@ function InspectorNumberInput({ value, min, max, step, onCommit }) {
   }, [value]);
 
   const commit = () => {
+    if (!focusedRef.current) return;
     focusedRef.current = false;
     const number = Number(draft);
-    if (!Number.isFinite(number)) {
+    if (!draft.trim() || !Number.isFinite(number)) {
       setDraft(String(value));
       return;
     }
@@ -130,6 +184,7 @@ function InspectorNumberInput({ value, min, max, step, onCommit }) {
 
   return (
     <input
+      id={id}
       type="number"
       min={min}
       max={max}
@@ -141,6 +196,8 @@ function InspectorNumberInput({ value, min, max, step, onCommit }) {
       onKeyDown={(event) => {
         if (event.key === "Enter") event.currentTarget.blur();
         if (event.key === "Escape") {
+          event.stopPropagation();
+          focusedRef.current = false;
           setDraft(String(value));
           event.currentTarget.blur();
         }
