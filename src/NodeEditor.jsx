@@ -178,7 +178,7 @@ import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBeha
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import LibraryStylePicker from "./components/LibraryStylePicker.jsx";
 import { libraryPrompt, libraryStyleDirection, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
-import { lookGradeBinding, lookSelectionPatch, lookGradeEditPatch } from "./lookGrade.js";
+import { lookSelectionPatch, lookGradeEditPatch } from "./lookGrade.js";
 import { useLookGrades } from "./useLookGrades.js";
 import { migrateStyleGradeData, normalizeStyleGradePresetName, preciseColorGrade, styleGradePaletteData, styleGradePresetNames } from "./styleGrade.js";
 import { createGenerationGroupId } from "./generationProgress.js";
@@ -13620,7 +13620,6 @@ function NodeBody({
     const precisePaletteSelected = selectedGrade === preciseColorGrade;
     const paletteSelected = customPaletteSelected || precisePaletteSelected;
     const paletteData = styleGradePaletteData(node.data);
-    const lookGradeDefault = Boolean(lookGradeBinding(node.data.libraryStyle)) && !node.data.customPaletteLookOverride;
     const lookExamples = node.data.libraryStyle?.examples || [];
     const lookExampleDragType = "application/x-newtnode-look-grade";
     const paletteColors = normalizedCustomPaletteColors(paletteData);
@@ -13855,7 +13854,6 @@ function NodeBody({
 
         {paletteSelected && (
           <section className="custom-palette-panel" onDragOver={customPaletteSelected ? allowFileDrop : undefined} onDrop={customPaletteSelected ? handlePaletteDrop : undefined}>
-            {customPaletteSelected && lookGradeDefault && <small className="custom-palette-status">Default grade from {node.data.libraryStyle.name} · replace as needed</small>}
             <fieldset className="look-grade-controls">
             {customPaletteSelected && <>
             {lookExamples.length > 0 && (
