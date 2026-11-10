@@ -13,7 +13,8 @@ jobs:
         # Use the Intel pool while hosted macOS ARM runners have capacity issues.
         os: [windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # The full Chromium suite can take about 20 minutes after setup and media checks.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

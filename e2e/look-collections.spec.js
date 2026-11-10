@@ -42,7 +42,7 @@ test("Named local collections, bulk selection and save destinations persist inde
   await page.getByRole("button", { name: "New Catalog", exact: true }).click();
   await page.getByLabel("Catalog name", { exact: true }).fill("Starred");
   await page.getByRole("button", { name: "Create Catalog", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("already in use");
+  await expect(page.getByRole("alert").filter({ hasText: "already in use" })).toBeVisible();
   await page.getByLabel("Catalog name", { exact: true }).fill("Cinema references");
   await page.getByRole("button", { name: "Create Catalog", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Looks source", exact: true })).toHaveText("Cinema references");
@@ -53,7 +53,7 @@ test("Named local collections, bulk selection and save destinations persist inde
   await page.screenshot({ path: test.info().outputPath("lookbook-collections.png"), fullPage: true });
   await expect(page.getByRole("checkbox", { name: "Select Ink", exact: true })).toBeChecked();
   conflict = true; await page.getByRole("button", { name: "Add to collection", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Collection changed");
+  await expect(page.getByRole("alert").filter({ hasText: "Collection changed" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Select Ink", exact: true })).toBeChecked();
   conflict = false; await page.getByRole("button", { name: "Add to collection", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Select Ink", exact: true })).not.toBeChecked();
@@ -100,7 +100,7 @@ test("Named local collections, bulk selection and save destinations persist inde
   await page.getByRole("button",{name:"Delete Catalog",exact:true}).click();
   conflict=true;
   await page.getByRole("button",{name:"Confirm delete",exact:true}).click();
-  await expect(page.getByRole("alert")).toContainText("Collection changed");
+  await expect(page.getByRole("alert").filter({ hasText: "Collection changed" })).toBeVisible();
   expect(library.collections.some(item=>item.name==="Cinema references")).toBe(true);
   conflict=false;
   await page.getByRole("button",{name:"Confirm delete",exact:true}).click();

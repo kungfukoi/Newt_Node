@@ -62,8 +62,10 @@ test('toolbar preset library preserves bindings, saves selections and deletes pe
  await expect(library.getByRole('button', { name: 'Insert Selected product edit', exact: true })).toHaveCount(0);
  await page.setViewportSize({ width: 375, height: 812 });
  await expect(library).toBeVisible();
- const bounds = await library.boundingBox();
- expect(bounds.x).toBeGreaterThanOrEqual(15); expect(bounds.x + bounds.width).toBeLessThanOrEqual(360);
+ await expect.poll(async () => {
+   const bounds = await library.boundingBox();
+   return Boolean(bounds && bounds.x >= 15 && bounds.x + bounds.width <= 360);
+ }).toBe(true);
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
  await page.screenshot({ path: testInfo.outputPath('toolbar-presets-mobile.png') });
  await page.keyboard.press('Escape');

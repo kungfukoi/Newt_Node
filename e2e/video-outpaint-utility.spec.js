@@ -330,7 +330,7 @@ test("Video Outpaint prepares locally, drafts a prompt, runs with refinements an
   await dialog.getByRole("button", { name: "Apply & prepare" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
-  expect(preparation.videoOutpaint.frame).toEqual({ x: 0.125, y: -0.140625, width: 1.5 });
+  await expect.poll(() => preparation?.videoOutpaint?.frame).toEqual({ x: 0.125, y: -0.140625, width: 1.5 });
   await expect(prompt).toHaveValue("My reviewed person-completion prompt");
   shouldFail = true;
   await node.locator(".run-node-button").click();
