@@ -18,10 +18,13 @@ export function normalizeLibraryStyle(value = {}) {
   return {
     id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt), category: text(value.category, 80), catalogId: text(value.catalogId, 80),
     notes: value.sourceProvider==="Newt"?lookStyleText(text(value.notes,4000)):text(value.notes, 4000), sourceUrl, sourceProvider: text(value.sourceProvider,80), sourceAuthor: text(value.sourceAuthor,120), sourceAttribution: text(value.sourceAttribution,200),
-    ...(Array.isArray(value.styleBlocks)?{styleBlocks:lookStyleBlocks(value.styleBlocks)}:{}),
+    ...(Array.isArray(value.styleBlocks)?{styleBlocks:lookStyleBlocks(value.styleBlocks,{preserveLegacyPalette:true})}:{}),
     colours: (Array.isArray(value.colours) ? value.colours : []).filter(colour => typeof colour?.hex === "string" && /^#(?:[a-f0-9]{3}|[a-f0-9]{6})$/i.test(colour.hex)).slice(0,20).map(colour => ({ name: text(colour.name,80), hex: colour.hex, percent: typeof colour.percent === "number" && Number.isFinite(colour.percent) && colour.percent>=0 && colour.percent<=100 ? colour.percent : null })),
     styleAnalysis: value.styleAnalysis?.stylePrompt ? {
       stylePrompt: lookStyleText(text(value.styleAnalysis.stylePrompt, 6000)), fingerprint: text(value.styleAnalysis.fingerprint, 64),
+      ...(value.styleAnalysis.signatureFeature && Number.isInteger(value.styleAnalysis.anchorReference) && Number.isInteger(value.styleAnalysis.referenceCount)
+        && value.styleAnalysis.anchorReference >= 1 && value.styleAnalysis.anchorReference <= value.styleAnalysis.referenceCount && value.styleAnalysis.referenceCount <= 8
+        ? { signatureFeature: text(value.styleAnalysis.signatureFeature, 1200), anchorReference: value.styleAnalysis.anchorReference, referenceCount: value.styleAnalysis.referenceCount } : {}),
       model: text(value.styleAnalysis.model, 120), provider: text(value.styleAnalysis.provider, 80),
       createdAt: text(value.styleAnalysis.createdAt, 40), version: Number(value.styleAnalysis.version) || 1
     } : null,
@@ -36,13 +39,30 @@ export function normalizeLibraryStyle(value = {}) {
 export function portableStylePrompt(value = "") {
   return text(value).replace(/--[a-z][\w-]*(?:\s+(?!--)[^\s]+)*/gi, "").trim();
 }
+export function lookStyleDescription(analysis) {
+  if (!analysis?.stylePrompt) return "";
+  const feature = portableStylePrompt(analysis.signatureFeature);
+  return [feature && `Defining visual feature: ${feature}`, lookStyleText(analysis.stylePrompt)].filter(Boolean).join("\n\n");
+}
+
 export function libraryStyleSnapshot(style) {
   const value = normalizeLibraryStyle(style);
-  const { catalogUrl: _catalogUrl, ...gradeReference } = value.examples[0] || normalizeLibraryStyle({ examples: [style?.gradeReference] }).examples[0] || {};
-  return { id: value.id, name: value.name, prompt: lookStyleText(portableStylePrompt(value.styleAnalysis?.stylePrompt || value.prompt)), sourceUrl: value.sourceUrl, sref: value.sref,
-    ...(gradeReference.localUrl ? { gradeReference } : {}) };
+  const examples = (value.examples.length ? value.examples : normalizeLibraryStyle({ examples: [style?.gradeReference] }).examples)
+    .slice(0, 4)
+    .map(({ catalogUrl, ...example }) => example);
+  const [gradeReference] = examples;
+  return { id: value.id, name: value.name, prompt: lookStyleText(portableStylePrompt(lookStyleDescription(value.styleAnalysis) || value.prompt)), sourceUrl: value.sourceUrl, sref: value.sref,
+    ...(gradeReference ? { gradeReference, examples } : {}) };
 }
 export function libraryPrompt(data = {}) { return portableStylePrompt(data.libraryStyle?.prompt); }
+export function libraryStyleDirection(data) {
+  const prompt = libraryPrompt(data);
+  if (!prompt) return "";
+  return `LOOK — compatible visual treatment only:
+Keep the user's subject, identity, scene, blocking and explicit camera or framing instructions. An explicitly selected Style preset controls the rendering medium. Use only compatible visual traits from the Look below. Ignore any reference colors, casts, palettes, film stocks, stock emulations and post-production treatments in the Look, including in older saved descriptions. The selected Grade takes priority over conflicting color or finishing directions. Without a Grade, leave color to the user's brief and any explicit Style preset.
+
+${prompt}`;
+}
 export function libraryStylesMatching(styles, query = "") {
   const words = text(query, 300).toLowerCase().split(/\s+/).filter(Boolean);
   return styles.filter(style => words.every(word => [style.name, style.prompt, style.notes, ...(style.tags || [])].join(" ").toLowerCase().includes(word)));

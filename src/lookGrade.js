@@ -9,13 +9,15 @@ export function lookGradeBinding(style) {
 const emptyPalette = { customPaletteRgbText: "", customPaletteColors: [], customPalettePreviewUrl: "", customPaletteSourceName: "", customPaletteStatus: "", customPaletteError: "", customPaletteLookKey: "", customPaletteLookOverride: false, customPaletteRequestId: "" };
 export function releaseLookGrade(data) {
   if (data.customPaletteLookOverride) return { customPaletteLookKey: "", customPaletteLookOverride: false };
-  return data.customPaletteLookKey || lookGradeBinding(data.libraryStyle) ? { ...emptyPalette, gradePreset: "None" } : {};
+  return data.customPaletteLookKey || lookGradeBinding(data.libraryStyle)
+    ? { ...emptyPalette, ...(!data.gradePreset || data.gradePreset === "Custom" ? { gradePreset: "None" } : {}) }
+    : {};
 }
 export function lookGradeEditPatch(data, patch) {
   const { customPaletteResultFor, ...next } = patch;
   if (customPaletteResultFor && data.customPaletteRequestId !== customPaletteResultFor) return null;
   const binding = lookGradeBinding(data.libraryStyle);
-  const editsGrade = ["gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some(key => Object.hasOwn(next, key));
+  const editsGrade = ["customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some(key => Object.hasOwn(next, key));
   if (binding && editsGrade && !Object.hasOwn(next, "libraryStyle") && !Object.hasOwn(next, "customPaletteLookKey")) {
     return { ...next, customPaletteLookKey: binding.key, customPaletteLookOverride: true,
       customPaletteStatus: next.customPaletteStatus || "", customPaletteRequestId: next.customPaletteRequestId || "" };
@@ -24,10 +26,11 @@ export function lookGradeEditPatch(data, patch) {
 }
 export function lookSelectionPatch(style, previous = {}) {
   const binding = lookGradeBinding(style);
-  return { ...releaseLookGrade(previous), libraryStyle: libraryStyleSnapshot(style), stylePreset: "None",
-    ...(binding ? { ...emptyPalette, gradePreset: "Custom", customPalettePreviewUrl: binding.reference.localUrl, customPaletteSourceName: `${binding.name} — first example` } : {}) };
+  const keepGrade = previous.gradePreset && previous.gradePreset !== "Custom" && (previous.gradePreset !== "None" || previous.libraryStyle);
+  return { ...releaseLookGrade(previous), libraryStyle: libraryStyleSnapshot(style),
+    ...(binding ? { ...lookGradeStart(binding), gradePreset: keepGrade ? previous.gradePreset : "Custom" } : {}) };
 }
 export function lookGradeStart(binding) {
-  return { ...emptyPalette, gradePreset: "Custom", customPaletteLookKey: binding.key, customPalettePreviewUrl: binding.reference.localUrl,
+  return { ...emptyPalette, customPaletteLookKey: binding.key, customPalettePreviewUrl: binding.reference.localUrl,
     customPaletteSourceName: `${binding.name} — first example`, customPaletteStatus: "extracting" };
 }

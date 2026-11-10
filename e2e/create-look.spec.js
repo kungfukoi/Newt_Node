@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 import sharp from "sharp";
 
-const description = "Preserve the requested subject and composition. Apply fine ink contours, translucent warm washes, softly feathered edges and restrained ochre highlights over subtle paper grain.";
+const description = "Fine ink contours, translucent overlapping washes, softly feathered edges and spare highlights over subtle paper grain.";
 async function setup(page) {
   const { errors } = await openFixture(page, { fixture: { nodes: [], edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 } } });
   let library = { revision: 0, collections: [] }, created = [], calls = 0, uploads = 0;
@@ -11,12 +11,12 @@ async function setup(page) {
   await page.route("**/api/style-library/catalog?**", route => json(route, { ready: true, indexed: created.length, total: created.length, categories: ["Illustrators", "Techniques"], styles: created }));
   await page.route("**/api/style-library/catalog/**", route => json(route, { style: created[0] }));
   await page.route("**/api/node/upload-asset", route => { uploads++; return json(route, { asset: { localUrl: `/outputs/e2e/input-${uploads}.png`, fileName: `input-${uploads}.png`, mimeType: "image/png" } }); });
-  await page.route("**/api/style-library/analyze", route => { calls++; expect(route.request().postDataJSON().purpose).toBe("create-look"); return json(route, { stylePrompt: description, tags: ["Techniques"], styleBlocks:[{id:"medium",text:"Fine ink contours and translucent washes"},{id:"palette",text:"Warm restrained colour relationships"},{id:"texture",text:"Subtle paper grain"}],palette:[{name:"warm paper",hex:"#e8ddc0"},{name:"ochre",hex:"#cc9933"},{name:"ink",hex:"#242b2c"}], fingerprint: "a".repeat(64), provider: "Atlas Cloud", model: "gpt-6-astra", version: 1 }); });
+  await page.route("**/api/style-library/analyze", route => { calls++; expect(route.request().postDataJSON().purpose).toBe("create-look"); return json(route, { stylePrompt: description, tags: ["Techniques"], styleBlocks:[{id:"medium",text:"Fine ink contours and translucent washes"},{id:"texture",text:"Subtle paper grain"}],palette:[{name:"warm paper",hex:"#e8ddc0"},{name:"ochre",hex:"#cc9933"},{name:"ink",hex:"#242b2c"}], fingerprint: "a".repeat(64), provider: "Atlas Cloud", model: "gpt-6-astra", version: 3 }); });
   await page.route("**/api/style-library/created", route => { const body = route.request().postDataJSON(); const style = { ...body, catalogId: body.id }; created = [style]; return json(route, { style }); });
   await page.locator(".mode-switch").getByRole("button", { name: "Looks", exact: true }).click();
   await page.getByRole("button", { name: "Create Look", exact: true }).click();
   const buffer = await sharp({ create: { width: 40, height: 60, channels: 3, background: "#ddc631" } }).png().toBuffer();
-  return { errors, dialog: page.getByRole("dialog", { name: "Create look", exact: true }), file: { name: "example.png", mimeType: "image/png", buffer }, count: () => calls, uploaded: () => uploads };
+  return { errors, dialog: page.getByRole("dialog", { name: "Create look", exact: true }), file: { name: "example.png", mimeType: "image/png", buffer }, count: () => calls, uploaded: () => uploads, saved: () => created[0] };
 }
 
 test("Create Look analyzes once, allows new tags and description edits, saves to Catalog and reuses the result in Style", async ({ page }) => {
@@ -41,7 +41,7 @@ test("Create Look analyzes once, allows new tags and description edits, saves to
   await dialog.getByRole("checkbox",{name:"Include Texture & detail",exact:true}).uncheck();
   await dialog.locator(".create-look-prompt summary").click();
   await expect(dialog.locator(".create-look-prompt")).toContainText("Soft broken ink contours");
-  await expect(dialog.locator(".create-look-prompt")).toContainText("#116677");
+  await expect(dialog.locator(".create-look-prompt")).not.toContainText(/#116677|Palette anchors|Colour treatment/);
   await expect(dialog.locator(".create-look-prompt")).not.toContainText("Subtle paper grain");
   await page.screenshot({ path: test.info().outputPath("create-look.png"), fullPage: true });
   let rejectedSave = false;
@@ -52,6 +52,9 @@ test("Create Look analyzes once, allows new tags and description edits, saves to
   await expect(dialog.locator(".create-look-images img")).toHaveCount(2);
   await dialog.getByRole("button", { name: "Save Look", exact: true }).click();
   await expect(dialog).not.toBeVisible(); await expect(page.getByRole("button", { name: "View Golden paper", exact: true })).toBeVisible();
+  expect(f.saved().colours[0].hex).toBe("#116677");
+  expect(f.saved().prompt).not.toMatch(/#116677|Palette anchors|Colour treatment/);
+  expect(f.saved().styleAnalysis.stylePrompt).toBe(f.saved().prompt);
   await page.getByRole("button", { name: "View Golden paper", exact: true }).click();
   const details = page.getByRole("dialog", { name: "Style details", exact: true });
   await expect(details).toContainText("Golden hour"); await expect(details).toContainText("Keep contrast gentle.");

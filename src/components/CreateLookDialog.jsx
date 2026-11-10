@@ -17,7 +17,7 @@ export default function CreateLookDialog({ open, categories, onClose, onSaved })
   const [busy, setBusy] = React.useState(""), [error, setError] = React.useState("");
   const [identity, setIdentity] = React.useState(() => `look-${crypto.randomUUID()}`);
   React.useEffect(() => { setIdentity(`look-${crypto.randomUUID()}`); }, [name, examples, description, tags, tag, blocks, palette]);
-  const stylePrompt=compileLookStyle(blocks,palette);
+  const stylePrompt=compileLookStyle(blocks);
   const options = lookCategories(categories);
   React.useEffect(() => { if (open && !dialog.current.open) dialog.current.showModal(); else if (!open) dialog.current.close(); }, [open]);
   async function run(status, action) {
@@ -47,7 +47,7 @@ export default function CreateLookDialog({ open, categories, onClose, onSaved })
   async function analyze() {
     await run("Astra is extracting the visual style, palette and tags…", async () => {
       const result = await styleLibraryApi.analyzeCreated({ name: name.trim() || "New look", examples, observations:description.trim() }, options);
-      setAnalysis(result); if(!description.trim())setDescription(result.stylePrompt); setTags(result.tags);setBlocks(lookStyleBlocks(result.styleBlocks));setPalette(result.palette||[]);
+      setAnalysis(result); if(!description.trim()||description===analysis?.stylePrompt)setDescription(result.stylePrompt); setTags(result.tags);setBlocks(lookStyleBlocks(result.styleBlocks));setPalette(result.palette||[]);
       if (result.warning) setError(result.warning);
     });
   }
@@ -72,6 +72,7 @@ export default function CreateLookDialog({ open, categories, onClose, onSaved })
     </div>
     <div className="create-look-analyze"><button type="button" disabled={Boolean(busy) || !examples.length} onClick={analyze}><Sparkles size={16}/>{analysis ? "Extract again" : "Extract style"}</button><span className="library-muted">Uses your configured Astra provider. Paid extraction; edits and reuse are free.</span></div>
     <LookPaletteBar colours={palette} disabled={Boolean(busy)} onChange={(index,hex)=>setPalette(current=>current.map((colour,number)=>number===index?{...colour,hex,name:"Custom"}:colour))}/>
+    {palette.length>0&&<p className="library-muted">Reference palette · saved separately from the Style prompt</p>}
     {busy && <p role="status" className="stylebuilder-notice">{busy}</p>}{error && <p role="alert" className="library-error">{error}</p>}
     <label>Short description<textarea aria-label="Look style description" value={description} maxLength={2000} disabled={Boolean(busy)} onChange={event => setDescription(event.target.value)} placeholder="Import a description, write your own, or extract it from the images."/></label>
     <section aria-label="Visual style board"><div className="create-look-board-heading"><h3>Style board</h3><span className="library-muted">Choose the sections and priorities used in your prompt.</span></div><div className="create-look-board">{blocks.map(block=>{const section=lookStyleSections.find(item=>item.id===block.id);return <article key={block.id} className={`create-look-style-card${block.enabled?"":" excluded"}`}><header><h4>{section.label}</h4><label><input type="checkbox" aria-label={`Include ${section.label}`} checked={block.enabled} disabled={Boolean(busy)||!analysis} onChange={event=>changeBlock(block.id,{enabled:event.target.checked})}/>Include</label></header><fieldset disabled={Boolean(busy)||!analysis}><LookbookSelect label={`${section.label} priority`} value={block.weight} onChange={weight=>changeBlock(block.id,{weight})} options={lookStylePriorities}/></fieldset><textarea aria-label={section.label} placeholder={section.placeholder} maxLength={600} disabled={Boolean(busy)||!analysis} value={block.text} onChange={event=>changeBlock(block.id,{text:event.target.value})}/></article>;})}</div></section>

@@ -6,26 +6,62 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   const fixture={nodes:[{id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"None",gradePreset:"Warm"}}],edges:[],groups:[],viewport:{x:0,y:0,scale:1}};
   const {errors}=await openFixture(page,{fixture});let analyses=0;
   const look=(id,name,images)=>({id,name,prompt:"Source",styleAnalysis:{stylePrompt:`Rendering treatment for ${name}`},examples:images.map(localUrl=>({localUrl}))});
-  const library={revision:0,collections:[{id:"looks",name:"Looks",styles:[look("red","Red",["/outputs/e2e/red.png","/outputs/e2e/green.png"]),look("green","Green",["/outputs/e2e/green.png","/outputs/e2e/red.png"]),look("slow","Slow",["/outputs/e2e/slow.png"])]}]};
+  const library={revision:0,collections:[{id:"looks",name:"Looks",styles:[
+    look("red","Red",["/outputs/e2e/red.png","/outputs/e2e/green.png","/outputs/e2e/yellow.png","/outputs/e2e/magenta.png"]),
+    look("green","Green",["/outputs/e2e/green.png","/outputs/e2e/red.png"]),
+    look("slow","Slow",["/outputs/e2e/slow.png"])
+  ]}]};
   await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify(library)}));
   await page.route("**/api/style-library/analyze",route=>{analyses++;return route.fulfill({status:500,body:"Analysis should not run"});});
   let releaseSlow;
   const slowGate=new Promise(resolve=>{releaseSlow=resolve;});
-  for(const [name,color] of [["red","#ff0000"],["green","#00ff00"],["slow","#0000ff"]]){
+  for(const [name,color] of [["red","#ff0000"],["green","#00ff00"],["yellow","#ffff00"],["magenta","#ff00ff"],["slow","#ff0000"]]){
     const buffer=await sharp({create:{width:48,height:32,channels:3,background:color}}).png().toBuffer();
     await page.route(`**/outputs/e2e/${name}.png`,async route=>{if(name==="slow")await slowGate;return route.fulfill({contentType:"image/png",headers:{"Access-Control-Allow-Origin":"*"},body:buffer});});
   }
   const node=page.locator('.react-flow__node[data-id="style"]'),picker=node.getByLabel("Look",{exact:true}),grade=node.getByLabel("Grade",{exact:true});
+  await expect(grade).toHaveValue("Warm");
+  await expect(grade.getByRole("option",{name:"Warm (legacy)",exact:true})).toBeDisabled();
+  await grade.selectOption("None");
+  await expect(grade.getByRole("option",{name:/^(Warm|Cool|Spiky Nike|Classy Kubric|Coney Color)( \(legacy\))?$/})).toHaveCount(0);
   await node.getByLabel("Look catalog",{exact:true}).focus();
   await expect(node.getByLabel("Look catalog",{exact:true}).getByRole("option",{name:"Looks",exact:true})).toHaveCount(1);
   await node.getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
   await picker.focus();
   await expect(picker.getByRole("option",{name:"Red",exact:true})).toHaveCount(1);
   await picker.selectOption({label:"Red"});
+  const stylePreset = node.getByLabel("Style preset", {exact:true});
+  await stylePreset.selectOption("Painterly 3D");
+  await expect(picker.locator("option:checked")).toHaveText("Red");
   await expect(grade).toHaveValue("Custom");await expect(grade).toBeEnabled();
   await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/red\.png/);
   await expect(node.locator(".custom-palette-preview")).toHaveCSS("object-fit","contain");
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF0000",{ignoreCase:true});
+  const examples = node.getByRole("group",{name:"Look examples for Grade"});
+  await expect(examples.getByRole("button")).toHaveCount(4);
+  const fourth = examples.getByRole("button",{name:"Use Look example 4 for Grade"});
+  await fourth.dragTo(node.locator(".custom-palette-preview"));
+  await expect(fourth).toHaveAttribute("aria-pressed","true");
+  await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/magenta\.png/);
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF00FF",{ignoreCase:true});
+  await grade.selectOption("Precise Color");
+  await expect(node.locator(".custom-palette-preview")).toHaveCount(0);
+  await node.getByTitle("Add selected color", {exact:true}).click();
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#DDC631",{ignoreCase:true});
+  await grade.selectOption("Custom");
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF00FF",{ignoreCase:true});
+  await page.waitForTimeout(700);await page.reload();
+  await expect(examples.getByRole("button")).toHaveCount(4);
+  await expect(fourth).toHaveAttribute("aria-pressed","true");
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF00FF",{ignoreCase:true});
+  await grade.selectOption("Precise Color");
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#DDC631",{ignoreCase:true});
+  await node.getByTitle("Clear palette colors", {exact:true}).click();
+  await expect(node.locator(".custom-grade-hex-list")).toHaveCount(0);
+  await grade.selectOption("Custom");
+  await expect(fourth).toHaveAttribute("aria-pressed","true");
+  await examples.getByRole("button",{name:"Use Look example 2 for Grade"}).press("Enter");
+  await expect(node.locator(".custom-grade-hex-list")).toContainText("#00FF00",{ignoreCase:true});
   await expect(node.locator('.custom-palette-panel input[type="file"]')).toBeEnabled();
   await expect(node.getByTitle("Clear extracted palette",{exact:true})).toBeEnabled();
   const blue=await sharp({create:{width:48,height:32,channels:3,background:"#0000ff"}}).png().toBuffer();
@@ -35,12 +71,15 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   await expect(picker.locator("option:checked")).toHaveText("Red");
   await page.waitForTimeout(700);await page.reload();
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#0000FF",{ignoreCase:true});
-  await grade.selectOption("Warm");
+  await grade.selectOption("Dusty Brothers");
   await expect(picker.locator("option:checked")).toHaveText("Red");
   await page.waitForTimeout(700);await page.reload();
-  await expect(grade).toHaveValue("Warm");
+  await expect(grade).toHaveValue("Dusty Brothers");
   const request=page.waitForRequest(request=>request.url().includes("/outputs/e2e/slow.png"));
   await picker.selectOption({label:"Slow"});await request;
+  await expect(grade).toHaveValue("Dusty Brothers");
+  await expect(stylePreset).toHaveValue("Painterly 3D");
+  await grade.selectOption("Custom");
   await override();
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#0000FF",{ignoreCase:true});
   releaseSlow();
@@ -48,6 +87,7 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   await expect(picker.locator("option:checked")).toHaveText("Slow");
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#0000FF",{ignoreCase:true});
   await picker.selectOption({label:"Green"});
+  await expect(examples.getByRole("button")).toHaveCount(2);
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#00FF00",{ignoreCase:true});
   await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/green\.png/);
   await page.waitForTimeout(700);await page.reload();
@@ -63,7 +103,10 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   await expect(node.locator(".custom-palette-preview")).toHaveAttribute("src",/red\.png/);
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#FF0000",{ignoreCase:true});
   await override();await expect(node.locator(".custom-grade-hex-list")).toContainText("#0000FF",{ignoreCase:true});
-  await picker.selectOption("");await expect(grade).toHaveValue("Custom");
+  await node.getByRole("button",{name:"Remove Look",exact:true}).click();
+  await expect(picker).toHaveValue("");
+  await expect(grade).toHaveValue("Custom");
+  await expect(stylePreset).toHaveValue("Painterly 3D");
   await expect(node.locator(".custom-grade-hex-list")).toContainText("#0000FF",{ignoreCase:true});
   expect(analyses).toBe(0);expect(errors).toEqual([]);
 });
@@ -140,7 +183,12 @@ test("Lookbook keeps details open, enlarges whole examples, clears search and re
 async function mockAnalysis(page) {
   await page.route("**/api/style-library/analyze", route => {
     const body=route.request().postDataJSON();
-    return route.fulfill({contentType:"application/json",body:JSON.stringify({stylePrompt:`Astra: ${body.observations.replace(/--sref.*$/, "").trim()}`,fingerprint:"e2e-analysis",model:"gpt-6-astra",version:1})});
+    const anchor = body.examples.length > 1 ? {
+      signatureFeature: "Build silhouettes from uneven, tapered ink strokes with deliberately broken edges.",
+      anchorReference: 2,
+      referenceCount: body.examples.length
+    } : {};
+    return route.fulfill({contentType:"application/json",body:JSON.stringify({stylePrompt:`Astra: ${body.observations.replace(/--sref.*$/, "").trim()}`,fingerprint:"e2e-analysis",model:"gpt-6-astra",version:2,...anchor})});
   });
 }
 
@@ -172,7 +220,7 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await nav.getByRole("button",{name:"Nodes",exact:true}).click();
   await expect(page.getByLabel("Look",{exact:true}).locator("option:checked")).toHaveText("Crimson ink");
-  await expect(page.getByLabel("Custom library style description")).toHaveCount(0);
+  await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveValue("Astra: Heavy ink, crimson accents, rough paper");
   await expect(page.getByTitle("Refresh library", { exact: true })).toHaveCount(0);
   await expect(page.locator(".library-style-picker").getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
   await expect(page.locator('.react-flow__node').filter({ has: page.getByLabel("Look",{exact:true}) }).locator('[data-port-key$=":styleOut"]')).toHaveCount(1);
@@ -195,7 +243,7 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await page.waitForTimeout(700);
   await page.reload();
   await expect(page.getByLabel("Look",{exact:true}).locator("option:checked")).toHaveText("Crimson ink");
-  await expect(page.getByLabel("Custom library style description")).toHaveCount(0);
+  await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveValue("Astra: Heavy ink, crimson accents, rough paper");
   await expect(page.getByLabel("Mood Board visual direction")).toHaveCount(0);
   const savedBoard = await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(node => node.type === "transfer"));
   expect(savedBoard.data.libraryBoardPrompt).toBe("Astra: Heavy ink, crimson accents, rough paper");
@@ -246,13 +294,15 @@ test("Catalog looks open details, save examples and create a named Style without
   await page.getByRole("button",{name:"Nodes",exact:true}).click();
   const createdPicker=page.locator('.react-flow__node:not([data-id="existing-style"])').getByLabel("Look",{exact:true});
   await expect(createdPicker.locator("option:checked")).toHaveText("Ink drawing");
+  await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveValue(/^Defining visual feature: Build silhouettes/);
+  await expect(page.getByRole("group",{name:"Look examples for Grade"}).getByRole("button")).toHaveCount(4);
   const existingPicker=page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look",{exact:true});
   await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).focus();
   await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
   await expect(existingPicker.getByRole("option",{name:"Ink drawing",exact:true})).toHaveCount(1);
   await existingPicker.selectOption({label:"Ink drawing"});
   await expect(existingPicker.locator("option:checked")).toHaveText("Ink drawing");
-  await expect(page.getByLabel("Custom library style description")).toHaveCount(0);
+  await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveCount(2);
   expect(library.collections[0].styles).toHaveLength(1);
   expect(library.collections[0].styles[0].prompt).toBe("Fine ink lines on warm paper.");
   expect(errors).toEqual([]);
@@ -290,14 +340,22 @@ test("A catalog look must save before its node is created, with retry after a co
 
 test("Library style reaches image generation and remains independent of later collection edits", async ({ page }) => {
   const fixture = { nodes: [
-    { id: "style", type: "style", x: 20, y: 20, data: { title: "Style", stylePreset: "None", libraryStyle: { id: "ink", name: "Ink", prompt: "Heavy ink with crimson accents" } } },
+    { id: "style", type: "style", x: 20, y: 20, data: { title: "Style", stylePreset: "Painterly 3D", gradePreset: "Custom", customPaletteRgbText: "#123456", libraryStyle: { id: "ink", name: "Ink", prompt: "Heavy ink with crimson accents" } } },
     { id: "model", type: "imageModel", x: 450, y: 20, data: { title: "Image Model", model: "Nano Banana Pro", prompt: "An old lighthouse" } }
   ], edges: [{ id: "style-wire", from: { nodeId: "style", port: "styleOut" }, to: { nodeId: "model", port: "styleIn" }, color: "#9b5cff" }], groups: [], viewport: { x: 0, y: 0, scale: 1 } };
   const { errors } = await openFixture(page, { fixture });
+  await expect(page.getByLabel("Grade",{exact:true})).toHaveValue("Precise Color");
+  await page.getByRole("textbox", {name:"Look style description", exact:true}).fill("Defining visual feature: Use irregular ink edges with crimson accents.");
+  await page.waitForTimeout(700);
+  await page.reload();
+  await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveValue("Defining visual feature: Use irregular ink edges with crimson accents.");
   let submitted;
   await page.route("**/api/node/generate-image", async route => { submitted = route.request().postDataJSON(); return route.fulfill({ contentType: "application/json", body: JSON.stringify({ images: [{ localUrl: "/outputs/e2e/generated.png" }] }) }); });
   await page.locator('.react-flow__node[data-id="model"]').locator('.run-node-button').click();
-  await expect.poll(() => submitted?.prompt || "").toContain("Heavy ink with crimson accents");
+  await expect.poll(() => submitted?.prompt || "").toContain("Use irregular ink edges with crimson accents");
+  expect(submitted.prompt).toContain("Ignore any reference colors");
+  expect(submitted.prompt).toContain("Style preset controls the rendering medium");
+  expect(submitted.prompt).toMatch(/#123456/i);
   expect(errors).toEqual([]);
 });
 

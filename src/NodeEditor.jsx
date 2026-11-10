@@ -177,9 +177,10 @@ import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { appendInputConnection, shouldDisconnectInputPort } from "./nodePortBehavior.js";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import LibraryStylePicker from "./components/LibraryStylePicker.jsx";
-import { libraryPrompt, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
-import { lookGradeBinding, lookSelectionPatch, releaseLookGrade, lookGradeEditPatch } from "./lookGrade.js";
+import { libraryPrompt, libraryStyleDirection, libraryStyleSnapshot, portableStylePrompt } from "./styleLibrary.js";
+import { lookGradeBinding, lookSelectionPatch, lookGradeEditPatch } from "./lookGrade.js";
 import { useLookGrades } from "./useLookGrades.js";
+import { migrateStyleGradeData, normalizeStyleGradePresetName, preciseColorGrade, styleGradePaletteData, styleGradePresetNames } from "./styleGrade.js";
 import { createGenerationGroupId } from "./generationProgress.js";
 import { generationProviderForModel } from "./generationPricing.js";
 import { imageEditProvider as resolveImageEditProvider } from "./imageEdit.js";
@@ -456,9 +457,7 @@ import { isReve21Model } from "./reve21.js";
 import {
   analyzeColorLookPalette,
   buildColorGradePrompt,
-  gradePresetNames,
-  gradePresetPrompts,
-  normalizeGradePresetName
+  gradePresetPrompts
 } from "./colorLook.js";
 import {
   clamp,
@@ -2838,7 +2837,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     let nextSkillDirectorData = null;
     let nextVideoModelData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
-    const styleOutputMaybeChanged = ["stylePreset", "libraryStyle", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "libraryStyle", "gradePreset", "precisePalette", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const sourceBeforeUpdate = current.find((node) => node.id === nodeId);
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
@@ -2848,7 +2847,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           ? (() => {
               const data = {
                 ...node.data,
-                ...patch
+                ...patch,
+                ...(node.type === "style" && patch.precisePalette ? { precisePalette: { ...node.data.precisePalette, ...patch.precisePalette } } : {})
               };
               if (node.type === "utility") nextUtilityData = data;
               if (node.type === "edit") nextEditData = data;
@@ -6525,12 +6525,6 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
     if (source?.type === "style") {
       if (!styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
-      if (
-        normalizeGradePresetName(source.data.gradePreset || "None") === "Custom"
-        && !customGradePromptPiece(source.data)
-        && (!source.data.stylePreset || source.data.stylePreset === "None")
-        && !libraryPrompt(source.data)
-      ) return "Add custom grade colors before connecting";
       if (target.type === "utility" && activeInputPortIdsForNode(target).includes("styleIn") && to.port === "styleIn") return "";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (["text", "textAgent"].includes(target.type) && to.port === "styleIn") return "";
@@ -13621,12 +13615,17 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
+    const selectedGrade = normalizeStyleGradePresetName(node.data.gradePreset);
     const customPaletteSelected = selectedGrade === "Custom";
+    const precisePaletteSelected = selectedGrade === preciseColorGrade;
+    const paletteSelected = customPaletteSelected || precisePaletteSelected;
+    const paletteData = styleGradePaletteData(node.data);
     const lookGradeDefault = Boolean(lookGradeBinding(node.data.libraryStyle)) && !node.data.customPaletteLookOverride;
-    const paletteColors = normalizedCustomPaletteColors(node.data);
+    const lookExamples = node.data.libraryStyle?.examples || [];
+    const lookExampleDragType = "application/x-newtnode-look-grade";
+    const paletteColors = normalizedCustomPaletteColors(paletteData);
     const styleSelected = styleOutputEnabled(node.data);
-    const customGradeAnalysis = customPaletteSelected && paletteColors.length
+    const customGradeAnalysis = paletteSelected && paletteColors.length
       ? analyzeColorLookPalette(paletteColors.map((color) => color.hex))
       : null;
 
@@ -13651,7 +13650,15 @@ function NodeBody({
       });
     }
 
-    async function handlePaletteImageSource({ sourceName, extract }) {
+    function useLookExample(example, index) {
+      return handlePaletteImageSource({
+        sourceName: `${node.data.libraryStyle.name} — example ${index + 1}`,
+        previewUrl: example.localUrl,
+        extract: () => extractCustomPaletteFromUrl(example.localUrl)
+      });
+    }
+
+    async function handlePaletteImageSource({ sourceName, previewUrl, extract }) {
       const paletteRequestId = crypto.randomUUID();
       onUndoSnapshot?.();
       onUpdate(node.id, {
@@ -13659,7 +13666,7 @@ function NodeBody({
         customPaletteStatus: "extracting",
         customPaletteError: "",
         customPaletteSourceName: sourceName,
-        customPalettePreviewUrl: "",
+        customPalettePreviewUrl: previewUrl || "",
         customPaletteColors: [],
         customPaletteRgbText: ""
       });
@@ -13671,7 +13678,7 @@ function NodeBody({
           customPaletteStatus: "",
           customPaletteError: "",
           customPaletteSourceName: sourceName,
-          customPalettePreviewUrl: extracted.previewUrl,
+          customPalettePreviewUrl: previewUrl || extracted.previewUrl,
           customPaletteColors: extracted.colors,
           customPaletteRgbText: "",
           customPalettePicker: firstExtractedColor || node.data.customPalettePicker || "#ddc631"
@@ -13687,6 +13694,12 @@ function NodeBody({
 
     function handlePaletteDrop(event) {
       allowFileDrop(event);
+      if (event.dataTransfer.types.includes(lookExampleDragType)) {
+        const url = event.dataTransfer.getData(lookExampleDragType);
+        const index = lookExamples.findIndex(example => example.localUrl === url);
+        if (index !== -1) useLookExample(lookExamples[index], index);
+        return;
+      }
       const outputItem = outputItemFromDataTransfer(event.dataTransfer) || currentDraggedOutputItem();
       if (outputItem?.type === "image") {
         handlePaletteOutputImport(outputItem);
@@ -13696,12 +13709,12 @@ function NodeBody({
     }
 
     function addPickerColor() {
-      const pickerColor = node.data.customPalettePicker || "#ddc631";
+      const pickerColor = paletteData.customPalettePicker || "#ddc631";
       const nextColors = uniqueCustomPaletteColors([...paletteColors, customPaletteColorFromHex(pickerColor)]).slice(0, 10);
       const colorAlreadyApplied = nextColors.length === paletteColors.length && nextColors.every((color, index) => color.hex === paletteColors[index]?.hex);
       if (colorAlreadyApplied) return;
       onUndoSnapshot?.();
-      onUpdate(node.id, {
+      updatePrecisePalette({
         customPaletteColors: nextColors,
         customPaletteRgbText: "",
         customPalettePicker: pickerColor,
@@ -13709,9 +13722,13 @@ function NodeBody({
       });
     }
 
+    function updatePrecisePalette(patch) {
+      onUpdate(node.id, { precisePalette: patch });
+    }
+
     async function pickScreenColor() {
       if (typeof window === "undefined" || !window.EyeDropper) {
-        onUpdate(node.id, {
+        updatePrecisePalette({
           customPaletteError: "Eye dropper is not available in this browser."
         });
         return;
@@ -13719,16 +13736,21 @@ function NodeBody({
       try {
         const result = await new window.EyeDropper().open();
         const color = customPaletteColorFromHex(result.sRGBHex);
-        onUpdate(node.id, {
+        updatePrecisePalette({
           customPalettePicker: color.hex,
           customPaletteError: ""
         });
       } catch (error) {
         if (error?.name === "AbortError") return;
-        onUpdate(node.id, {
+        updatePrecisePalette({
           customPaletteError: "Could not pick that color."
         });
       }
+    }
+
+    function clearPrecisePalette() {
+      onUndoSnapshot?.();
+      updatePrecisePalette({ customPaletteRgbText: "", customPaletteColors: [], customPaletteError: "" });
     }
 
     function clearCustomPalette() {
@@ -13750,7 +13772,7 @@ function NodeBody({
       const saturation = Math.round(x * 100);
       const value = Math.round((1 - y) * 100);
       const color = customPaletteColorFromHsv(pickerColor.hue, saturation, value);
-      onUpdate(node.id, {
+      updatePrecisePalette({
         customPalettePicker: color.hex,
         customPaletteError: ""
       });
@@ -13767,7 +13789,7 @@ function NodeBody({
       const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
       const hue = Math.round(y * 360);
       const color = customPaletteColorFromHsv(hue, pickerColor.saturation, pickerColor.value);
-      onUpdate(node.id, {
+      updatePrecisePalette({
         customPalettePicker: color.hex,
         customPaletteError: ""
       });
@@ -13779,7 +13801,7 @@ function NodeBody({
       updateHuePicker(event);
     }
 
-    const pickerColor = customPaletteColorFromHex(node.data.customPalettePicker || "#ddc631");
+    const pickerColor = customPaletteColorFromHex(paletteData.customPalettePicker || "#ddc631");
     const hasImagePalette = Boolean(node.data.customPalettePreviewUrl);
     const pickerHueColor = customPaletteColorFromHsv(pickerColor.hue, 100, 100);
     const pickerMarkerStyle = {
@@ -13802,12 +13824,15 @@ function NodeBody({
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">{customPaletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
+          <div className="style-output-placeholder">{paletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { ...releaseLookGrade(node.data), stylePreset: event.target.value, libraryStyle: null })}>
+          <select aria-label="Style preset" value={selectedPreset} onChange={(event) => {
+            onUndoSnapshot?.();
+            onUpdate(node.id, { stylePreset: event.target.value });
+          }}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -13816,18 +13841,44 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Grade</span>
-          <select aria-label="Grade" title="Choose a grade" value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
-            {gradePresetNames.map((presetName) => (
+          <select aria-label="Grade" title="Choose a grade" value={selectedGrade} onChange={(event) => {
+            onUndoSnapshot?.();
+            onUpdate(node.id, { gradePreset: event.target.value });
+          }}>
+            {styleGradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
+            {!styleGradePresetNames.includes(selectedGrade) && <option value={selectedGrade} disabled>{selectedGrade} (legacy)</option>}
           </select>
         </div>
 
-        <LibraryStylePicker data={node.data} onChange={patch => { onUndoSnapshot?.(); onUpdate(node.id, patch); }} />
-        {customPaletteSelected && (
-          <section className={`custom-palette-panel ${lookGradeDefault ? "look-grade-default" : ""}`} onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
-            {lookGradeDefault && <small className="custom-palette-status">Default grade from {node.data.libraryStyle.name} · replace or edit as needed</small>}
+        {paletteSelected && (
+          <section className="custom-palette-panel" onDragOver={customPaletteSelected ? allowFileDrop : undefined} onDrop={customPaletteSelected ? handlePaletteDrop : undefined}>
+            {customPaletteSelected && lookGradeDefault && <small className="custom-palette-status">Default grade from {node.data.libraryStyle.name} · replace as needed</small>}
             <fieldset className="look-grade-controls">
+            {customPaletteSelected && <>
+            {lookExamples.length > 0 && (
+              <div className="look-grade-examples nodrag" role="group" aria-label="Look examples for Grade">
+                {lookExamples.map((example, index) => (
+                  <button
+                    key={`${example.localUrl}-${index}`}
+                    type="button"
+                    draggable
+                    aria-label={`Use Look example ${index + 1} for Grade`}
+                    aria-pressed={node.data.customPalettePreviewUrl === example.localUrl}
+                    title={`Click or drag example ${index + 1} onto the Grade preview`}
+                    onClick={() => useLookExample(example, index)}
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      event.dataTransfer.effectAllowed = "copy";
+                      event.dataTransfer.setData(lookExampleDragType, example.localUrl);
+                    }}
+                  >
+                    <img {...fullResolutionImageProps(example.localUrl)} src={displayMediaUrl(previewImageUrl(example.localUrl))} alt="" draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
+                  </button>
+                ))}
+              </div>
+            )}
             <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
               <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
@@ -13853,8 +13904,9 @@ function NodeBody({
                 </button>
               )}
             </div>
+            </>}
 
-            {!hasImagePalette && (
+            {precisePaletteSelected && (
               <>
                 <div className="custom-palette-inline-picker">
                   <div className="custom-palette-spectrum-wrap" style={pickerMarkerStyle}>
@@ -13890,14 +13942,14 @@ function NodeBody({
                       <Pipette size={16} />
                       <span>Pick</span>
                     </button>
-                    <button type="button" className="custom-palette-tool muted" onClick={clearCustomPalette} title="Clear palette colors">
+                    <button type="button" className="custom-palette-tool muted" onClick={clearPrecisePalette} title="Clear palette colors">
                       <Trash2 size={16} />
                       <span>Clear</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="custom-palette-swatches" aria-label="Custom palette colors">
+                <div className="custom-palette-swatches" aria-label="Precise Color swatches">
                   {paletteColors.map((color) => (
                     <span key={`${color.hex}-${color.hue}-${color.value}`} title={`${color.hex} RGB(${color.r}, ${color.g}, ${color.b}) H${color.hue} V${color.value}%`} style={{ "--swatch-color": color.hex }} />
                   ))}
@@ -13921,11 +13973,16 @@ function NodeBody({
                 </div>
               </div>
             )}
-            {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
-            {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
+            {customPaletteSelected && node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
+            {paletteData.customPaletteError && <small className="upload-error">{paletteData.customPaletteError}</small>}
             </fieldset>
           </section>
         )}
+        <LibraryStylePicker data={node.data}
+          onChange={patch => { onUndoSnapshot?.(); onUpdate(node.id, patch); }}
+          onEditStart={onUndoSnapshot}
+          onEditPrompt={libraryStyle => onUpdate(node.id, { libraryStyle })}
+        />
       </div>
     );
   }
@@ -23875,8 +23932,8 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
   if (source.type === "style") {
     const selectedPreset = source.data.stylePreset || "None";
     return [
+      libraryStyleDirection(source.data),
       stylePresetPrompts[selectedPreset] || "",
-      libraryPrompt(source.data),
       gradePromptPiece(source.data)
     ].filter(Boolean);
   }
@@ -24042,26 +24099,23 @@ function customGradePromptPiece(data = {}) {
 }
 
 function gradePromptPiece(data = {}) {
-  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
-  if (selectedGrade === "Custom") return customGradePromptPiece(data);
+  const selectedGrade = normalizeStyleGradePresetName(data.gradePreset);
+  if (selectedGrade === "Custom" || selectedGrade === preciseColorGrade) return customGradePromptPiece(styleGradePaletteData(data));
   return gradePresetPrompts[selectedGrade] || "";
 }
 
 function styleOutputEnabled(data = {}) {
   const selectedPreset = data.stylePreset || "None";
-  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
   const hasStyle = selectedPreset !== "None" || Boolean(libraryPrompt(data));
-  const hasGrade = selectedGrade === "Custom" ? Boolean(customGradePromptPiece(data)) : selectedGrade !== "None";
-  return hasStyle || hasGrade;
+  return hasStyle || Boolean(gradePromptPiece(data));
 }
 
 function styleGradeLabel(data = {}) {
-  const style = libraryPrompt(data) ? data.libraryStyle.name || "Library Style" : data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
-  const grade = normalizeGradePresetName(data.gradePreset || "None");
-  const gradeLabel = grade === "Custom"
-    ? (customGradePromptPiece(data) ? "Custom Grade" : "")
-    : grade !== "None" ? grade : "";
-  return [style, gradeLabel].filter(Boolean).join(" + ") || "Style";
+  const look = libraryPrompt(data) ? data.libraryStyle.name || "Library Style" : "";
+  const style = data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
+  const grade = normalizeStyleGradePresetName(data.gradePreset);
+  const gradeLabel = gradePromptPiece(data) ? (grade === "Custom" ? "Custom Grade" : grade) : "";
+  return [look, style, gradeLabel].filter(Boolean).join(" + ") || "Style";
 }
 
 function customPaletteColorFromHex(value) {
@@ -25929,6 +25983,7 @@ function normalizeCoverageData(data = {}) {
 }
 
 function normalizeStyleData(data = {}) {
+  data = migrateStyleGradeData(data);
   const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
   const customPaletteColors = normalizedCustomPaletteColors(data);
   const legacyCustomPalette = data.stylePreset === "Custom Palette";
@@ -25938,7 +25993,13 @@ function normalizeStyleData(data = {}) {
     title: data.title || "Style",
     stylePreset: normalizeStylePresetName(legacyCustomPalette ? "None" : data.stylePreset || "None"),
     libraryStyle: data.libraryStyle ? libraryStyleSnapshot(data.libraryStyle) : null,
-    gradePreset: normalizeGradePresetName(data.gradePreset || (legacyCustomPalette ? "Custom" : "None")),
+    gradePreset: data.gradePreset,
+    precisePalette: {
+      customPaletteRgbText: String(data.precisePalette?.customPaletteRgbText || ""),
+      customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.precisePalette?.customPalettePicker || "")) ? data.precisePalette.customPalettePicker : "#ddc631",
+      customPaletteColors: normalizedCustomPaletteColors(data.precisePalette || {}),
+      customPaletteError: ""
+    },
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
     customPaletteColors,

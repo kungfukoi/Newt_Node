@@ -4530,7 +4530,36 @@ video.newtnode-video-fallback {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+}
+
+.look-grade-examples {
+  display: flex;
+  gap: 5px;
+}
+
+.look-grade-examples button {
+  width: 42px;
+  min-width: 0;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.34);
+  cursor: grab;
+}
+
+.look-grade-examples button:hover,
+.look-grade-examples button[aria-pressed="true"] {
+  border-color: #ddc631;
+}
+
+.look-grade-examples img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .custom-palette-image-clear {
@@ -10636,5 +10665,3 @@ video.newtnode-video-fallback {
 .preview-layout-item.drop-after { border-right: 3px solid #ddc631; box-shadow: inset -4px 0 0 rgba(221, 198, 49, 0.35); }
 
 .look-grade-controls { display:grid; gap:9px; border:0; padding:0; margin:0; min-width:0; }
-
-.custom-palette-panel.look-grade-default .custom-palette-preview { object-fit:contain; }

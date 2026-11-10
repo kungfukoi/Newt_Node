@@ -6,6 +6,7 @@ import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema,
 import Ajv from "ajv";
 import { explorePlanSchema, normalizeExplorePlan } from "../src/explore.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
+import { lookStyleSections } from "../src/createLookStyle.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
 export const creativeFalModel = `openai/${creativeOpenAiModel}`;
@@ -25,8 +26,18 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
-  "look-create-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 2000 }, tags: list({ ...nonempty, maxLength: 80 }, 1, 8), visualStyle: object(Object.fromEntries(["medium","palette","lighting","texture","shape","depth","mood"].map(key=>[key,{type:"string",maxLength:600}]))), palette: list(object({name:{...nonempty,maxLength:80},hex:{type:"string",pattern:"^#[a-fA-F0-9]{6}$"}}),0,6) }),
-  "look-style-analysis": object({ stylePrompt: { ...nonempty, minLength: 80, maxLength: 6000 } }),
+  "look-create-analysis": object({
+    stylePrompt: { ...nonempty, minLength: 80, maxLength: 2000 },
+    tags: list({ ...nonempty, maxLength: 80 }, 1, 8),
+    visualStyle: object(Object.fromEntries(lookStyleSections.map(({ id }) => [id, { type: "string", maxLength: 600 }]))),
+    palette: list(object({ name: { ...nonempty, maxLength: 80 }, hex: { type: "string", pattern: "^#[a-fA-F0-9]{6}$" } }), 0, 6)
+  }),
+  "look-style-analysis": object({
+    stylePrompt: { ...nonempty, minLength: 80, maxLength: 6000 },
+    signatureFeature: { ...nonempty, minLength: 30, maxLength: 1200 },
+    anchorReference: { type: "integer", minimum: 1, maximum: 8 },
+    referenceCount: { type: "integer", minimum: 1, maximum: 8 }
+  }),
   "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
   "storyboard-script-shotlist": scriptShotsSchema,

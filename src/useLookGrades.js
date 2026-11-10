@@ -20,7 +20,7 @@ export function useLookGrades(nodes, updateNode, extractPalette) {
       if (node.data.customPaletteLookOverride) { pending.current.delete(node.id); continue; }
       if (node.data.customPaletteLookKey === binding.key) {
         // An interrupted local extraction can resume when a workflow is reopened.
-        if (node.data.customPaletteColors?.length || node.data.customPaletteError || pending.current.has(node.id)) continue;
+        if (node.data.customPaletteColors?.length || node.data.customPaletteError) continue;
       }
       if (pending.current.get(node.id)?.key === binding.key) continue;
       const job = { key: binding.key };

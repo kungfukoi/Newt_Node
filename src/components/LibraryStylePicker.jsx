@@ -1,15 +1,17 @@
 import React from "react";
+import { X } from "lucide-react";
 import { styleLibraryApi } from "../api/newtApi.js";
-import { libraryStyleSnapshot } from "../styleLibrary.js";
 import { lookSelectionPatch, releaseLookGrade } from "../lookGrade.js";
 import { starredCatalogLooks } from "../lookCatalogs.js";
 import "../LibraryWorkspace.css";
 
-export default function LibraryStylePicker({ data, onChange }) {
+export default function LibraryStylePicker({ data, onChange, onEditStart, onEditPrompt }) {
   const [collections, setCollections] = React.useState([]);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
+  const latestData = React.useRef(data);
+  React.useLayoutEffect(() => { latestData.current = data; }, [data]);
   async function choose(value) {
     if (!value) { onChange({ ...releaseLookGrade(data), libraryStyle: null, lookCatalogId:["none","all"].includes(catalogValue)?catalogValue:catalogValue.slice(11) }); return; }
     if (value === "workflow-style") return;
@@ -25,7 +27,7 @@ export default function LibraryStylePicker({ data, onChange }) {
         await styleLibraryApi.save({ ...library, collections: library.collections.map(item => item.id === collectionId ? { ...item, styles: item.styles.map(saved => saved.id === id ? style : saved) } : item) });
         if (styleAnalysis.warning) setError(styleAnalysis.warning);
       }
-      onChange({...lookSelectionPatch(style, data),lookCatalogId:catalogValue==="all"?"all":collectionId});
+      onChange({...lookSelectionPatch(style, latestData.current),lookCatalogId:catalogValue==="all"?"all":collectionId});
     } catch (error) { setError(error.message); }
     finally { setAnalyzing(false); }
   }
@@ -41,14 +43,14 @@ export default function LibraryStylePicker({ data, onChange }) {
     return () => window.removeEventListener("newtnode:style-library-updated", load);
   }, []);
   const current = data.libraryStyle;
-  const selectedCollection = current && collections.find(collection => collection.styles.some(style => style.id === current.id && libraryStyleSnapshot(style).prompt === current.prompt));
+  const selectedCollection = current && collections.find(collection => collection.styles.some(style => style.id === current.id));
   const catalogs=[{value:"none",label:"None"},{value:"all",label:"All"},...collections.map(item=>({value:`collection:${item.id}`,label:item.name}))];
   const requested=["none","all"].includes(data.lookCatalogId)?data.lookCatalogId:data.lookCatalogId==="starred"?"all":data.lookCatalogId?`collection:${data.lookCatalogId}`:"";
   const inferred=selectedCollection?`collection:${selectedCollection.id}`:current?"all":"none";
   const catalogValue=catalogs.some(option=>option.value===requested)?requested:catalogs.some(option=>option.value===inferred)?inferred:"none";
   const visibleStyles=catalogValue==="all"?starredCatalogLooks(collections):collections.find(item=>`collection:${item.id}`===catalogValue)?.styles||[];
   const rows=visibleStyles.map(style=>({style,owner:collections.find(item=>item.styles.includes(style))}));
-  const selected=rows.find(({style})=>current&&style.id===current.id&&libraryStyleSnapshot(style).prompt===current.prompt);
+  const selected=rows.find(({style})=>current&&style.id===current.id);
   const value = selected ? `${selected.owner.id}:${current.id}` : current ? "workflow-style" : "";
   return <section className="library-style-picker nodrag nowheel" onPointerDown={event => event.stopPropagation()}>
     <div className="style-preset-row"><span>Catalog</span><select aria-label="Look catalog" title="Choose All saved looks or a catalog" value={catalogValue} disabled={analyzing} onFocus={load} onChange={event=>{setError("");onChange({...releaseLookGrade(data),libraryStyle:null,lookCatalogId:["none","all"].includes(event.target.value)?event.target.value:event.target.value.slice(11)});}}>{catalogs.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
@@ -62,5 +64,15 @@ export default function LibraryStylePicker({ data, onChange }) {
     {!error&&!analyzing&&<small className="library-muted">{catalogValue==="none"?"Choose a catalog, then a look.":loading&&!collections.length?"Loading saved looks…":!rows.length&&!current?"No looks saved here yet.":""}</small>}
     {error && <small role="alert">{error}</small>}
     {analyzing && <small role="status">Astra is analyzing this look. Paid analysis runs once; the description is saved for reuse.</small>}
+    {current && (
+      <div className="library-look-preview">
+        <div className="library-look-heading">
+          <strong>{current.name || "Saved Look"}</strong>
+          <button type="button" aria-label="Remove Look" title="Remove Look" disabled={analyzing} onClick={() => choose("")}><X size={15} /></button>
+        </div>
+        <textarea aria-label="Look style description" value={current.prompt || ""} maxLength={12000}
+          onFocus={onEditStart} onChange={event => onEditPrompt({ ...current, prompt: event.target.value })} />
+      </div>
+    )}
   </section>;
 }
