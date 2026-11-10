@@ -68,27 +68,58 @@ export function batchMediaType(node) {
   return node?.data?.batchMediaType || node?.data?.batchFiles?.[0]?.type || node?.data?.batchResults?.[0]?.type || "image";
 }
 
-// Carry pending collection context through ordinary Prompt connections, so a
-// new chain can be wired before making any paid Text Agent request.
-export function initializeTextAgentBatches(nodes, edges) {
+// Trace live collection inputs through Text Agent chains. A saved result from
+// an agent whose batch was disconnected cannot start another chain.
+function textAgentBatchKinds(nodes, edges) {
   const byId = new Map(nodes.map(node => [node.id, node]));
-  let changed = false;
+  const kinds = new Map();
   for (let pass = 0; pass < nodes.length; pass++) {
     let added = false;
-    const assigned = new Set();
     for (const edge of edges) {
       const source = byId.get(edge.from.nodeId), target = byId.get(edge.to.nodeId);
-      if (target?.type !== "textAgent" || !isBatchConnection({ source, edge })) continue;
-      if (assigned.has(target.id)) continue;
-      assigned.add(target.id);
-      const kind = source.data?.batchMediaType || batchMediaType(source);
-      if (Array.isArray(target.data?.batchResults) && target.data.batchMediaType === kind) continue;
-      byId.set(target.id, { ...target, data: { ...target.data, batchResults: target.data?.batchResults || [], batchMediaType: kind } });
-      changed = added = true;
+      if (target?.type !== "textAgent" || kinds.has(target.id)) continue;
+      const kind = source?.type === "textAgent" ? kinds.get(source.id)
+        : isBatchConnection({ source }) ? batchMediaType(source) : "";
+      if (!kind) continue;
+      kinds.set(target.id, kind);
+      added = true;
     }
     if (!added) break;
   }
-  return changed ? nodes.map(node => byId.get(node.id)) : nodes;
+  return kinds;
+}
+
+// Carry pending context through ordinary Prompt connections before any requests.
+export function initializeTextAgentBatches(nodes, edges) {
+  const kinds = textAgentBatchKinds(nodes, edges);
+  let changed = false;
+  const ready = nodes.map(node => {
+    const kind = kinds.get(node.id);
+    if (!kind || (Array.isArray(node.data?.batchResults) && node.data.batchMediaType === kind)) return node;
+    changed = true;
+    return { ...node, data: { ...node.data, batchResults: node.data?.batchResults || [], batchMediaType: kind } };
+  });
+  return changed ? ready : nodes;
+}
+
+export function batchPromptSummary(entries = []) {
+  return entries.map(item => `${item.label}\n${item.prompt}`).join("\n\n");
+}
+
+export function standaloneTextAgentPrompt(data) {
+  if (data.batchResults?.length && data.resultText === batchPromptSummary(data.batchResults)) return "";
+  return data.resultText;
+}
+
+export function resolveTextAgentBatchOutputs(nodes, edges) {
+  if (!nodes.some(node => node.type === "textAgent" && Array.isArray(node.data?.batchResults))) return nodes;
+  const kinds = textAgentBatchKinds(nodes, edges);
+  return nodes.map(node => {
+    if (node.type !== "textAgent" || !Array.isArray(node.data?.batchResults) || kinds.has(node.id)) return node;
+    const resultText = standaloneTextAgentPrompt(node.data);
+    return { ...node, data: { ...node.data, batchResults: undefined, resultText,
+      ...(resultText !== node.data.resultText ? { agentDraft: "" } : {}) } };
+  });
 }
 
 // UI estimates must include an unrun agent's sources, rather than disabling

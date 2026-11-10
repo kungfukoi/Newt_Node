@@ -1,23 +1,26 @@
-import { runBatchEntries } from "../batch.js";
+import { batchPromptSummary, runBatchEntries } from "../batch.js";
+import { existingResultItemsForNode } from "../mediaResults.js";
+import { appendUniqueVideoResults } from "../remoteVideoJobs.js";
 
 // Each entry gets isolated runner state and graph inputs. Only the collected
 // results are published to the real node; workers never swap the live graph.
-export async function runMediaBatch({ node, plan, execute, update, stopped, concurrency = 3 }) {
+export async function runMediaBatch({ node, plan, execute, update, stopped, selectedResultUrl = () => node.data.resultUrl, concurrency = 3 }) {
   const retry = Boolean(node.data.batchRetryEntry);
+  const keepVideoPreview = node.type === "videoModel";
+  const previousVideos = keepVideoPreview ? existingResultItemsForNode(node, "video") : [];
   const retained = retry ? (node.data.resultItems || []).filter(item => item.batchRunIndex !== plan[0].runIndex) : [];
   const retainedBatch = retry ? (node.data.batchResults || []).filter(item => item.batchRunIndex !== plan[0].runIndex) : [];
   const retainedFailures = retry ? (node.data.batchFailedEntries || []).filter(item => item.runIndex !== plan[0].runIndex) : [];
   const states = plan.map(entry => ({ entry, data: {}, finished: false }));
   const textMode = ["text", "textAgent", "skillDirector"].includes(node.type);
   function collect() {
-    const items = [...retained], collection = [...retainedBatch], texts = [];
+    const items = [...retained], collection = [...retainedBatch];
     for (const state of states) {
       const { entry, data } = state;
       const annotate = (item, index) => ({ ...item, label: `${entry.label} · ${index + 1}`, batchSourceId: entry.id,
         batchSourceUrl: entry.url, batchPrompt: entry.prompt || "", batchRunIndex: entry.runIndex,
         batchInputs: entry.inputs, batchNodeId: entry.inputs?.[0]?.batchId });
       if (textMode && data.resultText && !state.error) {
-        texts.push({ label: entry.label, text: data.resultText });
         collection.push({ ...entry, id: `${entry.id}:prompt`, prompt: data.resultText, batchRunIndex: entry.runIndex });
       } else {
         const results = Array.isArray(data.resultItems) ? data.resultItems : data.resultUrl ? [{ url: data.resultUrl, type: data.resultType || "image" }] : [];
@@ -30,23 +33,27 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
     }
     items.sort((a, b) => (a.batchRunIndex || 0) - (b.batchRunIndex || 0));
     collection.sort((a, b) => (a.batchRunIndex || 0) - (b.batchRunIndex || 0));
-    if (textMode) texts.splice(0, texts.length, ...collection.map(item => ({ label: item.label, text: item.prompt })));
-    return { items, collection, texts };
+    return { items, collection };
   }
   function publish() {
     if (stopped()) return;
-    const { items, collection, texts } = collect();
+    const { items, collection } = collect();
     const completed = states.filter(state => state.finished).length;
     const active = states.find(state => !state.finished && state.data.status === "running")?.data || {};
+    // Keep the gallery available while publishing only this batch's entries downstream.
+    const previewItems = keepVideoPreview ? appendUniqueVideoResults(previousVideos, items) : items;
+    const previewIndex = keepVideoPreview ? Math.max(0, previewItems.findIndex(item => item.url === selectedResultUrl())) : 0;
+    const previewItem = previewItems[previewIndex];
     update({ status: "running", batchProgress: `${completed} / ${plan.length}`, batchResults: collection, ...(collection.length ? { batchMediaType: collection[0].type } : {}),
       ...Object.fromEntries(["keyerProgress", "keyerJobId", "videoOutpaintStage"].filter(key => active[key] !== undefined).map(key => [key, active[key]])),
-      ...(items.length ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
-      ...(textMode ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}),
+      ...(items.length && previewItem ? { resultItems: previewItems, resultUrl: previewItem.url, resultType: previewItem.type, selectedResultIndex: previewIndex } : {}),
+      ...(textMode ? { resultText: batchPromptSummary(collection) } : {}),
       remoteVideoRunIds: [...new Set(states.flatMap(state => state.data.remoteVideoRunIds || []))] });
   }
   update({ status: "running", error: "", batchRunActive: true, batchProgress: `0 / ${plan.length}`, batchFailedEntries: retainedFailures,
-    batchResults: retainedBatch, resultItems: retained, resultUrl: retained[0]?.url || "", selectedResultIndex: 0,
-    ...(textMode ? { resultText: retainedBatch.map(item => `${item.label}\n${item.prompt}`).join("\n\n") } : {}) });
+    batchResults: retainedBatch,
+    ...(!keepVideoPreview ? { resultItems: retained, resultUrl: retained[0]?.url || "", selectedResultIndex: 0 } : {}),
+    ...(textMode ? { resultText: batchPromptSummary(retainedBatch) } : {}) });
   await runBatchEntries(plan, { concurrency, stopped, run: async (entry, index) => {
     const state = states[index];
     try {
@@ -60,7 +67,7 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
   } });
   if (stopped()) return { status: "error" };
   const failures = states.filter(state => state.error).map(state => ({ ...state.entry, error: state.error, variation: 0 }));
-  const { items, collection, texts } = collect();
+  const { items, collection } = collect();
   const last = states.filter(state => !state.error).at(-1)?.data || {};
   // Preserve node-specific viewer/configuration state from a completed entry.
   const { status, error, resultItems, resultUrl, resultText, selectedResultIndex, remoteVideoRunIds, ...lastPatch } = last;
@@ -70,9 +77,10 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, conc
     for (const key of ["agentDraft", "agentMessages", "textPromptHistoryIndex", "textPromptHistoryDraft"]) delete lastPatch[key];
   }
   const message = failures.length ? `${plan.length - failures.length} of ${plan.length} batch entries completed. ${failures[0].error}` : "";
+  const replacePreview = items.length > (keepVideoPreview ? retained.length : 0);
   update({ ...lastPatch, status: failures.length ? "error" : "complete", error: message, batchRunActive: false, batchProgress: "", batchRetryEntry: null,
     batchFailedEntries: [...retainedFailures, ...failures], batchResults: collection,
-    ...(items.length ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
-    ...(textMode ? { resultText: texts.map(item => `${item.label}\n${item.text}`).join("\n\n") } : {}) });
+    ...(replacePreview ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
+    ...(textMode ? { resultText: batchPromptSummary(collection) } : {}) });
   return { status: failures.length ? "error" : "complete", ...(failures.length ? { error: new Error(message) } : {}), resultItems: items };
 }

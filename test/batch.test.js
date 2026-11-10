@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph, batchChildNode, initializeTextAgentBatches, upstreamBatchTextAgents, batchInputEntryCount, batchInputConnections, migrateBatchOutputEdge } from "../src/batch.js";
+import { batchEntries, validateBatchEntries, runBatchEntries, buildBatchPlan, materializeBatchGraph, batchChildNode, initializeTextAgentBatches, resolveTextAgentBatchOutputs, upstreamBatchTextAgents, batchInputEntryCount, batchInputConnections, migrateBatchOutputEdge } from "../src/batch.js";
 import { runMediaBatch } from "../src/nodeRunners/batch.js";
 import { buildSelectedRunnableDependencies } from "../src/nodeRunner.js";
 import { createFlowConnectionIndex } from "../src/flowNodeConnections.js";
@@ -57,6 +57,24 @@ test("fresh normal Prompt chains inherit pending batch context and legacy specia
   assert.equal(migrated.id, legacy.id); assert.equal(migrated.from.port, "promptOut"); assert.equal(migrated.to.port, "promptIn");
   assert.equal(legacy.from.port, "batchOut");
   assert.equal(migrateBatchOutputEdge(edges[0], batch, first, "batchOut", "textIn"), edges[0]);
+});
+
+test("detaching a batch deactivates saved pairs and aggregate prompts throughout its Text Agent chain", () => {
+  const source = { id: "batch", type: "batch", data: { batchMediaType: "image" } };
+  const batchResults = [{ label: "Frame 1", prompt: "Paired prompt" }];
+  const first = { id: "first", type: "textAgent", data: { batchResults, resultText: "Frame 1\nPaired prompt", agentDraft: "Write one prompt per frame" } };
+  const second = { id: "second", type: "textAgent", data: { batchResults, resultText: "Standalone prompt" } };
+  const nodes = [source, first, second];
+  const prompt = { from: { nodeId: first.id, port: "promptOut" }, to: { nodeId: second.id, port: "promptIn" } };
+  const media = { from: { nodeId: source.id, port: "batchOut" }, to: { nodeId: first.id, port: "imageIn" } };
+  assert.deepEqual(resolveTextAgentBatchOutputs(nodes, [prompt, media]), nodes);
+  const [, detachedFirst, detachedSecond] = resolveTextAgentBatchOutputs(nodes, [prompt]);
+  assert.equal(detachedFirst.data.batchResults, undefined);
+  assert.equal(detachedFirst.data.resultText, "");
+  assert.equal(detachedFirst.data.agentDraft, "");
+  assert.equal(detachedSecond.data.batchResults, undefined);
+  assert.equal(detachedSecond.data.resultText, "Standalone prompt");
+  assert.equal(first.data.batchResults, batchResults);
 });
 test("selected consumer waits for selected producers across a passive Batch", () => {
   const nodes = [{ id: "producer", type: "imageModel" }, { id: "consumer", type: "imageModel" }];

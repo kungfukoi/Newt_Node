@@ -75,7 +75,9 @@ export function createFlowConnectionIndex() {
         if (seen.has(sourceId)) return [];
         seen.add(sourceId);
         const source = nodeById.get(sourceId);
-        return [source?.data, ...(source?.type === "batch" ? (incoming.get(sourceId) || []).flatMap(item => collect(item.id, new Set(seen))) : [])];
+        const followsBatchInputs = source?.type === "batch" ||
+          (source?.type === "textAgent" && Array.isArray(source.data?.batchResults));
+        return [source?.data, ...(followsBatchInputs ? (incoming.get(sourceId) || []).flatMap(item => collect(item.id, new Set(seen))) : [])];
       };
       const values = incoming.get(id).flatMap(source => collect(source.id));
       const previous = inputDependencyRefsByNode.get(id);

@@ -7166,7 +7166,10 @@ const handleVideoGeneration = durableVideoRequestHandler(async (req, res) => {
           }, { bracketSyntax: false })
         : prompt;
     if (seedance25) {
-      submittedPrompt = seedanceSubmittedPrompt(submittedPrompt, runtimeProvider);
+      submittedPrompt = seedanceSubmittedPrompt(submittedPrompt, runtimeProvider, {
+        hasStartFrame: Boolean(startFrameUrl),
+        hasEndFrame: Boolean(startFrameUrl && endFrameUrl)
+      });
     }
     const referenceVideoDurations = seedance25 && ["fal", "atlas"].includes(runtimeProvider) && routeKind === "reference-to-video"
       ? await localVideoDurations(referenceVideoUrls)

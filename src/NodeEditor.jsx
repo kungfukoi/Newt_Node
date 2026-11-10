@@ -13,7 +13,7 @@ import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
-import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, resolveTextAgentBatchOutputs, standaloneTextAgentPrompt, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
 import { runMediaBatch } from "./nodeRunners/batch.js";
 import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
@@ -7467,6 +7467,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       token.groupId = groupId;
       let outputTarget;
       const outcome = await runMediaBatch({ node, plan, stopped: () => token.stopped,
+        selectedResultUrl: () => nodesRef.current.find(item => item.id === node.id)?.data.resultUrl,
         concurrency: nodeBatchConcurrency(node, modelProviderPreferences),
         update: patch => { if (!token.stopped) actions.updateNode(node.id, patch); },
         execute: async (entry, capture) => {
@@ -7568,7 +7569,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       updateNode(currentNode.id, { nodeReferenceBindings });
     }
 
-    const referenceNodes = resolvePlainTextGraphNodes(graphNodes, graphEdges)
+    const referenceNodes = resolvePlainTextGraphNodes(resolveTextAgentBatchOutputs(graphNodes, graphEdges), graphEdges)
       .map((item) => item.id === currentNode.id ? currentNode : item);
     const currentIncomingByNode = buildIncomingByNode(graphNodes, graphEdges);
     const incoming = currentIncomingByNode[currentNode.id] || {};
@@ -7778,7 +7779,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       if (currentNode.type === "textAgent") {
         const agentMessage = String(runOptions.agentMessage ?? currentNode.data.agentDraft ?? "").trim();
         if (!agentMessage) throw new Error("Enter a message before running Text Agent.");
-        const previousMessages = textAgentMessagesForPrompt(currentNode.data);
+        const previousMessages = textAgentMessagesForPrompt({ ...currentNode.data, resultText: standaloneTextAgentPrompt(currentNode.data) });
         const userMessage = createTextAgentMessage("user", agentMessage);
         const messagesWithUser = appendTextAgentMessage(previousMessages, userMessage);
         updateNode(currentNode.id, {
@@ -7808,7 +7809,10 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           error: "",
           agentMessages: appendTextAgentMessage(messagesWithUser, assistantMessage),
           resultText: processed.text,
-          lastRunModel: processed.model
+          lastRunModel: processed.model,
+          ...(!runOptions.batchGroupId && Array.isArray(currentNode.data.batchResults)
+            ? { batchResults: undefined, batchFailedEntries: [], batchRetryEntry: null }
+            : {})
         });
         if (outputTarget) {
           const saved = await saveTextToOutputTarget(outputTarget, currentNode, processed.text, requestContext);
@@ -21186,7 +21190,7 @@ function batchMediaInputPort(node, kind, preferred) {
 }
 
 function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
-  const nodeMap = new Map(resolvePlainTextGraphNodes(nodes, edges).map((node) => [node.id, node]));
+  const nodeMap = new Map(resolvePlainTextGraphNodes(resolveTextAgentBatchOutputs(nodes, edges), edges).map((node) => [node.id, node]));
   const raw = edges.reduce((incoming, edge) => {
     const source = nodeMap.get(edge.from.nodeId);
     if (!source) return incoming;

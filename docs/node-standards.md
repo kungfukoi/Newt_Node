@@ -62,6 +62,10 @@ File drops/uploads reuse a byte-identical file already inside the current workfl
 
 Preview groups expanded batch entries by connected producer/output port and exposes the full result list in its thumbnail browser. Selecting a result on the producer updates Preview even if Preview saved an older index; selecting a Preview thumbnail updates the real producer, never a synthetic batch-entry node. Existing batch outputs must be browsable without rerunning generation.
 
+During a Video Model media batch, Preview keeps previous takes available for playback and selection alongside newly completed takes. Arriving takes preserve the active clip while the batch runs. The completed batch publishes its own result set, and a run that produces no new takes keeps the previous clips viewable.
+
+Disconnecting a Text Agent's last live batch input disables its saved batch pairs on the Prompt output for future runs. A standalone response can still flow over the Prompt wire. A standalone Send uses ordinary conversation and publishes a single response. Disconnecting a wire does not cancel an active run's captured inputs. Use Stop to stop queued work; provider jobs already submitted may still finish.
+
 Connection wire colors follow the current source output port, including Prompt outputs carrying private batch context. Normalize stale saved colors when loading or changing graphs; connection direction must not change the completed wire's type color. Existing selection and inactive-state highlights remain separate visual states.
 
 Resizing a node normalizes automatically laid-out text fields to the available interior height. Text Agent's Response and User prompt fill its available interior together; a draggable, keyboard-accessible divider determines their relative sizes and persists its ratio across node resizing and reload; Batch progress/result footers keep their natural height on every node. Explicit textarea resizing remains a separate saved mode. Saving/reloading automatically sized nodes must not restore stale measured field heights as fixed inline sizes.
@@ -1314,6 +1318,8 @@ When a Video Model retains a finished Seedance draft, a directly connected Outpu
 Edit Existing Video is an explicit Seedance 2.5 task on Fal, Atlas Cloud or Krea, accepts exactly one managed 4–30 second source video, optional images/audio, and no Director or Start/End Frames. Duration and framing display Source video without replacing saved settings. Fal receives task editing and auto duration/aspect; Atlas receives edit, duration -1 and adaptive ratio. Krea uses an explicit editing prompt with reference_videos; its wrapper preserves the source ratio and duration internally. Unknown editing prices stay unknown.
 
 Video reference consumers use visible node/Character tags when the prompt names them; other consumers retain output labels. Seedance 2.5 maps to numbered @ImageN, @VideoN and @AudioN tags and rejects unmatched tags before submitting video generation. Older regular-generation workflows and existing exact-dialogue/audio behavior remain intact. Mocked tests validate contracts, not live generation quality.
+
+For Seedance 2.5 image-to-video, `@start` and `@end` refer to connected Start Frame and End Frame inputs. The server converts those aliases to first-frame and last-frame wording in the submitted prompt, while preserving the authored prompt and dedicated frame inputs. An alias with no matching frame remains a validation error.
 
 Seedance 2.5 Draft is toggleable with Fal, Atlas or Krea selected. A connected Director owns its Draft setting. Never silently change providers for drafts.
 

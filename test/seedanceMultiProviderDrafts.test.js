@@ -55,6 +55,7 @@ function routeHarness(provider, { missingKey = false, rotateDuringUpload = false
     rewriteReferenceMentions: prompt => prompt, optionalInteger: () => undefined, durationToSeconds: value => parseInt(value),
     resolveLocalAssetPathFromUrl: async url => ({ filePath: url }), probeVideoFile: async () => ({ duration: 10 }), localVideoDurations: async urls => urls.map(() => 10),
     resolveKreaSeedanceAspectRatio: async ({ value }) => value,
+    estimateSeedanceCost: () => ({ amountUsd: null, currency: "USD", estimated: true }),
     uploadKreaReferenceImage: upload, uploadLocalOutputToKrea: upload,
     uploadLocalOutputToFal: upload,
     createSingleSubmissionFalClient: ({ credentials }) => ({ storage: { upload: file => upload(file.name, credentials) } }),
@@ -97,6 +98,31 @@ for (const provider of ["fal", "atlas", "krea"]) for (const mode of ["text", "im
     }
   });
 }
+
+for (const provider of ["fal", "atlas", "krea"]) {
+  test(`${provider} Seedance resolves Start and End Frame aliases before accepting generation`, async () => {
+    const h = routeHarness(provider);
+    const prompt = "Begin at the @START and finish at the @end.";
+    const res = await h.run({ prompt, seedanceDraft: false,
+      startFrameUrls: ["/outputs/start.png"], endFrameUrls: ["/outputs/end.png"] });
+    assert.equal(res.statusCode, 202, JSON.stringify(res.body));
+    assert.equal(h.spec.prompt, prompt);
+    assert.equal(h.spec.input.prompt, "Begin at the first frame and finish at the last frame.");
+    assert.equal(h.spec.routeKind, "image-to-video");
+    assert.equal(h.uploads.length, 2);
+  });
+}
+
+test("Seedance still rejects tags for missing frames or unrelated inputs", async () => {
+  for (const [prompt, startFrameUrls] of [["Use @start.", []], ["Use @end.", ["/outputs/start.png"]], ["Use @start-wide.", ["/outputs/start.png"]]]) {
+    const h = routeHarness("atlas");
+    const res = await h.run({ prompt, startFrameUrls, seedanceDraft: false });
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /Unmatched reference tags/);
+    assert.equal(h.spec, undefined);
+    assert.equal(h.uploads.length, 0);
+  }
+});
 
 test("selected draft providers with missing keys never fall back", async () => {
   for (const provider of ["fal", "atlas", "krea"]) {

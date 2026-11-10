@@ -50,12 +50,42 @@ test("image Batch processes each source through Utility and exposes its output c
 });
 
 test("image Batch runs each start frame through a Video Model", async ({ page }) => {
-  const { errors } = await seed(page, [batch(), { id: "video", type: "videoModel", x: 410, y: 20, data: { title: "Animate", model: "Kling 4.0 Image-to-Video", prompt: "Slow camera move", resolution: "720p", duration: "3 seconds", batchCount: "1", settingsOpen: false } }], [wire("batch", "video", "startFrameIn")]);
+  const previous = [1, 2].map(index => ({ id: `old-${index}`, url: `/outputs/e2e/old-${index}.mp4`, type: "video", batchRunIndex: index - 1 }));
+  const { errors } = await seed(page, [batch(), { id: "video", type: "videoModel", x: 410, y: 20, data: { title: "Animate", model: "Kling 4.0 Image-to-Video", prompt: "Slow camera move", resolution: "720p", duration: "3 seconds", batchCount: "1", settingsOpen: false,
+    resultItems: previous, batchResults: previous, batchMediaType: "video", resultUrl: previous[0].url, selectedResultIndex: 0 } },
+    { id: "viewer", type: "preview", x: 820, y: 20, data: {} }],
+    [wire("batch", "video", "startFrameIn"), { id: "video-preview", from: { nodeId: "video", port: "videoOut" }, to: { nodeId: "viewer", port: "sourceIn" } }]);
   const calls = [];
-  await page.route("**/api/node/generate-video", async route => { calls.push(route.request().postDataJSON()); await route.fulfill({ json: { video: { localUrl: `/outputs/e2e/animate-${calls.length}.mp4`, mimeType: "video/mp4" } } }); });
+  const first = Promise.withResolvers(), second = Promise.withResolvers();
+  await page.route("**/api/node/generate-video", async route => {
+    const request = route.request().postDataJSON();
+    calls.push(request);
+    const index = request.startFrameUrls[0].endsWith("source-1.png") ? 1 : 2;
+    await (index === 1 ? first.promise : second.promise);
+    await route.fulfill({ json: { video: { localUrl: `/outputs/e2e/animate-${index}.mp4`, mimeType: "video/mp4" } } });
+  });
+  const viewer = card(page, "viewer");
+  const player = viewer.locator(".preview-stage video");
+  const thumbs = viewer.getByRole("button", { name: /^Select preview \d+$/ });
+  await expect(player).toHaveAttribute("src", /old-1\.mp4$/);
   await card(page, "video").getByRole("button", { name: /^Run Video/ }).click();
-  await expect.poll(() => calls.length).toBe(2);
+  try {
+    await expect.poll(() => calls.length).toBe(2);
+    await expect(player).toHaveAttribute("src", /old-1\.mp4$/);
+    await thumbs.nth(1).click();
+    await expect(player).toHaveAttribute("src", /old-2\.mp4$/);
+    await player.evaluate(video => video.play());
+    first.resolve();
+    await expect(thumbs).toHaveCount(3);
+    await expect(player).toHaveAttribute("src", /old-2\.mp4$/);
+    await expect.poll(() => player.evaluate(video => !video.paused && video.currentTime > 0)).toBe(true);
+  } finally {
+    first.resolve();
+    second.resolve();
+  }
   await expect.poll(async () => (await savedNode(page, "video"))?.batchResults?.length).toBe(2);
+  await expect(thumbs).toHaveCount(2);
+  await expect(player).toHaveAttribute("src", /animate-1\.mp4$/);
   expect(calls.map(call => call.startFrameUrls).sort()).toEqual([["/outputs/e2e/source-1.png"], ["/outputs/e2e/source-2.png"]]);
   expect(new Set(calls.map(call => call.generationGroupId)).size).toBe(1);
   expect((await savedNode(page, "video")).batchMediaType).toBe("video");
@@ -96,6 +126,47 @@ test("normal Text Agent Prompt output keeps original videos paired for downstrea
   await expect.poll(() => calls.length).toBe(2);
   for (const request of calls) { expect(request.referenceVideoUrls).toHaveLength(1); expect(request.prompt).toContain(request.referenceVideoUrls[0]); }
   await expect(card(page, "agent").locator('[data-port-key="agent:batchOut"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("disconnecting a Text Agent's Batch leaves its single prompt on the connected Video Model", async ({ page }) => {
+  const source = batch();
+  source.data.batchFiles.push(...batch().data.batchFiles.map(entry => ({ ...entry, id: `${entry.id}-extra` })));
+  const singlePrompt = "Move slowly toward the end frame";
+  const { errors } = await seed(page, [
+    source,
+    { id: "agent", type: "textAgent", x: 360, y: 20, data: { resultText: singlePrompt,
+      batchResults: source.data.batchFiles, batchMediaType: "image" } },
+    { id: "start", type: "image", x: 20, y: 540, data: { resultUrl: "/outputs/e2e/standalone-start.png" } },
+    { id: "end", type: "image", x: 360, y: 540, data: { resultUrl: "/outputs/e2e/standalone-end.png" } },
+    { id: "video", type: "videoModel", x: 780, y: 20, data: { model: "Seedance 2.5", resolution: "720p", duration: "4 seconds", batchCount: "1", settingsOpen: false } }
+  ], [
+    wire("batch", "agent", "imageIn"),
+    { id: "prompt-wire", from: { nodeId: "agent", port: "promptOut" }, to: { nodeId: "video", port: "promptIn" } },
+    { id: "start-wire", from: { nodeId: "start", port: "imageOut" }, to: { nodeId: "video", port: "startFrameIn" } },
+    { id: "end-wire", from: { nodeId: "end", port: "imageOut" }, to: { nodeId: "video", port: "endFrameIn" } }
+  ]);
+  const calls = [];
+  await page.route("**/api/node/generate-video", async route => {
+    calls.push(route.request().postDataJSON());
+    await route.fulfill({ json: { video: { localUrl: "/outputs/e2e/standalone.mp4" } } });
+  });
+  const runVideo = card(page, "video").getByRole("button", { name: /^Run Video/ });
+  await expect(runVideo).toContainText("4 entries");
+  await card(page, "agent").locator('[data-port-key="agent:imageIn"]').click();
+  await expect(page.locator('[data-edge-id="batch-agent-imageIn"]')).toHaveCount(0);
+  await expect(page.locator('[data-edge-id="prompt-wire"]')).toHaveCount(1);
+  await expect(runVideo).not.toContainText("entries");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).edges.some(edge => edge.id === "batch-agent-imageIn"))).toBe(false);
+  await page.reload();
+  await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await runVideo.click();
+  await expect.poll(async () => (await savedNode(page, "video"))?.status).toBe("complete");
+  expect(calls).toHaveLength(1);
+  expect(calls[0].prompt).toBe(singlePrompt);
+  expect(calls[0].startFrameUrls).toEqual(["/outputs/e2e/standalone-start.png"]);
+  expect(calls[0].endFrameUrls).toEqual(["/outputs/e2e/standalone-end.png"]);
+  expect((await savedNode(page, "agent")).batchResults).toHaveLength(4);
   expect(errors).toEqual([]);
 });
 
