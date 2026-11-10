@@ -1,8 +1,6 @@
 import { normalizeImageEditModel } from "./imageEdit.js";
 
 export const defaultUserPreferences = Object.freeze({
-  showPresetPanel: true,
-  showPriceSnapshot: true,
   imageEditorModel: normalizeImageEditModel(),
   directorProcessingModel: "astra",
   textAgentModel: "sol"
@@ -21,12 +19,6 @@ export const textAgentModelOptions = Object.freeze([
 export function normalizeUserPreferences(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
-    showPresetPanel: typeof source.showPresetPanel === "boolean"
-      ? source.showPresetPanel
-      : defaultUserPreferences.showPresetPanel,
-    showPriceSnapshot: typeof source.showPriceSnapshot === "boolean"
-      ? source.showPriceSnapshot
-      : defaultUserPreferences.showPriceSnapshot,
     imageEditorModel: normalizeImageEditModel(source.imageEditorModel),
     directorProcessingModel: normalizeDirectorProcessingModel(source.directorProcessingModel),
     textAgentModel: normalizeTextAgentModel(source.textAgentModel)

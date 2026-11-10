@@ -884,7 +884,7 @@ process.on("message", (message) => {
 });
 app.use("/api", (_req, res, next) => sessionClosing ? res.status(503).json({ error: "NewtNode is shutting down." }) : next());
 app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
-const styleFinderAudition = createStyleFinderAudition({ directory: dataDir, readSharedCompact: () => createdLookStore.readSharedCompact() });
+const styleFinderAudition = createStyleFinderAudition({ directory: dataDir, readSharedCompact: () => createdLookStore.readSharedCompact(), readCreatedLooks: () => createdLookStore.read() });
 registerStyleFinderCuratedImages(app, styleFinderAudition);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));

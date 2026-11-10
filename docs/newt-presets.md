@@ -40,7 +40,7 @@ The inserted graph is placed beyond the occupied canvas and receives fresh node,
 
 When a reusable input is bound, its saved input node is replaced by the chosen project node and outgoing connections are reattached. Matching `@tags` are updated and affected downstream generated results are cleared so stale media is not presented as belonging to the newly bound inputs. Insertion never runs or submits paid work automatically.
 
-The toolbar control can be hidden or restored with **Settings > User Preferences > Show Presets Menu**. The existing saved preference is preserved. Hiding this control does not delete presets or disable creation from the selection action bar. Escape returns focus to the Presets button; clicking outside closes the library. Form controls retain their normal keyboard behavior.
+Escape returns focus to the Presets button. Clicking outside closes the library. Form controls retain their normal keyboard behavior.
 
 ## Delete A Preset
 

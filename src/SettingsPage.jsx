@@ -628,40 +628,6 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
           <div className="settings-preference-list">
             <CanvasPreferences />
             <LookbookStorageSettings />
-            <label className={`settings-preference-toggle ${userPreferences.showPresetPanel ? "enabled" : ""}`}>
-              <span>
-                <strong>Show Presets Menu</strong>
-                <small>Display the Presets library in the canvas menu bar.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={userPreferences.showPresetPanel}
-                onChange={(event) => setUserPreferences((current) => ({
-                  ...current,
-                  showPresetPanel: event.target.checked
-                }))}
-              />
-              <span className="node-toggle compact" aria-hidden="true">
-                <span />
-              </span>
-            </label>
-            <label className={`settings-preference-toggle ${userPreferences.showPriceSnapshot ? "enabled" : ""}`}>
-              <span>
-                <strong>Show Price Snapshot</strong>
-                <small>Display the estimated run price on Generate buttons.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={userPreferences.showPriceSnapshot}
-                onChange={(event) => setUserPreferences((current) => ({
-                  ...current,
-                  showPriceSnapshot: event.target.checked
-                }))}
-              />
-              <span className="node-toggle compact" aria-hidden="true">
-                <span />
-              </span>
-            </label>
             <label className="settings-preference-model">
               <span>
                 <strong>Image Editor Model</strong>

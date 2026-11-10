@@ -85,6 +85,20 @@ test("Shared custom looks remain browsable during an online outage and unavailab
   const f=fixture({createdStore:{read:async()=>{throw Error("Shared folder unavailable");}}});
   const online=await f.catalog.search();assert.equal(online.remoteCount,30);assert.equal(online.localCount,0);assert.match(online.warning,/Shared folder unavailable/);
 });
+test("Commercial Shared can browse either folder when the other is unavailable",async()=>{
+  const custom={id:"look-test",name:"Shared ink",category:"Illustration",tags:[]};
+  const compact={id:"compact-test",name:"Catalog ink",category:"Illustration",tags:[]};
+  const unavailable=async()=>{throw Error("Folder unavailable");};
+  const createdStore={state:async()=>({mode:"shared"}),read:async()=>[custom]};
+  const customOnly=fixture({createdStore,searchSharedCompact:unavailable});
+  const catalogOnly=fixture({createdStore:{...createdStore,read:unavailable},searchSharedCompact:async()=>({styles:[compact],indexed:1,total:1})});
+  const customPage=await customOnly.catalog.search({category:"Shared"});
+  const catalogPage=await catalogOnly.catalog.search({category:"Shared"});
+  assert.deepEqual(customPage.styles,[custom]);
+  assert.match(customPage.warning,/Shared catalog unavailable/);
+  assert.deepEqual(catalogPage.styles,[compact]);
+  assert.match(catalogPage.warning,/Custom looks unavailable/);
+});
 test("429 sets a retry window without retrying or silently using the legacy catalog",async()=>{
   let calls=0;const catalog=createStyleRefCatalog({fetchImpl:async()=>{calls++;return new Response("limited",{status:429,headers:{"Retry-After":"60"}});},legacyCatalog:{search:()=>{throw Error("must not fall back");}}});
   await assert.rejects(catalog.search(),error=>error.status===429&&error.retryAfter==="60");

@@ -3,6 +3,8 @@ import { openFixture } from "./helpers.mjs";
 import { normalizeVideoOutpaintSettings, videoOutpaintFingerprint, planVideoOutpaint } from "../src/videoOutpaint.js";
 
 test("Video Outpaint drafts an editable guided prompt without generating video and preserves edits on failure", async ({ page }) => {
+  // Keep the expanded drawer and its tooltip trigger above the canvas's scroll boundary.
+  await page.setViewportSize({ width: 1600, height: 1400 });
   await page.addInitScript(() => { if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return; sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [
       { id: "source", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/source.mp4", status: "complete" } },
@@ -27,11 +29,8 @@ test("Video Outpaint drafts an editable guided prompt without generating video a
   const node = page.locator('[data-node-card-id="vace"]');
   const about = node.getByRole("button", { name: "About this Node", exact: true });
   await expect(page.getByRole("tooltip")).toHaveCount(0);
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await about.hover({ timeout: 3000 });
-    await expect(page.getByRole("tooltip")).toContainText("Analyze and Run reuse the last canvas", { timeout: 1000 });
-  }).toPass({ timeout: 10000 });
+  await about.hover();
+  await expect(page.getByRole("tooltip")).toContainText("Analyze and Run reuse the last canvas");
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await about.focus();

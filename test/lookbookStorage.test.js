@@ -25,6 +25,43 @@ test("Shared looks and images use relative records; separate machines hydrate th
   const filename=await f.two.ensureAsset(other.examples[0].localUrl);assert.ok(filename.startsWith(f.b));assert.deepEqual(await readFile(filename),f.buffer);
   assert.equal((await f.two.read()).length,1);assert.equal((await f.store(f.b).state()).directory,await (await import('node:fs/promises')).realpath(f.shared));
 });
+
+test("Shared Looks has its own destination and an empty path keeps new looks local",async t=>{
+  const f=await fixture(t),catalog=path.join(f.root,"compact-catalog");
+  await mkdir(catalog);
+  const card={id:"catalog-ink",name:"Catalog ink",tags:[],examples:[]};
+  await writeFile(path.join(catalog,"catalog.json"),JSON.stringify({version:1,styles:[card],categories:[],assets:{},details:{}}));
+  const settings=await f.one.configure({directory:catalog,looksDirectory:""});
+  assert.equal(settings.mode,"local");
+  assert.equal(settings.format,"compact");
+  const localLook=draft();
+  await f.one.add(localLook);
+  assert.equal((await f.one.get(localLook.id)).examples[0].localUrl,"/uploads/local.png");
+
+  await f.one.configure({directory:settings.directory,looksDirectory:f.shared,copyLocal:false});
+  await f.two.configure({directory:f.shared});
+  const legacy=draft();
+  await f.two.add(legacy);
+  await f.two.configure({directory:"",looksDirectory:f.shared});
+  const source=draft(),saved=await f.one.add(source);
+  assert.ok(await stat(path.join(f.shared,source.id,"look.json")));
+  assert.ok(await stat(path.join(f.shared,"looks",legacy.id,"look.json")));
+  await assert.rejects(stat(path.join(catalog,"looks")),{code:"ENOENT"});
+  assert.equal((await f.one.get(legacy.id)).id,legacy.id);
+  await f.one.add(legacy);
+  await assert.rejects(stat(path.join(f.shared,legacy.id)),{code:"ENOENT"});
+  assert.deepEqual((await f.two.get(source.id)).examples,saved.examples);
+  const reopened=f.store(f.a),current=await reopened.state();
+  assert.equal(current.directory,settings.directory);
+  assert.equal(current.mode,"shared");
+  assert.equal((await reopened.readSharedCompact()).search({}).styles[0].id,card.id);
+  await assert.rejects(reopened.remove(source.id,{directory:current.directory}),{status:409});
+  assert.equal((await reopened.remove(source.id,{directory:current.looksDirectory})).removed,true);
+
+  await reopened.configure({directory:current.directory,looksDirectory:""});
+  assert.deepEqual((await reopened.read()).map(look=>look.id),[localLook.id]);
+  assert.equal((await reopened.state()).format,"compact");
+});
 test("Independent concurrent writers retain both looks; identical Save retries are idempotent and conflicting ids reject",async t=>{
   const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});const first=draft(),second={...draft(),name:"Second"};
   await Promise.all([f.one.add(first),f.two.add(second)]);assert.equal((await f.one.read()).length,2);

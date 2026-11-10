@@ -868,7 +868,7 @@ function App() {
       {libraryLoaded && <div hidden={workspaceMode !== "library"}>
         <WorkspaceErrorBoundary label="Looks" retryLabel="Reload" onRetry={() => window.location.reload()}>
           <React.Suspense fallback={<WorkspaceFallback label="Loading looks" />}>
-            <LibraryWorkspace onCreateMoodBoard={value => createFromLibrary("transfer", value)} onCreateStyle={value => createFromLibrary("style", value)} />
+            <LibraryWorkspace active={workspaceMode === "library"} onCreateMoodBoard={value => createFromLibrary("transfer", value)} onCreateStyle={value => createFromLibrary("style", value)} />
           </React.Suspense>
         </WorkspaceErrorBoundary>
       </div>}
@@ -880,7 +880,7 @@ function App() {
             onRetry={() => window.location.reload()}
           >
             <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-              <NodeEditor active={workspaceMode === "nodes"} libraryRequest={libraryRequest} onLibraryRequestConsumed={() => setLibraryRequest(null)} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} showPresetPanel={userPreferences.showPresetPanel} showPriceSnapshot={userPreferences.showPriceSnapshot} imageEditorModel={userPreferences.imageEditorModel} />
+              <NodeEditor active={workspaceMode === "nodes"} libraryRequest={libraryRequest} onLibraryRequestConsumed={() => setLibraryRequest(null)} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelProviderPreferences={modelProviderPreferences} modelProviderAvailability={modelProviderAvailability} modelPreferencesReady={modelPreferencesLoaded} imageEditorModel={userPreferences.imageEditorModel} />
             </React.Suspense>
           </WorkspaceErrorBoundary>
         </div>

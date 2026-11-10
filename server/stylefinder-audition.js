@@ -1,12 +1,12 @@
 import path from "node:path";
 import { readFile,stat } from "node:fs/promises";
-import { createStyleFinderCatalog } from "./stylefinder-catalog.js";
+import { createStyleFinderCatalog, selectStyleFinderPage } from "./stylefinder-catalog.js";
 import { readStyleFinderOverrides } from "./stylefinder-overrides.js";
 import { createCompactStyleFinderSource, curatedStyleFinderPath } from "./stylefinder-compact.js";
 
 const prefix="stylefinder-";
 const fail=(message,status=503)=>{throw Object.assign(new Error(message),{status});};
-export function createStyleFinderAudition({directory,readSharedCompact=async()=>null}) {
+export function createStyleFinderAudition({directory,readSharedCompact=async()=>null,readCreatedLooks=async()=>[]}) {
   let cached;
   const readCompact = createCompactStyleFinderSource(directory);
   async function activeCompact(){return await readSharedCompact() || readCompact();}
@@ -40,11 +40,24 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
     return {...result,styles:result.styles.map(style)};
   }
   async function search(query={}){
+    const [custom,catalog]=await Promise.allSettled([readCreatedLooks(),read()]);
+    const created=custom.status==="fulfilled"?custom.value:[];
+    const page=selectStyleFinderPage(created,query);
+    const warning=custom.status==="rejected"?[`User Looks unavailable: ${custom.reason.message}`]:[];
+    let result;
     try{
-      const result=await (await read()).search(query);
+      if(catalog.status==="rejected")throw catalog.reason;
+      result=await catalog.value.search({...query,offset:Math.max(0,page.offset-page.total)});
       if(!result.ready)fail("The local StyleFinder source folder is unavailable. Reconnect it and refresh.");
-      return {...result,source:"stylefinder",sourceLabel:"StyleFinder",styles:result.styles.map(style)};
-    }catch(error){if(error.status)throw error;fail("The local StyleFinder source folder is unavailable. Reconnect it and refresh.");}
+    }catch(error){
+      if(!created.length){if(error.status)throw error;fail("The local StyleFinder source folder is unavailable. Reconnect it and refresh.");}
+      warning.push(`StyleFinder catalog unavailable: ${error.message}`);
+      result={ready:true,populating:false,total:0,indexed:0,categories:[],styles:[]};
+    }
+    const categories=[...new Set([...result.categories,...created.map(look=>look.category).filter(Boolean)])];
+    const styles=[...page.styles,...result.styles.slice(0,page.limit-page.styles.length).map(style)];
+    return {...result,offset:page.offset,limit:page.limit,total:result.total+page.total,indexed:result.indexed+page.indexed,
+      categories,source:"stylefinder",sourceLabel:"StyleFinder",styles,...(warning.length?{warning:warning.join(" ")}:{})};
   }
   async function detail(id){
     if(typeof id!=="string"||!id.startsWith(prefix)||!/^[a-z0-9-]{1,100}$/.test(id.slice(prefix.length)))fail("Choose a valid StyleFinder look.",400);

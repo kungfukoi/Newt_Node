@@ -24,7 +24,7 @@ function StyleMosaic({ style }) {
   </span>;
 }
 
-export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
+export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onCreateStyle }) {
   const [creatingLook, setCreatingLook] = React.useState(false);
   const [deleteLookRequest,setDeleteLookRequest]=React.useState(null);
   const [mosaicDetails,setMosaicDetails]=React.useState(()=>new Map()),mosaicPending=React.useRef(new Set());
@@ -104,7 +104,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
   },[query,category,scope]);
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{setSelectedLooks(new Map());},[scope,query,category,browseCollectionId]);
-  React.useEffect(()=>{if(!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[isSourceCatalog,loadCatalog]);
+  React.useEffect(()=>{if(!active||!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[active,isSourceCatalog,loadCatalog]);
   const catalogViewKey=JSON.stringify([scope,query,category]);
   React.useEffect(()=>{
     if(!isSourceCatalog || catalogLoading || catalogError || catalog?.viewKey!==catalogViewKey) return;
@@ -203,7 +203,7 @@ export default function LibraryWorkspace({ onCreateMoodBoard, onCreateStyle }) {
     finally{mosaicPending.current.delete(style.id);}
   }
   const customLookId=style=>/^look-[a-f0-9-]{36}$/.test(style?.catalogId||style?.id||"")?(style.catalogId||style.id):"";
-  async function beginDeleteLook(){await act(async()=>{const storage=await styleLibraryApi.storage();setDeleteLookRequest({style:activeStyle,id:customLookId(activeStyle),directory:storage.directory,shared:storage.mode==="shared"});});}
+  async function beginDeleteLook(){await act(async()=>{const storage=await styleLibraryApi.storage();setDeleteLookRequest({style:activeStyle,id:customLookId(activeStyle),directory:storage.looksDirectory??storage.directory,shared:storage.mode==="shared"});});}
   async function deleteLook(){
     if(!deleteLookRequest)return;
     const target=deleteLookRequest;

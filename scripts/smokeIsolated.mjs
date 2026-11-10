@@ -138,12 +138,16 @@ try {
     version: 1, styles: [compactLook], categories: ["Illustration"], assets: { [curatedUrl]: compactBlob },
     details: { [compactLook.id]: { ...compactLook, prompt: "Detailed ink description" } }
   }));
+  const sharedLooksFolder = path.join(sandbox, "Shared Looks");
+  await mkdir(sharedLooksFolder);
   const sharedSetting = await fetch(api + "/api/style-library/storage", {
     method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ directory: compactFolder, copyLocal: false }),
+    body: JSON.stringify({ directory: compactFolder, looksDirectory: sharedLooksFolder, copyLocal: false }),
   });
   assert.equal(sharedSetting.status, 200);
-  assert.equal((await sharedSetting.json()).format, "compact");
+  const sharedStorage = await sharedSetting.json();
+  assert.equal(sharedStorage.format, "compact");
+  assert.equal(sharedStorage.mode, "shared");
   const sharedPage = await (await request("/api/style-library/catalog?category=Shared&q=ink&limit=1")).json();
   assert.equal(sharedPage.total, 1);
   assert.equal(sharedPage.styles[0].id, "stylefinder-smoke-ink");
@@ -153,6 +157,26 @@ try {
   assert.equal(sharedImage.localUrl, undefined);
   assert.deepEqual(Buffer.from(await (await request(sharedImage.url)).arrayBuffer()), compactImage);
   assert.equal((await (await request("/api/style-library/catalog?category=Shared&offset=1")).json()).styles.length, 0);
+  const lookPrompt = "Fine ink contours soften into translucent watercolor washes with warm paper grain and muted ochre accents.";
+  const createdLook = { id: "look-00000000-0000-4000-8000-000000000001", name: "Created ink", prompt: lookPrompt, tags: [],
+    styleAnalysis: { stylePrompt: lookPrompt, fingerprint: "a".repeat(64) }, examples: [{ localUrl: "/outputs/panel.png" }] };
+  const savedLook = (await (await request("/api/style-library/created", createdLook)).json()).style;
+  assert.match(savedLook.examples[0].localUrl, /^\/uploads\/shared-looks\//);
+  assert.equal(JSON.parse(await readFile(path.join(sharedLooksFolder, createdLook.id, "look.json"), "utf8")).look.name, createdLook.name);
+  const defaultLooks = await (await request("/api/style-library/stylefinder?limit=1")).json();
+  assert.equal(defaultLooks.total, 2);
+  assert.equal(defaultLooks.styles[0].id, createdLook.id);
+  assert.equal((await (await request("/api/style-library/stylefinder?limit=1&offset=1")).json()).styles[0].id, "stylefinder-smoke-ink");
+  assert.equal((await (await request(`/api/style-library/catalog/${createdLook.id}`)).json()).style.name, createdLook.name);
+  const localSetting = await fetch(api + "/api/style-library/storage", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory: compactFolder, looksDirectory: "" }),
+  });
+  assert.equal(localSetting.status, 200);
+  assert.equal((await localSetting.json()).mode, "local");
+  const localLook = { ...createdLook, id: "look-00000000-0000-4000-8000-000000000002", name: "Local ink" };
+  assert.equal((await (await request("/api/style-library/created", localLook)).json()).style.examples[0].localUrl, "/outputs/panel.png");
+  assert.equal((await (await request("/api/style-library/catalog?category=Shared&limit=1")).json()).styles[0].id, "stylefinder-smoke-ink");
   const clearSharedSetting = await fetch(api + "/api/style-library/storage", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ directory: "" }),
   });
@@ -292,7 +316,8 @@ try {
   assert.equal(JSON.parse(await readFile(historyFile, "utf8"))[0].id, "smoke-generation");
   const initialSettings = await (await request("/api/settings")).json();
   assert.match(initialSettings.historyRecoveryNotice, /restored/);
-  assert.equal(initialSettings.userPreferences.showPresetPanel, true);
+  assert.equal(Object.hasOwn(initialSettings.userPreferences, "showPresetPanel"), false);
+  assert.equal(Object.hasOwn(initialSettings.userPreferences, "showPriceSnapshot"), false);
   assert.equal(initialSettings.userPreferences.textAgentModel, "sol");
   assert.equal(initialSettings.repository, "https://github.com/kungfukoi/Newt_Node.git");
   assert.equal(initialSettings.branch, "main");
@@ -309,15 +334,17 @@ try {
     llm: "openai"
   };
   const savedSettings = await (await request("/api/settings", {
-    userPreferences: { showPresetPanel: false, imageEditorModel: "Ideogram 4.5", textAgentModel: "astra" },
+    userPreferences: { showPresetPanel: false, showPriceSnapshot: false, imageEditorModel: "Ideogram 4.5", textAgentModel: "astra" },
     modelProviderPreferences: expectedRouting
   })).json();
-  assert.equal(savedSettings.userPreferences.showPresetPanel, false);
+  assert.equal(Object.hasOwn(savedSettings.userPreferences, "showPresetPanel"), false);
+  assert.equal(Object.hasOwn(savedSettings.userPreferences, "showPriceSnapshot"), false);
   assert.deepEqual(savedSettings.modelProviderPreferences, expectedRouting);
   assert.equal(savedSettings.atlasApiKeyConfigured, true);
   assert.ok(savedSettings.activeCredentialIds.atlas);
   const reloadedSettings = await (await request("/api/settings")).json();
-  assert.equal(reloadedSettings.userPreferences.showPresetPanel, false);
+  assert.equal(Object.hasOwn(reloadedSettings.userPreferences, "showPresetPanel"), false);
+  assert.equal(Object.hasOwn(reloadedSettings.userPreferences, "showPriceSnapshot"), false);
   assert.equal(reloadedSettings.userPreferences.imageEditorModel, "Ideogram 4.5");
   assert.equal(reloadedSettings.userPreferences.textAgentModel, "astra");
   assert.deepEqual(reloadedSettings.modelProviderPreferences, expectedRouting);

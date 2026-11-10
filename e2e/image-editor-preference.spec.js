@@ -35,7 +35,7 @@ test("header and User Preferences share immediate persisted changes and preserve
   const picker = editor.getByRole("combobox", { name: "Image Editor Model", exact: true });
   await picker.selectOption("Ideogram 4.5");
   await expect(picker).toHaveValue("Ideogram 4.5");
-  expect(writes[0]).toEqual({ userPreferences: { ...settings.userPreferences, imageEditorModel: "Ideogram 4.5" } });
+  expect(writes[0]).toEqual({ userPreferences: { imageEditorModel: "Ideogram 4.5", directorProcessingModel: "sol", textAgentModel: "astra" } });
   expect(reads.some(url => url.endsWith("includeSecrets=0"))).toBe(true);
   await expect(editor.getByLabel("Edit prompt")).toHaveValue("Make the jacket blue");
   expect(await alpha(editor)).toBe(255);
@@ -60,6 +60,8 @@ test("header and User Preferences share immediate persisted changes and preserve
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const section = page.getByRole("button", { name: /User Preferences/ });
   if (await section.getAttribute("aria-expanded") !== "true") await section.click();
+  await expect(page.getByText("Show Presets Menu", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Show Price Snapshot", { exact: true })).toHaveCount(0);
   const preferencesPicker = page.getByRole("combobox", { name: "Image Editor Model", exact: true });
   await expect(preferencesPicker).toHaveValue("Nano Banana 2.1");
   await preferencesPicker.selectOption("Flux 3");

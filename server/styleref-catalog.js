@@ -80,15 +80,20 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, searchSha
       if(!createdStore)return {looks:[],shared:false};
       const state=await createdStore.state?.();return {looks:await createdStore.read(),shared:state?.mode==="shared"};
     })()]);
-    if(sharedOnly&&createdResult.status==="rejected")throw createdResult.reason;
     if(remoteResult.status==="rejected"&&(createdResult.status==="rejected"||!createdResult.value.looks.length))throw remoteResult.reason;
     const {all,matched}=remoteResult.status==="fulfilled"?remoteResult.value:{all:{styles:[]},matched:{styles:[],truncated:false}};
     const created=createdResult.status==="fulfilled"?createdResult.value.looks:[],shared=createdResult.status==="fulfilled"&&createdResult.value.shared;
-    const warning=[remoteResult.status==="rejected"?`Online catalog unavailable: ${remoteResult.reason.message}`:"",createdResult.status==="rejected"?`Custom looks unavailable: ${createdResult.reason.message}`:""].filter(Boolean).join(" ");
     const words=q.toLowerCase().split(/\s+/).filter(Boolean);
     const local=created.filter(style=>(sharedOnly?shared:!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
     const start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
-    const compact=sharedOnly?await searchSharedCompact?.({q,offset:Math.max(0,start-local.length),limit:size}):null;
+    let compact,compactError;
+    if(sharedOnly&&searchSharedCompact){
+      try{compact=await searchSharedCompact({q,offset:Math.max(0,start-local.length),limit:size});}
+      catch(error){compactError=error;}
+    }
+    if(sharedOnly&&!compact&&createdResult.status==="rejected")throw createdResult.reason;
+    if(compactError&&!shared)throw compactError;
+    const warning=[remoteResult.status==="rejected"?`Online catalog unavailable: ${remoteResult.reason.message}`:"",createdResult.status==="rejected"?`Custom looks unavailable: ${createdResult.reason.message}`:"",compactError?`Shared catalog unavailable: ${compactError.message}`:""].filter(Boolean).join(" ");
     const styles=[...local,...matched.styles].slice(start,start+size);
     if(compact)styles.push(...compact.styles.slice(0,size-styles.length));
     return {ready:true,source:"styleref",sourceLabel:"StyleRef",sourceUrl:"https://styleref.io",attribution:"StyleRef.io",populating:false,truncated:matched.truncated,warning,
