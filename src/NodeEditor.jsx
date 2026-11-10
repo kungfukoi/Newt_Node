@@ -131,6 +131,7 @@ import {
   GripVertical,
   Save,
   SlidersHorizontal,
+  Star,
   Trash2,
   Type,
   Unlock,
@@ -12184,6 +12185,7 @@ function NodeBody({
   modelProviderAvailability = {},
   showPriceSnapshot = true
 }) {
+  const [starredPreviewItems, setStarredPreviewItems] = React.useState(null);
   const workflowContext = generationScope || {};
   const config = node.type === "batch" ? { ...getNodeConfig(node.type), input: inputPortDefinitionsForNode(node), output: outputPortDefinitionsForNode(node) } : getNodeConfig(node.type);
   if (isRunnableNode(node) && node.type !== "assembly") incoming = representativeBatchIncoming(incoming);
@@ -13922,6 +13924,7 @@ function NodeBody({
     const previewSources = connectedPreviewSources(incoming.sourceIn);
     const { source: previewSource, item: previewItem, itemIndex: previewIndex } = previewSelectionForNode(node, previewSources);
     const previewItems = previewSource?.items || [];
+    const previewThumbOccurrences = new Map();
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
@@ -13973,13 +13976,23 @@ function NodeBody({
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
           !["ArrowLeft", "ArrowRight"].includes(event.key) || previewItems.length < 2) return;
       if (!fromThumbnails && (event.target !== event.currentTarget || previewItem?.type !== "image")) return;
-      const focusedIndex = fromThumbnails ? Array.from(event.currentTarget.querySelectorAll("button")).indexOf(event.target.closest("button")) : -1;
+      const strip = fromThumbnails ? event.currentTarget : event.currentTarget.parentElement?.querySelector(".preview-thumb-strip");
+      const focusedIndex = fromThumbnails ? Array.from(strip.children).indexOf(event.target.closest(".preview-thumb-tile")) : -1;
       const nextIndex = ((focusedIndex >= 0 ? focusedIndex : previewIndex) + (event.key === "ArrowLeft" ? -1 : 1) + previewItems.length) % previewItems.length;
       selectPreviewItem(nextIndex, event);
-      const strip = fromThumbnails ? event.currentTarget : event.currentTarget.parentElement?.querySelector(".preview-thumb-strip");
-      const thumbnail = strip?.querySelectorAll("button")[nextIndex];
+      const thumbnail = strip?.children[nextIndex]?.querySelector(".preview-thumb-select");
       if (fromThumbnails) thumbnail?.focus({ preventScroll: true });
       thumbnail?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+
+    function togglePreviewStar(event, key) {
+      event.stopPropagation();
+      setStarredPreviewItems((current) => {
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
     }
 
     function previewLayoutDropAllowed(event) {
@@ -14166,29 +14179,46 @@ function NodeBody({
                   {previewItems.map((item, index) => {
                     const version = seedanceVersion(item, previewItems);
                     const name = version ? version.name + (item.seedanceDraft ? " (Draft)" : "") : "";
+                    const mediaKey = JSON.stringify([previewSource.id, item.type, item.url]);
+                    const occurrence = previewThumbOccurrences.get(mediaKey) ?? 0;
+                    previewThumbOccurrences.set(mediaKey, occurrence + 1);
+                    const key = `${mediaKey}:${occurrence}`;
                     return (
-                      <button
-                        key={`${previewSource.id}-${item.url}-${index}`}
-                        type="button"
-                        className={[index === previewIndex && "active", item.seedanceDraft && "seedance-draft-thumb"].filter(Boolean).join(" ")}
-                        draggable
-                        onClick={(event) => selectPreviewItem(index, event)}
-                        onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
-                        onDragEnd={(event) => finishOutputItemDragData(item, event)}
-                        title={`Select or drag ${name || item.label || `${previewSource.label} ${index + 1}`}`}
-                        aria-label={`Select preview ${index + 1}${name ? `: ${name}` : ""}`}
-                        aria-pressed={index === previewIndex}
-                      >
-                        {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                        {item.type === "video" && <VideoThumbnail item={item} />}
-                        {item.seedanceDraft && <span className="seedance-preview-badge">Draft</span>}
-                        {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
-                        {item.type === "model3d" && (
-                          <span className="preview-thumb-model">
-                            <Box size={18} />
-                          </span>
-                        )}
-                      </button>
+                      <div className={`preview-thumb-tile${index === previewIndex ? " active" : ""}`} key={key}>
+                        <button
+                          type="button"
+                          className="preview-thumb-select"
+                          draggable
+                          onClick={(event) => selectPreviewItem(index, event)}
+                          onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
+                          onDragEnd={(event) => finishOutputItemDragData(item, event)}
+                          title={`Select or drag ${name || item.label || `${previewSource.label} ${index + 1}`}`}
+                          aria-label={`Select preview ${index + 1}${name ? `: ${name}` : ""}`}
+                          aria-pressed={index === previewIndex}
+                        >
+                          {item.type === "image" && <img {...fullResolutionImageProps(item)} src={displayMediaUrl(previewImageUrl(item))} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+                          {item.type === "video" && <VideoThumbnail item={item} />}
+                          {item.type === "audio" && <span className="preview-thumb-model"><FileAudio size={22} /></span>}
+                          {item.type === "model3d" && (
+                            <span className="preview-thumb-model">
+                              <Box size={18} />
+                            </span>
+                          )}
+                        </button>
+                        <div className="preview-thumb-footer">
+                          {item.seedanceDraft && <span>Draft</span>}
+                          <button
+                            type="button"
+                            className="preview-thumb-star"
+                            title="Toggle star"
+                            aria-label={`Star preview ${index + 1}${name ? `: ${name}` : ""}`}
+                            aria-pressed={starredPreviewItems?.has(key) ?? false}
+                            onClick={(event) => togglePreviewStar(event, key)}
+                          >
+                            <Star size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>

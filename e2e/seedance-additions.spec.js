@@ -91,11 +91,11 @@ test("finishing selected saved drafts labels both versions and updates the conne
   await video.getByRole("checkbox", { name: "shot-three" }).check();
   await video.getByRole("button", { name: "Finish selected at 1080p (2)" }).click();
   const preview = page.locator('[data-node-card-id="preview"]');
-  const hdThumb = preview.getByRole("button", { name: /shot-one$/ });
-  const draftThumb = preview.getByRole("button", { name: /shot-one \(Draft\)$/ });
+  const hdThumb = preview.getByRole("button", { name: /^Select preview \d+: shot-one$/ });
+  const draftThumb = preview.getByRole("button", { name: /^Select preview \d+: shot-one \(Draft\)$/ });
   await expect(hdThumb).toBeVisible();
-  await expect(hdThumb).toHaveText("");
-  await expect(draftThumb).toHaveText("Draft");
+  await expect(hdThumb.locator("..").locator(".preview-thumb-footer")).toHaveText("");
+  await expect(draftThumb.locator("..").locator(".preview-thumb-footer")).toHaveText("Draft");
   expect(requests.map(body => body.receiptId).sort()).toEqual(["draft-receipt-0", "draft-receipt-2"]);
   expect(requests.every(body => body.outputTargetPath === "deliveries" && body.outputTargetNodeId === "delivery")).toBe(true);
   expect(requests[0].generationGroupId).toBe(requests[1].generationGroupId);

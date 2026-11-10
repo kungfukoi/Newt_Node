@@ -100,13 +100,14 @@ test("video result galleries keep playback on the active viewer", async ({ page 
   resultCounts.forEach((count, index) => {
     const id = `model-${index}`, viewer = `viewer-${index}`;
     nodes.push({ id, type: "videoModel", x: 20 + index * 800, y: 20, data: { title: `Video ${index}`, model: "Seedance 2.5", settingsOpen: false,
-      resultUrl: `/outputs/e2e/clip-${index}-0.mp4`, resultType: "video", resultItems: Array.from({ length: count }, (_, item) => ({ url: `/outputs/e2e/clip-${index}-${item}.mp4`, type: "video", label: `Clip ${item}` })) } });
+      resultUrl: `/outputs/e2e/clip-${index}-0.mp4`, resultType: "video", resultItems: Array.from({ length: count }, (_, item) => ({ url: `/outputs/e2e/clip-${index}-${item}.mp4`, type: "video", label: `Clip ${item}`, seedanceDraft: index === 0 && item === 0 })) } });
     nodes.push({ id: viewer, type: "preview", x: 20 + index * 800, y: 420, data: { title: `Viewer ${index}` } });
     edges.push({ id: `edge-${index}`, from: { nodeId: id, port: "videoOut" }, to: { nodeId: viewer, port: "sourceIn" } });
   });
   await page.addInitScript(({ nodes, edges }) => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({ nodes, edges, groups: [], viewport: { x: 20, y: 20, scale: .35 } })), { nodes, edges });
   const { errors } = await openFixture(page, { count: nodes.length });
-  await expect(page.locator(".preview-thumb-strip button")).toHaveCount(61);
+  await expect(page.locator(".preview-thumb-select")).toHaveCount(61);
+  await expect(page.locator(".preview-thumb-star")).toHaveCount(61);
   const counts = await page.evaluate(() => ({ videos: document.querySelectorAll(".node-canvas video").length,
     thumbnailVideos: document.querySelectorAll(".preview-thumb-strip video").length, thumbnailImages: document.querySelectorAll(".preview-thumb-strip img").length }));
   console.log("Gallery media elements", JSON.stringify(counts));
@@ -115,8 +116,16 @@ test("video result galleries keep playback on the active viewer", async ({ page 
   expect(counts.thumbnailVideos).toBe(0);
   expect(counts.thumbnailImages).toBe(61);
   const viewer = page.locator('[data-node-card-id="viewer-0"]');
+  const draftFooter = viewer.locator(".preview-thumb-footer").filter({ hasText: "Draft" });
+  await expect(draftFooter.getByRole("button", { name: /^Star preview 1\b/ })).toBeVisible();
+  const star = viewer.getByRole("button", { name: "Star preview 2", exact: true });
+  await expect(star).toHaveAttribute("aria-pressed", "false");
+  await star.click();
+  await expect(star).toHaveAttribute("aria-pressed", "true");
+  await expect(viewer.locator(".preview-stage > video")).toHaveAttribute("src", /clip-0-0\.mp4/);
   await viewer.getByRole("button", { name: "Select preview 2", exact: true }).click();
   await expect(viewer.locator(".preview-stage > video")).toHaveAttribute("src", /clip-0-1\.mp4/);
+  await expect(star).toHaveAttribute("aria-pressed", "true");
   const thumb = viewer.getByRole("button", { name: "Select preview 3", exact: true });
   const transfer = await page.evaluateHandle(() => new DataTransfer());
   await thumb.dispatchEvent("dragstart", { dataTransfer: transfer });
@@ -128,6 +137,11 @@ test("video result galleries keep playback on the active viewer", async ({ page 
   await expect(thumb.locator("img")).toHaveCount(0);
   await expect(thumb.locator("video")).toHaveCount(0);
   await thumb.click();
+  await expect(viewer.locator(".preview-stage > video")).toHaveAttribute("src", /clip-0-2\.mp4/);
+  await star.press("ArrowRight");
+  await expect(thumb).toBeFocused();
+  await star.press("Space");
+  await expect(star).toHaveAttribute("aria-pressed", "false");
   await expect(viewer.locator(".preview-stage > video")).toHaveAttribute("src", /clip-0-2\.mp4/);
   expect(errors).toEqual([]);
 });
