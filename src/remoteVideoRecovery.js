@@ -27,7 +27,7 @@ export function recoveredVideoPatches(nodes, jobs, activeNodeIds = new Set(), ed
     if (!unseen.length) continue;
     const completed = unseen.filter((job) => job.state === "completed" && job.result?.video?.localUrl);
     const previous = existingResultItemsForNode(node, "video");
-    const incoming = completed.map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1));
+    const incoming = completed.map((job) => normalizeVideoGenerationResult(job.result, job.batchIndex - 1, Date.parse(job.updatedAt)));
     const versionContext = [...previous, ...incoming];
     for (const item of incoming) {
       if (item.seedanceDraftSource) item.label = seedanceVersion(item, versionContext).label;

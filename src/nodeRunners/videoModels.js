@@ -254,10 +254,11 @@ export function buildVideoGenerationRequest({
   };
 }
 
-export function normalizeVideoGenerationResult(data, index) {
+export function normalizeVideoGenerationResult(data, index, completedAt = Date.now()) {
   return {
     url: data.video.localUrl,
     type: "video",
+    ...(Number.isFinite(completedAt) ? { previewCompletedAt: completedAt } : {}),
     label: data.seedanceDraft ? `Draft ${index + 1} (480p)` : data.seedanceDraftSource ? "Finished (1080p)" : `Video ${index + 1}`,
     ...(data.seedanceDraft ? { seedanceDraft: data.seedanceDraft } : {}),
     ...(data.seedanceDraftSource ? { seedanceDraftSource: data.seedanceDraftSource } : {}),

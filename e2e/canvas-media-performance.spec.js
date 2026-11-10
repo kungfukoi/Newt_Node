@@ -138,7 +138,7 @@ test("video result galleries keep playback on the active viewer", async ({ page 
   await expect(thumb.locator("video")).toHaveCount(0);
   await thumb.click();
   await expect(viewer.locator(".preview-stage > video")).toHaveAttribute("src", /clip-0-2\.mp4/);
-  await star.press("ArrowRight");
+  await star.press("ArrowLeft");
   await expect(thumb).toBeFocused();
   await star.press("Space");
   await expect(star).toHaveAttribute("aria-pressed", "false");

@@ -39,6 +39,16 @@ export function previewSelectionForNode(node, previewSources = []) {
   };
 }
 
+// Saved results without completion times use the producer's result sequence.
+// Sort timed results in their own slots so untimed imports keep their place.
+export function newestPreviewItemIndexes(items) {
+  const indexes = Array.from(items.keys()).reverse();
+  const timed = indexes.filter(index => Number.isFinite(items[index].previewCompletedAt))
+    .sort((a, b) => items[b].previewCompletedAt - items[a].previewCompletedAt);
+  let nextTimed = 0;
+  return indexes.map(index => Number.isFinite(items[index].previewCompletedAt) ? timed[nextTimed++] : index);
+}
+
 export function previewSelectedItemIndexForSource(node, source) {
   const items = source?.items || [];
   if (!items.length) return 0;

@@ -8,7 +8,8 @@ test("a partial video batch result leaves the current Preview playing", async ({
         { id: "image", type: "image", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/landscape.png", status: "complete" } },
         { id: "model", type: "videoModel", x: 420, y: 20, data: {
           model: "Kling 4.0 Image-to-Video", prompt: "A bird flies", batchCount: "2",
-          resultUrl: "/outputs/e2e/motion.mp4", status: "complete"
+          resultUrl: "/outputs/e2e/motion.mp4", status: "complete",
+          resultItems: ["motion", "old-2", "old-3", "old-4", "old-5"].map(name => ({ url: `/outputs/e2e/${name}.mp4`, type: "video" }))
         } },
         { id: "viewer", type: "preview", x: 900, y: 20, data: {} }
       ],
@@ -26,20 +27,27 @@ test("a partial video batch result leaves the current Preview playing", async ({
   });
   const card = page.locator('[data-node-card-id="viewer"]');
   const video = card.locator(".preview-stage video");
+  const rail = card.locator(".preview-thumb-strip");
+  const leftmost = rail.locator(".preview-thumb-select").first();
+  await expect(leftmost).toHaveAttribute("aria-label", "Select preview 5");
+  expect(await rail.evaluate(strip => { strip.scrollLeft = strip.scrollWidth; return strip.scrollLeft; })).toBeGreaterThan(0);
   await expect.poll(() => video.evaluate(v => v.readyState)).toBeGreaterThanOrEqual(2);
   await video.evaluate(v => { v.muted = true; return v.play(); });
   await page.locator('[data-node-card-id="model"]').getByRole("button", { name: /^Run Video/ }).click();
   await expect.poll(() => requests.length).toBe(2);
-  await requests[0].fulfill({ json: { video: { localUrl: "/outputs/e2e/new-take.mp4" } } });
-  await expect(card.getByRole("button", { name: "Select preview 2" })).toBeVisible();
+  await requests[1].fulfill({ json: { video: { localUrl: "/outputs/e2e/new-take.mp4" } } });
+  await expect(leftmost).toHaveAttribute("aria-label", "Select preview 6");
+  await expect.poll(() => rail.evaluate(strip => strip.scrollLeft)).toBe(0);
   await expect(video).toHaveAttribute("src", /motion\.mp4$/);
   await expect.poll(() => video.evaluate(v => v.paused)).toBe(false);
   await video.evaluate(v => v.pause());
   const box = await video.boundingBox();
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
   await expect.poll(() => video.evaluate(v => v.currentTime)).toBeCloseTo(1.2, 1);
-  await requests[1].fulfill({ json: { video: { localUrl: "/outputs/e2e/last-take.mp4" } } });
-  await expect(video).toHaveAttribute("src", /new-take\.mp4$/);
+  await requests[0].fulfill({ json: { video: { localUrl: "/outputs/e2e/last-take.mp4" } } });
+  await expect(video).toHaveAttribute("src", /last-take\.mp4$/);
+  await expect(leftmost).toHaveAttribute("aria-label", "Select preview 6");
+  await expect(leftmost).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a resized Preview plays and hover scrubs at reduced canvas zoom", async ({ page }) => {

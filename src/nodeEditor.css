@@ -7517,6 +7517,7 @@ video.newtnode-video-fallback {
   grid-auto-flow: column;
   gap: 7px;
   overflow-x: auto;
+  overflow-anchor: none;
   padding: 2px;
 }
 

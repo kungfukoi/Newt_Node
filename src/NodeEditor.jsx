@@ -267,7 +267,7 @@ import {
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, replacementResultItems } from "./mediaResults.js";
 import { embeddedAudioOutputPortId, videoNodeOutputKind, videoNodeOutputLabel, videoNodeOutputPortDefinitions } from "./videoNodeOutputs.js";
-import { previewSelectionForNode, groupPreviewConnections } from "./previewSelection.js";
+import { previewSelectionForNode, groupPreviewConnections, newestPreviewItemIndexes } from "./previewSelection.js";
 import {
   adjacentPreviewLayoutItem,
   previewLayoutDropBeforeId,
@@ -13934,7 +13934,15 @@ function NodeBody({
     const previewSources = connectedPreviewSources(incoming.sourceIn);
     const { source: previewSource, item: previewItem, itemIndex: previewIndex } = previewSelectionForNode(node, previewSources);
     const previewItems = previewSource?.items || [];
+    const thumbnailIndexes = newestPreviewItemIndexes(previewItems);
+    const activeThumbnailIndex = thumbnailIndexes.indexOf(previewIndex);
     const previewThumbOccurrences = new Map();
+    const thumbnailKeys = previewItems.map((item) => {
+      const mediaKey = JSON.stringify([previewSource.id, item.type, item.url]);
+      const occurrence = previewThumbOccurrences.get(mediaKey) ?? 0;
+      previewThumbOccurrences.set(mediaKey, occurrence + 1);
+      return `${mediaKey}:${occurrence}`;
+    });
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
     const layoutColumnCount = previewLayoutColumnCount(layoutItems);
@@ -13946,21 +13954,19 @@ function NodeBody({
     function selectPreviewItem(index, event) {
       event?.preventDefault?.();
       event?.stopPropagation?.();
-      if (!previewSource || !previewItems.length) return;
-      const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
-      const item = previewItems[nextIndex];
+      const item = previewItems[index];
       if (!item?.url) return;
       const producer = (incoming.sourceIn || []).find(item => item.source.id === previewSource.sourceNodeId)?.source;
-      if (producer?.type === "cameraCoverage") { onUpdate(producer.id, selectCoverageVersion(normalizeCameraCoverageData(producer.data), item.shotId, item.versionId)); onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: nextIndex }); return; }
+      if (producer?.type === "cameraCoverage") { onUpdate(producer.id, selectCoverageVersion(normalizeCameraCoverageData(producer.data), item.shotId, item.versionId)); onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: index }); return; }
       onUpdate(previewSource.sourceNodeId, previewSource.sourcePort === "frameOut"
         ? { assemblyFrameUrl: item.url }
         : {
-            selectedResultIndex: item.sourceResultIndex ?? nextIndex,
+            selectedResultIndex: item.sourceResultIndex ?? index,
             resultUrl: item.sourceResultUrl || item.url
           });
       onUpdate(node.id, {
         previewSourceId: previewSource.id,
-        previewItemIndex: nextIndex
+        previewItemIndex: index
       });
     }
 
@@ -13988,11 +13994,16 @@ function NodeBody({
       if (!fromThumbnails && (event.target !== event.currentTarget || previewItem?.type !== "image")) return;
       const strip = fromThumbnails ? event.currentTarget : event.currentTarget.parentElement?.querySelector(".preview-thumb-strip");
       const focusedIndex = fromThumbnails ? Array.from(strip.children).indexOf(event.target.closest(".preview-thumb-tile")) : -1;
-      const nextIndex = ((focusedIndex >= 0 ? focusedIndex : previewIndex) + (event.key === "ArrowLeft" ? -1 : 1) + previewItems.length) % previewItems.length;
-      selectPreviewItem(nextIndex, event);
-      const thumbnail = strip?.children[nextIndex]?.querySelector(".preview-thumb-select");
+      const offset = event.key === "ArrowLeft" ? -1 : 1;
+      const nextPosition = thumbnailPosition(focusedIndex >= 0 ? focusedIndex : activeThumbnailIndex, offset);
+      selectPreviewItem(thumbnailIndexes[nextPosition], event);
+      const thumbnail = strip?.children[nextPosition]?.querySelector(".preview-thumb-select");
       if (fromThumbnails) thumbnail?.focus({ preventScroll: true });
       thumbnail?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+
+    function thumbnailPosition(position, offset) {
+      return (position + offset + thumbnailIndexes.length) % thumbnailIndexes.length;
     }
 
     function togglePreviewStar(event, key) {
@@ -14174,25 +14185,23 @@ function NodeBody({
             )}
             {previewItems.length > 1 && (
               <div className="preview-frame-nav" onPointerDown={(event) => event.stopPropagation()}>
-                <button type="button" onClick={(event) => selectPreviewItem(previewIndex - 1, event)} title="Previous preview" aria-label="Previous preview">
+                <button type="button" onClick={(event) => selectPreviewItem(thumbnailIndexes[thumbnailPosition(activeThumbnailIndex, -1)], event)} title="Previous preview" aria-label="Previous preview">
                   <ChevronLeft size={15} />
                 </button>
-                <span>{previewIndex + 1} / {previewItems.length}</span>
-                <button type="button" onClick={(event) => selectPreviewItem(previewIndex + 1, event)} title="Next preview" aria-label="Next preview">
+                <span>{activeThumbnailIndex + 1} / {previewItems.length}</span>
+                <button type="button" onClick={(event) => selectPreviewItem(thumbnailIndexes[thumbnailPosition(activeThumbnailIndex, 1)], event)} title="Next preview" aria-label="Next preview">
                   <ChevronRight size={15} />
                 </button>
               </div>
             )}
             {previewItems.length > 0 && (
               <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
-                <div className="preview-thumb-strip" onKeyDown={event => navigatePreviewWithKeyboard(event, true)}>
-                  {previewItems.map((item, index) => {
+                <PreviewThumbnailStrip newestKey={thumbnailKeys[thumbnailIndexes[0]]} onKeyDown={event => navigatePreviewWithKeyboard(event, true)}>
+                  {thumbnailIndexes.map((index) => {
+                    const item = previewItems[index];
                     const version = seedanceVersion(item, previewItems);
                     const name = version ? version.name + (item.seedanceDraft ? " (Draft)" : "") : "";
-                    const mediaKey = JSON.stringify([previewSource.id, item.type, item.url]);
-                    const occurrence = previewThumbOccurrences.get(mediaKey) ?? 0;
-                    previewThumbOccurrences.set(mediaKey, occurrence + 1);
-                    const key = `${mediaKey}:${occurrence}`;
+                    const key = thumbnailKeys[index];
                     return (
                       <div className={`preview-thumb-tile${index === previewIndex ? " active" : ""}`} key={key}>
                         <button
@@ -14231,7 +14240,7 @@ function NodeBody({
                       </div>
                     );
                   })}
-                </div>
+                </PreviewThumbnailStrip>
               </div>
             )}
           </>
@@ -23497,6 +23506,14 @@ function useTimelineLiveFrame(sourceNodeId, fallbackFrame) {
     return subscribeAssemblyLiveFrame(sourceNodeId, setFrame);
   }, [sourceNodeId]);
   return frame;
+}
+
+function PreviewThumbnailStrip({ newestKey, onKeyDown, children }) {
+  const strip = React.useRef(null);
+  React.useLayoutEffect(() => {
+    strip.current.scrollLeft = 0;
+  }, [newestKey]);
+  return <div ref={strip} className="preview-thumb-strip" onKeyDown={onKeyDown}>{children}</div>;
 }
 
 function TimelineLivePreviewImage({ item, sourceLabel }) {

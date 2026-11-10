@@ -62,6 +62,8 @@ File drops/uploads reuse a byte-identical file already inside the current workfl
 
 Preview groups expanded batch entries by connected producer/output port and exposes the full result list in its thumbnail browser. Selecting a result on the producer updates Preview even if Preview saved an older index; selecting a Preview thumbnail updates the real producer, never a synthetic batch-entry node. Existing batch outputs must be browsable without rerunning generation.
 
+Preview's thumbnail rail shows the newest result at the left and older results to its right. It returns to the left edge when a new result arrives or the viewer switches sources. Reordering the rail preserves producer selection and playback. Navigation follows the rail's visible order, with saved results that lack completion times ordered by the producer's result sequence.
+
 During a Video Model media batch, Preview keeps previous takes available for playback and selection alongside newly completed takes. Arriving takes preserve the active clip while the batch runs. The completed batch publishes its own result set, and a run that produces no new takes keeps the previous clips viewable.
 
 Disconnecting a Text Agent's last live batch input disables its saved batch pairs on the Prompt output for future runs. A standalone response can still flow over the Prompt wire. A standalone Send uses ordinary conversation and publishes a single response. Disconnecting a wire does not cancel an active run's captured inputs. Use Stop to stop queued work; provider jobs already submitted may still finish.

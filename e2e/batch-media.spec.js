@@ -72,7 +72,7 @@ test("image Batch runs each start frame through a Video Model", async ({ page })
   try {
     await expect.poll(() => calls.length).toBe(2);
     await expect(player).toHaveAttribute("src", /old-1\.mp4$/);
-    await thumbs.nth(1).click();
+    await viewer.getByRole("button", { name: "Select preview 2", exact: true }).click();
     await expect(player).toHaveAttribute("src", /old-2\.mp4$/);
     await player.evaluate(video => video.play());
     first.resolve();
