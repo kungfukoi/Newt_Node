@@ -1,3 +1,5 @@
+.assembly-cache-count { color: #a8cf89; white-space: nowrap; }
+
 .assembly-inspector {
   display: grid;
   grid-column: 3;
@@ -107,8 +109,30 @@
 
 .assembly-inspector-control.number-only > div { grid-template-columns: minmax(0, 1fr) 22px; }
 .assembly-inspector-control input[type="range"] { width: 100%; min-width: 0; accent-color: #e8d229; }
-.assembly-inspector-control input[type="number"] { width: 100%; min-width: 0; height: 25px; padding: 0 5px; box-sizing: border-box; }
-.assembly-inspector-control small { color: #6f6f6f; font-size: 8px; }
+.assembly-inspector-control input[type="number"], .assembly-motion-control input { width: 100%; min-width: 0; height: 25px; padding: 0 5px; box-sizing: border-box; }
+.assembly-inspector-control small, .assembly-motion-control small { color: #888; font-size: 8px; }
+
+.assembly-motion-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 68px) 18px;
+  align-items: center;
+  gap: 4px;
+  color: #aaa;
+  font-size: 10px;
+}
+
+.assembly-motion-control label {
+  display: flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 4px;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.assembly-motion-control label svg { flex: none; }
+.assembly-motion-control label:hover, .assembly-motion-control label:active { color: #e8d229; }
 
 .assembly-inspector-actions {
   display: grid;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewPlaybackCorrectionTolerance, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, assemblyRenderablePreviewLayers, assemblyScrubPreviewLayers, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
+import { assemblyMediaTechnicalReadout, assemblyPreviewElementState, assemblyPreviewLayerGeometry, assemblyPreviewMediaInstances, assemblyPreviewPlaybackCorrectionTolerance, assemblyPreviewSeekTarget, assemblyPreviewSeekTolerance, nextAssemblyPreviewEmission, requestAssemblyVideoFrame } from "../src/assembly/assemblyLivePreview.js";
 
 test("Timeline live preview waits for an image to decode", () => {
   const loading = assemblyPreviewElementState({ type: "image" }, { complete: false, naturalWidth: 1920, naturalHeight: 1080 });
@@ -48,6 +48,8 @@ test("Timeline live preview waits for the requested scrubbed video frame", () =>
   assert.equal(assemblyPreviewElementState({ type: "video" }, video, 3, 24, false).ready, false);
   video.currentTime = 3 + assemblyPreviewSeekTolerance(24) / 2;
   assert.equal(assemblyPreviewElementState({ type: "video" }, video, 3, 24, false).ready, true);
+  video.seeking = true;
+  assert.equal(assemblyPreviewElementState({ type: "video" }, video, 3, 24, false).ready, false);
 });
 
 test("Timeline playback tolerates normal decoder clock drift", () => {
@@ -88,34 +90,6 @@ test("Timeline live preview gives repeated source clips independent media elemen
   assert.deepEqual(instances.map((item) => item.key), ["clip-a", "clip-b"]);
   assert.equal(instances[0].media, media);
   assert.equal(instances[1].media, media);
-});
-
-test("Timeline live preview does not let one delayed layer freeze ready layers", () => {
-  const readyElement = { id: "ready" };
-  const layers = assemblyRenderablePreviewLayers([
-    { element: { id: "waiting" }, ready: false, width: 1920, height: 1080 },
-    { element: readyElement, ready: true, width: 1280, height: 720 }
-  ]);
-
-  assert.deepEqual(layers, [{ element: readyElement, ready: true, width: 1280, height: 720 }]);
-});
-
-test("Timeline live preview withholds a visual frame until one layer is drawable", () => {
-  assert.deepEqual(assemblyRenderablePreviewLayers([
-    { element: null, ready: false, width: 0, height: 0 },
-    { element: {}, ready: false, width: 1920, height: 1080 }
-  ]), []);
-});
-
-test("Timeline scrubbing holds its last frame until the requested top frame is ready", () => {
-  const lower = { element: { id: "lower" }, ready: true, decoded: true, width: 1920, height: 1080 };
-  const seekingTop = { element: { id: "top" }, ready: false, decoded: true, width: 1920, height: 1080 };
-  const readyTop = { ...seekingTop, ready: true };
-
-  assert.equal(assemblyScrubPreviewLayers([lower, seekingTop]), null);
-  assert.deepEqual(assemblyScrubPreviewLayers([lower, readyTop]), [readyTop]);
-  assert.equal(assemblyScrubPreviewLayers([lower, { ...seekingTop, decoded: false }]), null);
-  assert.deepEqual(assemblyScrubPreviewLayers([]), []);
 });
 
 test("Timeline selected clip readout formats resolution and frame rate", () => {

@@ -241,6 +241,10 @@ test("clip moves magnetically snap their start and end edges to neighboring clip
   const movingClip = state.tracks.find((track) => track.id === videoTrack.id).clips.at(-1);
   assert.equal(snapAssemblyClipMoveStart(state, movingClip.id, videoTrack.id, 7.9, 72, 12), 8);
   assert.equal(snapAssemblyClipMoveStart(state, movingClip.id, videoTrack.id, 8.5, 72, 12), 8.5);
+  state = { ...state, playhead: 20 };
+  assert.equal(snapAssemblyClipMoveStart(state, movingClip.id, videoTrack.id, 20.1), 20);
+  assert.equal(snapAssemblyClipMoveStart(state, movingClip.id, videoTrack.id, 20 - movingClip.duration - 0.1), 20 - movingClip.duration);
+  assert.equal(snapAssemblyClipMoveStart(state, movingClip.id, videoTrack.id, 21.018), 21);
 });
 
 test("history provides stable undo and redo snapshots", () => {

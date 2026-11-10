@@ -11,3 +11,42 @@
 
 .assembly-scroll-navigation { display:flex; align-items:center; gap:12px; padding:5px 10px; font-size:11px; color:#aaa; }
 .assembly-scroll-navigation input { flex:1; min-width:0; height:18px; accent-color:#ddc631; }
+
+.assembly-track-row.video .assembly-track-header { grid-template-columns: minmax(0, 1fr); align-content: center; }
+.assembly-track-row.video .assembly-track-actions-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; }
+.assembly-track-row.video .assembly-track-actions-row button { width: 100%; }
+
+.assembly-selection-marquee {
+  position: absolute;
+  z-index: 11;
+  pointer-events: none;
+  border: 1px solid #e8d229;
+  background: #e8d22924;
+}
+
+.assembly-clip .assembly-trim-handle {
+  display: grid;
+  width: min(16px, 30%);
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.assembly-clip:hover .assembly-trim-handle:not(:disabled),
+.assembly-clip.selected .assembly-trim-handle:not(:disabled) { background: #f1da2433; }
+.assembly-clip .assembly-trim-handle:hover:not(:disabled),
+.assembly-clip .assembly-trim-handle:active:not(:disabled) { background: #f1da2480; }
+.assembly-clip .assembly-trim-handle:not(:disabled)::after {
+  width: 4px;
+  height: 12px;
+  border-inline: 1px solid #fff5ad;
+  content: "";
+  opacity: 0;
+}
+.assembly-clip:hover .assembly-trim-handle::after,
+.assembly-clip.selected .assembly-trim-handle::after,
+.assembly-clip .assembly-trim-handle:focus-visible::after { opacity: 1; }
+.assembly-clip .assembly-trim-handle:disabled { pointer-events: none; }

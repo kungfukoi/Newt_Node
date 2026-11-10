@@ -20,7 +20,14 @@ export function createAssemblyFramePresenter({ present, createImage = () => new 
     image.src = url;
   }
   return {
-    offer(url) {
+    offer(url, decoded = false) {
+      if (!disposed && url && decoded) {
+        if (pending) pending.image.onload = pending.image.onerror = null;
+        pending = null;
+        queued = "";
+        if (shown !== url) { shown = url; present(url); }
+        return;
+      }
       if (disposed || !url || url === pending?.url || url === queued || (!pending && url === shown)) return;
       queued = url;
       next();

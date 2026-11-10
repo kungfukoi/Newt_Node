@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ffmpeg from "ffmpeg-static";
 import ffprobe from "@ffprobe-installer/ffprobe";
-import { assemblyRenderPayload } from "../src/assembly/assemblyState.js";
-import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyRenderPlan } from "../server/assembly-render.js";
+import { assemblyRenderPayload, moveAssemblyVideoTrack } from "../src/assembly/assemblyState.js";
+import { assemblyRenderSummary, buildAssemblyFfmpegArgs, createAssemblyFramePlan, createAssemblyRenderPlan } from "../server/assembly-render.js";
 import { assemblyActiveClips, createAssemblyState, insertAssemblyMediaClip, normalizeAssemblyState, retimeAssemblyClip, setAssemblyView, syncAssemblyInputs, updateAssemblyClip, updateAssemblyMedia } from "../src/assembly/assemblyState.js";
 
 test("render audio defaults on for older timelines and preserves an explicit off setting", () => {
@@ -17,6 +17,22 @@ test("render audio defaults on for older timelines and preserves an explicit off
   assert.equal(normalizeAssemblyState(JSON.parse(JSON.stringify(silent))).renderAudio, false);
   assert.equal(assemblyRenderPayload(silent).renderAudio, false);
   assert.equal(assemblyRenderPayload(createAssemblyState()).renderAudio, true);
+});
+
+test("reordered video tracks survive serialization and change the export and extraction stack", () => {
+  let state = createAssemblyState();
+  const [first, second, ...audio] = state.tracks;
+  const sources = ["top", "bottom"].map(id => ({ id, type: "image", url: `/${id}.png` }));
+  state = syncAssemblyInputs(state, sources);
+  state = insertAssemblyMediaClip(state, "top", first.id, 0);
+  state = insertAssemblyMediaClip(state, "bottom", second.id, 0);
+  const resolved = sources.map(({ id }) => ({ id, filePath: `${id}.png` }));
+  assert.deepEqual(createAssemblyRenderPlan(state, resolved).visualClips.map(layer => layer.media.id), ["bottom", "top"]);
+
+  const reordered = normalizeAssemblyState(JSON.parse(JSON.stringify(moveAssemblyVideoTrack(state, second.id, -1))));
+  assert.deepEqual(reordered.tracks.map(track => track.id), [second.id, first.id, ...audio.map(track => track.id)]);
+  assert.deepEqual(createAssemblyRenderPlan(reordered, resolved).visualClips.map(layer => layer.media.id), ["top", "bottom"]);
+  assert.deepEqual(createAssemblyFramePlan(reordered, resolved, 0).visualClips.map(layer => layer.media.id), ["top", "bottom"]);
 });
 
 test("real timeline render mixes different audio sample rates with valid timestamps and audible samples", () => {

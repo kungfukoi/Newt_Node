@@ -1,6 +1,66 @@
 import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 
+test("a partial video batch result leaves the current Preview playing", async ({ page }) => {
+  await openFixture(page, {
+    fixture: {
+      nodes: [
+        { id: "image", type: "image", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/landscape.png", status: "complete" } },
+        { id: "model", type: "videoModel", x: 420, y: 20, data: {
+          model: "Kling 4.0 Image-to-Video", prompt: "A bird flies", batchCount: "2",
+          resultUrl: "/outputs/e2e/motion.mp4", status: "complete"
+        } },
+        { id: "viewer", type: "preview", x: 900, y: 20, data: {} }
+      ],
+      edges: [
+        { id: "start-frame", from: { nodeId: "image", port: "imageOut" }, to: { nodeId: "model", port: "startFrameIn" } },
+        { id: "video-viewer", from: { nodeId: "model", port: "videoOut" }, to: { nodeId: "viewer", port: "sourceIn" } }
+      ],
+      groups: [], viewport: { x: 20, y: 20, scale: 0.8 }
+    },
+    settings: { falKeyConfigured: true, modelProviderPreferences: { veo: "fal" } }
+  });
+  const requests = [];
+  await page.route("**/api/node/generate-video", route => {
+    requests.push(route);
+  });
+  const card = page.locator('[data-node-card-id="viewer"]');
+  const video = card.locator(".preview-stage video");
+  await expect.poll(() => video.evaluate(v => v.readyState)).toBeGreaterThanOrEqual(2);
+  await video.evaluate(v => { v.muted = true; return v.play(); });
+  await page.locator('[data-node-card-id="model"]').getByRole("button", { name: /^Run Video/ }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  await requests[0].fulfill({ json: { video: { localUrl: "/outputs/e2e/new-take.mp4" } } });
+  await expect(card.getByRole("button", { name: "Select preview 2" })).toBeVisible();
+  await expect(video).toHaveAttribute("src", /motion\.mp4$/);
+  await expect.poll(() => video.evaluate(v => v.paused)).toBe(false);
+  await video.evaluate(v => v.pause());
+  const box = await video.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
+  await expect.poll(() => video.evaluate(v => v.currentTime)).toBeCloseTo(1.2, 1);
+  await requests[1].fulfill({ json: { video: { localUrl: "/outputs/e2e/last-take.mp4" } } });
+  await expect(video).toHaveAttribute("src", /new-take\.mp4$/);
+});
+
+test("a resized Preview plays and hover scrubs at reduced canvas zoom", async ({ page }) => {
+  const scale = 0.32;
+  await openFixture(page, { fixture: {
+    nodes: [
+      { id: "video", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/motion.mp4", status: "complete" } },
+      { id: "viewer", type: "preview", x: 550, y: 20, data: { nodeWidth: 1236, nodeHeight: 720 } }
+    ],
+    edges: [{ id: "video-viewer", from: { nodeId: "video", port: "videoOut" }, to: { nodeId: "viewer", port: "sourceIn" } }],
+    groups: [], viewport: { x: 20, y: 20, scale }
+  } });
+  const video = page.locator('[data-node-card-id="viewer"] .preview-stage video');
+  await expect.poll(() => video.evaluate(v => v.readyState)).toBeGreaterThanOrEqual(2);
+  const box = await video.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
+  await expect.poll(() => video.evaluate(v => v.currentTime)).toBeCloseTo(1.2, 1);
+  await page.mouse.click(box.x + 24 * scale, box.y + box.height - 48 * scale);
+  await expect.poll(() => video.evaluate(v => v.paused)).toBe(false);
+});
+
 test("native Preview play controls never attach the node to the mouse", async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [
