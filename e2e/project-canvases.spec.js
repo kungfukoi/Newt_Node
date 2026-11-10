@@ -1,4 +1,27 @@
 import {test,expect} from '@playwright/test';import {openFixture} from './helpers.mjs';
+
+test('toolbar New canvas resets the project tabs after the unsaved-work prompt', async ({ page }) => {
+  await openFixture(page, { count: 1, uiState: { nodePaletteCollapsed: false } });
+  const controls = page.getByRole('toolbar', { name: 'Project controls' });
+  const tabs = page.getByRole('tablist', { name: 'Project canvases' });
+  const newCanvas = controls.getByRole('button', { name: 'New canvas', exact: true });
+  const prompt = page.getByRole('dialog', { name: 'Unsaved workflow' });
+
+  await page.getByRole('button', { name: 'Add canvas', exact: true }).click();
+  await expect(tabs.getByRole('tab', { name: 'Canvas 2' })).toHaveAttribute('aria-selected', 'true');
+  await newCanvas.click();
+  await prompt.getByRole('button', { name: 'Cancel' }).click();
+  await expect(tabs.getByRole('tab')).toHaveCount(2);
+
+  await newCanvas.click();
+  await prompt.getByRole('button', { name: "Don't Save" }).click();
+  await expect(tabs.getByRole('tab')).toHaveCount(1);
+  await expect(tabs.getByRole('tab', { name: 'Canvas 1' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-node-card-id]')).toHaveCount(0);
+  await newCanvas.click();
+  await expect(prompt).toHaveCount(0);
+});
+
 test('asset scope lives below drawer actions and hides with the drawer', async ({page}) => {
   const {errors} = await openFixture(page, {count: 4});
   const scope = page.getByRole('combobox', {name: 'Asset scope', exact: true});

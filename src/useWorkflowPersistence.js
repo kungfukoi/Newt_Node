@@ -575,7 +575,7 @@ export function useWorkflowPersistence({
     if (!(await guardUnsavedWorkflowChange("start a new workflow"))) return;
 
     const nextProjectName = "Untitled node project";
-    const nextViewport = { x: 0, y: 0, scale: 1 };
+    const graph = normalizeProjectCanvases();
     localWorkflowHandleRef.current = null;
     setLocalWorkflowFileName("");
     setProjectId(createWorkflowSessionId());
@@ -583,18 +583,19 @@ export function useWorkflowPersistence({
     setSavedProjectName(null);
     setProjectPackagePath("");
     setWorkflowFilePath("");
-    setNodes([]);
-    setEdges([]);
-    setGroups([]);
-    setViewport(nextViewport);
+    setNodes(graph.nodes);
+    setEdges(graph.edges);
+    setGroups(graph.groups);
+    setCanvases?.(graph.canvases);
+    setActiveCanvasId?.(graph.activeCanvasId);
+    setViewport(graph.viewport);
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
+    clearUndoStack?.();
     setProjectMenuOpen(false);
     setFileMenuOpen(false);
     markWorkflowClean({
-      nodes: [],
-      edges: [],
-      groups: [],
+      ...graph,
       projectName: nextProjectName,
       projectPackagePath: ""
     });

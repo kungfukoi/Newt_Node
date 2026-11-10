@@ -6,7 +6,8 @@ On desktop, canvas tabs sit above the canvas in the column to the right of the n
 
 ## Working With Canvases
 
-- Add a blank canvas with +. Double-click its tab to rename it.
+- Use the + beside the canvas tabs to add a blank canvas to the current project. Double-click its tab to rename it.
+- Use the toolbar + or File > New canvas to start a blank project with one empty Canvas 1. The unsaved-work prompt applies to all canvases in the current project.
 - Drag tabs to reorder them. The tab's options menu offers Rename, Duplicate and Delete. Alt+Left/Right also reorders tabs.
 - Find canvas searches by name when the tab row gets long.
 - Select nodes, then right-click a destination tab to copy or move the selection there. Ordinary node copy/paste also works between canvases.
