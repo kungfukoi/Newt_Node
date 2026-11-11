@@ -1,9 +1,9 @@
 import {test,expect} from "@playwright/test";
 import {chooseLookbookSource,openFixture} from "./helpers.mjs";
 
-test("Saving a shared folder refreshes the kept-alive Catalog when returning from Settings",async({page})=>{
+test("User Looks uses the configured Shared User Looks folder",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
-  let storage={directory:"",looksDirectory:"",mode:"local",localCount:0},catalogReads=0;
+  let storage={directory:"",looksDirectory:"",mode:"local",localCount:0},catalogReads=0,category;
   const json=(route,value)=>route.fulfill({contentType:"application/json",body:JSON.stringify(value)});
   const shared={id:"look-12345678-1234-1234-1234-123456789abc",name:"Shared Ink",sourceProvider:"Newt",category:"Illustration",examples:[{localUrl:"/outputs/e2e/shared-ink.png"}]};
   await page.route("**/api/style-library",route=>json(route,{revision:0,collections:[]}));
@@ -12,12 +12,17 @@ test("Saving a shared folder refreshes the kept-alive Catalog when returning fro
     return json(route,storage);
   });
   const list=route=>{
-    catalogReads++;const styles=storage.mode==="shared"?[shared]:[];
-    return json(route,{ready:true,source:"styleref",total:styles.length,localCount:styles.length,remoteCount:0,styles,categories:["Illustration"]});
+    catalogReads++;category=new URL(route.request().url()).searchParams.get("category");const styles=storage.mode==="shared"?[shared]:[];
+    return json(route,{ready:true,source:"styleref",total:styles.length,localCount:styles.length,remoteCount:0,styles,categories:["Illustration","Photography"]});
   };
   await page.route("**/api/style-library/catalog?**",list);
-  await page.route("**/api/style-library/stylefinder?**",list);
+  await page.route("**/api/style-library/stylefinder?**",route=>json(route,{
+    ready:true,source:"stylefinder",total:1,styles:[{id:"stylefinder-ink",name:"StyleFinder Ink",examples:[]}],categories:["Illustration","Photography"],
+  }));
+  await page.route("**/api/style-library/shared-user-looks?**",list);
   await page.getByRole("button",{name:"Looks",exact:true}).click();
+  await expect(page.getByRole("button",{name:"View StyleFinder Ink",exact:true})).toBeVisible();
+  await chooseLookbookSource(page,"User Looks");
   await expect(page.getByLabel("Style previews",{exact:true})).toContainText("No styles match this view.");
   const before=catalogReads;
   await page.getByRole("button",{name:"Settings",exact:true}).click();await page.getByRole("button",{name:/User Preferences/}).click();
@@ -25,8 +30,12 @@ test("Saving a shared folder refreshes the kept-alive Catalog when returning fro
   await panel.getByLabel("Shared User Looks",{exact:true}).fill("/Volumes/Company/Newt_Shared_Looks");
   await panel.getByRole("button",{name:"Save folders",exact:true}).click();await expect(panel.getByRole("status")).toContainText("New Looks and their images will be saved to Shared User Looks");
   await page.getByRole("button",{name:"Looks",exact:true}).click();await expect(page.getByRole("button",{name:"View Shared Ink",exact:true})).toBeVisible();
-  await chooseLookbookSource(page,"Commercial");
+  await page.getByRole("combobox",{name:"Look category",exact:true}).click();
+  await expect(page.getByRole("option",{name:"Photography",exact:true})).toBeVisible();
+  await page.getByRole("option",{name:"Illustration",exact:true}).click();
+  await expect.poll(()=>category).toBe("Illustration");
   await expect(page.getByRole("button",{name:"View Shared Ink",exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"View StyleFinder Ink",exact:true})).toHaveCount(0);
   expect(catalogReads).toBeGreaterThan(before);expect(requests.some(item=>item.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
 });
 test("User Preferences can swap a compact Lookbook between a Windows network path and a Mac mount",async({page})=>{

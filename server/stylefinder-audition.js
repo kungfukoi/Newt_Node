@@ -6,7 +6,8 @@ import { createCompactStyleFinderSource, curatedStyleFinderPath } from "./stylef
 
 const prefix="stylefinder-";
 const fail=(message,status=503)=>{throw Object.assign(new Error(message),{status});};
-export function createStyleFinderAudition({directory,readSharedCompact=async()=>null,readCreatedLooks=async()=>[]}) {
+const browseCategories=(categories,looks)=>[...new Set([...categories,...looks.map(look=>look.category).filter(Boolean)])];
+export function createStyleFinderAudition({directory,readSharedCompact=async()=>null,readCreatedLooks=async()=>[],readSharedLooks=async()=>null}) {
   let cached;
   const readCompact = createCompactStyleFinderSource(directory);
   async function activeCompact(){return await readSharedCompact() || readCompact();}
@@ -54,10 +55,18 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
       warning.push(`StyleFinder catalog unavailable: ${error.message}`);
       result={ready:true,populating:false,total:0,indexed:0,categories:[],styles:[]};
     }
-    const categories=[...new Set([...result.categories,...created.map(look=>look.category).filter(Boolean)])];
+    const categories=browseCategories(result.categories,created);
     const styles=[...page.styles,...result.styles.slice(0,page.limit-page.styles.length).map(style)];
     return {...result,offset:page.offset,limit:page.limit,total:result.total+page.total,indexed:result.indexed+page.indexed,
       categories,source:"stylefinder",sourceLabel:"StyleFinder",styles,...(warning.length?{warning:warning.join(" ")}:{})};
+  }
+  async function searchSharedUserLooks(query={}){
+    const [shared,catalog]=await Promise.allSettled([readSharedLooks(),read().then(value=>value.search({limit:1}))]);
+    if(shared.status==="rejected")throw shared.reason;
+    const looks=shared.value||[];
+    const categories=browseCategories(catalog.status==="fulfilled"?catalog.value.categories:[],looks);
+    return {...selectStyleFinderPage(looks,query),ready:true,source:"shared-user-looks",categories,
+      warning:shared.value===null?"Set the Shared User Looks folder in Settings → User Preferences.":""};
   }
   async function detail(id){
     if(typeof id!=="string"||!id.startsWith(prefix)||!/^[a-z0-9-]{1,100}$/.test(id.slice(prefix.length)))fail("Choose a valid StyleFinder look.",400);
@@ -74,7 +83,7 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
     if (!curatedStyleFinderPath.test(url)) return null;
     return (await readCompact())?.curatedAsset(url);
   }
-  return {search,searchShared,detail,asset,curatedAsset};
+  return {search,searchShared,searchSharedUserLooks,detail,asset,curatedAsset};
 }
 export function registerStyleFinderCuratedImages(app, catalog) {
   app.get(curatedStyleFinderPath, async (req,res,next) => {
@@ -90,6 +99,10 @@ export function registerStyleFinderCuratedImages(app, catalog) {
 export function registerStyleFinderAuditionRoutes(app,options,catalog=createStyleFinderAudition(options)){
   const error=(res,e)=>res.status(e.status||503).json({error:e.status?e.message:"This image is unavailable in the local StyleFinder folder."});
   app.get("/api/style-library/stylefinder",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1"}));}catch(e){error(res,e);}});
+  app.get("/api/style-library/shared-user-looks",async(req,res)=>{
+    try{res.json(await catalog.searchSharedUserLooks(req.query));}
+    catch(e){res.status(e.status||503).json({error:e.status?e.message:"Could not load User Looks. Check the Shared User Looks folder and refresh."});}
+  });
   app.get("/api/style-library/stylefinder/:id",async(req,res)=>{try{res.json(await catalog.detail(req.params.id));}catch(e){error(res,e);}});
   app.get("/api/style-library/stylefinder-image",async(req,res)=>{
     try{

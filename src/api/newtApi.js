@@ -52,7 +52,7 @@ export const styleLibraryApi = {
   },
   async catalog({ query = "", category = "", offset = 0, refresh = false, source = "library" } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
-    const endpoint=source==="stylefinder"?"stylefinder":"catalog";
+    const endpoint=source==="stylefinder"||source==="shared-user-looks"?source:"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
     ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
     if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");

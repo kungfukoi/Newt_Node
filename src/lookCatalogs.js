@@ -1,5 +1,5 @@
 export function lookCatalogOptions(collections = []) {
-  return [{ value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "starred", label: "Starred" },
+  return [{ value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "shared-user-looks", label: "User Looks" }, { value: "starred", label: "Starred" },
     ...collections.filter(item => item.name.toLowerCase() !== "starred").map(item => ({ value: `collection:${item.id}`, label: item.name }))];
 }
 

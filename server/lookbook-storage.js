@@ -94,6 +94,10 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     return null;
   }
   async function read(){const location=lookLocation(await config());return location.root?readShared(location):local.read();}
+  async function readSharedLooks(){
+    const location=lookLocation(await config());
+    return location.root?readShared(location):null;
+  }
   async function aliases(){if(aliasCache)return aliasCache;try{return aliasCache=JSON.parse(await readFile(aliasPath,"utf8"));}catch(error){if(error.code==="ENOENT")return aliasCache={};throw error;}}
   async function assetAlias(url){
     if(typeof url!=="string"||!url.startsWith("/uploads/")||url.startsWith(assetPrefix))return "";
@@ -194,7 +198,7 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     await writeFile(temporary,JSON.stringify({version:1,id,deletedAt:new Date().toISOString()}),{mode:0o644});try{await rename(temporary,filename);}catch(error){await rm(temporary,{force:true});if(!await isDeleted(folder,id))throw error;}
     return {id,removed:true};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,readSharedCompact};
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,readSharedCompact,readSharedLooks};
 }
 export function registerLookbookStorageRoutes(app,store){
   const error=(res,e)=>res.status(e.status||500).json({error:e.status?e.message:"Could not access Lookbook storage. Check the folder and its permissions; the previous setting is unchanged."});

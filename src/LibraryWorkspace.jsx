@@ -42,6 +42,8 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const [savedCatalogRows, setCatalogRows] = React.useState(() => collectionRows(uiGet("lookbookCatalogRows", 1)));
   const [styleFinderRows,setStyleFinderRows]=React.useState(()=>collectionRows(uiGet("lookbookStyleFinderRows",1)));
   React.useEffect(()=>{uiSet("lookbookStyleFinderRows",styleFinderRows);},[styleFinderRows]);
+  const [sharedLookRows,setSharedLookRows]=React.useState(()=>collectionRows(uiGet("lookbookSharedUserRows",1)));
+  React.useEffect(()=>{uiSet("lookbookSharedUserRows",sharedLookRows);},[sharedLookRows]);
   React.useEffect(() => { uiSet("lookbookCatalogRows", savedCatalogRows); }, [savedCatalogRows]);
   const [namedCatalogRows,setNamedCatalogRows]=React.useState(()=>uiGet("lookbookNamedCatalogRows", {}) || {});
   React.useEffect(()=>{uiSet("lookbookNamedCatalogRows",namedCatalogRows);},[namedCatalogRows]);
@@ -49,12 +51,13 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     const rows=collectionRows(value);
     if(scope==="library")setCatalogRows(rows);
     else if(scope==="stylefinder")setStyleFinderRows(rows);
+    else if(scope==="shared-user-looks")setSharedLookRows(rows);
     else if(scope==="starred")setCollectionRows(rows);
     else setNamedCatalogRows(current=>({...current,[browseCollectionId]:rows}));
   },[scope,browseCollectionId]);
   const frameRef = React.useRef(null);
   const resizable = true;
-  const frameRows = scope === "library" ? savedCatalogRows : scope === "stylefinder" ? styleFinderRows : scope === "starred" ? savedCollectionRows : collectionRows(namedCatalogRows[browseCollectionId] ?? 1);
+  const frameRows = scope === "library" ? savedCatalogRows : scope === "stylefinder" ? styleFinderRows : scope === "shared-user-looks" ? sharedLookRows : scope === "starred" ? savedCollectionRows : collectionRows(namedCatalogRows[browseCollectionId] ?? 1);
   const [activeStyle,setActiveStyle]=React.useState(null), [detailLoading,setDetailLoading]=React.useState(false);
   const [busy,setBusy]=React.useState(false), [error,setError]=React.useState(""), [notice,setNotice]=React.useState("");
   const [previewIndex, setPreviewIndex] = React.useState(null);
@@ -65,8 +68,11 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const browseCollection=library?.collections.find(item=>item.id===browseCollectionId);
   const canDeleteCatalog=scope==="collection"&&browseCollection&&browseCollection.id!=="system-starred"&&!["catalog","starred"].includes(browseCollection.name.toLowerCase());
   React.useEffect(()=>setDeletingCatalog(""),[scope,browseCollectionId]);
-  const isSourceCatalog=scope==="library"||scope==="stylefinder";
-  const sourceStyles=isSourceCatalog ? (catalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? starredCatalogLooks(library?.collections) : (browseCollection?.styles||[]);
+  const sharedUserLooks=scope==="shared-user-looks";
+  const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks;
+  const catalogViewKey=JSON.stringify([scope,query,category]);
+  const sharedTotal=sharedUserLooks&&catalog?.viewKey!==catalogViewKey?0:catalog?.total??0;
+  const sourceStyles=isSourceCatalog ? (sharedUserLooks&&catalog?.viewKey!==catalogViewKey?[]:catalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? starredCatalogLooks(library?.collections) : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
   const browserOptions=lookCatalogOptions(library?.collections);
   const saveOptions=lookSaveOptions(library?.collections);
@@ -89,6 +95,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   }
   const loadCatalog = React.useCallback(async ({offset=0,refresh=false,search=query,filter=category,source=scope}={}) => {
     const version=++request.current; setCatalogLoading(true); setCatalogError("");
+    if(!offset&&source==="shared-user-looks")setCatalog(current=>current&&{...current,viewKey:null,warning:""});
     try {
       const value=await styleLibraryApi.catalog({query:search,category:filter,offset,refresh,source});
       if(version!==request.current)return;
@@ -105,7 +112,6 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{setSelectedLooks(new Map());},[scope,query,category,browseCollectionId]);
   React.useEffect(()=>{if(!active||!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[active,isSourceCatalog,loadCatalog]);
-  const catalogViewKey=JSON.stringify([scope,query,category]);
   React.useEffect(()=>{
     if(!isSourceCatalog || catalogLoading || catalogError || catalog?.viewKey!==catalogViewKey) return;
     const offset=catalog.styles.length;
@@ -140,7 +146,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       if (!library) throw new Error("Wait for your catalogs to load.");
       const trimmed = name.trim();
       if (!trimmed || trimmed.length > 120) throw new Error("Name your catalog using 1–120 characters.");
-      if (["catalog","commercial","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
+      if (["catalog","commercial","user looks","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
       const target = crypto.randomUUID();
       await save([...library.collections,{id:target,name:trimmed,styles:[]}]);
       if(!collectionId)setCollectionId(target);setBrowseCollectionId(target);setScope("collection");
@@ -288,7 +294,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     {error&&<div className="library-error" role="alert">{error}<button disabled={busy} onClick={loadLibrary}>Retry</button></div>}{notice&&<p className="stylebuilder-notice" role="status">{notice}</p>}
     <section className="stylebuilder-browse" aria-label="Looks catalog"><div className="stylebuilder-browse-toolbar"><p>Explore the catalog. <span>Choose a look</span></p><div className="stylebuilder-browse-controls"><button className="lookbook-compact-action" disabled={busy||!library||library.collections.length>=100} onClick={()=>setCreatingCatalog(value=>!value)}>New Catalog</button><LookbookSelect label="Looks source" value={browserValue} onChange={chooseCatalog} options={browserOptions}/><label className="stylebuilder-search"><Search size={18}/><input ref={searchInput} aria-label="Search looks" placeholder="Search looks" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="stylebuilder-search-clear" aria-label="Clear look search" onClick={()=>{setQuery("");searchInput.current?.focus();}}><X size={15}/></button>}</label><button className="stylebuilder-icon" aria-label="Refresh catalog" title="Refresh the look catalog" disabled={catalogLoading} onClick={()=>loadCatalog({refresh:true})}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button></div></div>
     {creatingCatalog&&<form className="library-inline look-collection-form" onSubmit={async event=>{event.preventDefault();if(await createCatalog(newCatalogName)){setCreatingCatalog(false);setNewCatalogName("");}}}><label>Catalog name<input autoFocus maxLength={120} disabled={busy} value={newCatalogName} onChange={event=>setNewCatalogName(event.target.value)} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setCreatingCatalog(false);}}}/></label><button type="submit" className="library-primary" disabled={busy||!newCatalogName.trim()}>Create Catalog</button><button type="button" disabled={busy} onClick={()=>setCreatingCatalog(false)}>Cancel</button></form>}
-      <div className="stylebuilder-catalog-meta"><span>{scope==="library"?category==="Shared"?`${catalog?.total??0} shared ${catalog?.total===1?"look":"looks"}`:`${catalog?.remoteCount??catalog?.indexed??0} StyleRef looks${catalog?.localCount?` · ${catalog.localCount} custom`:""}`:scope==="stylefinder"?`${catalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
+      <div className="stylebuilder-catalog-meta"><span>{(scope==="library"&&category==="Shared")||sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${catalog?.remoteCount??catalog?.indexed??0} StyleRef looks${catalog?.localCount?` · ${catalog.localCount} custom`:""}`:scope==="stylefinder"?`${catalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
       {scope==="library"&&catalog?.truncated&&<p className="library-muted">StyleRef has reached its gallery browsing limit. Refine your search to explore more looks.</p>}
       {catalogError&&isSourceCatalog&&<p className="library-error" role="alert">{catalogError}</p>}
       {catalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{catalog.warning}</p>}

@@ -7,6 +7,7 @@ import {mkdtemp,mkdir,readFile,rename,rm,readdir,symlink,writeFile,stat} from "n
 import sharp from "sharp";
 import express from "express";
 import {createLookbookStorage,registerLookbookStorageRoutes,removeOriginalLookImage} from "../server/lookbook-storage.js";
+import {createStyleFinderAudition} from "../server/stylefinder-audition.js";
 
 const draft=()=>({id:`look-${randomUUID()}`,name:"Shared ink",prompt:"Fine irregular ink contours with transparent watercolor washes, softly feathered edges and visible warm paper grain.",sourceProvider:"Newt",notes:"Ink and wash",tags:["Illustration"],examples:[{localUrl:"/uploads/local.png",fileName:"reference.png"}],styleAnalysis:{stylePrompt:"Already extracted",fingerprint:"a".repeat(64)}});
 async function fixture(t){
@@ -30,7 +31,7 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   const f=await fixture(t),catalog=path.join(f.root,"compact-catalog");
   await mkdir(catalog);
   const card={id:"catalog-ink",name:"Catalog ink",tags:[],examples:[]};
-  await writeFile(path.join(catalog,"catalog.json"),JSON.stringify({version:1,styles:[card],categories:[],assets:{},details:{}}));
+  await writeFile(path.join(catalog,"catalog.json"),JSON.stringify({version:1,styles:[card],categories:["Illustration","Photography"],assets:{},details:{}}));
   const settings=await f.one.configure({directory:catalog,looksDirectory:""});
   assert.equal(settings.mode,"local");
   assert.equal(settings.format,"compact");
@@ -52,6 +53,15 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   await assert.rejects(stat(path.join(f.shared,legacy.id)),{code:"ENOENT"});
   assert.deepEqual((await f.two.get(source.id)).examples,saved.examples);
   const reopened=f.store(f.a),current=await reopened.state();
+  const styleFinder=createStyleFinderAudition({directory:f.a,readSharedCompact:reopened.readSharedCompact,readCreatedLooks:reopened.read,readSharedLooks:reopened.readSharedLooks});
+  const first=await styleFinder.searchSharedUserLooks({limit:1});
+  const second=await styleFinder.searchSharedUserLooks({offset:1,limit:1});
+  assert.equal(first.total,2);
+  assert.deepEqual(first.categories,(await styleFinder.search()).categories);
+  assert.equal((await styleFinder.searchSharedUserLooks({category:"Illustration"})).total,2);
+  assert.equal((await styleFinder.searchSharedUserLooks({category:"Photography"})).total,0);
+  assert.deepEqual(new Set([...first.styles,...second.styles].map(look=>look.id)),new Set([source.id,legacy.id]));
+  assert.equal((await styleFinder.searchSharedUserLooks({q:"not present"})).total,0);
   assert.equal(current.directory,settings.directory);
   assert.equal(current.mode,"shared");
   assert.equal((await reopened.readSharedCompact()).search({}).styles[0].id,card.id);
@@ -59,6 +69,7 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   assert.equal((await reopened.remove(source.id,{directory:current.looksDirectory})).removed,true);
 
   await reopened.configure({directory:current.directory,looksDirectory:""});
+  assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles,[]);
   assert.deepEqual((await reopened.read()).map(look=>look.id),[localLook.id]);
   assert.equal((await reopened.state()).format,"compact");
 });
