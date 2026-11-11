@@ -7,7 +7,7 @@ import { exploreMediumGuidance, exploreContrastBriefs, describeExploreContrast }
 export const exploreTasks = ["Auto", "Product", "Fashion", "Environment", "Brand / Logo", "Illustration", "Abstract"];
 export const exploreInfluences = ["Follow closely", "Reinterpret", "Explore beyond"];
 export const exploreModels = imageModelOptions;
-export const exploreStyleFamilies = ["Auto", "Random", ...stylePresetNames.filter(name => name !== "None" && name !== "Vintage 8mm")];
+export const exploreStyleFamilies = ["Auto", "Random", ...stylePresetNames.filter(name => name !== "None")];
 export const exploreGrades = ["None", "Random", ...gradePresetNames.filter(name => !["Custom", "None"].includes(name))];
 export const exploreActions = ["explore", "more", "push", "refine", "combine", "retry"];
 export const exploreVersion = 3;
@@ -17,7 +17,7 @@ const clean = (value, limit = 8000) => typeof value === "string" ? value.trim().
 
 export function exploreDefaults() {
   return { prompt: "", creativeTask: "Auto", creativeRange: 55, directionCount: 9, variations: 1,
-    styleFamily: "Auto", exploreMode: true, referenceInfluence: "Reinterpret", model: imageModelNames.openAiImage2,
+    styleFamily: "Auto", exploreMode: true, referenceInfluence: "Reinterpret", model: imageModelNames.openAiImage26Flare,
     aspectRatio: "16:9", resolution: "2K", quality: "medium", imageBackground: "auto", openAiImageVariant: "flare",
     settingsOpen: false, referencesOpen: true, gradePreset: "None", resultItems: [], selectedResultIndex: 0, resultUrl: "", resultText: "",
     exploreDirections: [], exploreQueue: [], exploreStopRequested: false, exploreProgress: "" };
@@ -66,7 +66,7 @@ function exploreResultStyleText(item) {
 }
 
 // Avoid surprise changes to wardrobe, anatomy or subject from novelty presets.
-const randomPhotoStyles = ["Cinematic Indie", "Cinematic Standard", "Cinematic Commercial", "Photography B&W", "Photography Color", "Photography Film"];
+const randomPhotoStyles = ["Cinematic Indie", "Cinematic Standard", "Cinematic Commercial", "Vintage 8mm", "Photography Color", "Photography Film"];
 const randomGraphicStyles = ["Painterly 3D", "80s Animation", "90s Animation", "Pixel Art", "Anime", "Claymation", "2D Animation", "3D Animation"];
 const contentPreservation = "CONTENT LOCK: Treat Image / Product references as content and composition authorities, not loose inspiration. Preserve the same subjects and their count, identities, poses, expressions, wardrobe, accessories, objects, readable wording, branding, environment, camera viewpoint, framing and spatial relationships. Change only visual treatment: lighting, color grade, contrast, texture and rendering style. Do not add, remove, replace, move or redesign content for variety. Multiple reference images are not an instruction to merge scenes. Only an explicit change in the user's brief or revision note may override the corresponding content constraint. Style, grade, Camera, creative range and Explore Mode never authorize content changes.";
 
@@ -127,8 +127,18 @@ export function exploreDirectionRequest(request, index) {
     grade: gradePresetPrompts[look.gradePreset] || "" };
 }
 
+const explorePainterly3DPrompt = `Cinematic painterly 3D animation blending dimensional realism with expressive hand-painted artistry. Sculpted forms, visible brushwork, intentional painted color transitions, and stylized edges integrated into the surfaces.
+
+Illuminate these painted surfaces with believable cinematic 3D lighting: directional light that wraps around forms, soft bounced light, grounded contact shadows, material-sensitive highlights, and atmospheric depth. Maintain coherent light direction and spatial relationships across subjects and surroundings. Shapes should feel solid and physically present, while textures and shading retain an artist's hand. A balanced hybrid of painted illustration and dimensional rendering, neither a flat painting nor a glossy, plastic CG image.
+
+Rich color depth, controlled chiaroscuro, and sophisticated animated-feature finish. Preserve brushwork in both illuminated and shadowed areas.
+
+Apply this treatment only to the subjects and scene specified in the prompt and references. This preset controls rendering and visual treatment, not subject matter, setting, wardrobe, props, architecture, or historical era. Do not introduce unrelated objects or decorative motifs. Preserve specified identities, objects, and scene relationships. Explicit camera, framing, lighting, and color-grade instructions take precedence. Do not add text or watermarks.`;
+
 function exploreStyleGuidance(request, family) {
-  return request.version >= 3 && request.exploreMode !== false ? exploreMediumGuidance[family] || stylePresetPrompts[family] : stylePresetPrompts[family];
+  if (request.version >= 3 && request.exploreMode !== false && exploreMediumGuidance[family]) return exploreMediumGuidance[family];
+  if (request.version >= 3 && family === "Painterly 3D") return explorePainterly3DPrompt;
+  return stylePresetPrompts[family];
 }
 
 function contrastGuidance(request, brief, look = request) {

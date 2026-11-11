@@ -18,6 +18,10 @@ test("Explore plans, pauses, resumes and refines while preserving Preview connec
   ], edges);
   const card = nodeCard(page, "explore");
   await expect(card.getByLabel("Explore image model")).toHaveValue("OpenAI Image 2.6 Flare");
+  const creativeRange = card.getByRole("slider", { name: "Creative range" });
+  await expect(creativeRange).toHaveValue("55");
+  await expect(creativeRange).toHaveAccessibleDescription(/The default of 55 gives distinct looks/);
+  await expect(card.locator("label").filter({ has: page.getByRole("slider", { name: "Creative range" }) })).toHaveAttribute("title", /Higher values encourage bolder camera angles/);
   await card.getByLabel("Explore image model").selectOption("OpenAI Image 2.6 Sunburst");
   await expect(card.getByLabel("Variant", { exact: true })).toHaveCount(0);
   await expect(card.getByLabel("Explore Mode")).toBeChecked();

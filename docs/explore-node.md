@@ -4,15 +4,19 @@ Explore develops several art directions from one brief, then generates individua
 
 ## First run
 
-Write a brief, optionally connect assets, and click Explore. Defaults are nine directions, one image each, OpenAI Image 2.6 Flare, medium quality, 2K and 16:9. A new node falls back to an enabled model and its supported format if necessary; saved selections are not silently changed. Settings offer task, style family, creative range, reference influence, Grade, image model, format and direction count (one to 25).
+Write a brief, optionally connect assets, and click Explore. Defaults are nine directions, one image each, OpenAI Image 2.6 Flare, medium quality, 2K and 16:9. A new node falls back to an enabled model and its supported format if necessary. Saved Image 2.5 model names migrate to the corresponding 2.6 variants. Settings offer task, style family, creative range, reference influence, Grade, image model, format and direction count (one to 25).
 
 Grade uses the same named presets as Style, defaulting to None. It guides both planning and image generation without changing product/character identity or explicit brand colors. The selected image's direction details include the grade used for that image. Custom palettes remain available through a connected Style node. Changing future settings does not modify old images or their saved prompts.
 
 Auto interprets the brief. Photographic work uses cinematic/editorial craft; logos and other graphic work use graphic design criteria rather than forcing a photographic film treatment.
 
+Creative Range offers help on hover and through assistive technology. Lower values request restrained variations, 55 asks for distinct looks grounded in the brief, and higher values encourage bolder visual choices. The slider only affects planning. Quality shows a saved value as unavailable if the current model's selector does not offer it.
+
 Style Family and Grade each offer **Random**, independently of Auto/None or a specific preset. A new batch assigns different named looks before planning, reusing each family/grade only after cycling through its available pool. Random style choices avoid presets that deliberately change anatomy, wardrobe or subject matter. The resolved look is saved with each image and appears in Direction Details; it does not change when future settings change. Push Further can explore fresh random looks. More Like This and Refine retain their parent's resolved look when the selector is still Random, and Resume never rerolls an unfinished batch. Explicit fixed selections still apply.
 
 **Explore Mode** sits beside Settings and defaults on. On asks for eclectic, clearly distinct professional treatments within the brief's constraints. Off asks for restrained, faithful variations; it does not cancel a deliberately selected Random style or grade. Neither mode authorizes changes to attached image content. Random selection is local and adds no extra planning calls or image generations.
+
+Vintage 8mm is available as a fixed style and in the Random photography pool. Photography B&W is available as a fixed style. Painterly 3D's restrained guidance applies dimensional lighting and painted surfaces while following the brief's subject and setting. Jaws of Life is available as a named grade and in the Random grade pool.
 
 ## References
 

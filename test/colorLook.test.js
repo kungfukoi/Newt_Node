@@ -75,7 +75,7 @@ test("creates a reusable preset without requiring a user prompt", () => {
 test("ships reusable Cool and Warm grade presets", () => {
   assert.deepEqual(gradePresetNames, [
     "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
-    "Moody Meadow", "Classy Kubric", "Coney Color", "Custom"
+    "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life", "Custom"
   ]);
   assert.equal(coolGradePalette.length, 14);
   assert.equal(warmGradePalette.length, 14);
@@ -89,7 +89,7 @@ test("ships reusable Cool and Warm grade presets", () => {
 
 test("ships named reference grades with complete palette direction", () => {
   assert.deepEqual(Object.keys(referenceGradePresets), [
-    "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers", "Moody Meadow", "Classy Kubric", "Coney Color"
+    "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers", "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life"
   ]);
   for (const [name, preset] of Object.entries(referenceGradePresets)) {
     assert.equal(preset.palette.length, 14, `${name} should preserve a full reference palette`);

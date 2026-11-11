@@ -149,6 +149,8 @@ test("random choices balance each preset pool and resolved guidance remains cons
   assert.equal(request.directionLooks.length, 25);
   const styles = request.directionLooks.map(look => look.styleFamily), grades = request.directionLooks.map(look => look.gradePreset);
   assert.equal(new Set(styles.slice(0, 14)).size, 14);
+  assert.ok(styles.slice(0, 14).includes("Vintage 8mm"));
+  assert.ok(!styles.includes("Photography B&W"));
   const gradeCount = exploreGrades.filter(name => !["None", "Random"].includes(name)).length;
   assert.equal(new Set(grades.slice(0, gradeCount)).size, gradeCount);
   assert.equal(new Set(request.directionLooks.map(look => JSON.stringify(look))).size, 25);
@@ -166,6 +168,16 @@ test("random choices balance each preset pool and resolved guidance remains cons
   });
   const different = exploreRequest(input({ data: { directionCount: 25, styleFamily: "Random", gradePreset: "Random" }, random: () => 0.8 }));
   assert.notDeepEqual(different.directionLooks, request.directionLooks);
+});
+
+test("the upstream Painterly 3D and Jaws of Life guidance reach both Explore prompts", () => {
+  const request = exploreRequest(input({ data: { styleFamily: "Painterly 3D", gradePreset: "Jaws of Life", exploreMode: false } }));
+  const planning = JSON.parse(explorePlanningPrompt(request));
+  const generation = exploreImagePrompt(exploreDirectionRequest(request, 0), direction());
+  assert.match(planning.lookGuidance.styles["Painterly 3D"], /directional light that wraps around forms/);
+  assert.match(planning.lookGuidance.grades["Jaws of Life"], /slate-cyan midtones/);
+  assert.ok(generation.includes(planning.lookGuidance.styles["Painterly 3D"]));
+  assert.ok(generation.includes(planning.lookGuidance.grades["Jaws of Life"]));
 });
 
 test("random style and random grade are independent and graphic tasks stay graphic", () => {

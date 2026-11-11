@@ -55,7 +55,7 @@ test("Grade choices remain independent from Style choices", () => {
   assert.equal(stylePresetNames.includes("Custom Palette"), false);
   assert.deepEqual(gradePresetNames, [
     "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
-    "Moody Meadow", "Classy Kubric", "Coney Color", "Custom"
+    "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life", "Custom"
   ]);
   assert.match(gradePresetPrompts.Cool, /COLOR PALETTE:/);
   assert.match(gradePresetPrompts.Warm, /COLOR PALETTE:/);

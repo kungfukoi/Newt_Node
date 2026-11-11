@@ -1,5 +1,9 @@
 # Upstream feature sources
 
+Explore review, November 11, 2026. SugerMilks main at `4d51d448a9bb116a4a24103754e2f19d553e4882` includes the Creative Range help and Image 2.6 changes from `44880ef` and `9183967`. Adapted the help and exposed unavailable saved quality values in the picker. This checkout already defaults to 2.6 Flare and migrates saved 2.5 model names to the corresponding 2.6 variants.
+
+The Explore prompt review at the same revision matched the planning instructions, image prompt template, content lock and contrast module. Aligned the Random photography pool, Painterly 3D guidance for new Explore requests and Jaws of Life grade. The local Style input, Found Footage option, planner model preferences and provider checks still affect requests when applicable. Saved queues keep their resolved prompt text.
+
 Preset dropdown presentation (4.44.2): adapted SugerMilks 72c77e3 `PresetWorkflowPicker.jsx` rows with name and System/User subtitle, direct insertion and per-user-preset deletion. Retains our Layers trigger icon, refresh/save-selection controls and optional reusable-input configuration.
 
 The user requested that these repositories be remembered as sources to evaluate and selectively port features from. Deadmeat is James Fisher (`jamesmfisher1979-source`). The GitHub spelling of Sugarmilks's account is `SugerMilks`.

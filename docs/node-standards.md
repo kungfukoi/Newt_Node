@@ -1256,6 +1256,8 @@ This document is not law carved in stone. If a future feature needs a different 
 
 ### Explore
 
+Explore's Random photography pool includes Vintage 8mm. Photography B&W stays available as a fixed choice. Jaws of Life is a shared grade available in both Style and Explore. New Explore requests use the upstream Painterly 3D guidance when Explore Mode is off. Saved queues retain their resolved style and grade text.
+
 Explore owns its planning, sequential image queue, selected output and direction metadata. Keep the body lazy-loaded and use the shared image runner, provider routing, managed media and History. Stop leaves submitted work running; Resume never repeats completed or uncertain requests and preserves original settings. Its typed input handles remain mounted when References is collapsed. Preview receives the full image collection; other image consumers receive the selection. See [Explore](explore-node.md).
 
 ### Storyboard selected revisions
