@@ -10,7 +10,7 @@ import LookbookSelect from "./components/LookbookSelect.jsx";
 import CreateLookDialog from "./components/CreateLookDialog.jsx";
 import LookDetailExtras from "./components/LookDetailExtras.jsx";
 import LookDescription from "./components/LookDescription.jsx";
-import { lookCatalogOptions, lookSaveOptions, uniqueCatalogLooks } from "./lookCatalogs.js";
+import { lookCatalogOptions, lookSaveOptions, starredCatalogLooks, uniqueCatalogLooks } from "./lookCatalogs.js";
 import { collectionRows, collectionRowHeight, collectionRowGap, collectionFrameChrome } from "./collectionFrame.js";
 import { uiGet, uiSet } from "./uiState.js";
 
@@ -83,7 +83,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const sharedTotal=currentCatalog?.total??0;
   const savedLooks=allLooks?library?.collections.flatMap(item=>item.styles)||[]:[];
   const matchesCategory=style=>!category||style.category===category||style.tags?.includes(category);
-  const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? library?.collections.find(item=>item.name.toLowerCase()==="starred")?.styles||[] : (browseCollection?.styles||[]);
+  const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? starredCatalogLooks(library?.collections) : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
   const browserOptions=lookCatalogOptions(library?.collections,showLocalLooks);
   const saveOptions=lookSaveOptions(library?.collections);

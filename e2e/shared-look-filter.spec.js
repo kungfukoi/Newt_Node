@@ -71,8 +71,8 @@ test("All combines paged catalog results and saved copies without repeats",async
   await expect(page.getByRole("button",{name:"View Photo",exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(0);
   await chooseLookbookSource(page,"Starred");
-  await expect(page.getByRole("button",{name:"View Ink",exact:true})).toBeVisible();
-  await expect(page.getByRole("button",{name:"View Pencil",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("button",{name:"View Pencil",exact:true})).toBeVisible();
 
   const search=page.getByRole("textbox",{name:"Search looks",exact:true});
   const strip=page.getByLabel("Style previews",{exact:true});
