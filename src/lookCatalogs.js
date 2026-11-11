@@ -1,6 +1,18 @@
-export function lookCatalogOptions(collections = []) {
-  return [{ value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "shared-user-looks", label: "User Looks" }, { value: "starred", label: "Starred" },
+export function lookCatalogOptions(collections = [], showLocal = false) {
+  return [{ value: "all", label: "All" }, { value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "shared-user-looks", label: "User Looks" },
+    ...(showLocal ? [{value:"local-looks",label:"Local Looks"}] : []), { value: "starred", label: "Starred" },
     ...collections.filter(item => item.name.toLowerCase() !== "starred").map(item => ({ value: `collection:${item.id}`, label: item.name }))];
+}
+
+export function uniqueCatalogLooks(styles) {
+  const seen = new Set();
+  return styles.filter(style => {
+    const keys = [style.id,style.catalogId].filter(Boolean).map(id=>`id:${id}`);
+    if(style.sourceUrl)keys.push(`source:${style.sourceUrl}\n${style.name}`);
+    const duplicate=keys.some(key=>seen.has(key));
+    keys.forEach(key=>seen.add(key));
+    return !duplicate;
+  });
 }
 
 export function lookSaveOptions(collections = []) {

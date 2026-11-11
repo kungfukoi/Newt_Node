@@ -73,11 +73,11 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, searchSha
       return {styles:[...new Map(styles.map(style=>[style.id,style])).values()],truncated};
     });
   }
-  async function search({q="",category="",offset=0,limit=48,refresh=false}={}) {
+  async function search({q="",category="",offset=0,limit=48,refresh=false,own=false}={}) {
     q=clean(q,300);category=clean(category,80);
-    const sharedOnly=category==="Shared";
+    const sharedOnly=!own&&category==="Shared";
     const [remoteResult,createdResult]=await Promise.allSettled([sharedOnly?Promise.resolve({all:{styles:[]},matched:{styles:[],truncated:false}}):(async()=>{const all=await listing("","",refresh);return {all,matched:category&&!all.styles.some(style=>style.category===category)?{styles:[],truncated:false}:q||category?await listing(q,category,refresh):all};})(),(async()=>{
-      if(!createdStore)return {looks:[],shared:false};
+      if(own||!createdStore)return {looks:[],shared:false};
       const state=await createdStore.state?.();return {looks:await createdStore.read(),shared:state?.mode==="shared"};
     })()]);
     if(remoteResult.status==="rejected"&&(createdResult.status==="rejected"||!createdResult.value.looks.length))throw remoteResult.reason;
@@ -97,7 +97,7 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, searchSha
     const styles=[...local,...matched.styles].slice(start,start+size);
     if(compact)styles.push(...compact.styles.slice(0,size-styles.length));
     return {ready:true,source:"styleref",sourceLabel:"StyleRef",sourceUrl:"https://styleref.io",attribution:"StyleRef.io",populating:false,truncated:matched.truncated,warning,
-      indexed:all.styles.length+created.length+(compact?.indexed??0),remoteCount:all.styles.length,localCount:created.length,sharedCount:(shared?created.length:0)+(compact?.indexed??0),total:local.length+matched.styles.length+(compact?.total??0),offset:start,limit:size,categories:[...new Set(["Shared",...(sharedOnly?cache.get("list::")?.value.styles||[]:all.styles).concat(created).map(style=>style.category).filter(Boolean)])].sort(),styles};
+      indexed:all.styles.length+created.length+(compact?.indexed??0),remoteCount:all.styles.length,localCount:created.length,sharedCount:(shared?created.length:0)+(compact?.indexed??0),total:local.length+matched.styles.length+(compact?.total??0),offset:start,limit:size,categories:[...new Set([...(own?[]:["Shared"]),...(sharedOnly?cache.get("list::")?.value.styles||[]:all.styles).concat(created).map(style=>style.category).filter(Boolean)])].sort(),styles};
   }
   async function detail(id) {
     if(!id?.startsWith(prefix)){
@@ -132,7 +132,7 @@ export function createStyleRefCatalog({ fetchImpl=fetch, createdStore, searchSha
 export function registerStyleRefCatalogRoutes(app, options={}) {
   const catalog=createStyleRefCatalog(options);
   const error=(res,e,fallback)=>{if(e.retryAfter)res.set("Retry-After",e.retryAfter);res.status(e.status||500).json({error:e.status?e.message:fallback});};
-  app.get("/api/style-library/catalog",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1"}));}catch(e){error(res,e,"Could not read StyleRef. Check your connection and retry.");}});
+  app.get("/api/style-library/catalog",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1",own:req.query.own==="1"}));}catch(e){error(res,e,"Could not read StyleRef. Check your connection and retry.");}});
   app.get("/api/style-library/catalog/:id",async(req,res)=>{try{res.json(await catalog.detail(req.params.id));}catch(e){error(res,e,"Could not read this StyleRef look.");}});
   app.get("/api/style-library/styleref-image",async(req,res)=>{try{const value=await catalog.asset(req.query.url);res.set({"Content-Type":value.type,"Cache-Control":"private, max-age=300","X-Content-Type-Options":"nosniff"}).send(value.buffer);}catch(e){error(res,e,"Could not load this StyleRef example.");}});
 }

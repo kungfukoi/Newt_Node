@@ -1,9 +1,11 @@
 import path from "node:path";
 import { createHash,randomUUID } from "node:crypto";
 import { mkdir,readFile,writeFile,rename,readdir,stat,realpath,rm } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
 import { createCustomLookStore,prepareCustomLook } from "./custom-looks.js";
 import { createCompactStyleFinderReader } from "./stylefinder-compact.js";
+import { selectStyleFinderPage } from "./stylefinder-catalog.js";
 import { normalizeLibraryStyle } from "../src/styleLibrary.js";
 
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
@@ -11,6 +13,16 @@ const digest=buffer=>createHash("sha256").update(buffer).digest("hex");
 const idPattern=/^look-[a-f0-9-]{36}$/;
 const assetPattern=/^([a-f0-9]{64})\.(png|jpg|webp|avif)$/;
 const assetPrefix="/uploads/shared-looks/";
+const purgeOptions={recursive:true,force:true,maxRetries:4,retryDelay:150};
+async function stageLookDeletion(source,target){
+  for(let attempt=0;;attempt++){
+    try{await rename(source,target);return;}
+    catch(error){
+      if(attempt===4||!["EBUSY","EACCES","EPERM"].includes(error.code))throw error;
+      await delay(150*(attempt+1));
+    }
+  }
+}
 const looksRoot=setting=>setting.looksDirectory??setting.directory;
 function lookLocation(setting){
   const root=looksRoot(setting);
@@ -83,7 +95,22 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
       for(const item of entries)if(item.isDirectory()&&idPattern.test(item.name)&&!locations.has(item.name))locations.set(item.name,folder);
     }
     const ids=[...locations.keys()].sort();
-    const looks=[];for(let offset=0;offset<ids.length;offset+=16)looks.push(...await Promise.all(ids.slice(offset,offset+16).map(async id=>{try{const folder=locations.get(id),look=display(folder,await record(folder,id));return await isDeleted(folder,id)?null:look;}catch{fail(`Shared look ${id} could not be read. Check the shared folder before saving more looks.`,503);}})));
+    const looks=[];
+    for(let offset=0;offset<ids.length;offset+=16){
+      looks.push(...await Promise.all(ids.slice(offset,offset+16).map(async id=>{
+        const folder=locations.get(id);
+        try{
+          const look=display(folder,await record(folder,id));
+          return await isDeleted(folder,id)?null:look;
+        }catch(error){
+          if(error.code==="ENOENT"){
+            try{await stat(path.join(folder,id));}
+            catch(missing){if(missing.code==="ENOENT")return null;throw missing;}
+          }
+          fail(`Shared look ${id} could not be read. Check the shared folder before saving more looks.`,503);
+        }
+      })));
+    }
     const active=looks.filter(Boolean);if(active.length>5000)fail("The shared Lookbook exceeds 5,000 looks.");return active;
   }
   async function isDeleted(folder,id){try{await stat(path.join(folder,id,"deleted.json"));return true;}catch(error){if(error.code==="ENOENT")return false;throw error;}}
@@ -96,7 +123,11 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
   async function read(){const location=lookLocation(await config());return location.root?readShared(location):local.read();}
   async function readSharedLooks(){
     const location=lookLocation(await config());
-    return location.root?readShared(location):null;
+    return location.root?{looksDirectory:location.root,looks:await readShared(location)}:null;
+  }
+  async function searchLocalLooks(query){
+    const looks=looksRoot(await config())?[]:await local.read();
+    return {...selectStyleFinderPage(looks,query),ready:true,categories:[...new Set(looks.map(look=>look.category).filter(Boolean))].sort()};
   }
   async function aliases(){if(aliasCache)return aliasCache;try{return aliasCache=JSON.parse(await readFile(aliasPath,"utf8"));}catch(error){if(error.code==="ENOENT")return aliasCache={};throw error;}}
   async function assetAlias(url){
@@ -198,12 +229,56 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     await writeFile(temporary,JSON.stringify({version:1,id,deletedAt:new Date().toISOString()}),{mode:0o644});try{await rename(temporary,filename);}catch(error){await rm(temporary,{force:true});if(!await isDeleted(folder,id))throw error;}
     return {id,removed:true};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,readSharedCompact,readSharedLooks};
+  function purgeSharedLook(id,expectedDirectory){return serial(async()=>{
+    if(!idPattern.test(id||""))fail("Only user-created Looks can be deleted.");
+    const {root,folders}=lookLocation(await config());
+    if(!root||expectedDirectory!==root)fail("The Shared User Looks folder changed. Refresh User Looks and try again.",409);
+    await rootAvailable(root);
+    const resolvedRoot=await realpath(root);
+    async function checkedDirectory(target){
+      let resolved;
+      try{resolved=await realpath(target);}catch(error){if(error.code==="ENOENT")return null;throw error;}
+      const expected=path.join(resolvedRoot,path.relative(root,target));
+      if(path.relative(expected,resolved)!==""||!(await stat(resolved)).isDirectory()){
+        fail("The Look folder does not resolve inside Shared User Looks.",409);
+      }
+      return resolved;
+    }
+    let removed=false;
+    for(const folder of folders){
+      const target=path.join(folder,id);
+      const pending=path.join(folder,`.deleting-${id}`);
+      const previous=await checkedDirectory(pending);
+      if(previous){
+        await rm(previous,purgeOptions);
+        removed=true;
+      }
+      const resolved=await checkedDirectory(target);
+      if(!resolved)continue;
+      const resolvedPending=path.join(path.dirname(resolved),path.basename(pending));
+      await stageLookDeletion(resolved,resolvedPending);
+      await rm(resolvedPending,purgeOptions);
+      removed=true;
+    }
+    return {id,removed};
+  });}
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,purgeSharedLook,readSharedCompact,readSharedLooks,searchLocalLooks};
 }
 export function registerLookbookStorageRoutes(app,store){
   const error=(res,e)=>res.status(e.status||500).json({error:e.status?e.message:"Could not access Lookbook storage. Check the folder and its permissions; the previous setting is unchanged."});
   app.get("/api/style-library/storage",async(_req,res)=>{try{res.json(await store.state());}catch(e){error(res,e);}});
+  app.get("/api/style-library/local-looks",async(req,res)=>{try{res.json(await store.searchLocalLooks(req.query));}catch(e){error(res,e);}});
   app.put("/api/style-library/storage",async(req,res)=>{try{res.json(await store.configure(req.body));}catch(e){error(res,e);}});
+  app.delete("/api/style-library/shared-user-looks/:id",async(req,res)=>{
+    try{res.json(await store.purgeSharedLook(req.params.id,req.body?.directory));}
+    catch(e){
+      const code=e.code&&/^[A-Z0-9]+$/.test(e.code)?` (${e.code})`:"";
+      const message=e.code==="EBUSY"?"The Look folder is in use. Close any open files in it and retry."
+        :["EACCES","EPERM"].includes(e.code)?"The shared drive denied deletion. Check whether the Look folder is open or whether you have delete permission."
+        :"The shared drive could not delete the Look folder. Retry the removal.";
+      res.status(e.status||503).json({error:e.status?e.message:message+code});
+    }
+  });
   app.post("/api/style-library/storage/retire-local",async(_req,res)=>{try{res.json(await store.retireLocalCopies());}catch(e){error(res,e);}});
   app.get("/uploads/shared-looks/:filename",async(req,res)=>{try{res.sendFile(await store.ensureAsset(assetPrefix+req.params.filename));}catch(e){error(res,e);}});
   app.use("/uploads",async(req,res,next)=>{try{const target=await store.assetAlias("/uploads"+req.path);if(!target)return next();res.sendFile(await store.ensureAsset(target));}catch(e){error(res,e);}});

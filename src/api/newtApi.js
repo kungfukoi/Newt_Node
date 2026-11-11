@@ -14,6 +14,13 @@ const localControlApiPort = import.meta.env?.VITE_CONTROL_API_PORT || "3337";
 const localControlApiBaseUrl = `http://127.0.0.1:${localControlApiPort}`;
 
 export const styleLibraryApi = {
+  async purgeSharedLook(id,directory){
+    const {response,data}=await fetchJsonApi(`/api/style-library/shared-user-looks/${encodeURIComponent(id)}`,{
+      method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({directory}),
+    },"Permanently delete shared Look",{timeoutMs:60000,retryLocalApi:false});
+    ensureOk(response,data,"Could not delete the Look folder. Restart NewtNode if the server is running an older version.");
+    return data;
+  },
   async removeCreated(id,directory){
     const {response,data}=await fetchJsonApi(`/api/style-library/created/${encodeURIComponent(id)}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({directory})},"Delete custom Look",{timeoutMs:60000,retryLocalApi:false});
     ensureOk(response,data,"Could not delete this Look.");return data;
@@ -51,12 +58,33 @@ export const styleLibraryApi = {
     return data;
   },
   async catalog({ query = "", category = "", offset = 0, refresh = false, source = "library" } = {}) {
-    const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0" });
-    const endpoint=source==="stylefinder"||source==="shared-user-looks"?source:"catalog";
+    const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0", own: "1" });
+    const endpoint=["stylefinder","shared-user-looks","local-looks"].includes(source)?source:"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
     ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
     if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");
     return data;
+  },
+  async allCatalogs({query,category,refresh,includeLocal=false,offsets={library:0,stylefinder:0,"shared-user-looks":0,"local-looks":0}}) {
+    const sources=Object.entries(offsets).filter(([source])=>source!=="local-looks"||includeLocal);
+    const results=await Promise.allSettled(sources.map(([source,offset])=>this.catalog({query,category,refresh,source,offset})));
+    const nextOffsets={},styles=[],categories=new Set(),warnings=[];
+    const labels={library:"Commercial",stylefinder:"StyleFinder","shared-user-looks":"User Looks","local-looks":"Local Looks"};
+    let truncated=false;
+    results.forEach((result,index)=>{
+      const [source,offset]=sources[index];
+      if(result.status==="rejected"){warnings.push(`${labels[source]}: ${result.reason.message}`);return;}
+      const page=result.value;
+      styles.push(...page.styles);
+      page.categories?.forEach(category=>categories.add(category));
+      truncated ||= page.truncated;
+      const next=offset+page.styles.length;
+      if(next<page.total){
+        if(next>offset)nextOffsets[source]=next;
+        else warnings.push(`Could not load more ${labels[source]} looks. Refresh to retry.`);
+      }
+    });
+    return {ready:true,styles,categories:[...categories].sort(),nextOffsets,truncated,warning:warnings.join(" ")};
   },
   async detail(id) {
     const endpoint=id.startsWith("stylefinder-")?"stylefinder":"catalog";

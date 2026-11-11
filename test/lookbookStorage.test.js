@@ -38,6 +38,7 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   const localLook=draft();
   await f.one.add(localLook);
   assert.equal((await f.one.get(localLook.id)).examples[0].localUrl,"/uploads/local.png");
+  assert.deepEqual((await f.one.searchLocalLooks()).styles.map(look=>look.id),[localLook.id]);
 
   await f.one.configure({directory:settings.directory,looksDirectory:f.shared,copyLocal:false});
   await f.two.configure({directory:f.shared});
@@ -57,7 +58,10 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   const first=await styleFinder.searchSharedUserLooks({limit:1});
   const second=await styleFinder.searchSharedUserLooks({offset:1,limit:1});
   assert.equal(first.total,2);
+  assert.equal(first.looksDirectory,current.looksDirectory);
   assert.deepEqual(first.categories,(await styleFinder.search()).categories);
+  assert.deepEqual((await styleFinder.search({own:true})).styles.map(look=>look.id),["stylefinder-catalog-ink"]);
+  assert.deepEqual((await reopened.searchLocalLooks()).styles,[]);
   assert.equal((await styleFinder.searchSharedUserLooks({category:"Illustration"})).total,2);
   assert.equal((await styleFinder.searchSharedUserLooks({category:"Photography"})).total,0);
   assert.deepEqual(new Set([...first.styles,...second.styles].map(look=>look.id)),new Set([source.id,legacy.id]));
@@ -66,7 +70,11 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   assert.equal(current.mode,"shared");
   assert.equal((await reopened.readSharedCompact()).search({}).styles[0].id,card.id);
   await assert.rejects(reopened.remove(source.id,{directory:current.directory}),{status:409});
-  assert.equal((await reopened.remove(source.id,{directory:current.looksDirectory})).removed,true);
+  await assert.rejects(reopened.purgeSharedLook(source.id,current.directory),{status:409});
+  assert.equal((await reopened.purgeSharedLook(source.id,first.looksDirectory)).removed,true);
+  await assert.rejects(stat(path.join(f.shared,source.id)),{code:"ENOENT"});
+  assert.equal((await reopened.purgeSharedLook(source.id,first.looksDirectory)).removed,false);
+  assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles.map(look=>look.id),[legacy.id]);
 
   await reopened.configure({directory:current.directory,looksDirectory:""});
   assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles,[]);
@@ -97,6 +105,12 @@ test("Settings and asset routes reject sharing URIs/traversal and retain the pri
   const app=express();app.use(express.json());registerLookbookStorageRoutes(app,f.one);const server=app.listen(0,"127.0.0.1");await new Promise(resolve=>server.once("listening",resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const base=`http://127.0.0.1:${server.address().port}`,saved=await f.one.add(draft());assert.equal((await fetch(base+"/api/style-library/storage")).status,200);
   const image=await fetch(base+saved.examples[0].localUrl);assert.equal(image.status,200);assert.match(image.headers.get("content-type"),/image\/png/);assert.deepEqual(Buffer.from(await image.arrayBuffer()),f.buffer);
+  const deleted=await fetch(base+"/api/style-library/shared-user-looks/"+saved.id,{
+    method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({directory:(await f.one.state()).looksDirectory}),
+  });
+  assert.equal(deleted.status,200);
+  assert.deepEqual(await deleted.json(),{id:saved.id,removed:true});
+  await assert.rejects(stat(path.join(f.shared,"looks",saved.id)),{code:"ENOENT"});
 });
 
 test("A filesystem symbolic-link or Windows junction root resolves to the same shared folder",async t=>{

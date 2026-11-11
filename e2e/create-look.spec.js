@@ -8,7 +8,7 @@ async function setup(page) {
   let library = { revision: 0, collections: [] }, created = [], calls = 0, uploads = 0;
   const json = (route, value) => route.fulfill({ contentType: "application/json", body: JSON.stringify(value) });
   await page.route("**/api/style-library", route => { if (route.request().method() === "PUT") library = { ...route.request().postDataJSON(), revision: library.revision + 1 }; return json(route, library); });
-  await page.route("**/api/style-library/catalog?**", route => json(route, { ready: true, indexed: created.length, total: created.length, categories: ["Illustrators", "Techniques"], styles: created }));
+  await page.route("**/api/style-library/local-looks?**", route => json(route, { ready: true, indexed: created.length, total: created.length, categories: ["Illustrators", "Techniques"], styles: created }));
   await page.route("**/api/style-library/catalog/**", route => json(route, { style: created[0] }));
   await page.route("**/api/node/upload-asset", route => { uploads++; return json(route, { asset: { localUrl: `/outputs/e2e/input-${uploads}.png`, fileName: `input-${uploads}.png`, mimeType: "image/png" } }); });
   await page.route("**/api/style-library/analyze", route => { calls++; expect(route.request().postDataJSON().purpose).toBe("create-look"); return json(route, { stylePrompt: description, tags: ["Techniques"], styleBlocks:[{id:"medium",text:"Fine ink contours and translucent washes"},{id:"texture",text:"Subtle paper grain"}],palette:[{name:"warm paper",hex:"#e8ddc0"},{name:"ochre",hex:"#cc9933"},{name:"ink",hex:"#242b2c"}], fingerprint: "a".repeat(64), provider: "Atlas Cloud", model: "gpt-6-astra", version: 3 }); });

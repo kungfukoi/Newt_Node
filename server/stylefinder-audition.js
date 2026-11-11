@@ -41,7 +41,7 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
     return {...result,styles:result.styles.map(style)};
   }
   async function search(query={}){
-    const [custom,catalog]=await Promise.allSettled([readCreatedLooks(),read()]);
+    const [custom,catalog]=await Promise.allSettled([query.own?[]:readCreatedLooks(),read()]);
     const created=custom.status==="fulfilled"?custom.value:[];
     const page=selectStyleFinderPage(created,query);
     const warning=custom.status==="rejected"?[`User Looks unavailable: ${custom.reason.message}`]:[];
@@ -63,9 +63,9 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
   async function searchSharedUserLooks(query={}){
     const [shared,catalog]=await Promise.allSettled([readSharedLooks(),read().then(value=>value.search({limit:1}))]);
     if(shared.status==="rejected")throw shared.reason;
-    const looks=shared.value||[];
+    const {looks=[],looksDirectory=""}=shared.value||{};
     const categories=browseCategories(catalog.status==="fulfilled"?catalog.value.categories:[],looks);
-    return {...selectStyleFinderPage(looks,query),ready:true,source:"shared-user-looks",categories,
+    return {...selectStyleFinderPage(looks,query),ready:true,source:"shared-user-looks",categories,looksDirectory,
       warning:shared.value===null?"Set the Shared User Looks folder in Settings → User Preferences.":""};
   }
   async function detail(id){
@@ -98,7 +98,7 @@ export function registerStyleFinderCuratedImages(app, catalog) {
 }
 export function registerStyleFinderAuditionRoutes(app,options,catalog=createStyleFinderAudition(options)){
   const error=(res,e)=>res.status(e.status||503).json({error:e.status?e.message:"This image is unavailable in the local StyleFinder folder."});
-  app.get("/api/style-library/stylefinder",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1"}));}catch(e){error(res,e);}});
+  app.get("/api/style-library/stylefinder",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1",own:req.query.own==="1"}));}catch(e){error(res,e);}});
   app.get("/api/style-library/shared-user-looks",async(req,res)=>{
     try{res.json(await catalog.searchSharedUserLooks(req.query));}
     catch(e){res.status(e.status||503).json({error:e.status?e.message:"Could not load User Looks. Check the Shared User Looks folder and refresh."});}

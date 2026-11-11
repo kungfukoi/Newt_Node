@@ -51,7 +51,7 @@ test("User Preferences can swap a compact Lookbook between a Windows network pat
   await field.fill(uncPath);await save.click();
   await expect(panel.getByRole("status")).toContainText("New Looks will be saved on this computer");expect(last).toEqual({directory:uncPath,looksDirectory:"",copyLocal:true});
   fail=true;await field.fill("/Volumes/Company/Newt_Node_Lib");await save.click();await expect(panel.getByRole("alert")).toContainText("previous setting unchanged");expect(state.directory).toBe(uncPath);
-  fail=false;await looks.fill("/Volumes/Company/Newt_Shared_Looks");await save.click();await expect(panel.getByRole("status")).toContainText("Commercial → Shared");expect(state.directory).toBe("/Volumes/Company/Newt_Node_Lib");
+  fail=false;await looks.fill("/Volumes/Company/Newt_Shared_Looks");await save.click();await expect(panel.getByRole("status")).toContainText("Browse the compact catalog in StyleFinder");expect(state.directory).toBe("/Volumes/Company/Newt_Node_Lib");
   await page.reload();await page.getByRole("button",{name:"Settings",exact:true}).click();
   const toggle=page.getByRole("button",{name:/User Preferences/});await expect(toggle).toBeVisible();if(await toggle.getAttribute("aria-expanded")!=="true")await toggle.click();
   await expect(field).toHaveValue("/Volumes/Company/Newt_Node_Lib");await expect(looks).toHaveValue("/Volumes/Company/Newt_Shared_Looks");expect(errors).toEqual([]);
