@@ -2,19 +2,24 @@ import { normalizeOutpaintFrame, outpaintFrameGeometry } from "./videoOutpaintFr
 import { outpaintReferenceAppearanceRule, outpaintSourceColorRule } from "./outpaintContext.js";
 import { outpaintFrameOneRule, fullFrameScene } from "./outpaintFrameOne.js";
 import { normalizeOutpaintReferenceRoles, outpaintRoleInstructions } from "./outpaintReferences.js";
+import { ltxVfxModels } from "./ltxVfx.js";
 export const videoOutpaintModelName = "Video Outpaint";
 export const videoOutpaintRatios = ["9:16", "16:9", "1:1"];
-export const videoOutpaintModels = [["seedance-2.5", "Seedance Edit"], ["wan-vace", "Wan VACE 14B"]];
+export const ltxReframeOutpaintModel = "ltx-reframe";
+export const videoOutpaintModels = [["seedance-2.5", "Seedance Edit"], ["wan-vace", "Wan VACE 14B"], [ltxReframeOutpaintModel, ltxVfxModels.reframe.displayName]];
+export function isLtxReframeOutpaint(utilityModel, settings) {
+  return utilityModel === videoOutpaintModelName && settings?.model === ltxReframeOutpaintModel;
+}
 const bounded = (value, min, max, fallback) => Number.isFinite(Number(value)) ? Math.max(min, Math.min(max, Number(value))) : fallback;
 export function normalizeVideoOutpaintSettings(value = {}) {
   value = value && typeof value === "object" ? value : {};
-  const model = value.model === "seedance-2.5" ? "seedance-2.5" : "wan-vace";
+  const model = videoOutpaintModels.some(([id]) => id === value.model) ? value.model : "wan-vace";
   const seedanceResolution = ["480p", "720p", "1080p"].includes(value.seedanceResolution) ? value.seedanceResolution : "1080p";
   return {
     model,
     seedanceResolution,
-    repeatCount: model === "seedance-2.5" ? Math.round(bounded(value.repeatCount, 1, 30, 1)) : 1,
-    keepAllRepeats: model === "seedance-2.5" && value.keepAllRepeats !== false,
+    repeatCount: model !== "wan-vace" ? Math.round(bounded(value.repeatCount, 1, 30, 1)) : 1,
+    keepAllRepeats: model !== "wan-vace" && value.keepAllRepeats !== false,
     useFullSource: model === "seedance-2.5",
     aspectRatio: videoOutpaintRatios.includes(value.aspectRatio) ? value.aspectRatio : "9:16",
     frame: normalizeOutpaintFrame(value.frame),
@@ -34,7 +39,8 @@ export function normalizeVideoOutpaintSettings(value = {}) {
 // Default new nodes to Seedance while preserving an explicitly selected Wan engine.
 // Legacy result normalization above keeps its original timing interpretation.
 export function normalizeUtilityOutpaintSettings(value = {}) {
-  return normalizeVideoOutpaintSettings({ ...(value && typeof value === "object" ? value : {}), model: value?.model === "wan-vace" ? "wan-vace" : "seedance-2.5" });
+  const model = videoOutpaintModels.some(([id]) => id === value?.model) ? value.model : "seedance-2.5";
+  return normalizeVideoOutpaintSettings({ ...value, model });
 }
 export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "") {
   const normalized = normalizeVideoOutpaintSettings(settings);
@@ -42,6 +48,7 @@ export function videoOutpaintFingerprint(sourceUrl, settings, canvasVideoUrl = "
 }
 export function planVideoOutpaint(metadata, options = {}, timing = {}) {
   const settings = normalizeVideoOutpaintSettings(options);
+  if (settings.model === ltxReframeOutpaintModel) throw new Error("LTX-2.5 Reframe uses the connected source video directly.");
   const canvases = { "9:16": [720, 1280], "16:9": [1280, 720], "1:1": [720, 720] };
   const seedance = settings.model === "seedance-2.5";
   const long = settings.outputSize === "480p" ? 854 : settings.outputSize === "720p" ? 1280 : 1920;

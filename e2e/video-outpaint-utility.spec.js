@@ -218,7 +218,7 @@ test("Seedance outpaint switches controls, prepares a short clip, analyzes conte
   expect(generation.seedanceTask).toBe("edit"); expect(generation.durableGeneration).toBe(true);
   expect(generation.referenceVideoUrls).toEqual(["/outputs/e2e/source.mp4"]);
   await page.screenshot({ path: testInfo.outputPath("seedance-outpaint.png") });
-  await expect(node.getByLabel("Outpaint model").locator("option")).toHaveCount(2);
+  await expect(node.getByLabel("Outpaint model").locator("option")).toHaveText(["Seedance Edit", "Wan VACE 14B", "LTX-2.5 Reframe"]);
   await expect(node.getByLabel("Outpaint model")).toHaveValue("seedance-2.5");
   await expect(node.getByLabel("Outpaint inference steps")).toHaveCount(0);
   await node.getByLabel("Outpaint model").selectOption("wan-vace");

@@ -26,7 +26,7 @@ import { outpaintOutputItem } from "./outpaintPreview.js";
 import { NodeAbout } from "./components/NodeAbout.jsx";
 import { outpaintNeedsFinishing, outpaintOutputError } from "./outpaintQuality.js";
 import { runOutpaintRetries } from "./nodeRunners/outpaintRetries.js";
-import { normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
+import { isLtxReframeOutpaint, normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
 import { defaultOutpaintFrame } from "./videoOutpaintFrame.js";
 import { VideoOutpaintPromptControls } from "./components/VideoOutpaintPromptControls.jsx";
 import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
@@ -144,7 +144,7 @@ import {
   X
 } from "lucide-react";
 import { audioModelApi, composerApi, nodeApi, systemApi, stopRemoteVideoNode } from "./api/newtApi.js";
-import { findLtxVfxModel, normalizeLtxVfxSettings } from "./ltxVfx.js";
+import { findLtxVfxModel, ltxVfxModels, normalizeLtxVfxSettings } from "./ltxVfx.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
 import { nodeSchedulingKey, nodeBatchConcurrency } from "./nodeScheduling.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
@@ -7602,7 +7602,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           isUtilityDwposeVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
-    const isLtxVfxRun = currentNode.type === "utility" && utilityMode(currentNode) === "video" && Boolean(findLtxVfxModel(currentNode.data.utilityVideoModel));
+    const isOutpaintReframeRun = isLtxReframeOutpaint(currentNode.data.utilityVideoModel, currentNode.data.videoOutpaint);
+    const isLtxVfxRun = currentNode.type === "utility" && utilityMode(currentNode) === "video" && Boolean(isOutpaintReframeRun || findLtxVfxModel(currentNode.data.utilityVideoModel));
     const batchCount = isSingleRunSegmentation || isLtxVfxRun ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
     const generationGroupId = runOptions.batchGroupId || ((["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode) || isLtxVfxRun)
       ? createGenerationGroupId(currentNode.type)
@@ -7634,7 +7635,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       updateNode(currentNode.id, {
         status: "running",
         error: "",
-        ...(currentNode.type === "utility" && currentNode.data.utilityVideoModel === videoOutpaintModelName ? { videoOutpaintStage: "extension", videoOutpaintQcFindings: [] } : {}),
+        ...(currentNode.type === "utility" && currentNode.data.utilityVideoModel === videoOutpaintModelName && !isOutpaintReframeRun ? { videoOutpaintStage: "extension", videoOutpaintQcFindings: [] } : {}),
         ...(currentNode.type === "explore" ? { exploreStopRequested: false } : {}),
         ...(["text", "textAgent"].includes(currentNode.type) ? { lastRunModel: "" } : {}),
         ...(currentNode.type === "skillDirector" ? {
@@ -15319,6 +15320,8 @@ function NodeBody({
     const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
     const isCompositeVideo = isUtilityCompositeVideoModel(utilityVideoModel);
     const isOutpaintVideo = utilityVideoModel === videoOutpaintModelName;
+    const isOutpaintReframe = isLtxReframeOutpaint(utilityVideoModel, node.data.videoOutpaint);
+    const usesOutpaintCanvas = isOutpaintVideo && !isOutpaintReframe;
     const isWanBlend = isUtilityWanBlendModel(utilityVideoModel);
     const isVideoStitch = isUtilityVideoStitchModel(utilityVideoModel);
     const isTransitionBuilder = isUtilityTransitionBuilderModel(utilityVideoModel);
@@ -15336,7 +15339,7 @@ function NodeBody({
     const isTopazSdrToHdr = isUtilityTopazSdrToHdrModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
-    const ltxVfxModel = isVideoMode ? findLtxVfxModel(utilityVideoModel) : null;
+    const ltxVfxModel = isVideoMode ? isOutpaintReframe ? ltxVfxModels.reframe : findLtxVfxModel(utilityVideoModel) : null;
     const ltxVfxSettings = ltxVfxModel && normalizeLtxVfxSettings(ltxVfxModel, node.data.ltxVfx?.[ltxVfxModel.id]);
     const reframeSourceUrl = ltxVfxSettings?.anchor ? connectedAssetUrls(incoming.referenceVideoIn).at(0) || "" : "";
     const ltxVfxResult = ltxVfxModel && node.data.resultItems?.[Number(node.data.selectedResultIndex) || 0];
@@ -15368,11 +15371,15 @@ function NodeBody({
     const outpaintSlots = outpaintImageSlots(node.data, outpaintSlotUrls, outpaintSlotNames);
     const outpaintReferences = outpaintImagePayload(node.data, outpaintSlotUrls);
     const retainedOutpaint = lastOutpaintPreparation(node.data);
-    const isOutpaintCropOnly = isOutpaintVideo && retainedOutpaint?.plan?.needsOutpaint === false && !outpaintPreparationError(retainedOutpaint, connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", connectedAssetUrls(incoming.canvasVideoIn).at(0) || "", normalizeUtilityOutpaintSettings(node.data.videoOutpaint).model);
+    const isOutpaintCropOnly = usesOutpaintCanvas && retainedOutpaint?.plan?.needsOutpaint === false && !outpaintPreparationError(retainedOutpaint, connectedAssetUrls(incoming.referenceVideoIn).at(0) || "", connectedAssetUrls(incoming.canvasVideoIn).at(0) || "", normalizeUtilityOutpaintSettings(node.data.videoOutpaint).model);
     const activeUtilityInputPortIds = utilityInputPortIds(isVideoMode ? "video" : "image", utilityImageModel, utilityVideoModel, node.data);
+    const connectedReframeUnusedPorts = isOutpaintReframe
+      ? activeUtilityInputPortIds.filter(id => id !== "referenceVideoIn" && incoming[id]?.length)
+      : [];
     const collapsedPorts = (isVideoMode && isCompositeVideo ? compositeInputPorts(node.data, portColors.preview) : activeUtilityInputPortIds
       .map((portId) => portId === "referenceVideoIn" ? referenceVideoPort : config.input.find((port) => port.id === portId))
       .filter(Boolean))
+      .filter(port => !isOutpaintReframe || port.id === "referenceVideoIn" || connectedReframeUnusedPorts.includes(port.id))
       .map((port) => {
         if (isOutpaintVideo && outpaintImagePortIds.includes(port.id)) return { ...port, label: outpaintSlots.find(slot => slot.id === port.id).name };
         if (!isCompositeVideo) return port;
@@ -15382,7 +15389,7 @@ function NodeBody({
       });
     const resultType = node.data.resultType || utilityOutputMediaType;
     const hasReferenceVideoInput = activeUtilityInputPortIds.includes("referenceVideoIn");
-    const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length || (isOutpaintVideo && incoming.canvasVideoIn?.length));
+    const hasRequiredReferenceVideo = isWanVaceMaskToVideo || isTransitionBuilder || !hasReferenceVideoInput ? true : Boolean(incoming.referenceVideoIn?.length || (usesOutpaintCanvas && incoming.canvasVideoIn?.length));
     const wanWarpSegmentCount = isVideoStitch ? connectedWanWarpSegments(incoming.referenceVideoIn).length : 0;
     const wanWarpReferenceVideoCount = isVideoStitch ? connectedAssetUrlsByType(incoming.referenceVideoIn, "video").length : 0;
     const wanWarpBlendRefineReady = isVideoStitch && wanWarpReferenceVideoCount > 0 && Boolean(incoming.controlVideoIn?.length) && Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim());
@@ -15430,7 +15437,7 @@ function NodeBody({
         : isCoverage
           ? Boolean(incoming.imageIn?.length)
         : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
-    const utilityRunLabel = isOutpaintVideo ? (isOutpaintCropOnly ? "Export crop" : "Run Outpaint") : isVideoMode
+    const utilityRunLabel = usesOutpaintCanvas ? (isOutpaintCropOnly ? "Export crop" : "Run Outpaint") : isVideoMode
       ? ltxVfxModel ? `Run ${ltxVfxModel.displayName}` : isSam3Video
         ? "Run SAM 3 Video"
         : isVoidVideo
@@ -15594,7 +15601,7 @@ function NodeBody({
         )}
         {isVideoMode && isRetiredUtilityVideoModel(utilityVideoModel) && <p className="utility-model-description">This model is disabled. Choose an available model. Saved results are preserved.</p>}
         <button className={`run-node-button ${running ? "running" : ""}`} onClick={() => onRun(node)} disabled={running || !canRun || isVideoMode && isRetiredUtilityVideoModel(utilityVideoModel)}>
-          {running ? (isOutpaintVideo ? (isOutpaintCropOnly ? "Exporting crop..." : node.data.videoOutpaintStage === "qc-edits" ? "QC Edits..." : "Generating Fill...") : isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
+          {running ? (usesOutpaintCanvas ? (isOutpaintCropOnly ? "Exporting crop..." : node.data.videoOutpaintStage === "qc-edits" ? "QC Edits..." : "Generating Fill...") : isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
@@ -15633,7 +15640,7 @@ function NodeBody({
                   <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
                 </NodeRow>
               )}
-              {isOutpaintVideo ? (
+              {usesOutpaintCanvas ? (
                 <VideoOutpaintControls canvasVideoUrl={connectedAssetUrls(incoming.canvasVideoIn).at(0) || ""} canvasPort={config.input.find(port => port.id === "canvasVideoIn")} generationScope={generationScope} node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} referenceSlots={outpaintSlots} referenceImagePorts={outpaintImagePortIds.map(id => ({ ...config.input.find(port => port.id === id), label: outpaintSlots.find(slot => slot.id === id).name }))} referenceImageUrls={outpaintReferences.urls} referenceRoles={outpaintReferences.roles} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onPrepare={onOutpaintPrepare} onAnalyze={onOutpaintAnalyze} referenceImagePort={referenceImagePort} settingsOpen={settingsOpen} incoming={incoming} portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }} />
               ) : isDWPoseVideo ? (
                 <NodeRow label="Draw Mode">
@@ -15929,6 +15936,13 @@ function NodeBody({
                     aspectRatio={ltxVfxSettings.aspect_ratio}
                     anchor={ltxVfxSettings.anchor}
                   />}
+                  {settingsOpen && connectedReframeUnusedPorts.map(id => {
+                    const port = config.input.find(port => port.id === id);
+                    if (!port) return null;
+                    return <NodeRow key={id} label={port.label} inputPort={port} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                      <span className="utility-mini-note">Unused by Reframe</span>
+                    </NodeRow>;
+                  })}
                 </>
               ) : isTopazSdrToHdr ? (
                 <NodeRow label="Output Format">
@@ -23049,7 +23063,8 @@ function buildWanSegmentGenerationResult({ node, prompt, incoming, index }) {
 }
 
 async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNode = {}, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
-  const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wan22VaceDepth);
+  const utilityModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wan22VaceDepth);
+  const model = isLtxReframeOutpaint(utilityModel, node.data.videoOutpaint) ? ltxVfxModels.reframe.displayName : utilityModel;
   const ltxVfxModel = findLtxVfxModel(model);
   const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   const isWanSegment = isUtilityTransitionBuilderModel(model);

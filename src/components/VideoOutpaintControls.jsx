@@ -12,7 +12,7 @@ import { normalizeUtilityOutpaintSettings, videoOutpaintRatios, videoOutpaintFin
 
 export function VideoOutpaintModelControl({ node, running, onUpdate }) {
   const settings = normalizeUtilityOutpaintSettings(node.data.videoOutpaint);
-  return <NodeRow label="Outpaint model"><select aria-label="Outpaint model" value={settings.model} disabled={running} onChange={e => onUpdate(node.id, { videoOutpaint: { ...settings, model: e.target.value } })}>{videoOutpaintModels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></NodeRow>;
+  return <NodeRow label="Outpaint model"><select aria-label="Outpaint model" value={settings.model} disabled={running} onChange={e => onUpdate(node.id, { videoOutpaint: { ...node.data.videoOutpaint, model: e.target.value } })}>{videoOutpaintModels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></NodeRow>;
 }
 
 export function VideoOutpaintControls({ node, sourceVideoUrl, canvasVideoUrl = "", canvasPort, referenceImageUrls = [], referenceSlots = [], referenceImagePorts = [], referenceRoles = [], promptConnected, running, onUpdate, onPrepare, onAnalyze, referenceImagePort, settingsOpen, incoming, portProps, generationScope }) {

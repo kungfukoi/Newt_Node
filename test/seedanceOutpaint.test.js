@@ -49,7 +49,10 @@ test("legacy preparation timing remains readable and engine changes invalidate p
 });
 
 test("Utility defaults to Seedance and preserves selectable Wan settings and old results", () => {
-  assert.deepEqual(videoOutpaintModels, [["seedance-2.5", "Seedance Edit"], ["wan-vace", "Wan VACE 14B"]]);
+  assert.deepEqual(videoOutpaintModels, [["seedance-2.5", "Seedance Edit"], ["wan-vace", "Wan VACE 14B"], ["ltx-reframe", "LTX-2.5 Reframe"]]);
+  assert.equal(normalizeUtilityOutpaintSettings({ model: "ltx-reframe" }).model, "ltx-reframe");
+  assert.equal(normalizeUtilityOutpaintSettings({ model: "ltx-reframe", repeatCount: 3 }).repeatCount, 3);
+  assert.throws(() => planVideoOutpaint({}, { model: "ltx-reframe" }), /uses the connected source video directly/);
   assert.equal(normalizeUtilityOutpaintSettings().model, "seedance-2.5");
   const old = { model: "wan-vace", frame: { x: 0, y: -0.2, width: 1 }, feather: 48 };
   const current = normalizeUtilityOutpaintSettings(old);
