@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { enabledImageModelOptions, imageModelNames } from "../src/modelOptions.js";
+import { modelProviderOptionState } from "../src/modelProviderRouting.js";
+import { generationProviderForModel } from "../src/generationPricing.js";
+import { imageModelReferenceLimit } from "../src/imageReferenceLimits.js";
 
 import {
   buildKreaMiniMaxH3Input,
@@ -14,6 +18,38 @@ import {
   resolveFalKreaProvider,
   supportsKreaModel
 } from "../src/kreaApi.js";
+
+test("Seedream 5.5 is enabled and routes only through explicitly selected Krea", () => {
+  const model = imageModelNames.seedream55;
+  assert.ok(enabledImageModelOptions({}).includes(model));
+  assert.equal(kreaEndpointForModel("image", model), "/generate/image/bytedance/seedream-5-5");
+  for (const provider of ["krea", "fal", "atlas", "google"]) {
+    const preferences = { imageGeneration: provider };
+    const availability = { krea: true, fal: true, atlas: true, google: true };
+    assert.equal(modelProviderOptionState(model, "image", preferences, availability).disabled, provider !== "krea");
+    assert.equal(generationProviderForModel({ model, mediaType: "image", providerPreferences: preferences, providerAvailability: availability }), provider === "krea" ? "krea" : null);
+    assert.equal(imageModelReferenceLimit(model, provider), provider === "krea" ? 10 : null);
+  }
+});
+
+test("Seedream 5.5 submits dimensions and all supported references through Krea", () => {
+  const modelName = imageModelNames.seedream55;
+  const referenceUrls = Array.from({ length: 10 }, (_, index) => `https://example.com/ref-${index}.png`);
+  assert.deepEqual(buildKreaImageInput({ modelName, prompt: "  Portrait  ", aspectRatio: "9:16", resolution: "2K", referenceUrls, background: "transparent" }), {
+    prompt: "Portrait",
+    width: 1152,
+    height: 2048,
+    style_images: referenceUrls.map((url) => ({ url, strength: 1 })),
+    background: "transparent"
+  });
+  assert.deepEqual(buildKreaImageInput({ modelName, prompt: "Landscape", resolution: "1K" }), {
+    prompt: "Landscape", width: 1024, height: 576, background: "auto"
+  });
+  assert.deepEqual(buildKreaImageInput({ modelName, prompt: "Panorama", aspectRatio: "21:9", resolution: "1K" }), {
+    prompt: "Panorama", width: 1024, height: 440, background: "auto"
+  });
+  assert.throws(() => buildKreaImageInput({ modelName, prompt: "Too many", referenceUrls: [...referenceUrls, referenceUrls[0]] }), { status: 400 });
+});
 
 test("Fal remains preferred when Fal and Krea are both enabled", () => {
   assert.equal(resolveFalKreaProvider({ falKey: "fal-key", kreaKey: "krea-key" }), "fal");

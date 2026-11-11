@@ -16717,7 +16717,7 @@ function NodeBody({
             </NodeRow>
           )}
           <ImageModelAdvancedOptions node={node} onUpdate={onUpdate} referenceCount={imageReferenceCount} Row={NodeRow} />
-          {isGptImage26Model(node.data.model) && (
+          {(isGptImage26Model(node.data.model) || node.data.model === imageModelNames.seedream55) && (
             <NodeRow label="Background">
               <select
                 value={normalizeOpenAiImage2Background(node.data.imageBackground)}
@@ -19573,7 +19573,7 @@ function isKrea2LargeImageModel(model) {
 
 function isSeedream5ImageModel(model) {
   const normalized = String(model || "").toLowerCase();
-  return normalized.includes("seedream") && normalized.includes("5");
+  return normalized.includes("seedream") && normalized.includes("5") && model !== imageModelNames.seedream55;
 }
 
 function normalizeKrea2Creativity(value) {
@@ -19813,7 +19813,7 @@ function imageModelResolutionOptions(model) {
   if (isFlux3Model(model)) return flux3ResolutionOptions;
   if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;
-  if (isSeedream5ImageModel(model)) return seedream5ResolutionOptions;
+  if (isSeedream5ImageModel(model) || model === imageModelNames.seedream55) return seedream5ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
 }

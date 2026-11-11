@@ -21,6 +21,15 @@ for (const provider of ["atlas", "krea", "fal"]) {
       else { await expect(option).toBeDisabled(); await expect(option).toContainText("unavailable"); }
     }
     await expect(image.locator('option[value="OpenAI Image 2.6 Flare"]')).toBeEnabled();
+    const seedream = image.locator('option[value="Seedream 5.5"]');
+    if (provider === "krea") {
+      await expect(seedream).toBeEnabled();
+      await image.selectOption("Seedream 5.5");
+      await expect(image).toHaveValue("Seedream 5.5");
+      await expect(page.locator('[data-node-card-id="image-model"]').getByText("Background", { exact: true })).toBeVisible();
+    } else {
+      await expect(seedream).toBeDisabled();
+    }
     await expect(image.locator('option[value*="Image 2.5"]')).toHaveCount(0);
     await expect(page.locator('[data-node-card-id="legacy-image"] select').filter({ has: page.locator('option[value="OpenAI Image 2.6 Sunburst"]') })).toHaveValue("OpenAI Image 2.6 Sunburst");
     const video = page.locator('[data-node-card-id="video-model"] select').filter({ has: page.locator('option[value="Seedance 2.5"]') });

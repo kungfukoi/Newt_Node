@@ -1,6 +1,7 @@
 import { isNanoBanana21Model, nanoBanana21KreaEndpoint, nanoBanana21KreaPrices, buildNanoBanana21KreaInput } from "./nanoBanana21.js";
 import { applyPricingQuote } from "./pricingCatalog.js";
 import { isOpenAiImage26Model, normalizeOpenAiImage26Model, openAiImage26Variant } from "./openAiImageModels.js";
+import { imageModelNames } from "./modelOptions.js";
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
 export const kreaEndpoints = Object.freeze({
@@ -8,6 +9,7 @@ export const kreaEndpoints = Object.freeze({
     "Ideogram 4.5": "/generate/image/ideogram/ideogram-4.5",
     "Z-Image": "/generate/image/z-image/z-image",
     "Seedream 5.0 Pro": "/generate/image/bytedance/seedream-5-pro",
+    [imageModelNames.seedream55]: "/generate/image/bytedance/seedream-5-5",
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana 2.1": nanoBanana21KreaEndpoint,
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
@@ -126,6 +128,17 @@ export function buildKreaImageInput({
     });
   }
 
+  if (modelName === imageModelNames.seedream55) {
+    if (refs.length > 10) throw Object.assign(new Error("Krea Seedream 5.5 supports at most 10 reference images."), { status: 400 });
+    const dimensions = dimensionsForAspectRatio(normalizedAspectRatio, normalizedResolution === "1K" ? 1024 : 2048, 8);
+    return compact({
+      ...input,
+      ...dimensions,
+      style_images: refs.map((url) => ({ url, strength: 1 })),
+      background: normalizeChoice(background, ["auto", "opaque", "transparent"], "auto")
+    });
+  }
+
   if (modelName === "Seedream 5.0 Pro") {
     const dimensions = dimensionsForAspectRatio(normalizedAspectRatio, normalizedResolution === "2K" ? 2048 : 1536);
     return compact({
@@ -168,6 +181,7 @@ export function normalizeKreaImageResolution(modelName, value) {
   const requested = String(value || "2K").toUpperCase();
   if (modelName === "Z-Image" || modelName === "Krea 2 Large") return "1K";
   if (modelName === "Seedream 5.0 Pro") return requested === "1K" ? "1.5K" : "2K";
+  if (modelName === imageModelNames.seedream55) return normalizeChoice(requested, ["1K", "2K"], "2K");
   return normalizeChoice(requested, ["1K", "2K", "4K"], "2K");
 }
 
@@ -322,14 +336,14 @@ function normalizeChoice(value, options, fallback) {
   return options.find((option) => option.toLowerCase() === normalized) || fallback;
 }
 
-function dimensionsForAspectRatio(value, longEdge) {
+function dimensionsForAspectRatio(value, longEdge, minimumEdge = 512) {
   const [left, right] = String(value || "1:1").split(":").map(Number);
   const ratio = left > 0 && right > 0 ? left / right : 1;
   const width = ratio >= 1 ? longEdge : longEdge * ratio;
   const height = ratio >= 1 ? longEdge / ratio : longEdge;
   return {
-    width: Math.max(512, Math.round(width / 8) * 8),
-    height: Math.max(512, Math.round(height / 8) * 8)
+    width: Math.max(minimumEdge, Math.round(width / 8) * 8),
+    height: Math.max(minimumEdge, Math.round(height / 8) * 8)
   };
 }
 

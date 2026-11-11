@@ -16,7 +16,7 @@ import { estimateLegacyOpenAiImage2Cost } from "./openAiImage2.js";
 import { reve21CostPerImage } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
 import { normalizeModelProviderPreferences, providerSupportedModels } from "./modelProviderRouting.js";
-import { isGptImage26Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
+import { imageModelNames, isGptImage26Model, isLegacyOpenAiImage2Model } from "./modelOptions.js";
 
 const falImageRates = Object.freeze({
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
@@ -75,6 +75,7 @@ export function generationProviderForModel({
   if (mediaType === "image") {
     if (isNanoBanana21Model(model)) return preferences.imageGeneration === "atlas" ? null : preferences.imageGeneration === "krea" ? "krea" : "fal";
     if (preferences.imageGeneration === "krea") return supportsKreaModel("image", model) ? "krea" : null;
+    if (model === imageModelNames.seedream55) return null;
     if (preferences.imageGeneration === "atlas" && supportsAtlasImageModel(model)) return "atlas";
     if (isGptImage26Model(model)) return "fal";
     if (model === "Nano Banana Pro") return preferences.imageGeneration;

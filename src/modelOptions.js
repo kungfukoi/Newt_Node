@@ -26,6 +26,7 @@ export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
   zImage: "Z-Image",
   seedream5Pro: "Seedream 5.0 Pro",
+  seedream55: "Seedream 5.5",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: openAiImage26Models.flare,
@@ -53,6 +54,7 @@ export function normalizeGptImage26Model(value, fallback = "", variant = "flare"
 export const imageModelOptions = [
   imageModelNames.zImage,
   imageModelNames.seedream5Pro,
+  imageModelNames.seedream55,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,

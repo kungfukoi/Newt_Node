@@ -557,6 +557,7 @@ const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const imageModelNames = {
   zImage: "Z-Image",
   seedream5Pro: "Seedream 5.0 Pro",
+  seedream55: "Seedream 5.5",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: openAiImage26Models.flare,
@@ -571,6 +572,7 @@ const imageModelNames = {
 const imageModelOptions = [
   imageModelNames.zImage,
   imageModelNames.seedream5Pro,
+  imageModelNames.seedream55,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
@@ -4239,7 +4241,12 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const selectedModel = resolveImageModel(normalizeOpenAiImage26Model(req.body.model, req.body.openAiImageVariant));
-    if (isNanoBanana21Model(selectedModel.displayName) && req.body.imagePromptUrls !== undefined && (!Array.isArray(req.body.imagePromptUrls) || req.body.imagePromptUrls.some(url => !isLocalAssetUrl(url)))) throw httpError(400, "Nano Banana 2.1 requires valid managed image references; none were submitted.");
+    const requiresManagedReferences = isNanoBanana21Model(selectedModel.displayName) || selectedModel.displayName === imageModelNames.seedream55;
+    if (requiresManagedReferences && req.body.imagePromptUrls !== undefined && (
+      !Array.isArray(req.body.imagePromptUrls) || req.body.imagePromptUrls.some((url) => !isLocalAssetUrl(url))
+    )) {
+      throw httpError(400, `${selectedModel.displayName} requires valid managed image references; none were submitted.`);
+    }
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
     const cleanReferenceLabels = imagePromptUrls.map((_, index) => cleanImagePromptLabel(imagePromptLabels[index])).filter(Boolean);
@@ -4259,6 +4266,9 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const explicitKreaImageProvider = runtimeModelProviderPreferences.imageGeneration === "krea";
+    if (selectedModel.provider === "krea" && !explicitKreaImageProvider) {
+      return res.status(400).json({ error: "Seedream 5.5 requires Krea. Select Krea in Settings > Model Providers > Image Model." });
+    }
     if (explicitKreaImageProvider && !supportsKreaModel("image", selectedModel.displayName)) {
       return res.status(400).json({ error: `${selectedModel.displayName} is not supported by NewtNode's Krea image route. Select a supported model or choose Fal in Settings > Model Providers > Image Model.` });
     }
@@ -4317,7 +4327,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     if (usesKreaImageFallback) {
-      return runKreaImageModel(req, res, {
+      return await runKreaImageModel(req, res, {
         prompt,
         selectedModel,
         imagePromptUrls,
@@ -5104,6 +5114,7 @@ async function runKreaImageModel(
         ? normalizeKrea2Creativity(req.body.kreaCreativity)
         : undefined,
       imagePromptCount: referenceUrls.length,
+      ...(selectedModel.displayName === imageModelNames.seedream55 && { background: input.background, width: input.width, height: input.height }),
       imagePromptLabels: cleanReferenceLabels,
       runtimeProvider: "krea"
     },
@@ -19452,6 +19463,13 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.trim() === imageModelNames.seedream55.toLowerCase()) {
+    return {
+      provider: "krea",
+      displayName: imageModelNames.seedream55,
+      id: kreaEndpointForModel("image", imageModelNames.seedream55)
+    };
+  }
   if (normalized.includes("seedream") && (normalized.includes("5") || normalized.includes("v5"))) {
     return {
       provider: "fal-seedream-5-pro",

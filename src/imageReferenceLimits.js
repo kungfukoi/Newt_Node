@@ -24,6 +24,7 @@ const imageReferenceLimits = Object.freeze({
     "openai-image-2-6": 10,
     "z-image": 1,
     "seedream-5-pro": 10,
+    "seedream-5-5": 10,
     "nano-banana-2": 14,
     "nano-banana-pro": 14,
     "openai-image-2": 10,
@@ -39,6 +40,7 @@ function imageReferenceModelKey(model = "") {
   if (normalized === "nano banana 2.1") return "nano-banana-2-1";
   if (normalized.includes("nano banana 2")) return "nano-banana-2";
   if (normalized.includes("nano banana pro")) return "nano-banana-pro";
+  if (normalized === "seedream 5.5") return "seedream-5-5";
   if (normalized.includes("seedream 5")) return "seedream-5-pro";
   if (normalized.includes("z-image") || normalized.includes("z image")) return "z-image";
   if (normalized.includes("reve 2.1") || normalized.includes("reve-2.1")) return "reve-2-1";

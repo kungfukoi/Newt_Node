@@ -1131,7 +1131,7 @@ function isKrea2LargeImageModel(model) {
 
 function isSeedream5ImageModel(model) {
   const normalized = String(model || "").toLowerCase();
-  return normalized.includes("seedream") && normalized.includes("5");
+  return normalized.includes("seedream") && normalized.includes("5") && model !== imageModelNames.seedream55;
 }
 
 function imageResolutionOptionsForModel(model) {
@@ -1140,7 +1140,7 @@ function imageResolutionOptionsForModel(model) {
   if (isIdeogram45Model(model)) return ideogram45ResolutionOptions;
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
-  return isSeedream5ImageModel(model) ? seedream5ResolutionOptions : imageResolutionOptions;
+  return isSeedream5ImageModel(model) || model === imageModelNames.seedream55 ? seedream5ResolutionOptions : imageResolutionOptions;
 }
 
 function formatKrea2Creativity(value) {
