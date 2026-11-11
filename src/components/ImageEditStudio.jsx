@@ -30,9 +30,9 @@ function IconButton({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" title={label} aria-label={label} aria-pressed={active} className={`ies-icon ${active ? "active" : ""}`} {...props}><Icon size={18} /></button>;
 }
 
-function CompareHandle({ split, setSplit, point }) {
+function CompareHandle({ split, setSplit }) {
   const update = event => {
-    setSplit(point(event).x * 100);
+    setSplit(imageEditPoint(event.clientX, event.clientY, event.currentTarget.parentElement.getBoundingClientRect()).x * 100);
   };
   const release = event => {
     event.stopPropagation();
@@ -131,7 +131,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const result = versions[resultIndex];
   const resultLayerGroup = result?.layerGroup || layerSession?.items[0]?.layerGroup;
   const reviewing = Boolean(result);
-  const previewOnly = reviewing || layerMode || showComposition;
+  const previewOnly = reviewing || layerMode || showComposition || view !== "result";
   const layerOptions = React.useMemo(() => {
     const groups = new Map();
     let separation = 0;
@@ -725,10 +725,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     setQuality(qualities.includes(saved.quality) ? saved.quality : "high");
     setResolution(resolutionOptions.includes(saved.resolution) ? saved.resolution : "2K");
     setSelectedBoxId(saved.selectedBoxId || saved.marks.find(mark => mark.layer === "boxes")?.id || "");
-    setTool("boxes"); setLayer("boxes"); setResultIndex(-1); setError(""); setWarning(""); fitImage();
+    setTool("boxes"); setLayer("boxes"); setResultIndex(-1); setView("result"); setError(""); setWarning(""); fitImage();
   }
   function continueEditing() {
-    setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); fitImage();
+    setBase(result); setResultIndex(-1); setView("result"); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); fitImage();
   }
   function stackFor(target) {
     const group = target.layerGroup;
@@ -931,7 +931,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     } catch (failure) { setError(failure.message || "Could not save the layer stack."); }
     finally { busyRef.current = false; setSaving(false); }
   }
-  const displayedImageSize = layerTarget ? compositionSize(layerSession.items, layerSession.sourceSize, layerSession.canvasSize) : reviewing && view === "result" && result.width && result.height ? result : size;
+  const displayedImageSize = layerTarget ? compositionSize(layerSession.items, layerSession.sourceSize, layerSession.canvasSize) : reviewing && result.width && result.height ? result : size;
   const fitMargin = layerTarget ? 64 : 36;
   const scale = displayedImageSize ? Math.max(0.01, Math.min((viewport.width - fitMargin) / displayedImageSize.width, (viewport.height - fitMargin) / displayedImageSize.height)) : 1;
   const displaySize = displayedImageSize ? { width: displayedImageSize.width * scale, height: displayedImageSize.height * scale } : { width: 300, height: 300 };
@@ -944,17 +944,22 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   function readImageSize(event) {
     setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
   }
+  const comparison = view !== "result" && <>
+    <div className="ies-original-preview" style={{ clipPath: view === "split" ? `inset(0 ${100 - split}% 0 0)` : undefined }}>
+      <img src={item.url} alt="Original comparison image" draggable={false} />
+    </div>
+    {view === "split" && <CompareHandle split={split} setSplit={setSplit} />}
+  </>;
   const imageSurface = <div ref={surfaceRef} className={`ies-surface ${tool === "hand" || previewOnly ? "panning" : ""}${showAlpha && !layerTarget ? " alpha-preview" : ""}${layerMode || showComposition ? " ies-layer-source" : ""}`} style={layerTarget ? undefined : canvasStyle} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerLeave={() => { setCursor(null); setHoverObject(null); }} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp}>
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false}
-              style={{ visibility: blank && !reviewing || reviewing && view === "result" ? "hidden" : "visible",
-                clipPath: reviewing && view === "split" ? `inset(0 ${100 - split}% 0 0)` : undefined }}
+              style={{ visibility: blank || reviewing ? "hidden" : "visible" }}
               onLoad={readImageSize} onError={() => setError("Could not load the original full-resolution image.")} />
             {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /><canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /></>}
             {!reviewing && size && <canvas ref={hoverRef} aria-label="Object hover preview" className="ies-object-hover" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} />}
             {!previewOnly && size && !blank && tool === "boxes" && <ImageEditBoxPreview box={boxes.find(box => box.id === selectedBoxId && boxNeedsObject(box))} size={size} sourceUrl={base.url} />}
             {!previewOnly && size && !blank && (boxes.length > 0 || tool === "boxes") && <ImageEditBoxesOverlay boxes={boxes} size={size} active={tool === "boxes"} disabled={busy || saving} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onGesture={active => { boxGesture.current = active; }} />}
-            {reviewing && !showComposition && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ objectFit: "contain", clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
-            {reviewing && !showComposition && view === "split" && <CompareHandle split={split} setSplit={setSplit} point={point} />}
+            {reviewing && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ objectFit: "contain" }} />}
+            {!layerTarget && comparison}
             {cursor && !previewOnly && !busy && ["pen", "eraser"].includes(tool) && <div className="ies-brush-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, width: Math.max(3, brushSize / 100 * Math.min(displaySize.width, displaySize.height)), aspectRatio: "1", borderColor: tool === "eraser" ? "#fff" : layer === "selection" ? "#72efd8" : color }} />}
           </div>;
 
@@ -992,11 +997,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         </div>
         <div className="ies-stage" ref={stageRef}>
           {layerTarget ? <div className="ies-surface ies-stack-canvas alpha-preview" style={canvasStyle}
-            onPointerDown={showComposition ? pointerDown : undefined} onPointerMove={showComposition ? pointerMove : undefined}
-            onPointerUp={showComposition ? pointerUp : undefined} onPointerCancel={showComposition ? pointerUp : undefined}>
+            onPointerDown={previewOnly ? pointerDown : undefined} onPointerMove={previewOnly ? pointerMove : undefined}
+            onPointerUp={previewOnly ? pointerUp : undefined} onPointerCancel={previewOnly ? pointerUp : undefined}>
             <LayerStackPreview stack={layerSession} draft={stackDraft} disabled={busy || saving} zoom={zoom}
-              onChange={transformStackLayer} activeContent={showComposition ? null : imageSurface} previewUrl={showComposition ? result?.url : undefined} />
+              onChange={transformStackLayer} showTransform={view === "result"} activeContent={showComposition ? null : imageSurface} previewUrl={showComposition ? result?.url : undefined} />
             {showComposition && <img style={{ display: "none" }} src={base.url} alt="" onLoad={readImageSize} />}
+            {comparison}
           </div> : imageSurface}
           {busy && <div className="ies-progress" role="status"><LoaderCircle size={22} className="ies-spinning" /><span>{busyLabel}</span><time>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</time></div>}
           {!size && !error && <div className="ies-progress" role="status"><LoaderCircle className="ies-spinning" size={22} />Loading image</div>}
@@ -1004,7 +1010,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         </div>
         <div className="ies-viewbar">
           <span>{displayedImageSize ? `${displayedImageSize.width} x ${displayedImageSize.height}` : ""}</span>
-          {reviewing && !showComposition && <div className="ies-review-controls"><div className="ies-segment" role="group" aria-label="Preview mode">{["original", "split", "result"].map((value) => <button type="button" key={value} className={view === value ? "active" : ""} aria-pressed={view === value} onClick={() => setView(value)}>{value === "split" ? "Compare" : value === "result" ? "Edit" : "Original"}</button>)}</div>{view === "split" && <input aria-label="Comparison split" type="range" min="0" max="100" value={split} onChange={(e) => setSplit(Number(e.target.value))} />}</div>}
+          <div className="ies-review-controls"><div className="ies-segment" role="group" aria-label="Preview mode">{["original", "split", "result"].map((value) => <button type="button" key={value} className={view === value ? "active" : ""} aria-pressed={view === value} onClick={() => setView(value)}>{value === "split" ? "Compare" : value === "result" ? "Edit" : "Original"}</button>)}</div>{view === "split" && <input aria-label="Comparison split" type="range" min="0" max="100" value={split} onChange={(e) => setSplit(Number(e.target.value))} />}</div>
           <div className="ies-zoom"><IconButton icon={Minus} label="Zoom out" onClick={() => adjustZoom(-0.25)} /><output>{Math.round(scale * zoom * 100)}%</output><IconButton icon={Plus} label="Zoom in" onClick={() => adjustZoom(0.25)} /><IconButton icon={Maximize} label="Fit image" onClick={fitImage} /></div>
         </div>
       </div>
@@ -1018,7 +1024,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
               return;
             }
             if (layerTarget) leaveLayerStack();
-            setResultIndex(Number(value)); setView("split");
+            setResultIndex(Number(value)); setView(value === "-1" ? "result" : "split");
           }}>
             <option value="-1">Current draft</option>
             {layerTarget && !layerSession.items[0].layerGroup && <option value={"stack:" + layerSession.key}>Layer stack</option>}

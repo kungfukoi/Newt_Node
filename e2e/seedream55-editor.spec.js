@@ -263,6 +263,15 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   const folderEye = folder.getByRole("button", { name: "Show Folder 1", exact: true });
   const signPixels = composition.locator('img[src$="edited-sign.png"]');
   await expect(signPixels).toBeVisible();
+  const previewMode = editor.getByRole("group", { name: "Preview mode", exact: true });
+  await previewMode.getByRole("button", { name: "Compare", exact: true }).click();
+  await expect(editor.getByAltText("Original comparison image")).toHaveAttribute("src", "/outputs/e2e/landscape.png");
+  await expect(editor.getByRole("slider", { name: "Compare divider", exact: true })).toBeVisible();
+  await expect(signPixels).toBeVisible();
+  await previewMode.getByRole("button", { name: "Original", exact: true }).click();
+  await expect(editor.getByRole("slider", { name: "Compare divider", exact: true })).toHaveCount(0);
+  await previewMode.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(editor.getByAltText("Original comparison image")).toHaveCount(0);
   await folderEye.click();
   await expect(folderEye).toHaveAttribute("aria-pressed", "false");
   await expect(signPixels).toHaveCount(0);

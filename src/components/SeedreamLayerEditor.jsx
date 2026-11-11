@@ -288,7 +288,7 @@ export function layerEditSource(stack, layer) {
   return { ...item, ...layer.replacement, label: layer.name.trim() || item.label };
 }
 
-export function LayerStackPreview({ stack, draft, disabled, onChange, activeContent, zoom, previewUrl }) {
+export function LayerStackPreview({ stack, draft, disabled, onChange, activeContent, zoom, previewUrl, showTransform }) {
   const { width, height } = compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
   const surface = React.useRef(null);
   const drag = React.useRef(null);
@@ -349,7 +349,7 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
         : visible && <img key={layer.url} src={(layer.url === draft.selected && previewUrl) || layer.replacement?.url || layer.url}
           alt="" draggable={false} style={{ ...style(layer), opacity: layer.opacity / 100 }} />;
     })}</div>
-    {!activeContent && isLayerVisible(active, draft.folders) && <div className="ies-layer-selection" role="group" aria-label="Layer transform"
+    {showTransform && !activeContent && isLayerVisible(active, draft.folders) && <div className="ies-layer-selection" role="group" aria-label="Layer transform"
       style={{ ...style(active), "--ies-handle-scale": 100 / (active.scale * zoom) }}
       onPointerDown={startTransform} onPointerMove={updateTransform} onLostPointerCapture={() => { drag.current = null; }}>
       {["Top left", "Top right", "Bottom left", "Bottom right"].map((corner, index) =>

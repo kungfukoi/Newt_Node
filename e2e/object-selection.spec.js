@@ -64,6 +64,12 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect.poll(() => alpha(selection, .2, .3)).toBe(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   expect(calls).toHaveLength(1);
+  const previewMode = editor.getByRole("group", { name: "Preview mode", exact: true });
+  await previewMode.getByRole("button", { name: "Compare", exact: true }).click();
+  await expect(editor.getByAltText("Original comparison image")).toBeVisible();
+  await expect(editor.getByRole("slider", { name: "Compare divider", exact: true })).toBeVisible();
+  await previewMode.getByRole("button", { name: "Edit", exact: true }).click();
+  expect(await alpha(selection, .7, .3)).toBe(255);
   const surface = editor.locator(".ies-surface");
   const beforeZoom = await surface.boundingBox();
   await move(page, editor, .55, .75);
