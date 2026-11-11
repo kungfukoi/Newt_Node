@@ -1,6 +1,7 @@
 import path from "node:path";
 import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { parse } from "parse5";
+import { libraryStylesMatching } from "../src/styleLibrary.js";
 
 const attrs = node => Object.fromEntries((node.attrs || []).map(item => [item.name,item.value]));
 const text = node => node?.nodeName === "#text" ? node.value : (node?.childNodes || []).map(text).join("");
@@ -51,8 +52,7 @@ export function styleFinderRasterFormat(bytes) {
 }
 
 export function selectStyleFinderPage(styles,{q="",category="",offset=0,limit=48}={}) {
-  const words=String(q).slice(0,300).toLowerCase().split(/\s+/).filter(Boolean);
-  const matched=styles.filter(style=>(!category||style.category===category||style.tags.includes(category))&&words.every(word=>[style.name,style.prompt,style.sref,style.category,...style.tags].join(" ").toLowerCase().includes(word)));
+  const matched=libraryStylesMatching(styles,q).filter(style=>!category||style.category===category||style.tags?.includes(category));
   const start=Math.max(0,Math.trunc(Number(offset)||0)),size=Math.min(96,Math.max(1,Math.trunc(Number(limit)||48)));
   return {total:matched.length,indexed:styles.length,offset:start,limit:size,styles:matched.slice(start,start+size)};
 }

@@ -38,7 +38,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const [sharedCatalogRevision,setSharedCatalogRevision]=React.useState(0);
   const [showLocalLooks,setShowLocalLooks]=React.useState(false);
   const [removeError,setRemoveError]=React.useState("");
-  const [catalog,setCatalog]=React.useState(null), [catalogLoading,setCatalogLoading]=React.useState(false), [catalogError,setCatalogError]=React.useState("");
+  const [catalog,setCatalog]=React.useState(null), [catalogLoading,setCatalogLoading]=React.useState(false), [catalogFailure,setCatalogFailure]=React.useState(null);
   const [query,setQuery]=React.useState(""), [category,setCategory]=React.useState(""), [scope,setScope]=React.useState("stylefinder");
   const [savedCollectionRows, setCollectionRows] = React.useState(() => collectionRows(uiGet("lookbookCollectionRows", 1)));
   React.useEffect(() => { uiSet("lookbookCollectionRows", savedCollectionRows); }, [savedCollectionRows]);
@@ -77,17 +77,20 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const catalogRefresh=sharedCatalogRevision;
   const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks||allLooks||scope==="local-looks";
   const catalogViewKey=JSON.stringify([scope,query,category]);
-  const sharedTotal=sharedUserLooks&&catalog?.viewKey!==catalogViewKey?0:catalog?.total??0;
+  const currentCatalog=catalog?.viewKey===catalogViewKey?catalog:null;
+  const catalogError=catalogFailure?.viewKey===catalogViewKey?catalogFailure.message:"";
+  const waitingForCatalog=isSourceCatalog&&(catalogLoading||(!currentCatalog&&!catalogError));
+  const sharedTotal=currentCatalog?.total??0;
   const savedLooks=allLooks?library?.collections.flatMap(item=>item.styles)||[]:[];
   const matchesCategory=style=>!category||style.category===category||style.tags?.includes(category);
-  const sourceStyles=isSourceCatalog ? ((sharedUserLooks||allLooks)&&catalog?.viewKey!==catalogViewKey?[]:catalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? library?.collections.find(item=>item.name.toLowerCase()==="starred")?.styles||[] : (browseCollection?.styles||[]);
+  const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? library?.collections.find(item=>item.name.toLowerCase()==="starred")?.styles||[] : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
   const browserOptions=lookCatalogOptions(library?.collections,showLocalLooks);
   const saveOptions=lookSaveOptions(library?.collections);
   const browserName=browserOptions.find(option=>option.value===browserValue)?.label || "Catalog";
   function chooseCatalog(value) {
     if(value===browserValue)return;
-    request.current++;setCatalog(null);setCatalogLoading(false);setCatalogError("");setCategory("");
+    request.current++;setCatalog(null);setCatalogLoading(false);setCatalogFailure(null);setCategory("");
     if(value.startsWith("collection:")){setBrowseCollectionId(value.slice(11));setScope("collection");}else setScope(value);
   }
   const filterCategories=allLooks?[...new Set([...(catalog?.categories||[]),...savedLooks.map(style=>style.category).filter(Boolean)])].sort():isSourceCatalog?(catalog?.categories||[]):[...new Set(sourceStyles.map(style=>style.category).filter(Boolean))].sort();
@@ -105,7 +108,9 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   }
   const loadCatalog = React.useCallback(async ({offset=0,offsets,refresh=false,search=query,filter=category,source=scope,directory}={}) => {
     const append=Boolean(offset||offsets);
-    const version=++request.current; setCatalogLoading(true); setCatalogError("");
+    const version=++request.current;
+    const viewKey=JSON.stringify([source,search,filter]);
+    setCatalogLoading(true);setCatalogFailure(null);
     if(!offset&&source==="shared-user-looks")setCatalog(current=>current&&{...current,viewKey:null,warning:""});
     try {
       const value=source==="all"
@@ -121,14 +126,14 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       if(!append && frameRef.current)frameRef.current.scrollLeft=0;
       setCatalog(current=>({
         ...value,
-        viewKey:JSON.stringify([source,search,filter]),
+        viewKey,
         styles:append?[...current.styles,...value.styles]:value.styles,
         ...(offsets&&{categories:[...new Set([...current.categories,...value.categories])].sort(),
           warning:[...new Set([current.warning,value.warning].filter(Boolean))].join(" "),
           truncated:current.truncated||value.truncated}),
       }));
     }
-    catch(e) { if(version===request.current)setCatalogError(e.message); } finally { if(version===request.current)setCatalogLoading(false); }
+    catch(e) { if(version===request.current)setCatalogFailure({viewKey,message:e.message}); } finally { if(version===request.current)setCatalogLoading(false); }
   },[query,category,scope,includeLocalInAll]);
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{
@@ -350,16 +355,16 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     {error&&<div className="library-error" role="alert">{error}<button disabled={busy} onClick={loadLibrary}>Retry</button></div>}
     {sharedUserLooks&&removeError&&<div className="library-error" role="alert">{removeError}<button type="button" disabled={busy||!canRemoveSelected||catalog?.viewKey!==catalogViewKey} onClick={removeSelectedLooks}>Retry</button></div>}
     {notice&&<p className="stylebuilder-notice" role="status">{notice}</p>}
-    <section className="stylebuilder-browse" aria-label="Looks catalog"><div className="stylebuilder-browse-toolbar"><p>Explore the catalog. <span>Choose a look</span></p><div className="stylebuilder-browse-controls"><button className="lookbook-compact-action" disabled={busy||!library||library.collections.length>=100} onClick={()=>setCreatingCatalog(value=>!value)}>New Catalog</button><LookbookSelect label="Looks source" value={browserValue} onChange={chooseCatalog} options={browserOptions}/><label className="stylebuilder-search"><Search size={18}/><input ref={searchInput} aria-label="Search looks" placeholder="Search looks" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="stylebuilder-search-clear" aria-label="Clear look search" onClick={()=>{setQuery("");searchInput.current?.focus();}}><X size={15}/></button>}</label><button className="stylebuilder-icon" aria-label="Refresh catalog" title="Refresh the look catalog" disabled={catalogLoading} onClick={()=>loadCatalog({refresh:true})}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button></div></div>
+    <section className="stylebuilder-browse" aria-label="Looks catalog"><div className="stylebuilder-browse-toolbar"><p>Explore the catalog. <span>Choose a look</span></p><div className="stylebuilder-browse-controls"><button className="lookbook-compact-action" disabled={busy||!library||library.collections.length>=100} onClick={()=>setCreatingCatalog(value=>!value)}>New Catalog</button><LookbookSelect label="Looks source" value={browserValue} onChange={chooseCatalog} options={browserOptions}/><label className="stylebuilder-search"><Search size={18}/><input ref={searchInput} aria-label="Search looks" placeholder="Search looks" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="stylebuilder-search-clear" aria-label="Clear look search" onClick={()=>{setQuery("");searchInput.current?.focus();}}><X size={15}/></button>}</label><button className="stylebuilder-icon" aria-label="Refresh catalog" title="Refresh the look catalog" disabled={isSourceCatalog?catalogLoading:busy} onClick={()=>isSourceCatalog?loadCatalog({refresh:true}):loadLibrary()}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button></div></div>
     {creatingCatalog&&<form className="library-inline look-collection-form" onSubmit={async event=>{event.preventDefault();if(await createCatalog(newCatalogName)){setCreatingCatalog(false);setNewCatalogName("");}}}><label>Catalog name<input autoFocus maxLength={120} disabled={busy} value={newCatalogName} onChange={event=>setNewCatalogName(event.target.value)} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setCreatingCatalog(false);}}}/></label><button type="submit" className="library-primary" disabled={busy||!newCatalogName.trim()}>Create Catalog</button><button type="button" disabled={busy} onClick={()=>setCreatingCatalog(false)}>Cancel</button></form>}
-      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${catalog?.remoteCount??catalog?.indexed??0} StyleRef looks${catalog?.localCount?` · ${catalog.localCount} custom`:""}`:scope==="stylefinder"?`${catalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
-      {(scope==="library"||allLooks)&&catalog?.truncated&&<p className="library-muted">StyleRef has reached its gallery browsing limit. Refine your search to explore more looks.</p>}
+      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${currentCatalog?.total??0} StyleRef looks${currentCatalog?.localCount?` · ${currentCatalog.localCount} custom`:""}`:scope==="stylefinder"?`${currentCatalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
+      {(scope==="library"||allLooks)&&currentCatalog?.truncated&&<p className="library-muted">StyleRef has reached its gallery browsing limit. Refine your search to explore more looks.</p>}
       {catalogError&&isSourceCatalog&&<p className="library-error" role="alert">{catalogError}</p>}
-      {catalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{catalog.warning}</p>}
+      {currentCatalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{currentCatalog.warning}</p>}
       {canDeleteCatalog&&<div className="library-inline" style={{justifyContent:"flex-end",marginBottom:12}}>{deletingCatalog===browseCollection.id?<><span>Delete “{browseCollection.name}” and its saved memberships? Original looks, other collections and workflow nodes are kept.</span><button className="lookbook-compact-action" disabled={busy} onClick={deleteCatalog}>Confirm delete</button><button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog("")}>Cancel</button></>:<button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog(browseCollection.id)}>Delete Catalog</button>}</div>}
       <div key={`strip:${browserValue}`} ref={frameRef} data-row-count={frameRows} className={`stylebuilder-style-strip ${resizable ? `collection-grid ${!visibleStyles.length ? "collection-grid-empty" : ""}` : ""}`} style={resizable ? {"--collection-rows":frameRows,"--collection-row-height":`${collectionRowHeight}px`,"--collection-row-gap":`${collectionRowGap}px`,"--collection-frame-chrome":`${collectionFrameChrome}px`} : undefined} aria-label="Style previews" tabIndex={0}>
         {visibleStyles.map(style=><article className="stylebuilder-tile" key={keyOf(style)} onPointerEnter={()=>preloadMosaic(style)} onFocusCapture={()=>preloadMosaic(style)}><label className="stylebuilder-tile-selection"><input type="checkbox" aria-label={`Select ${style.name}`} checked={selectedLooks.has(keyOf(style))} disabled={sharedUserLooks&&busy} onChange={event=>{const checked=event.target.checked;setRemoveError("");setSelectedLooks(current=>{const next=new Map(current);if(checked)next.set(keyOf(style),style);else next.delete(keyOf(style));return next;});}}/></label><button className="stylebuilder-tile-open" onClick={()=>openDetails(style)} aria-label={`View ${style.name}`}><StyleMosaic style={mosaicDetails.has(style.id)?{...style,examples:mosaicDetails.get(style.id)}:style}/><span className="stylebuilder-tile-name">{style.sref?.replace(/^--sref\s+/,"")||style.name}</span></button><button className={`stylebuilder-tile-star ${isSaved(style)?"saved":""}`} aria-label={`${isSaved(style)?"Remove from collection":"Save to collection"}: ${style.name}`} aria-pressed={isSaved(style)} title={isSaved(style)?"Unstar and remove from your collection":"Save to your collection"} disabled={busy||!library} onClick={()=>toggleSavedLook(style)}><Star size={16} fill={isSaved(style)?"currentColor":"none"}/></button></article>)}
-        {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{catalogLoading?"Loading looks…":isSourceCatalog&&!catalog?.ready?"The catalog is not available yet. Refresh to retry.":"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog("library")}>Browse catalog <ArrowRight size={15}/></button>}</div>}
+        {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{waitingForCatalog?"Loading looks…":isSourceCatalog&&!currentCatalog?.ready?"The catalog is not available yet. Refresh to retry.":"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog("library")}>Browse catalog <ArrowRight size={15}/></button>}</div>}
       </div>
       <LookbookShuttle key={`shuttle:${browserValue}`} frameRef={frameRef} previewCount={visibleStyles.length} rows={frameRows}/>
       {resizable&&<CollectionResizeHandle key={`resize:${browserValue}`} rows={frameRows} frameRef={frameRef} label={browserName} onChange={changeFrameRows}/>}

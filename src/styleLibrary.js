@@ -65,7 +65,11 @@ ${prompt}`;
 }
 export function libraryStylesMatching(styles, query = "") {
   const words = text(query, 300).toLowerCase().split(/\s+/).filter(Boolean);
-  return styles.filter(style => words.every(word => [style.name, style.prompt, style.notes, ...(style.tags || [])].join(" ").toLowerCase().includes(word)));
+  if (!words.length) return styles;
+  return styles.filter(style => {
+    const searchable = [style.name, style.prompt, style.notes, style.sref, style.category, ...(style.tags || [])].join(" ").toLowerCase();
+    return words.every(word => searchable.includes(word));
+  });
 }
 export function collectionExamples(styles) {
   const seen = new Set();

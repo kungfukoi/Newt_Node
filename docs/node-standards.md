@@ -4,7 +4,7 @@ StyleFinder's Filter menu includes the original source categories and a Characte
 
 The optional compact StyleFinder source is a private, movable snapshot of the indexed catalog and effective curation. It preserves stable IDs, catalog order, displayed details, example order and bytes, and managed curated image URLs. A configured compact folder opens independently of the mirror and legacy override files.
 
-The Lookbook source menu lists All first. All combines each source and saved catalog in one paginated view and deduplicates by catalog identity or source. Commercial shows StyleRef, User Looks shows the configured shared user-created store, and Local Looks shows local creations when local storage is selected.
+The Lookbook source menu lists All first. All combines each source and saved catalog in one paginated view and deduplicates by catalog identity or source. Search applies to the selected source, and All sends the query to each available catalog and searches the saved collections. Changing the query or source hides the previous results until the current results arrive. Commercial shows StyleRef, User Looks shows the configured shared user-created store, and Local Looks shows local creations when local storage is selected.
 
 Saving Lookbook folder settings refreshes an already mounted Commercial or StyleFinder view, including while Looks is hidden behind Settings. Clear stale selection and details, then reload with the current search and applicable category without requiring browser reload or paid work.
 
