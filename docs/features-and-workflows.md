@@ -137,7 +137,7 @@ Newt's npm dependency preflight does not install ComfyUI models or SGLang weight
 With Fal selected in Settings for Utility Video, connect a video and choose one of these LTX-2.5 models.
 
 - **Alpha Gen** returns a grayscale MP4 matte and a ProRes 4444 MOV cutout with straight alpha. Use the result arrows to select which video goes downstream. [Fal Alpha Gen](https://fal.ai/models/lightricks/ltx-2.5/alpha-gen)
-- **Reframe** expands the scene to a new aspect ratio at 720p or 1080p. Source Placement sets where the original video sits inside the frame. [Fal Reframe](https://fal.ai/models/lightricks/ltx-2.5/reframe)
+- **Reframe** expands the scene to a new aspect ratio at 720p or 1080p. The Source Placement preview shows the connected video inside the output frame and stripes the area to fill. It updates as you change Aspect Ratio or Source Placement. [Fal Reframe](https://fal.ai/models/lightricks/ltx-2.5/reframe)
 - **Upscale** takes H.264 or HEVC video and offers 1080p, 4K and 8K. Fal's maximum input frame count depends on the output resolution. [Fal Upscale](https://fal.ai/models/lightricks/ltx-2.5/upscale)
 - **SDR to HDR** returns processed video and a separate downloadable ZIP of 16-bit half-float OpenEXR frames in the selected color space. [Fal SDR to HDR](https://fal.ai/models/lightricks/ltx-2.5/hdr)
 

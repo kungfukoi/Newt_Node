@@ -1,0 +1,25 @@
+.ltx-reframe-preview {
+  margin: 8px 0;
+  text-align: center;
+}
+
+.ltx-reframe-preview-frame {
+  position: relative;
+  width: min(100%, calc(168px * var(--reframe-ratio)));
+  aspect-ratio: var(--reframe-ratio);
+  margin: 0 auto;
+  outline: 1px solid #727988;
+  background: repeating-linear-gradient(135deg, #20242b 0 6px, #2e343e 6px 12px);
+}
+
+.ltx-reframe-preview-frame video {
+  display: block;
+  position: absolute;
+  object-fit: contain;
+}
+
+.ltx-reframe-preview figcaption {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #b8bfca;
+}

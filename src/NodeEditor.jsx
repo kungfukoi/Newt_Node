@@ -20,6 +20,7 @@ import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./k
 import { outpaintImagePortIds, outpaintImageSlots, outpaintImagePayload, isOutpaintNode, migrateOutpaintImageEdges } from "./outpaintReferenceSlots.js";
 import { lastOutpaintPreparation, outpaintPreparationError } from "./outpaintPreparation.js";
 import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
+import LtxReframePlacementPreview from "./components/LtxReframePlacementPreview.jsx";
 import { OutpaintResultPane } from "./components/OutpaintResultPane.jsx";
 import { outpaintOutputItem } from "./outpaintPreview.js";
 import { NodeAbout } from "./components/NodeAbout.jsx";
@@ -15337,6 +15338,7 @@ function NodeBody({
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
     const ltxVfxModel = isVideoMode ? findLtxVfxModel(utilityVideoModel) : null;
     const ltxVfxSettings = ltxVfxModel && normalizeLtxVfxSettings(ltxVfxModel, node.data.ltxVfx?.[ltxVfxModel.id]);
+    const reframeSourceUrl = ltxVfxSettings?.anchor ? connectedAssetUrls(incoming.referenceVideoIn).at(0) || "" : "";
     const ltxVfxResult = ltxVfxModel && node.data.resultItems?.[Number(node.data.selectedResultIndex) || 0];
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
     const stillFrameVideoUrl = isStillFrame ? connectedAssetUrls(incoming.referenceVideoIn).at(-1) || "" : "";
@@ -15909,17 +15911,25 @@ function NodeBody({
                   </NodeRow>
                 </>
               ) : ltxVfxModel ? (
-                ltxVfxModel.controls.map(({ key, label, options, optionLabels }) => (
-                  <NodeRow key={key} label={label}>
-                    <select value={ltxVfxSettings[key]} onChange={(event) => onUpdate(node.id, {
-                      ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: { ...ltxVfxSettings, [key]: event.target.value } }
-                    })}>
-                      {options.map((option) => (
-                        <option key={option} value={option}>{optionLabels?.[option] || option.replaceAll("_", " ")}</option>
-                      ))}
-                    </select>
-                  </NodeRow>
-                ))
+                <>
+                  {ltxVfxModel.controls.map(({ key, label, options, optionLabels }) => (
+                    <NodeRow key={key} label={label}>
+                      <select aria-label={label} value={ltxVfxSettings[key]} onChange={(event) => onUpdate(node.id, {
+                        ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: { ...ltxVfxSettings, [key]: event.target.value } }
+                      })}>
+                        {options.map((option) => (
+                          <option key={option} value={option}>{optionLabels?.[option] || option.replaceAll("_", " ")}</option>
+                        ))}
+                      </select>
+                    </NodeRow>
+                  ))}
+                  {settingsOpen && ltxVfxSettings.anchor && <LtxReframePlacementPreview
+                    key={reframeSourceUrl}
+                    sourceUrl={reframeSourceUrl}
+                    aspectRatio={ltxVfxSettings.aspect_ratio}
+                    anchor={ltxVfxSettings.anchor}
+                  />}
+                </>
               ) : isTopazSdrToHdr ? (
                 <NodeRow label="Output Format">
                   <select value={node.data.topazSdrToHdrOutputFormat || "mp4"} onChange={(event) => onUpdate(node.id, { topazSdrToHdrOutputFormat: event.target.value })}>
