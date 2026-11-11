@@ -148,7 +148,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const result = await client.generate({ mediaType: "image", key, input: {
       model,
       image: `data:image/png;base64,${image.toString("base64")}`,
-      prompt: [prompt, "Use short English names for all returned layers. Preserve the image content and text as-is."].filter(Boolean).join("\n\n"),
+      ...(prompt?.trim() && { prompt }),
       ...options
     } });
     const { outputs = [], layers = [] } = result.job;

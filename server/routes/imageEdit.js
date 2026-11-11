@@ -13,6 +13,7 @@ import { imageEditModelOptions, normalizeImageEditModel } from "../../src/imageE
 import { isIdeogram45Model, ideogram45QualityOptions } from "../../src/ideogram45.js";
 import sharp from "sharp";
 import { boxSelectionDocument, readSelectionMetadata } from "../../src/imageEditBoxExport.js";
+import { hasLayerTransparency, preserveLayerAlpha } from "../../src/layerAlpha.js";
 
 export function registerImageEditRoutes(app, { limiter, getProvider, readSource, generate, decompose, readGenerated = readImageEditResult, save, recordHistory, estimateCost, sendError }) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 24 * 1024 * 1024, files: 3, fields: 48, fieldSize: 100000 } });
@@ -112,7 +113,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
           settings: { ...options, sourceUrl, layers: items.map(item => ({ label: item.label, ...item.layer })) },
           localImage: items[0]?.url, localImages: items.map(item => item.url), cost: null });
       } catch { warning += " The layer run could not be added to History."; }
-      if (!items.length) throw Object.assign(new Error(warning), { status: 502 });
+      if (!items.length) throw Object.assign(new Error(warning || "Seedream returned no editable layers. The stack was left as-is."), { status: 502 });
       return { items, warning };
     }
     let boxes;
@@ -151,11 +152,13 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
         images: prepared.images, mask: prepared.mask, options });
       generationProvider = generation.provider || generationProvider;
       const generated = await readGenerated(generation.remoteImage.url);
-      const bytes = options && !stitch ? await sharp(generated, { limitInputPixels: 24_000_000 }).rotate().png().toBuffer() : await finishImageEdit(prepared, generated);
-      const jpeg = options?.output_format === "jpeg";
+      let bytes = options && !stitch ? await sharp(generated, { limitInputPixels: 24_000_000 }).rotate().png().toBuffer() : await finishImageEdit(prepared, generated);
+      const lockedAlpha = req.body.preserveAlpha === "true" && await lockEditedLayerAlpha(source.buffer, bytes);
+      if (lockedAlpha) bytes = lockedAlpha;
+      const jpeg = !lockedAlpha && options?.output_format === "jpeg";
       const output = await save(req, jpeg ? await sharp(bytes).flatten({ background: "#fff" }).jpeg().toBuffer() : bytes, jpeg ? ".jpg" : ".png");
       const cost = options ? null : generation.cost ?? estimateCost?.({ model, provider: generationProvider, endpoint: generation.endpoint, quality, size: `${prepared.size.width}x${prepared.size.height}` }) ?? null;
-      const { width, height } = options && !stitch ? await sharp(bytes).metadata() : prepared;
+      const { width, height } = lockedAlpha || options && !stitch ? await sharp(bytes).metadata() : prepared;
       const item = { url: output.url, thumbnailUrl: output.thumbnailUrl, fileName: output.fileName, type: "image", mimeType: jpeg ? "image/jpeg" : "image/png",
         label: "Image Edit", provider: generationProvider, sourceUrl, width, height, cost };
       let warning = "";
@@ -181,6 +184,17 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       throw error;
     }
   }
+}
+
+async function lockEditedLayerAlpha(source, edited) {
+  const original = sharp(source, { limitInputPixels: 24_000_000 });
+  if (!(await original.metadata()).hasAlpha) return null;
+  const { data: sourcePixels, info: { width, height } } = await original.rotate().toColourspace("srgb").ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  if (!hasLayerTransparency(sourcePixels)) return null;
+  const editedPixels = await sharp(edited, { limitInputPixels: 24_000_000 }).resize(width, height, { fit: "fill" })
+    .toColourspace("srgb").ensureAlpha().raw().toBuffer();
+  preserveLayerAlpha(sourcePixels, editedPixels);
+  return sharp(editedPixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
 function seedreamOptions(body, mode) {

@@ -64,7 +64,18 @@ test("object hover, modifiers, undo, prompt selection and exported edit mask", a
   await expect.poll(() => alpha(selection, .2, .3)).toBe(0);
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();
   expect(calls).toHaveLength(1);
-  await editor.getByRole("button", { name: "Zoom in", exact: true }).click();
+  const surface = editor.locator(".ies-surface");
+  const beforeZoom = await surface.boundingBox();
+  await move(page, editor, .55, .75);
+  await page.mouse.wheel(0, -110);
+  await expect.poll(async () => (await surface.boundingBox()).width).toBeGreaterThan(beforeZoom.width);
+  const zoomed = await surface.boundingBox();
+  expect(Math.abs(zoomed.x + zoomed.width * .55 - beforeZoom.x - beforeZoom.width * .55)).toBeLessThan(2);
+  expect(Math.abs(zoomed.y + zoomed.height * .75 - beforeZoom.y - beforeZoom.height * .75)).toBeLessThan(2);
+  await page.mouse.wheel(0, 110);
+  await expect.poll(async () => (await surface.boundingBox()).width).toBeCloseTo(beforeZoom.width, 1);
+  await page.mouse.wheel(0, -110);
+  await expect.poll(async () => (await surface.boundingBox()).width).toBeGreaterThan(beforeZoom.width);
   await move(page, editor, .55, .75, true, "Shift");
   await expect.poll(() => calls.length).toBe(2);
   await expect.poll(() => alpha(selection, .55, .75)).toBe(255);
@@ -322,8 +333,7 @@ test("saved objects survive Continue Editing, reopen, and explicit rescan withou
   await expect(editor.getByText("Using scan from before this edit.", { exact: false })).toHaveCount(0);
   expect(scans).toHaveLength(2); expect(scans[1].rescan).toBe(true);
   expect(await alpha(selection, .2, .3)).toBe(255);
-  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
-  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard edits and close image editor", exact: true }).click();
   // Reopen the original: its saved map remains distinct from the edited scan.
   await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
   await expect(editor.getByText("Saved scan restored", { exact: false })).toBeVisible();
@@ -341,7 +351,7 @@ test("a saved scan works without Fal credentials", async ({ page }) => {
   await page.route("**/api/node/image-object-cache", route => route.fulfill({ json: { entries: [{ key: JSON.stringify(options), options, data: { masks } }] } }));
   await page.route("**/api/node/image-objects", route => { paid++; return route.fulfill({ status: 400, json: { error: "No key" } }); });
   // Remount so restoration reads the persisted scan with no provider enabled.
-  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard edits and close image editor", exact: true }).click();
   await page.getByRole("button", { name: "Draw and edit with Flux 3", exact: true }).click();
   await expect(editor.getByText("Saved scan restored", { exact: false })).toBeVisible();
   await editor.getByRole("button", { name: "Object Selection", exact: true }).click();

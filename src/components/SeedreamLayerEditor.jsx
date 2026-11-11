@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDown, ArrowUp, Eye, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, FolderPlus, Layers, Redo2, Trash2, Undo2, X } from "lucide-react";
 import { nodeApi } from "../api/newtApi.js";
 import { downloadImageEdit } from "../imageEditSave.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
@@ -50,12 +50,20 @@ function drawLayer(context, image, geometry, left = 0, top = 0, opacity = 1) {
 
 function LayerSlider({ label, value, onChange, min, max, unit }) {
   const readout = `${Math.round(value * 100) / 100}${unit}`;
+  const gesture = React.useRef(null);
   return <label className="ies-layer-slider">{label}<output>{readout}</output>
-    <input aria-label={label} aria-valuetext={readout} type="range" min={min} max={max} step="1" value={value} onChange={event => onChange(event.target.valueAsNumber)} />
+    <input aria-label={label} aria-valuetext={readout} type="range" min={min} max={max} step="1" value={value}
+      onPointerDown={() => { gesture.current = {}; }} onPointerUp={() => { gesture.current = null; }}
+      onPointerCancel={() => { gesture.current = null; }} onBlur={() => { gesture.current = null; }}
+      onKeyDown={() => { gesture.current = null; }} onChange={event => onChange(event.target.valueAsNumber, gesture.current)} />
   </label>;
 }
 
-async function renderLayers(layers, width, height, includeLayers) {
+export function isLayerVisible(layer, folders = []) {
+  return layer.visible && !folders.some(folder => folder.id === layer.folderId && folder.visible === false);
+}
+
+async function renderLayers(layers, width, height, includeLayers, folders) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -64,7 +72,7 @@ async function renderLayers(layers, width, height, includeLayers) {
   // Keep the PSD records in bottom-first order, matching the canvas draw order.
   const children = [];
   for (const layer of layers) {
-    const visible = layer.visible && layer.opacity > 0;
+    const visible = isLayerVisible(layer, folders) && layer.opacity > 0;
     if (!visible && !includeLayers) continue;
     const image = new Image();
     image.crossOrigin = "anonymous";
@@ -102,7 +110,16 @@ export function compositionSize(items, sourceSize, canvasSize) {
 
 export async function renderLayerStack({ items, sourceSize, canvasSize }, draft, psd = false) {
   const { width, height } = compositionSize(items, sourceSize, canvasSize);
-  return renderLayers(restoreLayers(items, width, height, draft), width, height, psd);
+  const layers = restoreLayers(items, width, height, draft);
+  const composition = await renderLayers(layers, width, height, psd, draft?.folders);
+  if (psd && draft?.folders?.length) {
+    const records = new Map(layers.map((layer, index) => [layer.item.url, composition.children[index]]));
+    composition.children = layerBlocks(layers, draft.folders).map(block => {
+      const children = block.layers.map(layer => records.get(layer.item.url));
+      return block.folder ? { name: block.folder.name, opened: !block.folder.collapsed, hidden: block.folder.visible === false, children } : children[0];
+    });
+  }
+  return composition;
 }
 
 export async function downloadLayerPsd(composition) {
@@ -208,26 +225,25 @@ export function initializeLayerStack(stack, draft) {
   const { width, height } = canvasSize;
   const layers = restoreLayers(stack.items, width, height, draft).map(({ item, ...edits }) => ({ ...edits, url: item.url }));
   const selected = [stack.selected, draft?.selected].find(url => layers.some(layer => layer.url === url))
-    || stack.items.find(item => item.layer.index !== 0)?.url || layers[0].url;
-  return { layers, selected, canvasSize };
+    || layers.at(-1).url;
+  const folders = Array.isArray(draft?.folders) ? draft.folders.filter(folder => typeof folder?.id === "string" && typeof folder.name === "string") : [];
+  return { layers, selected, canvasSize, folders, appliedSignature: draft?.appliedSignature };
 }
 
 export function mergeLayerSeparation(stack, draft, results, sourceSize, replaceUrl) {
   const incoming = initializeLayerStack({ items: results, sourceSize });
   const canvasSize = draft.canvasSize || compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
   const target = draft.layers.find(layer => layer.url === replaceUrl);
-  const incomingItems = target ? results : results.filter(item => item.layer.index !== 0);
-  const allowed = new Set(incomingItems.map(item => item.url));
-  const newLayers = incoming.layers.filter(layer => allowed.has(layer.url)).map(layer => {
+  const newLayers = incoming.layers.map(layer => {
     const anchor = target || { x: 0, y: 0, ...canvasSize, scale: 100, rotation: 0 };
     const bounds = { left: layer.x, top: layer.y, right: layer.x + layer.width, bottom: layer.y + layer.height };
     const geometry = layerGeometryForBounds(anchor, bounds, incoming.canvasSize.width, incoming.canvasSize.height);
-    return { ...layer, ...geometry, opacity: target?.opacity ?? layer.opacity, visible: target?.visible ?? layer.visible };
+    return { ...layer, ...geometry, folderId: target?.folderId, opacity: target?.opacity ?? layer.opacity, visible: target?.visible ?? layer.visible };
   });
   const layers = target ? draft.layers.flatMap(layer => layer.url === target.url ? newLayers : [layer]) : [...draft.layers, ...newLayers];
   const selected = newLayers.find(layer => layer.url === incoming.selected)?.url || newLayers[0]?.url || draft.selected;
-  return { stack: { ...stack, canvasSize, items: [...stack.items.filter(item => item.url !== replaceUrl), ...incomingItems] },
-    draft: { layers, selected, canvasSize }, results: incomingItems };
+  return { stack: { ...stack, canvasSize, items: [...stack.items.filter(item => item.url !== replaceUrl), ...results] },
+    draft: { ...draft, layers, selected, canvasSize }, results };
 }
 
 export function consolidateLayerStacks(stored) {
@@ -242,9 +258,11 @@ export function consolidateLayerStacks(stored) {
   const current = read(key);
   const urls = new Set(current.layers.map(layer => layer.url));
   const earlier = [];
+  const folders = [...current.folders];
   for (const group of groups.keys()) {
     if (group === key) continue;
     const prior = read(group);
+    folders.push(...prior.folders);
     const xScale = current.canvasSize.width / prior.canvasSize.width;
     const yScale = current.canvasSize.height / prior.canvasSize.height;
     for (const layer of prior.layers) {
@@ -254,7 +272,7 @@ export function consolidateLayerStacks(stored) {
     }
     drafts.delete(group);
   }
-  drafts.set(key, { ...current, layers: [...earlier, ...current.layers] });
+  drafts.set(key, { ...current, folders, layers: [...earlier, ...current.layers] });
   const known = new Set();
   const results = stored.results.flatMap(item => {
     if (!item.layerGroup) return [item];
@@ -303,16 +321,16 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
     if (start.operation === "scale") {
       const initial = Math.hypot(start.startX - start.centerX, start.startY - start.centerY);
       const next = Math.hypot(event.clientX - start.centerX, event.clientY - start.centerY);
-      onChange({ scale: clampScale(start.scale * next / Math.max(1, initial)) });
+      onChange({ scale: clampScale(start.scale * next / Math.max(1, initial)) }, start);
     } else if (start.operation === "rotate") {
       const initial = Math.atan2(start.startY - start.centerY, start.startX - start.centerX);
       const next = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
-      onChange({ rotation: wrapAngle(start.rotation + (next - initial) * 180 / Math.PI) });
+      onChange({ rotation: wrapAngle(start.rotation + (next - initial) * 180 / Math.PI) }, start);
     } else {
       onChange({
         x: Math.max(-width, Math.min(2 * width, Math.round(start.x + (event.clientX - start.startX) * start.scaleX))),
         y: Math.max(-height, Math.min(2 * height, Math.round(start.y + (event.clientY - start.startY) * start.scaleY))),
-      });
+      }, start);
     }
   }
   function nudgeTransform(event) {
@@ -324,11 +342,14 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
       ? { scale: clampScale(active.scale + step) } : { rotation: wrapAngle(active.rotation + step) });
   }
   return <div ref={surface} className="ies-layer-surface" role="group" aria-label="Layer composition">
-    <div className="ies-layer-pixels">{draft.layers.map(layer => layer.url === draft.selected && activeContent
-      ? <div className="ies-layer-active" key={layer.url} style={{ ...style(layer), opacity: layer.visible ? layer.opacity / 100 : 0 }} inert={!layer.visible || undefined}>{activeContent}</div>
-      : layer.visible && <img key={layer.url} src={(layer.url === draft.selected && previewUrl) || layer.replacement?.url || layer.url}
-        alt="" draggable={false} style={{ ...style(layer), opacity: layer.opacity / 100 }} />)}</div>
-    {!activeContent && active.visible && <div className="ies-layer-selection" role="group" aria-label="Layer transform"
+    <div className="ies-layer-pixels">{draft.layers.map(layer => {
+      const visible = isLayerVisible(layer, draft.folders);
+      return layer.url === draft.selected && activeContent
+        ? <div className="ies-layer-active" key={layer.url} style={{ ...style(layer), opacity: visible ? layer.opacity / 100 : 0 }} inert={!visible || undefined}>{activeContent}</div>
+        : visible && <img key={layer.url} src={(layer.url === draft.selected && previewUrl) || layer.replacement?.url || layer.url}
+          alt="" draggable={false} style={{ ...style(layer), opacity: layer.opacity / 100 }} />;
+    })}</div>
+    {!activeContent && isLayerVisible(active, draft.folders) && <div className="ies-layer-selection" role="group" aria-label="Layer transform"
       style={{ ...style(active), "--ies-handle-scale": 100 / (active.scale * zoom) }}
       onPointerDown={startTransform} onPointerMove={updateTransform} onLostPointerCapture={() => { drag.current = null; }}>
       {["Top left", "Top right", "Bottom left", "Bottom right"].map((corner, index) =>
@@ -341,62 +362,290 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
   </div>;
 }
 
-export function LayerStackControls({ stack, draft, disabled, showProperties, onSelect, onDraft, onTransform }) {
+function layerBlocks(layers, folders) {
+  const byId = new Map(folders.map(folder => [folder.id, folder]));
+  const grouped = new Map();
+  const blocks = [];
+  for (const layer of layers) {
+    const folder = byId.get(layer.folderId);
+    if (!folder) {
+      blocks.push({ layers: [layer] });
+      continue;
+    }
+    if (!grouped.has(folder.id)) {
+      const block = { folder, layers: [] };
+      grouped.set(folder.id, block);
+      blocks.push(block);
+    }
+    grouped.get(folder.id).layers.push(layer);
+  }
+  return [...blocks, ...folders.filter(folder => !grouped.has(folder.id)).map(folder => ({ folder, layers: [] }))];
+}
+
+export function LayerStackControls({ stack, draft, disabled, showProperties, canUndo, canRedo, canSeparate, onSeparate, onRemove, onUndo, onRedo, onSelect, onDraft, onTransform }) {
   const { width, height } = compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
-  const { layers, selected } = draft;
+  const { layers, selected, folders = [] } = draft;
+  const blocks = layerBlocks(layers, folders);
+  const [selection, setSelection] = React.useState(null);
+  const selectionAnchor = React.useRef(null);
+  const selectedUrls = selection?.primary === selected
+    ? new Set(layers.filter(layer => selection.urls.has(layer.url)).map(layer => layer.url))
+    : new Set([selected]);
+  const removeLabel = selectedUrls.size > 1 ? "Remove selected layers" : "Remove selected layer";
   const [rename, setRename] = React.useState(null);
+  const [dropTarget, setDropTarget] = React.useState(null);
+  const [draggedLayer, setDraggedLayer] = React.useState(null);
+  const [listHeight, setListHeight] = React.useState();
+  const listRef = React.useRef(null);
+  const resizeStart = React.useRef(null);
+  const resizeFrame = React.useRef(0);
+  React.useEffect(() => () => cancelAnimationFrame(resizeFrame.current), []);
+  const listId = React.useId();
   const activeIndex = layers.findIndex(layer => layer.url === selected);
   const active = layers[activeIndex];
+  const activeBlockIndex = blocks.findIndex(block => block.layers.includes(active));
+  const activeBlock = blocks[activeBlockIndex];
   const metadata = stack.items.find(item => item.url === active.url)?.layer;
   const change = (url, patch) => onDraft({ ...draft, layers: layers.map(layer => layer.url === url ? { ...layer, ...patch } : layer) });
   const name = layer => layer.name.trim() || stack.items.find(item => item.url === layer.url)?.label || "Layer";
 
   function reorder(delta) {
-    const next = layers.slice();
-    [next[activeIndex], next[activeIndex + delta]] = [next[activeIndex + delta], next[activeIndex]];
-    onDraft({ ...draft, layers: next });
+    if (activeBlock.folder) {
+      const siblings = activeBlock.layers;
+      const index = siblings.indexOf(active);
+      [siblings[index], siblings[index + delta]] = [siblings[index + delta], siblings[index]];
+    } else {
+      const target = neighborBlock(delta);
+      [blocks[activeBlockIndex], blocks[target]] = [blocks[target], blocks[activeBlockIndex]];
+    }
+    onDraft({ ...draft, layers: blocks.flatMap(block => block.layers) });
+  }
+  function neighborBlock(delta) {
+    for (let index = activeBlockIndex + delta; index >= 0 && index < blocks.length; index += delta) {
+      if (blocks[index].layers.length) return index;
+    }
+    return -1;
+  }
+  const canReorder = delta => activeBlock.folder
+    ? Boolean(activeBlock.layers[activeBlock.layers.indexOf(active) + delta]) : neighborBlock(delta) !== -1;
+  function updateFolder(id, patch) {
+    onDraft({ ...draft, folders: folders.map(folder => folder.id === id ? { ...folder, ...patch } : folder) });
+  }
+  function moveLayer(url, folderId, targetUrl, above) {
+    const moving = layers.find(layer => layer.url === url);
+    if (!moving || url === targetUrl || (!targetUrl && (moving.folderId || "") === folderId)) return;
+    const next = layers.filter(layer => layer !== moving);
+    const last = folderId ? next.findLastIndex(layer => layer.folderId === folderId) : -1;
+    const index = targetUrl ? next.findIndex(layer => layer.url === targetUrl) + Number(above) : last < 0 ? next.length : last + 1;
+    next.splice(index, 0, { ...moving, folderId: folderId || undefined });
+    onDraft({ ...draft, layers: next, folders: folders.map(folder => folder.id === folderId ? { ...folder, collapsed: false } : folder) });
   }
   function commitRename() {
-    if (rename?.name.trim()) change(rename.url, { name: rename.name.trim() });
+    if (rename?.name.trim()) {
+      if (rename.folder) updateFolder(rename.id, { name: rename.name.trim() });
+      else change(rename.id, { name: rename.name.trim() });
+    }
     setRename(null);
+  }
+  function renameInput(label) {
+    return <input type="text" aria-label={label} maxLength={160} autoFocus value={rename.name}
+      onFocus={event => event.currentTarget.select()} onBlur={commitRename}
+      onChange={event => setRename({ ...rename, name: event.target.value })}
+      onKeyDown={event => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") { event.stopPropagation(); setRename(null); }
+      }} />;
+  }
+  function dropHandlers(folderId, targetUrl) {
+    const isAbove = event => {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      return event.clientY < bounds.top + bounds.height / 2;
+    };
+    return {
+      onDragOver: event => {
+        if (!draggedLayer || disabled || draggedLayer === targetUrl) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        const id = targetUrl || folderId;
+        const above = isAbove(event);
+        setDropTarget(current => current?.id === id && current.above === above ? current : { id, above });
+      },
+      onDragLeave: event => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null);
+      },
+      onDrop: event => {
+        if (!draggedLayer || disabled || draggedLayer === targetUrl) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveLayer(draggedLayer, folderId, targetUrl, isAbove(event));
+        setDraggedLayer(null); setDropTarget(null);
+      },
+    };
+  }
+  function selectLayer(event, url) {
+    let primary = url;
+    let urls = new Set([url]);
+    const anchor = (selection?.primary === selected && selectionAnchor.current) || selected;
+    if (event.shiftKey) {
+      const visibleRows = [...blocks].reverse().flatMap(({ folder, layers }) => folder?.collapsed ? [] : [...layers].reverse());
+      const from = visibleRows.findIndex(layer => layer.url === anchor);
+      const to = visibleRows.findIndex(layer => layer.url === url);
+      if (from >= 0 && to >= 0) {
+        urls = new Set(visibleRows.slice(Math.min(from, to), Math.max(from, to) + 1).map(layer => layer.url));
+      }
+    } else if (event.ctrlKey || event.metaKey) {
+      urls = new Set(selectedUrls);
+      if (urls.has(url) && urls.size > 1) {
+        urls.delete(url);
+        primary = url === selected ? [...urls].at(-1) : selected;
+      } else urls.add(url);
+    }
+    selectionAnchor.current = event.shiftKey ? anchor : primary;
+    setSelection({ primary, urls });
+    onSelect(primary);
+  }
+  function layerRow(layer, nested = false) {
+    const dropSide = dropTarget?.id === layer.url ? dropTarget.above ? " ies-drop-above" : " ies-drop-below" : "";
+    return <div className={`ies-layer-row${nested ? " ies-layer-nested" : ""}${dropSide}`} key={layer.url} {...dropHandlers(layer.folderId || "", layer.url)}>
+      <button type="button" aria-label={"Show " + name(layer)} aria-pressed={layer.visible} disabled={disabled}
+        onClick={() => change(layer.url, { visible: !layer.visible })}>{layer.visible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+      {rename?.id === layer.url ? renameInput("Rename layer") : <button className="ies-layer-row-name" type="button" title="Drag to reorder · Double-click to rename"
+        aria-pressed={selectedUrls.has(layer.url)} data-active={selected === layer.url} disabled={disabled} draggable={!disabled} onClick={event => selectLayer(event, layer.url)}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" onKeyDown={event => {
+          if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key) || selected !== layer.url) return;
+          event.preventDefault(); event.stopPropagation();
+          const delta = event.key === "ArrowUp" ? 1 : -1;
+          if (canReorder(delta)) reorder(delta);
+        }}
+        onDragStart={event => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", name(layer));
+          setDraggedLayer(layer.url);
+        }} onDragEnd={() => { setDraggedLayer(null); setDropTarget(null); }}
+        onDoubleClick={() => setRename({ id: layer.url, name: name(layer) })}>
+        <img src={layer.replacement?.url || layer.url} alt="" draggable={false} /><span>{name(layer)}</span>
+      </button>}
+    </div>;
+  }
+  function resizeList(height) {
+    setListHeight(Math.max(56, height));
+  }
+
+  function resizeDuringDrag() {
+    const drag = resizeStart.current;
+    if (!drag) return;
+    const list = listRef.current;
+    const { sidebar } = drag;
+    const height = drag.height + drag.pointerY - drag.startY + sidebar.scrollTop - drag.scrollTop + drag.edgeGrowth;
+    if (drag.moved || height !== drag.height) resizeList(height);
+    const edge = sidebar.getBoundingClientRect().bottom - 36;
+    if (drag.pointerY > Math.max(edge, drag.startY) && height < list.scrollHeight) {
+      const step = Math.min(20, Math.ceil((drag.pointerY - edge) / 2));
+      const previousScroll = sidebar.scrollTop;
+      sidebar.scrollTop += step;
+      // The sidebar can reach its scroll limit before React lays out the larger list.
+      drag.edgeGrowth += step - (sidebar.scrollTop - previousScroll);
+    }
+    resizeFrame.current = requestAnimationFrame(resizeDuringDrag);
   }
 
   return <section className="ies-layer-controls ies-panel-section">
-    <h3>Layer stack <span>{layers.length}</span></h3>
-    <div className="ies-layer-list" aria-label="Layer stack">
-      {[...layers].reverse().map(layer => <div key={layer.url}>
-        <button type="button" aria-label={"Show " + name(layer)} aria-pressed={layer.visible} disabled={disabled}
-          onClick={() => change(layer.url, { visible: !layer.visible })}>{layer.visible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
-        {rename?.url === layer.url ? <input type="text" aria-label="Rename layer" maxLength={160} autoFocus
-          value={rename.name} onFocus={event => event.currentTarget.select()} onBlur={commitRename}
-          onChange={event => setRename({ url: layer.url, name: event.target.value })}
-          onKeyDown={event => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") { event.stopPropagation(); setRename(null); }
-          }} /> : <button className="ies-layer-row-name" type="button" title="Double-click to rename"
-          aria-pressed={selected === layer.url} disabled={disabled} onClick={() => onSelect(layer.url)}
-          onDoubleClick={() => setRename({ url: layer.url, name: name(layer) })}>
-          <img src={layer.replacement?.url || layer.url} alt="" /><span>{name(layer)}</span>
-        </button>}
-        {selected === layer.url && <div className="ies-layer-order" role="group" aria-label="Layer order">
-          <button type="button" title="Raise layer" aria-label="Raise layer" disabled={disabled || activeIndex === layers.length - 1} onClick={() => reorder(1)}><ArrowUp size={15} /></button>
-          <button type="button" title="Lower layer" aria-label="Lower layer" disabled={disabled || activeIndex === 0} onClick={() => reorder(-1)}><ArrowDown size={15} /></button>
-        </div>}
-      </div>)}
+    <div className="ies-layer-stack-heading">
+      <h3>Layer stack <span>{layers.length}</span></h3>
+      <div className="ies-layer-history" role="group" aria-label="Layer stack actions">
+        <button type="button" title="Separate selected layer" aria-label="Separate Selected Layer" disabled={!canSeparate} onClick={onSeparate}><Layers size={14} /></button>
+        <button type="button" title="New layer folder" aria-label="New layer folder" disabled={disabled} onClick={() => {
+          const id = crypto.randomUUID();
+          const names = new Set(folders.map(folder => folder.name));
+          let number = 1;
+          while (names.has("Folder " + number)) number += 1;
+          onDraft({ ...draft, folders: [...folders, { id, name: "Folder " + number, collapsed: false }] });
+        }}><FolderPlus size={14} /></button>
+        <button type="button" title={selectedUrls.size === layers.length ? "Keep at least one layer" : removeLabel}
+          aria-label={removeLabel}
+          disabled={disabled || selectedUrls.size === layers.length} onClick={() => {
+            onRemove(selectedUrls);
+            setSelection(null);
+            selectionAnchor.current = null;
+          }}><Trash2 size={14} /></button>
+        <button type="button" title="Undo layer change" aria-label="Undo layer change" disabled={disabled || !canUndo} onClick={onUndo}><Undo2 size={14} /></button>
+        <button type="button" title="Redo layer change" aria-label="Redo layer change" disabled={disabled || !canRedo} onClick={onRedo}><Redo2 size={14} /></button>
+      </div>
     </div>
+    <div ref={listRef} id={listId} className="ies-layer-list" aria-label="Layer stack" style={{ height: listHeight, maxHeight: listHeight === undefined ? 180 : undefined }}>
+      {[...blocks].reverse().map(({ folder, layers: members }) => folder
+        ? <div className="ies-layer-folder" key={folder.id}>
+          <div className={`ies-folder-row${dropTarget?.id === folder.id ? " ies-folder-drop" : ""}`} {...dropHandlers(folder.id)}>
+            <button type="button" aria-label={"Show " + folder.name} aria-pressed={folder.visible !== false} disabled={disabled}
+              onClick={() => updateFolder(folder.id, { visible: folder.visible === false })}>{folder.visible === false ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            <button type="button" aria-expanded={!folder.collapsed} aria-label={(folder.collapsed ? "Expand " : "Collapse ") + folder.name} disabled={disabled}
+              onClick={() => updateFolder(folder.id, { collapsed: !folder.collapsed })}>{folder.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</button>
+            {rename?.id === folder.id ? renameInput("Rename folder") : <button type="button" className="ies-layer-row-name" title="Double-click to rename folder" disabled={disabled}
+              onDoubleClick={() => setRename({ id: folder.id, folder: true, name: folder.name })}><Folder size={15} /><span>{folder.name}</span></button>}
+            <button type="button" aria-label={"Ungroup " + folder.name} title="Remove folder and keep its layers" disabled={disabled} onClick={() => onDraft({
+              ...draft, folders: folders.filter(entry => entry.id !== folder.id),
+              layers: layers.map(layer => layer.folderId === folder.id ? { ...layer, folderId: undefined } : layer),
+            })}><X size={13} /></button>
+          </div>
+          {!folder.collapsed && [...members].reverse().map(layer => layerRow(layer, true))}
+        </div> : layerRow(members[0]))}
+      {draggedLayer && <div className={`ies-folder-root${dropTarget?.id === "" ? " ies-folder-drop" : ""}`} {...dropHandlers("")}>Drop to move out of folder</div>}
+    </div>
+    <button type="button" className="ies-layer-resize" aria-label="Resize layer stack" aria-controls={listId}
+      aria-keyshortcuts="ArrowUp ArrowDown Home End" title="Drag to resize or double-click to show all layers"
+      onDoubleClick={() => setListHeight("auto")}
+      onPointerDown={event => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        const sidebar = event.currentTarget.closest(".ies-sidebar-scroll");
+        resizeStart.current = { sidebar, startY: event.clientY, pointerY: event.clientY, height: listRef.current.clientHeight, scrollTop: sidebar.scrollTop, edgeGrowth: 0 };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        resizeFrame.current = requestAnimationFrame(resizeDuringDrag);
+      }}
+      onPointerMove={event => {
+        const drag = resizeStart.current;
+        if (drag && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          drag.pointerY = event.clientY;
+          drag.moved ||= event.clientY !== drag.startY;
+        }
+      }}
+      onPointerUp={event => {
+        const drag = resizeStart.current;
+        if (!drag) return;
+        const height = drag.height + event.clientY - drag.startY + drag.sidebar.scrollTop - drag.scrollTop + drag.edgeGrowth;
+        if (drag.moved || height !== drag.height) resizeList(height);
+      }}
+      onLostPointerCapture={() => {
+        resizeStart.current = null;
+        cancelAnimationFrame(resizeFrame.current);
+      }}
+      onKeyDown={event => {
+        const height = listRef.current.clientHeight;
+        const next = { ArrowUp: height - 24, ArrowDown: height + 24, Home: 56, End: "auto" }[event.key];
+        if (next === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (next === "auto") setListHeight(next);
+        else resizeList(next);
+      }}><span /></button>
     <details className="ies-disclosure" open={showProperties}>
       <summary>Layer properties</summary>
-      <fieldset disabled={disabled}>
+      <fieldset className="ies-transform-fields" disabled={disabled}>
       <p className="ies-layer-property-name">{name(active)}</p>
-      {metadata?.textRecognition?.text && <label>Recognized text<textarea readOnly rows={2} value={metadata.textRecognition.text} /></label>}
-      <LayerSlider label="Opacity" unit="%" value={active.opacity} min={0} max={100} onChange={opacity => onTransform({ opacity })} />
-      <LayerSlider label="Position X" unit=" px" value={active.x} min={-width} max={2 * width} onChange={x => onTransform({ x })} />
-      <LayerSlider label="Position Y" unit=" px" value={active.y} min={-height} max={2 * height} onChange={y => onTransform({ y })} />
-      <LayerSlider label="Scale" unit="%" value={active.scale} min={1} max={400} onChange={scale => onTransform({ scale })} />
-      <LayerSlider label="Rotation" unit="°" value={active.rotation} min={-180} max={180} onChange={rotation => onTransform({ rotation })} />
+      {folders.length > 0 && <label className="ies-layer-folder-field">Folder<select value={active.folderId || ""} onChange={event => moveLayer(active.url, event.target.value)}>
+        <option value="">No folder</option>
+        {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+      </select></label>}
+      <LayerSlider label="Opacity" unit="%" value={active.opacity} min={0} max={100} onChange={(opacity, gesture) => onTransform({ opacity }, gesture)} />
+      <LayerSlider label="Position X" unit=" px" value={active.x} min={-width} max={2 * width} onChange={(x, gesture) => onTransform({ x }, gesture)} />
+      <LayerSlider label="Position Y" unit=" px" value={active.y} min={-height} max={2 * height} onChange={(y, gesture) => onTransform({ y }, gesture)} />
+      <LayerSlider label="Scale" unit="%" value={active.scale} min={1} max={400} onChange={(scale, gesture) => onTransform({ scale }, gesture)} />
+      <LayerSlider label="Rotation" unit="°" value={active.rotation} min={-180} max={180} onChange={(rotation, gesture) => onTransform({ rotation }, gesture)} />
+      {metadata?.textRecognition?.text && <label className="ies-layer-ocr">Recognized text<textarea readOnly rows={1} value={metadata.textRecognition.text} /></label>}
       <button type="button" className="ies-reset-layers" onClick={() => {
         const initial = initializeLayerStack({ ...stack, selected });
-        onDraft({ ...initial, layers: initial.layers.map(layer => ({ ...layer, replacement: layers.find(previous => previous.url === layer.url)?.replacement })) });
+        const byUrl = new Map(initial.layers.map(layer => [layer.url, layer]));
+        onDraft({ ...draft, layers: layers.map(layer => ({ ...byUrl.get(layer.url), folderId: layer.folderId, replacement: layer.replacement })) });
       }}>Reset layer layout</button>
       </fieldset>
     </details>

@@ -1390,7 +1390,10 @@ export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavi
             showApiCosts={showApiCosts}
             canApply={canEditImage}
             onAccept={onAcceptAiEdit}
-            onClose={() => setAiMode(false)}
+            onClose={(applied) => {
+              if (applied?.url) setDisplayItem(current => ({ ...current, ...applied }));
+              setAiMode(false);
+            }}
           />
         </React.Suspense>
       </div>

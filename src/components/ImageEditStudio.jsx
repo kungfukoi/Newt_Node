@@ -10,8 +10,8 @@ import { useImageEditBoxNames } from "../useImageEditBoxNames.js";
 import { imageEditDownload, downloadImageEdit } from "../imageEditSave.js";
 import { boxNeedsObject, boxNeedsIdentification, objectMaskForBox, boxFromSelectionPixels } from "../imageEditBoxModels.js";
 import { ImageEditBoxesOverlay, ImageEditBoxesPanel, ImageEditBoxPreview } from "./ImageEditBoxes.jsx";
-import { LayerStackControls, LayerStackPreview, compositionSize, consolidateLayerStacks, cropLayerSelection, downloadLayerPsd, extractLayerSelection, initializeLayerStack, layerCompositeBlob, layerEditSource, mergeLayerSeparation, pasteLayerSelection, renderLayerStack, uploadLayerComposite } from "./SeedreamLayerEditor.jsx";
-import { imageLayerDraftKey, readImageLayerDraft, saveImageLayerDraft } from "../imageLayerDrafts.js";
+import { LayerStackControls, LayerStackPreview, compositionSize, consolidateLayerStacks, cropLayerSelection, downloadLayerPsd, extractLayerSelection, initializeLayerStack, isLayerVisible, layerCompositeBlob, layerEditSource, mergeLayerSeparation, pasteLayerSelection, renderLayerStack, uploadLayerComposite } from "./SeedreamLayerEditor.jsx";
+import { imageLayerDraftKey, readImageLayerDraft, saveImageLayerDraft, updateImageLayerDraft, writeImageLayerDraft } from "../imageLayerDrafts.js";
 import { drawObjectMask, objectAtPoint, selectObjectMarks, sam2Defaults } from "../objectSelection.js";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, Layers, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, RefreshCcw, Save, Scan, ScanSearch, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
@@ -69,17 +69,20 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const resolutionOptions = seedream ? seedream55Sizes : isFlux3Model(model) ? flux3ResolutionOptions : nanoBanana21ResolutionOptions;
   const [seedreamSettings, setSeedreamSettings] = React.useState({
     background: "auto", aspectRatio: "auto", outputFormat: "png", references: [],
-    atlasMaxLayers: 9, atlasLayerResolution: "auto", atlasLayerFormat: "png", atlasTextRecognition: false,
+    atlasMaxLayers: 9, atlasLayerResolution: "auto", atlasTextRecognition: false,
   });
   const changeSeedream = patch => setSeedreamSettings(current => ({ ...current, ...patch }));
   const [blank, setBlank] = React.useState(false);
   const [resolution, setResolution] = React.useState("2K");
   const [quality, setQuality] = React.useState("high");
-  const [zoom, setZoom] = React.useState(1);
-  const [pan, setPan] = React.useState({ x: 0, y: 0 });
+  const [{ zoom, pan }, setCanvasView] = React.useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  const fitImage = () => setCanvasView({ zoom: 1, pan: { x: 0, y: 0 } });
+  const adjustZoom = (step) => setCanvasView((view) => ({ ...view, zoom: Math.max(0.5, Math.min(5, view.zoom + step)) }));
   const [viewport, setViewport] = React.useState({ width: 700, height: 600 });
   const layerStorageKey = imageLayerDraftKey(workflowContext, item.url);
-  const [restoredLayers] = React.useState(() => consolidateLayerStacks(readImageLayerDraft(layerStorageKey)));
+  const [savedLayerDraft] = React.useState(() => readImageLayerDraft(layerStorageKey));
+  const [restoredLayers] = React.useState(() => consolidateLayerStacks(savedLayerDraft));
+  const pendingLayerDraft = React.useRef(null);
   const [versions, setVersions] = React.useState(restoredLayers.results);
   const [layerSession, setLayerSession] = React.useState(null);
   const [stackDraft, setStackDraft] = React.useState(null);
@@ -90,6 +93,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const activeLayer = stackDraft?.layers.find(entry => entry.url === stackDraft.selected);
   const sourceDraft = React.useRef(null);
   const layerToolDrafts = React.useRef(new Map());
+  const stackHistory = React.useRef(new Map());
+  const layerHistory = layerSession && stackHistory.current.get(layerSession.key);
   const restoreStackOnLoad = React.useRef(Boolean(restoredLayers.lastStack));
   const layerDrafts = React.useRef(new Map(restoredLayers.drafts));
   const lastLayerStack = React.useRef(restoredLayers.lastStack);
@@ -106,7 +111,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const [error, setError] = React.useState("");
   const [warning, setWarning] = React.useState("");
   const [elapsed, setElapsed] = React.useState(0);
-  const [confirmClose, setConfirmClose] = React.useState(false);
   const [cursor, setCursor] = React.useState(null);
   const [objectMasks, setObjectMasks] = React.useState([]);
   const [hoverObject, setHoverObject] = React.useState(null);
@@ -145,7 +149,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const selectionBox = tool === "boxes" ? boxes.find(box => box.id === selectedBoxId) : null;
   const layerDestinations = stackDraft?.layers.filter(entry => entry.url !== stackDraft.selected) || [];
   const destination = layerDestinations.find(entry => entry.url === selectionDestination) || layerDestinations[0];
-  const dirty = history.marks.length || prompt.trim();
   const providerAvailable = ["fal", "atlas", "krea"].includes(provider);
   const providerLabel = provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
   const resultProvider = result?.provider || result?.cost?.provider;
@@ -169,7 +172,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       if (showComposition) {
         const composition = await renderLayerStack(layerSession, stackDraft);
         downloadImageEdit({ blob: await layerCompositeBlob(composition.canvas), fileName: "seedream-composition.png" });
-      } else downloadImageEdit(await imageEditDownload({ base, result, size, marks: history.marks, prompt, blank }));
+      } else downloadImageEdit(await imageEditDownload({ base, result, size, marks: history.marks, prompt, blank, lockAlpha: layerTarget }));
     }
     catch (failure) { setError(failure.message || "Could not save the image to disk."); }
     finally { if (mounted.current) setSaving(false); }
@@ -182,7 +185,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     if (busyRef.current || saving || !size || !hasDrawing) return;
     busyRef.current = true; setSaving(true); setError("");
     try {
-      const { blob } = await imageEditDownload({ base, size, marks: history.marks.filter(mark => mark.layer === "drawing"), prompt: "", blank });
+      const { blob } = await imageEditDownload({ base, size, marks: history.marks.filter(mark => mark.layer === "drawing"), prompt: "", blank, lockAlpha: true });
       const output = await uploadLayerComposite(blob, size, workflowContext);
       applyLayerResult(output);
     } catch (failure) { setError(failure.message || "Could not apply the drawing to the layer."); }
@@ -196,12 +199,73 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
 
   async function done() {
     if (busyRef.current || saving || restoringSelections || namingBoxes.length) return;
-    setSaving(true); setError("");
+    busyRef.current = true; setSaving(true); setError("");
     try {
       await nodeApi.imageObjectCache({ sourceUrl: base.url, selectionState: selectionState() });
-      onClose();
-    } catch (failure) { setError(failure.message || "Could not save the editor draft."); }
-    finally { if (mounted.current) setSaving(false); }
+      let output;
+      let appliedStack;
+      if (layerSession) {
+        appliedStack = await finishStackForDone();
+        const signature = layerPixelSignature(appliedStack);
+        const unchangedSource = !layerSession.items[0].layerGroup && layerSession.items[0].url === item.url &&
+          signature === layerPixelSignature(initializeLayerStack(layerSession));
+        if (signature !== appliedStack.appliedSignature && !unchangedSource) {
+          const composition = await renderLayerStack(layerSession, appliedStack);
+          output = await uploadLayerComposite(await layerCompositeBlob(composition.canvas), composition, workflowContext);
+          appliedStack = { ...appliedStack, appliedSignature: signature };
+        }
+      } else if (result) {
+        output = result;
+      } else if (hasDrawing && size) {
+        output = await saveDoneDrawing(captureTools(), false);
+      } else if (base.url !== item.url) {
+        output = base;
+      }
+      const applied = output && await onAccept(item, output, canApply ? "apply" : "copy");
+      if (appliedStack && output) {
+        storeStackDraft({ ...appliedStack, appliedSignature: stackDraft.appliedSignature });
+        try {
+          saveImageLayerDraft(imageLayerDraftKey(workflowContext, output.url), {
+            stackKey: layerSession.key, results: layerSession.items, draft: appliedStack,
+          });
+        } catch { /* The editable stack remains saved under the original source. */ }
+      }
+      commitLayerChanges();
+      onClose(applied || output);
+    } catch (failure) { setError(failure.message || "Could not apply the image edits."); }
+    finally { busyRef.current = false; if (mounted.current) setSaving(false); }
+  }
+
+  function layerPixelSignature(draft) {
+    return JSON.stringify(draft.layers.filter(entry => isLayerVisible(entry, draft.folders) && entry.opacity > 0).map(entry =>
+      [entry.replacement?.url || entry.url, entry.x, entry.y, entry.width, entry.height, entry.scale, entry.rotation, entry.opacity]));
+  }
+
+  async function saveDoneDrawing(state, lockAlpha) {
+    const drawing = state.history.marks.filter(mark => mark.layer === "drawing");
+    const { blob } = await imageEditDownload({ base: state.base, size: state.size, marks: drawing, prompt: "", blank: state.blank, lockAlpha });
+    const output = await uploadLayerComposite(blob, state.size, workflowContext);
+    return { ...output, label: lockAlpha ? output.label : "Image Edit" };
+  }
+
+  async function finishStackForDone() {
+    const layers = [];
+    for (const entry of stackDraft.layers) {
+      const state = entry.url === stackDraft.selected ? captureTools()
+        : layerToolDrafts.current.get(JSON.stringify([layerSession.key, entry.url]));
+      const source = layerEditSource(layerSession, entry);
+      let replacement;
+      if (state) {
+        replacement = versions[state.resultIndex];
+        if (!replacement && state.size && state.history.marks.some(mark => mark.layer === "drawing" && mark.tool !== "eraser")) {
+          replacement = await saveDoneDrawing(state, true);
+        }
+        if (!replacement && state.base.url !== source.url) replacement = state.base;
+      }
+      layers.push(replacement ? { ...entry, replacement: { url: replacement.url, width: replacement.width, height: replacement.height,
+        mimeType: replacement.mimeType, fileName: replacement.fileName } } : entry);
+    }
+    return { ...stackDraft, layers };
   }
 
   React.useEffect(() => { rootRef.current?.focus(); }, []);
@@ -270,8 +334,20 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     const stage = stageRef.current;
     const wheel = (event) => {
       event.preventDefault(); event.stopPropagation();
-      if (event.ctrlKey || event.metaKey) setZoom((value) => Math.max(0.5, Math.min(5, value * Math.exp(-event.deltaY * 0.008))));
-      else setPan((value) => ({ x: value.x - event.deltaX, y: value.y - event.deltaY }));
+      const bounds = stage.getBoundingClientRect();
+      const x = event.clientX - bounds.left - bounds.width / 2;
+      const y = event.clientY - bounds.top - bounds.height / 2;
+      const units = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds.height : 1;
+      const { deltaX, deltaY, shiftKey } = event;
+      setCanvasView((view) => {
+        if (shiftKey || !deltaY) {
+          return { ...view, pan: { x: view.pan.x - deltaX * units, y: view.pan.y - deltaY * units } };
+        }
+        const zoom = Math.max(0.5, Math.min(5, view.zoom * Math.exp(-deltaY * units * 0.002)));
+        if (zoom === view.zoom) return view;
+        const ratio = zoom / view.zoom;
+        return { zoom, pan: { x: x - (x - view.pan.x) * ratio, y: y - (y - view.pan.y) * ratio } };
+      });
     };
     stage.addEventListener("wheel", wheel, { passive: false });
     return () => stage.removeEventListener("wheel", wheel);
@@ -362,7 +438,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       form.append("nodeTitle", item.label || "Image Edit");
       form.append("selection", png, "image-selection.png");
       const data = await nodeApi.saveImageSelection(form);
-      await onAccept(item, data.item, "copy"); onClose();
+      await onAccept(item, data.item, "copy"); commitLayerChanges(); onClose();
     }
     catch (failure) { setError(failure.message); }
     finally { setSaving(false); }
@@ -395,14 +471,16 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     if (busyRef.current || dragRef.current || boxGesture.current) return;
     setHistory((s) => !s.future.length ? s : ({ past: [...s.past, s.marks], marks: s.future[0], future: s.future.slice(1) }));
   }
-  function close() { if (!busyRef.current && !saving) dirty ? setConfirmClose(true) : onClose(); }
+  function discardEdits() { if (!busyRef.current && !saving && !modelSaving) onClose(); }
   function keyboard(event) {
-    if (event.target.closest('.ies-box-name-input, [aria-label="Rename layer"]') || (event.target.closest(".ies-compare-handle") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))) return;
+    if (event.target.closest('.ies-box-name-input, [aria-label="Rename layer"], [aria-label="Rename folder"]') || (event.target.closest(".ies-compare-handle") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))) return;
     if (event.target.closest(".ies-transform-handle") && event.key.startsWith("Arrow")) return;
+    if (event.target.closest(".ies-layer-resize") && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    if (event.altKey && event.target.closest(".ies-layer-row-name[draggable='true']") && ["ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.stopPropagation();
-    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key === "Escape") { event.preventDefault(); discardEdits(); return; }
     if (event.key === "Tab") {
-      const container = confirmClose ? rootRef.current.querySelector(".ies-confirm") : rootRef.current;
+      const container = rootRef.current;
       const controls = [...container.querySelectorAll('button:not(:disabled), summary, a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [role="slider"][tabindex="0"]')].filter((element) => {
         const closed = element.closest("details:not([open])");
         return element.offsetParent && !element.matches(":disabled") && (!closed || element === closed.firstElementChild);
@@ -411,9 +489,14 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first?.focus(); }
     }
-    if (event.target.closest("input, textarea, select")) return;
+    if (event.target.closest('input:not([type="range"]), textarea, select')) return;
     if ((event.metaKey || event.ctrlKey) && ["z", "y"].includes(event.key.toLowerCase())) {
-      event.preventDefault(); event.shiftKey || event.key.toLowerCase() === "y" ? redo() : undo();
+      event.preventDefault();
+      const forward = event.shiftKey || event.key.toLowerCase() === "y";
+      const strokeChanges = forward ? history.future : history.past;
+      if (layerTarget && (showComposition || !strokeChanges.length)) restoreLayerHistory(forward);
+      else if (forward) redo();
+      else undo();
     }
   }
   function point(event) {
@@ -490,7 +573,11 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    if (drag.mark.tool === "hand") { setPan({ x: drag.pan.x + event.clientX - drag.clientX, y: drag.pan.y + event.clientY - drag.clientY }); return; }
+    if (drag.mark.tool === "hand") {
+      const pan = { x: drag.pan.x + event.clientX - drag.clientX, y: drag.pan.y + event.clientY - drag.clientY };
+      setCanvasView((view) => ({ ...view, pan }));
+      return;
+    }
     const p = point(event);
     if (["pen", "eraser"].includes(drag.mark.tool)) {
       const last = drag.mark.points.at(-1);
@@ -515,15 +602,17 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   async function generate(retryDraft) {
     const edit = retryDraft || { base, size, marks: history.marks, prompt, mode, blank, quality, resolution, selectedBoxId, seedreamSettings };
     const { base: editBase, size: editSize, marks: editMarks, prompt: editPrompt, mode: editMode, blank: editBlank } = edit;
-    const splitLayers = seedream && editMode === "layers";
+    const splitLayers = editMode === "layers";
+    const requestModel = splitLayers ? "Seedream 5.5" : model;
+    const requestProvider = splitLayers ? (atlasAvailable ? "atlas" : "") : provider;
     const editBoxesDraft = splitLayers ? [] : editMarks.filter(mark => mark.layer === "boxes");
     const output = edit.seedreamSettings || seedreamSettings;
-    const qualities = isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
+    const qualities = isIdeogram45Model(requestModel) ? ideogram45QualityOptions : ["high", "xhigh", "max"];
     const editQuality = qualities.includes(edit.quality) ? edit.quality : "high";
     const editResolution = resolutionOptions.includes(edit.resolution) ? edit.resolution : "2K";
-    if (busyRef.current || saving || namingBoxes.length || modelSavePending.current) return;
+    if (busyRef.current || saving || (!splitLayers && namingBoxes.length) || modelSavePending.current) return;
     if (!editSize) { setError("Wait for the original image to load before generating."); return; }
-    if (!providerAvailable) { setError("Enable an image-edit provider in Settings before generating."); return; }
+    if (!requestProvider) { setError("Enable an image-edit provider in Settings before generating."); return; }
     const maxLayers = Number(output.atlasMaxLayers);
     if (splitLayers && (!Number.isInteger(maxLayers) || maxLayers < 1 || maxLayers > 99)) {
       setError("Choose a maximum of 1 to 99 layers.");
@@ -535,7 +624,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     boxGesture.current = false;
     busyRef.current = true; setBusy(true); setBusyLabel("Generating edit"); setError(""); setWarning("");
     try {
-      imageEditSize(editSize.width, editSize.height, model);
+      imageEditSize(editSize.width, editSize.height, requestModel);
       validateEditBoxes(editBoxesDraft);
       let resolvedBoxes = editBoxesDraft;
       for (const box of editBoxesDraft.filter(box => boxNeedsIdentification(box, model) && !box.sourceMask)) {
@@ -558,9 +647,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       form.append("boxes", JSON.stringify(editBoxes));
       const objects = Object.fromEntries(resolvedBoxes.filter(box => boxNeedsObject(box) && box.sourceMask).map(box => [box.id, box.sourceMask]));
       if (Object.keys(objects).length) form.append("boxObjects", new Blob([JSON.stringify(objects)], { type: "application/json" }), "box-objects.json");
-      for (const [key, value] of Object.entries({ sourceUrl: editBase.url, requestId: globalThis.crypto.randomUUID(), prompt: editPrompt, mode: editMode, quality: editQuality, resolution: splitLayers ? output.atlasLayerResolution : editResolution, model, blank: String(editBlank), provider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
-      if (seedream) {
-        const fields = splitLayers ? { maxLayers: maxLayers + 1, textRecognition: output.atlasTextRecognition, outputFormat: output.atlasLayerFormat }
+      for (const [key, value] of Object.entries({ sourceUrl: editBase.url, requestId: globalThis.crypto.randomUUID(), prompt: editPrompt, mode: editMode, quality: editQuality, resolution: splitLayers ? output.atlasLayerResolution : editResolution, model: requestModel, blank: String(editBlank), provider: requestProvider, nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      if (seedream || splitLayers) {
+        const fields = splitLayers ? { maxLayers: maxLayers + 1, textRecognition: output.atlasTextRecognition }
           : {
             outputFormat: output.outputFormat,
             background: output.background,
@@ -571,8 +660,11 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       }
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
+      if (layerTarget && !splitLayers) form.append("preserveAlpha", "true");
       const data = await nodeApi.editImage(form);
       if (splitLayers && data.items?.length) {
+        const baseImage = data.items.find(layer => layer.layer.index === 0);
+        const canvasSize = baseImage?.width && baseImage?.height ? { width: baseImage.width, height: baseImage.height } : editSize;
         const layers = await translateSeedreamLabels(data.items, translator);
         if (!mounted.current) return;
         const previous = versions.findLast(version => version.layerGroup);
@@ -580,11 +672,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         const group = existing?.items[0].layerGroup || globalThis.crypto.randomUUID();
         const results = layers.map(layer => ({ ...layer, layerGroup: group, before: editBase.url, layerSourceSize: editSize }));
         const merged = existing && mergeLayerSeparation({ ...existing, key: group }, layerDrafts.current.get(existing.key) || initializeLayerStack(existing),
-          results, editSize, existing === layerSession ? stackDraft.selected : undefined);
-        const nextStack = merged?.stack || { key: group, items: results, sourceSize: editSize };
+          results, canvasSize, existing === layerSession ? stackDraft.selected : undefined);
+        const nextStack = merged?.stack || { key: group, items: results, sourceSize: editSize, canvasSize };
         const added = merged?.results || results;
         const nextDraft = merged?.draft || initializeLayerStack(nextStack);
-        persistLayerChanges({ results: nextStack.items, stackKey: group, draft: nextDraft, replaceResults: true });
+        if (merged && existing.key === group) recordLayerChange(undefined, existing, layerDrafts.current.get(group) || initializeLayerStack(existing));
+        stageLayerChanges({ results: nextStack.items, stackKey: group, draft: nextDraft, replaceResults: true });
         versionDrafts.current.push(...added.map(() => ({ ...edit, marks: [] })));
         setVersions(old => [...old, ...added]);
         enterLayerStack(nextStack, nextDraft);
@@ -616,6 +709,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       if (layerTarget && action === "apply") { applyLayerResult(result); return; }
       const output = action === "layers" ? layerSession?.items || versions.filter(version => version.layerGroup === resultLayerGroup) : result;
       await onAccept(item, output, action);
+      commitLayerChanges();
       onClose();
     }
     catch (failure) { setError(failure.message || "Could not apply the edit."); }
@@ -631,10 +725,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     setQuality(qualities.includes(saved.quality) ? saved.quality : "high");
     setResolution(resolutionOptions.includes(saved.resolution) ? saved.resolution : "2K");
     setSelectedBoxId(saved.selectedBoxId || saved.marks.find(mark => mark.layer === "boxes")?.id || "");
-    setTool("boxes"); setLayer("boxes"); setResultIndex(-1); setError(""); setWarning(""); setZoom(1); setPan({ x: 0, y: 0 });
+    setTool("boxes"); setLayer("boxes"); setResultIndex(-1); setError(""); setWarning(""); fitImage();
   }
   function continueEditing() {
-    setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); setZoom(1); setPan({ x: 0, y: 0 });
+    setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); fitImage();
   }
   function stackFor(target) {
     const group = target.layerGroup;
@@ -654,9 +748,15 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     const recentGroup = versions.findLast(version => version.layerGroup);
     return stackFor(result || previous || (lastLayerStack.current === "image:" + base.url ? base : recentGroup) || base);
   }
-  function persistLayerChanges(changes) {
+  function stageLayerChanges(changes) {
+    pendingLayerDraft.current ??= readImageLayerDraft(layerStorageKey);
+    updateImageLayerDraft(pendingLayerDraft.current, changes);
+  }
+  function commitLayerChanges() {
+    if (!pendingLayerDraft.current) return;
     try {
-      saveImageLayerDraft(layerStorageKey, changes);
+      writeImageLayerDraft(layerStorageKey, pendingLayerDraft.current);
+      pendingLayerDraft.current = null;
       setLayerStorageError("");
     } catch { setLayerStorageError("Layer changes could not be saved in this browser."); }
   }
@@ -664,10 +764,45 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     setStackDraft(next);
     layerDrafts.current.set(stack.key, next);
     lastLayerStack.current = stack.key;
-    persistLayerChanges({ stackKey: stack.key, draft: next, results: stack.result ? [stack.result] : [] });
+    stageLayerChanges({ stackKey: stack.key, draft: next, results: stack.result ? [stack.result] : [] });
+  }
+  function recordLayerChange(gesture, stack = layerSession, draft = stackDraft) {
+    if (!stack || !draft) return;
+    const previous = stackHistory.current.get(stack.key);
+    if (gesture && previous?.gesture === gesture) return;
+    stackHistory.current.set(stack.key, { past: [...(previous?.past || []).slice(-49), { stack, draft }], future: [], gesture });
+  }
+  function changeStackDraft(next, gesture) {
+    recordLayerChange(gesture);
+    storeStackDraft(next);
+  }
+  function restoreLayerHistory(forward) {
+    if (busyRef.current || saving || dragRef.current || boxGesture.current || !layerHistory) return;
+    const { past, future } = layerHistory;
+    const snapshot = (forward ? future : past).at(-1);
+    if (!snapshot) return;
+    const current = { stack: layerSession, draft: stackDraft };
+    stackHistory.current.set(layerSession.key, forward
+      ? { past: [...past, current], future: future.slice(0, -1) }
+      : { past: past.slice(0, -1), future: [...future, current] });
+    const next = snapshot.draft.layers.some(entry => entry.url === stackDraft.selected)
+      ? { ...snapshot.draft, selected: stackDraft.selected } : snapshot.draft;
+    const target = next.layers.find(entry => entry.url === next.selected);
+    const source = layerEditSource(snapshot.stack, target);
+    if (layerSession.items !== snapshot.stack.items) {
+      stageLayerChanges({ results: snapshot.stack.items, stackKey: snapshot.stack.key, draft: next, replaceResults: true });
+      const restored = snapshot.stack.items.filter(item => !versions.some(version => version.url === item.url && version.layerGroup === item.layerGroup));
+      if (restored.length) {
+        versionDrafts.current.push(...restored.map(() => undefined));
+        setVersions(old => [...old, ...restored]);
+      }
+    }
+    setLayerSession(snapshot.stack);
+    storeStackDraft(next, snapshot.stack);
+    if (source.url !== base.url || next.selected !== stackDraft.selected) loadLayerTools(snapshot.stack, next);
   }
   function captureTools() {
-    return { base, history, prompt, mode, blank, selectedBoxId, resultIndex, tool, layer, selectionName: selectionName.current };
+    return { base, size, history, prompt, mode, blank, selectedBoxId, resultIndex, tool, layer, selectionName: selectionName.current };
   }
   function restoreTools(source, saved) {
     if (base.url !== source.url) skipSelectionRestore.current = Boolean(saved);
@@ -675,7 +810,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     setPrompt(saved?.prompt || ""); setMode(saved?.mode || "edit"); setBlank(saved?.blank || false);
     setSelectedBoxId(saved?.selectedBoxId || ""); setTool(saved?.tool || "pen"); setLayer(saved?.layer || "drawing");
     selectionName.current = saved?.selectionName || "";
-    setResultIndex(saved?.resultIndex ?? -1); setView("result"); setError(""); setZoom(1); setPan({ x: 0, y: 0 });
+    setResultIndex(saved?.resultIndex ?? -1); setView("result"); setError(""); fitImage();
   }
   function rememberLayerTools() {
     if (layerSession) layerToolDrafts.current.set(JSON.stringify([layerSession.key, stackDraft.selected]), captureTools());
@@ -706,14 +841,29 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       loadLayerTools(layerSession, next);
     }
   }
-  function transformStackLayer(patch) {
-    storeStackDraft({ ...stackDraft, layers: stackDraft.layers.map(entry => entry.url === stackDraft.selected ? { ...entry, ...patch } : entry) });
+  function removeSelectedLayers(urls) {
+    if (busyRef.current || saving || urls.size >= stackDraft.layers.length) return;
+    const layers = stackDraft.layers.filter(entry => !urls.has(entry.url));
+    const index = stackDraft.layers.findIndex(entry => entry.url === stackDraft.selected);
+    const selected = stackDraft.layers.slice(index + 1).find(entry => !urls.has(entry.url))?.url || layers.at(-1).url;
+    const stack = { ...layerSession, items: layerSession.items.filter(entry => !urls.has(entry.url)) };
+    recordLayerChange();
+    enterLayerStack(stack, { ...stackDraft, layers, selected });
+  }
+  function transformStackLayer(patch, gesture) {
+    changeStackDraft({ ...stackDraft, layers: stackDraft.layers.map(entry => entry.url === stackDraft.selected ? { ...entry, ...patch } : entry) }, gesture);
+  }
+  function separateSelectedLayer() {
+    const source = layerEditSource(layerSession, activeLayer);
+    const sourceSize = source.width && source.height ? { width: source.width, height: source.height } : size;
+    return generate({ base: source, size: sourceSize, mode: "layers", marks: [], blank: false,
+      prompt: layerMode ? prompt : "", quality, resolution, seedreamSettings });
   }
   function applyLayerResult(output) {
     const replacement = { url: output.url, width: output.width, height: output.height, mimeType: output.mimeType, fileName: output.fileName };
     const next = { ...stackDraft, layers: stackDraft.layers.map(entry => entry.url === stackDraft.selected ? { ...entry, replacement } : entry) };
     layerToolDrafts.current.delete(JSON.stringify([layerSession.key, stackDraft.selected]));
-    storeStackDraft(next);
+    changeStackDraft(next);
     loadLayerTools(layerSession, next);
   }
   async function addSelectionToStack(target) {
@@ -732,7 +882,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         const pasted = await pasteLayerSelection(cutout, sourceGeometry, target, targetUrl);
         const replacement = await uploadLayerComposite(await layerCompositeBlob(pasted.canvas), pasted.canvas, workflowContext);
         layerToolDrafts.current.delete(JSON.stringify([previous.key, target.url]));
-        storeStackDraft({ ...previousDraft, layers: previousDraft.layers.map(entry => entry.url === target.url ? { ...entry, ...pasted.geometry, replacement } : entry) });
+        changeStackDraft({ ...previousDraft, layers: previousDraft.layers.map(entry => entry.url === target.url ? { ...entry, ...pasted.geometry, replacement } : entry) });
       } else {
         const cropped = cropLayerSelection(cutout, sourceGeometry);
         const output = await uploadLayerComposite(await layerCompositeBlob(cropped.canvas), cropped.canvas, workflowContext);
@@ -744,7 +894,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         const nextDraft = { ...previousDraft, selected: item.url, layers: [...previousDraft.layers,
           { ...cropped.geometry, url: item.url, name, visible: true, opacity: 100 }] };
         const added = [...promoted, item];
-        persistLayerChanges({ results: nextStack.items, stackKey: group, draft: nextDraft, replaceResults: true });
+        recordLayerChange(undefined, promoted.length ? { ...previous, key: group, items: promoted } : previous, previousDraft);
+        stageLayerChanges({ results: nextStack.items, stackKey: group, draft: nextDraft, replaceResults: true });
         versionDrafts.current.push(...added.map(() => undefined));
         setVersions(old => [...old, ...added]);
         enterLayerStack(nextStack, nextDraft);
@@ -756,7 +907,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     if (!size || restoringSelections || !restoreStackOnLoad.current) return;
     restoreStackOnLoad.current = false;
     const stack = currentLayerStack();
-    if (restoredLayers.consolidated) persistLayerChanges({ results: stack.items, stackKey: stack.key, draft: layerDrafts.current.get(stack.key), replaceResults: true });
+    if (restoredLayers.consolidated) stageLayerChanges({ results: stack.items, stackKey: stack.key, draft: layerDrafts.current.get(stack.key), replaceResults: true });
     enterLayerStack(stack);
   }, [size, restoringSelections]);
   async function saveLayerStack(format) {
@@ -774,6 +925,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           return;
         }
         await onAccept(item, output, "copy");
+        commitLayerChanges();
         onClose();
       }
     } catch (failure) { setError(failure.message || "Could not save the layer stack."); }
@@ -811,12 +963,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
       <span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span>
       <div className="ies-header-actions">
         <button ref={openLayersButton} className="ies-open-layers" type="button" aria-label="Show layers" title="Show layers"
-          disabled={busy || saving || !size} aria-pressed={layerTarget} onClick={() => layerTarget ? rootRef.current?.querySelector('.ies-layer-row-name[aria-pressed="true"]')?.focus() : enterLayerStack(currentLayerStack())}><Layers size={17} /><span>Layers</span></button>
+          disabled={busy || saving || !size} aria-pressed={layerTarget} onClick={() => layerTarget ? rootRef.current?.querySelector('.ies-layer-row-name[data-active="true"]')?.focus() : enterLayerStack(currentLayerStack())}><Layers size={17} /><span>Layers</span></button>
         <button className="ies-export-psd" type="button" aria-label="Export PSD" title="Export PSD" disabled={busy || saving || !size}
           onClick={() => saveLayerStack("psd")}><Download size={17} /><span>Export PSD</span></button>
         <IconButton icon={Save} label="Save image to disk" onClick={saveToDisk} disabled={busy || saving || !size || namingBoxes.length > 0} />
         <button type="button" disabled={busy || saving || modelSaving || restoringSelections || namingBoxes.length > 0} onClick={done}><Check size={17} />Done</button>
-        <IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || modelSaving} />
+        <IconButton icon={X} label="Discard edits and close image editor" onClick={discardEdits} disabled={busy || saving || modelSaving} />
       </div>
     </header>
     <div className="ies-workspace">
@@ -853,7 +1005,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         <div className="ies-viewbar">
           <span>{displayedImageSize ? `${displayedImageSize.width} x ${displayedImageSize.height}` : ""}</span>
           {reviewing && !showComposition && <div className="ies-review-controls"><div className="ies-segment" role="group" aria-label="Preview mode">{["original", "split", "result"].map((value) => <button type="button" key={value} className={view === value ? "active" : ""} aria-pressed={view === value} onClick={() => setView(value)}>{value === "split" ? "Compare" : value === "result" ? "Edit" : "Original"}</button>)}</div>{view === "split" && <input aria-label="Comparison split" type="range" min="0" max="100" value={split} onChange={(e) => setSplit(Number(e.target.value))} />}</div>}
-          <div className="ies-zoom"><IconButton icon={Minus} label="Zoom out" onClick={() => setZoom((v) => Math.max(0.5, v - 0.25))} /><output>{Math.round(scale * zoom * 100)}%</output><IconButton icon={Plus} label="Zoom in" onClick={() => setZoom((v) => Math.min(5, v + 0.25))} /><IconButton icon={Maximize} label="Fit image" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} /></div>
+          <div className="ies-zoom"><IconButton icon={Minus} label="Zoom out" onClick={() => adjustZoom(-0.25)} /><output>{Math.round(scale * zoom * 100)}%</output><IconButton icon={Plus} label="Zoom in" onClick={() => adjustZoom(0.25)} /><IconButton icon={Maximize} label="Fit image" onClick={fitImage} /></div>
         </div>
       </div>
       <aside className="ies-sidebar" aria-label="Image inspector">
@@ -880,7 +1032,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         </div>
         <div className="ies-sidebar-scroll">
         {layerTarget && <LayerStackControls key={layerSession.key} stack={layerSession} draft={stackDraft} disabled={busy || saving} showProperties={showComposition}
-          onSelect={selectStackLayer} onDraft={storeStackDraft} onTransform={transformStackLayer} />}
+          canUndo={Boolean(layerHistory?.past.length)} canRedo={Boolean(layerHistory?.future.length)}
+          canSeparate={Boolean(atlasAvailable && size && !busy && !saving && !modelSaving && !restoringSelections)} onSeparate={separateSelectedLayer}
+          onRemove={removeSelectedLayers} onUndo={() => restoreLayerHistory(false)} onRedo={() => restoreLayerHistory(true)}
+          onSelect={selectStackLayer} onDraft={changeStackDraft} onTransform={transformStackLayer} />}
         {!reviewing && (selectionBox || hasSelection) && <section className="ies-panel-section">
           <h3>Selection to layer</h3>
           <button type="button" disabled={busy || saving || !size} onClick={() => addSelectionToStack()}>Add to New Layer</button>
@@ -930,10 +1085,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
               <label>Layer resolution<select value={seedreamSettings.atlasLayerResolution} onChange={event => changeSeedream({ atlasLayerResolution: event.target.value })}>
                 <option value="auto">Auto</option><option value="1k">1K</option><option value="1.5k">1.5K</option><option value="2k">2K</option>
               </select></label>
-              <small id="ies-layer-count-help">1–99 layers, plus the base image. Seedream may return fewer.</small>
-              <label>Base image format<select value={seedreamSettings.atlasLayerFormat} onChange={event => changeSeedream({ atlasLayerFormat: event.target.value })}>
-                <option value="png">PNG</option><option value="jpeg">JPEG</option>
-              </select></label>
+              <small id="ies-layer-count-help">1–99 editable layers. Seedream may return fewer.</small>
               <label className="ies-checkbox"><input type="checkbox" checked={seedreamSettings.atlasTextRecognition} onChange={event => changeSeedream({ atlasTextRecognition: event.target.checked })} />Recognize text layers</label>
             </> : <>
               <label>Background<select aria-label="Edit background" value={seedreamSettings.background} onChange={event => changeSeedream({ background: event.target.value, ...(event.target.value === "transparent" && { outputFormat: "png" }) })}>
@@ -963,7 +1115,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           </div></section>
           {!layerMode && <details className="ies-disclosure ies-panel-section"><summary>Save selection draft</summary><div className="ies-section-body">
             <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
-          <small>Create an Image Selection node to reuse this draft. Done saves the draft on the source image.</small>
+          <small>Create an Image Selection node to reuse this draft. Done applies the image edits and saves the selection draft.</small>
           </div></details>}
         </fieldset>}
         {reviewing && <div className="ies-result-actions">
@@ -999,6 +1151,5 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         </div>
       </aside>
     </div>
-    {confirmClose && <div className="ies-confirm"><div role="alertdialog" aria-label="Discard edit draft"><h3>Discard this draft?</h3><p>Generated edits are kept in History. Unsaved drawing marks will be discarded.</p><div><button onClick={() => setConfirmClose(false)}>Keep Editing</button><button className="ies-primary" onClick={onClose}>Discard Draft</button></div></div></div>}
   </section>;
 }

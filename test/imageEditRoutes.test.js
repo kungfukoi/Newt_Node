@@ -149,6 +149,20 @@ test("Atlas layer separation accepts small cutouts and preserves JPEG, PNG alpha
   });
 });
 
+test("Editing a layer locks its alpha and changes only opaque source pixels", async () => {
+  const sourcePixels = Buffer.from([10, 20, 30, 255, 40, 50, 60, 128, 0, 0, 0, 0, 70, 80, 90, 255]);
+  const raw = { width: 4, height: 1, channels: 4 };
+  const source = await sharp(sourcePixels, { raw }).png().toBuffer();
+  const generated = await sharp({ create: { width: 4, height: 1, channels: 3, background: "#d03020" } }).png().toBuffer();
+  await withEditor(async ({ post, saves }) => {
+    const response = await post({ model: "Seedream 5.5", provider: "krea", preserveAlpha: "true", outputFormat: "jpeg" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).item.mimeType, "image/png");
+    const result = await sharp(saves[0].buffer).raw().toBuffer();
+    assert.deepEqual([...result], [208, 48, 32, 255, 40, 50, 60, 128, 0, 0, 0, 0, 208, 48, 32, 255]);
+  }, { getProvider: () => "krea", readSource: async () => ({ buffer: source }), readGenerated: async () => generated });
+});
+
 test("image edits use OpenAI Image 2.6 Sunburst and retain workflow context", () => withEditor(async ({ post, calls, saves, histories }) => {
   const response = await post();
   assert.equal(response.status, 200);

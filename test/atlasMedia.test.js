@@ -23,10 +23,12 @@ test("Atlas Seedream 5.5 layer decomposition uses the documented inputs and reta
   const options = { num_images: 12, resolution: "1.5k", enable_text_recognition: true, output_format: "jpeg" };
   const result = await media.seedreamLayers({ image: Buffer.from("image"), prompt: "Separate the sign", options }, "test");
   assert.deepEqual(request.input, { model: "bytedance/seedream-v5.5/layer-decomposition", image: "data:image/png;base64,aW1hZ2U=",
-    prompt: "Separate the sign\n\nUse short English names for all returned layers. Preserve the image content and text as-is.", ...options });
+    prompt: "Separate the sign", ...options });
   assert.equal(result.provider, "Atlas Cloud");
   assert.deepEqual(result.assets.map(asset => asset.label), ["Base image", "Sign"]);
   assert.deepEqual(result.assets[1].layer, { index: 1, bbox: { absolute: [0, 0, 32, 20] }, description: "A painted sign", textRecognition: { text: "OPEN" } });
+  await media.seedreamLayers({ image: Buffer.from("image"), prompt: "", options }, "test");
+  assert.equal(Object.hasOwn(request.input, "prompt"), false);
 });
 
 test("Atlas Seedance outpaint can request documented MOV color fidelity without changing other models", () => {

@@ -5140,8 +5140,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         throw new Error("The source has changed since editing began. Add this edit as a new Image instead.");
       }
       pushUndoSnapshot({ nodeDataIds: [node.id] });
-      await restorePreviewLayoutImageEdit({ ...source, ...savedResult, editContext: context });
-      return;
+      return restorePreviewLayoutImageEdit({ ...source, ...savedResult, thumbnailUrl: savedResult.thumbnailUrl || "", editContext: context });
     }
 
     const count = nodesRef.current.filter((node) => node.type === "image").length + 1;

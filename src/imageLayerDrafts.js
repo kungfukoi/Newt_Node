@@ -16,8 +16,7 @@ export function readImageLayerDraft(key) {
   return { schema: 1, results: [], drafts: [] };
 }
 
-export function saveImageLayerDraft(key, { results = [], stackKey, draft, replaceResults = false }) {
-  const stored = readImageLayerDraft(key);
+export function updateImageLayerDraft(stored, { results = [], stackKey, draft, replaceResults = false }) {
   if (replaceResults) {
     const retired = new Set(stored.results.filter(result => result.layerGroup && result.layerGroup !== stackKey).map(result => result.layerGroup));
     stored.results = stored.results.filter(result => !result.layerGroup);
@@ -38,5 +37,14 @@ export function saveImageLayerDraft(key, { results = [], stackKey, draft, replac
     stored.drafts = [...drafts];
   }
   if (stackKey) stored.lastStack = stackKey;
+}
+
+export function writeImageLayerDraft(key, stored) {
   globalThis.localStorage.setItem(key, JSON.stringify(stored));
+}
+
+export function saveImageLayerDraft(key, changes) {
+  const stored = readImageLayerDraft(key);
+  updateImageLayerDraft(stored, changes);
+  writeImageLayerDraft(key, stored);
 }

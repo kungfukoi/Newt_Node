@@ -54,8 +54,9 @@ test("header and User Preferences share immediate persisted changes and preserve
   await picker.selectOption("Nano Banana 2.1");
   await expect(picker).toHaveValue("Nano Banana 2.1");
   await expect(editor.locator(".ies-run-section")).toContainText("Ideogram 4.5");
-  await editor.getByRole("button", { name: "Close image editor", exact: true }).click();
-  await editor.getByRole("button", { name: "Discard Draft", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard edits and close image editor", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator(".output-lightbox img")).toHaveAttribute("src", /\/outputs\/e2e\/landscape\.png$/);
   await page.getByRole("button", { name: "Close preview", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const section = page.getByRole("button", { name: /User Preferences/ });

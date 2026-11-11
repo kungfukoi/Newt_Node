@@ -25,6 +25,9 @@ test("saved editor preference opens Flux 3 in the shared model picker", async ({
   expect(payload.get("provider")).toBe("fal");
   expect(payload.get("resolution")).toBe("4K");
   await expect(editor.getByRole("button", { name: "Add Image to Canvas", exact: true })).toBeVisible();
+  await editor.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.locator(".output-lightbox img")).toHaveAttribute("src", /\/outputs\/e2e\/edited\.png$/);
   expect(errors).toEqual([]);
 });
 test("Settings saves Flux 3 as the editor preference", async ({ page }, testInfo) => {
