@@ -1,4 +1,5 @@
 import { isKling4Model } from "../kling4.js";
+import { findLtxVfxModel, normalizeLtxVfxSettings } from "../ltxVfx.js";
 import { lastOutpaintPreparation } from "../outpaintPreparation.js";
 import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import { workflowContextPayload } from "../workflowContext.js";
@@ -304,9 +305,11 @@ export function buildUtilityVideoRequest({
   voidNumFrames,
   outputTargetIndex = ""
 }) {
+  const ltxVfxModel = findLtxVfxModel(model);
   return {
     prompt,
     model,
+    ...(ltxVfxModel ? { ltxVfx: normalizeLtxVfxSettings(ltxVfxModel, node.data.ltxVfx?.[ltxVfxModel.id]) } : {}),
     dwposeDrawMode: node.data.dwposeDrawMode || "body-pose",
     startFrameUrls,
     endFrameUrls,

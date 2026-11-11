@@ -1,4 +1,5 @@
 import { kreaEndpoints } from "./kreaApi.js";
+import { ltxVfxModelNames } from "./ltxVfx.js";
 
 export const defaultModelProviderPreferences = Object.freeze({
   seedance: "fal",
@@ -14,7 +15,7 @@ export const defaultModelProviderPreferences = Object.freeze({
 const providerModelSupport = Object.freeze({
   model3d: Object.freeze({ fal: Object.freeze(["Hunyuan 3D 3.1 Pro", "Rodin 2.5"]), krea: Object.freeze(["Hunyuan 3D 3.1 Pro", "Rodin 2.5"]) }),
   utilityImage: Object.freeze({ fal: Object.freeze(["Qwen Camera Edit", "Image to Color ID", "DWPose", "Depth Anything", "Topaz Image Upscale", "Patina", "BiRefNet Image", "SAM 3 Image"]), krea: Object.freeze(["Topaz Image Upscale", "Image to Color ID"]) }),
-  utilityVideo: Object.freeze({ fal: Object.freeze(["Video Outpaint", "DWPose Video", "Depth Anything Video", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting", "Wan 2.2 A14B LoRA Text-to-Video", "Wan 2.2 A14B LoRA Image-to-Video", "Wan 2.2 VACE Fun A14B Depth", "Wan 2.2 VACE Fun A14B Pose", "Wan 2.2 VACE Fun A14B Inpainting", "SAM 3 Video", "VOID Video Inpainting", "BiRefNet Video", "RIFE Video", "Bytedance Upscaler", "Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale"]), krea: Object.freeze(["Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale"]) }),
+  utilityVideo: Object.freeze({ fal: Object.freeze(["Video Outpaint", "DWPose Video", "Depth Anything Video", "Wan VACE Mask-to-Video", "Wan VACE 14B Inpainting", "Wan 2.2 A14B LoRA Text-to-Video", "Wan 2.2 A14B LoRA Image-to-Video", "Wan 2.2 VACE Fun A14B Depth", "Wan 2.2 VACE Fun A14B Pose", "Wan 2.2 VACE Fun A14B Inpainting", "SAM 3 Video", "VOID Video Inpainting", "BiRefNet Video", "RIFE Video", "Bytedance Upscaler", "Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale", ...ltxVfxModelNames]), krea: Object.freeze(["Flux Video Upscale", "Topaz SDR to HDR", "Topaz Video Upscale"]) }),
   minimaxH3: Object.freeze({
     fal: Object.freeze(["MiniMax H3"]),
     krea: Object.freeze(["MiniMax H3"]),

@@ -132,7 +132,14 @@ SAM 3 Image/Video Utility options are feature-gated off; their catalog definitio
 | External ComfyUI | WanBlend, WanWarp; WanSegment defines segment configuration | Reachable ComfyUI, required custom nodes/weights/templates and valid local mappings; see [manifest](comfyWan-requirements.yaml) |
 | Optional local model service | MiniMax H3 Local | Separate SGLang/Python/CUDA environment, weights and media mapping; see [setup](minimaxH3-local.md) |
 
-Newt's npm dependency preflight does not install ComfyUI models or SGLang weights. Topaz SDR to HDR is an explicit hosted HDR workflow, distinct from simply transcoding an SDR file to 10-bit ProRes.
+Newt's npm dependency preflight does not install ComfyUI models or SGLang weights.
+
+With Fal selected in Settings for Utility Video, connect a video and choose one of these LTX-2.5 models.
+
+- **Alpha Gen** returns a grayscale MP4 matte and a ProRes 4444 MOV cutout with straight alpha. Use the result arrows to select which video goes downstream. [Fal Alpha Gen](https://fal.ai/models/lightricks/ltx-2.5/alpha-gen)
+- **Reframe** expands the scene to a new aspect ratio at 720p or 1080p. Source Placement sets where the original video sits inside the frame. [Fal Reframe](https://fal.ai/models/lightricks/ltx-2.5/reframe)
+- **Upscale** takes H.264 or HEVC video and offers 1080p, 4K and 8K. Fal's maximum input frame count depends on the output resolution. [Fal Upscale](https://fal.ai/models/lightricks/ltx-2.5/upscale)
+- **SDR to HDR** returns processed video and a separate downloadable ZIP of 16-bit half-float OpenEXR frames in the selected color space. [Fal SDR to HDR](https://fal.ai/models/lightricks/ltx-2.5/hdr)
 
 ## Stops, errors and limits
 

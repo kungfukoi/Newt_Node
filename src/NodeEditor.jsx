@@ -143,6 +143,7 @@ import {
   X
 } from "lucide-react";
 import { audioModelApi, composerApi, nodeApi, systemApi, stopRemoteVideoNode } from "./api/newtApi.js";
+import { findLtxVfxModel, normalizeLtxVfxSettings } from "./ltxVfx.js";
 import { useProjectOutputCatalog } from "./useProjectOutputCatalog.js";
 import { nodeSchedulingKey, nodeBatchConcurrency } from "./nodeScheduling.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./newtPresets.js";
@@ -7600,8 +7601,9 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           isUtilityDwposeVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
-    const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
-    const generationGroupId = runOptions.batchGroupId || ((["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode))
+    const isLtxVfxRun = currentNode.type === "utility" && utilityMode(currentNode) === "video" && Boolean(findLtxVfxModel(currentNode.data.utilityVideoModel));
+    const batchCount = isSingleRunSegmentation || isLtxVfxRun ? 1 : nodeBatchCount(currentNode, currentNode.type === "imageModel" ? 9 : 4);
+    const generationGroupId = runOptions.batchGroupId || ((["text", "textAgent", "imageModel", "explore", "videoModel", "audioModel"].includes(currentNode.type) || supportsRemoteVideoRecovery(currentNode) || isLtxVfxRun)
       ? createGenerationGroupId(currentNode.type)
       : "");
     token.groupId = generationGroupId;
@@ -15333,6 +15335,9 @@ function NodeBody({
     const isTopazSdrToHdr = isUtilityTopazSdrToHdrModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
+    const ltxVfxModel = isVideoMode ? findLtxVfxModel(utilityVideoModel) : null;
+    const ltxVfxSettings = ltxVfxModel && normalizeLtxVfxSettings(ltxVfxModel, node.data.ltxVfx?.[ltxVfxModel.id]);
+    const ltxVfxResult = ltxVfxModel && node.data.resultItems?.[Number(node.data.selectedResultIndex) || 0];
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
     const stillFrameVideoUrl = isStillFrame ? connectedAssetUrls(incoming.referenceVideoIn).at(-1) || "" : "";
     const qwenImageInputUrl = isQwenCameraEdit ? connectedAssetUrls(incoming.imageIn).at(-1) || "" : "";
@@ -15405,6 +15410,7 @@ function NodeBody({
           isTransitionBuilder ||
           isWanVaceMaskToVideo ||
           isOutpaintCropOnly ||
+          ltxVfxModel ||
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
         (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
@@ -15423,7 +15429,7 @@ function NodeBody({
           ? Boolean(incoming.imageIn?.length)
         : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
     const utilityRunLabel = isOutpaintVideo ? (isOutpaintCropOnly ? "Export crop" : "Run Outpaint") : isVideoMode
-      ? isSam3Video
+      ? ltxVfxModel ? `Run ${ltxVfxModel.displayName}` : isSam3Video
         ? "Run SAM 3 Video"
         : isVoidVideo
           ? "Run VOID"
@@ -15498,7 +15504,7 @@ function NodeBody({
         ? "WanBlend / Segments"
       : isWanVaceMaskToVideo
         ? "Source Video"
-        : isOutpaintVideo || isSam3Video || isBirefnetVideo || isDWPoseVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler
+        : isOutpaintVideo || isSam3Video || isBirefnetVideo || isDWPoseVideo || isDepthAnythingVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isWan22VaceControlVideo || isVideoUpscaler || ltxVfxModel
           ? "Video"
           : isVoidVideo
             ? "Source Video"
@@ -15556,6 +15562,11 @@ function NodeBody({
           </button>
         </div>
         {isVideoMode && isCompositeVideo ? <CompositeLivePreview layers={compositePreviewLayers} stillDuration={node.data.compositeDuration || 5} renderedResult={utilityResultPane} hasResult={Boolean(node.data.resultUrl)} runError={node.data.error} /> : utilityResultPane}
+        {ltxVfxResult && <div className="utility-model-description">
+          <div>{ltxVfxResult.label}</div>
+          {ltxVfxResult.exrArchive?.url && <a href={ltxVfxResult.exrArchive.url} download={ltxVfxResult.exrArchive.fileName}>Download OpenEXR ZIP</a>}
+          {ltxVfxResult.deliveryWarning && <div role="status">{ltxVfxResult.deliveryWarning}</div>}
+        </div>}
         {isTransitionBuilder ? (
           <>
             <OutputPortRow node={node} port={outclipOutputPort} label="Last Frame" align="right" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
@@ -15598,13 +15609,13 @@ function NodeBody({
               </NodeRow>
               {isOutpaintVideo && <VideoOutpaintModelControl node={node} running={running} onUpdate={onUpdate} />}
               {settingsOpen && isCompositeVideo && <CompositeLayerControls node={node} incoming={incoming} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} colors={portColors} mediaType={previewMediaType} connectedSummary={connectedSummary} />}
-              {!isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
+              {!ltxVfxModel && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoStitch && !isTransitionBuilder && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
               {(isWanVaceInpaintingVideo || isUtilityWan22VaceInpaintingModel(utilityVideoModel)) && <VideoOutpaintPromptControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(0) || ""} maskVideoUrl={connectedAssetUrls(incoming.maskVideoIn).at(0) || ""} promptConnected={promptConnected} running={running} onUpdate={onUpdate} onAnalyze={onOutpaintAnalyze} />}
-              {!isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!ltxVfxModel && !isSam3Video && !isBirefnetVideo && !isDWPoseVideo && !isDepthAnythingVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanBlend && !isVideoStitch && !isTransitionBuilder && !isWan22A14bVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select aria-label="Utility video generations" disabled={running} value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -15897,6 +15908,18 @@ function NodeBody({
                     <input type="number" min="1.1" max="10" step="0.1" value={node.data.bytedanceUpscalerScaleRatio || ""} onChange={(event) => onUpdate(node.id, { bytedanceUpscalerScaleRatio: event.target.value })} placeholder="Auto" />
                   </NodeRow>
                 </>
+              ) : ltxVfxModel ? (
+                ltxVfxModel.controls.map(({ key, label, options, optionLabels }) => (
+                  <NodeRow key={key} label={label}>
+                    <select value={ltxVfxSettings[key]} onChange={(event) => onUpdate(node.id, {
+                      ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: { ...ltxVfxSettings, [key]: event.target.value } }
+                    })}>
+                      {options.map((option) => (
+                        <option key={option} value={option}>{optionLabels?.[option] || option.replaceAll("_", " ")}</option>
+                      ))}
+                    </select>
+                  </NodeRow>
+                ))
               ) : isTopazSdrToHdr ? (
                 <NodeRow label="Output Format">
                   <select value={node.data.topazSdrToHdrOutputFormat || "mp4"} onChange={(event) => onUpdate(node.id, { topazSdrToHdrOutputFormat: event.target.value })}>
@@ -20388,6 +20411,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   }
 
   if (videoModel === videoOutpaintModelName) return ["promptIn", ...outpaintImagePortIds, "referenceVideoIn", "canvasVideoIn"];
+  if (findLtxVfxModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDwposeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityDepthAnythingVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -20426,6 +20450,8 @@ function normalizedUtilityImageModelName(model) {
 }
 
 function normalizedUtilityVideoModelName(model) {
+  const ltxVfxModel = findLtxVfxModel(model);
+  if (ltxVfxModel) return ltxVfxModel.displayName;
   if (String(model).toLowerCase() === keyerModelName.toLowerCase()) return keyerModelName;
   if (String(model).toLowerCase() === "video outpaint") return videoOutpaintModelName;
   const normalized = String(model || "").toLowerCase();
@@ -23014,6 +23040,7 @@ function buildWanSegmentGenerationResult({ node, prompt, incoming, index }) {
 
 async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNode = {}, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
   const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wan22VaceDepth);
+  const ltxVfxModel = findLtxVfxModel(model);
   const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   const isWanSegment = isUtilityTransitionBuilderModel(model);
   const isWanWarp = isUtilityVideoStitchModel(model);
@@ -23111,8 +23138,8 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, incomingByNod
     voidNumFrames: normalizeVoidVideoFrameCount(node.data.voidNumFrames),
     outputTargetIndex: String((Number(index) || 0) + 1)
   });
-  const { response, data } = model === videoOutpaintModelName
-    ? await runTrackedGeneration({ scope: remoteVideoScope(workflowContext), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: "Video Outpaint", groupId: generationGroupId, batchIndex: index + 1, batchTotal }, progress => nodeApi.utilityVideo({ ...request, ...progress }, "Utility video"))
+  const { response, data } = model === videoOutpaintModelName || ltxVfxModel
+    ? await runTrackedGeneration({ scope: remoteVideoScope(workflowContext), nodeId: node.id, nodeTitle: node.data.title, kind: "video", label: model, groupId: generationGroupId, batchIndex: index + 1, batchTotal }, progress => nodeApi.utilityVideo({ ...request, ...progress }, "Utility video"))
     : await nodeApi.utilityVideo(request, "Utility video");
   if (!response.ok) {
     const error = new Error(`Run ${index + 1}: ${data.error || "Utility video failed."}`);

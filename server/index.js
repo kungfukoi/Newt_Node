@@ -117,6 +117,7 @@ import {
   updateGenerationProgress
 } from "./generation-progress.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
+import { findLtxVfxModel, ltxVfxFalInput, ltxVfxModels, ltxVfxRate, ltxVfxSourceError, normalizeLtxVfxSettings } from "../src/ltxVfx.js";
 import { createRemoteVideoJobs } from "./remote-video-jobs.js";
 import { jobTimingDiagnostic } from "./job-diagnostics.js";
 import { createSeedanceJobAdapter, providerKeyFingerprint } from "./seedance-job-provider.js";
@@ -1328,6 +1329,7 @@ function buildHealthPayload() {
       featureUsage: true,
       utilityImage: true,
       utilityVideo: true,
+      ltxVfx: true,
       keyer: true,
       keyerUtility: true,
       keyerAutoSetup: true,
@@ -6380,6 +6382,12 @@ app.post("/api/node/utility-video", async (req, res) => {
       return runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls: [prepared.generationVideoUrl], maskVideoUrls: [prepared.maskVideoUrl], selectedVideoModel, outpaintContext: prepared });
     }
 
+    if (selectedVideoModel.provider === "fal-ltx-vfx") {
+      if (runtimeModelProviderPreferences.utilityVideo !== "fal" || !process.env.FAL_KEY) {
+        return res.status(400).json({ error: `${selectedVideoModel.displayName} requires Fal as the Utility Video provider and an enabled Fal API key in Settings.` });
+      }
+      return await runLtxVfxUtility(req, res, referenceVideoUrls, selectedVideoModel);
+    }
     if (runtimeModelProviderPreferences.utilityVideo === "krea") return runKreaEnhanceUtility(req, res, selectedVideoModel, "video");
     const kreaUtilitySupported =
       selectedVideoModel.provider === "fal-topaz-video-upscaler" &&
@@ -11088,6 +11096,127 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
       label: selectedVideoModel.displayName,
       localUrl: output.publicPath,
       fileName: output.fileName
+    }
+  });
+}
+
+async function runLtxVfxUtility(req, res, referenceVideoUrls, model) {
+  const key = process.env.FAL_KEY;
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) throw httpError(400, `${model.displayName} requires a connected video.`);
+  const settings = normalizeLtxVfxSettings(model, req.body.ltxVfx);
+  const source = await resolveLocalAssetPath(videoUrl);
+  updateCurrentGenerationProgress({ phase: "preparing", message: "Checking source video" });
+  let metadata = await probeVideoFile(source.filePath);
+  const { size: bytes } = await stat(source.filePath);
+  const sourceError = ltxVfxSourceError(model, settings, { ...metadata, bytes });
+  if (sourceError) throw httpError(400, sourceError);
+  if (!metadata.num_frames && (model.id === ltxVfxModels.alphaGen.id || model.id === ltxVfxModels.upscale.id)) {
+    metadata = { ...metadata, ...await probeVideoFile(source.filePath, { countFrames: true }) };
+    const frameError = ltxVfxSourceError(model, settings, { ...metadata, bytes });
+    if (frameError) throw httpError(400, frameError);
+  }
+
+  const checkProvider = () => {
+    if (process.env.FAL_KEY !== key || runtimeModelProviderPreferences.utilityVideo !== "fal") {
+      throw httpError(409, "The Utility Video provider or Fal API key changed. Run again with the intended settings.");
+    }
+  };
+  checkProvider();
+  updateCurrentGenerationProgress({ phase: "uploading", message: "Uploading source video to Fal" });
+  const uploadedVideo = await uploadLocalOutputToFal(videoUrl);
+  checkProvider();
+  const endpoint = model.id;
+  const result = await subscribeFal(endpoint, { input: ltxVfxFalInput(model, settings, uploadedVideo) });
+  const outputs = model.outputs || [{ key: "video", label: model.displayName, extension: ".mp4", mimeType: "video/mp4" }];
+  const resultItems = [];
+  const remoteVideos = [];
+  const warnings = [];
+  let exrArchive;
+  let outputBytes = 0;
+  for (const [index, spec] of [...outputs, ...(model.archive ? [model.archive] : [])].entries()) {
+    const remote = normalizeFalFile(result.data?.[spec.key]);
+    try {
+      if (!remote?.url) throw new Error("Fal did not return a file.");
+      const group = index === 0 ? workflowPackageOutputDirName : workflowPackageDependencyDirName;
+      const output = await saveLtxVfxOutput(req, remote.url, model, spec, group);
+      outputBytes += output.bytes;
+      if (spec === model.archive) {
+        exrArchive = { url: output.publicPath, fileName: output.fileName };
+      } else {
+        const video = enrichVideoMetadata(remote, await probeVideoFile(output.filePath));
+        remoteVideos.push(video);
+        resultItems.push({ ...video, localUrl: output.publicPath, fileName: output.fileName, type: "video", label: spec.label, mimeType: spec.mimeType });
+      }
+    } catch (error) {
+      warnings.push(`${spec.label} could not be saved.`);
+      console.warn(`LTX VFX output save failed for ${result.requestId || "unknown request"} (${spec.key}):`, error.message);
+    }
+  }
+  const unitRateUsd = ltxVfxRate(model, settings, metadata);
+  const cost = estimateFalVideoUtilityCost({
+    endpoint,
+    amountUsd: unitRateUsd && metadata.duration ? roundCurrency(unitRateUsd * metadata.duration) : null,
+    unitRateUsd,
+    units: metadata.duration || null,
+    unit: "video second",
+    pricingBasis: "Fal estimate by source duration and resolution tier",
+    pricingSource: "fal-model-page-2026-11-10"
+  });
+  const deliveryWarning = warnings.length ? `${warnings.join(" ")} Check Fal request ${result.requestId || "history"} before rerunning.` : "";
+  const text = [model.displayName, deliveryWarning].filter(Boolean).join(". ");
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: model.displayName,
+    endpoint,
+    mode: model.displayName,
+    prompt: "",
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: { ...settings, sourceVideoCount: 1, sourceWidth: metadata.width, sourceHeight: metadata.height, sourceFps: metadata.fps, durationSeconds: metadata.duration },
+    cost,
+    localVideo: resultItems[0]?.localUrl || "",
+    remoteVideo: remoteVideos[0],
+    localVideos: resultItems.map((item) => item.localUrl),
+    remoteVideos,
+    outputFileName: resultItems[0]?.fileName || "",
+    outputFileNames: resultItems.map((item) => item.fileName),
+    outputLabels: resultItems.map((item) => item.label),
+    outputBytes,
+    exrArchive,
+    text
+  });
+
+  if (!resultItems.length) throw httpError(502, deliveryWarning);
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: model.displayName,
+    text,
+    cost,
+    resultItems: resultItems.map((item) => ({ ...item, exrArchive, deliveryWarning }))
+  });
+}
+
+async function saveLtxVfxOutput(req, url, model, spec, group) {
+  return queueMediaPersistence(async () => {
+    updateCurrentGenerationProgress({ status: "running", phase: "downloading", message: `Saving ${spec.label}` });
+    const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
+    if (!response.ok || !response.body) throw new Error(`Fal file download failed with HTTP ${response.status}.`);
+    const kind = `${model.id.split("/").at(-1)}-${spec.key.replaceAll("_", "-")}`;
+    const output = await createManagedAssetTarget(req, kind, spec.extension, group, { forceExtension: true });
+    const temporaryPath = `${output.filePath}.part-${randomUUID()}`;
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
+      const { size } = await stat(temporaryPath);
+      if (!size) throw new Error("Fal returned an empty file.");
+      await rename(temporaryPath, output.filePath);
+      return { ...output, bytes: size };
+    } finally {
+      await rm(temporaryPath, { force: true }).catch(() => {});
     }
   });
 }
@@ -19606,6 +19735,8 @@ function resolveUtilityImageModel(model) {
 }
 
 function resolveUtilityVideoModel(model) {
+  const ltxVfxModel = findLtxVfxModel(model);
+  if (ltxVfxModel) return { ...ltxVfxModel, provider: "fal-ltx-vfx", requiresPrompt: false };
   if (String(model).toLowerCase() === "video outpaint") return { provider: "fal-video-outpaint", displayName: "Video Outpaint", id: "fal-ai/wan-vace-14b/inpainting", requiresPrompt: true };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) {
@@ -22725,6 +22856,7 @@ function mimeForExtension(extension) {
   if (extension === ".wav") return "audio/wav";
   if (extension === ".m4a") return "audio/mp4";
   if (extension === ".txt" || extension === ".md") return "text/plain";
+  if (extension === ".zip") return "application/zip";
   return "image/png";
 }
 

@@ -1,4 +1,5 @@
 import { isFlux3MaxModel } from "../flux3Max.js";
+import { findLtxVfxModel } from "../ltxVfx.js";
 import { assertOutpaintConsistencySupport } from "../outpaintReferences.js";
 import { normalizeVideoOutpaintSettings, seedanceOutpaintRequest } from "../videoOutpaint.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
@@ -614,6 +615,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/video-outpaint-finish", jsonBody(body), "Match and QC outpainting", { retryLocalApi: false, timeoutMs: 600000 });
   },
   async utilityVideo(body, label = "Utility video generation") {
+    if (findLtxVfxModel(body.model)) {
+      const health = await getJson("/api/health", "LTX-2.5 VFX support");
+      if (health.routes?.ltxVfx !== true) throw new Error("Restart NewtNode to enable LTX-2.5 VFX.");
+    }
     if (body.model === "Video Outpaint") {
       label = body.videoOutpaintRepair ? "QC Edits..." : "Generating Fill...";
       const health = await getJson("/api/health", "Could not verify video outpaint support.");

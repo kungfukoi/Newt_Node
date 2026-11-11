@@ -34,8 +34,8 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   await expect(page.getByText("local styles",{exact:false})).toHaveCount(0);
   await page.getByRole("button",{name:"View Paper washes",exact:true}).click();
   const details=page.getByRole("dialog",{name:"Style details",exact:true});
-  await expect(details.getByRole("link",{name:"StyleRef.io",exact:true})).toHaveAttribute("href",look.sourceUrl);
-  await expect(details).toContainText("@artist");await expect(details.getByLabel("Look colours")).toContainText("#f4f0e6");
+  await expect(details.getByRole("link",{name:"StyleRef.io",exact:true})).toHaveCount(0);
+  await expect(details.getByText("Source specification and examples")).toHaveCount(0);await expect(details.getByLabel("Look colours")).toContainText("#f4f0e6");
   await expect(details.getByLabel("Similar styles")).toHaveCount(0);
   await expect(details.getByText("StyleRef does not supply similar-style recommendations.",{exact:true})).toHaveCount(0);
   await expect(details.getByLabel("StyleRef prompt").getByRole("heading",{name:"Rendering",exact:true})).toBeVisible();

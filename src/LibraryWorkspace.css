@@ -184,7 +184,6 @@
 .look-collection-form { margin-top:12px; align-items:flex-end; }
 .look-collection-form { margin-bottom:24px; padding:16px; border:1px solid #ddc63133; border-radius:10px; }
 .look-detail-extras { margin-top:28px; border-top:1px solid #ddc63126; }
-.look-source-link { color:#ddc631; text-decoration:underline; text-underline-offset:3px; }
 .look-detail-extras section { margin-top:24px; }
 .look-detail-extras h3 { font-size:17px; margin:0 0 14px; }
 .look-colour-bar { display:flex; height:18px; overflow:hidden; border-radius:6px; margin-bottom:14px; }

@@ -82,6 +82,17 @@ try {
   const health = await (await request("/api/health")).json();
   assert.equal(health.routes.windowLifecycle, true);
   assert.equal(health.routes.featureUsage, true);
+  assert.equal(health.routes.ltxVfx, true);
+  for (const model of ["LTX-2.5 Alpha Gen", "LTX-2.5 Reframe", "LTX-2.5 Upscale", "LTX-2.5 SDR to HDR"]) {
+    const rejected = await fetch(api + "/api/node/utility-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, referenceVideoUrls: ["/outputs/clip.mp4"] }),
+      signal: AbortSignal.timeout(15000)
+    });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /requires Fal as the Utility Video provider and an enabled Fal API key/);
+  }
   const usageEvent = { id: "00000000-0000-4000-8000-000000000001", type: "imageModel", action: "run" };
   for (let i = 0; i < 2; i++) {
     const response = await request("/api/feature-usage", usageEvent);
