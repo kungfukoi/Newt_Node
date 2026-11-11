@@ -23,8 +23,9 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
     setRenaming(null);
   }
   const point = event => {
-    const rect = svgRef.current.getBoundingClientRect();
-    return { x: clampBoxValue((event.clientX - rect.left) / rect.width, 0, 1), y: clampBoxValue((event.clientY - rect.top) / rect.height, 0, 1) };
+    const inverse = svgRef.current.getScreenCTM().inverse();
+    const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
+    return { x: clampBoxValue(p.x / size.width, 0, 1), y: clampBoxValue(p.y / size.height, 0, 1) };
   };
   function begin(event, box, operation = "translate") {
     if (!active || disabled || event.button !== 0 || drag.current) return;
@@ -51,7 +52,7 @@ export function ImageEditBoxesOverlay({ boxes, size, active, disabled, selectedI
   const shown = draft ? [...boxes.filter(box => box.id !== draft.id), draft] : boxes;
   const points = rect => boxCorners(rect, size.width, size.height).map(p => `${p.x},${p.y}`).join(" ");
   const radius = Math.max(4, Math.min(size.width, size.height) / 65);
-  return <svg ref={svgRef} className={`ies-box-overlay ${active ? "interactive" : ""}`} aria-label="Boxes canvas" viewBox={`0 0 ${size.width} ${size.height}`} onPointerDown={event => begin(event)} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
+  return <svg ref={svgRef} className={`ies-box-overlay ${active ? "interactive" : ""}`} aria-label="Boxes canvas" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" onPointerDown={event => begin(event)} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
     {shown.map((box, index) => {
       const sourceOnly = ["keep", "remove"].includes(box.mode), rect = sourceOnly ? box.source : box.target;
       const corners = boxCorners(rect, size.width, size.height), top = { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 };

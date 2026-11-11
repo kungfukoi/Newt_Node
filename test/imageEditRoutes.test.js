@@ -96,6 +96,59 @@ test("Save Selection preserves embedded PNG metadata in managed outputs with no 
   assert.equal(saves.length, 1);
 }));
 
+test("Seedream 5.5 preserves transparent edits and requires Atlas for layer separation", () => {
+  const generated = [];
+  const transparent = sharp({ create: { width: 32, height: 48, channels: 4, background: { r: 80, g: 50, b: 20, alpha: 0.5 } } }).png().toBuffer();
+  return withEditor(async ({ post, saves, histories }) => {
+    const seedream = { model: "Seedream 5.5", provider: "krea" };
+    const edit = await post({ ...seedream, resolution: "1K", background: "transparent", outputFormat: "png", aspectRatio: "3:2" });
+    assert.equal(edit.status, 200);
+    assert.deepEqual(generated[0].options, { size: "1K", background: "transparent", output_format: "png", aspect_ratio: "3:2" });
+    assert.equal((await edit.json()).item.width, 32);
+    assert.equal((await sharp(saves[0].buffer).raw().toBuffer())[3], 128);
+    assert.equal((await post({ ...seedream, background: "transparent", outputFormat: "jpeg" })).status, 400);
+    assert.equal((await post({ ...seedream, provider: "fal" })).status, 400);
+
+    assert.equal((await post({ ...seedream, mode: "layers" })).status, 400);
+    assert.equal((await post({ ...seedream, provider: "fal", mode: "layers" })).status, 400);
+    assert.equal(histories.length, 1);
+  }, {
+    getProvider: (_req, provider) => provider,
+    generate: async request => { generated.push(request); return { provider: "Krea", endpoint: "/generate/image/bytedance/seedream-5-5", remoteImage: { url: "edit" } }; },
+    readGenerated: async () => transparent,
+  });
+});
+
+test("Atlas layer separation accepts small cutouts and preserves JPEG, PNG alpha and OCR", () => {
+  const image = sharp({ create: { width: 128, height: 128, channels: 4, background: { r: 30, g: 20, b: 10, alpha: 0.5 } } }).png().toBuffer();
+  const requestOptions = { num_images: 12, resolution: "1.5k", enable_text_recognition: true, output_format: "jpeg" };
+  return withEditor(async ({ post, saves, histories }) => {
+    const response = await post({ model: "Seedream 5.5", provider: "atlas", mode: "layers", prompt: "Separate the sign",
+      maxLayers: "12", resolution: "1.5k", textRecognition: "true", outputFormat: "jpeg" });
+    assert.equal(response.status, 200);
+    const { items } = await response.json();
+    assert.deepEqual(items.map(item => item.mimeType), ["image/jpeg", "image/png"]);
+    assert.equal(items[1].layer.textRecognition.text, "OPEN");
+    assert.equal((await sharp(saves[0].buffer).metadata()).format, "jpeg");
+    assert.equal((await sharp(saves[1].buffer).raw().toBuffer())[3], 128);
+    assert.equal(histories[0].provider, "Atlas Cloud");
+  }, {
+    readSource: async () => ({ buffer: await image }),
+    readGenerated: async () => image,
+    decompose: async ({ provider, options, image: submitted }) => {
+      assert.equal(provider, "atlas");
+      assert.deepEqual(options, requestOptions);
+      const { width, height } = await sharp(submitted).metadata();
+      assert.deepEqual([width, height], [512, 512]);
+      return { id: "atlas-layers", provider: "Atlas Cloud", endpoint: "bytedance/seedream-v5.5/layer-decomposition",
+        modelName: "Seedream 5.5 Layer Decomposition", assets: [
+          { url: "base", label: "Base image", layer: { index: 0 } },
+          { url: "sign", label: "Sign", layer: { index: 1, textRecognition: { text: "OPEN" } } },
+        ] };
+    },
+  });
+});
+
 test("image edits use OpenAI Image 2.6 Sunburst and retain workflow context", () => withEditor(async ({ post, calls, saves, histories }) => {
   const response = await post();
   assert.equal(response.status, 200);

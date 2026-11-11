@@ -49,9 +49,37 @@ test("Video Outpaint runs Reframe directly with the selected ratio, resolution a
   const model = node.getByRole("combobox", { name: "Outpaint model" });
   await model.selectOption({ label: "LTX-2.5 Reframe" });
   await expect(node.getByRole("button", { name: "Prepare canvas & mask" })).toHaveCount(0);
-  await node.getByRole("combobox", { name: "Aspect Ratio", exact: true }).selectOption("4:5");
-  await node.getByRole("combobox", { name: "Resolution", exact: true }).selectOption("720p");
-  await node.getByRole("combobox", { name: "Source Placement", exact: true }).selectOption("bottom");
+  const editor = page.getByRole("dialog", { name: "Reframe placement editor" });
+  const editPlacement = node.getByRole("button", { name: "Edit placement" });
+  await editPlacement.click();
+  await editor.getByRole("button", { name: "Top left", exact: true }).click();
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(node.getByRole("combobox", { name: "Source Placement", exact: true })).toHaveValue("center");
+
+  await editPlacement.click();
+  await editor.getByRole("combobox", { name: "Aspect Ratio", exact: true }).selectOption("4:5");
+  await editor.getByRole("combobox", { name: "Resolution", exact: true }).selectOption("720p");
+  await editor.getByRole("button", { name: "Bottom", exact: true }).click();
+  await expect(editor.getByRole("button", { name: "Bottom", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const time = editor.getByRole("slider", { name: "Reframe preview time" });
+  await expect(time).toBeEnabled();
+  await time.press("ArrowRight");
+  await expect.poll(() => editor.locator("video").evaluate(video => video.currentTime)).toBeGreaterThan(0);
+  await editor.getByRole("checkbox", { name: "Custom placement" }).check();
+  await editor.getByRole("spinbutton", { name: "Source width (%)" }).fill("60");
+  await editor.getByRole("spinbutton", { name: "Left (%)" }).fill("10");
+  await editor.getByRole("spinbutton", { name: "Top (%)" }).fill("20");
+  await editor.getByRole("checkbox", { name: "Safety checker" }).uncheck();
+  await expect.poll(() => editor.locator("video").evaluate(video => video.style.top)).toBe("20%");
+  const handle = await editor.getByRole("button", { name: "Move custom placement" }).boundingBox();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 12, handle.y + handle.height / 2);
+  await page.mouse.up();
+  await expect.poll(() => editor.locator("video").evaluate(video => parseFloat(video.style.left))).toBeGreaterThan(10);
+  await editor.getByRole("spinbutton", { name: "Left (%)" }).fill("10");
+  await editor.getByRole("button", { name: "Apply placement" }).click();
+  await expect(editor).toHaveCount(0);
   await expect(node.getByRole("figure", { name: "Reframe placement preview" })).toContainText("4:5 output");
   await node.getByRole("button", { name: "Run LTX-2.5 Reframe" }).click();
   await expect.poll(() => submissions.length).toBe(1);
@@ -61,7 +89,8 @@ test("Video Outpaint runs Reframe directly with the selected ratio, resolution a
     model: "LTX-2.5 Reframe",
     referenceVideoUrls: ["/outputs/e2e/source.mp4"],
     canvasVideoUrl: "",
-    ltxVfx: { aspect_ratio: "4:5", resolution: "720p", anchor: "bottom" },
+    ltxVfx: { aspect_ratio: "4:5", resolution: "720p", anchor: "bottom",
+      rectangle: { x: 0.1, y: 0.2, width: 0.6 }, enable_safety_checker: false },
   });
   expect(submissions[0]).not.toHaveProperty("videoOutpaintPrepared");
   expect(requests.some(request => request.path === "/api/node/video-outpaint-prepare")).toBe(false);
@@ -69,7 +98,7 @@ test("Video Outpaint runs Reframe directly with the selected ratio, resolution a
   await page.reload();
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await expect(model).toHaveValue("ltx-reframe");
-  await expect(node.getByRole("combobox", { name: "Source Placement", exact: true })).toHaveValue("bottom");
+  await expect(node.getByRole("combobox", { name: "Source Placement", exact: true })).toHaveValue("custom");
   await model.selectOption("seedance-2.5");
   await expect(node.getByRole("button", { name: "Prepare canvas & mask" })).toBeVisible();
   expect(errors).toEqual([]);

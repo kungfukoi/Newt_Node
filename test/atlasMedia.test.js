@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createAtlasMedia } from "../server/atlas-media.js";
 import {
   atlasVideoInputDimensions,
   atlasVideoInputPixelLimits,
@@ -10,6 +11,23 @@ import {
   supportsAtlasImageModel,
   supportsAtlasVideoModel
 } from "../src/atlasMedia.js";
+
+test("Atlas Seedream 5.5 layer decomposition uses the documented inputs and retains layer metadata", async () => {
+  let request;
+  const media = createAtlasMedia({ client: { generate: async input => {
+    request = input;
+    return { requestId: "layers-job", job: { outputs: ["https://example.com/base.jpg", "https://example.com/sign.png"],
+      layers: [{ z_index: 0 }, { z_index: 1, name: "Sign", bounding_box: { absolute: [0, 0, 32, 20] },
+        description: "A painted sign", text_recognition: { text: "OPEN" } }] } };
+  } } });
+  const options = { num_images: 12, resolution: "1.5k", enable_text_recognition: true, output_format: "jpeg" };
+  const result = await media.seedreamLayers({ image: Buffer.from("image"), prompt: "Separate the sign", options }, "test");
+  assert.deepEqual(request.input, { model: "bytedance/seedream-v5.5/layer-decomposition", image: "data:image/png;base64,aW1hZ2U=",
+    prompt: "Separate the sign\n\nUse short English names for all returned layers. Preserve the image content and text as-is.", ...options });
+  assert.equal(result.provider, "Atlas Cloud");
+  assert.deepEqual(result.assets.map(asset => asset.label), ["Base image", "Sign"]);
+  assert.deepEqual(result.assets[1].layer, { index: 1, bbox: { absolute: [0, 0, 32, 20] }, description: "A painted sign", textRecognition: { text: "OPEN" } });
+});
 
 test("Atlas Seedance outpaint can request documented MOV color fidelity without changing other models", () => {
   const input = buildAtlasVideoRequest({ model: "Seedance 2.5", prompt: "Extend the scene", videos: ["https://example.com/source.mp4"], seedanceTask: "edit", resolution: "1080p", outputFormat: "mov" });

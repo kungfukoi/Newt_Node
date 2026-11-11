@@ -55,20 +55,60 @@ export function findLtxVfxModel(value) {
 }
 
 export function normalizeLtxVfxSettings(model, data) {
-  return Object.fromEntries(model.controls.map(({ key, options, defaultValue }) => [
+  const settings = Object.fromEntries(model.controls.map(({ key, options, defaultValue }) => [
     key, options.includes(data?.[key]) ? data[key] : defaultValue
   ]));
+  if (model.id === ltxVfxModels.reframe.id) {
+    const { x, y, width } = data?.rectangle || {};
+    if (Number.isFinite(x) && x >= 0 && x < 1 && Number.isFinite(y) && y >= 0 && y < 1 &&
+        Number.isFinite(width) && width > 0 && width <= 1) settings.rectangle = { x, y, width };
+    if (data?.enable_safety_checker === false) settings.enable_safety_checker = false;
+  }
+  return settings;
 }
 
 export function ltxVfxFalInput(model, settings, videoUrl) {
-  const { anchor, ...options } = normalizeLtxVfxSettings(model, settings);
-  return { video_url: videoUrl, ...options, ...(anchor ? { placement: { anchor } } : {}) };
+  const { anchor, rectangle, ...options } = normalizeLtxVfxSettings(model, settings);
+  const placement = rectangle || (anchor && { anchor });
+  return { video_url: videoUrl, ...options, ...(placement ? { placement } : {}) };
+}
+
+export function ltxReframeOutputSize({ aspect_ratio, resolution }) {
+  const [w, h] = aspect_ratio.split(":").map(Number);
+  const short = resolution === "720p" ? 720 : 1080;
+  return { width: Math.round(short * w / Math.min(w, h)), height: Math.round(short * h / Math.min(w, h)) };
+}
+
+export function ltxReframeRectangleBounds(settings, source) {
+  const output = ltxReframeOutputSize(settings);
+  const heightPerWidth = output.width * source.height / (output.height * source.width);
+  return {
+    heightPerWidth,
+    minWidth: Math.max(1 / output.width, 1 / (output.height * heightPerWidth)),
+    maxWidth: Math.min(1, 1 / heightPerWidth, 2 * source.width / output.width),
+  };
+}
+
+export function clampLtxReframeRectangle(rectangle, bounds) {
+  const width = Math.min(bounds.maxWidth, Math.max(bounds.minWidth, rectangle.width));
+  return {
+    x: Math.max(0, Math.min(1 - width, rectangle.x)),
+    y: Math.max(0, Math.min(1 - width * bounds.heightPerWidth, rectangle.y)),
+    width,
+  };
 }
 
 export function ltxVfxSourceError(model, settings, { width, height, fps, num_frames: frames, codecName, bytes }) {
   if (!width || !height) return "Could not read the source video dimensions.";
   const shortSide = Math.min(width, height);
   const longSide = Math.max(width, height);
+  if (model === ltxVfxModels.reframe && settings.rectangle) {
+    const bounds = ltxReframeRectangleBounds(settings, { width, height });
+    const rectangle = clampLtxReframeRectangle(settings.rectangle, bounds);
+    if (["x", "y", "width"].some(key => Math.abs(rectangle[key] - settings.rectangle[key]) > 1e-8)) {
+      return "Adjust the custom Reframe placement so the source fits inside the output at up to 2× its original size.";
+    }
+  }
   if (model === ltxVfxModels.alphaGen) {
     if (bytes > 200_000_000 || frames > 3072 || longSide > 3840 || shortSide > 2160 || longSide / shortSide > 32 / 9) {
       return "Alpha Gen accepts up to 200 MB and 3072 frames, with sides up to 3840 × 2160 and an aspect ratio up to 32:9.";

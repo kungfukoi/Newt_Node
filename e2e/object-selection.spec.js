@@ -374,10 +374,10 @@ test("box versions rerun their original setup, preserve masks after failure, and
   await page.screenshot({ path: testInfo.outputPath("box-rerun.png") });
   await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
   await expect(editor.getByRole("alert")).toContainText("Cleanup attempt failed");
-  await expect(editor.getByLabel("Edit version")).toHaveValue("0");
+  await expect(editor.getByLabel("Layers", { exact: true })).toHaveValue("0");
   expect(forms).toHaveLength(2);
   await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
-  await expect(editor.getByLabel("Edit version")).toHaveValue("1");
+  await expect(editor.getByLabel("Layers", { exact: true })).toHaveValue("1");
   await editor.getByRole("button", { name: "Adjust Boxes", exact: true }).click();
   await expect(editor.getByLabel("Box description", { exact: true })).toHaveValue("pizza box");
   await expect(editor.getByLabel("Translate X (%)", { exact: true })).toHaveValue("70");
@@ -387,12 +387,12 @@ test("box versions rerun their original setup, preserve masks after failure, and
   await editor.getByLabel("Translate X (%)", { exact: true }).fill("80");
   await editor.getByLabel("Edit prompt").fill("Move farther right.");
   await editor.getByRole("button", { name: "Generate Edit", exact: true }).click();
-  await expect(editor.getByLabel("Edit version")).toHaveValue("2");
+  await expect(editor.getByLabel("Layers", { exact: true })).toHaveValue("2");
   await editor.getByRole("button", { name: "Continue Editing", exact: true }).click();
   await expect(editor.getByLabel("Edit prompt")).toHaveValue("");
-  await editor.getByLabel("Edit version").selectOption("0");
+  await editor.getByLabel("Layers", { exact: true }).selectOption("0");
   await editor.getByRole("button", { name: "Rerun Box Edit", exact: true }).click();
-  await expect(editor.getByLabel("Edit version")).toHaveValue("3");
+  await expect(editor.getByLabel("Layers", { exact: true })).toHaveValue("3");
   expect(forms).toHaveLength(5);
   for (const form of [forms[1], forms[2], forms[4]]) {
     for (const key of ["sourceUrl", "boxes", "prompt", "resolution", "quality", "model", "provider"]) expect(form.get(key)).toBe(forms[0].get(key));
@@ -401,7 +401,7 @@ test("box versions rerun their original setup, preserve masks after failure, and
   expect(new Set(forms.map(form => form.get("requestId"))).size).toBe(5);
   expect(JSON.parse(forms[3].get("boxes"))[0].target.x).toBe(.8);
   expect(selections).toBe(1);
-  await editor.getByLabel("Edit version").selectOption("-1");
+  await editor.getByLabel("Layers", { exact: true }).selectOption("-1");
   await expect(editor.getByAltText("Original image", { exact: true })).toHaveAttribute("src", "/outputs/e2e/edited-4.png");
   await expect(editor.getByLabel("Edit prompt")).toHaveValue("");
   expect(errors).toEqual([]);

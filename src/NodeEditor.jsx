@@ -1869,6 +1869,13 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
       if (event.target.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='textbox']")) return;
 
+      if (key === "i" && !commandKey && !event.altKey && !event.shiftKey && !event.repeat && !event.isComposing &&
+        !document.querySelector("dialog[open], [aria-modal='true']")) {
+        event.preventDefault();
+        addNode("image");
+        return;
+      }
+
       if (commandKey && (key === "z" || key === "y") && event.repeat) {
         event.preventDefault();
         return;
@@ -5114,8 +5121,9 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
   }
 
   async function acceptAiImageEdit(source, result, action) {
-    if (!result?.url) throw new Error("No edited image is available.");
-    const { before: _before, ...savedResult } = result;
+    const results = action === "layers" ? result : [result];
+    if (!results?.length || results.some(item => !item?.url)) throw new Error("No edited image is available.");
+    const { before: _before, layerGroup: _layerGroup, ...savedResult } = results[0];
 
     if (action === "apply") {
       const context = source.editContext;
@@ -5138,41 +5146,44 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
     const count = nodesRef.current.filter((node) => node.type === "image").length + 1;
     const anchor = nodesRef.current.find((node) => node.id === source.editContext?.nodeId);
-    let position = anchor
+    const origin = anchor
       ? { x: anchor.x + estimatedNodeWidth(anchor.type) + 60, y: anchor.y }
       : defaultNodePosition(count);
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const candidate = { type: "image", x: position.x, y: position.y, data: {} };
-      if (!nodesRef.current.some((node) => rectsOverlap(estimatedNodeRect(candidate, 18), estimatedNodeRect(node, 18)))) break;
-      position = { x: position.x + 36, y: position.y + 54 };
-    }
-
-    const id = createNodeId("image");
-    const resultItem = { ...savedResult, type: "image", label: savedResult.label || "Image Edit", mimeType: "image/png" };
-    const nextNode = {
-      id,
-      type: "image",
-      ...position,
-      data: {
-        ...createDefaultNodeData("image", "Image", count),
-        title: savedResult.label === "Image Selection" ? "Image Selection" : "Image Edit",
-        resultUrl: resultItem.url,
-        thumbnailUrl: resultItem.thumbnailUrl || "",
-        resultItems: [resultItem],
-        selectedResultIndex: 0,
-        fileName: resultItem.fileName || fileNameFromLocalUrl(resultItem.url),
-        mimeType: "image/png",
-        mediaType: "image",
-        resultType: "image",
-        status: "ready",
-        error: ""
+    const occupied = [...nodesRef.current];
+    const added = results.map(({ before: _source, layerGroup: _group, ...item }, index) => {
+      let position = { x: origin.x + (index % 4) * 380, y: origin.y + Math.floor(index / 4) * 420 };
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const candidate = { type: "image", ...position, data: {} };
+        if (!occupied.some(node => rectsOverlap(estimatedNodeRect(candidate, 18), estimatedNodeRect(node, 18)))) break;
+        position = { x: position.x + 36, y: position.y + 54 };
       }
-    };
+      const resultItem = { ...item, type: "image", label: item.label || "Image Edit", mimeType: item.mimeType || "image/png" };
+      const nextNode = {
+        id: createNodeId("image"), type: "image", ...position,
+        data: {
+          ...createDefaultNodeData("image", "Image", count + index),
+          title: item.layer || ["Image Selection", "Layer Composition"].includes(item.label) ? resultItem.label : "Image Edit",
+          resultUrl: resultItem.url,
+          thumbnailUrl: resultItem.thumbnailUrl || "",
+          resultItems: [resultItem],
+          selectedResultIndex: 0,
+          fileName: resultItem.fileName || fileNameFromLocalUrl(resultItem.url),
+          mimeType: resultItem.mimeType,
+          mediaType: "image",
+          resultType: "image",
+          status: "ready",
+          error: ""
+        }
+      };
+      occupied.push(nextNode);
+      return nextNode;
+    });
     pushUndoSnapshot();
-    nodesRef.current = [...nodesRef.current, nextNode];
+    nodesRef.current = occupied;
     setNodes(nodesRef.current);
-    setSelectedNodeIds([id]);
-    setPreviewLightboxItem({ ...resultItem, editContext: { type: "nodeResult", nodeId: id, itemIndex: 0 } });
+    setSelectedNodeIds(added.map(node => node.id));
+    if (action === "layers") closePreviewLightbox();
+    else setPreviewLightboxItem({ ...added[0].data.resultItems[0], editContext: { type: "nodeResult", nodeId: added[0].id, itemIndex: 0 } });
   }
 
   async function applyPreviewLayoutImageEdit(item, edit = {}) {
@@ -8690,6 +8701,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           imageEditProvider={imageEditProvider}
           imageEditorModel={imageEditorModel}
           imageEditFalAvailable={Boolean(modelProviderAvailability.fal)}
+          imageEditKreaAvailable={Boolean(modelProviderAvailability.krea)}
+          imageEditAtlasAvailable={Boolean(modelProviderAvailability.atlas)}
           showApiCosts={showPriceSnapshot}
           onClose={closePreviewLightbox}
         />
@@ -8715,7 +8728,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         {nodeCatalog.map((item) => {
           const Icon = item.icon;
           return (
-            <button key={item.type} onClick={(event) => addNode(item.type, pointerNodePosition(event))} title={`Add ${item.label}`}>
+            <button key={item.type} onClick={(event) => addNode(item.type, pointerNodePosition(event))}
+              title={`Add ${item.label}`} aria-keyshortcuts={item.type === "image" ? "I" : undefined}>
               <Icon size={17} />
               <span>{item.label}</span>
               <Plus size={14} />
@@ -15921,9 +15935,10 @@ function NodeBody({
                 <>
                   {ltxVfxModel.controls.map(({ key, label, options, optionLabels }) => (
                     <NodeRow key={key} label={label}>
-                      <select aria-label={label} value={ltxVfxSettings[key]} onChange={(event) => onUpdate(node.id, {
-                        ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: { ...ltxVfxSettings, [key]: event.target.value } }
+                      <select aria-label={label} value={key === "anchor" && ltxVfxSettings.rectangle ? "custom" : ltxVfxSettings[key]} onChange={(event) => onUpdate(node.id, {
+                        ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: { ...ltxVfxSettings, [key]: event.target.value, ...(key === "anchor" && { rectangle: null }) } }
                       })}>
+                        {key === "anchor" && ltxVfxSettings.rectangle && <option value="custom" disabled>Custom placement</option>}
                         {options.map((option) => (
                           <option key={option} value={option}>{optionLabels?.[option] || option.replaceAll("_", " ")}</option>
                         ))}
@@ -15933,8 +15948,11 @@ function NodeBody({
                   {settingsOpen && ltxVfxSettings.anchor && <LtxReframePlacementPreview
                     key={reframeSourceUrl}
                     sourceUrl={reframeSourceUrl}
-                    aspectRatio={ltxVfxSettings.aspect_ratio}
-                    anchor={ltxVfxSettings.anchor}
+                    settings={ltxVfxSettings}
+                    running={running}
+                    onApply={settings => onUpdate(node.id, {
+                      ltxVfx: { ...node.data.ltxVfx, [ltxVfxModel.id]: settings }
+                    })}
                   />}
                   {settingsOpen && connectedReframeUnusedPorts.map(id => {
                     const port = config.input.find(port => port.id === id);

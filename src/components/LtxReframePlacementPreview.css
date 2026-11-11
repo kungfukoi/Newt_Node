@@ -9,6 +9,7 @@
   aspect-ratio: var(--reframe-ratio);
   margin: 0 auto;
   outline: 1px solid #727988;
+  overflow: hidden;
   background: repeating-linear-gradient(135deg, #20242b 0 6px, #2e343e 6px 12px);
 }
 
@@ -22,4 +23,98 @@
   margin-top: 5px;
   font-size: 11px;
   color: #b8bfca;
+}
+
+.ltx-reframe-dialog {
+  width: min(960px, 92vw);
+}
+
+.ltx-reframe-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.55fr);
+  gap: 24px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.ltx-reframe-preview.expanded .ltx-reframe-preview-frame {
+  width: min(100%, calc(52vh * var(--reframe-ratio)));
+}
+
+.ltx-reframe-transport {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.ltx-reframe-editor-controls {
+  display: grid;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.ltx-reframe-editor-controls label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ltx-reframe-editor-controls fieldset {
+  min-width: 0;
+  border: 1px solid #525966;
+  border-radius: 6px;
+}
+
+.ltx-reframe-anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.ltx-reframe-editor-controls fieldset > label {
+  margin-bottom: 8px;
+}
+
+.ltx-reframe-rectangle-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.ltx-reframe-rectangle-fields input {
+  width: 7ch;
+}
+
+.ltx-reframe-dialog .ltx-reframe-drag {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0;
+  border: 2px solid #ddc631;
+  border-radius: 0;
+  background: transparent;
+  cursor: move;
+  touch-action: none;
+}
+
+.ltx-reframe-dialog button,
+.ltx-reframe-dialog select {
+  padding: 6px 9px;
+  border: 1px solid #626978;
+  border-radius: 5px;
+  color: inherit;
+  background: #303641;
+}
+
+.ltx-reframe-anchor-grid button[aria-pressed="true"],
+.ltx-reframe-dialog .outpaint-canvas-actions button:last-child {
+  color: #16181b;
+  border-color: #ddc631;
+  background: #ddc631;
+}
+
+.ltx-reframe-dialog :is(button, select, input):focus-visible {
+  outline: 2px solid #ddc631;
+  outline-offset: 2px;
+}
+
+@media (max-width: 680px) {
+  .ltx-reframe-editor-layout { grid-template-columns: minmax(0, 1fr); }
 }

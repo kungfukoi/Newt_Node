@@ -28,6 +28,13 @@ test("LTX VFX Utility settings map to each Fal request schema", () => {
   assert.deepEqual(ltxVfxFalInput(reframe, request.ltxVfx, video_url), {
     video_url, aspect_ratio: "9:16", resolution: "720p", placement: { anchor: "bottom_left" }
   });
+  const rectangle = { x: 0.1, y: 0.2, width: 0.6 };
+  const custom = { ...selectedSettings, rectangle, enable_safety_checker: false };
+  assert.deepEqual(ltxVfxFalInput(reframe, custom, video_url), {
+    video_url, aspect_ratio: "9:16", resolution: "720p", placement: rectangle, enable_safety_checker: false
+  });
+  assert.equal(ltxVfxSourceError(reframe, custom, { width: 640, height: 360 }), "");
+  assert.match(ltxVfxSourceError(reframe, custom, { width: 128, height: 72 }), /up to 2×/);
   assert.deepEqual(ltxVfxFalInput(alphaGen, selectedSettings, video_url), { video_url });
   assert.deepEqual(ltxVfxFalInput(upscale, { resolution: "8k" }, video_url), { video_url, resolution: "8k" });
   assert.deepEqual(ltxVfxFalInput(hdr, {}, video_url), { video_url, output_colorspace: "acescg" });

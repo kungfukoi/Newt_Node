@@ -5,9 +5,10 @@ import { openAiImage26Models, normalizeOpenAiImage26Model } from "./openAiImageM
 import { imageModelNames } from "./modelOptions.js";
 import { isIdeogram45Model } from "./ideogram45.js";
 
-export const imageEditModelOptions = [openAiImage26Models.sunburst, openAiImage26Models.flare, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21];
-export const imageEditUsesSelectionGuide = model => isFlux3Model(model) || isNanoBanana21Model(model);
-export const imageEditRequiresFal = model => isIdeogram45Model(model) || imageEditUsesSelectionGuide(model);
+export const imageEditModelOptions = [openAiImage26Models.sunburst, openAiImage26Models.flare, imageModelNames.ideogram45, imageModelNames.flux3, imageModelNames.nanoBanana21, imageModelNames.seedream55];
+export const isSeedream55Edit = model => model === imageModelNames.seedream55;
+export const imageEditRequiresFal = model => isIdeogram45Model(model) || isFlux3Model(model) || isNanoBanana21Model(model);
+export const imageEditUsesSelectionGuide = model => isFlux3Model(model) || isNanoBanana21Model(model) || isSeedream55Edit(model);
 export const normalizeImageEditModel = (model) => {
   const normalized = normalizeOpenAiImage26Model(model, "sunburst");
   return imageEditModelOptions.includes(normalized) ? normalized : openAiImage26Models.sunburst;
@@ -32,7 +33,7 @@ export function imageEditPoint(clientX, clientY, rect) {
 export function imageEditSize(width, height, model) {
   if (![width, height].every((value) => Number.isInteger(value) && value > 0) || width * height > imageEditMaxPixels)
     throw new Error("This image is too large for the editor. Use an image up to 24 megapixels.");
-  if (imageEditRequiresFal(model)) return { width, height };
+  if (imageEditRequiresFal(model) || isSeedream55Edit(model)) return { width, height };
   if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.6 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
   let scale = Math.min(1, 3840 / Math.max(width, height), Math.sqrt(8294400 / (width * height)));
   scale = Math.max(scale, Math.sqrt(655360 / (width * height)));

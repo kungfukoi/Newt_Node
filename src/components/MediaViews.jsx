@@ -479,7 +479,7 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavigation = false, onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", imageEditorModel, imageEditFalAvailable, showApiCosts = false }) {
+export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavigation = false, onNavigate, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, imageEditProvider = "", imageEditorModel, imageEditFalAvailable, imageEditKreaAvailable, imageEditAtlasAvailable, showApiCosts = false }) {
   const [aiMode, setAiMode] = React.useState(false);
   const lightboxStageRef = React.useRef(null);
   const imageEditorRef = React.useRef(null);
@@ -1385,6 +1385,8 @@ export function OutputPreviewLightbox({ item, navigationKey = "", allowVideoNavi
             provider={imageEditProvider}
             model={imageEditorModel}
             falAvailable={imageEditFalAvailable ?? imageEditProvider === "fal"}
+            kreaAvailable={imageEditKreaAvailable}
+            atlasAvailable={imageEditAtlasAvailable ?? imageEditProvider === "atlas"}
             showApiCosts={showApiCosts}
             canApply={canEditImage}
             onAccept={onAcceptAiEdit}

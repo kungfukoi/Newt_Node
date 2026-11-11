@@ -143,5 +143,30 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     };
   }
 
-  return { image, video, prepareVideo, videoCost };
+  async function seedreamLayers({ image, prompt, options }, key) {
+    const model = "bytedance/seedream-v5.5/layer-decomposition";
+    const result = await client.generate({ mediaType: "image", key, input: {
+      model,
+      image: `data:image/png;base64,${image.toString("base64")}`,
+      prompt: [prompt, "Use short English names for all returned layers. Preserve the image content and text as-is."].filter(Boolean).join("\n\n"),
+      ...options
+    } });
+    const { outputs = [], layers = [] } = result.job;
+    const assets = outputs.map((url, index) => {
+      const metadata = layers[index] || {};
+      return {
+        url: typeof url === "string" && url.startsWith("https://") ? url : "",
+        label: index === 0 ? "Base image" : String(metadata.name || `Layer ${index}`).slice(0, 160),
+        layer: {
+          index: Number.isInteger(metadata.z_index) ? metadata.z_index : index,
+          ...(metadata.bounding_box && { bbox: metadata.bounding_box }),
+          ...(metadata.description && { description: metadata.description }),
+          ...(metadata.text_recognition && { textRecognition: metadata.text_recognition }),
+        }
+      };
+    });
+    return { id: result.requestId, endpoint: model, provider: "Atlas Cloud", modelName: "Seedream 5.5 Layer Decomposition", assets };
+  }
+
+  return { image, video, prepareVideo, videoCost, seedreamLayers };
 }

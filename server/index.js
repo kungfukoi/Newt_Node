@@ -1161,6 +1161,7 @@ registerImageEditRoutes(app, {
   getProvider: (_req, requestedProvider) => {
     if (requestedProvider === "fal" && process.env.FAL_KEY) return "fal";
     if (requestedProvider === "atlas" && process.env.ATLAS_API_KEY) return "atlas";
+    if (requestedProvider === "krea" && process.env.KREA_API_KEY) return "krea";
     return "";
   },
   readSource: async (sourceUrl) => {
@@ -1170,7 +1171,22 @@ registerImageEditRoutes(app, {
     if (source.buffer.length > 32 * 1024 * 1024) throw httpError(413, "Image editing supports source files up to 32 MB.");
     return source;
   },
-  generate: async ({ provider, model, variant, prompt, quality, size, images, mask, resolution }) => {
+  decompose: ({ image, prompt, options }) => atlasMedia.seedreamLayers({ image, prompt, options }, String(process.env.ATLAS_API_KEY || "").trim()),
+  generate: async ({ provider, model, variant, prompt, quality, size, images, mask, resolution, options }) => {
+    if (provider === "krea") {
+      const guides = [...images, ...(mask ? [mask] : [])];
+      const apiKey = process.env.KREA_API_KEY;
+      const referenceUrls = await Promise.all(guides.map((buffer, index) => uploadAssetBufferToKrea({
+        buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png`
+      }, apiKey)));
+      const endpoint = kreaEndpointForModel("image", model);
+      const input = buildKreaImageInput({ modelName: model, prompt, referenceUrls, resolution,
+        background: options.background, aspectRatio: options.aspect_ratio === "auto" ? size.replace("x", ":") : options.aspect_ratio });
+      const result = await runKreaGeneration({ endpoint, input, label: model, apiKey });
+      const url = extractKreaJobResultUrl(result.job);
+      if (!url) throw httpError(502, "Krea returned no edited image. Check Krea history before rerunning.");
+      return { endpoint, provider: "Krea", remoteImage: { url } };
+    }
     if (isNanoBanana21Model(model)) {
       return generateNanoBanana21({ prompt, images, mask, aspectRatio: "auto", resolution }, {
         upload: uploadImageInputToFal, subscribe: subscribeFal, firstImage: firstFalImageResult
@@ -1227,9 +1243,9 @@ registerImageEditRoutes(app, {
       cost: estimateOpenAiImage2Cost({ size, quality, endpoint, modelName: model })
     };
   },
-  save: async (req, buffer) => {
+  save: async (req, buffer, extension = ".png") => {
     const kind = req.path === "/api/node/save-image-selection" ? "image-selection" : "image-edit";
-    const target = await createManagedAssetTarget(req, kind, ".png", workflowPackageOutputDirName);
+    const target = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
     await writeFileWithRetry(target.filePath, buffer);
     const thumbnail = await createImagePreview(req, target, kind);
     return {
@@ -6391,7 +6407,7 @@ app.post("/api/node/utility-video", async (req, res) => {
       if (runtimeModelProviderPreferences.utilityVideo !== "fal" || !process.env.FAL_KEY) {
         return res.status(400).json({ error: `${selectedVideoModel.displayName} requires Fal as the Utility Video provider and an enabled Fal API key in Settings.` });
       }
-      return await runLtxVfxUtility(req, res, referenceVideoUrls, selectedVideoModel);
+      return await runLtxVfxUtility(req, res, referenceVideoUrls, findLtxVfxModel(selectedVideoModel.id));
     }
     if (runtimeModelProviderPreferences.utilityVideo === "krea") return runKreaEnhanceUtility(req, res, selectedVideoModel, "video");
     const kreaUtilitySupported =

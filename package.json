@@ -1,6 +1,6 @@
 {
   "name": "newtnode",
-  "version": "4.66.4-beta.0",
+  "version": "4.67.0-beta.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -24,6 +24,7 @@
     "@img/colour": "1.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@xyflow/react": "^12.11.3",
+    "ag-psd": "34.1.0",
     "ajv": "^8.20.0",
     "concurrently": "^9.2.0",
     "cors": "^2.8.5",

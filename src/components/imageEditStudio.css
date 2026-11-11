@@ -10,30 +10,40 @@
 .ies-header > span { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .ies-header strong { white-space: nowrap; font-size: 15px; }
 .ies-header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a7a7a7; }
-.ies-header-actions { display: flex; align-items: center; gap: 12px; min-width: 0; flex-shrink: 0; }
-.ies-model-select { display: flex; align-items: center; gap: 8px; min-width: 0; color: #bbb; white-space: nowrap; }
-.ies-model-select select { width: 255px; max-width: 32vw; min-width: 0; padding: 7px 9px; border: 1px solid #444; border-radius: 5px; background: #121212; color: #eee; }
-.ies-model-select select:disabled { opacity: .45; }
-.ies-model-saving { color: #bbb; font-size: 11px; }
-@media (max-width: 760px) { .ies-header { padding: 0 10px; gap: 8px; } .ies-header-actions { gap: 8px; flex: 1; justify-content: flex-end; } .ies-model-select > span, .ies-model-saving { display: none; } .ies-model-select { flex: 0 1 255px; } .ies-model-select select { width: 100%; max-width: none; } .ies-header > span { flex-shrink: 0; gap: 6px; } }
-.ies-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 304px; flex: 1; min-height: 0; }
+.ies-header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 0; }
+.image-edit-studio .ies-open-layers { color: #f3df73; border-color: #62562f; }
+.ies-workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(304px, 27%, 365px); flex: 1; min-height: 0; }
 .ies-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ies-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 10px 12px; border-bottom: 1px solid #343434; }
+@media (min-width: 761px) {
+  .ies-main { display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .ies-toolbar { grid-row: 1 / -1; flex-flow: column nowrap; padding: 8px; border: 0; border-right: 1px solid #343434; overflow-y: auto; scrollbar-width: thin; }
+  .ies-toolbar > .ies-segment { flex-direction: column; }
+  .ies-toolbar > .ies-divider { flex: 0 0 1px; width: 24px; height: 1px; margin: 3px 0; }
+}
 .image-edit-studio .ies-icon { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; }
 .image-edit-studio .active { color: #f2db51; border-color: #948333; background: #393622; }
 .ies-divider { width: 1px; height: 24px; background: #444; margin: 0 4px; }
 .ies-segment { display: inline-flex; gap: 3px; background: #101010; border-radius: 6px; padding: 3px; }
 .ies-segment button { padding: 5px 8px; border-color: transparent; }
+.ies-contextbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 5px 12px; min-height: 37px; border-bottom: 1px solid #383838; background: #202020; font-size: 12px; }
+.ies-contextbar strong { white-space: nowrap; }
+.ies-context-target { min-width: 0; flex: 1; color: #bcbcbc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ies-contextbar .ies-segment { margin-left: auto; }
+.ies-contextbar .ies-segment button { min-height: 27px; padding: 4px 8px; }
 .ies-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #0d0e10; overscroll-behavior: contain; }
 .ies-surface { position: relative; flex: none; background-color: #fff; cursor: crosshair; touch-action: none; user-select: none; box-shadow: 0 4px 30px #0006; }
+.ies-surface.alpha-preview { background: repeating-conic-gradient(#323232 0 25%, #474747 0 50%) 0 0 / 20px 20px; }
 .ies-surface.panning { cursor: grab; }
 .ies-surface.panning:active { cursor: grabbing; }
 .ies-brush-cursor { position: absolute; pointer-events: none; transform: translate(-50%, -50%); border: 1px solid; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
 .ies-surface > img, .ies-surface > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; pointer-events: none; }
 .ies-surface .ies-selection { opacity: .45; filter: sepia(1) saturate(8) hue-rotate(110deg); }
 .ies-surface .ies-object-hover { opacity: .5; }
+.ies-layer-source > canvas { visibility: hidden; }
 .ies-object-controls { display: flex; flex-direction: column; gap: 8px; padding-bottom: 0; border-bottom: 0; }
 .ies-object-controls small, .ies-object-controls p { color: #bbb; font-size: 11px; margin: 0; }
+.ies-object-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; }
 .ies-sam2-controls { display: flex; flex-direction: column; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #393939; }
 .ies-sam2-controls .ies-slider small { grid-column: 1 / -1; font-weight: 400; }
 .ies-split-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
@@ -104,6 +114,11 @@
 
 /* A single inspector rhythm: context, instructions, output; action stays visible. */
 .ies-sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 16px 16px; }
+.ies-inspector-header { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; padding: 12px 16px; border-bottom: 1px solid #343434; background: #232323; }
+.ies-inspector-header > small, .ies-output-grid > :is(small, .ies-seedream-reference, label:has(input[type="file"])) { grid-column: 1 / -1; }
+.ies-output-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
+.ies-output-grid > :only-child { grid-column: 1 / -1; }
+.ies-tool-options { display: grid; gap: 12px; }
 .ies-panel-section, .ies-box-controls { padding: 16px 0; border-bottom: 1px solid #343434; display: flex; flex-direction: column; gap: 12px; }
 .ies-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ies-section-heading h3 { margin: 0; font-size: 12px; font-weight: 600; color: #eee; }
@@ -132,15 +147,87 @@
 .ies-sidebar-scroll > label { margin-top: 16px; }
 .ies-sidebar-scroll > .ies-warning { margin-top: 12px; }
 @media (max-width: 760px) {
+  .ies-header { padding: 0 10px; gap: 8px; }
+  .ies-header > span { gap: 6px; }
   .ies-sidebar { padding: 0; }
   .ies-sidebar fieldset { display: flex; gap: 0; }
+  .ies-inspector-header { padding: 8px 12px; }
   .ies-sidebar-scroll { padding: 0 12px 12px; }
   .ies-sidebar .ies-run-section { padding: 10px 12px; }
   .ies-workspace { grid-template-rows: minmax(180px, 1fr) minmax(180px, 42%); }
 }
+@media (max-width: 540px) { .ies-open-layers > span, .ies-export-psd > span { display: none; } }
 
 .ies-selection-notice { padding-top: 12px; color: #b4c5a0; }
 
 .ies-field-pair { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; }
 .ies-box-controls { gap: 10px; }
 .ies-field-pair:empty { display: none; }
+.ies-seedream-reference {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ies-seedream-reference span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ies-layer-surface, .ies-layer-pixels { position: absolute; inset: 0; }
+.ies-layer-pixels { overflow: hidden; }
+.ies-layer-pixels > img, .ies-layer-selection, .ies-layer-active { position: absolute; display: block; }
+.ies-layer-active > .ies-surface { width: 100%; height: 100%; background: transparent; box-shadow: none; }
+.ies-layer-pixels > img { pointer-events: none; }
+.ies-layer-selection { border: 1px solid #8cc8fa; cursor: move; touch-action: none; }
+.image-edit-studio button.ies-transform-handle { position: absolute; min-width: 0; min-height: 0; width: 12px; height: 12px; padding: 0; border: 1px solid #8cc8fa; border-radius: 2px; background: #20262e; touch-action: none; }
+.ies-layer-selection > .ies-transform-handle { cursor: nwse-resize; transform: translate(-50%, -50%) scale(var(--ies-handle-scale)); }
+.ies-layer-selection > .ies-transform-handle:nth-child(2), .ies-layer-selection > .ies-transform-handle:nth-child(3) { cursor: nesw-resize; }
+.ies-rotate-stem { position: absolute; bottom: 100%; left: 50%; width: 1px; height: 22px; background: #8cc8fa; transform: scale(var(--ies-handle-scale)); transform-origin: center bottom; }
+.image-edit-studio .ies-rotate-stem .ies-transform-handle { top: 0; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; cursor: grab; }
+.ies-layer-controls h3 { display: flex; justify-content: space-between; align-items: center; margin: 0; font-size: 13px; }
+.ies-layer-controls h3 span { color: #aaa; font-weight: 400; }
+.ies-layer-list { overflow: auto; max-height: 220px; margin-bottom: 14px; }
+.ies-layer-list > div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: stretch; gap: 4px; margin-bottom: 4px; }
+.ies-layer-list .ies-layer-row-name { justify-content: flex-start; text-align: left; min-width: 0; }
+.ies-layer-row-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ies-layer-order { display: flex; align-items: center; gap: 2px; }
+.image-edit-studio .ies-layer-order button { width: 29px; min-height: 32px; padding: 0; }
+.ies-layer-list img { width: 28px; height: 28px; object-fit: contain; }
+.ies-layer-row-name[aria-pressed="true"] { border-color: #948333; }
+.ies-sidebar .ies-layer-controls fieldset { display: grid; gap: 10px; margin: 0; padding: 8px 0 0; border: 0; min-width: 0; }
+.ies-layer-property-name { margin: 0; color: #ddd; overflow-wrap: anywhere; }
+.ies-layer-controls label { display: grid; gap: 4px; color: #bbb; font-size: 12px; }
+.ies-layer-controls .ies-layer-slider { grid-template-columns: 1fr auto; }
+.ies-layer-slider > input { grid-column: 1 / -1; margin: 0; }
+.ies-sidebar .ies-layer-slider > input { accent-color: #84bdf1; }
+.ies-layer-slider > output { color: #eee; font-variant-numeric: tabular-nums; }
+.ies-layer-controls input { width: 100%; accent-color: #f2db51; }
+.ies-layer-controls input:is([type="number"], [type="text"]) { min-height: 34px; color: #eee; background: #141414; border: 1px solid #424242; border-radius: 6px; padding: 7px 9px; }
+.image-edit-studio .ies-reset-layers { justify-self: start; min-height: 28px; padding: 4px 0; color: #bbb; background: transparent; border: 0; }
+.image-edit-studio .ies-header { flex-basis: 45px; background: #202123; }
+.image-edit-studio .ies-header strong { font-size: 14px; font-weight: 650; }
+.image-edit-studio :is(.ies-header-actions, .ies-run-section) > button,
+.image-edit-studio .ies-stack-actions > button { min-height: 32px; padding: 6px 10px; gap: 6px; }
+.image-edit-studio .ies-toolbar { background: #222325; }
+.image-edit-studio .ies-stage { background: #303134; }
+.image-edit-studio .ies-inspector-header,
+.image-edit-studio .ies-run-section { background: #242527; }
+.image-edit-studio .ies-sidebar { background: #1e1f21; }
+.image-edit-studio .ies-sidebar :is(select, textarea, input[type="number"], input[type="text"]) { background: #17181a; }
+.ies-layer-list > div { grid-template-columns: 32px minmax(0, 1fr) auto; margin-bottom: 2px; gap: 2px; }
+.image-edit-studio .ies-layer-list > div > button { min-height: 34px; padding: 4px 6px; background: transparent; border-color: transparent; }
+.image-edit-studio .ies-layer-list > div > button:hover:not(:disabled) { background: #2b2c30; }
+.image-edit-studio .ies-layer-list .ies-layer-row-name[aria-pressed="true"] { background: #283f59; border-color: #446587; }
+.ies-layer-list img { width: 24px; height: 24px; flex: 0 0 24px; background: repeating-conic-gradient(#454545 0 25%, #333 0 50%) 0 / 8px 8px; }
+.ies-stack-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.image-edit-studio .ies-stack-actions > button { flex: 1 1 auto; min-height: 29px; font-size: 11px; }
+.image-edit-studio .ies-toolbar .ies-icon { flex-basis: 30px; width: 30px; height: 30px; min-height: 30px; }
+.image-edit-studio .ies-toolbar .ies-icon > svg { width: 16px; height: 16px; }
+.image-edit-studio :is(.ies-toolbar, .ies-contextbar, .ies-viewbar) .active { color: #d1e8ff; border-color: #476884; background: #293f56; }
+.image-edit-studio .ies-layer-selection { border-color: #8cc8fa; }
+@media (min-width: 761px) {
+  .ies-main { grid-template-columns: 44px minmax(0, 1fr); }
+  .ies-toolbar { gap: 3px; padding: 6px; }
+}

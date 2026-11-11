@@ -1,6 +1,22 @@
 import { test, expect } from "@playwright/test";
 import { openFixture, wireGeometry, wireAttachmentErrors } from "./helpers.mjs";
 
+test("I adds an Image node without intercepting text entry", async ({ page }) => {
+  const { errors } = await openFixture(page, { fixture: {
+    nodes: [{ id: "shortcut-text", type: "plainText", x: 30, y: 30, data: { title: "Notes", text: "" } }],
+    edges: [], groups: [], viewport: { x: 20, y: 20, scale: 1 },
+  } });
+  const text = page.locator('[data-node-card-id="shortcut-text"] textarea');
+  await text.press("i");
+  await expect(text).toHaveValue("i");
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+  await text.blur();
+  await page.keyboard.press("i");
+  await expect(page.locator('.react-flow__node[data-id^="image-"]')).toHaveCount(1);
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
 test("Prompt wires use the output-port color after reload and new connections", async ({ page }) => {
   const nodes = [{ id: "agent", type: "textAgent", x: 20, y: 20, data: { title: "Agent", agentDraft: "A prompt" } },
     ...["first", "second"].map((id, index) => ({ id, type: "videoModel", x: 430 + index * 430, y: 20, data: { title: id, settingsOpen: false } }))];
