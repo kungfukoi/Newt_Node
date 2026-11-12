@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { buildAtlasImageRequest, buildAtlasVideoRequest } from "../src/atlasMedia.js";
-import { atlasPricingEndpoints, isAtlasSeedance25PricingEndpoint } from "../src/atlasPricing.js";
+import { atlasPricingEndpoints, atlasSeedream55LayersEndpoint, isAtlasSeedance25PricingEndpoint } from "../src/atlasPricing.js";
 import { generationEstimate } from "../src/generationPricing.js";
 import { generationQuoteSettings, QUOTE_TTL_MS } from "../src/pricingTrust.js";
 import { atlasTokenCount } from "../src/atlasBillingUsage.js";
 
 export const ATLAS_CALCULATE_URL = "https://api.atlascloud.ai/api/v1/model/calculate";
 export const FAL_BILLING_URL = "https://api.fal.ai/v1/models/billing-events";
-const atlasQuoteOnlyEndpoints = ["text-to-image", "edit", "remix"].map(route => `reve-ai/reve-2.1/${route}`);
+const atlasQuoteOnlyEndpoints = [atlasSeedream55LayersEndpoint, ...["text-to-image", "edit", "remix"].map(route => `reve-ai/reve-2.1/${route}`)];
 const amount = value => (typeof value === "number" || typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))
   && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 

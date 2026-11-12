@@ -28,9 +28,11 @@ export function mergeStatsRecords(existing, incoming) {
       // Reconciliation may fill unknown costs; never replace a known charge with an estimate.
       const keepPrior = prior.cost.amountUsd !== null && !(prior.cost.estimated && row.cost.estimated === false && row.cost.amountUsd !== null);
       const atlasUsage = row.atlasUsage ?? prior.atlasUsage;
+      const billing = (prior.billing?.attempts ?? -1) >= (row.billing?.attempts ?? -1) ? prior.billing ?? row.billing : row.billing;
       records.set(id, {
         ...(keepPrior ? prior : row),
         ...(atlasUsage ? { atlasUsage } : {}),
+        ...(billing ? { billing } : {}),
         videoDurationSeconds: prior.videoDurationSeconds ?? row.videoDurationSeconds,
         fastMode: prior.fastMode || row.fastMode
       });
@@ -68,6 +70,24 @@ export function createStatsLedger({ filePath, now = () => new Date().toISOString
   return {
     append: item => enqueue(() => ingest([item.id || item.generationRunId ? item : { ...item, id: `ledger-anonymous-${randomUUID()}` }])),
     snapshot: history => enqueue(() => ingest(history)),
+    dueBilling: (now, limit) => enqueue(async () => {
+      const document = await read();
+      return document.records.filter(row => row.billing?.requestId && row.keyIdentity && row.billing.nextCheckAt && row.billing.nextCheckAt <= now
+        && (row.cost.amountUsd === null || row.cost.estimated))
+        .sort((a, b) => a.billing.nextCheckAt.localeCompare(b.billing.nextCheckAt)).slice(0, limit);
+    }),
+    updateBilling: (expected, billing, cost) => enqueue(async () => {
+      const document = await read();
+      const identity = statsEventId(expected);
+      const index = document.records.findIndex(row => statsEventId(row) === identity);
+      if (index < 0) return null;
+      const row = document.records[index];
+      if (row.billing?.requestId !== expected.billing.requestId || row.billing?.nextCheckAt !== expected.billing.nextCheckAt
+        || (row.cost.amountUsd !== null && !row.cost.estimated)) return null;
+      const updated = normalizeStatsRecord({ ...row, billing, cost: cost ?? row.cost });
+      await save(document, document.records.with(index, updated));
+      return updated;
+    }),
     recordCharge: (identity, cost) => enqueue(async () => {
       const document = await read();
       const index = document.records.findIndex(row => (row.generationRunId || row.id) && statsEventId(row) === identity);

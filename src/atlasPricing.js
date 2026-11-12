@@ -2,6 +2,8 @@ import { getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
 import { seedanceAtlasDraftCompletionEndpoint } from "./seedanceDraft.js";
 const seedream5ProModelName = "Seedream 5.0 Pro", seedream5ProAtlasBase = "bytedance/seedream-v5.0-pro";
 
+export const atlasSeedream55LayersEndpoint = "bytedance/seedream-v5.5/layer-decomposition";
+
 export const ATLAS_PRICING_URL = "https://api.atlascloud.ai/api/v1/pricing/models";
 export const ATLAS_PRICING_CHECKED_AT = "2026-09-10";
 export const ATLAS_RULES_VERSION = 1;

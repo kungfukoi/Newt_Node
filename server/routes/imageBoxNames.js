@@ -36,6 +36,8 @@ export function registerImageBoxNameRoutes(app, { limiter, readSource, describe,
       if (!result || recorded) return;
       recorded = true;
       await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", provider: result.provider, modelName: result.model, endpoint: result.endpoint,
+        keyIdentity: result.keyIdentity, billing: { requestId: result.requestId, sessionId: result.sessionId },
+        usage: result.usage,
         mode: "Image Edit: Box identification", prompt: boxNameInstructions, text: result.text, error,
         project: { id: body.projectId || "node-workspace", name: body.projectName || "Node workspace" }, node: { id: body.nodeId, title: body.nodeTitle || "Image Edit" },
         settings: { sourceUrl: body.sourceUrl, region, imageInputs: 2 },

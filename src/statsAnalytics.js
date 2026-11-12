@@ -1,4 +1,4 @@
-import { atlasTextUsageRecords } from "./atlasBillingUsage.js";
+import { atlasTextUsageRecords, atlasTokenCount } from "./atlasBillingUsage.js";
 
 // Shared analytics contract: recorded amounts only, never today's model prices.
 export const providerLabels = { atlas: "Atlas Cloud", fal: "Fal", krea: "Krea", openai: "OpenAI", google: "Google", elevenlabs: "ElevenLabs", local: "Local", unknown: "Unknown provider" };
@@ -35,11 +35,33 @@ function videoDurationSeconds(item) {
   return null;
 }
 
+function providerId(value) {
+  return typeof value === "string" && /^[a-z0-9_.-]{1,128}$/i.test(value) && safeLabel(value) === value ? value : "";
+}
+
+function normalizeBilling(item) {
+  const billing = item.billing ?? {};
+  const usage = item.usage?.request ?? item.usage;
+  const details = {
+    requestId: providerId(billing.requestId),
+    sessionId: providerId(billing.sessionId),
+    inputTokens: atlasTokenCount(billing.inputTokens ?? usage?.input_tokens ?? usage?.prompt_tokens),
+    outputTokens: atlasTokenCount(billing.outputTokens ?? usage?.output_tokens ?? usage?.completion_tokens),
+    outputCount: atlasTokenCount(billing.outputCount),
+    resolution: typeof billing.resolution === "string" && /^(?:auto|[0-9.]+[kp])$/i.test(billing.resolution) ? billing.resolution : "",
+    computeUnits: Number.isFinite(billing.computeUnits) && billing.computeUnits >= 0 ? billing.computeUnits : null,
+    attempts: atlasTokenCount(billing.attempts),
+    nextCheckAt: Number.isFinite(Date.parse(billing.nextCheckAt)) ? new Date(billing.nextCheckAt).toISOString() : ""
+  };
+  return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== "" && value !== null));
+}
+
 export function normalizeStatsRecord(item = {}) {
   const provider = canonicalProvider(item.provider);
   const fingerprint = String(item.keyIdentity?.fingerprint || "");
   const keyId = /^[a-f0-9]{64}$/.test(fingerprint) ? `${provider}:${fingerprint}` : "unknown";
   const amountUsd = recordedAmount(item.cost);
+  const billing = normalizeBilling(item);
   const createdAt = Number.isFinite(Date.parse(item.createdAt)) ? new Date(item.createdAt).toISOString() : "";
   const workflowId = safeLabel(item.project?.id || item.workflow?.id || "unknown");
   const atlasUsage = provider === "atlas" && item.mediaType === "text" ? atlasTextUsageRecords(item.atlasUsage ?? item.usage) : [];
@@ -54,6 +76,7 @@ export function normalizeStatsRecord(item = {}) {
     keyLabel: keyId === "unknown" ? "Unknown key (legacy / unattributed)" : `${providerLabels[provider]} key ${fingerprint.slice(0, 10)}`,
     status: safeLabel(item.status || "completed"), endpoint: safeLabel(item.endpoint),
     ...(atlasUsage.length ? { atlasUsage } : {}),
+    ...(Object.keys(billing).length ? { billing } : {}),
     cost: { amountUsd, currency: "USD", estimated: amountUsd === null ? null : item.cost?.estimated !== false,
       ...(typeof item.cost?.unit === "string" && Number.isFinite(item.cost?.units) && item.cost.units >= 0
         ? { unit: safeLabel(item.cost.unit), units: item.cost.units } : {}),

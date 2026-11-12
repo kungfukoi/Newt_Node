@@ -81,6 +81,11 @@ Atlas runs can be filled as historical estimates. Atlas Seedance 2.5 also uses s
 completed jobs to recover billing inputs for ledger-only runs. Selected Atlas video runs can use
 the original saved inputs with the same saved credential to request a current quote.
 The resulting estimates are labeled and written to Local Stats and recent History.
+Atlas Seedream 5.5 Layer Decomposition uses the account quote for its recorded
+provider output count, or the saved requested count for older retained runs. Retained Krea Nano Banana Pro and Seedream 5.0 Pro
+runs can use a current USD catalog entry when the exact billing settings are saved.
+For older Krea Nano Banana Pro runs, the original archived image can also recover
+the resolution tier when its dimensions exactly match a published native size.
 
 New Atlas Seedance 2.5 runs use the account's Calculate API when available, including
 draft previews, 1080p draft completions, and video edits. Offline estimates use the
@@ -106,6 +111,16 @@ Open **Details** on a run with a recorded ID and enter the verified USD charge
 from provider billing. This also works for ledger-only runs. A manual charge is
 labeled as such. Both actions preserve existing prices, including zero. They
 do not submit generation jobs. Global totals still come from provider queries.
+
+## Automatic post-run pricing
+
+New runs retain available provider request IDs, session IDs and measured billing
+usage in the durable ledger. Fal media requests with attributable billing IDs retry
+exact charge lookups, and Atlas Seedream layer runs retry a missing account quote
+using the recorded output count. Retries survive restarts, use the original saved
+credential and stop after a bounded number of checks. Stats distinguishes pending
+billing, usage-only records and unavailable dollar pricing. Existing provider
+charges are preserved and verified charges can supersede estimates.
 
 ## Further billing recovery design
 

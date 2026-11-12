@@ -13,18 +13,20 @@ import {
 } from "../src/atlasMedia.js";
 
 test("Atlas Seedream 5.5 layer decomposition uses the documented inputs and retains layer metadata", async () => {
-  let request;
+  let request, quoted;
   const media = createAtlasMedia({ client: { generate: async input => {
     request = input;
     return { requestId: "layers-job", job: { outputs: ["https://example.com/base.jpg", "https://example.com/sign.png"],
       layers: [{ z_index: 0 }, { z_index: 1, name: "Sign", bounding_box: { absolute: [0, 0, 32, 20] },
         description: "A painted sign", text_recognition: { text: "OPEN" } }] } };
-  } } });
+  } }, quoteInput: async (input, key) => { quoted = { input, key }; return { amountUsd: 0.15 }; } });
   const options = { num_images: 12, resolution: "1.5k", enable_text_recognition: true, output_format: "jpeg" };
   const result = await media.seedreamLayers({ image: Buffer.from("image"), prompt: "Separate the sign", options }, "test");
   assert.deepEqual(request.input, { model: "bytedance/seedream-v5.5/layer-decomposition", image: "data:image/png;base64,aW1hZ2U=",
     prompt: "Separate the sign", ...options });
   assert.equal(result.provider, "Atlas Cloud");
+  assert.deepEqual(quoted, { input: { model: request.input.model, resolution: "1.5k", num_images: 2 }, key: "test" });
+  assert.equal(result.cost.amountUsd, 0.15);
   assert.deepEqual(result.assets.map(asset => asset.label), ["Base image", "Sign"]);
   assert.deepEqual(result.assets[1].layer, { index: 1, bbox: { absolute: [0, 0, 32, 20] }, description: "A painted sign", textRecognition: { text: "OPEN" } });
   await media.seedreamLayers({ image: Buffer.from("image"), prompt: "", options }, "test");

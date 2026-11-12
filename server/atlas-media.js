@@ -4,8 +4,9 @@ import {
   estimateAtlasVideoCost
 } from "../src/atlasMedia.js";
 import { prepareAtlasSeedanceImageAsset } from "./atlas-video-input.js";
+import { providerKeyFingerprint } from "./seedance-job-provider.js";
 import { seedanceDraftCost } from "../src/seedanceDraft.js";
-import { estimateAtlasImageCost as catalogImageCost } from "../src/atlasPricing.js";
+import { atlasSeedream55LayersEndpoint, estimateAtlasImageCost as catalogImageCost } from "../src/atlasPricing.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, prepareVideoSource = null, quoteInput = async () => null }) {
   async function uploadSource(source, key, kind = "", model = "", onReferencePrepared) {
@@ -144,7 +145,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
   }
 
   async function seedreamLayers({ image, prompt, options }, key) {
-    const model = "bytedance/seedream-v5.5/layer-decomposition";
+    const model = atlasSeedream55LayersEndpoint;
     const result = await client.generate({ mediaType: "image", key, input: {
       model,
       image: `data:image/png;base64,${image.toString("base64")}`,
@@ -165,7 +166,11 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
         }
       };
     });
-    return { id: result.requestId, endpoint: model, provider: "Atlas Cloud", modelName: "Seedream 5.5 Layer Decomposition", assets };
+    const cost = assets.length > 0
+      ? await quoteInput({ model, resolution: options.resolution, num_images: assets.length }, key).catch(() => null)
+      : null;
+    return { id: result.requestId, endpoint: model, provider: "Atlas Cloud", modelName: "Seedream 5.5 Layer Decomposition", assets, cost,
+      keyIdentity: { fingerprint: providerKeyFingerprint(key) } };
   }
 
   return { image, video, prepareVideo, videoCost, seedreamLayers };

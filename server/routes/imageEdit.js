@@ -107,11 +107,12 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       let warning = items.length < generation.assets.length ? `Saved ${items.length} of ${generation.assets.length} images. Check Atlas Cloud request ${generation.id} for the remaining layers.` : "";
       try {
         await recordHistory({ id: generation.id, createdAt: new Date().toISOString(), mediaType: "image", provider: generation.provider,
-          modelName: generation.modelName, endpoint: generation.endpoint, mode: "Image Edit: Layer separation", prompt,
+          modelName: generation.modelName, endpoint: generation.endpoint, mode: "Image Edit: Layer separation", prompt, keyIdentity: generation.keyIdentity,
+          billing: { requestId: generation.id, outputCount: generation.assets.length, resolution: options.resolution },
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
-          settings: { ...options, sourceUrl, layers: items.map(item => ({ label: item.label, ...item.layer })) },
-          localImage: items[0]?.url, localImages: items.map(item => item.url), cost: null });
+          settings: { ...options, outputImageCount: generation.assets.length, sourceUrl, layers: items.map(item => ({ label: item.label, ...item.layer })) },
+          localImage: items[0]?.url, localImages: items.map(item => item.url), cost: generation.cost ?? null });
       } catch { warning += " The layer run could not be added to History."; }
       if (!items.length) throw Object.assign(new Error(warning || "Seedream returned no editable layers. The stack was left as-is."), { status: 502 });
       return { items, warning };
@@ -164,7 +165,7 @@ export function registerImageEditRoutes(app, { limiter, getProvider, readSource,
       let warning = "";
       try {
         await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: generationProvider, modelName: model,
-          endpoint: generation.endpoint, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
+          endpoint: generation.endpoint, requestId: generation.requestId, keyIdentity: generation.keyIdentity, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
           settings: { quality: imageEditUsesSelectionGuide(model) ? undefined : quality, variant, ...(imageEditUsesSelectionGuide(model) ? { resolution: req.body.resolution || "2K", selectionGuide: Boolean(prepared.mask) } : {}), ...(isNanoBanana21Model(model) ? { thinkingLevel: "high", enableWebSearch: false } : {}), ...(isIdeogram45Model(model) ? { editPrecision: "high" } : {}), ...options, sourceUrl, boxes: prepared.boxes, boxStrategy: prepared.boxStrategy, maskedEdit: Boolean(prepared.mask), blank: req.body.blank === "true", imageSize: `${width}x${height}` },

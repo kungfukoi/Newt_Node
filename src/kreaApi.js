@@ -223,7 +223,10 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
       : `${modelName} Krea API fixed-price estimate`,
     pricingSource: "krea-api-docs-2026-07-30"
   };
-  return applyPricingQuote(cost, "krea", kreaEndpointForModel("image", modelName), modelName === "Seedream 5.0 Pro" ? {resolutionTier: normalizedResolution, referenceImageCount: referenceCount} : {resolution: normalizedResolution});
+  const dimensions = modelName === "Seedream 5.0 Pro"
+    ? { resolutionTier: normalizedResolution.toLowerCase(), referenceImageCount: Math.min(referenceCount, 10) }
+    : { resolution: normalizedResolution };
+  return applyPricingQuote(cost, "krea", kreaEndpointForModel("image", modelName), dimensions);
 }
 
 export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) {

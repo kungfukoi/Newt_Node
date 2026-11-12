@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { openFixture } from "./helpers.mjs";
 const fingerprint = "a".repeat(64);
 const record = (id, day, amountUsd, extra = {}) => ({ id, createdAt: `2026-10-${String(day).padStart(2, "0")}T10:00:00Z`, provider: "Atlas Cloud", modelName: "Seedance 2.5", mediaType: "video", generationRunId: `job-${id}`, project: { id: "workflow-a", name: "Summer film", fileName: "Summer.json" }, keyIdentity: { fingerprint }, cost: { amountUsd, currency: "USD", estimated: true, pricingBasis: "Saved provider-specific estimate" }, ...extra });
-const history = [record("a", 8, 3), record("b", 7, 2, { provider: "fal.ai", modelName: "Nano Banana 2", mediaType: "image", cost: { amountUsd: 2, estimated: false } }), record("c", 3, null), record("d", 8, .000005, { project: { id: "workflow-b", name: "Summer film", fileName: "Other.json" }, provider: "Krea", modelName: "MiniMax H3" })];
+const history = [record("a", 8, 3), record("b", 7, 2, { provider: "fal.ai", modelName: "Nano Banana 2", mediaType: "image", cost: { amountUsd: 2, estimated: false } }), record("c", 3, null, { billing: { requestId: "provider-job-c", attempts: 0, nextCheckAt: "2026-10-08T12:00:15Z" } }), record("d", 8, .000005, { project: { id: "workflow-b", name: "Summer film", fileName: "Other.json" }, provider: "Krea", modelName: "MiniMax H3" })];
 const snapshot = { history, fetchedAt: "2026-10-08T12:00:00Z", coverage: { trackingStartedAt: "2026-10-08T00:00:00Z", note: "This installation only; earlier evicted history and other machines are excluded." }, capabilities: [{ provider: "atlas", note: "Account billing requires billing-read permission", docs: "https://www.atlascloud.ai/docs/public-api" }, { provider: "krea", note: "No public API balance endpoint", docs: "https://www.krea.ai/docs/developers/api-keys-and-billing" }] };
 async function openStats(page) {
   await page.clock.install({ time: new Date("2026-10-08T12:00:00Z") });
@@ -20,6 +20,7 @@ test("local ledger combines filters, resets, dates, drill-down and repeated navi
   const { errors, requests } = await openStats(page);
   const ledger = page.locator(".analytics-ledger");
   await expect(ledger.locator("tbody tr")).toHaveCount(4);
+  await expect(ledger.getByText("Pending billing", { exact: true })).toBeVisible();
   await page.getByLabel("Date range", { exact: true }).selectOption("all");
   await expect(ledger.locator("tbody tr")).toHaveCount(4);
   await page.getByLabel("Provider", { exact: true }).selectOption("krea");

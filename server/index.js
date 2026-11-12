@@ -50,7 +50,8 @@ import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { createDirectorDialoguePreparation } from "./director-dialogue.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { completeGenerationCost, createHistoryPricing } from "./history-pricing.js";
-import { estimateAtlasSeedance25Run } from "../src/atlasPricing.js";
+import { createPostRunPricing, preparePostRunBilling } from "./post-run-pricing.js";
+import { atlasSeedream55LayersEndpoint, estimateAtlasSeedance25Run } from "../src/atlasPricing.js";
 import { statsCredentialIdentities } from "./stats-credentials.js";
 import { recordedCostAmount } from "../src/pricingCatalog.js";
 import { ProviderPricing } from "./provider-pricing.js";
@@ -987,6 +988,13 @@ registerCoreRoutes(app, {
 registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing({
   store: historyStore, ledger: statsLedger, snapshot: () => pricingRefresh.snapshot(),
   atlasJobsDirectory: path.join(dataDir, "remote-video-jobs.json.d"),
+  readArchivedImageDimensions: async (item) => {
+    const outputs = await projectOutputStore.findRun(item.project.id, item.generationRunId || item.id);
+    if (outputs.length !== 1 || outputs[0].type !== "image" || !isLocalAssetUrl(outputs[0].url)) return null;
+    const { filePath } = await resolveLocalAssetPathFromUrl(outputs[0].url);
+    const { default: sharp } = await import("sharp");
+    return sharp(filePath).metadata();
+  },
   quoteAtlas: async (_item, spec) => {
     if (!spec?.credentialFingerprint) return null;
     const { credentials } = await readRuntimeSettingsStore();
@@ -996,6 +1004,25 @@ registerPricingRoutes(app, pricingRefresh, providerPricing, createHistoryPricing
     return key ? providerPricing.atlasInput(spec.input, key) : null;
   }
 }));
+const checkPostRunPricing = createPostRunPricing({
+  ledger: statsLedger,
+  store: historyStore,
+  lookup: async (row) => {
+    const { credentials } = await readRuntimeSettingsStore();
+    const configuredKey = statsRuntimeKeys()[row.provider];
+    const key = [configuredKey, ...(credentials[row.provider] ?? []).map(entry => entry.key)]
+      .find(value => value && providerKeyFingerprint(value) === row.keyIdentity?.fingerprint);
+    if (!key) return null;
+    if (row.provider === "fal") return providerPricing.falCharge(row.billing.requestId, row.endpoint, key);
+    if (row.provider === "atlas" && row.endpoint === atlasSeedream55LayersEndpoint) {
+      return providerPricing.atlasInput({ model: row.endpoint, resolution: row.billing.resolution, num_images: row.billing.outputCount }, key);
+    }
+    return null;
+  },
+  onError: () => console.warn("A provider charge was saved to Local Stats; recent History could not be updated.")
+});
+setInterval(() => checkPostRunPricing().catch(() => console.warn("Post-run billing check unavailable; saved records were preserved.")), 15_000).unref();
+
 registerFeatureUsageRoutes(app, featureUsageStore);
 registerStatsRoutes(app, { ledger: statsLedger, providers: statsProviders, readHistory, refreshKeys: refreshRuntimeConfigFromEnvFile,
   readKeyIdentities: async () => {
@@ -1433,6 +1460,7 @@ function buildHealthPayload() {
       skillDirector: true,
       storyboardQc: true,
       providerPricing: true,
+      postRunPricing: true,
       statsPriceReconciliation: true,
       spendAnalytics: true,
       storyboardSequenceReview: true,
@@ -4022,6 +4050,8 @@ app.post("/api/node/process-text", async (req, res) => {
       modelName: result.model,
       endpoint: result.endpoint,
       mode: mode === "agent" ? "Text agent" : "Text processing",
+      keyIdentity: result.keyIdentity,
+      billing: { requestId: result.requestId, sessionId: result.sessionId },
       prompt: text || textInputs.map((item) => item.text).join("\n\n"),
       submittedPrompt: result.submittedPrompt || text,
       project: projectFromBody(req.body),
@@ -4154,6 +4184,8 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       modelName: result.model,
       endpoint: result.endpoint,
       mode: "Director",
+      keyIdentity: result.keyIdentity,
+      billing: { requestId: result.requestId, sessionId: result.sessionId },
       prompt: sceneOverview || sceneName,
       submittedPrompt: result.submittedPrompt || sceneOverview,
       project: projectFromBody(req.body),
@@ -5114,7 +5146,7 @@ async function runKreaImageModel(
     : `${selectedModel.displayName} generation`;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "Krea",
@@ -5575,7 +5607,7 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
   const primaryMask = downloadedMasks[0];
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -5757,7 +5789,7 @@ async function runDwposeUtilityImage(req, res, { imageUrl, selectedModel }) {
   const text = `DWPose ${drawMode.replace(/-/g, " ")} map.`;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -5832,7 +5864,7 @@ async function runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel 
   const text = "Depth Anything v2 map.";
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -5929,7 +5961,7 @@ async function runTopazImageUpscaler(req, res, { imageUrl, selectedModel }) {
   const text = topazImageUpscalerPromptLabel(input);
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -6018,7 +6050,7 @@ async function runKreaEnhanceUtility(req, res, selectedModel, mediaType) {
   const settings = { ...input, runtimeProvider: "krea", sourceWidth: metadata.width, sourceHeight: metadata.height };
   delete settings.image_url; delete settings.video_url;
   const enriched = mediaType === "video" ? enrichVideoMetadata(remote, await probeVideoFile(output.filePath)) : { ...remote, width: output.width, height: output.height };
-  await appendHistory({ id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType, provider: "Krea", modelName: selectedModel.displayName, endpoint, mode: selectedModel.displayName,
+  await appendHistory({ id: result.requestId || randomUUID(), requestId: result.requestId, createdAt: new Date().toISOString(), mediaType, provider: "Krea", modelName: selectedModel.displayName, endpoint, mode: selectedModel.displayName,
     prompt: req.body.prompt || "", submittedPrompt: input.prompt || "", project: projectFromBody(req.body), node: nodeFromBody(req.body), settings, cost,
     [mediaType === "image" ? "remoteImage" : "remoteVideo"]: enriched, [mediaType === "image" ? "localImage" : "localVideo"]: output.publicPath, outputFileName: output.fileName, outputBytes: output.bytes });
   return res.json({ requestId: result.requestId, endpoint, modelName: selectedModel.displayName, provider: "Krea", cost, [mediaType]: { ...enriched, label: selectedModel.displayName, localUrl: output.publicPath, fileName: output.fileName } });
@@ -6148,7 +6180,7 @@ async function runPatinaUtilityImage(req, res, { imageUrl, selectedModel }) {
   const outputBytes = outputs.reduce((sum, item) => sum + item.output.bytes, 0);
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -6253,7 +6285,7 @@ async function runBirefnetUtilityImage(req, res, { imageUrl, selectedModel }) {
   const outputBytes = images.reduce((sum, item) => sum + item.output.bytes, 0);
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
@@ -6649,7 +6681,7 @@ app.post("/api/node/qwen-camera-edit", async (req, res) => {
     const cost = estimateQwenCameraEditCost({ endpoint, image: remoteImage });
 
     await appendHistory({
-      id: result.requestId || randomUUID(),
+      id: result.requestId || randomUUID(), requestId: result.requestId,
       createdAt: new Date().toISOString(),
       mediaType: "image",
       provider: "fal.ai",
@@ -7484,7 +7516,7 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   }
   const provider = spec.provider === "fal" ? "fal.ai" : spec.provider === "atlas" ? "Atlas Cloud" : "Krea";
   await appendHistory({
-    id: job.requestId || job.runId || randomUUID(), createdAt: job.createdAt || new Date().toISOString(),
+    id: job.requestId || job.runId || randomUUID(), requestId: job.requestId, createdAt: job.createdAt || new Date().toISOString(),
     mediaType: "video", provider, modelName, endpoint, mode: outpaintFinished ? "Video outpainting" : routeKindLabel(routeKind),
     prompt: spec.prompt, submittedPrompt: spec.submittedPrompt,
     project: projectFromBody(body), node: nodeFromBody(body), settings: { ...settings, seed: resultSeed, ...(draftMetadata ? { draft: draftMetadata } : {}), ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}) },
@@ -8047,7 +8079,7 @@ async function runMinimaxH3Video(req, res, { prompt, selectedVideoModel, runtime
     referenceImageCount: routeKind === "reference-to-video" ? referenceImageUrls.length : 0
   });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -8143,7 +8175,7 @@ async function runMinimaxH3AtlasVideo(req, res, {
     output.bytes = await replaceVideoAudioTrack(output.filePath, audio.filePath);
   }
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "Atlas Cloud",
@@ -8242,7 +8274,7 @@ async function runMinimaxH3KreaVideo(req, res, {
   }
   const cost = estimateKreaMiniMaxH3Cost({ durationSeconds: duration, referenceImageCount: referenceImageUrls.length });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "Krea",
@@ -8380,7 +8412,7 @@ async function runMinimaxH3LocalVideo(req, res, {
     file_name: output.fileName
   };
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "local-sglang",
@@ -8623,7 +8655,7 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
   const output = await downloadVideo(req, remoteVideo.url, is4k ? `kling-o3-4k-${routeKind}` : `kling-o3-${routeKind}`);
   const cost = estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -8696,7 +8728,7 @@ async function runKling4Video(req, res) {
   const output = await downloadVideo(req, remoteVideo.url, `kling-4-${provider}`);
   const providerName = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
   await appendHistory({
-    id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "video",
+    id: result.requestId || randomUUID(), requestId: result.requestId, createdAt: new Date().toISOString(), mediaType: "video",
     provider: providerName, modelName: videoModelNames.kling4, endpoint, mode: "image-to-video",
     prompt: req.body.prompt || "", submittedPrompt: input.prompt || "", project: projectFromBody(req.body), node: nodeFromBody(req.body),
     settings: kling4HistorySettings(req.body, provider, input),
@@ -8728,7 +8760,7 @@ async function runFlux3MaxVideo(req, res) {
   const actualEndpoint = krea ? kreaEndpointForModel("video", videoModelNames.flux3Max) : endpoint;
   const cost = { ...flux3MaxCost(actualEndpoint, input.duration), ...(krea ? { pricingSource: "krea-openapi-2026-10-21", pricingBasis: "Krea FLUX 3 Max; no verified local price estimate" } : {}) };
   await appendHistory({
-    id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "video",
+    id: result.requestId || randomUUID(), requestId: result.requestId, createdAt: new Date().toISOString(), mediaType: "video",
     provider: krea ? "Krea" : "fal.ai", modelName: videoModelNames.flux3Max, endpoint: actualEndpoint,
     mode: input.keyframes ? "keyframes-to-video" : "text-to-video", prompt: input.prompt, submittedPrompt: input.prompt,
     project: projectFromBody(req.body), node: nodeFromBody(req.body),
@@ -8788,7 +8820,7 @@ async function runKreaKlingO3Video(
   const cost = estimateKreaKlingCost({ durationSeconds, generateAudio, mode: is4k ? "4k" : "pro" });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "Krea",
@@ -9122,7 +9154,7 @@ app.post("/api/node/generate-3d", async (req, res) => {
       : estimatedCost;
 
     await appendHistory({
-      id: result.requestId || randomUUID(),
+      id: result.requestId || randomUUID(), requestId: result.requestId,
       createdAt: new Date().toISOString(),
       mediaType: "model3d",
       provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
@@ -9223,7 +9255,7 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
   const cost = estimateSam3VideoCost({ endpoint, frames: videoFrameCount(remoteVideo, result?.data) });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9292,7 +9324,7 @@ async function runAuroraVideo(req, res, { prompt, referenceImageUrls, referenceA
   const output = await downloadVideo(req, remoteVideo.url, "creatify-aurora");
   const cost = estimateAuroraCost({ endpoint, resolution, duration: remoteVideo.duration });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9358,7 +9390,7 @@ async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrl
   const output = await downloadVideo(req, remoteVideo.url, "happy-horse-reference-to-video");
   const cost = estimateHappyHorseCost({ endpoint, resolution, duration });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9434,7 +9466,7 @@ async function runLumaRay2Video(req, res, { prompt, startFrameUrls, endFrameUrls
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateLumaRay2Cost({ endpoint, resolution, duration, routeKind });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9521,7 +9553,7 @@ async function runWanFunControlVideo(req, res, { prompt, referenceImageUrls, ref
     fps: input.fps
   });
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9609,7 +9641,7 @@ async function runWan27ReferenceVideo(req, res, { prompt, referenceImageUrls, re
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9701,7 +9733,7 @@ async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoU
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -9814,7 +9846,7 @@ async function runWan22A14bUtility(req, res, { prompt, referenceImageUrls, selec
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10006,7 +10038,7 @@ async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUr
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10156,7 +10188,7 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
   const outpaintDetails = outpaintContext ? { prepared: outpaintContext, rawVideoUrl: rawOutput.publicPath, nativeWidth: nativeVideo.width, nativeHeight: nativeVideo.height, restoredSource: Boolean(outpaintFinish) && outpaintContext.plan.settings.restoreSource, matching: outpaintFinish?.matching, qc: outpaintFinish?.qc, outputFormat: outpaintFinish?.outputFormat || "8-bit SDR H.264", warning } : null;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10299,7 +10331,7 @@ async function runWan22VaceControlUtility(req, res, { prompt, referenceImageUrls
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10438,7 +10470,7 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
   const outputBytes = videos.reduce((sum, item) => sum + item.output.bytes, 0);
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10545,7 +10577,7 @@ async function runDwposeUtilityVideo(req, res, { referenceVideoUrls, selectedVid
   const text = `DWPose ${drawMode.replace(/-/g, " ")} video pose map.`;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10637,7 +10669,7 @@ async function runDepthAnythingUtilityVideo(req, res, { referenceVideoUrls, sele
     .join(", ");
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10711,7 +10743,7 @@ async function runRifeVideoInterpolation(req, res, { referenceVideoUrls, selecte
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10789,7 +10821,7 @@ async function runBytedanceVideoUpscaler(req, res, { referenceVideoUrls, selecte
   });
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -10923,7 +10955,7 @@ async function runFluxVideoUpscale(req, res, { prompt, referenceVideoUrls, selec
   const text = `Flux Video Upscale, ${upscaleFactor}x ${modeLabel} mode.`;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -11074,7 +11106,7 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
       };
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
@@ -11187,7 +11219,7 @@ async function runLtxVfxUtility(req, res, referenceVideoUrls, model) {
   const deliveryWarning = warnings.length ? `${warnings.join(" ")} Check Fal request ${result.requestId || "history"} before rerunning.` : "";
   const text = [model.displayName, deliveryWarning].filter(Boolean).join(". ");
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -11276,7 +11308,7 @@ async function runTopazSdrToHdr(req, res, { referenceVideoUrls, selectedVideoMod
   const text = `Topaz SDR to HDR, ${outputFormat === "prores" ? "ProRes 422 HQ" : "MP4 H265 HDR10"}.`;
 
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
@@ -16325,7 +16357,7 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
     if (billing && billingKey && billingKey === process.env.FAL_KEY) {
       const id = result?.requestId || result?.request_id || requestId;
       const charge = await providerPricing.falCharge(id, endpoint, billingKey);
-      if(charge) billing.push({id,endpoint,charge});
+      if (id) billing.push({ id, endpoint, charge, fingerprint: providerKeyFingerprint(billingKey) });
     }
     return result;
   } catch (error) {
@@ -16472,12 +16504,18 @@ async function appendHistory(item, { deduplicate = false } = {}) {
   if (item.project?.id && item.project.id === statsContext?.projectId && !item.project.fileName && statsContext.fileName) {
     item = { ...item, project: { ...item.project, fileName: statsContext.fileName } };
   }
-  if(item.provider === "fal.ai") {
-    const matches = (generationBillingScope.getStore() || []).filter(row=>!row.used && row.endpoint===item.endpoint);
-    const settled = matches.find(row=>row.id===item.id) || (matches.length===1 ? matches[0] : null);
-    if(settled) { item = {...item,cost:{...item.cost,...settled.charge}}; settled.used=true; }
+  if (statsProvider === "fal") {
+    const matches = (generationBillingScope.getStore() || []).filter(row => !row.used && row.endpoint === item.endpoint);
+    const explicitRequestId = item.billing?.requestId || item.requestId;
+    const matched = matches.find(row => row.id === (explicitRequestId || item.id))
+      || (!explicitRequestId && matches.length === 1 ? matches[0] : null);
+    if (matched && (!item.keyIdentity || item.keyIdentity.fingerprint === matched.fingerprint)) {
+      matched.used = true;
+      item = { ...item, keyIdentity: { fingerprint: matched.fingerprint }, billing: { ...item.billing, requestId: matched.id },
+        cost: matched.charge && item.provider === "fal.ai" ? { ...item.cost, ...matched.charge } : item.cost };
+    }
   }
-  item = { ...item, cost: completeGenerationCost(item) };
+  item = preparePostRunBilling({ ...item, cost: completeGenerationCost(item) });
   const history = await historyStore.append(item, { deduplicate });
   if (item?.generationRunId) {
     updateGenerationProgress(item.generationRunId, {
@@ -20440,6 +20478,8 @@ async function recordStoryboardLlmUsage({ result, cost }, body, mode) {
     modelName: result.model,
     provider: result.provider,
     endpoint: result.endpoint,
+    keyIdentity: result.keyIdentity,
+    billing: { requestId: result.requestId, sessionId: result.sessionId },
     mode,
     cost,
     usage: result.usage || result.usages,
@@ -21965,7 +22005,7 @@ async function runAtlasImageModel(req, res, {
     atlasImage.remoteImage.content_type
   );
   await appendHistory({
-    id: atlasImage.requestId || randomUUID(),
+    id: atlasImage.requestId || randomUUID(), requestId: atlasImage.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "Atlas Cloud",

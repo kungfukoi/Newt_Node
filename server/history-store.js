@@ -74,7 +74,9 @@ export function createHistoryStore({ filePath, limit = 500, onWrite = async () =
       let changed = false;
       const next = items.map(item => {
         const cost = updates.get(keyFor(item));
-        if (recordedCostAmount(item.cost) !== null || recordedCostAmount(cost) === null) return item;
+        const replacesEstimate = item.cost?.estimated !== false && cost?.estimated === false
+          && cost?.pricingSource !== "manual-provider-billing";
+        if (recordedCostAmount(cost) === null || (recordedCostAmount(item.cost) !== null && !replacesEstimate)) return item;
         changed = true;
         return { ...item, cost };
       });

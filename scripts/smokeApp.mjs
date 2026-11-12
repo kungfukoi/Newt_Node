@@ -42,6 +42,7 @@ const requiredHealthRoutes = [
   "prepareCharacterDialogue",
   "storyboardSequenceReview",
   "providerPricing",
+  "postRunPricing",
   "spendAnalytics",
   "objectSelectionCache",
   "remoteVideoJobs",

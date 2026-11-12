@@ -68,6 +68,10 @@ export function createProjectOutputStore({ directory }) {
     return enqueue(async () => { await bootstrap(seed); return operation(); });
   }
   return {
+    findRun: (projectId, runId) => enqueue(async () => {
+      const records = await load(keyFor({ id: projectId }));
+      return records.get(runId)?.items ?? [];
+    }),
     all: (projectId, history = []) => withBootstrap(history, async () => {
       const records = await load(keyFor({ id: projectId }));
       return [...new Map([...records.values()].flatMap((record) => record.items).map((item) => [item.url, item])).values()].sort(order);

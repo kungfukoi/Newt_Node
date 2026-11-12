@@ -1,5 +1,7 @@
 // Krea OpenAPI /agent/send-message and /agent/wait-for-session, checked 2026-10-21.
 // Sessions are billable agent turns, not OpenAI-compatible completions.
+import { createHash } from "node:crypto";
+
 const endpoint = "/agent/send-message";
 export function buildKreaLlmInput({ prompt, systemPrompt = "", model = "gpt-5.6-terra", reasoningEffort = "low", attachments = [], responseMimeType = "text/plain" }) {
   const pinnedModel = `openai/${String(model).replace(/^openai\//, "")}`;
@@ -36,7 +38,8 @@ export async function requestKreaLlm(options, { apiKey, fetchImpl = fetch, onPro
     if (!result.finished && !["completed", "failed", "cancelled"].includes(result.status)) continue;
     if (result.status !== "completed") throw Object.assign(new Error(result.error || `Krea LLM session ${result.status}.`), { status: 502 });
     if (!String(result.text || "").trim()) throw Object.assign(new Error("Krea completed the session without text. Check Krea history before rerunning."), { status: 502 });
-    return { text: result.text.trim(), provider: "Krea", model: body.model, endpoint, usage: null, usages: [], requestId: session.runId, sessionId: session.sessionId, sessionUrl: session.url };
+    return { text: result.text.trim(), provider: "Krea", model: body.model, endpoint, usage: null, usages: [], requestId: session.runId, sessionId: session.sessionId, sessionUrl: session.url,
+      keyIdentity: { fingerprint: createHash("sha256").update(apiKey).digest("hex") } };
   }
   throw Object.assign(new Error("Krea text session timed out. Check Krea history before rerunning."), { status: 504 });
 }

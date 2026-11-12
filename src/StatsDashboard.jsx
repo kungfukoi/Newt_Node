@@ -176,7 +176,11 @@ function RunLedger({ rows, onChargeRecorded }) {
       const runId = row.generationRunId || row.id;
       const atlasRequestIds = row.atlasUsage?.map(usage => usage.atlasRequestId || usage.atlasResponseId).filter(Boolean);
       const unpriced = row.cost.amountUsd === null;
-      const chargeLabel = unpriced ? "Billing details missing" : row.cost.estimated ? "Estimate / unverified"
+      const billing = row.billing;
+      const pending = Boolean(billing?.nextCheckAt) && (unpriced || row.cost.estimated);
+      const hasUsage = billing?.inputTokens != null || billing?.outputTokens != null || billing?.computeUnits != null;
+      const missingLabel = pending ? "Pending billing" : hasUsage ? "Usage only" : "Billing unavailable";
+      const chargeLabel = unpriced ? (pending ? "Waiting for a provider price" : billing?.attempts > 0 ? "No price returned after automatic checks" : row.cost.pricingBasis || "No billing data recorded") : row.cost.estimated ? (pending ? "Estimate · checking provider billing" : "Estimate / unverified")
         : row.cost.pricingSource === "manual-provider-billing" ? "Manual charge" : row.cost.pricingSource === "local" ? "Local" : "Provider reported";
       return <tr key={`${row.provider}:${runId}:${index}`}>
         <td><details><summary><strong>{row.modelName}</strong><small>{row.mediaType} · {row.status} · Details</small></summary>
@@ -184,6 +188,14 @@ function RunLedger({ rows, onChargeRecorded }) {
             <dt>Run ID</dt><dd>{row.generationRunId || "Not recorded"}</dd>
             <dt>Request / record ID</dt><dd>{row.id || "Not recorded"}</dd>
             {atlasRequestIds?.length > 0 && <><dt>Atlas request IDs</dt><dd>{atlasRequestIds.join(", ")}</dd></>}
+            {billing?.requestId && <><dt>Provider request ID</dt><dd>{billing.requestId}</dd></>}
+            {billing?.sessionId && <><dt>Provider session ID</dt><dd>{billing.sessionId}</dd></>}
+            {billing?.inputTokens != null && <><dt>Input tokens</dt><dd>{billing.inputTokens}</dd></>}
+            {billing?.outputTokens != null && <><dt>Output tokens</dt><dd>{billing.outputTokens}</dd></>}
+            {billing?.computeUnits != null && <><dt>Compute units</dt><dd>{billing.computeUnits}</dd></>}
+            {billing?.outputCount != null && <><dt>Provider outputs</dt><dd>{billing.outputCount}</dd></>}
+            {billing?.resolution && <><dt>Billing resolution</dt><dd>{billing.resolution}</dd></>}
+            {pending && <><dt>Next billing check</dt><dd>{readableDate(billing.nextCheckAt)}</dd></>}
             <dt>Endpoint</dt><dd>{row.endpoint || "Not recorded"}</dd>
             <dt>Workflow ID</dt><dd>{row.project.id}</dd>
             <dt>Pricing basis</dt><dd>{row.cost.pricingBasis || "No verified basis recorded"}</dd>
@@ -197,7 +209,7 @@ function RunLedger({ rows, onChargeRecorded }) {
         <td>{row.project.name}<small>{row.project.fileName || "JSON filename not recorded"}</small></td>
         <td>{providerLabels[row.provider]}<small>{row.keyLabel}</small></td>
         <td><time dateTime={row.createdAt}>{readableDate(row.createdAt)}</time></td>
-        <td><strong>{unpriced ? "Unpriced" : formatMoney(row.cost.amountUsd)}</strong><small>{chargeLabel}</small></td>
+        <td><strong>{unpriced ? missingLabel : formatMoney(row.cost.amountUsd)}</strong><small>{chargeLabel}</small></td>
       </tr>;
     })}</tbody>
   </table></div>;
