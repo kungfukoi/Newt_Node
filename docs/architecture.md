@@ -526,7 +526,7 @@ The layer stack resize grip sets the panel height independently of the number of
 
 Original, Compare, and Edit stay in the canvas footer for drafts, generated edits, and layer stacks. The comparison source is the image that opened the editor. The mouse wheel zooms around the pointer over the canvas. Shift-wheel pans the canvas, and the inspector retains its own wheel scrolling.
 
-`ImageEditStudio.jsx` owns the active-tool sections, shared edit/output controls and fixed generation footer. `ImageEditBoxes.jsx` owns compact box identity/actions and progressive-disclosure transform/blending/help/export controls. `imageEditStudio.css` supplies a consistent inspector rhythm and independent scrolling at desktop and narrow sizes. Native details/summary controls participate in the dialog focus trap; collapsed controls stay out of keyboard navigation.
+`ImageEditStudio.jsx` owns the active-tool sections, shared edit/output controls and fixed generation footer. Editor notices such as restored selections and object scan results appear below the window header. `ImageEditBoxes.jsx` owns compact box identity/actions and progressive-disclosure transform/blending/help/export controls. `imageEditStudio.css` supplies bold inspector headings and independent scrolling at desktop and narrow sizes. Native details/summary controls participate in the dialog focus trap; collapsed controls stay out of keyboard navigation.
 
 ## Video outpainting prompt guidance
 

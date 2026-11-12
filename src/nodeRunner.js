@@ -1,3 +1,4 @@
+import { editCompareEffectId } from "./editEffects.js";
 import { appendResultItems } from "./mediaResults.js";
 import { createWorkScheduler } from "./workScheduler.js";
 
@@ -62,6 +63,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
+  if (node.type === "edit" && node.data?.editEffect === editCompareEffectId) return false;
   return ["text", "textAgent", "skillDirector", "imageModel", "explore", "videoModel", "audioModel", "utility", "edit", "keyer", "assembly", "model3d", "storyboard", "autoAspect", "coverage", "output"].includes(node.type);
 }
 

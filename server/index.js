@@ -94,7 +94,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "@ffprobe-installer/ffprobe";
-import { defaultEditEffectSettings, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
+import { defaultEditEffectSettings, editCompareEffectId, findEditEffect, normalizeEditSourceType } from "../src/editEffects.js";
 import { apiErrorMessage } from "../src/apiErrors.js";
 import { buildTextAgentPrompt, normalizeTextAgentMessages, textAgentInstructions } from "../src/textAgent.js";
 import {
@@ -15102,7 +15102,7 @@ function transitionBuilderMaskSourceFilter({ width, height, fps, duration, maskS
 function editMediaRequestFromBody(body = {}) {
   const requestedEffectId = String(body.effectId || "").trim();
   const effect = findEditEffect(requestedEffectId);
-  if (!requestedEffectId || effect.id !== requestedEffectId) {
+  if (!requestedEffectId || effect.id !== requestedEffectId || effect.id === editCompareEffectId) {
     return {
       status: 400,
       error: "Unsupported Edit effect."

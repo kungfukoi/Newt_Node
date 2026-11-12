@@ -1,3 +1,5 @@
+export const editCompareEffectId = "compare";
+
 export const editEffectGroups = [
   { id: "transform", label: "Transform" },
   { id: "time", label: "Time" },
@@ -376,6 +378,14 @@ export const editEffectDefinitions = [
       { id: "low", label: "Low", type: "range", min: 0, max: 1, step: 0.01, defaultValue: 0.1 },
       { id: "high", label: "High", type: "range", min: 0, max: 1, step: 0.01, defaultValue: 0.4 }
     ]
+  },
+  {
+    id: editCompareEffectId,
+    groupId: "effects",
+    label: "Compare",
+    mediaTypes: ["image", "video"],
+    definition: "Compare two connected images or videos with a movable divider.",
+    controls: []
   }
 ];
 

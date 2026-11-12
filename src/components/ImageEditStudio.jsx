@@ -20,6 +20,7 @@ import { imageEditModelOptions, normalizeImageEditModel } from "../imageEdit.js"
 import { saveImageEditorModel } from "../imageEditorPreference.js";
 import { isIdeogram45Model, ideogram45QualityOptions } from "../ideogram45.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
+import { MediaCompareDivider } from "./MediaCompareDivider.jsx";
 import "./imageEditStudio.css";
 
 const tools = [["pen", Pencil, "Draw"], ["arrow", ArrowUpRight, "Arrow"], ["ellipse", Circle, "Circle"], ["rectangle", Square, "Rectangle"], ["text", Type, "Text note"], ["eraser", Eraser, "Erase marks"], ["hand", Hand, "Pan"]];
@@ -28,23 +29,6 @@ const emptyHistory = { past: [], marks: [], future: [] };
 
 function IconButton({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" title={label} aria-label={label} aria-pressed={active} className={`ies-icon ${active ? "active" : ""}`} {...props}><Icon size={18} /></button>;
-}
-
-function CompareHandle({ split, setSplit }) {
-  const update = event => {
-    setSplit(imageEditPoint(event.clientX, event.clientY, event.currentTarget.parentElement.getBoundingClientRect()).x * 100);
-  };
-  const release = event => {
-    event.stopPropagation();
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  return <div className="ies-split-line ies-compare-handle" role="slider" tabIndex={0} aria-label="Compare divider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(split)} style={{ left: `${split}%` }}
-    onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); update(event); }}
-    onPointerMove={event => { event.stopPropagation(); if (event.currentTarget.hasPointerCapture(event.pointerId)) update(event); }}
-    onPointerUp={release} onPointerCancel={release} onLostPointerCapture={event => event.stopPropagation()}
-    onKeyDown={event => { event.stopPropagation(); if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); setSplit(value => event.key === "Home" ? 0 : event.key === "End" ? 100 : Math.max(0, Math.min(100, value + (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)))); } }}>
-    <span className="ies-compare-grip" aria-hidden="true">↔</span>
-  </div>;
 }
 
 export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvailable, atlasAvailable, provider: defaultProvider = falAvailable ? "fal" : "", model: selectedModel, canApply, onAccept, onClose, showApiCosts = false }) {
@@ -963,7 +947,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     <div className="ies-original-preview" style={{ clipPath: view === "split" ? `inset(0 ${100 - split}% 0 0)` : undefined }}>
       <img src={item.url} alt="Original comparison image" draggable={false} />
     </div>
-    {view === "split" && <CompareHandle split={split} setSplit={setSplit} />}
+    {view === "split" && <MediaCompareDivider split={split} setSplit={setSplit} />}
   </>;
   const imageSurface = <div ref={surfaceRef} className={`ies-surface ${tool === "hand" || previewOnly ? "panning" : ""}${showAlpha && !layerTarget ? " alpha-preview" : ""}${layerMode || showComposition ? " ies-layer-source" : ""}`} style={layerTarget ? undefined : canvasStyle} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerLeave={() => { setCursor(null); setHoverObject(null); }} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp}>
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false}
@@ -991,6 +975,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         <IconButton icon={X} label="Discard edits and close image editor" onClick={discardEdits} disabled={busy || saving || modelSaving} />
       </div>
     </header>
+    <div className="ies-window-status" role="status">
+      {selectionSaved && <p>{selectionSaved}</p>}
+      {objectStatus && <p>{objectStatus}</p>}
+      {inheritedScan && <p>Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
+      {modelSaving && <p>Saving model preference…</p>}
+      {(warning || layerStorageError) && <p className="ies-warning">{[warning, layerStorageError].filter(Boolean).join(" ")}</p>}
+    </div>
     <div className="ies-workspace">
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
@@ -1049,7 +1040,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           </select></label>
           <label title="Shared with User Preferences">Model<select aria-label="Image Editor Model" value={model} disabled={busy || saving || modelSaving}
             onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>
-          {modelSaving && <small role="status">Saving model preference…</small>}
         </div>
         <div className="ies-sidebar-scroll">
         {layerTarget && <LayerStackControls key={layerSession.key} stack={layerSession} draft={stackDraft} disabled={busy || saving} showProperties={showComposition}
@@ -1066,15 +1056,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           <button type="button" disabled={busy || saving || !destination || !size} onClick={() => addSelectionToStack(destination)}>Add to Existing Layer</button>
         </section>}
         {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
-          <details open className="ies-disclosure ies-panel-section ies-inspector-disclosure"><summary>Edit instructions</summary>
+          <details open className="ies-disclosure ies-panel-section ies-inspector-disclosure"><summary>Edit Mode</summary>
           <div className="ies-instructions-fields">
           <label>Method<select aria-label="Edit method" disabled={boxes.length > 0 && !seedream} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch" disabled={boxes.length > 0}>Render sketch</option><option value="remove" disabled={boxes.length > 0}>Remove selected</option>{seedream && <option value="layers">Separate layers</option>}</select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={layerMode ? "Name the elements to separate (optional)" : mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
           </div></details>
-          {selectionSaved && <p className="ies-selection-notice" role="status">{selectionSaved}</p>}
-          {tool !== "object" && objectStatus && <p className="ies-selection-notice" role="status">{objectStatus}</p>}
-          {tool !== "object" && inheritedScan && <p className="ies-selection-notice" role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
           {!layerMode && tool === "boxes" && <ImageEditBoxesPanel boxes={boxes} selectedId={selectedBoxId} onSelect={setSelectedBoxId} onCommit={commitBox} onDelete={id => commit(history.marks.filter(mark => mark.id !== id))} onUploadReference={uploadBoxReference} onSelectObject={selectBoxObject} onSaveSelection={exportBoxes} namingBoxes={namingBoxes} model={model} busy={busy || saving || typeof onAccept !== "function"} />}
           {!layerMode && tool === "object" && <section className="ies-object-controls ies-panel-section"><div className="ies-section-heading"><h3>Object selection</h3></div>
             <label>Select by prompt<textarea aria-label="Object selection prompt" rows={2} maxLength={300} placeholder="The jacket, all people…" value={selectionPrompt} onChange={e => setSelectionPrompt(e.target.value)} /></label>
@@ -1084,8 +1071,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
             </div>
             <small>Click selects · Shift adds · Alt subtracts. Scan and Select use Fal.</small>
 
-            {objectStatus && <p role="status">{objectStatus}</p>}
-            {inheritedScan && <p role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
             <details className="ies-disclosure"><summary>Detection settings</summary><div className="ies-sam2-controls ies-section-body" role="group" aria-label="SAM 2 settings">
 
               {[["pointsPerSide", "Sampling density", 8, 64, 8, "Higher finds more small objects; takes longer."], ["confidence", "Confidence threshold", 0, 1, 0.01, "Lower keeps more candidates, including uncertain ones."], ["stability", "Stability threshold", 0, 1, 0.01, "Lower accepts less consistent boundaries."], ["minRegionArea", "Minimum region area", 0, 10000, 1, "Lower keeps smaller regions; measured in analysis pixels."]].map(([key, label, min, max, step, hint]) => <label className="ies-slider" key={key}>{label}<output>{key === "pointsPerSide" ? `${sam2Settings[key]} × ${sam2Settings[key]}` : key === "minRegionArea" ? `${sam2Settings[key]} px` : sam2Settings[key].toFixed(2)}</output><input type="range" aria-label={label} min={min} max={max} step={step} value={sam2Settings[key]} onChange={event => setSam2Settings(current => ({ ...current, [key]: Number(event.target.value) }))} /><small>{hint}</small></label>)}
@@ -1153,7 +1138,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           <button type="button" disabled={busy || saving} onClick={continueEditing}><Pencil size={17} />Continue Editing</button>
           <a href={result.url} download={result.fileName}><Download size={17} />Download</a>
         </div>}
-        {(warning || layerStorageError) && <p className="ies-warning" role="status">{[warning, layerStorageError].filter(Boolean).join(" ")}</p>}
         </div>
         <div className="ies-run-section">
           <small>{reviewing ? result.modelName || model : layerMode ? "Seedream 5.5 Layer Decomposition" : isIdeogram45Model(model) ? "Ideogram 4.5 Precise Edit" : model} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>

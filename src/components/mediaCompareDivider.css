@@ -1,0 +1,3 @@
+.ies-compare-handle { position: absolute; top: 0; bottom: 0; width: 24px; transform: translateX(-50%); background: transparent; box-shadow: none; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.ies-compare-handle::before { content: ""; position: absolute; left: calc(50% - 1px); top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
+.ies-compare-grip { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 28px; height: 38px; color: #fff; background: #202020e8; border: 1px solid #fff; border-radius: 10px; pointer-events: none; }

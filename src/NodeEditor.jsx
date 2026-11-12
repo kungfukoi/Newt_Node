@@ -236,8 +236,10 @@ import {
   normalizeColorIdMatteItems,
   rgbToHex
 } from "./colorIdMatte.js";
+import { EditMediaCompare } from "./components/EditMediaCompare.jsx";
 import {
   defaultEditEffectSettings,
+  editCompareEffectId,
   findEditEffect,
   editEffectsForSourceType,
   firstEditEffectForSourceType,
@@ -6504,6 +6506,10 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     if (isVideoModelUnsupportedInput(target, to.port)) return videoModelUnsupportedInputMessage(target.data?.model, to.port);
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
+    if (target.type === "edit") {
+      if (!editInputPortIds(target.data).includes(to.port)) return "Choose the matching Edit input.";
+      if (editSelectionFromData(target.data).effect.id === editCompareEffectId) return "";
+    }
     if (target.type === "batch") {
       if (source.type === "batch" || from.port === "batchOut") return "Connect media sources directly to Batch.";
       const kind = portKindForNodePort(source, from.port, "output");
@@ -14636,7 +14642,11 @@ function NodeBody({
     const settingsOpen = Boolean(node.data.settingsOpen);
     const visibleSourceEffects = editEffectsForSourceType(sourceType).filter((item) => item.groupId !== "cleanup");
     const sourceEffects = visibleSourceEffects.some((item) => item.id === effect.id) ? visibleSourceEffects : [effect, ...visibleSourceEffects];
-    const inputPortId = sourceType === "image" ? "imageIn" : "videoIn";
+    const comparing = effect.id === editCompareEffectId;
+    const [inputPortId, comparePortId] = editInputPortIds(node.data);
+    const comparePort = config.input.find((port) => port.id === comparePortId);
+    const compareItems = incoming[comparePortId] || [];
+    const compareUrl = connectedAssetUrls(compareItems).at(-1) || "";
     const sourcePort = config.input.find((port) => port.id === inputPortId);
     const outputPort = outputPortDefinitionsForNode(node)[0];
     const sourceItems = incoming[inputPortId] || [];
@@ -15196,7 +15206,7 @@ function NodeBody({
 
     return (
       <div className="node-body model-node-body edit-node-body">
-        <EditSourceDimensionProbe sourceUrl={sourceUrl} sourceType={sourceType} onDimensions={updateEditSourceDimensions} />
+        {!comparing && <EditSourceDimensionProbe sourceUrl={sourceUrl} sourceType={sourceType} onDimensions={updateEditSourceDimensions} />}
         <div className="edit-effect-tabs edit-media-tabs" role="tablist" aria-label="Edit media type">
           {editImageSourceTypes.map((mediaType) => (
             <button
@@ -15212,6 +15222,16 @@ function NodeBody({
             </button>
           ))}
         </div>
+        {comparing ? (
+          <>
+            {[[sourcePort, "Original", sourceItems], [comparePort, "Edit", compareItems]].map(([port, label, items]) => (
+              <NodeRow key={port.id} label={label} inputPort={port} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" className={items.length ? "connected-field" : ""}>{connectedSummary(items, "Add " + sourceType)}</button>
+              </NodeRow>
+            ))}
+            <EditMediaCompare key={JSON.stringify([sourceType, sourceUrl, compareUrl])} mediaType={sourceType} originalUrl={sourceUrl} editUrl={compareUrl} />
+          </>
+        ) : <>
         <ResultPane
           label="Edited output will appear here"
           resultUrl={node.data.resultUrl}
@@ -15238,6 +15258,7 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
           {running ? "Editing..." : "Run Edit"}
         </button>
+        </>}
         <details className="model-settings-drawer edit-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Edit</summary>
           <NodeRow label="Effect">
@@ -15247,6 +15268,7 @@ function NodeBody({
               ))}
             </select>
           </NodeRow>
+          {!comparing && <>
           <NodeRow label={capitalizeMediaType(sourceType)} inputPort={settingsOpen ? sourcePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button type="button" className={sourceConnected ? "connected-field" : ""}>{connectedSummary(sourceItems, `Add ${sourceType}`)}</button>
           </NodeRow>
@@ -15293,6 +15315,7 @@ function NodeBody({
           ) : !isLocalImageEffect ? (
             <div className="edit-empty-controls">No settings for this effect.</div>
           ) : null}
+          </>}
           <NodeAbout>{effect.definition}</NodeAbout>
         </details>
       </div>
@@ -18927,7 +18950,9 @@ function getNodeConfig(type) {
       icon: SlidersHorizontal,
       input: [
         { id: "imageIn", label: "Image", color: portColors.image },
-        { id: "videoIn", label: "Video", color: portColors.video }
+        { id: "videoIn", label: "Video", color: portColors.video },
+        { id: "imageCompareIn", label: "Edit image", color: portColors.image },
+        { id: "videoCompareIn", label: "Edit video", color: portColors.video }
       ],
       output: [{ id: "editOut", label: "Output", color: portColors.video }]
     },
@@ -20650,8 +20675,10 @@ function editSelectionFromData(data = {}) {
 }
 
 function editInputPortIds(data = {}) {
-  const { sourceType } = editSelectionFromData(data);
-  return [sourceType === "image" ? "imageIn" : "videoIn"];
+  const { effect, sourceType } = editSelectionFromData(data);
+  const ports = [sourceType === "image" ? "imageIn" : "videoIn"];
+  if (effect.id === editCompareEffectId) ports.push(sourceType === "image" ? "imageCompareIn" : "videoCompareIn");
+  return ports;
 }
 
 function editOutputType(nodeOrData = {}) {
@@ -21027,6 +21054,7 @@ function baseOutputPortDefinitionsForNode(node) {
       );
   }
   if (node?.type === "edit") {
+    if (editSelectionFromData(node.data).effect.id === editCompareEffectId) return [];
     const outputType = editOutputType(node);
     const ports = [{
       id: "editOut",
@@ -26632,6 +26660,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "edit") {
+    if (editSelectionFromData(source.data).effect.id === editCompareEffectId) return null;
     if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) nextEdge.from.port = "editOut";
     nextEdge.color = portKindForNodePort(source, nextEdge.from.port, "output") === "video" ? portColors.video : portColors.image;
   }
