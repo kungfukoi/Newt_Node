@@ -3,9 +3,12 @@ import { openFixture } from './helpers.mjs';
 import { canvasFixture } from './fixtures.mjs';
 
 test('Timeline opens wider with both yellow actions on the second footer row', async ({ page }) => {
-  await openFixture(page, { timeline: true, scale: 0.7 });
-  const node = page.locator('[data-node-card-id="timeline"]');
-  await expect(node).toHaveCSS('width', '1400px');
+  await openFixture(page, { count: 1, scale: 0.75 });
+  await page.locator('.node-canvas').click({ button: 'right', position: { x: 380, y: 60 } });
+  await page.locator('.node-context-menu').getByRole('button', { name: 'Timeline', exact: true }).click();
+  const node = page.locator('.node-card.node-type-assembly');
+  await expect(node).toHaveCSS('width', '1700px');
+  await expect(node).toHaveCSS('height', '595px');
   const controls = await node.locator('.assembly-footer-controls > *').evaluateAll(items =>
     items.map(item => {
       const { top, bottom } = item.getBoundingClientRect();
@@ -32,7 +35,7 @@ test('Timeline adds a large connected Preview above the tracks that follows its 
   await expect(preview).toHaveCount(0);
   await node.getByRole('button', { name: 'Add connected Preview' }).press('Space');
   await expect(preview).toBeInViewport();
-  await expect(preview).toHaveCSS('width', '770px');
+  await expect(preview).toHaveCSS('width', '935px');
   const previewBox = await preview.boundingBox();
   const timelineBox = await node.boundingBox();
   expect(previewBox.y + previewBox.height).toBeLessThan(timelineBox.y);

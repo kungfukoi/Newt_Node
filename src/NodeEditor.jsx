@@ -19117,7 +19117,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       nodeWidth: estimatedNodeWidth(type),
-      nodeHeight: 520,
+      nodeHeight: estimatedNodeHeight(type),
       assembly: createAssemblyState(),
       assemblyFrameUrl: "",
       assemblyFrameTime: 0,

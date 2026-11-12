@@ -5,7 +5,7 @@ export function estimatedNodeWidth(type) {
   if (type === "cameraCoverage") return 780;
   if (type === "audioModel") return 370;
   if (type === "explore") return 650;
-  if (type === "assembly") return 1400;
+  if (type === "assembly") return 1700;
   if (type === "frameIt") return 980;
   if (type === "storyboard") return 920;
   if (type === "autoAspect") return 390;
@@ -73,7 +73,7 @@ export function estimatedNodeHeight(type) {
   if (type === "cameraCoverage") return 900;
   if (type === "audioModel") return 750;
   if (type === "explore") return 680;
-  if (type === "assembly") return 520;
+  if (type === "assembly") return 595;
   if (type === "frameIt") return 700;
   if (type === "character") return 520;
   if (type === "composer") return 410;
