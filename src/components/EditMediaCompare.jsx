@@ -54,13 +54,17 @@ export function EditMediaCompare({ mediaType, originalUrl, editUrl }) {
     }
   }
 
+  function finishPlayback() {
+    pause();
+    if (duration && videos().some(video => video.currentTime !== duration)) seek(duration);
+  }
+
   function updateTime(event) {
     const clock = originalRef.current || editRef.current;
     if (event.currentTarget !== clock || !duration) return;
     const nextTime = Math.min(clock.currentTime, duration);
     if (clock.currentTime >= duration) {
-      pause();
-      if (videos().some(video => video.currentTime !== duration)) seek(duration);
+      finishPlayback();
     } else if (!clock.paused && editRef.current && editRef.current !== clock) {
       const edited = editRef.current;
       if (!edited.seeking && Math.abs(edited.currentTime - nextTime) > 0.08) edited.currentTime = nextTime;
@@ -83,7 +87,7 @@ export function EditMediaCompare({ mediaType, originalUrl, editUrl }) {
         onLoadedMetadata={updateDuration}
         onDurationChange={updateDuration}
         onTimeUpdate={updateTime}
-        onEnded={pause}
+        onEnded={finishPlayback}
         onError={() => { pause(); setDuration(0); setError(label + " video could not load."); }}
       />
     ) : <img src={url} alt={label} style={style} draggable={false} onError={() => setError(label + " image could not load.")} />;

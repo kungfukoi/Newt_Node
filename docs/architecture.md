@@ -147,6 +147,8 @@ CorridorKey 2.0 is selected through Utility Video's canonical `modelOptions.js` 
 
 Composite Video uses `src/compositeLayers.js` for stable layer/mask port identities, normalization and legacy shared-input migration. `src/components/CompositeLayerControls.jsx` owns the layer controls; `server/composite-stack.js` builds the planar RGB/alpha FFmpeg graph. The existing Utility video route records the complete stack and writes one managed video result.
 
+The Edit node Compare effect previews two live inputs of the selected media type. The viewer shares the Image Editor divider and uses one playback position through the duration of the shorter clip. In split view only Original audio plays. Compare is a preview-only effect.
+
 Video crop geometry and FFmpeg filter construction live in `src/videoCrop.js`, using shared `cropGeometry.js` bounds. `src/components/VideoCropEditor.jsx` owns the inline and enlarged video crop UI; the Edit node passes persisted settings to the existing local Edit route.
 
 NewtNode is a local-first React application backed by a local Express service.
