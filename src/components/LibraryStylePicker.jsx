@@ -2,7 +2,7 @@ import React from "react";
 import { X } from "lucide-react";
 import { styleLibraryApi } from "../api/newtApi.js";
 import { lookSelectionPatch, releaseLookGrade } from "../lookGrade.js";
-import { starredCatalogLooks } from "../lookCatalogs.js";
+import { allSavedCatalogLooks } from "../lookCatalogs.js";
 import "../LibraryWorkspace.css";
 
 export default function LibraryStylePicker({ data, onChange, onEditStart, onEditPrompt }) {
@@ -48,7 +48,7 @@ export default function LibraryStylePicker({ data, onChange, onEditStart, onEdit
   const requested=["none","all"].includes(data.lookCatalogId)?data.lookCatalogId:data.lookCatalogId==="starred"?"all":data.lookCatalogId?`collection:${data.lookCatalogId}`:"";
   const inferred=selectedCollection?`collection:${selectedCollection.id}`:current?"all":"none";
   const catalogValue=catalogs.some(option=>option.value===requested)?requested:catalogs.some(option=>option.value===inferred)?inferred:"none";
-  const visibleStyles=catalogValue==="all"?starredCatalogLooks(collections):collections.find(item=>`collection:${item.id}`===catalogValue)?.styles||[];
+  const visibleStyles=catalogValue==="all"?allSavedCatalogLooks(collections):collections.find(item=>`collection:${item.id}`===catalogValue)?.styles||[];
   const rows=visibleStyles.map(style=>({style,owner:collections.find(item=>item.styles.includes(style))}));
   const selected=rows.find(({style})=>current&&style.id===current.id);
   const value = selected ? `${selected.owner.id}:${current.id}` : current ? "workflow-style" : "";

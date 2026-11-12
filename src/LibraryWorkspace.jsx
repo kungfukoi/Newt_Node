@@ -1,5 +1,5 @@
 import React from "react";
-import { Search, ArrowUpRight, ArrowRight, X, RefreshCw, Palette, Layers, Star } from "lucide-react";
+import { Search, ArrowUpRight, ArrowRight, X, RefreshCw, Palette, Layers, Star, FolderPlus } from "lucide-react";
 import { styleLibraryApi, nodeApi } from "./api/newtApi.js";
 import { normalizeLibraryStyle, libraryStylesMatching, libraryStyleSnapshot, lookStyleDescription, portableStylePrompt, collectionExamples } from "./styleLibrary.js";
 import { displayMediaUrl } from "./mediaAssets.js";
@@ -10,12 +10,12 @@ import LookbookSelect from "./components/LookbookSelect.jsx";
 import CreateLookDialog from "./components/CreateLookDialog.jsx";
 import LookDetailExtras from "./components/LookDetailExtras.jsx";
 import LookDescription from "./components/LookDescription.jsx";
-import { lookCatalogOptions, lookSaveOptions, starredCatalogLooks, uniqueCatalogLooks } from "./lookCatalogs.js";
+import { lookCatalogOptions, lookSaveOptions, findStarredCatalog, uniqueCatalogLooks } from "./lookCatalogs.js";
 import { collectionRows, collectionRowHeight, collectionRowGap, collectionFrameChrome } from "./collectionFrame.js";
 import { uiGet, uiSet } from "./uiState.js";
 
 const keyOf = style => `${style.catalog ? "catalog" : "saved"}:${style.id}`;
-const sameLook = (first, second) => first.id === second.id || Boolean(first.catalogId && first.catalogId === second.catalogId) || Boolean(first.sourceUrl && first.sourceUrl === second.sourceUrl && first.name === second.name);
+const sameLook = (first, second) => first.id === second.id || Boolean((first.catalogId || first.id) === (second.catalogId || second.id)) || Boolean(first.sourceUrl && first.sourceUrl === second.sourceUrl && first.name === second.name);
 const imageUrl = image => image.localUrl ? displayMediaUrl(image.localUrl) : styleLibraryApi.catalogAssetUrl(image.url);
 function StyleMosaic({ style }) {
   const examples = (style.examples || []).slice(0, 4);
@@ -67,6 +67,8 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const previewDialog = React.useRef(null);
   const searchInput = React.useRef(null);
   const dialog=React.useRef(null), request=React.useRef(0), detailRequest=React.useRef(0), imported=React.useRef(new Map());
+  const starredCollection=findStarredCatalog(library?.collections);
+  const starredTarget=starredCollection || {id:"system-starred",name:"Starred",styles:[]};
   const collection=library?.collections.find(item=>item.id===collectionId);
   const browseCollection=library?.collections.find(item=>item.id===browseCollectionId);
   const canDeleteCatalog=scope==="collection"&&browseCollection&&browseCollection.id!=="system-starred"&&!["catalog","starred"].includes(browseCollection.name.toLowerCase());
@@ -85,7 +87,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const sharedTotal=currentCatalog?.total??0;
   const savedLooks=allLooks?library?.collections.flatMap(item=>item.styles)||[]:[];
   const matchesCategory=style=>!category||style.category===category||style.tags?.includes(category);
-  const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? starredCatalogLooks(library?.collections) : (browseCollection?.styles||[]);
+  const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? (starredCollection?.styles||[]) : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
   const browserOptions=lookCatalogOptions(library?.collections,showLocalLooks,showFilmStills);
   const saveOptions=lookSaveOptions(library?.collections);
@@ -100,7 +102,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     ? uniqueCatalogLooks([...libraryStylesMatching(savedLooks,query).filter(matchesCategory),...sourceStyles])
     : isSourceCatalog ? sourceStyles : libraryStylesMatching(sourceStyles,query).filter(matchesCategory);
   React.useEffect(()=>{if(category&&!filterCategories.includes(category))setCategory("");},[category,filterCategories.join("\n")]);
-  const isSaved = style => Boolean(library?.collections.some(item => item.styles.some(saved => sameLook(saved, style))));
+  const isStarred = style => Boolean(starredCollection?.styles.some(saved => sameLook(saved, style)));
   const isSavedToCollection = style => Boolean(collection?.styles.some(saved => sameLook(saved, style)));
 
   async function loadLibrary() {
@@ -195,13 +197,17 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     });
     return succeeded;
   }
-  async function toggleCollectionMembership(style) {
-    if (!collection) return;
-    if (!collection.styles.some(saved=>sameLook(saved,style))) { await saveReferences([style]); return; }
+  async function toggleCollectionMembership(style, target = collection || starredTarget) {
+    if (!target.styles.some(saved=>sameLook(saved,style))) {
+      await saveReferences([style], target);
+      return;
+    }
     await act(async()=>{
-      await save(library.collections.map(item=>item.id===collection.id ? {...item,styles:item.styles.filter(saved=>!sameLook(saved,style))} : item));
-      setSelectedLooks(current=>new Map([...current].filter(([,saved])=>!sameLook(saved,style))));
-      setNotice(`Removed ${style.name} from ${collection.name}.`);
+      await save(library.collections.map(item=>item.id===target.id ? {...item,styles:item.styles.filter(saved=>!sameLook(saved,style))} : item));
+      if ((scope === "collection" && target.id === browseCollectionId) || (scope === "starred" && target.id === starredTarget.id)) {
+        setSelectedLooks(current=>new Map([...current].filter(([,saved])=>!sameLook(saved,style))));
+      }
+      setNotice(`Removed ${style.name} from ${target.name}.`);
     });
   }
   async function deleteCatalog() {
@@ -229,7 +235,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       const form=new FormData();form.append("nodeType","transfer");form.append("asset",file);
       const {response:upload,data}=await nodeApi.uploadAsset(form);
       if(!upload.ok||!data.asset?.localUrl)throw new Error(data.error||"Could not import this example.");
-      const asset={...data.asset,id:crypto.randomUUID(),catalogUrl:image.url};examples.push(asset);imported.current.set(image.url,asset);
+      const asset={...data.asset,id:crypto.randomUUID(),catalogUrl:image.url,filmStillPalette:image.filmStillPalette};examples.push(asset);imported.current.set(image.url,asset);
     }
     return normalizeLibraryStyle({...style,examples});
   }
@@ -291,42 +297,33 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       closeDetails();await loadCatalog({refresh:true});setNotice(`Deleted ${target.style.name} from the catalog.${warning}`);
     });
   }
-  async function saveReferences(styles) {
+  async function saveReferences(styles, target = collection || starredTarget) {
     let succeeded = false;
     await act(async()=>{
       if(!library)throw new Error("Wait for your collection to load before saving styles.");
       const additions=[];
-      for(const style of styles.filter(item=>!collection?.styles.some(saved=>sameLook(saved,item)))) {
+      for(const style of styles.filter(item=>!target.styles.some(saved=>sameLook(saved,item)))) {
         const existing=library.collections.flatMap(item=>item.styles).find(saved=>sameLook(saved,style));
         const source=existing || (style.catalog&&style!==activeStyle?(await styleLibraryApi.detail(style.id)).style:style);
-        additions.push({...await materialize(source),id:crypto.randomUUID()});
+        const local = await materialize(source);
+        additions.push({...local,id:crypto.randomUUID(),catalogId:local.catalogId || style.catalogId || style.id});
       }
       if(!additions.length){setNotice("These styles are already in this collection.");succeeded=true;return;}
-      let target=collection,collections=library.collections;
-      if(!target){target={id:"system-starred",name:"Starred",styles:[]};collections=[...collections,target];}
+      const collections=library.collections.some(item=>item.id===target.id) ? library.collections : [...library.collections,target];
       await save(collections.map(item=>item.id===target.id?{...item,styles:[...item.styles,...additions]}:item));
-      setCollectionId(target.id);if(!browseCollectionId)setBrowseCollectionId(target.id);setNotice(`Saved ${additions.length===1?additions[0].name:`${additions.length} styles`} to ${target.name}.`);succeeded=true;
+      setNotice(`Saved ${additions.length===1?additions[0].name:`${additions.length} styles`} to ${target.name}.`);succeeded=true;
     });
     return succeeded;
   }
-  const saveReference = style => saveReferences([style]);
-  async function removeReference(style, {keepDetailsOpen=false}={}) {
-    await act(async () => {
-      if (!library) throw new Error("Wait for your collection to load before removing a look.");
-      await save(library.collections.map(item => ({ ...item, styles: item.styles.filter(saved => !sameLook(saved, style)) })));
-      setSelectedLooks(current=>new Map([...current].filter(([,saved])=>!sameLook(saved,style))));
-      if (!keepDetailsOpen && scope === "collection" && activeStyle && sameLook(activeStyle, style)) closeDetails();
-      setNotice(`Removed ${style.name} from your collection.`);
-    });
-  }
-  const toggleSavedLook = (style,options) => isSaved(style) ? removeReference(style,options) : saveReference(style);
+  const toggleStar = style => toggleCollectionMembership(style, starredTarget);
   async function createStyleNode(style) {
     await act(async () => {
       if (!library) throw new Error("Wait for your library to load before creating a Style node.");
       // The open details supply the exact examples the user sees. A saved
       // copy can supply its analysis and matching assets, but not their order.
-      const matches = saved => style.catalog ? sameLook(saved, style) : saved.id === style.id;
-      const existingCollection = library.collections.find(item => item.styles.some(matches));
+      const matches = saved => sameLook(saved, style);
+      const existingCollection = library.collections.find(item => item.styles.some(saved => saved.id === style.id))
+        || library.collections.find(item => item.styles.some(matches));
       const existing = existingCollection?.styles.find(matches);
       const local = await materialize(style, existing?.examples);
       if (!local.styleAnalysis?.stylePrompt && existing?.styleAnalysis?.stylePrompt) local.styleAnalysis = existing.styleAnalysis;
@@ -334,9 +331,11 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
         setNotice("This is the first time this Look has been used as a Style, Analyzing the examples and observations.  The Style will be saved for reuse.");
         local.styleAnalysis = await styleLibraryApi.analyze(local);
       }
-      let target = existingCollection || collection, collections = library.collections;
-      if (!target) { target = { id: "system-starred", name: "Starred", styles: [] }; collections = [...collections, target]; }
-      const savedStyle = { ...local, id: existing?.id || (style.catalog ? crypto.randomUUID() : local.id) };
+      let target = existingCollection || (collection !== starredCollection ? collection : undefined)
+        || library.collections.find(item => item.name === "My Looks");
+      let collections = library.collections;
+      if (!target) { target = { id: crypto.randomUUID(), name: "My Looks", styles: [] }; collections = [...collections, target]; }
+      const savedStyle = { ...local, id: existing?.id || (style.catalog ? crypto.randomUUID() : local.id), catalogId: local.catalogId || (style.catalog ? style.id : "") };
       const styles = existing ? target.styles.map(item => item.id === existing.id ? savedStyle : item) : [...target.styles, savedStyle];
       await save(collections.map(item => item.id === target.id ? { ...item, styles } : item));
       if (!collectionId) setCollectionId(target.id);
@@ -369,7 +368,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       {currentCatalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{currentCatalog.warning}</p>}
       {canDeleteCatalog&&<div className="library-inline" style={{justifyContent:"flex-end",marginBottom:12}}>{deletingCatalog===browseCollection.id?<><span>Delete “{browseCollection.name}” and its saved memberships? Original looks, other collections and workflow nodes are kept.</span><button className="lookbook-compact-action" disabled={busy} onClick={deleteCatalog}>Confirm delete</button><button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog("")}>Cancel</button></>:<button className="lookbook-compact-action" disabled={busy} onClick={()=>setDeletingCatalog(browseCollection.id)}>Delete Catalog</button>}</div>}
       <div key={`strip:${browserValue}`} ref={frameRef} data-row-count={frameRows} className={`stylebuilder-style-strip ${resizable ? `collection-grid ${!visibleStyles.length ? "collection-grid-empty" : ""}` : ""}`} style={resizable ? {"--collection-rows":frameRows,"--collection-row-height":`${collectionRowHeight}px`,"--collection-row-gap":`${collectionRowGap}px`,"--collection-frame-chrome":`${collectionFrameChrome}px`} : undefined} aria-label="Style previews" tabIndex={0}>
-        {visibleStyles.map(style=><article className="stylebuilder-tile" key={keyOf(style)} onPointerEnter={()=>preloadMosaic(style)} onFocusCapture={()=>preloadMosaic(style)}><label className="stylebuilder-tile-selection"><input type="checkbox" aria-label={`Select ${style.name}`} checked={selectedLooks.has(keyOf(style))} disabled={sharedUserLooks&&busy} onChange={event=>{const checked=event.target.checked;setRemoveError("");setSelectedLooks(current=>{const next=new Map(current);if(checked)next.set(keyOf(style),style);else next.delete(keyOf(style));return next;});}}/></label><button className="stylebuilder-tile-open" onClick={()=>openDetails(style)} aria-label={`View ${style.name}`}><StyleMosaic style={mosaicDetails.has(style.id)?{...style,examples:mosaicDetails.get(style.id)}:style}/><span className="stylebuilder-tile-name">{style.sref?.replace(/^--sref\s+/,"")||style.name}</span></button><button className={`stylebuilder-tile-star ${isSaved(style)?"saved":""}`} aria-label={`${isSaved(style)?"Remove from collection":"Save to collection"}: ${style.name}`} aria-pressed={isSaved(style)} title={isSaved(style)?"Unstar and remove from your collection":"Save to your collection"} disabled={busy||!library} onClick={()=>toggleSavedLook(style)}><Star size={16} fill={isSaved(style)?"currentColor":"none"}/></button></article>)}
+        {visibleStyles.map(style=><article className="stylebuilder-tile" key={keyOf(style)} onPointerEnter={()=>preloadMosaic(style)} onFocusCapture={()=>preloadMosaic(style)}><label className="stylebuilder-tile-selection"><input type="checkbox" aria-label={`Select ${style.name}`} checked={selectedLooks.has(keyOf(style))} disabled={sharedUserLooks&&busy} onChange={event=>{const checked=event.target.checked;setRemoveError("");setSelectedLooks(current=>{const next=new Map(current);if(checked)next.set(keyOf(style),style);else next.delete(keyOf(style));return next;});}}/></label><button className="stylebuilder-tile-open" onClick={()=>openDetails(style)} aria-label={`View ${style.name}`}><StyleMosaic style={mosaicDetails.has(style.id)?{...style,examples:mosaicDetails.get(style.id)}:style}/><span className="stylebuilder-tile-name">{style.sref?.replace(/^--sref\s+/,"")||style.name}</span></button><button className={`stylebuilder-tile-star ${isStarred(style)?"saved":""}`} aria-label={`${isStarred(style)?"Unstar look":"Star look"}: ${style.name}`} aria-pressed={isStarred(style)} title={isStarred(style)?"Remove from Starred":"Add to Starred"} disabled={busy||!library} onClick={()=>toggleStar(style)}><Star size={16} fill={isStarred(style)?"currentColor":"none"}/></button></article>)}
         {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{waitingForCatalog?"Loading looks…":isSourceCatalog&&!currentCatalog?.ready?"The catalog is not available yet. Refresh to retry.":"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog("library")}>Browse catalog <ArrowRight size={15}/></button>}</div>}
       </div>
       <LookbookShuttle key={`shuttle:${browserValue}`} frameRef={frameRef} previewCount={visibleStyles.length} rows={frameRows}/>
@@ -378,7 +377,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     </section>
     <div className="lookbook-selection-actions"><span className="library-muted">{selectedLooks.size ? `${selectedLooks.size} selected` : ""}</span><div className="library-inline"><button disabled={busy||!library||!selectedLooks.size} onClick={async()=>{if(await saveReferences([...selectedLooks.values()]))setSelectedLooks(new Map());}}>Add to collection</button>{sharedUserLooks&&<button type="button" disabled={busy||!canRemoveSelected} onClick={removeSelectedLooks}>Remove Look</button>}{library&&<fieldset disabled={busy}><LookbookSelect label="Add to collection destination" value={collectionId} onChange={setCollectionId} options={saveOptions}/></fieldset>}<button className="library-primary lookbook-compact-action" onClick={()=>setCreatingLook(true)}>Create Look</button></div></div>
     <CreateLookDialog open={creatingLook} categories={catalog?.categories} onClose={()=>setCreatingLook(false)} onSaved={style=>{const shared=style.examples?.some(image=>image.localUrl?.startsWith("/uploads/shared-looks/"));if(!shared)setShowLocalLooks(true);chooseCatalog(shared?"shared-user-looks":"local-looks");setQuery("");setCategory("");setSharedCatalogRevision(current=>current+1);setNotice(`Saved ${style.name} to the catalog.`);}}/>
-    <dialog ref={dialog} className="library-style-detail" aria-label="Style details" onCancel={event=>{event.preventDefault();closeDetails();}}><button className="stylebuilder-detail-close" aria-label="Close style details" onClick={closeDetails}><X size={20}/></button>{detailLoading&&<p role="status">Loading style details…</p>}{error&&<p className="library-error" role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{activeStyle&&<><span className="stylebuilder-eyebrow">{activeStyle.category||"SAVED LOOK"}</span><div className="look-detail-title"><h2>{activeStyle.name}</h2><button type="button" className={`look-detail-star ${isSaved(activeStyle)?"saved":""}`} aria-label={isSaved(activeStyle)?"Unstar look":"Star look"} aria-pressed={isSaved(activeStyle)} title={isSaved(activeStyle)?"Unstar and remove from saved collections":`Save to ${collection?.name||"Starred"}`} disabled={busy||!library} onClick={()=>toggleSavedLook(activeStyle,{keepDetailsOpen:true})}><Star size={22} fill={isSaved(activeStyle)?"currentColor":"none"}/></button></div><div className="library-detail-examples">{(activeStyle.examples||[]).map((image,index)=><button key={`${image.id}-${index}`} className="library-example-open" aria-label={`Enlarge ${activeStyle.name} example ${index+1}`} onClick={()=>setPreviewIndex(index)}><img src={imageUrl(image)} alt={`${activeStyle.name} example ${index+1}`}/></button>)}</div>{!activeStyle.examples?.length&&<p className="library-muted">This look has no reference images available.</p>}<div className="look-detail-actions"><div className="library-inline"><button aria-label={isSavedToCollection(activeStyle)?"Remove from my collection":"Save to my collection"} aria-pressed={isSavedToCollection(activeStyle)} disabled={busy||!library} onClick={()=>collection?toggleCollectionMembership(activeStyle):toggleSavedLook(activeStyle)}><Star size={16} fill={isSavedToCollection(activeStyle)?"currentColor":"none"}/>{isSavedToCollection(activeStyle)?"Remove from collection":"Save to collection"}</button>{library&&<fieldset disabled={busy}><LookbookSelect label="Save destination" value={collectionId} onChange={setCollectionId} options={saveOptions}/></fieldset>}<button disabled={busy||!activeStyle.examples?.length} onClick={()=>addToBoard([activeStyle])}>Create Mood Board node</button><button disabled={busy||(!activeStyle.styleAnalysis?.stylePrompt&&!activeStyle.examples?.length)} onClick={()=>createStyleNode(activeStyle)}>Use in Style <ArrowUpRight size={15}/></button>{customLookId(activeStyle)&&!deleteLookRequest&&<button type="button" disabled={busy} onClick={beginDeleteLook}>Delete Look</button>}</div>{customLookId(activeStyle)&&deleteLookRequest&&<div className="look-delete-controls"><section className="look-delete-confirm" aria-label="Delete custom Look"><p>Delete “{deleteLookRequest.style.name}” from {deleteLookRequest.shared?"the shared catalog for everyone":"your custom catalog"}? Your saved collection copies will also be removed. Existing workflow nodes and their images are kept.</p><button type="button" disabled={busy} onClick={deleteLook}>Confirm delete Look</button><button type="button" disabled={busy} onClick={()=>setDeleteLookRequest(null)}>Cancel delete</button></section></div>}</div><LookDetailExtras style={activeStyle}/><p className="library-muted">{activeStyle.styleAnalysis?.stylePrompt?"This look’s style description is saved and ready to reuse.":"Use in Style analyzes the examples and observations with Astra once (paid), then saves the description for future use."}</p><LookDescription text={lookStyleDescription(activeStyle.styleAnalysis)||activeStyle.prompt||"No visual description is available for this look."} title={activeStyle.sourceProvider==="StyleRef"&&!activeStyle.styleAnalysis?.stylePrompt?"StyleRef prompt":"Style description"} summary={["StyleRef","Midlibrary","Newt"].includes(activeStyle.sourceProvider)?activeStyle.notes:""}/>{activeStyle.sourceProvider==="StyleRef"&&activeStyle.styleAnalysis?.stylePrompt&&activeStyle.prompt&&<LookDescription title="StyleRef prompt" text={activeStyle.prompt}/>}{activeStyle.sref&&<code>{activeStyle.sref}</code>}<p className="library-muted">{activeStyle.tags?.join(" · ")}</p></>}</dialog>
+    <dialog ref={dialog} className="library-style-detail" aria-label="Style details" onCancel={event=>{event.preventDefault();closeDetails();}}><button className="stylebuilder-detail-close" aria-label="Close style details" onClick={closeDetails}><X size={20}/></button>{detailLoading&&<p role="status">Loading style details…</p>}{error&&<p className="library-error" role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{activeStyle&&<><span className="stylebuilder-eyebrow">{activeStyle.category||"SAVED LOOK"}</span><div className="look-detail-title"><h2>{activeStyle.name}</h2><button type="button" className={`look-detail-star ${isStarred(activeStyle)?"saved":""}`} aria-label={isStarred(activeStyle)?"Unstar look":"Star look"} aria-pressed={isStarred(activeStyle)} title={isStarred(activeStyle)?"Remove from Starred":"Add to Starred"} disabled={busy||!library} onClick={()=>toggleStar(activeStyle)}><Star size={22} fill={isStarred(activeStyle)?"currentColor":"none"}/></button></div><div className="library-detail-examples">{(activeStyle.examples||[]).map((image,index)=><button key={`${image.id}-${index}`} className="library-example-open" aria-label={`Enlarge ${activeStyle.name} example ${index+1}`} onClick={()=>setPreviewIndex(index)}><img src={imageUrl(image)} alt={`${activeStyle.name} example ${index+1}`}/></button>)}</div>{!activeStyle.examples?.length&&<p className="library-muted">This look has no reference images available.</p>}<div className="look-detail-actions"><div className="library-inline"><button aria-label={isSavedToCollection(activeStyle)?"Remove from my collection":"Save to my collection"} aria-pressed={isSavedToCollection(activeStyle)} disabled={busy||!library} onClick={()=>toggleCollectionMembership(activeStyle)}><FolderPlus size={16}/>{isSavedToCollection(activeStyle)?"Remove from collection":"Save to collection"}</button>{library&&<fieldset disabled={busy}><LookbookSelect label="Save destination" value={collectionId} onChange={setCollectionId} options={saveOptions}/></fieldset>}<button disabled={busy||!activeStyle.examples?.length} onClick={()=>addToBoard([activeStyle])}>Create Mood Board node</button><button disabled={busy||(!activeStyle.styleAnalysis?.stylePrompt&&!activeStyle.examples?.length)} onClick={()=>createStyleNode(activeStyle)}>Use in Style <ArrowUpRight size={15}/></button>{customLookId(activeStyle)&&!deleteLookRequest&&<button type="button" disabled={busy} onClick={beginDeleteLook}>Delete Look</button>}</div>{customLookId(activeStyle)&&deleteLookRequest&&<div className="look-delete-controls"><section className="look-delete-confirm" aria-label="Delete custom Look"><p>Delete “{deleteLookRequest.style.name}” from {deleteLookRequest.shared?"the shared catalog for everyone":"your custom catalog"}? Your saved collection copies will also be removed. Existing workflow nodes and their images are kept.</p><button type="button" disabled={busy} onClick={deleteLook}>Confirm delete Look</button><button type="button" disabled={busy} onClick={()=>setDeleteLookRequest(null)}>Cancel delete</button></section></div>}</div><LookDetailExtras style={activeStyle}/><p className="library-muted">{activeStyle.styleAnalysis?.stylePrompt?"This look’s style description is saved and ready to reuse.":"Use in Style analyzes the examples and observations with Astra once (paid), then saves the description for future use."}</p><LookDescription text={lookStyleDescription(activeStyle.styleAnalysis)||activeStyle.prompt||"No visual description is available for this look."} title={activeStyle.sourceProvider==="StyleRef"&&!activeStyle.styleAnalysis?.stylePrompt?"StyleRef prompt":"Style description"} summary={["StyleRef","Midlibrary","Newt"].includes(activeStyle.sourceProvider)?activeStyle.notes:""}/>{activeStyle.sourceProvider==="StyleRef"&&activeStyle.styleAnalysis?.stylePrompt&&activeStyle.prompt&&<LookDescription title="StyleRef prompt" text={activeStyle.prompt}/>}{activeStyle.sref&&<code>{activeStyle.sref}</code>}<p className="library-muted">{activeStyle.tags?.join(" · ")}</p></>}</dialog>
     <dialog ref={previewDialog} className="library-image-preview" aria-label="Look example preview" onCancel={event=>{event.preventDefault();closePreview();}} onClick={event=>{if(event.target===event.currentTarget)closePreview();}} onKeyDown={event=>{if(event.key==="ArrowRight"&&activeStyle?.examples?.length){event.preventDefault();setPreviewIndex(index=>(index+1)%activeStyle.examples.length);}if(event.key==="ArrowLeft"&&activeStyle?.examples?.length){event.preventDefault();setPreviewIndex(index=>(index-1+activeStyle.examples.length)%activeStyle.examples.length);}}}>
       <button className="library-preview-close" aria-label="Close example preview" onClick={closePreview}><X size={22}/></button>
       {previewIndex!==null&&activeStyle?.examples?.[previewIndex]&&<><img src={imageUrl(activeStyle.examples[previewIndex])} alt={`${activeStyle.name} example ${previewIndex+1}, enlarged`}/><div className="library-preview-controls"><button aria-label="Previous example" disabled={activeStyle.examples.length<2} onClick={()=>setPreviewIndex(index=>(index-1+activeStyle.examples.length)%activeStyle.examples.length)}>Previous</button><span>{previewIndex+1} / {activeStyle.examples.length}</span><button aria-label="Next example" disabled={activeStyle.examples.length<2} onClick={()=>setPreviewIndex(index=>(index+1)%activeStyle.examples.length)}>Next</button></div></>}

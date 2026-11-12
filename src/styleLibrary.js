@@ -1,6 +1,7 @@
 // Shared, model-neutral catalog contract. No Midjourney parameters enter other models.
 import { lookStyleBlocks } from "./createLookStyle.js";
 import { lookStyleText } from "./lookStyleText.js";
+import { filmStillPalette } from "./filmStillPalette.js";
 export const librarySchemaVersion = 1;
 const text = (value, max = 12000) => typeof value === "string" ? value.trim().slice(0, max) : "";
 export function midlibrarySearchUrl({ query = "", terms = [], colours = [], category = "" } = {}) {
@@ -17,6 +18,7 @@ export function normalizeLibraryStyle(value = {}) {
   try { const url = new URL(value.sourceUrl); if (url.protocol === "https:" && ["midlibrary.io","styleref.io"].includes(url.hostname) && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional source. */ }
   return {
     id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt), category: text(value.category, 80), catalogId: text(value.catalogId, 80),
+    ...(value.searchName ? { searchName: text(value.searchName, 200) } : {}),
     notes: value.sourceProvider==="Newt"?lookStyleText(text(value.notes,4000)):text(value.notes, 4000), sourceUrl, sourceProvider: text(value.sourceProvider,80), sourceAuthor: text(value.sourceAuthor,120), sourceAttribution: text(value.sourceAttribution,200),
     ...(Array.isArray(value.styleBlocks)?{styleBlocks:lookStyleBlocks(value.styleBlocks,{preserveLegacyPalette:true})}:{}),
     colours: (Array.isArray(value.colours) ? value.colours : []).filter(colour => typeof colour?.hex === "string" && /^#(?:[a-f0-9]{3}|[a-f0-9]{6})$/i.test(colour.hex)).slice(0,20).map(colour => ({ name: text(colour.name,80), hex: colour.hex, percent: typeof colour.percent === "number" && Number.isFinite(colour.percent) && colour.percent>=0 && colour.percent<=100 ? colour.percent : null })),
@@ -32,7 +34,9 @@ export function normalizeLibraryStyle(value = {}) {
     examples: (Array.isArray(value.examples) ? value.examples : []).filter(image => /^\/(uploads|workflow-assets|outputs)\//.test(image?.localUrl || "") && !image.localUrl.includes("..") && !/[?#\\]/.test(image.localUrl)).slice(0, 8).map(image => {
       // This is an identity for reusing an import, never a fetch target.
       const catalogUrl = typeof image.catalogUrl === "string" && image.catalogUrl.length <= 2048 ? image.catalogUrl : "";
-      return { id: text(image.id, 80), localUrl: image.localUrl, fileName: text(image.fileName, 200), mimeType: text(image.mimeType, 80), ...(catalogUrl ? { catalogUrl } : {}) };
+      const palette = filmStillPalette(image.filmStillPalette);
+      return { id: text(image.id, 80), localUrl: image.localUrl, fileName: text(image.fileName, 200), mimeType: text(image.mimeType, 80),
+        ...(catalogUrl ? { catalogUrl } : {}), ...(palette ? { filmStillPalette: palette } : {}) };
     })
   };
 }
@@ -67,7 +71,7 @@ export function libraryStylesMatching(styles, query = "") {
   const words = text(query, 300).toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return styles;
   return styles.filter(style => {
-    const searchable = [style.name, style.prompt, style.notes, style.sref, style.category, ...(style.tags || [])].join(" ").toLowerCase();
+    const searchable = [style.name, style.searchName, style.prompt, style.notes, style.sref, style.category, ...(style.tags || [])].join(" ").toLowerCase();
     return words.every(word => searchable.includes(word));
   });
 }

@@ -12,7 +12,7 @@ test("Settings restores the last selected section", () => {
   assert.equal(readSettingsSection(storage), "models");
 });
 
-test("Settings defaults to Overview for an unknown section or unavailable storage", () => {
+test("Settings defaults to Status for an unknown section or unavailable storage", () => {
   assert.equal(readSettingsSection({ getItem: () => "unknown" }), "overview");
   assert.equal(readSettingsSection(null), "overview");
   assert.equal(writeSettingsSection("unknown", null), "overview");

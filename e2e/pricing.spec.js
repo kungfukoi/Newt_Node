@@ -13,10 +13,10 @@ test("pricing refresh is opt-in and provider quotes update Run without generatin
  const pricing = page.getByRole("button", { name: "API Pricing", exact: true });
  const auto = page.getByRole("switch", { name: "Automatic pricing refresh" });
  const nav = page.getByRole("navigation", { name: "Settings sections" });
- const overview = nav.getByRole("button", { name: "Overview", exact: true });
+ const statusSection = nav.getByRole("button", { name: "Status", exact: true });
  const credentials = nav.getByRole("button", { name: "API Credentials", exact: true });
- await expect(overview).toHaveAttribute("aria-current", "true");
- await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+ await expect(statusSection).toHaveAttribute("aria-current", "true");
+ await expect(page.getByRole("heading", { name: "Status", exact: true })).toBeVisible();
  await pricing.press("Enter");
  await expect(pricing).toHaveAttribute("aria-current", "true");
  const pricingHeading = page.getByRole("heading", { name: "API Pricing", exact: true });

@@ -291,7 +291,7 @@ test("Catalog looks open details, save examples and create a named Style without
   expect(library.collections[0].styles[0].examples.every(image=>image.localUrl.startsWith("/outputs/"))).toBe(true);
   await expect(page.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
-  await expect(page.getByRole("button",{name:"Remove from collection: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","true");
+  await expect(page.getByRole("button",{name:"Unstar look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","true");
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("missing");
   await expect(page.locator(".stylebuilder-tile")).toHaveCount(0);
   await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Starred",exact:true}).click();
@@ -348,6 +348,7 @@ test("A catalog look must save before its node is created, with retry after a co
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await page.getByRole("button",{name:"Nodes",exact:true}).click();
   await expect(page.getByLabel("Look",{exact:true}).locator("option:checked")).toHaveText("Warm ink");
+  expect(library.collections[0].name).toBe("My Looks");
   expect(library.collections[0].styles[0].prompt).toBe("Warm paper and soft ink");
   expect(errors).toEqual([]);
 });
@@ -374,11 +375,11 @@ test("Library style reaches image generation and remains independent of later co
   expect(errors).toEqual([]);
 });
 
-test("Unstarring removes saved copies immediately and after reload while retaining workflow snapshots",async({page})=>{
+test("Unstarring removes only the Starred copy and preserves named copies and workflow snapshots",async({page})=>{
   const look={id:"ink-catalog",name:"Ink drawing",sourceUrl:"https://midlibrary.io/library/ink-drawing",prompt:"Fine ink on warm paper",examples:[],detailAvailable:true};
   const saved={...look,id:"saved-ink"};
   const other={id:"other",name:"Other look",prompt:"Pastel shapes",examples:[]};
-  let library={version:1,revision:0,collections:[{id:"first",name:"First",styles:[saved,other]},{id:"second",name:"Second",styles:[{...saved,id:"second-copy"}]}]},conflict=true;
+  let library={version:1,revision:0,collections:[{id:"first",name:"First",styles:[saved,other]},{id:"second",name:"Second",styles:[{...saved,id:"second-copy"}]},{id:"stars",name:"Starred",styles:[saved]}]},conflict=true;
   const fixture={nodes:[
     {id:"style",type:"style",x:20,y:20,data:{title:"Style",stylePreset:"None",libraryStyle:saved}},
     {id:"board",type:"transfer",x:450,y:20,data:{title:"Mood Board",libraryBoard:true,libraryBoardPrompt:look.prompt,transferImages:[{id:"sample",localUrl:"/outputs/e2e/reference.png"}],resultUrl:"/outputs/e2e/board.png",fileName:"MOOD_BOARD.png",locked:true,activated:true}}
@@ -395,19 +396,19 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,indexed:1,total:1,categories:[],styles:[look]})}));
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style:look})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"First",exact:true}).click();
-  const remove=page.getByRole("button",{name:"Remove from collection: Ink drawing",exact:true});
+  await chooseLookbookSource(page,"Starred");
+  const remove=page.getByRole("button",{name:"Unstar look: Ink drawing",exact:true});
   await remove.click();
   await expect(page.getByRole("alert")).toContainText("Library changed in another window");
   await expect(remove).toHaveAttribute("aria-pressed","true");
   expect(library.collections[0].styles).toHaveLength(2);
   conflict=false;await remove.click();
   await expect(page.getByRole("button",{name:"View Ink drawing",exact:true})).toHaveCount(0);
-  await expect(page.getByRole("button",{name:"View Other look",exact:true})).toBeVisible();
-  expect(library.collections[0].styles.map(style=>style.name)).toEqual(["Other look"]);
-  expect(library.collections[1].styles).toHaveLength(0);
+  expect(library.collections[0].styles).toEqual([saved,other]);
+  expect(library.collections[1].styles).toHaveLength(1);
+  expect(library.collections[2].styles).toHaveLength(0);
   await chooseLookbookSource(page,"Commercial");
-  await expect(page.getByRole("button",{name:"Save to collection: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
+  await expect(page.getByRole("button",{name:"Star look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
   await page.getByRole("button",{name:"Save to my collection",exact:true}).click();
   await expect(page.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
@@ -416,10 +417,10 @@ test("Unstarring removes saved copies immediately and after reload while retaini
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
   await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"First",exact:true}).click();
-  await expect(page.getByRole("button",{name:"View Ink drawing",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"View Ink drawing",exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Star look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"Nodes",exact:true}).click();
   await expect(page.getByLabel("Look",{exact:true}).locator("option:checked")).toHaveText("Ink drawing");
-  await expect(page.getByLabel("Look",{exact:true}).locator('optgroup[label="Saved with workflow"] option')).toHaveCount(1);
   await expect(page.getByTitle("Unlock mood board",{exact:true})).toBeVisible();
   const snapshot=await page.evaluate(()=>JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")));
   expect(snapshot.nodes.find(node=>node.id==="style").data.libraryStyle.prompt).toBe(look.prompt);

@@ -1,5 +1,7 @@
 # Upstream feature sources
 
+Film Stills parser adapted from [SugerMilks 3ef7f61](https://github.com/SugerMilks/NewtNode/commit/3ef7f6127301619cb7ed35da635380889cd27591). The sheet detection, native crop, supplied swatch ranking and readable names feed our offline compact Lookbook indexer. Existing Film Stills identities and asset URLs remain compatible with the refreshed package.
+
 ## Timeline review — November 11, 2026
 
 Reviewed [SugerMilks main at 4d51d44](https://github.com/SugerMilks/NewtNode/commit/4d51d448a9bb116a4a24103754e2f19d553e4882), including the Editor node, monitor, timeline state, playback engine and Editor standards. Our Timeline monitor button creates a connected Preview node above the Timeline. Our playhead-anchored zoom, Fit Timeline, horizontal scrolling, linked sound, layered compositing and managed still capture already cover corresponding upstream behavior.

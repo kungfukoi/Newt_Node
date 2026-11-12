@@ -1,5 +1,5 @@
 export const settingsGroups = [
-  { label: "General", sections: [["overview", "Overview"], ["userPreferences", "User Preferences"]] },
+  { label: "General", sections: [["overview", "Status"], ["userPreferences", "User Preferences"]] },
   { label: "Providers & Models", sections: [
     ["credentials", "API Credentials"],
     ["providers", "Model Providers"],

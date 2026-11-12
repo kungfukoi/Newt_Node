@@ -1,3 +1,5 @@
+export const findStarredCatalog = (collections = []) => collections.find(item => item.name.toLowerCase() === "starred");
+
 export function lookCatalogOptions(collections = [], showLocal = false, showFilmStills = false) {
   return [{ value: "all", label: "All" }, { value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "shared-user-looks", label: "User Looks" },
     ...(showFilmStills ? [{value:"film-stills",label:"Film Stills"}] : []),
@@ -17,12 +19,12 @@ export function uniqueCatalogLooks(styles) {
 }
 
 export function lookSaveOptions(collections = []) {
-  const starred = collections.find(item => item.name.toLowerCase() === "starred");
+  const starred = findStarredCatalog(collections);
   return [{ value: starred?.id || "system-starred", label: "Starred" }, ...collections.filter(item => item !== starred).map(item => ({ value: item.id, label: item.name }))];
 }
 
-// Stars retain their existing saved-anywhere meaning; show each look only once.
-export function starredCatalogLooks(collections = []) {
+// Prefer a copy with saved analysis when combining collections for the Style picker.
+export function allSavedCatalogLooks(collections = []) {
   const looks = new Map();
   for (const collection of collections) for (const style of collection.styles) {
     const identity = style.catalogId || (style.sourceUrl ? `${style.sourceUrl}\n${style.name}` : style.id);

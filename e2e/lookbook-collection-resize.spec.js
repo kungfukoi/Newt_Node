@@ -7,7 +7,7 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   let uiState={};
   await page.route("**/api/ui-state",route=>{if(route.request().method()==="PUT")uiState=route.request().postDataJSON().state;return route.fulfill({contentType:"application/json",body:JSON.stringify({state:uiState,revision:0,updatedAt:0})});});
   const styles=Array.from({length:48},(_,index)=>({id:`look-${index}`,name:`Saved look ${index+1}`,prompt:"Fine ink",examples:[{id:"example",localUrl:"/outputs/e2e/example.png"}]}));
-  await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections:[{id:"looks",name:"Looks",styles}]})}));
+  await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections:[{id:"looks",name:"Starred",styles}]})}));
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,styles,total:48,indexed:48,categories:["Architects","Painters","Techniques"]})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
   await chooseLookbookSource(page,"Commercial");

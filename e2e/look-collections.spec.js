@@ -9,9 +9,14 @@ test("The details star persists changes and stays open after unstarring from a n
   await page.route("**/api/style-library",route=>{if(route.request().method()==="PUT"){if(fail)return json(route,{error:"Collection changed; retry"},409);library={...route.request().postDataJSON(),revision:library.revision+1};}return json(route,library);});
   await page.route("**/api/style-library/catalog?**",route=>json(route,{ready:true,total:0,styles:[],categories:[]}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Cinema",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Star look: Ink",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"View Ink",exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});
+  await details.getByRole("button",{name:"Star look",exact:true}).click();
+  await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");
+  expect(library.collections.find(item=>item.name==="Starred").styles).toHaveLength(1);
   fail=true;await details.getByRole("button",{name:"Unstar look",exact:true}).click();await expect(details.getByRole("alert")).toContainText("Collection changed");await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");
-  fail=false;await details.getByRole("button",{name:"Unstar look",exact:true}).click();await expect(details).toBeVisible();await expect(details.getByRole("button",{name:"Star look",exact:true})).toHaveAttribute("aria-pressed","false");expect(library.collections[0].styles).toHaveLength(0);
+  fail=false;await details.getByRole("button",{name:"Unstar look",exact:true}).click();await expect(details).toBeVisible();await expect(details.getByRole("button",{name:"Star look",exact:true})).toHaveAttribute("aria-pressed","false");expect(library.collections[0].styles).toEqual([style]);
+  expect(library.collections.find(item=>item.name==="Starred").styles).toHaveLength(0);
   await details.getByRole("button",{name:"Star look",exact:true}).click();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");await expect(details).toBeVisible();
   await details.screenshot({path:test.info().outputPath("look-details-star.png")});
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Starred",exact:true}).click();await page.getByRole("button",{name:"View Ink",exact:true}).click();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");expect(errors).toEqual([]);
@@ -58,6 +63,10 @@ test("Named local collections, bulk selection and save destinations persist inde
   conflict = false; await page.getByRole("button", { name: "Add to collection", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Select Ink", exact: true })).not.toBeChecked();
   expect(library.collections.find(item => item.id === "second").styles).toHaveLength(2);
+  await expect(page.getByRole("button",{name:"Star look: Ink",exact:true})).toHaveAttribute("aria-pressed","false");
+  await choose("Looks source", "Starred");
+  await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(0);
+  await choose("Looks source", "Commercial");
   await page.getByRole("button", { name: "View Ink", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Style details", exact: true });
   await expect(dialog.getByText("Manage collections", { exact: true })).toHaveCount(0);

@@ -18,6 +18,6 @@ test('ElevenLabs credential field saves the active key masked and reloads',async
  await expect(page.getByLabel('ElevenLabs API key',{exact:true})).toHaveValue('eleven-browser-fixture');
  await expect(page.getByText('User Read needed',{exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath('elevenlabs-settings.png')});
- await page.getByRole('button',{name:'Overview',exact:true}).click();
+ await page.getByRole('button',{name:'Status',exact:true}).click();
  await expect(page.getByText('Restricted',{exact:true})).toBeVisible();
 });
