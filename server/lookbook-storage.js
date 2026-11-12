@@ -42,9 +42,10 @@ export async function removeOriginalLookImage(url,uploadsDirectory){
 export function createLookbookStorage({directory,cacheDirectory,readAsset,removeOriginal}){
   const local=createCustomLookStore({directory}),configPath=path.join(directory,"lookbook-storage.json"),aliasPath=path.join(directory,"lookbook-image-aliases.json"),assets=new Map();
   const readCatalog=createCompactStyleFinderReader({shared:true});
+  const readFilmCatalog=createCompactStyleFinderReader({shared:true,imageEndpoint:"/api/style-library/film-stills-image"});
   let queue=Promise.resolve(),aliasCache=null;
   function serial(action){const work=queue.then(action);queue=work.catch(()=>{});return work;}
-  async function config(){try{const value=JSON.parse(await readFile(configPath,"utf8"));if(typeof value.directory!=="string"||(value.looksDirectory!==undefined&&typeof value.looksDirectory!=="string"))throw Error("Invalid Lookbook storage setting.");return value;}catch(error){if(error.code==="ENOENT")return {directory:""};throw error;}}
+  async function config(){try{const value=JSON.parse(await readFile(configPath,"utf8"));if(typeof value.directory!=="string"||(value.looksDirectory!==undefined&&typeof value.looksDirectory!=="string")||(value.filmStillsDirectory!==undefined&&typeof value.filmStillsDirectory!=="string"))throw Error("Invalid Lookbook storage setting.");return value;}catch(error){if(error.code==="ENOENT")return {directory:""};throw error;}}
   async function rootAvailable(root){
     try{if(!(await stat(root)).isDirectory())throw Error("Not a directory");}
     catch{fail("The shared folder is unavailable. Mount the drive or update the path in Settings → User Preferences.",503);}
@@ -69,6 +70,12 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
   async function readSharedCompact(){
     const setting=await config();
     return setting.format==="compact"?openCompact(setting.directory):null;
+  }
+  async function readFilmStills(){
+    const {filmStillsDirectory}=await config();
+    if(!filmStillsDirectory)return null;
+    try{return await readFilmCatalog(filmStillsDirectory);}
+    catch{fail("Film Stills could not be opened. Check that its folder is mounted and contains a valid catalog.json.",503);}
   }
   async function record(folder,id){
     const filename=path.join(folder,id,"look.json"),info=await stat(filename);
@@ -195,20 +202,25 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     return images;
   }
   function add(source){return serial(async()=>{const location=lookLocation(await config());if(!location.root)return local.add(source);const saved=await sharedAdd(location,source);await retireImages([source],[saved]);return saved;});}
-  async function state(){const setting=await config(),looksDirectory=looksRoot(setting);return {directory:setting.directory,looksDirectory,mode:looksDirectory?"shared":"local",localCount:(await local.read()).length,...(setting.format==="compact"?{format:setting.format}:{})};}
+  async function state(){const setting=await config(),looksDirectory=looksRoot(setting);return {directory:setting.directory,looksDirectory,filmStillsDirectory:setting.filmStillsDirectory??"",mode:looksDirectory?"shared":"local",localCount:(await local.read()).length,...(setting.format==="compact"?{format:setting.format}:{})};}
   function configure(body={}){return serial(async()=>{
     const previous=await config();
     const root=await resolveFolder(body.directory,previous.directory);
     const compact=root===previous.directory?previous.format==="compact"
       :root&&await openCompact(root,{optional:body.looksDirectory===undefined});
     const looksDirectory=body.looksDirectory===undefined?previous.looksDirectory:await resolveFolder(body.looksDirectory,looksRoot(previous));
+    const filmStillsDirectory=await resolveFolder(body.filmStillsDirectory??previous.filmStillsDirectory??"",previous.filmStillsDirectory);
+    if(filmStillsDirectory&&filmStillsDirectory!==previous.filmStillsDirectory){
+      try{await readFilmCatalog(filmStillsDirectory);}
+      catch{fail("Choose a Film Stills folder containing a valid compact catalog.json.",503);}
+    }
     const location=lookLocation({directory:root,looksDirectory});
     if(location.root){
       const copies=body.copyLocal===false?[]:await local.read();
       if(copies.length||(location.root!==looksRoot(previous)&&(looksDirectory!==undefined||!compact)))await checkWritable(location.root);
       for(const look of copies)await sharedAdd(location,look);
     }
-    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root,looksDirectory,...(compact?{format:"compact"}:{})}),{mode:0o600});await rename(temporary,configPath);
+    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root,looksDirectory,...(filmStillsDirectory?{filmStillsDirectory}:{}),...(compact?{format:"compact"}:{})}),{mode:0o600});await rename(temporary,configPath);
     return state();
   });}
   function retireLocalCopies(){return serial(async()=>{
@@ -262,9 +274,35 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     }
     return {id,removed};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,purgeSharedLook,readSharedCompact,readSharedLooks,searchLocalLooks};
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,purgeSharedLook,readSharedCompact,readFilmStills,readSharedLooks,searchLocalLooks};
 }
 export function registerLookbookStorageRoutes(app,store){
+  async function filmStills(res, action){
+    try{
+      const catalog=await store.readFilmStills();
+      if(!catalog)fail("Set the Film Stills catalog folder in Settings → User Preferences.",404);
+      await action(catalog);
+    }catch(error){
+      res.status(error.status||(error.code==="ENOENT"?404:503)).json({error:error.status?error.message:"This Film Stills example is unavailable. Check the shared folder and refresh."});
+    }
+  }
+  const filmStyle=style=>{
+    const id=`film-stills-${style.id}`;
+    return {...style,id,catalogId:id,sourceProvider:"Film Stills"};
+  };
+  app.get("/api/style-library/film-stills",(req,res)=>filmStills(res,catalog=>{
+    const page=catalog.search(req.query);
+    res.json({...page,styles:page.styles.map(filmStyle)});
+  }));
+  app.get("/api/style-library/film-stills/:id",(req,res)=>filmStills(res,catalog=>{
+    const id=/^film-stills-([a-z0-9-]{1,100})$/.exec(req.params.id)?.[1];
+    if(!id)fail("Choose a valid Film Stills look.",400);
+    res.json({style:filmStyle(catalog.detail(id).style)});
+  }));
+  app.get("/api/style-library/film-stills-image",(req,res)=>filmStills(res,async catalog=>{
+    const {filename,mimeType}=await catalog.asset(req.query.file,req.query.v);
+    res.sendFile(filename,{headers:{"Content-Type":mimeType,"Cache-Control":"private, max-age=60","X-Content-Type-Options":"nosniff"}});
+  }));
   const error=(res,e)=>res.status(e.status||500).json({error:e.status?e.message:"Could not access Lookbook storage. Check the folder and its permissions; the previous setting is unchanged."});
   app.get("/api/style-library/storage",async(_req,res)=>{try{res.json(await store.state());}catch(e){error(res,e);}});
   app.get("/api/style-library/local-looks",async(req,res)=>{try{res.json(await store.searchLocalLooks(req.query));}catch(e){error(res,e);}});

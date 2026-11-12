@@ -59,17 +59,17 @@ export const styleLibraryApi = {
   },
   async catalog({ query = "", category = "", offset = 0, refresh = false, source = "library" } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0", own: "1" });
-    const endpoint=["stylefinder","shared-user-looks","local-looks"].includes(source)?source:"catalog";
+    const endpoint=["stylefinder","shared-user-looks","local-looks","film-stills"].includes(source)?source:"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
     ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
     if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");
     return data;
   },
-  async allCatalogs({query,category,refresh,includeLocal=false,offsets={library:0,stylefinder:0,"shared-user-looks":0,"local-looks":0}}) {
-    const sources=Object.entries(offsets).filter(([source])=>source!=="local-looks"||includeLocal);
+  async allCatalogs({query,category,refresh,includeLocal=false,includeFilmStills=false,offsets={library:0,stylefinder:0,"shared-user-looks":0,"local-looks":0,"film-stills":0}}) {
+    const sources=Object.entries(offsets).filter(([source])=>(source!=="local-looks"||includeLocal)&&(source!=="film-stills"||includeFilmStills));
     const results=await Promise.allSettled(sources.map(([source,offset])=>this.catalog({query,category,refresh,source,offset})));
     const nextOffsets={},styles=[],categories=new Set(),warnings=[];
-    const labels={library:"Commercial",stylefinder:"StyleFinder","shared-user-looks":"User Looks","local-looks":"Local Looks"};
+    const labels={library:"Commercial",stylefinder:"StyleFinder","shared-user-looks":"User Looks","local-looks":"Local Looks","film-stills":"Film Stills"};
     let truncated=false;
     results.forEach((result,index)=>{
       const [source,offset]=sources[index];
@@ -87,7 +87,7 @@ export const styleLibraryApi = {
     return {ready:true,styles,categories:[...categories].sort(),nextOffsets,truncated,warning:warnings.join(" ")};
   },
   async detail(id) {
-    const endpoint=id.startsWith("stylefinder-")?"stylefinder":"catalog";
+    const endpoint=id.startsWith("film-stills-")?"film-stills":id.startsWith("stylefinder-")?"stylefinder":"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 60000, retryLocalApi: false });
     return ensureOk(response, data, "Could not read this catalog look.");
   },

@@ -32,6 +32,8 @@ Settings → User Preferences owns two per-installation paths. Shared Looks Cata
 
 A newly selected Shared Looks Catalog folder containing a compact `catalog.json` is validated on save. Paths can point to a local folder, a mapped Windows drive or UNC share, or a mounted macOS volume. The compact package needs read access. Copying or creating user Looks needs write access to the Shared User Looks folder. A dedicated folder stores Look records directly and also reads older `looks/` subfolders.
 
+Film Stills Catalog is an optional per-installation path to a read-only compact package. The Film Stills source uses the standard Lookbook search, category filter, pagination, details and managed image import. All includes it when configured. New or changed folder paths are validated on save, and an unavailable Film Stills mount surfaces a source-specific error.
+
 Create Look places a large continuous colour palette bar directly beneath Extract style / Extract again after extraction returns colours. Swatches show names and hex values and support mouse/keyboard colour editing; edited colours are saved as reference metadata independently of the Style prompt. Segment widths are equal because extraction returns suggested colours without measured proportions. The Midlibrary import button and endpoints are removed.
 
 Look analysis begins directly with visual style traits, without a stock subject/composition-preservation opening. Create Look's compiled sections likewise carry no introductory wrapper. `lookStyleText.js` removes only the former known opening from new/cached Newt analyses and saved workflow style snapshots; source catalog prose stays unchanged. Text cleanup never causes another paid analysis.

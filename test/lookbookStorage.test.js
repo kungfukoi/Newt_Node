@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
-import {randomUUID} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import {mkdtemp,mkdir,readFile,rename,rm,readdir,symlink,writeFile,stat} from "node:fs/promises";
 import sharp from "sharp";
 import express from "express";
@@ -80,6 +80,38 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles,[]);
   assert.deepEqual((await reopened.read()).map(look=>look.id),[localLook.id]);
   assert.equal((await reopened.state()).format,"compact");
+});
+test("Film Stills keeps its own folder, detail identities and versioned image route",async t=>{
+  const f=await fixture(t),film=path.join(f.root,"Film Stills");
+  const hash=createHash("sha256").update(f.buffer).digest("hex"),blob=`${hash}.png`;
+  const bucket=path.join(film,"images",hash.slice(0,2));
+  await mkdir(bucket,{recursive:true});
+  await writeFile(path.join(bucket,blob),f.buffer);
+  const example={url:"/api/style-library/stylefinder-image?file=img%2Fstill.png"};
+  const style={id:"still",name:"First frame",category:"Film Stills",tags:[],examples:[example]};
+  await writeFile(path.join(film,"catalog.json"),JSON.stringify({version:1,styles:[style],categories:["Film Stills"],details:{},assets:{"img/still.png":blob}}));
+  const saved=await f.one.configure({directory:"",looksDirectory:f.shared,filmStillsDirectory:film});
+  await assert.rejects(f.one.configure({...saved,filmStillsDirectory:f.shared}),{status:503});
+  await f.one.configure({directory:"",looksDirectory:f.shared,copyLocal:false});
+  assert.equal((await f.one.state()).filmStillsDirectory,saved.filmStillsDirectory);
+  assert.equal(await f.one.readSharedCompact(),null);
+
+  const app=express();
+  registerLookbookStorageRoutes(app,f.one);
+  const server=app.listen(0,"127.0.0.1");
+  await new Promise(resolve=>server.once("listening",resolve));
+  t.after(()=>server.close());
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const endpoint=`${base}/api/style-library/film-stills`;
+  const page=await (await fetch(`${endpoint}?q=first&category=Film%20Stills`)).json();
+  assert.equal(page.total,1);
+  const [card]=page.styles;
+  assert.equal(card.catalogId,"film-stills-still");
+  assert.deepEqual((await (await fetch(`${endpoint}/${card.id}`)).json()).style,card);
+  const image=await fetch(base+card.examples[0].url);
+  assert.equal(image.headers.get("content-type"),"image/png");
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()),f.buffer);
+  assert.equal((await fetch(base+card.examples[0].url.replace(blob,"stale.png"))).status,404);
 });
 test("Independent concurrent writers retain both looks; identical Save retries are idempotent and conflicting ids reject",async t=>{
   const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});const first=draft(),second={...draft(),name:"Second"};

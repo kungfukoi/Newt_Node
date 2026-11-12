@@ -387,11 +387,11 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   const providerBase = layers.getByRole("button", { name: "Base image", exact: true });
   await backdrop.click();
   await expect(selectedRows).toHaveCount(1);
-  await providerBase.click({ modifiers: ["Control"] });
+  await providerBase.click({ modifiers: ["ControlOrMeta"] });
   await expect(selectedRows).toHaveCount(2);
-  await providerBase.click({ modifiers: ["Control"] });
+  await providerBase.click({ modifiers: ["ControlOrMeta"] });
   await expect(selectedRows).toHaveCount(1);
-  await providerBase.click({ modifiers: ["Control"] });
+  await providerBase.click({ modifiers: ["ControlOrMeta"] });
   await editor.getByRole("button", { name: "Remove selected layers", exact: true }).click();
   await expect(backdrop).toHaveCount(0);
   await expect(providerBase).toHaveCount(0);

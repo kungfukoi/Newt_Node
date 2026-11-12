@@ -6,9 +6,10 @@ import "./LookbookStorageSettings.css";
 export default function LookbookStorageSettings(){
   const [state,setState]=React.useState(null),[directory,setDirectory]=React.useState(""),[copyLocal,setCopyLocal]=React.useState(true);
   const [looksDirectory,setLooksDirectory]=React.useState("");
+  const [filmStillsDirectory,setFilmStillsDirectory]=React.useState("");
   const [busy,setBusy]=React.useState(false),[error,setError]=React.useState(""),[notice,setNotice]=React.useState("");
   const operation=React.useRef(false);
-  function apply(value){setState(value);setDirectory(value.directory);setLooksDirectory(value.looksDirectory??value.directory);}
+  function apply(value){setState(value);setDirectory(value.directory);setLooksDirectory(value.looksDirectory??value.directory);setFilmStillsDirectory(value.filmStillsDirectory??"");}
   React.useEffect(()=>{let active=true;styleLibraryApi.storage().then(value=>{
     if(!active)return;
     apply(value);
@@ -18,16 +19,18 @@ export default function LookbookStorageSettings(){
   async function run(action){if(operation.current)return;operation.current=true;setBusy(true);setError("");setNotice("");try{await action();}catch(error){setError(error.message);}finally{operation.current=false;setBusy(false);}}
   async function browse(title,defaultPath,setPath){await run(async()=>{const {response,data}=await systemApi.selectFolder({title,defaultPath});if(data?.canceled)return;if(!response.ok)throw Error(data.error||"Could not choose a folder.");if(data.path)setPath(data.path);});}
   async function save(){await run(async()=>{
-    const value=await styleLibraryApi.saveStorage({directory,looksDirectory,copyLocal});
+    const value=await styleLibraryApi.saveStorage({directory,looksDirectory,filmStillsDirectory,copyLocal});
     apply(value);
     const destination=value.mode==="shared"?"New Looks and their images will be saved to Shared User Looks.":"New Looks will be saved on this computer.";
     const catalog=value.format==="compact"?" Browse the compact catalog in StyleFinder.":"";
-    setNotice(`Lookbook folders saved. ${destination}${catalog}`);
+    setNotice(`Lookbook folders saved. ${destination}${catalog}${value.filmStillsDirectory?" Browse the shared stills in Film Stills.":""}`);
   });}
   return <section className="lookbook-storage-preference" aria-label="Lookbook storage">
     <label><strong>Shared Looks Catalog</strong><input placeholder="Enter a local or network folder path" value={directory} disabled={disabled} onChange={event=>setDirectory(event.target.value)}/></label>
     <p>Choose the compact catalog folder containing catalog.json and images.</p>
     <div className="lookbook-storage-actions"><button type="button" aria-label="Browse Shared Looks Catalog" disabled={disabled} onClick={()=>browse("Choose Shared Looks Catalog folder",directory,setDirectory)}><FolderOpen size={14}/>Browse</button></div>
+    <label><strong>Film Stills Catalog</strong><input placeholder="Enter a local or network folder path" value={filmStillsDirectory} disabled={disabled||typeof state?.filmStillsDirectory!=="string"} onChange={event=>setFilmStillsDirectory(event.target.value)}/></label>
+    <div className="lookbook-storage-actions"><button type="button" aria-label="Browse Film Stills Catalog" disabled={disabled||typeof state?.filmStillsDirectory!=="string"} onClick={()=>browse("Choose Film Stills Catalog folder",filmStillsDirectory,setFilmStillsDirectory)}><FolderOpen size={14}/>Browse</button></div>
     <label><strong>Shared User Looks</strong><input placeholder="Enter a writable local or network folder path" value={looksDirectory} disabled={disabled} onChange={event=>setLooksDirectory(event.target.value)}/></label>
     <p>New user-created Looks and their images are saved here. Choose User Looks from the Looks source menu to browse this folder. Leave this field empty to save on this computer.</p>
     <div className="lookbook-storage-actions"><button type="button" aria-label="Browse Shared User Looks" disabled={disabled} onClick={()=>browse("Choose Shared User Looks folder",looksDirectory,setLooksDirectory)}><FolderOpen size={14}/>Browse</button></div>

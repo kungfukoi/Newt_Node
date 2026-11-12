@@ -12,7 +12,7 @@ export function compactStyleFinderBlob(directory, blob) {
   return path.join(directory, "images", blob.slice(0, 2), blob);
 }
 
-export function openCompactStyleFinder(directory, manifest, { shared = false } = {}) {
+export function openCompactStyleFinder(directory, manifest, { shared = false, imageEndpoint = "/api/style-library/stylefinder-image" } = {}) {
   const { version, styles, details, categories, assets } = manifest;
   if (version !== 1 || !Array.isArray(styles) || !styles.length || styles.length > 50000 ||
       !Array.isArray(categories) || !categories.every(value => typeof value === "string") ||
@@ -51,7 +51,7 @@ export function openCompactStyleFinder(directory, manifest, { shared = false } =
         ? new URL(url, "http://localhost").searchParams.get("file") : "");
       if (!key || !Object.hasOwn(assets, key)) return image;
       const { localUrl, ...reference } = image;
-      return { ...reference, url: `/api/style-library/stylefinder-image?file=${encodeURIComponent(key)}&v=${assets[key]}` };
+      return { ...reference, url: `${imageEndpoint}?file=${encodeURIComponent(key)}&v=${assets[key]}` };
     });
     return {
       ...style, examples, previewUrl: examples[0]?.url || style.previewUrl,

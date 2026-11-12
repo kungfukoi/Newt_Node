@@ -72,10 +72,12 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const canDeleteCatalog=scope==="collection"&&browseCollection&&browseCollection.id!=="system-starred"&&!["catalog","starred"].includes(browseCollection.name.toLowerCase());
   React.useEffect(()=>setDeletingCatalog(""),[scope,browseCollectionId]);
   const sharedUserLooks=scope==="shared-user-looks";
+  const [showFilmStills,setShowFilmStills]=React.useState(false);
   const allLooks=scope==="all";
   const includeLocalInAll=allLooks&&showLocalLooks;
+  const includeFilmStillsInAll=allLooks&&showFilmStills;
   const catalogRefresh=sharedCatalogRevision;
-  const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks||allLooks||scope==="local-looks";
+  const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks||allLooks||scope==="local-looks"||scope==="film-stills";
   const catalogViewKey=JSON.stringify([scope,query,category]);
   const currentCatalog=catalog?.viewKey===catalogViewKey?catalog:null;
   const catalogError=catalogFailure?.viewKey===catalogViewKey?catalogFailure.message:"";
@@ -85,7 +87,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const matchesCategory=style=>!category||style.category===category||style.tags?.includes(category);
   const sourceStyles=isSourceCatalog ? (currentCatalog?.styles||[]).map(style=>({...style,catalog:true})) : scope==="starred" ? starredCatalogLooks(library?.collections) : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
-  const browserOptions=lookCatalogOptions(library?.collections,showLocalLooks);
+  const browserOptions=lookCatalogOptions(library?.collections,showLocalLooks,showFilmStills);
   const saveOptions=lookSaveOptions(library?.collections);
   const browserName=browserOptions.find(option=>option.value===browserValue)?.label || "Catalog";
   function chooseCatalog(value) {
@@ -114,7 +116,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     if(!offset&&source==="shared-user-looks")setCatalog(current=>current&&{...current,viewKey:null,warning:""});
     try {
       const value=source==="all"
-        ? await styleLibraryApi.allCatalogs({query:search,category:filter,refresh,offsets,includeLocal:includeLocalInAll})
+        ? await styleLibraryApi.allCatalogs({query:search,category:filter,refresh,offsets,includeLocal:includeLocalInAll,includeFilmStills:includeFilmStillsInAll})
         : await styleLibraryApi.catalog({query:search,category:filter,offset,refresh,source});
       if(version!==request.current)return;
       if(offset&&source==="shared-user-looks"&&value.looksDirectory!==directory){
@@ -134,10 +136,14 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       }));
     }
     catch(e) { if(version===request.current)setCatalogFailure({viewKey,message:e.message}); } finally { if(version===request.current)setCatalogLoading(false); }
-  },[query,category,scope,includeLocalInAll]);
+  },[query,category,scope,includeLocalInAll,includeFilmStillsInAll]);
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{
-    const update=()=>styleLibraryApi.storage().then(value=>setShowLocalLooks(value.mode==="local")).catch(()=>{});
+    const update=()=>styleLibraryApi.storage().then(value=>{
+      setShowLocalLooks(value.mode==="local");
+      setShowFilmStills(Boolean(value.filmStillsDirectory));
+      if(!value.filmStillsDirectory)setScope(current=>current==="film-stills"?"stylefinder":current);
+    }).catch(()=>{});
     update();
     window.addEventListener("newtnode:lookbook-storage-updated",update);
     return()=>window.removeEventListener("newtnode:lookbook-storage-updated",update);
@@ -181,7 +187,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       if (!library) throw new Error("Wait for your catalogs to load.");
       const trimmed = name.trim();
       if (!trimmed || trimmed.length > 120) throw new Error("Name your catalog using 1–120 characters.");
-      if (["all","catalog","commercial","stylefinder","user looks","local looks","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
+      if (["all","catalog","commercial","stylefinder","user looks","local looks","film stills","starred"].includes(trimmed.toLowerCase()) || library.collections.some(item=>item.name.toLowerCase()===trimmed.toLowerCase())) throw new Error("That catalog name is already in use.");
       const target = crypto.randomUUID();
       await save([...library.collections,{id:target,name:trimmed,styles:[]}]);
       if(!collectionId)setCollectionId(target);setBrowseCollectionId(target);setScope("collection");
@@ -357,7 +363,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     {notice&&<p className="stylebuilder-notice" role="status">{notice}</p>}
     <section className="stylebuilder-browse" aria-label="Looks catalog"><div className="stylebuilder-browse-toolbar"><p>Explore the catalog. <span>Choose a look</span></p><div className="stylebuilder-browse-controls"><button className="lookbook-compact-action" disabled={busy||!library||library.collections.length>=100} onClick={()=>setCreatingCatalog(value=>!value)}>New Catalog</button><LookbookSelect label="Looks source" value={browserValue} onChange={chooseCatalog} options={browserOptions}/><label className="stylebuilder-search"><Search size={18}/><input ref={searchInput} aria-label="Search looks" placeholder="Search looks" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="stylebuilder-search-clear" aria-label="Clear look search" onClick={()=>{setQuery("");searchInput.current?.focus();}}><X size={15}/></button>}</label><button className="stylebuilder-icon" aria-label="Refresh catalog" title="Refresh the look catalog" disabled={isSourceCatalog?catalogLoading:busy} onClick={()=>isSourceCatalog?loadCatalog({refresh:true}):loadLibrary()}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button></div></div>
     {creatingCatalog&&<form className="library-inline look-collection-form" onSubmit={async event=>{event.preventDefault();if(await createCatalog(newCatalogName)){setCreatingCatalog(false);setNewCatalogName("");}}}><label>Catalog name<input autoFocus maxLength={120} disabled={busy} value={newCatalogName} onChange={event=>setNewCatalogName(event.target.value)} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setCreatingCatalog(false);}}}/></label><button type="submit" className="library-primary" disabled={busy||!newCatalogName.trim()}>Create Catalog</button><button type="button" disabled={busy} onClick={()=>setCreatingCatalog(false)}>Cancel</button></form>}
-      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${currentCatalog?.total??0} StyleRef looks${currentCatalog?.localCount?` · ${currentCatalog.localCount} custom`:""}`:scope==="stylefinder"?`${currentCatalog?.total??0} StyleFinder looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
+      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${currentCatalog?.total??0} StyleRef looks${currentCatalog?.localCount?` · ${currentCatalog.localCount} custom`:""}`:scope==="stylefinder"||scope==="film-stills"?`${currentCatalog?.total??0} ${browserName} looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
       {(scope==="library"||allLooks)&&currentCatalog?.truncated&&<p className="library-muted">StyleRef has reached its gallery browsing limit. Refine your search to explore more looks.</p>}
       {catalogError&&isSourceCatalog&&<p className="library-error" role="alert">{catalogError}</p>}
       {currentCatalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{currentCatalog.warning}</p>}

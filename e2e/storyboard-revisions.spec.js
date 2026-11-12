@@ -79,7 +79,13 @@ test("panel protection blocks editing, replanning and generation; restoring a ve
  await expect(card.getByRole("button",{name:"Create New Plan",exact:true})).toBeDisabled();expect(plans).toBe(0);
  await card.getByRole("tab",{name:"Storyboard View",exact:true}).click();
  await expect(card.getByRole("button",{name:"Generate Missing",exact:true})).toBeDisabled();
- await card.getByLabel("Select all editable panels").check();
+ const selectAll = card.getByRole("checkbox", { name: "Select all editable panels" });
+ await expect(selectAll).toBeEnabled();
+ await selectAll.press("Space");
+ await expect(selectAll).toBeChecked();
+ await expect(card.getByLabel("Select panel 1 for revision")).not.toBeChecked();
+ await expect(card.getByLabel("Select panel 2 for revision")).toBeChecked();
+ await expect(card.getByLabel("Select panel 3 for revision")).toBeChecked();
  await card.getByRole("button",{name:"Regenerate Selected",exact:true}).click();
  await expect.poll(()=>images).toBe(2);
  await expect.poll(async()=> (await savedFrames(page))[1].versions?.length).toBe(1);
