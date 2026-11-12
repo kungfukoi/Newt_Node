@@ -28,6 +28,7 @@ server/data/style-library.json.tmp
 server/data/remote-video-jobs.json
 server/data/remote-video-jobs.json.d/
 server/data/remote-video-jobs.json.legacy-backup
+server/data/ideogram-vector/
 server/data/project-outputs/
 server/data/newt-presets/
 server/data/object-scans/
