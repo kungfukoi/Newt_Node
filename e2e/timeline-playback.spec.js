@@ -56,6 +56,31 @@ test('Timeline adds a large connected Preview above the tracks that follows its 
   expect(errors).toEqual([]);
 });
 
+test('New Timeline and connected Preview inherit sizes from the active canvas', async ({ page }) => {
+  const fixture = canvasFixture({ timeline: true, scale: 0.6 });
+  const [timeline, viewer] = fixture.nodes;
+  Object.assign(timeline.data, { nodeWidth: 1600, nodeHeight: 620 });
+  Object.assign(viewer.data, { nodeWidth: 980, nodeHeight: 690 });
+  fixture.canvases = [{ id: 'current', name: 'Current' }, { id: 'other', name: 'Other' }];
+  fixture.activeCanvasId = 'current';
+  timeline.canvasId = viewer.canvasId = 'current';
+  fixture.nodes.push(
+    { ...timeline, id: 'other-timeline', canvasId: 'other', data: { ...timeline.data, nodeWidth: 1800 } },
+    { ...viewer, id: 'other-preview', canvasId: 'other', data: { ...viewer.data, nodeWidth: 1100 } }
+  );
+  fixture.edges.push({ id: 'other-wire', from: { nodeId: 'other-timeline', port: 'frameOut' }, to: { nodeId: 'other-preview', port: 'sourceIn' } });
+  await openFixture(page, { fixture });
+  await page.locator('.node-canvas').click({ button: 'right', position: { x: 1200, y: 500 } });
+  await page.locator('.node-context-menu').getByRole('button', { name: 'Timeline', exact: true }).click();
+  const addedTimeline = page.locator('.node-card.node-type-assembly:not([data-node-card-id="timeline"])');
+  await expect(addedTimeline).toHaveCSS('width', '1600px');
+  await expect(addedTimeline).toHaveCSS('height', '620px');
+  await addedTimeline.getByRole('button', { name: 'Add connected Preview' }).press('Space');
+  const addedPreview = page.locator('.node-card.node-type-preview:not([data-node-card-id="viewer"])');
+  await expect(addedPreview).toHaveCSS('width', '980px');
+  await expect(addedPreview).toHaveCSS('height', '690px');
+});
+
 test('Timeline J/K/L shuttles the focused transport and leaves text inputs alone', async ({ page }) => {
   const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
   const node = page.locator('[data-node-card-id="timeline"]');

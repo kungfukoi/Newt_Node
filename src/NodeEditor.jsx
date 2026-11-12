@@ -2346,6 +2346,10 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
   function createNodeData(type, label, count) {
     const data = createDefaultNodeData(type, label, count);
+    if (type === "assembly") {
+      const template = nodesRef.current.findLast(node => node.type === "assembly" && node.canvasId === activeCanvasRef.current);
+      if (template) return { ...data, ...getNodeShellSize(template) };
+    }
     if (type === "explore") {
       const model = enabledImageModels.includes(data.model) ? data.model : enabledImageModels.find(item => exploreModels.includes(item)) || data.model;
       return { ...data, ...imageModelSelectionPatch(data, model) };
@@ -2386,17 +2390,35 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     return data;
   }
 
+  function getNodeShellSize(node) {
+    const bounds = getNodeBounds(node.id);
+    return {
+      nodeWidth: normalizedNodeWidth(node.data?.nodeWidth ?? bounds.right - bounds.left, node.type),
+      nodeHeight: normalizedNodeHeight(node.data?.nodeHeight ?? bounds.bottom - bounds.top,
+        minimumResizableNodeHeight(node.type), maximumResizableNodeHeight(node.type))
+    };
+  }
+
   function addTimelinePreview(node) {
     const timeline = getNodeBounds(node.id);
     const gap = 48;
-    const previewWidth = Math.round((timeline.right - timeline.left) * 0.55);
-    const previewHeight = Math.round(previewWidth * 9 / 16) + 120;
+    const canvasNodes = nodesRef.current.filter(item => item.canvasId === node.canvasId);
+    const timelineIds = new Set(canvasNodes.filter(item => item.type === "assembly").map(item => item.id));
+    const previewEdges = edgesRef.current.filter(edge => edge.from.port === "frameOut" && timelineIds.has(edge.from.nodeId));
+    const localPreviewIds = new Set(previewEdges.filter(edge => edge.from.nodeId === node.id).map(edge => edge.to.nodeId));
+    const previewIds = new Set(previewEdges.map(edge => edge.to.nodeId));
+    const template = canvasNodes.findLast(item => item.type === "preview" && localPreviewIds.has(item.id))
+      || canvasNodes.findLast(item => item.type === "preview" && previewIds.has(item.id));
+    const fallbackWidth = Math.round((timeline.right - timeline.left) * 0.55);
+    const { nodeWidth: previewWidth, nodeHeight: previewHeight } = template ? getNodeShellSize(template) : {
+      nodeWidth: fallbackWidth,
+      nodeHeight: Math.round(fallbackWidth * 9 / 16) + 120
+    };
     const position = {
       x: Math.round((timeline.left + timeline.right - previewWidth) / 2),
       y: Math.floor(timeline.top) - gap - previewHeight
     };
-    const obstacles = nodesRef.current
-      .filter(item => item.canvasId === node.canvasId)
+    const obstacles = canvasNodes
       .map(item => estimatedNodeRect(item))
       .filter(bounds => bounds.right + gap > position.x && bounds.left - gap < position.x + previewWidth)
       .sort((a, b) => b.bottom - a.bottom);
@@ -2414,10 +2436,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     if (!canvas) return;
     const current = viewportRef.current;
     const inset = 48;
+    const left = Math.min(timeline.left, position.x);
+    const right = Math.max(timeline.right, position.x + previewWidth);
     const scale = Math.max(viewportScaleFloor, Math.min(current.scale,
-      (canvas.clientWidth - 2 * inset) / (timeline.right - timeline.left),
+      (canvas.clientWidth - 2 * inset) / (right - left),
       (canvas.clientHeight - 2 * inset) / (timeline.bottom - position.y)));
-    const x = clamp(current.x, inset - timeline.left * scale, canvas.clientWidth - inset - timeline.right * scale);
+    const x = clamp(current.x, inset - left * scale, canvas.clientWidth - inset - right * scale);
     const y = clamp(current.y, inset - position.y * scale, canvas.clientHeight - inset - timeline.bottom * scale);
     const next = { x, y, scale };
     if (!sameViewport(current, next)) renderTransientViewport(next, { commitAfterMs: 120 });

@@ -73,7 +73,11 @@ export async function openFixture(page, options = {}) {
   if (options.remoteVideoJobs) await page.route("**/api/remote-video-jobs?**", options.remoteVideoJobs);
   await page.goto("/");
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
-  await expect(page.locator(".react-flow__node")).toHaveCount(fixture.nodes.length);
+  const activeCanvasId = fixture.activeCanvasId || fixture.canvases?.[0]?.id;
+  const visibleNodes = activeCanvasId
+    ? fixture.nodes.filter(node => (node.canvasId || fixture.canvases?.[0]?.id) === activeCanvasId)
+    : fixture.nodes;
+  await expect(page.locator(".react-flow__node")).toHaveCount(visibleNodes.length);
   await expect(page.getByText("Nodes failed to load.", { exact: false })).toHaveCount(0);
   return { fixture, errors, requests };
 }
