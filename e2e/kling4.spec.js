@@ -53,10 +53,12 @@ test("Stats keeps Kling 4.0 provider routes and unpriced runs separate", async (
   await page.getByLabel("Model", { exact: true }).selectOption("Kling 4.0 Image-to-Video");
   for (const provider of ["fal", "atlas"]) {
     await page.getByLabel("Provider", { exact: true }).selectOption(provider);
-    await expect(ledger.locator("tbody tr")).toHaveCount(1);
-    await ledger.locator("summary").click();
-    await expect(ledger.getByText(history.find(row => row.provider === provider).endpoint, { exact: true })).toBeVisible();
-    await expect(ledger.getByText("No verified Kling 4.0 price is available", { exact: true })).toBeVisible();
+    const rows = ledger.locator("tbody tr");
+    await expect(rows).toHaveCount(1);
+    const details = rows.locator("details");
+    await details.locator("summary").click();
+    await expect(details.getByText(history.find(row => row.provider === provider).endpoint, { exact: true })).toBeVisible();
+    await expect(details.getByText("No verified Kling 4.0 price is available", { exact: true })).toBeVisible();
   }
   expect(errors).toEqual([]);
 });

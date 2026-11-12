@@ -3,12 +3,10 @@ import { openFixture } from "./helpers.mjs";
 import { normalizeVideoOutpaintSettings, videoOutpaintFingerprint, planVideoOutpaint } from "../src/videoOutpaint.js";
 
 test("Video Outpaint drafts an editable guided prompt without generating video and preserves edits on failure", async ({ page }) => {
-  // Keep the expanded drawer and its tooltip trigger above the canvas's scroll boundary.
-  await page.setViewportSize({ width: 1600, height: 1400 });
   await page.addInitScript(() => { if (sessionStorage.getItem("seedance-node-editor-draft-v1")) return; sessionStorage.setItem("seedance-node-editor-draft-v1", JSON.stringify({
     nodes: [
       { id: "source", type: "video", x: 20, y: 20, data: { resultUrl: "/outputs/e2e/source.mp4", status: "complete" } },
-      { id: "vace", type: "utility", x: 550, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: true, outpaintPromptMode: "guided", videoOutpaint: { model: "wan-vace", aspectRatio: "9:16" }, prompt: "Existing prompt" } }
+      { id: "vace", type: "utility", x: 550, y: 20, data: { title: "Outpaint", utilityMode: "video", utilityVideoModel: "Video Outpaint", settingsOpen: false, outpaintPromptMode: "guided", videoOutpaint: { model: "wan-vace", aspectRatio: "9:16" }, prompt: "Existing prompt" } }
     ], edges: [
       { id: "s-v", from: { nodeId: "source", port: "videoOut" }, to: { nodeId: "vace", port: "referenceVideoIn" } }
     ], groups: [], viewport: { x: 10, y: 10, scale: 0.8 }
@@ -37,6 +35,7 @@ test("Video Outpaint drafts an editable guided prompt without generating video a
   await expect(page.getByRole("tooltip")).toBeVisible();
   await about.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await node.locator(".model-settings-drawer > summary").click();
   const prompt = node.locator(".node-row").filter({ has: page.locator(".node-row-label", { hasText: /^Prompt$/ }) }).locator("textarea");
   await node.getByRole("button", { name: "Prepare canvas & mask" }).click();
   await expect(node.getByLabel("Prepared outpainting canvas")).toBeVisible();
