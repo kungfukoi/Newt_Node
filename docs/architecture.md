@@ -384,6 +384,8 @@ Timeline is the visible product name; `assembly` remains its internal node type 
 
 `assemblyPreviewCache.js` prepares decoded composites ahead of Timeline playback with separate media decoders. It shares layer drawing with live rendering, releases its working decoders when the paused window is warm, and invalidates cached frames when the visual composition changes. `assemblyLiveFrameBus.js` signals viewer demand and delivers ready frames. Playback audio, the master clock, graph checkpoints, and export keep their existing owners.
 
+The Timeline transport can create a standard Preview node above the Timeline through the editor's connected-node creation path. `AssemblyNodeBody` draws into its hidden composition canvas and publishes `frameOut` through the live-frame bus.
+
 `AssemblyFrameSizeControls.jsx` owns draft editing for preview width/height. It commits
 to the existing `assembly.outputWidth` / `outputHeight`, shared by the live frame and
 FFmpeg render. Dimension changes refresh the live frame immediately and participate

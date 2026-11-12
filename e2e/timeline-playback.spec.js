@@ -2,6 +2,60 @@ import { test, expect } from '@playwright/test';
 import { openFixture } from './helpers.mjs';
 import { canvasFixture } from './fixtures.mjs';
 
+test('Timeline opens wider with both yellow actions on the second footer row', async ({ page }) => {
+  await openFixture(page, { timeline: true, scale: 0.7 });
+  const node = page.locator('[data-node-card-id="timeline"]');
+  await expect(node).toHaveCSS('width', '1400px');
+  const controls = await node.locator('.assembly-footer-controls > *').evaluateAll(items =>
+    items.map(item => {
+      const { top, bottom } = item.getBoundingClientRect();
+      return { bottom, center: (top + bottom) / 2 };
+    }));
+  expect(Math.max(...controls.map(item => item.center)) - Math.min(...controls.map(item => item.center))).toBeLessThan(1);
+  const extract = await node.getByRole('button', { name: 'Extract Frame' }).boundingBox();
+  const render = await node.getByRole('button', { name: 'Render Timeline' }).boundingBox();
+  expect(extract.y).toBeCloseTo(render.y, 0);
+  expect(extract.y).toBeGreaterThan(Math.max(...controls.map(item => item.bottom)));
+});
+
+test('Timeline adds a large connected Preview above the tracks that follows its transport', async ({ page }) => {
+  const fixture = canvasFixture({ timeline: true, scale: 0.7 });
+  fixture.nodes = fixture.nodes.filter(node => node.id === 'timeline');
+  fixture.edges = [];
+  fixture.nodes[0].data.assembly.outputWidth = 960;
+  const { errors } = await openFixture(page, { fixture });
+  const node = page.locator('[data-node-card-id="timeline"]');
+  const preview = page.locator('.node-card.node-type-preview');
+  const image = preview.locator('.preview-stage img');
+  const frame = () => image.getAttribute('src');
+
+  await expect(preview).toHaveCount(0);
+  await node.getByRole('button', { name: 'Add connected Preview' }).press('Space');
+  await expect(preview).toBeInViewport();
+  await expect(preview).toHaveCSS('width', '770px');
+  const previewBox = await preview.boundingBox();
+  const timelineBox = await node.boundingBox();
+  expect(previewBox.y + previewBox.height).toBeLessThan(timelineBox.y);
+  const centerOffset = (previewBox.x + previewBox.width / 2) - (timelineBox.x + timelineBox.width / 2);
+  expect(Math.abs(centerOffset)).toBeLessThan(2);
+  const previewId = await preview.getAttribute('data-node-card-id');
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('seedance-node-editor-draft-v1')).edges)).toMatchObject([
+    { from: { nodeId: 'timeline', port: 'frameOut' }, to: { nodeId: previewId, port: 'sourceIn' } }
+  ]);
+  await expect(image).toBeVisible();
+  await expect(image).toHaveCSS('object-fit', 'contain');
+  await expect.poll(() => image.evaluate(element => element.naturalWidth / element.naturalHeight)).toBeCloseTo(960 / 360, 2);
+
+  const beforeScrub = await frame();
+  await node.locator('.assembly-ruler').click({ position: { x: 48, y: 12 } });
+  await expect.poll(frame).not.toBe(beforeScrub);
+  const beforePlay = await frame();
+  await node.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect.poll(frame).not.toBe(beforePlay);
+  await node.getByRole('button', { name: 'Pause', exact: true }).click();
+  expect(errors).toEqual([]);
+});
+
 test('Timeline J/K/L shuttles the focused transport and leaves text inputs alone', async ({ page }) => {
   const { errors } = await openFixture(page, { timeline: true, scale: 0.7 });
   const node = page.locator('[data-node-card-id="timeline"]');

@@ -12,6 +12,7 @@ import {
   EyeOff,
   FlagOff,
   Lock,
+  MonitorPlay,
   MousePointer2,
   Minus,
   Pause,
@@ -92,6 +93,7 @@ export function AssemblyNodeBody({
   onUpdate,
   onRun,
   onExtractFrame,
+  onAddPreview,
   onProbeMedia,
   onRemoveMediaConnection,
   running,
@@ -141,8 +143,8 @@ export function AssemblyNodeBody({
 
   const duration = assemblyDuration(timeline);
   const pixelsPerSecond = timeline.zoom;
-  const scrollMetrics = useAssemblyViewport(scrollRef, duration * pixelsPerSecond);
-  const timelineWidth = Math.max(760, duration * pixelsPerSecond + Math.max(80, scrollMetrics.width - timelineGutterWidth));
+  const viewportWidth = useAssemblyViewport(scrollRef);
+  const timelineWidth = Math.max(760, duration * pixelsPerSecond + Math.max(80, viewportWidth - timelineGutterWidth));
   const timelineGridWidth = Math.max(8, assemblyRulerSpacing(duration, pixelsPerSecond, timeline.frameRate).minorStep * pixelsPerSecond);
   const selectedClipIds = new Set(marquee?.ids ?? getSelectedClipIds(timeline));
   const selected = selectedClipIds.size === 1 ? findClip(timeline, selectedClipIds.values().next().value) : null;
@@ -1039,7 +1041,7 @@ export function AssemblyNodeBody({
       jumpToMarker(timelineRef.current.outPoint);
       return;
     }
-    if (event.code === "Space") {
+    if (event.code === "Space" && !event.target.closest("button")) {
       event.preventDefault();
       togglePlayback();
       return;
@@ -1145,6 +1147,7 @@ export function AssemblyNodeBody({
           <div className="assembly-transport" title="Timeline shortcuts: J reverse, K pause, L forward. Tap J or L again to shuttle faster.">
           <IconButton active={timeline.loopInOut} title="Loop playback between In and Out" disabled={timeline.inPoint === null || timeline.outPoint === null || timeline.outPoint <= timeline.inPoint} onClick={toggleLoopInOut}><Repeat2 size={15} /></IconButton>
           <IconButton title={playing ? "Pause" : "Play"} onClick={togglePlayback}>{playing ? <Pause size={15} /> : <Play size={15} />}</IconButton>
+          <IconButton title="Add connected Preview" onClick={() => onAddPreview(node)}><MonitorPlay size={15} /></IconButton>
           <time>{formatTimecode(timeline.playhead, timeline.frameRate)}</time>
           <span className="assembly-frame-number" aria-label="Timeline frame number" title="Frame index from the start of the timeline (first frame is 0)">Frame {Math.round(timeline.playhead * Math.max(1, Math.round(timeline.frameRate)))}</span>
           <span>/ {formatTimecode(duration, timeline.frameRate)}</span>
@@ -1277,36 +1280,39 @@ export function AssemblyNodeBody({
         </div>
       </div>
 
-      <label className="assembly-scroll-navigation nodrag nowheel" onPointerDown={event => event.stopPropagation()}><span>Timeline position</span><input type="range" aria-label="Timeline horizontal scroll" min="0" max={scrollMetrics.max} step="1" value={Math.min(scrollMetrics.left, scrollMetrics.max)} disabled={!scrollMetrics.max} onChange={event => { if (scrollRef.current) scrollRef.current.scrollLeft = Number(event.target.value); }} /></label>
       <div className="assembly-footer nodrag" onPointerDown={(event) => event.stopPropagation()}>
-        <div className="assembly-selection-status">
-          {selected && selectedMedia ? (
-            <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
-          ) : <span>{selectedClipIds.size > 1 ? `${selectedClipIds.size} clips selected` : timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
-          {probeStatus && <small>{probeStatus}</small>}
-          {extractionError && <small role="alert">{extractionError}</small>}
-          {replacementError && <small role="alert">{replacementError}</small>}
+        <div className="assembly-footer-controls">
+          <div className="assembly-selection-status">
+            {selected && selectedMedia ? (
+              <><strong>{selectedMedia.label}</strong><span>In {formatClipDuration(selected.clip.sourceIn)} / {formatClipDuration(selected.clip.duration)} | {assemblyMediaTechnicalReadout(selectedMedia)}</span></>
+            ) : <span>{selectedClipIds.size > 1 ? `${selectedClipIds.size} clips selected` : timeline.media.length ? "Select a clip to edit" : "Connect video, audio, or still nodes to begin"}</span>}
+            {probeStatus && <small>{probeStatus}</small>}
+            {extractionError && <small role="alert">{extractionError}</small>}
+            {replacementError && <small role="alert">{replacementError}</small>}
+          </div>
+          <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
+            <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
+            <IconButton title="Fit Timeline" onClick={() => { replaceTimeline(setAssemblyView(timelineRef.current, { zoom: fitAssemblyZoom(duration, scrollRef.current?.clientWidth || 900, timelineGutterWidth) }), true); requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollLeft = 0; }); }}><BetweenHorizontalStart size={14} /></IconButton>
+            <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
+            <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
+          </div>
+          <AssemblyFrameSizeControls width={timeline.outputWidth} height={timeline.outputHeight}
+            onChange={patch => commitTimeline(setAssemblyView(timelineRef.current, patch))} />
+          <label><span>FPS</span><input type="number" min="1" max="120" value={timeline.frameRate} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { frameRate: Number(event.target.value) }), true)} /></label>
+          <label title="Include unmuted timeline audio in rendered outputs">
+            <input type="checkbox" style={{ width: "auto" }} checked={timeline.renderAudio} disabled={running}
+              onChange={(event) => commitTimeline(setAssemblyView(timelineRef.current, { renderAudio: event.target.checked }))} />
+            <span>Include audio</span>
+          </label>
         </div>
-        <div className="assembly-zoom-control" role="toolbar" aria-label="Timeline zoom">
-          <IconButton title="Zoom out" onClick={() => zoomTimeline(-1)}><Minus size={14} /></IconButton>
-          <IconButton title="Fit Timeline" onClick={() => { replaceTimeline(setAssemblyView(timelineRef.current, { zoom: fitAssemblyZoom(duration, scrollRef.current?.clientWidth || 900, timelineGutterWidth) }), true); requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollLeft = 0; }); }}><BetweenHorizontalStart size={14} /></IconButton>
-          <span className="assembly-zoom-readout">{assemblyZoomLabel(timeline.zoom)}</span>
-          <IconButton title="Zoom in" onClick={() => zoomTimeline(1)}><Plus size={14} /></IconButton>
+        <div className="assembly-footer-actions">
+          <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !onExtractFrame || !timeline.media.length} onClick={extractPlayheadFrame}>
+            {extractingFrame ? "Extracting..." : "Extract Frame"}
+          </button>
+          <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
+            {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}
+          </button>
         </div>
-        <AssemblyFrameSizeControls width={timeline.outputWidth} height={timeline.outputHeight}
-          onChange={patch => commitTimeline(setAssemblyView(timelineRef.current, patch))} />
-        <label><span>FPS</span><input type="number" min="1" max="120" value={timeline.frameRate} onChange={(event) => replaceTimeline(setAssemblyView(timelineRef.current, { frameRate: Number(event.target.value) }), true)} /></label>
-        <label title="Include unmuted timeline audio in rendered outputs">
-          <input type="checkbox" style={{ width: "auto" }} checked={timeline.renderAudio} disabled={running}
-            onChange={(event) => commitTimeline(setAssemblyView(timelineRef.current, { renderAudio: event.target.checked }))} />
-          <span>Include audio</span>
-        </label>
-        <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !onExtractFrame || !timeline.media.length} onClick={extractPlayheadFrame}>
-          {extractingFrame ? "Extracting..." : "Extract Frame"}
-        </button>
-        <button type="button" className="run-node-button assembly-render-button" disabled={running || extractingFrame || !timeline.media.length} onClick={() => onRun({ ...node, data: { ...node.data, assembly: timelineRef.current } })}>
-          {running ? "Rendering..." : timeline.inPoint !== null && timeline.outPoint !== null && timeline.outPoint > timeline.inPoint ? "Render In to Out" : "Render Timeline"}
-        </button>
       </div>
 
       <canvas ref={canvasRef} className="assembly-frame-canvas" aria-hidden="true" />

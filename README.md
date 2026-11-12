@@ -73,6 +73,8 @@ API keys and project files are stored locally. Cloud providers receive the input
 3. Review results in the node, a Preview node, or the project output panel.
 4. Save your workflow as a package to keep its inputs and outputs together. Use an Output node to export media.
 
+Press **V** with the cursor over the canvas to add a Video node at that spot.
+
 Open **Settings → User Preferences** to adjust canvas navigation, hover video scrubbing, and other preferences. Repository updates are available in **Settings → Repository**.
 
 ## Documentation

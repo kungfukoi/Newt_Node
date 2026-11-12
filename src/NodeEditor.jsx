@@ -1869,10 +1869,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
       if (event.target.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='textbox']")) return;
 
-      if (key === "i" && !commandKey && !event.altKey && !event.shiftKey && !event.repeat && !event.isComposing &&
+      if ((key === "i" || key === "v") && !commandKey && !event.altKey && !event.shiftKey && !event.repeat && !event.isComposing &&
         !document.querySelector("dialog[open], [aria-modal='true']")) {
+        const position = key === "v" ? currentCanvasPointerPosition() : undefined;
+        if (key === "v" && !position) return;
         event.preventDefault();
-        addNode("image");
+        addNode(key === "v" ? "video" : "image", position);
         return;
       }
 
@@ -2312,7 +2314,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       type,
       x: nodePosition.x,
       y: nodePosition.y,
-      data: createNodeData(type, spec?.label || "Node", count)
+      data: { ...createNodeData(type, spec?.label || "Node", count), ...options.data }
     };
     const graphNodes = [...nodesRef.current, nextNode];
     const pendingConnection = options.pendingConnection || null;
@@ -2382,6 +2384,43 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       };
     }
     return data;
+  }
+
+  function addTimelinePreview(node) {
+    const timeline = getNodeBounds(node.id);
+    const gap = 48;
+    const previewWidth = Math.round((timeline.right - timeline.left) * 0.55);
+    const previewHeight = Math.round(previewWidth * 9 / 16) + 120;
+    const position = {
+      x: Math.round((timeline.left + timeline.right - previewWidth) / 2),
+      y: Math.floor(timeline.top) - gap - previewHeight
+    };
+    const obstacles = nodesRef.current
+      .filter(item => item.canvasId === node.canvasId)
+      .map(item => estimatedNodeRect(item))
+      .filter(bounds => bounds.right + gap > position.x && bounds.left - gap < position.x + previewWidth)
+      .sort((a, b) => b.bottom - a.bottom);
+    for (const bounds of obstacles) {
+      if (bounds.bottom + gap <= position.y) break;
+      if (bounds.top - gap < position.y + previewHeight) position.y = Math.floor(bounds.top) - gap - previewHeight;
+    }
+
+    addNode("preview", position, {
+      data: { nodeWidth: previewWidth, nodeHeight: previewHeight },
+      pendingConnection: { from: { nodeId: node.id, port: "frameOut" }, color: portColors.image }
+    });
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const current = viewportRef.current;
+    const inset = 48;
+    const scale = Math.max(viewportScaleFloor, Math.min(current.scale,
+      (canvas.clientWidth - 2 * inset) / (timeline.right - timeline.left),
+      (canvas.clientHeight - 2 * inset) / (timeline.bottom - position.y)));
+    const x = clamp(current.x, inset - timeline.left * scale, canvas.clientWidth - inset - timeline.right * scale);
+    const y = clamp(current.y, inset - position.y * scale, canvas.clientHeight - inset - timeline.bottom * scale);
+    const next = { x, y, scale };
+    if (!sameViewport(current, next)) renderTransientViewport(next, { commitAfterMs: 120 });
   }
 
   function defaultNodePosition(count) {
@@ -5925,6 +5964,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
   }
 
   function handleCanvasWheel(event) {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && event.target.closest(".assembly-timeline-scroll")) return;
+
     const storyboardScroller = event.target.closest(".storyboard-scroll-surface");
     if (storyboardScroller && shouldPrioritizeSelectedTextareaWheel(event)) {
       const nestedTextarea = event.target.closest("textarea");
@@ -8631,6 +8672,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         onFrameItCapture={captureFrameItFrame}
         onFrameItGenerate={generateFrameItMedia}
         onAssemblyExtractFrame={extractAssemblyFrame}
+        onAddTimelinePreview={addTimelinePreview}
         onAssemblyProbe={probeAssemblyMedia}
         onOutpaintAnalyze={analyzeOutpaintPrompt}
         onOutpaintPrepare={prepareOutpaintCanvas}
@@ -8894,6 +8936,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
                 onFrameItCapture={captureFrameItFrame}
                 onFrameItGenerate={generateFrameItMedia}
                 onAssemblyExtractFrame={extractAssemblyFrame}
+                onAddTimelinePreview={addTimelinePreview}
                 onOutpaintAnalyze={analyzeOutpaintPrompt}
         onOutpaintPrepare={prepareOutpaintCanvas}
                 onCanvasPanStart={beginCanvasPan}
@@ -9417,6 +9460,7 @@ function NodeCard({
   onFrameItCapture,
   onFrameItGenerate,
   onAssemblyExtractFrame,
+  onAddTimelinePreview,
   onAssemblyProbe,
   onOutpaintAnalyze,
   onOutpaintPrepare,
@@ -9774,6 +9818,7 @@ function NodeCard({
         onFrameItCapture={onFrameItCapture}
         onFrameItGenerate={onFrameItGenerate}
         onAssemblyExtractFrame={onAssemblyExtractFrame}
+        onAddTimelinePreview={onAddTimelinePreview}
         onAssemblyProbe={onAssemblyProbe}
         onOutpaintAnalyze={onOutpaintAnalyze}
         onOutpaintPrepare={onOutpaintPrepare}
@@ -12191,6 +12236,7 @@ function NodeBody({
   onFrameItCapture,
   onFrameItGenerate,
   onAssemblyExtractFrame,
+  onAddTimelinePreview,
   onAssemblyProbe,
   onOutpaintAnalyze,
   onOutpaintPrepare,
@@ -12387,6 +12433,7 @@ function NodeBody({
         onUpdate={onUpdate}
         onRun={onRun}
         onExtractFrame={onAssemblyExtractFrame}
+        onAddPreview={onAddTimelinePreview}
         onProbeMedia={onAssemblyProbe}
         onRemoveMediaConnection={onAssemblyMediaDisconnect}
         running={running}
@@ -19045,7 +19092,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "assembly") {
     return {
       title,
-      nodeWidth: 1080,
+      nodeWidth: estimatedNodeWidth(type),
       nodeHeight: 520,
       assembly: createAssemblyState(),
       assemblyFrameUrl: "",

@@ -1,5 +1,18 @@
 # Upstream feature sources
 
+## Timeline review — November 11, 2026
+
+Reviewed [SugerMilks main at 4d51d44](https://github.com/SugerMilks/NewtNode/commit/4d51d448a9bb116a4a24103754e2f19d553e4882), including the Editor node, monitor, timeline state, playback engine and Editor standards. Our Timeline monitor button creates a connected Preview node above the Timeline. Our playhead-anchored zoom, Fit Timeline, horizontal scrolling, linked sound, layered compositing and managed still capture already cover corresponding upstream behavior.
+
+Gaps observed in our Timeline:
+
+- Per-clip audio gain, video and audio clip fades, cross-dissolve and dip-to-black at video cuts, and audio crossfade at cuts. These need matching behavior in live playback, extracted stills and final render where applicable.
+- Moving a selected group together with overlap checks, native multi-clip cut/copy/paste, explicit unlink and duplicate controls, bounded-gap ripple delete, and removing empty tracks. Upstream also has previous/next edit-point shortcuts, single-frame clip nudges and keyboard timeline zoom.
+- Audio-clock-led playback with buffering feedback, upcoming source preparation and decoder reuse across contiguous cuts. Our Timeline has a bounded composited-frame cache and holds the last complete frame during seeks.
+- Export cancellation and progress, export to a user-selected destination, and automatic Image node creation after a still grab. Our Extract Frame saves to the Timeline bin and supports dragging the still onto the canvas.
+
+Upstream auto-appends connected media and retains the clips when disconnected. Our bin supports reusable linked sources, drag placement and deliberate clip replacement, and removes linked assets and clips on disconnect. Upstream invalidates the outgoing video on timeline edits. Our video output is the most recent explicit render. These are workflow differences to evaluate separately.
+
 Explore review, November 11, 2026. SugerMilks main at `4d51d448a9bb116a4a24103754e2f19d553e4882` includes the Creative Range help and Image 2.6 changes from `44880ef` and `9183967`. Adapted the help and exposed unavailable saved quality values in the picker. This checkout already defaults to 2.6 Flare and migrates saved 2.5 model names to the corresponding 2.6 variants.
 
 The Explore prompt review at the same revision matched the planning instructions, image prompt template, content lock and contrast module. Aligned the Random photography pool, Painterly 3D guidance for new Explore requests and Jaws of Life grade. The local Style input, Found Footage option, planner model preferences and provider checks still affect requests when applicable. Saved queues keep their resolved prompt text.

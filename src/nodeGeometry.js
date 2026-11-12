@@ -5,7 +5,7 @@ export function estimatedNodeWidth(type) {
   if (type === "cameraCoverage") return 780;
   if (type === "audioModel") return 370;
   if (type === "explore") return 650;
-  if (type === "assembly") return 1080;
+  if (type === "assembly") return 1400;
   if (type === "frameIt") return 980;
   if (type === "storyboard") return 920;
   if (type === "autoAspect") return 390;
@@ -30,7 +30,7 @@ export function maximumResizableNodeHeight(type) {
 export function normalizedNodeWidth(value, type, maximum = maximumResizableNodeWidth(type)) {
   const width = Number(value);
   if (!Number.isFinite(width)) return null;
-  const minimum = estimatedNodeWidth(type);
+  const minimum = type === "assembly" ? 1080 : estimatedNodeWidth(type);
   return Math.round(clamp(width, minimum, Math.max(minimum, Number(maximum) || 2400)));
 }
 

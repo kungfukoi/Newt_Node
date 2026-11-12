@@ -17,6 +17,32 @@ test("I adds an Image node without intercepting text entry", async ({ page }) =>
   expect(errors).toEqual([]);
 });
 
+test("V adds a Video node at the cursor on a zoomed canvas", async ({ page }) => {
+  const { errors } = await openFixture(page, { fixture: {
+    nodes: [{ id: "shortcut-text", type: "plainText", x: 30, y: 30, data: { title: "Notes", text: "" } }],
+    edges: [], groups: [], viewport: { x: 120, y: 80, scale: 0.5 },
+  } });
+  const videoNode = page.locator('.react-flow__node[data-id^="video-"]');
+  const text = page.locator('[data-node-card-id="shortcut-text"] textarea');
+  const cursor = { x: 800, y: 500 };
+  await page.mouse.move(1, 1);
+  await page.keyboard.press("v");
+  await expect(videoNode).toHaveCount(0);
+  await page.mouse.move(cursor.x, cursor.y);
+  await text.press("v");
+  await expect(text).toHaveValue("v");
+  await expect(videoNode).toHaveCount(0);
+  await text.blur();
+  await page.keyboard.down("v");
+  await page.keyboard.down("v");
+  await page.keyboard.up("v");
+  await expect(videoNode).toHaveCount(1);
+  const box = await videoNode.boundingBox();
+  expect(Math.abs(box.x - cursor.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.y - cursor.y)).toBeLessThanOrEqual(1);
+  expect(errors).toEqual([]);
+});
+
 test("Prompt wires use the output-port color after reload and new connections", async ({ page }) => {
   const nodes = [{ id: "agent", type: "textAgent", x: 20, y: 20, data: { title: "Agent", agentDraft: "A prompt" } },
     ...["first", "second"].map((id, index) => ({ id, type: "videoModel", x: 430 + index * 430, y: 20, data: { title: id, settingsOpen: false } }))];
