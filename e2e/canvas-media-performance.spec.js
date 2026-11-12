@@ -60,7 +60,7 @@ test("Canvas shadows preference applies live and survives reload", async ({ page
   // Section expansion is itself persisted; open it only when necessary.
   const section = page.getByRole("button", { name: /User Preferences/ });
   await expect(section).toBeVisible();
-  if (await section.getAttribute("aria-expanded") === "false") await section.click();
+  await section.click();
   await expect(toggle).not.toBeChecked();
   await page.getByText("Canvas shadows", { exact: true }).click();
   await expect(toggle).toBeChecked();

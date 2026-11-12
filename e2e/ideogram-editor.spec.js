@@ -15,7 +15,7 @@ test("Settings saves the editor model and exposes Krea image routing", async ({ 
   await expect.poll(() => settings.userPreferences?.imageEditorModel).toBe("Ideogram 4.5");
   await expect(page.getByLabel("Image Editor Model", { exact: true })).toHaveValue("Ideogram 4.5");
   const providers = page.getByRole("button", { name: /Model Providers/ });
-  if (await providers.getAttribute("aria-expanded") !== "true") await providers.click();
+  await providers.click();
   const images = page.locator("label.settings-field").filter({ has: page.locator("span", { hasText: /^Image Model$/ }) });
   await images.locator("select").selectOption("krea");
   await expect(images).toContainText("Krea 2 Large");

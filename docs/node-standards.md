@@ -262,7 +262,7 @@ Before completion:
 
 These are durable current surfaces independent of the checked-out branch name:
 
-- The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests.
+- The Settings workspace is part of the app shell and owns local API keys, update repository, branch status, pull/update, and restart requests. The category list opens one section in the details pane and remembers the last selection in the browser. Overview shows API key, branch, and server status.
 - React Flow is the active canvas runtime. Proxy, compact, and map render modes are currently disabled; complete node bodies and all edges remain mounted from the minimum 5% zoom through working zoom.
 - Image, video, and text model runs expose per-node generation progress with queue, generation, download, finalization, batch, elapsed-time, and terminal states.
 - The canvas exposes a red X beside Snap and zoom in the bottom-right controls to stop every active canvas node and cancel queued selected-node runs. Per-node Stop buttons are removed. Stop releases the canvas wait and preserves results; late callbacks cannot overwrite the ejected run. Durable video tracking is dismissed server-side and remains stopped after restart. Stop does not claim cancellation or refunds from a cloud provider, and already executing local media work may finish.

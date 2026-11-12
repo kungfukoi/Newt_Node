@@ -6,6 +6,7 @@ test('ElevenLabs credential field saves the active key masked and reloads',async
  await page.route(/\/api\/settings(?:\?.*)?$/,async r=>{if(r.request().method()==='POST'){saved=r.request().postDataJSON();state={...state,...saved,elevenLabsApiKeyConfigured:true};}return r.fulfill({json:{...state,secrets:{credentials:state.credentials}}});});
  await page.route('**/api/settings/validate-keys', r => { const id=state.activeCredentialIds.elevenLabs; const result={status:'unverified',reason:'missing-user-read'};return r.fulfill({json:{providers:{elevenLabs:result},credentials:{elevenLabs:id?{[id]:result}:{}}}}); });
  await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('button',{name:'API Credentials',exact:true}).click();
  await page.getByTitle('Add ElevenLabs key',{exact:true}).click();
  const input=page.getByRole('textbox',{name:'ElevenLabs API key',exact:true});
  await page.getByLabel('ElevenLabs API key',{exact:true}).fill('eleven-browser-fixture');
@@ -15,7 +16,8 @@ test('ElevenLabs credential field saves the active key masked and reloads',async
  expect(saved.activeCredentialIds.elevenLabs).toBe(saved.credentials.elevenLabs[0].id);
  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
  await expect(page.getByLabel('ElevenLabs API key',{exact:true})).toHaveValue('eleven-browser-fixture');
- await expect(page.getByText('Restricted',{exact:true})).toBeVisible();
  await expect(page.getByText('User Read needed',{exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath('elevenlabs-settings.png')});
+ await page.getByRole('button',{name:'Overview',exact:true}).click();
+ await expect(page.getByText('Restricted',{exact:true})).toBeVisible();
 });

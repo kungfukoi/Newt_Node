@@ -6,7 +6,7 @@ async function openCanvasPreferences(page) {
   await page.getByLabel("Workspace mode").getByRole("button", { name: "Settings", exact: true }).click();
   const section = page.getByRole("button", { name: /User Preferences/ });
   await expect(section).toBeVisible();
-  if (await section.getAttribute("aria-expanded") !== "true") await section.click();
+  await section.click();
 }
 
 test("fresh window restores the workspace and draft; reload retains its own edits", async ({ page }) => {

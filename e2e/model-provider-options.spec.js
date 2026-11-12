@@ -53,6 +53,7 @@ async function routingFixture(page, { failSave = false, staleReload = false } = 
     return route.fulfill({ json: { ...state, secrets: { credentials: state.credentials } } });
   });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Model Providers", exact: true }).click();
   return { ...fixture, saves };
 }
 

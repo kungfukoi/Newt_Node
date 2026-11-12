@@ -2,7 +2,6 @@ import { PricingSettings } from "./components/PricingSettings.jsx";
 import { FeatureUsageSettings } from "./components/FeatureUsageSettings.jsx";
 import React from "react";
 import {
-  ChevronDown,
   Eye,
   EyeOff,
   FolderOpen,
@@ -32,7 +31,7 @@ import {
   providerSupportedModelsLabel
 } from "./modelProviderRouting.js";
 import { keyDetail, providerMetricTone, providerMetricValue, unverifiedKeyValidation } from "./settingsKeyStatus.js";
-import { readSettingsOpenSections, writeSettingsOpenSections } from "./settingsSectionState.js";
+import { readSettingsSection, settingsGroups, writeSettingsSection } from "./settingsSectionState.js";
 import { imageEditModelOptions } from "./imageEdit.js";
 import { saveImageEditorModel } from "./imageEditorPreference.js";
 import { defaultUserPreferences, directorProcessingModelOptions, textAgentModelOptions, normalizeUserPreferences } from "./userPreferences.js";
@@ -67,7 +66,9 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
   const [minimaxH3LocalBusy, setMinimaxH3LocalBusy] = React.useState(false);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [userPreferences, setUserPreferences] = React.useState(defaultUserPreferences);
-  const [openSections, setOpenSections] = React.useState(readSettingsOpenSections);
+  const [activeSection, setActiveSection] = React.useState(readSettingsSection);
+  const detailsRef = React.useRef(null);
+  const [preferencesVisited, setPreferencesVisited] = React.useState(activeSection === "userPreferences");
   const [status, setStatus] = React.useState("loading");
   const [keyValidationBusy, setKeyValidationBusy] = React.useState(false);
   const [busy, setBusy] = React.useState("");
@@ -403,17 +404,17 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
     setVisibleCredentialIds((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  function toggleSection(section) {
-    setOpenSections((current) => writeSettingsOpenSections({ ...current, [section]: !current[section] }));
+  function selectSection(section) {
+    if (section === activeSection) return;
+    setActiveSection(writeSettingsSection(section));
+    if (detailsRef.current) detailsRef.current.scrollTop = 0;
+    if (section === "userPreferences") setPreferencesVisited(true);
   }
 
   return (
-    <section className="stats-page settings-page">
+    <section className="settings-page" aria-labelledby="settings-title">
       <header className="stats-hero settings-hero">
-        <div>
-          <span className="stats-kicker">Runtime</span>
-          <h1>Settings</h1>
-        </div>
+        <h1 id="settings-title">Settings</h1>
         <div className="settings-hero-actions">
           <button onClick={refreshSettings} disabled={status === "loading" || status === "refreshing" || Boolean(busy)} title="Refresh settings">
             <RefreshCcw className={status === "refreshing" ? "spin" : ""} size={17} />
@@ -426,159 +427,178 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
         </div>
       </header>
 
-      <div className="stats-metrics settings-metrics">
-        {providerDefinitions.map((provider) => {
-          const configured = Boolean(settings?.[providerConfiguredField(provider.id)]);
-          const validation = settings?.keyValidation?.[provider.id];
-          return (
-            <SettingsMetric
-              key={provider.id}
-              icon={<KeyRound size={20} />}
-              label={`${provider.label} API`}
-              value={providerMetricValue(configured, validation, keyValidationBusy)}
-              detail={keyDetail(settings?.activeCredentialLabels?.[provider.id], status, validation)}
-              tone={providerMetricTone(configured, validation)}
-            />
-          );
-        })}
-        <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={branchMetricTone(settings?.branchStatus?.state)} />
-        <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
-      </div>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {settingsGroups.map(({ label, sections }) => (
+            <div className="settings-nav-group" key={label}>
+              <h2>{label}</h2>
+              {sections.map(([id, title]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-current={activeSection === id ? "true" : undefined}
+                  aria-controls="settings-details"
+                  onClick={() => selectSection(id)}
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
 
-      <div className="settings-grid">
-        <CollapsibleSettingsSection title="Feature Usage" open={openSections.usage} onToggle={() => toggleSection("usage")} wide>
-          {openSections.usage && <FeatureUsageSettings />}
-        </CollapsibleSettingsSection>
-        <CollapsibleSettingsSection title="API Pricing" open={openSections.pricing} onToggle={() => toggleSection("pricing")} wide>
-          <PricingSettings />
-        </CollapsibleSettingsSection>
-        <CollapsibleSettingsSection
-          title="API Credentials"
-          aside="One active key per service"
-          open={openSections.credentials}
-          onToggle={() => toggleSection("credentials")}
-          wide
-        >
-          <div className="settings-credential-grid">
-            {providerDefinitions.map((provider) => (
-              <CredentialProviderCard
-                key={provider.id}
-                provider={provider}
-                credentials={credentials[provider.id] || []}
-                activeId={activeCredentialIds[provider.id] || ""}
-                validation={settings?.keyValidationByCredential?.[provider.id] || {}}
-                visibleCredentialIds={visibleCredentialIds}
-                onAdd={() => addCredential(provider.id)}
-                onActivate={(id) => setActiveCredentialIds((current) => ({ ...current, [provider.id]: id }))}
-                onChange={(id, next) => updateCredential(provider.id, id, next)}
-                onRemove={(id) => removeCredential(provider.id, id)}
-                onToggleVisibility={(id) => toggleCredentialVisibility(provider.id, id)}
-              />
-            ))}
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
-              <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save & Validate"}</span>
-            </button>
-          </div>
-        </CollapsibleSettingsSection>
+        <div className="settings-details" id="settings-details" ref={detailsRef}>
+          {message && (activeSection !== "providers" || message !== routingMessage) && (
+            <p className="settings-message" role="status">{message}</p>
+          )}
+          {activeSection === "overview" && (
+            <SettingsSection id="overview">
+              <div className="stats-metrics settings-metrics">
+                {providerDefinitions.map((provider) => {
+                  const configured = Boolean(settings?.[providerConfiguredField(provider.id)]);
+                  const validation = settings?.keyValidation?.[provider.id];
+                  return (
+                    <SettingsMetric
+                      key={provider.id}
+                      icon={<KeyRound size={20} />}
+                      label={`${provider.label} API`}
+                      value={providerMetricValue(configured, validation, keyValidationBusy)}
+                      detail={keyDetail(settings?.activeCredentialLabels?.[provider.id], status, validation)}
+                      tone={providerMetricTone(configured, validation)}
+                    />
+                  );
+                })}
+                <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={branchMetricTone(settings?.branchStatus?.state)} />
+                <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
+              </div>
+            </SettingsSection>
+          )}
 
-        <CollapsibleSettingsSection
-          title="Model Providers"
-          aside="Explicit runtime routing"
-          open={openSections.providers}
-          onToggle={() => toggleSection("providers")}
-          wide
-        >
-          <div className="settings-provider-routing">
-            <label className="settings-field">
-              <span>Seedance 2.0 / 2.5</span>
-              <select
-                value={modelProviderPreferences.seedance}
-                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, seedance: event.target.value }))}
-              >
-                <option value="fal">Fal</option>
-                <option value="krea">Krea</option>
-                <option value="atlas">Atlas Cloud</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.seedance, activeCredentialIds, "Seedance")}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("seedance", modelProviderPreferences.seedance)}</small>
-            </label>
-            <label className="settings-field">
-              <span>Image Model</span>
-              <select
-                value={modelProviderPreferences.imageGeneration}
-                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, imageGeneration: event.target.value }))}
-              >
-                <option value="google">Google</option>
-                <option value="fal">Fal</option>
-                <option value="krea">Krea</option>
-                <option value="atlas">Atlas Cloud</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "supported image models")}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("imageGeneration", modelProviderPreferences.imageGeneration)}</small>
-            </label>
-            <label className="settings-field">
-              <span>Video Model</span>
-              <select value={modelProviderPreferences.veo}
-                onChange={(event) => {
-                  const provider = event.target.value;
-                  setModelProviderPreferences((current) => ({ ...current, veo: provider, minimaxH3: provider }));
-                  if (provider === "local") refreshMinimaxH3LocalStatus({ quiet: true });
-                }}>
-                <option value="fal">Fal</option>
-                <option value="krea">Krea</option>
-                <option value="google">Google</option>
-                <option value="atlas">Atlas Cloud</option>
-                <option value="local">Local</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "video models", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
-              <small>MiniMax H3 uses this provider. Seedance uses its dedicated setting.</small>
-            </label>
-            {[["model3d", "3D Model"], ["utilityImage", "Utility Image"], ["utilityVideo", "Utility Video"]].map(([group, title]) => (
-              <label className="settings-field" key={group}>
-                <span>{title}</span>
-                <select value={modelProviderPreferences[group]} onChange={event => setModelProviderPreferences(current => ({ ...current, [group]: event.target.value }))}>
-                  <option value="fal">Fal</option>
-                  <option value="krea">Krea</option>
-                </select>
-                <small>{modelProviderDetail(modelProviderPreferences[group], activeCredentialIds, title.toLowerCase())}</small>
-                <small className="settings-provider-models">{providerSupportedModelsLabel(group, modelProviderPreferences[group])}</small>
-              </label>
-            ))}
-            <label className="settings-field">
-              <span>Text / Agent / Director LLM</span>
-              <select
-                value={modelProviderPreferences.llm}
-                onChange={(event) => setModelProviderPreferences((current) => ({ ...current, llm: event.target.value }))}
-              >
-                <option value="fal">Fal</option>
-                <option value="openai">OpenAI</option>
-                <option value="atlas">Atlas Cloud</option>
-                <option value="krea">Krea</option>
-              </select>
-              <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text and Director features")}</small>
-              <small className="settings-provider-models">{providerSupportedModelsLabel("llm", modelProviderPreferences.llm)}</small>
-              {modelProviderPreferences.llm === "krea" && <small>Krea bills Agent sessions in compute units. Text and reference analysis return replies here; pinned models require access on your Krea plan.</small>}
-            </label>
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={saveProviderRouting} disabled={actionsDisabled}>
-              <Save size={15} />
-              <span>{busy === "routing" ? "Saving" : "Save Routing"}</span>
-            </button>
-          </div>
-          {routingMessage && <p className="settings-message" role="status">{routingMessage}</p>}
-        </CollapsibleSettingsSection>
+          {activeSection === "usage" && (
+            <SettingsSection id="usage">
+              <FeatureUsageSettings />
+            </SettingsSection>
+          )}
+          {activeSection === "pricing" && (
+            <SettingsSection id="pricing">
+              <PricingSettings />
+            </SettingsSection>
+          )}
+          {activeSection === "credentials" && (
+            <SettingsSection id="credentials" aside="One active key per service">
+              <div className="settings-credential-grid">
+                {providerDefinitions.map((provider) => (
+                  <CredentialProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    credentials={credentials[provider.id] || []}
+                    activeId={activeCredentialIds[provider.id] || ""}
+                    validation={settings?.keyValidationByCredential?.[provider.id] || {}}
+                    visibleCredentialIds={visibleCredentialIds}
+                    onAdd={() => addCredential(provider.id)}
+                    onActivate={(id) => setActiveCredentialIds((current) => ({ ...current, [provider.id]: id }))}
+                    onChange={(id, next) => updateCredential(provider.id, id, next)}
+                    onRemove={(id) => removeCredential(provider.id, id)}
+                    onToggleVisibility={(id) => toggleCredentialVisibility(provider.id, id)}
+                  />
+                ))}
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+                  <Save size={15} />
+                  <span>{busy === "save" ? "Saving" : "Save & Validate"}</span>
+                </button>
+              </div>
+            </SettingsSection>
+          )}
 
-        <CollapsibleSettingsSection
-          title="Enabled Models"
-          open={openSections.models}
-          onToggle={() => toggleSection("models")}
-          wide
-        >
+          {activeSection === "providers" && (
+            <SettingsSection id="providers" aside="Explicit runtime routing">
+              <div className="settings-provider-routing">
+                <label className="settings-field">
+                  <span>Seedance 2.0 / 2.5</span>
+                  <select
+                    value={modelProviderPreferences.seedance}
+                    onChange={(event) => setModelProviderPreferences((current) => ({ ...current, seedance: event.target.value }))}
+                  >
+                    <option value="fal">Fal</option>
+                    <option value="krea">Krea</option>
+                    <option value="atlas">Atlas Cloud</option>
+                  </select>
+                  <small>{modelProviderDetail(modelProviderPreferences.seedance, activeCredentialIds, "Seedance")}</small>
+                  <small className="settings-provider-models">{providerSupportedModelsLabel("seedance", modelProviderPreferences.seedance)}</small>
+                </label>
+                <label className="settings-field">
+                  <span>Image Model</span>
+                  <select
+                    value={modelProviderPreferences.imageGeneration}
+                    onChange={(event) => setModelProviderPreferences((current) => ({ ...current, imageGeneration: event.target.value }))}
+                  >
+                    <option value="google">Google</option>
+                    <option value="fal">Fal</option>
+                    <option value="krea">Krea</option>
+                    <option value="atlas">Atlas Cloud</option>
+                  </select>
+                  <small>{modelProviderDetail(modelProviderPreferences.imageGeneration, activeCredentialIds, "supported image models")}</small>
+                  <small className="settings-provider-models">{providerSupportedModelsLabel("imageGeneration", modelProviderPreferences.imageGeneration)}</small>
+                </label>
+                <label className="settings-field">
+                  <span>Video Model</span>
+                  <select value={modelProviderPreferences.veo}
+                    onChange={(event) => {
+                      const provider = event.target.value;
+                      setModelProviderPreferences((current) => ({ ...current, veo: provider, minimaxH3: provider }));
+                      if (provider === "local") refreshMinimaxH3LocalStatus({ quiet: true });
+                    }}>
+                    <option value="fal">Fal</option>
+                    <option value="krea">Krea</option>
+                    <option value="google">Google</option>
+                    <option value="atlas">Atlas Cloud</option>
+                    <option value="local">Local</option>
+                  </select>
+                  <small>{modelProviderDetail(modelProviderPreferences.veo, activeCredentialIds, "video models", minimaxH3LocalStatus, minimaxH3LocalBusy)}</small>
+                  <small className="settings-provider-models">{providerSupportedModelsLabel("veo", modelProviderPreferences.veo)}</small>
+                  <small>MiniMax H3 uses this provider. Seedance uses its dedicated setting.</small>
+                </label>
+                {[["model3d", "3D Model"], ["utilityImage", "Utility Image"], ["utilityVideo", "Utility Video"]].map(([group, title]) => (
+                  <label className="settings-field" key={group}>
+                    <span>{title}</span>
+                    <select value={modelProviderPreferences[group]} onChange={event => setModelProviderPreferences(current => ({ ...current, [group]: event.target.value }))}>
+                      <option value="fal">Fal</option>
+                      <option value="krea">Krea</option>
+                    </select>
+                    <small>{modelProviderDetail(modelProviderPreferences[group], activeCredentialIds, title.toLowerCase())}</small>
+                    <small className="settings-provider-models">{providerSupportedModelsLabel(group, modelProviderPreferences[group])}</small>
+                  </label>
+                ))}
+                <label className="settings-field">
+                  <span>Text / Agent / Director LLM</span>
+                  <select
+                    value={modelProviderPreferences.llm}
+                    onChange={(event) => setModelProviderPreferences((current) => ({ ...current, llm: event.target.value }))}
+                  >
+                    <option value="fal">Fal</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="atlas">Atlas Cloud</option>
+                    <option value="krea">Krea</option>
+                  </select>
+                  <small>{modelProviderDetail(modelProviderPreferences.llm, activeCredentialIds, "text and Director features")}</small>
+                  <small className="settings-provider-models">{providerSupportedModelsLabel("llm", modelProviderPreferences.llm)}</small>
+                  {modelProviderPreferences.llm === "krea" && <small>Krea bills Agent sessions in compute units. Text and reference analysis return replies here; pinned models require access on your Krea plan.</small>}
+                </label>
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={saveProviderRouting} disabled={actionsDisabled}>
+                  <Save size={15} />
+                  <span>{busy === "routing" ? "Saving" : "Save Routing"}</span>
+                </button>
+              </div>
+              {routingMessage && <p className="settings-message" role="status">{routingMessage}</p>}
+            </SettingsSection>
+          )}
+
+          {activeSection === "models" && (
+            <SettingsSection id="models">
               <div className="settings-model-grid">
                 <ModelToggleGroup
                   title="Image Models"
@@ -617,114 +637,93 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
                   <span>{busy === "save" ? "Saving" : "Save Models"}</span>
                 </button>
               </div>
-        </CollapsibleSettingsSection>
+            </SettingsSection>
+          )}
 
-        <CollapsibleSettingsSection
-          title="User Preferences"
-          aside="Canvas and processing"
-          open={openSections.userPreferences}
-          onToggle={() => toggleSection("userPreferences")}
-        >
-          <div className="settings-preference-list">
-            <CanvasPreferences />
-            <LookbookStorageSettings />
-            <label className="settings-preference-model">
-              <span>
-                <strong>Image Editor Model</strong>
-                <small>Shared with the image editor; saves immediately. Ideogram 4.5, Flux 3, and Nano Banana 2.1 use Fal.</small>
-              </span>
-              <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
-                disabled={actionsDisabled} onChange={(event) => changeImageEditorModel(event.target.value)}>
-                {imageEditModelOptions.map((model) => <option key={model}>{model}</option>)}
-              </select>
-            </label>
-            <label className="settings-preference-model">
-              <span>
-                <strong>Text Agent Model</strong>
-                <small>Used for new Text Agent messages through your selected text provider.</small>
-              </span>
-              <select aria-label="Text Agent Model" value={userPreferences.textAgentModel}
-                onChange={(event) => setUserPreferences((current) => ({ ...current, textAgentModel: event.target.value }))}>
-                {textAgentModelOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="settings-preference-model">
-              <span>
-                <strong>Director Processing Model</strong>
-                <small>Used for Director planning, revisions, visual analysis, and reference-video analysis.</small>
-              </span>
-              <select
-                value={userPreferences.directorProcessingModel}
-                onChange={(event) => setUserPreferences((current) => ({
-                  ...current,
-                  directorProcessingModel: event.target.value
-                }))}
-              >
-                {directorProcessingModelOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
-              <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save Preferences"}</span>
-            </button>
-          </div>
-        </CollapsibleSettingsSection>
+          {preferencesVisited && (
+            <SettingsSection id="userPreferences" aside="Canvas and processing" hidden={activeSection !== "userPreferences"}>
+              <div className="settings-preference-list">
+                <CanvasPreferences />
+                <LookbookStorageSettings />
+                <label className="settings-preference-model">
+                  <span>
+                    <strong>Image Editor Model</strong>
+                    <small>Shared with the image editor; saves immediately. Ideogram 4.5, Flux 3, and Nano Banana 2.1 use Fal.</small>
+                  </span>
+                  <select aria-label="Image Editor Model" value={userPreferences.imageEditorModel}
+                    disabled={actionsDisabled} onChange={(event) => changeImageEditorModel(event.target.value)}>
+                    {imageEditModelOptions.map((model) => <option key={model}>{model}</option>)}
+                  </select>
+                </label>
+                <label className="settings-preference-model">
+                  <span>
+                    <strong>Text Agent Model</strong>
+                    <small>Used for new Text Agent messages through your selected text provider.</small>
+                  </span>
+                  <select aria-label="Text Agent Model" value={userPreferences.textAgentModel}
+                    onChange={(event) => setUserPreferences((current) => ({ ...current, textAgentModel: event.target.value }))}>
+                    {textAgentModelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-preference-model">
+                  <span>
+                    <strong>Director Processing Model</strong>
+                    <small>Used for Director planning, revisions, visual analysis, and reference-video analysis.</small>
+                  </span>
+                  <select
+                    value={userPreferences.directorProcessingModel}
+                    onChange={(event) => setUserPreferences((current) => ({
+                      ...current,
+                      directorProcessingModel: event.target.value
+                    }))}
+                  >
+                    {directorProcessingModelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="settings-actions">
+                <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
+                  <Save size={15} />
+                  <span>{busy === "save" ? "Saving" : "Save Preferences"}</span>
+                </button>
+              </div>
+            </SettingsSection>
+          )}
 
-        <CollapsibleSettingsSection
-          title="Repository"
-          aside={settings?.branch || "Current branch"}
-          open={openSections.repository}
-          onToggle={() => toggleSection("repository")}
-        >
-          <label className="settings-field">
-            <span>Repository Field</span>
-            <input
-              className="settings-repository-input"
-              type="text"
-              value={repository}
-              onChange={(event) => setRepository(event.target.value)}
-              placeholder="https://github.com/kungfukoi/Newt_Node"
-            />
-          </label>
-          <div className="settings-actions">
-            <button type="button" onClick={updateFromRepository} disabled={actionsDisabled || !repository.trim()}>
-              <RefreshCcw className={busy === "update" ? "spin" : ""} size={15} />
-              <span>{busy === "update" ? "Updating" : "Update"}</span>
-            </button>
-          </div>
-        </CollapsibleSettingsSection>
+          {activeSection === "repository" && (
+            <SettingsSection id="repository" aside={settings?.branch || "Current branch"}>
+              <label className="settings-field">
+                <span>Repository Field</span>
+                <input
+                  className="settings-repository-input"
+                  type="text"
+                  value={repository}
+                  onChange={(event) => setRepository(event.target.value)}
+                  placeholder="https://github.com/kungfukoi/Newt_Node"
+                />
+              </label>
+              <div className="settings-actions">
+                <button type="button" onClick={updateFromRepository} disabled={actionsDisabled || !repository.trim()}>
+                  <RefreshCcw className={busy === "update" ? "spin" : ""} size={15} />
+                  <span>{busy === "update" ? "Updating" : "Update"}</span>
+                </button>
+              </div>
+              {updateLog && <pre className="settings-log">{updateLog}</pre>}
+            </SettingsSection>
+          )}
 
-        <CollapsibleSettingsSection title="Diagnostics" open={openSections.diagnostics} onToggle={() => toggleSection("diagnostics")} wide>
-          {openSections.diagnostics && <DiagnosticsPanel />}
-        </CollapsibleSettingsSection>
+          {activeSection === "diagnostics" && (
+            <SettingsSection id="diagnostics">
+              <DiagnosticsPanel />
+            </SettingsSection>
+          )}
 
-        {(message || updateLog) && (
-          <CollapsibleSettingsSection
-            title="Status"
-            aside={busy || status}
-            open={openSections.status}
-            onToggle={() => toggleSection("status")}
-            wide
-          >
-            {message && <p className="settings-message">{message}</p>}
-            {updateLog && <pre className="settings-log">{updateLog}</pre>}
-          </CollapsibleSettingsSection>
-        )}
-
-        <CollapsibleSettingsSection
-          title="Comfy Engine"
-          aside={comfyWanAside(comfyWanStatus, comfyWanBusy)}
-          open={openSections.comfy}
-          onToggle={() => toggleSection("comfy")}
-          wide
-          className="settings-comfy-panel"
-        >
+          {activeSection === "comfy" && (
+            <SettingsSection id="comfy" aside={comfyWanAside(comfyWanStatus, comfyWanBusy)} className="settings-comfy-panel">
               <label className="settings-field">
                 <span>ComfyUI Root</span>
                 <div className="settings-input-row path">
@@ -760,7 +759,9 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
                   <span>{busy === "save" ? "Saving" : "Save ComfyUI"}</span>
                 </button>
               </div>
-        </CollapsibleSettingsSection>
+            </SettingsSection>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -1028,26 +1029,16 @@ function normalizeCredentialsForUi(value = {}) {
   ]));
 }
 
-function CollapsibleSettingsSection({ title, aside, open, onToggle, wide = false, className = "", children }) {
-  const panelClassName = [
-    "stats-panel",
-    "settings-panel",
-    "settings-collapsible-panel",
-    wide ? "wide" : "",
-    open ? "open" : "",
-    className
-  ].filter(Boolean).join(" ");
+function SettingsSection({ id, aside, className = "", hidden, children }) {
+  const title = settingsGroups.flatMap(({ sections }) => sections).find(([key]) => key === id)[1];
 
   return (
-    <section className={panelClassName}>
-      <button type="button" className="settings-panel-toggle" onClick={onToggle} aria-expanded={open}>
-        <span className="panel-title settings-toggle-title">
-          <span>{title}</span>
-          {aside && <small>{aside}</small>}
-        </span>
-        <ChevronDown size={16} />
-      </button>
-      {open && children}
+    <section className={`settings-panel ${className}`.trim()} aria-labelledby={`settings-heading-${id}`} hidden={hidden}>
+      <header className="settings-panel-heading">
+        <h2 id={`settings-heading-${id}`}>{title}</h2>
+        {aside && <p>{aside}</p>}
+      </header>
+      {children}
     </section>
   );
 }

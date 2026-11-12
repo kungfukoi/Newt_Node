@@ -87,7 +87,7 @@ test("Text Agent model can be saved independently and reloaded", async ({ page }
   await page.reload();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const section = page.getByRole("button", { name: /User Preferences/ });
-  if (await section.getAttribute("aria-expanded") !== "true") await section.click();
+  await section.click();
   await expect(selector).toHaveValue("sol");
   expect(errors).toEqual([]);
 });
