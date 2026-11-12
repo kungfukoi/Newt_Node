@@ -380,6 +380,8 @@ Local MiniMax H3 lives in `server/minimaxH3Local/`. The server converts managed 
 
 Local FFmpeg/FFprobe power media inspection, Edit, Timeline rendering, waveform/probe work, Output transcoding, and related Utility operations. Use `ffmpeg-static` and `@ffprobe-installer/ffprobe` by default, with documented environment overrides for controlled installations.
 
+The LTX SDR-to-HDR Utility route in `server/index.js` submits 65-frame batches sequentially through the existing Fal client. `server/ltx-hdr-batches.js` prepares frame-aligned clips at a constant source-derived frame rate, removes tail padding from the processed video and EXRs, and remuxes source audio. The route publishes the assembled video and OpenEXR ZIP through managed asset storage and records each completed Fal request for billing reconciliation.
+
 ## Timeline Compatibility
 
 Timeline is the visible product name; `assembly` remains its internal node type for saved-workflow compatibility. Existing source filenames such as `AssemblyNodeBody.jsx` also remain valid implementation names until a deliberate migration updates imports, tests, docs, and old workflows together.

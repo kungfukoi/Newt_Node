@@ -35,7 +35,7 @@ export const ltxVfxModels = {
   hdr: {
     id: endpointPrefix + "hdr",
     displayName: "LTX-2.5 SDR to HDR",
-    description: "Converts SDR video for HDR finishing and delivers a ZIP of 16-bit half-float OpenEXR frames.",
+    description: "Converts the full clip in 65-frame batches and delivers one video and a ZIP of 16-bit half-float OpenEXR frames.",
     controls: [
       {
         key: "output_colorspace", label: "EXR Color Space", defaultValue: "acescg",

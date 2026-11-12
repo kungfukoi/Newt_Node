@@ -141,7 +141,7 @@ With Fal selected in Settings for Utility Video, connect a video and choose one 
 - **Alpha Gen** returns a grayscale MP4 matte and a ProRes 4444 MOV cutout with straight alpha. Use the result arrows to select which video goes downstream. [Fal Alpha Gen](https://fal.ai/models/lightricks/ltx-2.5/alpha-gen)
 - **Reframe** expands the scene to a new aspect ratio at 720p or 1080p. Choose it as a Utility Video model or under **Video Outpaint → Outpaint model**. Connect the source and click **Edit placement** to play or scrub the clip, set output size and safety checker, and choose an anchor or **Custom placement**. Drag the source or set its left, top and width as percentages of the output. The source keeps its proportions and stays inside the frame at up to 2× its original size. Stripes mark the area to fill. Click **Apply placement** to save the settings for the next Fal run. [Fal Reframe](https://fal.ai/models/lightricks/ltx-2.5/reframe)
 - **Upscale** takes H.264 or HEVC video and offers 1080p, 4K and 8K. Fal's maximum input frame count depends on the output resolution. [Fal Upscale](https://fal.ai/models/lightricks/ltx-2.5/upscale)
-- **SDR to HDR** returns processed video and a separate downloadable ZIP of 16-bit half-float OpenEXR frames in the selected color space. [Fal SDR to HDR](https://fal.ai/models/lightricks/ltx-2.5/hdr)
+- **SDR to HDR** processes the connected clip in batches of up to 65 frames. A single run assembles one full-length video with source audio and one downloadable ZIP of sequential 16-bit half-float OpenEXR frames in the selected color space. Progress shows the current batch. [Fal SDR to HDR](https://fal.ai/models/lightricks/ltx-2.5/hdr)
 
 ## Stops, errors and limits
 

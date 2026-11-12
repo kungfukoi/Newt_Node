@@ -22,6 +22,7 @@ import { preventMinimaxH3Starts } from "./minimaxH3Local/engine.js";
 import { requestKreaLlm } from "./krea-llm.js";
 import { buildKreaEnhanceInput, kreaEnhanceEndpoint } from "./krea-enhance.js";
 import { createVideoOutpaintService } from "./video-outpaint.js";
+import { assembleHdrArchive, assembleHdrVideo, extractHdrFrames, prepareHdrBatches } from "./ltx-hdr-batches.js";
 import { registerVideoOutpaintFinishRoute } from "./routes/videoOutpaintFinish.js";
 import { createKeyerService } from "./keyer.js";
 import { createKeyerInstaller } from "./keyer-install.js";
@@ -74,7 +75,7 @@ import multer from "multer";
 import { isLocalVideoUpload, localVideoUploadLimits, standardUploadLimits } from "./upload-config.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
@@ -1377,6 +1378,7 @@ function buildHealthPayload() {
       utilityImage: true,
       utilityVideo: true,
       ltxVfx: true,
+      ltxHdrBatches: true,
       keyer: true,
       keyerUtility: true,
       keyerAutoSetup: true,
@@ -11181,6 +11183,10 @@ async function runLtxVfxUtility(req, res, referenceVideoUrls, model) {
     }
   };
   checkProvider();
+  if (model === ltxVfxModels.hdr) {
+    if (!metadata.fps || !metadata.frameRate) throw httpError(400, "Could not read the HDR source frame rate.");
+    return runLtxHdrBatches(req, res, { source, metadata, model, settings, checkProvider });
+  }
   updateCurrentGenerationProgress({ phase: "uploading", message: "Uploading source video to Fal" });
   const uploadedVideo = await uploadLocalOutputToFal(videoUrl);
   checkProvider();
@@ -11262,20 +11268,160 @@ async function runLtxVfxUtility(req, res, referenceVideoUrls, model) {
 async function saveLtxVfxOutput(req, url, model, spec, group) {
   return queueMediaPersistence(async () => {
     updateCurrentGenerationProgress({ status: "running", phase: "downloading", message: `Saving ${spec.label}` });
-    const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
-    if (!response.ok || !response.body) throw new Error(`Fal file download failed with HTTP ${response.status}.`);
     const kind = `${model.id.split("/").at(-1)}-${spec.key.replaceAll("_", "-")}`;
     const output = await createManagedAssetTarget(req, kind, spec.extension, group, { forceExtension: true });
     const temporaryPath = `${output.filePath}.part-${randomUUID()}`;
     try {
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
-      const { size } = await stat(temporaryPath);
-      if (!size) throw new Error("Fal returned an empty file.");
+      const size = await downloadLtxVfxFile(url, temporaryPath);
       await rename(temporaryPath, output.filePath);
       return { ...output, bytes: size };
     } finally {
       await rm(temporaryPath, { force: true }).catch(() => {});
     }
+  });
+}
+
+async function downloadLtxVfxFile(url, destination) {
+  if (!url) throw new Error("Fal did not return a file.");
+  const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
+  if (!response.ok || !response.body) throw new Error(`Fal file download failed with HTTP ${response.status}.`);
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
+  const { size } = await stat(destination);
+  if (!size) throw new Error("Fal returned an empty file.");
+  return size;
+}
+
+async function runLtxHdrBatches(req, res, { source, metadata, model, settings, checkProvider }) {
+  const directory = await mkdtemp(path.join(tmpdir(), "newtnode-ltx-hdr-"));
+  const endpoint = model.id;
+  const unitRateUsd = ltxVfxRate(model, settings, metadata);
+  const costFor = (units) => estimateFalVideoUtilityCost({
+    endpoint, amountUsd: roundCurrency(unitRateUsd * units), unitRateUsd, units, unit: "video second",
+    pricingBasis: "Fal estimate by submitted batch duration and source resolution tier",
+    pricingSource: "fal-model-page-2026-11-10"
+  });
+  const completed = [];
+  let resultItem;
+  let outputBytes = 0;
+  let batchCount = 0;
+  let deliveryWarning = "";
+  let failure;
+  try {
+    updateCurrentGenerationProgress({ phase: "preparing", message: "Splitting source into 65-frame HDR batches" });
+    const batches = await prepareHdrBatches(source.filePath, directory, metadata, runFfmpeg, probeVideoFile);
+    batchCount = batches.length;
+    let frameOffset = 0;
+    for (const [index, batch] of batches.entries()) {
+      const label = `HDR batch ${index + 1} of ${batchCount}`;
+      const startPercent = 10 + 80 * index / batchCount;
+      const endPercent = 10 + 80 * (index + 1) / batchCount;
+      checkProvider();
+      updateCurrentGenerationProgress({ status: "running", phase: "uploading", percent: startPercent, message: `${label} · Uploading` });
+      const uploadedVideo = await uploadToFal({ path: batch.input, originalname: path.basename(batch.input), mimetype: "video/mp4" });
+      checkProvider();
+      const result = await subscribeFal(endpoint, { input: ltxVfxFalInput(model, settings, uploadedVideo) },
+        { batch: { label, startPercent, endPercent } });
+      batch.requestId = result.requestId;
+      completed.push(batch);
+      updateCurrentGenerationProgress({ phase: "downloading", message: `${label} · Saving processed frames` });
+
+      batch.videoName = `hdr-${index}.mp4`;
+      const videoPath = path.join(directory, batch.videoName);
+      await downloadLtxVfxFile(normalizeFalFile(result.data?.video)?.url, videoPath);
+      batch.videoMetadata = await probeVideoFile(videoPath, { countFrames: true });
+      const { num_frames: frames, fps, pixelFormat, width, height } = batch.videoMetadata;
+      if (!fps || !pixelFormat || !width || !height || frames < batch.frames || frames > batch.submittedFrames || !frames) {
+        throw new Error(`${label} returned an unexpected video format or frame count.`);
+      }
+
+      if (!deliveryWarning) {
+        const archivePath = path.join(directory, "batch.zip");
+        try {
+          await downloadLtxVfxFile(normalizeFalFile(result.data?.exr_frames)?.url, archivePath);
+          await extractHdrFrames(archivePath, directory, frameOffset, batch);
+        } catch (error) {
+          deliveryWarning = `The full OpenEXR ZIP could not be assembled. Check Fal request ${batch.requestId || index + 1}.`;
+          console.warn(`${label} OpenEXR save failed:`, error.message);
+        } finally {
+          await rm(archivePath, { force: true }).catch(() => {});
+        }
+      }
+      frameOffset += batch.frames;
+    }
+
+    updateCurrentGenerationProgress({ phase: "finalizing", percent: 91, message: "Assembling the full HDR video and OpenEXR sequence" });
+    const videoPath = path.join(directory, "assembled.mp4");
+    const videoMetadata = await assembleHdrVideo(batches, source.filePath, directory, metadata, videoPath, runFfmpeg, probeVideoFile);
+    const zipPath = path.join(directory, "assembled.zip");
+    if (!deliveryWarning) {
+      try {
+        await assembleHdrArchive(directory, frameOffset, zipPath);
+      } catch (error) {
+        deliveryWarning = "The full OpenEXR ZIP could not be assembled. Check the Fal batch requests.";
+        console.warn("LTX HDR archive assembly failed:", error.message);
+      }
+    }
+    const publish = async (file, kind, extension, group) => queueMediaPersistence(async () => {
+      const target = await createManagedAssetTarget(req, kind, extension, group, { forceExtension: true });
+      const { size } = await stat(file);
+      const temporary = `${target.filePath}.part-${randomUUID()}`;
+      try {
+        await moveUploadedFile(file, temporary);
+        await rename(temporary, target.filePath);
+      } finally {
+        await rm(temporary, { force: true }).catch(() => {});
+      }
+      outputBytes += size;
+      return { url: target.publicPath, fileName: target.fileName };
+    });
+    const video = await publish(videoPath, "hdr-video", ".mp4", workflowPackageOutputDirName);
+    let exrArchive;
+    if (!deliveryWarning) {
+      try {
+        exrArchive = await publish(zipPath, "hdr-exr-frames", ".zip", workflowPackageDependencyDirName);
+      } catch (error) {
+        deliveryWarning = "The full OpenEXR ZIP could not be saved. Check the Fal batch requests.";
+        console.warn("LTX HDR archive publish failed:", error.message);
+      }
+    }
+    resultItem = {
+      ...videoMetadata, localUrl: video.url, fileName: video.fileName,
+      type: "video", label: model.displayName, mimeType: "video/mp4", exrArchive, deliveryWarning
+    };
+  } catch (error) {
+    failure = error;
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch((error) => console.warn("LTX HDR cleanup failed:", error.message));
+  }
+
+  const text = [`${model.displayName} · ${batchCount} ${batchCount === 1 ? "batch" : "batches"}`, deliveryWarning].filter(Boolean).join(". ");
+  for (const [index, batch] of completed.entries()) {
+    const output = index === completed.length - 1 ? resultItem : undefined;
+    await appendHistory({
+      id: batch.requestId || randomUUID(), requestId: batch.requestId,
+      createdAt: new Date().toISOString(), mediaType: "video", provider: "fal.ai", modelName: model.displayName,
+      endpoint, mode: model.displayName, prompt: "", project: projectFromBody(req.body), node: nodeFromBody(req.body),
+      settings: {
+        ...settings, sourceVideoCount: 1, sourceWidth: metadata.width, sourceHeight: metadata.height,
+        sourceFps: metadata.fps, durationSeconds: metadata.duration, batchIndex: index + 1, batchCount,
+        batchFrames: batch.frames, submittedFrames: batch.submittedFrames
+      },
+      cost: costFor(batch.submittedFrames / metadata.fps),
+      ...(output ? {
+        localVideo: output.localUrl, localVideos: [output.localUrl], outputFileName: output.fileName,
+        outputFileNames: [output.fileName], outputLabels: [output.label], outputBytes, exrArchive: output.exrArchive
+      } : {}),
+      text: output ? text : `${model.displayName} · Batch ${index + 1} of ${batchCount}`
+    });
+  }
+  if (failure) {
+    if (!completed.length) throw failure;
+    throw httpError(502, `${failure.message} Check the ${completed.length} completed Fal batch requests in History before rerunning.`);
+  }
+  return res.json({
+    requestId: completed.at(-1)?.requestId, endpoint, modelName: model.displayName, text,
+    cost: costFor(completed.reduce((sum, batch) => sum + batch.submittedFrames, 0) / metadata.fps),
+    resultItems: [resultItem]
   });
 }
 
@@ -16249,6 +16395,10 @@ function pageHistorySummaries(items, req) {
 }
 
 async function subscribeFal(endpoint, options = {}, context = {}) {
+  const batch = context.batch;
+  const progressMessage = (message) => batch ? `${batch.label} · ${message}` : message;
+  const progressPercent = (percent) => batch
+    ? batch.startPercent + (batch.endPercent - batch.startPercent) * percent / 100 : percent;
   const billingKey = process.env.FAL_KEY;
   const startedAt = Date.now();
   const inputSummary = summarizeFalValue(options.input, "input");
@@ -16276,7 +16426,7 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
           status: "queued",
           phase: "queued",
           requestId,
-          message: "Queued with Fal"
+          message: progressMessage("Queued with Fal")
         });
         writeFalDebugLog({
           event: "enqueued",
@@ -16296,13 +16446,13 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
         updateCurrentGenerationProgress({
           status: queued ? "queued" : "running",
           phase: queued ? "queued" : "generating",
-          ...(providerPercent === null ? {} : { percent: generationStagePercent(providerPercent) }),
+          ...(providerPercent === null ? {} : { percent: progressPercent(generationStagePercent(providerPercent)) }),
           requestId,
           queuePosition,
           providerStatus: status,
-          message: queued
+          message: progressMessage(queued
             ? (queuePosition === null || queuePosition === undefined ? "Queued with Fal" : `Fal queue position ${queuePosition}`)
-            : "Generating with Fal"
+            : "Generating with Fal")
         });
 
         if (status !== lastStatus || positionKey !== lastQueuePosition) {
@@ -16346,8 +16496,8 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
       phase: "finalizing",
       requestId: result?.requestId || requestId,
       providerStatus: "COMPLETED",
-      percent: 98,
-      message: "Fal generation complete"
+      percent: progressPercent(98),
+      message: progressMessage("Fal generation complete")
     });
 
     writeFalDebugLog({

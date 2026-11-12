@@ -83,6 +83,7 @@ try {
   assert.equal(health.routes.windowLifecycle, true);
   assert.equal(health.routes.featureUsage, true);
   assert.equal(health.routes.ltxVfx, true);
+  assert.equal(health.routes.ltxHdrBatches, true);
   for (const model of ["LTX-2.5 Alpha Gen", "LTX-2.5 Reframe", "LTX-2.5 Upscale", "LTX-2.5 SDR to HDR"]) {
     const rejected = await fetch(api + "/api/node/utility-video", {
       method: "POST",

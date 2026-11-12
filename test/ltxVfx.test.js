@@ -4,6 +4,22 @@ import { findLtxVfxModel, ltxVfxFalInput, ltxVfxModelNames, ltxVfxModels, ltxVfx
 import { enabledUtilityVideoModelOptions } from "../src/modelOptions.js";
 import { providerSupportedModels } from "../src/modelProviderRouting.js";
 import { buildUtilityVideoRequest, normalizeUtilityVideoGenerationResult } from "../src/nodeRunners/videoModels.js";
+import { nodeApi } from "../src/api/newtApi.js";
+
+test("HDR blocks an older backend before submitting to Fal", async (t) => {
+  const calls = [];
+  let hasBatching = false;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls.push(new URL(url, "http://localhost").pathname);
+    return Response.json({ routes: { ltxVfx: true, ltxHdrBatches: hasBatching } });
+  });
+  const body = { model: ltxVfxModels.hdr.displayName };
+  await assert.rejects(nodeApi.utilityVideo(body), /Restart the NewtNode backend to enable 65-frame HDR batching/);
+  assert.deepEqual(calls, ["/api/health"]);
+  hasBatching = true;
+  assert.equal((await nodeApi.utilityVideo(body)).response.ok, true);
+  assert.deepEqual(calls, ["/api/health", "/api/health", "/api/node/utility-video"]);
+});
 
 test("all four LTX VFX tools are enabled Utility Video models routed to Fal", () => {
   const enabled = enabledUtilityVideoModelOptions();
