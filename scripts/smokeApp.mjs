@@ -45,6 +45,7 @@ const requiredHealthRoutes = [
   "postRunPricing",
   "spendAnalytics",
   "objectSelectionCache",
+  "sam31Segmentation",
   "remoteVideoJobs",
   "remoteVideoStop",
   "atlasDurableVideo",

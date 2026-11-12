@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { objectSelectionEndpoints, objectSelectionInput, validateSam2Settings } from "../../src/objectSelection.js";
+import { estimateSam31ImageCost } from "../../src/samSegmentation.js";
 import { prepareObjectSource, encodeObjectMask, readObjectMask } from "../object-selection.js";
 import { objectSourceHash, objectQueryKey } from "../object-selection-cache.js";
 import { normalizeImageEditSelectionState } from "../../src/imageEditSelectionState.js";
@@ -78,16 +79,16 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
     const { data, info } = await prepareObjectSource(source.buffer).catch(() => { throw Object.assign(new Error("Use an image up to 24 megapixels."), { status: 400 }); });
     const sam3 = Boolean(point || prompt);
     const endpoint = objectSelectionEndpoints[sam3 ? "point" : "auto"];
-    const model = sam3 ? "SAM 3" : "SAM 2";
+    const model = sam3 ? "SAM 3.1" : "SAM 2";
     const imageUrl = await upload({ buffer: data, mimeType: "image/png", fileName: "object-selection.png" });
     const result = await subscribe(endpoint, { input: objectSelectionInput({ imageUrl, point, prompt, sam2, width: info.width, height: info.height }), logs: true }, { route: "image-objects", model });
     const remote = (sam3 ? result?.data?.masks : result?.data?.individual_masks) || [];
     // Record completed paid inference even if its masks are empty or cannot be downloaded.
-    const cost = { amountUsd: sam3 ? 0.005 : null, currency: "USD", units: 1, unit: "request", mediaType: "image", endpoint,
-      pricingBasis: sam3 ? "SAM 3 Fal per-request estimate" : "SAM 2: awaiting matched Fal billing; no verified fixed rate", pricingSource: "fal-model-page-2026-10-06" };
+    const cost = sam3 ? estimateSam31ImageCost() : { amountUsd: null, currency: "USD", units: 1, unit: "request", mediaType: "image", endpoint,
+      pricingBasis: "SAM 2: awaiting matched Fal billing; no verified fixed rate", pricingSource: "fal-model-page-2026-10-06" };
     let warning = "";
     try {
-      await recordHistory({ id: result.requestId || randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: "fal.ai", modelName: model,
+      await recordHistory({ id: result.requestId || randomUUID(), requestId: result.requestId, createdAt: new Date().toISOString(), mediaType: "image", provider: "fal.ai", modelName: model,
         endpoint, mode: "Image Edit: Object Selection", prompt: prompt || "", project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
         node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" }, localImage: sourceUrl,
         settings: { sourceUrl, point, ...(!sam3 ? { sam2 } : {}), imageSize: `${info.width}x${info.height}`, maskCount: remote.length }, cost });
@@ -105,7 +106,7 @@ export function registerObjectSelectionRoutes(app, { limiter, available, readSou
           if (mask.area) masks.push(mask);
         }
       }
-      if (remote.length > 128) warning = [warning, "Showing the first 128 objects; click an unhighlighted area to select it with SAM 3."].filter(Boolean).join(" ");
+      if (remote.length > 128) warning = [warning, "Showing the first 128 objects; click an unhighlighted area to select it with SAM 3.1."].filter(Boolean).join(" ");
       const data = { masks, model, warning, inherited: false };
       if (cache) {
         try { await cache.put(hash, options, data); }

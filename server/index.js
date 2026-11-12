@@ -124,6 +124,7 @@ import { jobTimingDiagnostic } from "./job-diagnostics.js";
 import { createSeedanceJobAdapter, providerKeyFingerprint } from "./seedance-job-provider.js";
 import { durableVideoRequestHandler, registerRemoteVideoJobRoutes } from "./routes/remote-video-jobs.js";
 import { workflowContextPayload } from "../src/workflowContext.js";
+import { sam31ImageEndpoint, sam31VideoEndpoint, sam31ImageCostPerRequest, sam31VideoCostPer16Frames, estimateSam31ImageCost, estimateSam31VideoCost } from "../src/samSegmentation.js";
 import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "./sam3Outputs.js";
 import {
   activateSoleProviderCredentials,
@@ -654,8 +655,6 @@ const wanVaceCostPerSecond = {
 const voidVideoInpaintingBaseCost = 0.05;
 const voidVideoInpaintingPass2Cost = 0.05;
 const voidVideoInpaintingSam3QuadMaskCost = 0.05;
-const sam3ImageCostPerRequest = 0.005;
-const sam3VideoCostPer16Frames = 0.005;
 const aurora480pCostPerSecond = 0.07;
 const aurora720pCostPerSecond = 0.14;
 const bytedanceUpscalerCostPerSecond = {
@@ -705,7 +704,7 @@ const storyboardVisionOpenAiModel = process.env.STORYBOARD_VISION_OPENAI_MODEL |
 const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || falTextModel;
 const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || falTextModel;
 const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || defaultFalVideoTextModel;
-const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
+const sam3SegmentationModelsEnabled = false; // Standalone Image Model and Video Model picker gate.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
 const depthAnythingVideoModelOptions = ["VDA-Small", "VDA-Base", "VDA-Large"];
@@ -1405,6 +1404,7 @@ function buildHealthPayload() {
       imageSelectionExport: true,
       imageBoxIdentification: true,
       objectSelectionCache: true,
+      sam31Segmentation: true,
       imageObjectSelection: true,
       ideogram45: true,
       kling4ImageToVideo: true,
@@ -3369,11 +3369,11 @@ app.get("/api/stats", async (_req, res) => {
           currency: "USD"
         },
         sam3Image: {
-          costPerRequest: sam3ImageCostPerRequest,
+          costPerRequest: sam31ImageCostPerRequest,
           currency: "USD"
         },
         sam3Video: {
-          costPer16Frames: sam3VideoCostPer16Frames,
+          costPer16Frames: sam31VideoCostPer16Frames,
           currency: "USD"
         },
         aurora: {
@@ -5558,10 +5558,10 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
 
   const imageUrl = firstLocalOutput(imagePromptUrls);
   if (!imageUrl) {
-    return res.status(400).json({ error: "SAM 3 Image requires a connected image." });
+    return res.status(400).json({ error: "SAM 3.1 Image requires a connected image." });
   }
 
-  const endpoint = "fal-ai/sam-3/image";
+  const endpoint = sam31ImageEndpoint;
   const input = sam3ImageMaskInput({
     imageUrl: await uploadLocalOutputToFal(imageUrl),
     prompt,
@@ -5573,7 +5573,7 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
 
   if (!remoteMasks.length) {
     return res.status(422).json({
-      error: "SAM 3 Image did not find a matching segment. Try naming a visible object in the image, like helmet, face, person, or robot.",
+      error: "SAM 3.1 Image did not find a matching segment. Try naming a visible object in the image, like helmet, face, person, or robot.",
       raw: result?.data
     });
   }
@@ -5585,7 +5585,7 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
       output: await downloadImage(
         req,
         remoteMask.url,
-        `sam-3-image-mask-${index + 1}`,
+        `sam-3-1-image-mask-${index + 1}`,
         remoteMask.content_type || remoteMask.mimeType
       )
     });
@@ -5596,14 +5596,14 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
         output: await downloadImage(
           req,
           remotePreview.url,
-          "sam-3-image-preview",
+          "sam-3-1-image-preview",
           remotePreview.content_type || remotePreview.mimeType
         )
       }
     : null;
   const maskCount = downloadedMasks.length;
   const text = `Segmented ${maskCount} ${maskCount === 1 ? "mask" : "masks"}.`;
-  const cost = estimateSam3ImageCost({ endpoint });
+  const cost = estimateSam31ImageCost();
   const primaryMask = downloadedMasks[0];
 
   await appendHistory({
@@ -5611,15 +5611,15 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
     createdAt: new Date().toISOString(),
     mediaType: "image",
     provider: "fal.ai",
-    modelName: "SAM 3 Image",
+    modelName: "SAM 3.1 Image",
     endpoint,
-    mode: "SAM 3 image segmentation",
+    mode: "SAM 3.1 image segmentation",
     prompt,
     submittedPrompt: prompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
-      model: req.body.model || "SAM 3 Image",
+      model: "SAM 3.1 Image",
       imageCount: 1,
       imagePromptLabel: cleanImagePromptLabel(imagePromptLabels[0]),
       applyMask: input.apply_mask,
@@ -5665,7 +5665,7 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
   return res.json({
     requestId: result.requestId,
     endpoint,
-    modelName: "SAM 3 Image",
+    modelName: "SAM 3.1 Image",
     text,
     cost,
     image: images[0],
@@ -5726,7 +5726,7 @@ app.post("/api/node/utility-image", async (req, res) => {
     if (selectedModel.provider === "fal-sam3-image") {
       const prompt = String(req.body.prompt || "").trim();
       if (!prompt) {
-        return res.status(400).json({ error: "SAM 3 Image requires a segmentation prompt." });
+        return res.status(400).json({ error: "SAM 3.1 Image requires a segmentation prompt." });
       }
 
       return runSam3ImageSegmentation(req, res, {
@@ -9233,10 +9233,10 @@ app.post("/api/node/generate-3d", async (req, res) => {
 async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }) {
   const videoUrl = firstLocalOutput(referenceVideoUrls);
   if (!videoUrl) {
-    return res.status(400).json({ error: "SAM 3 Video requires a connected video." });
+    return res.status(400).json({ error: "SAM 3.1 Video requires a connected video." });
   }
 
-  const endpoint = "fal-ai/sam-3/video";
+  const endpoint = sam31VideoEndpoint;
   const options = req.body.sam3Video || {};
   const input = sam3VideoMaskInput({
     videoUrl: await uploadLocalOutputToFal(videoUrl),
@@ -9251,27 +9251,32 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
     return res.status(502).json({ error: "Fal returned no segmentation video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(req, remoteVideo.url, "sam-3-video-mask");
-  const cost = estimateSam3VideoCost({ endpoint, frames: videoFrameCount(remoteVideo, result?.data) });
+  const output = await downloadVideo(req, remoteVideo.url, "sam-3-1-video-mask");
+  const inputFrames = await resolveLocalAssetPathFromUrl(videoUrl).then(async ({ filePath }) => {
+    const metadata = await probeVideoFile(filePath);
+    return videoFrameCount(metadata) ?? videoFrameCount(await probeVideoFile(filePath, { countFrames: true }));
+  }).catch(() => null);
+  const cost = estimateSam31VideoCost(inputFrames);
 
   await appendHistory({
     id: result.requestId || randomUUID(), requestId: result.requestId,
     createdAt: new Date().toISOString(),
     mediaType: "video",
     provider: "fal.ai",
-    modelName: "SAM 3 Video",
+    modelName: "SAM 3.1 Video",
     endpoint,
-    mode: "SAM 3 video mask",
+    mode: "SAM 3.1 video mask",
     prompt,
     submittedPrompt: prompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
-      model: req.body.model || "SAM 3 Video",
+      model: "SAM 3.1 Video",
       videoCount: 1,
       applyMask: input.apply_mask,
       outputType: input.video_output_type,
-      detectionThreshold: input.detection_threshold
+      detectionThreshold: input.detection_threshold,
+      inputFrames
     },
     cost,
     remoteVideo,
@@ -9284,7 +9289,7 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
   return res.json({
     requestId: result.requestId,
     endpoint,
-    modelName: "SAM 3 Video",
+    modelName: "SAM 3.1 Video",
     cost,
     video: {
       ...remoteVideo,
@@ -9772,14 +9777,14 @@ async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoU
     cost,
     video: {
       ...remoteVideo,
-      label: "SAM 3 Mask",
+      label: "VOID Inpainted Video",
       localUrl: output.publicPath,
       fileName: output.fileName
     },
     videos: [
       {
         ...remoteVideo,
-        label: "SAM 3 Mask",
+        label: "VOID Inpainted Video",
         localUrl: output.publicPath,
         fileName: output.fileName
       }
@@ -16871,40 +16876,6 @@ function estimateAuroraCost({ endpoint, resolution, duration }) {
   };
 }
 
-function estimateSam3ImageCost({ endpoint }) {
-  return {
-    amountUsd: sam3ImageCostPerRequest,
-    currency: "USD",
-    unitRateUsd: sam3ImageCostPerRequest,
-    units: 1,
-    unit: "request",
-    mediaType: "image",
-    pricingBasis: "SAM 3 image segmentation fal.ai per-request pricing estimate",
-    pricingSource: "fal-model-page-2026-05-12",
-    endpoint
-  };
-}
-
-function estimateSam3VideoCost({ endpoint, frames }) {
-  const frameCount = Number(frames || 0);
-  const billedUnits = frameCount > 0 ? Math.ceil(frameCount / 16) : null;
-
-  return {
-    amountUsd: billedUnits ? roundCurrency(billedUnits * sam3VideoCostPer16Frames) : null,
-    currency: "USD",
-    unitRateUsd: sam3VideoCostPer16Frames,
-    units: billedUnits,
-    unit: "16 frames",
-    mediaType: "video",
-    pricingBasis: billedUnits
-      ? "SAM 3 video segmentation fal.ai pricing estimate at $0.005 per 16 frames"
-      : "SAM 3 video segmentation fal.ai pricing estimate at $0.005 per 16 frames; local frame count unavailable",
-    pricingSource: "fal-model-page-2026-05-12",
-    endpoint,
-    frames: frameCount || null
-  };
-}
-
 function estimateFalImageUtilityCost({ endpoint, mediaType, pricingBasis, amountUsd = null, unitRateUsd = null, units = 1, unit = "request", pricingSource = "fal-model-page-2026-05-13" }) {
   return {
     amountUsd,
@@ -19631,15 +19602,15 @@ function resolveImageModel(model) {
     if (!sam3SegmentationModelsEnabled) {
       return {
         provider: "disabled",
-        displayName: "SAM 3 Image",
-        id: "fal-ai/sam-3/image"
+        displayName: "SAM 3.1 Image",
+        id: sam31ImageEndpoint
       };
     }
 
     return {
       provider: "fal-sam3-image",
-      displayName: "SAM 3 Image",
-      id: "fal-ai/sam-3/image"
+      displayName: "SAM 3.1 Image",
+      id: sam31ImageEndpoint
     };
   }
 
@@ -19749,8 +19720,8 @@ function resolveUtilityImageModel(model) {
   if (normalized.includes("sam") && normalized.includes("image")) {
     return {
       provider: "fal-sam3-image",
-      displayName: "SAM 3 Image",
-      id: "fal-ai/sam-3/image"
+      displayName: "SAM 3.1 Image",
+      id: sam31ImageEndpoint
     };
   }
 
@@ -19855,8 +19826,8 @@ function resolveUtilityVideoModel(model) {
   if (normalized.includes("sam") && normalized.includes("video")) {
     return {
       provider: "fal-sam3-video",
-      displayName: "SAM 3 Video",
-      id: "fal-ai/sam-3/video",
+      displayName: "SAM 3.1 Video",
+      id: sam31VideoEndpoint,
       requiresPrompt: true
     };
   }
@@ -20090,16 +20061,16 @@ function resolveVideoModel(model) {
     if (!sam3SegmentationModelsEnabled) {
       return {
         provider: "disabled",
-        displayName: "SAM 3 Video",
-        id: "fal-ai/sam-3/video",
+        displayName: "SAM 3.1 Video",
+        id: sam31VideoEndpoint,
         speed: "sam3"
       };
     }
 
     return {
       provider: "fal-sam3-video",
-      displayName: "SAM 3 Video",
-      id: "fal-ai/sam-3/video",
+      displayName: "SAM 3.1 Video",
+      id: sam31VideoEndpoint,
       speed: "sam3"
     };
   }

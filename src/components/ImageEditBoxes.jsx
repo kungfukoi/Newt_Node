@@ -101,7 +101,7 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
       <label>Name / description<input aria-label="Box description" value={box.label} maxLength={200} onChange={event => onCommit({ ...box, label: event.target.value })} /></label>
       <small className="ies-box-tag">Use {editBoxTags(boxes)[boxes.indexOf(box)]} in your edit prompt</small>
       {boxNeedsObject(box) && <>
-        {boxNeedsIdentification(box, model) && !box.sourceMask && <small>Automatic object selection adds a Fal SAM 3 request.</small>}
+        {boxNeedsIdentification(box, model) && !box.sourceMask && <small>Automatic object selection adds a Fal SAM 3.1 request.</small>}
         <button type="button" onClick={() => onSelectObject(box)}>{box.sourceMask ? "Reselect object" : "Select object"}</button>
         {box.sourceMask && <small role="status">Object selected. Check the highlighted shape.{box.selectionDerived && " Selected regions move together."}</small>}
       </>}
@@ -124,7 +124,7 @@ export function ImageEditBoxesPanel({ boxes, selectedId, onSelect, onCommit, onD
     <details className="ies-disclosure ies-help"><summary>How to use boxes</summary><div className="ies-section-body">
       <p>Drag to move, corners to scale, and the round handle to rotate. Double-click a label to rename it. Shift-select objects before activating Boxes to move them together.</p>
       <p>Use @tags in your prompt to refer to boxes. New boxes are named automatically; you can edit their names.</p>
-      <p>{box && boxNeedsIdentification(box, model) ? "Generate uses SAM 3 to identify an unselected object. This is a separate Fal request." : "FLUX uses named placement instructions. Select object when you need a precise shape."} Keep protects original pixels inside its box.</p>
+      <p>{box && boxNeedsIdentification(box, model) ? "Generate uses SAM 3.1 to identify an unselected object. This is a separate Fal request." : "FLUX uses named placement instructions. Select object when you need a precise shape."} Keep protects original pixels inside its box.</p>
     </div></details>
     {boxes.length > 0 && <details className="ies-disclosure"><summary>Export box image</summary><div className="ies-section-body">
       <small>Create a PNG with visible boxes, tags and embedded selection data.</small>

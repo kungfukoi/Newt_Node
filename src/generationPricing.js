@@ -81,7 +81,7 @@ export function generationProviderForModel({
     if (model === "Nano Banana Pro") return preferences.imageGeneration;
     if (model === "Ideogram 4.5") return "fal";
     if (supportsKreaModel("image", model)) return automaticFalKreaProvider(providerAvailability);
-    return ["Flux 3", "Ideogram 4.5", "REVE 2.1", "SAM 3 Image"].includes(model) ? "fal" : null;
+    return ["Flux 3", "Ideogram 4.5", "REVE 2.1", "SAM 3 Image", "SAM 3.1 Image"].includes(model) ? "fal" : null;
   }
 
   return null;

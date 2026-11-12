@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { estimateSam31ImageCost, estimateSam31VideoCost } from "../src/samSegmentation.js";
+import { normalizeModelPreferences } from "../src/modelOptions.js";
 import { sam3ImageMaskInput, sam3ImageOutputs, sam3VideoMaskInput } from "../server/sam3Outputs.js";
 
-test("SAM 3 image requests raw PNG mattes instead of masked RGB previews", () => {
+test("SAM 3.1 image requests raw PNG mattes instead of masked RGB previews", () => {
   assert.deepEqual(sam3ImageMaskInput({
     imageUrl: "https://example.com/source.png",
     prompt: "the foreground person",
@@ -19,7 +21,7 @@ test("SAM 3 image requests raw PNG mattes instead of masked RGB previews", () =>
   });
 });
 
-test("SAM 3 video requests an unapplied mask video", () => {
+test("SAM 3.1 video requests an unapplied mask video", () => {
   assert.deepEqual(sam3VideoMaskInput({
     videoUrl: "https://example.com/source.mp4",
     prompt: "the foreground person",
@@ -33,7 +35,7 @@ test("SAM 3 video requests an unapplied mask video", () => {
   });
 });
 
-test("SAM 3 outputs keep masks primary and preview separate", () => {
+test("SAM 3.1 outputs keep masks primary and preview separate", () => {
   const output = sam3ImageOutputs({
     image: { url: "https://example.com/preview.png" },
     masks: [
@@ -49,7 +51,7 @@ test("SAM 3 outputs keep masks primary and preview separate", () => {
   assert.equal(output.preview.url, "https://example.com/preview.png");
 });
 
-test("SAM 3 outputs do not duplicate a mask as the preview", () => {
+test("SAM 3.1 outputs do not duplicate a mask as the preview", () => {
   const output = sam3ImageOutputs({
     image: { url: "https://example.com/mask.png" },
     masks: [{ url: "https://example.com/mask.png" }]
@@ -57,4 +59,19 @@ test("SAM 3 outputs do not duplicate a mask as the preview", () => {
 
   assert.equal(output.masks.length, 1);
   assert.equal(output.preview, null);
+});
+
+test("SAM 3.1 uses its own published rates and bills video from input frames", () => {
+  assert.equal(estimateSam31ImageCost().amountUsd, 0.01);
+  assert.equal(estimateSam31VideoCost(16).amountUsd, 0.01);
+  assert.equal(estimateSam31VideoCost(17).amountUsd, 0.02);
+  assert.equal(estimateSam31VideoCost(null).amountUsd, null);
+});
+
+test("legacy SAM 3 utility preferences carry forward to SAM 3.1", () => {
+  const prefs = normalizeModelPreferences({
+    utilityImage: { "SAM 3 Image": false }, utilityVideo: { "SAM 3 Video": false }
+  });
+  assert.equal(prefs.utilityImage["SAM 3.1 Image"], false);
+  assert.equal(prefs.utilityVideo["SAM 3.1 Video"], false);
 });

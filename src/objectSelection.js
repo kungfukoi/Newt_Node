@@ -1,5 +1,7 @@
+import { sam31ImageEndpoint } from "./samSegmentation.js";
+
 // Independent selection geometry; masks are compact row-major [start, length] runs.
-export const objectSelectionEndpoints = { auto: "fal-ai/sam2/auto-segment", point: "fal-ai/sam-3/image" };
+export const objectSelectionEndpoints = { auto: "fal-ai/sam2/auto-segment", point: sam31ImageEndpoint };
 
 export const sam2Defaults = Object.freeze({ pointsPerSide: 32, confidence: 0.75, stability: 0.95, minRegionArea: 100 });
 export function validateSam2Settings(settings = {}) {
@@ -13,7 +15,7 @@ export function validateSam2Settings(settings = {}) {
 }
 
 export function objectSelectionInput({ imageUrl, point, prompt, width, height, sam2 }) {
-  // SAM 3 accepts at most 32 masks, including text identification for Boxes.
+  // Fal caps SAM 3.1 at 32 masks, including text identification for Boxes.
   if (prompt) return { image_url: imageUrl, prompt, apply_mask: false, output_format: "png", return_multiple_masks: true, max_masks: 32, include_scores: true };
   if (!point) {
     const settings = validateSam2Settings(sam2);

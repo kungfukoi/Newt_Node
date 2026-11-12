@@ -201,7 +201,7 @@ export const videoModelNames = {
   wanFunControl: "Wan Fun Control",
   wan27Reference: "Wan 2.7 Reference-to-Video",
   aurora: "Creatify Aurora",
-  sam3Video: "SAM 3 Video"
+  sam3Video: "SAM 3.1 Video"
 };
 export const videoModelOptions = [
   videoModelNames.seedance,
@@ -249,7 +249,7 @@ export const utilityImageModelNames = {
   depthAnything: "Depth Anything",
   topazUpscaler: "Topaz Image Upscale",
   patina: "Patina",
-  sam3Image: "SAM 3 Image",
+  sam3Image: "SAM 3.1 Image",
   birefnetImage: "BiRefNet Image"
 };
 export const utilityImageModelOptions = [
@@ -355,7 +355,7 @@ export const utilityVideoModelNames = {
   wan22VaceDepth: "Wan 2.2 VACE Fun A14B Depth",
   wan22VacePose: "Wan 2.2 VACE Fun A14B Pose",
   wan22VaceInpainting: "Wan 2.2 VACE Fun A14B Inpainting",
-  sam3Video: "SAM 3 Video",
+  sam3Video: "SAM 3.1 Video",
   voidVideoInpainting: "VOID Video Inpainting",
   birefnetVideo: "BiRefNet Video",
   rifeVideo: "RIFE Video",
@@ -414,7 +414,7 @@ export function normalizeModelPreferences(value = {}) {
     const incoming = value?.[kind] && typeof value[kind] === "object" ? value[kind] : {};
     normalized[kind] = Object.fromEntries(options.map((model) => [model, Boolean(incoming[model] ?? (isGptImage26Model(model)
       ? incoming[model.replace("2.6", "2.5")] ?? incoming["OpenAI Image 2.6"] ?? incoming["GPT Image 2.6"] ?? incoming["OpenAI Image 2.5"] ?? incoming["GPT Image 2.5"]
-      : undefined) ?? defaultModelPreferences[kind]?.[model])]));
+      : undefined) ?? (model.startsWith("SAM 3.1 ") ? incoming[model.replace("SAM 3.1 ", "SAM 3 ")] : undefined) ?? defaultModelPreferences[kind]?.[model])]));
     if (!Object.values(normalized[kind]).some(Boolean) && options[0]) normalized[kind][options[0]] = true;
   });
 
@@ -583,4 +583,4 @@ export const utilityModelDescriptions = {
   [utilityVideoModelNames.topazUpscaler]: "Very blocky / YouTube-like source: Compression 0.35, Noise 0.25.\nSoft but relatively clean source: Compression 0.10, Noise 0.10, Detail 0.40.\nWaxy or plastic result: lower Noise to 0.10; add Grain 0.01–0.02.\nVisible bright outlines: raise Halo gradually to 0.20–0.30.\nDo not raise Detail too high on tiny footage—it blends the original low-res artifacts back in."
 };
 
-export const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
+export const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3.1 segmentation.

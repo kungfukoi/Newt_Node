@@ -15523,7 +15523,7 @@ function NodeBody({
         : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
     const utilityRunLabel = usesOutpaintCanvas ? (isOutpaintCropOnly ? "Export crop" : "Run Outpaint") : isVideoMode
       ? ltxVfxModel ? `Run ${ltxVfxModel.displayName}` : isSam3Video
-        ? "Run SAM 3 Video"
+        ? "Run SAM 3.1 Video"
         : isVoidVideo
           ? "Run VOID"
           : isBirefnetVideo
@@ -15574,7 +15574,7 @@ function NodeBody({
         : isTopazImageUpscaler
           ? "Run Topaz Upscale"
         : isSam3Image
-        ? "Run SAM 3 Image"
+        ? "Run SAM 3.1 Image"
         : isBirefnetImage
           ? "Run BiRefNet Image"
           : isStillFrame
@@ -16839,7 +16839,7 @@ function NodeBody({
                 <ModelProviderOption key={model} model={model} {...providerOptionProps} />
               ))}
               {!imageModelOptions.includes(node.data.model) && !isSam3Image && <option hidden>{node.data.model}</option>}
-              {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
+              {sam3SegmentationModelsEnabled && <option>SAM 3.1 Image</option>}
             </select>
           </NodeRow>
           {isOpenAiImage2 && (

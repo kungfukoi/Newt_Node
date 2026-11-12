@@ -56,10 +56,12 @@ test("object map and prompt/point selection use explicit Fal endpoints and recor
   assert.equal(result.masks[0].area, 128);
   assert.match(calls[0].endpoint, /sam2\/auto-segment$/);
   await post({ prompt: "the jacket" }); await post({ point: { x: .5, y: .5 } });
-  assert.match(calls[1].endpoint, /sam-3\/image$/);
+  assert.equal(calls[1].endpoint, "fal-ai/sam-3-1/image");
+  assert.equal(calls[2].endpoint, calls[1].endpoint);
+  assert.deepEqual(calls[2].input.point_prompts, [{ x: 8, y: 4, label: 1 }]);
   assert.equal(calls[1].input.prompt, "the jacket");
   assert.equal(histories.length, 3);
-  assert.equal(histories[1].cost.amountUsd, .005);
+  assert.equal(histories[1].cost.amountUsd, .01);
   assert.equal(histories[0].localImage, "/uploads/test.png");
 }));
 
@@ -75,16 +77,16 @@ test("custom SAM 2 controls reach Fal and History; invalid values fail before su
   assert.equal(calls.length, 1);
 }));
 
-test("box object identification stays within SAM 3's mask limit", () => fixture(async ({ post, histories }) => {
+test("box object identification keeps SAM 3.1 requests within Newt's mask limit", () => fixture(async ({ post, histories }) => {
   const response = await post({ prompt: "the object to move and rotate" });
   const result = await response.json();
   assert.equal(response.status, 200, JSON.stringify(result));
-  assert.equal(result.model, "SAM 3");
+  assert.equal(result.model, "SAM 3.1");
   assert.equal(result.masks[0].area, 128);
   assert.equal(histories.length, 1);
 }, {
   subscribe: async (endpoint, { input }) => {
-    assert.equal(endpoint, "fal-ai/sam-3/image");
+    assert.equal(endpoint, "fal-ai/sam-3-1/image");
     if (!Number.isInteger(input.max_masks) || input.max_masks < 1 || input.max_masks > 32) {
       throw Object.assign(new Error("max_masks: Input should be less than or equal to 32"), { status: 422 });
     }

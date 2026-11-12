@@ -444,8 +444,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     finally { setSaving(false); }
   }
   async function identifyBoxObject(box, sourceBase = base) {
-    if (!falAvailable) throw new Error("Enable a Fal key to identify box objects with SAM 3, or use an existing Object Selection.");
-    setBusyLabel(`Identifying ${box.label} with SAM 3`);
+    if (!falAvailable) throw new Error("Enable a Fal key to identify box objects with SAM 3.1, or use an existing Object Selection.");
+    setBusyLabel(`Identifying ${box.label} with SAM 3.1`);
     const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
     const query = box.label.trim() && !/^Object(?: \d+)?$/i.test(box.label.trim()) ? { prompt: box.label.trim() } : { point: { x: box.source.x, y: box.source.y } };
     const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: sourceBase.url, requestId: crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...query });
@@ -456,7 +456,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   }
   async function selectBoxObject(box) {
     if (busyRef.current || !size) return;
-    busyRef.current = true; setBusy(true); setBusyLabel("Selecting box object with SAM 3"); setError("");
+    busyRef.current = true; setBusy(true); setBusyLabel("Selecting box object with SAM 3.1"); setError("");
     try {
       const selected = await identifyBoxObject(box);
       if (mounted.current) commitBox(selected);
@@ -531,11 +531,11 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         if (masks.length) selectionName.current = options.prompt;
         if (masks.length) commit([...history.marks.filter(mark => mark.layer !== "selection"), ...masks.map(mask => ({ tool: "object", layer: "selection", mask }))]);
         setObjectStatus(masks.length ? `Selected ${masks.length} matching regions. Refine with Shift/Alt or the brush.` : "No matching objects found. Try a different description; your selection is unchanged.");
-      } else setObjectStatus(masks.length ? `${masks.length} objects ready. Hover to preview; click to select.` : "No automatic objects found. Click an object to try SAM 3, or select by prompt.");
+      } else setObjectStatus(masks.length ? `${masks.length} objects ready. Hover to preview; click to select.` : "No automatic objects found. Click an object to try SAM 3.1, or select by prompt.");
       if (data.warning) setWarning(data.warning);
     };
     if (!rescan && objectCache.current.has(key)) { apply(objectCache.current.get(key)); return; }
-    busyRef.current = true; setBusy(true); setBusyLabel(kind === "auto" ? "Finding objects with SAM 2" : "Selecting with SAM 3"); setError(""); setWarning("");
+    busyRef.current = true; setBusy(true); setBusyLabel(kind === "auto" ? "Finding objects with SAM 2" : "Selecting with SAM 3.1"); setError(""); setWarning("");
     try {
       const form = new FormData(); appendWorkflowContextFormFields(form, workflowContext);
       const data = await nodeApi.imageObjects({ ...Object.fromEntries(form), sourceUrl: base.url, requestId: globalThis.crypto.randomUUID(), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit", ...options, rescan });
