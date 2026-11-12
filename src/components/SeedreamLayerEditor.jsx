@@ -288,28 +288,89 @@ export function layerEditSource(stack, layer) {
   return { ...item, ...layer.replacement, label: layer.name.trim() || item.label };
 }
 
-export function LayerStackPreview({ stack, draft, disabled, onChange, activeContent, zoom, previewUrl, showTransform }) {
+function rotateLayerOffset(x, y, angle) {
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+
+function layerSelectionFrame(layers, active) {
+  if (layers.length <= 1) return layers[0];
+  const angle = active.rotation * Math.PI / 180;
+  const bounds = layers.map(layer => {
+    const geometry = layerGeometry(layer);
+    const center = rotateLayerOffset(geometry.x, geometry.y, -angle);
+    const relative = geometry.angle - angle;
+    const cos = Math.abs(Math.cos(relative)), sin = Math.abs(Math.sin(relative));
+    const halfWidth = (geometry.width * cos + geometry.height * sin) / 2;
+    const halfHeight = (geometry.width * sin + geometry.height * cos) / 2;
+    return { left: center.x - halfWidth, top: center.y - halfHeight, right: center.x + halfWidth, bottom: center.y + halfHeight };
+  });
+  const left = Math.min(...bounds.map(box => box.left)), right = Math.max(...bounds.map(box => box.right));
+  const top = Math.min(...bounds.map(box => box.top)), bottom = Math.max(...bounds.map(box => box.bottom));
+  const center = rotateLayerOffset((left + right) / 2, (top + bottom) / 2, angle);
+  const width = right - left, height = bottom - top;
+  return { x: center.x - width / 2, y: center.y - height / 2, width, height, rotation: active.rotation, scale: 100 };
+}
+
+const clampLayerScale = value => Math.max(1, Math.min(400, Math.round(value)));
+const wrapLayerAngle = value => ((value + 180) % 360 + 360) % 360 - 180;
+
+function transformLayerSelection(layers, frame, { dx = 0, dy = 0, ratio = 1, rotation = 0 }, width, height) {
+  if (layers.length === 1) {
+    const [layer] = layers;
+    return new Map([[layer.url, {
+      x: dx ? Math.max(-width, Math.min(2 * width, Math.round(layer.x + dx))) : layer.x,
+      y: dy ? Math.max(-height, Math.min(2 * height, Math.round(layer.y + dy))) : layer.y,
+      scale: ratio === 1 ? layer.scale : clampLayerScale(layer.scale * ratio),
+      rotation: rotation ? wrapLayerAngle(Math.round(layer.rotation + rotation)) : layer.rotation,
+    }]]);
+  }
+  const minRatio = Math.max(...layers.map(layer => 1 / layer.scale));
+  const maxRatio = Math.min(...layers.map(layer => 400 / layer.scale));
+  ratio = Math.max(minRatio, Math.min(maxRatio, ratio));
+  if (ratio === 1 && !rotation) {
+    const clampDelta = (delta, axis, size) => Math.max(
+      Math.min(0, Math.max(...layers.map(layer => -size - layer[axis]))),
+      Math.min(Math.max(0, Math.min(...layers.map(layer => 2 * size - layer[axis]))), Math.round(delta))
+    );
+    const x = clampDelta(dx, "x", width), y = clampDelta(dy, "y", height);
+    return new Map(layers.map(layer => [layer.url, { x: layer.x + x, y: layer.y + y }]));
+  }
+  const centerX = frame.x + frame.width / 2, centerY = frame.y + frame.height / 2;
+  return new Map(layers.map(layer => {
+    const geometry = layerGeometry(layer);
+    const offset = rotateLayerOffset(geometry.x - centerX, geometry.y - centerY, rotation * Math.PI / 180);
+    return [layer.url, {
+      x: centerX + offset.x * ratio - layer.width / 2,
+      y: centerY + offset.y * ratio - layer.height / 2,
+      scale: layer.scale * ratio,
+      rotation: rotation ? wrapLayerAngle(layer.rotation + rotation) : layer.rotation,
+    }];
+  }));
+}
+
+export function LayerStackPreview({ stack, draft, selectedUrls, disabled, onChange, activeContent, zoom, previewUrl, showTransform }) {
   const { width, height } = compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
   const surface = React.useRef(null);
   const drag = React.useRef(null);
   const active = draft.layers.find(layer => layer.url === draft.selected);
+  const selectedLayers = draft.layers.filter(layer => selectedUrls.has(layer.url));
+  const frame = layerSelectionFrame(selectedLayers, active);
   const style = layer => ({
     left: layer.x / width * 100 + "%", top: layer.y / height * 100 + "%",
     width: layer.width / width * 100 + "%", height: layer.height / height * 100 + "%",
     transform: `rotate(${layer.rotation}deg) scale(${layer.scale / 100})`,
   });
-  const clampScale = value => Math.max(1, Math.min(400, Math.round(value)));
-  const wrapAngle = value => ((Math.round(value) + 180) % 360 + 360) % 360 - 180;
   function startTransform(event) {
     if (event.button !== 0 || disabled || drag.current) return;
     event.stopPropagation();
     const rect = surface.current.getBoundingClientRect();
     const bounds = event.currentTarget.getBoundingClientRect();
-    const centerX = bounds.left + bounds.width / 2, centerY = bounds.top + bounds.height / 2;
     drag.current = {
       id: event.pointerId, operation: event.target.closest("[data-transform]")?.dataset.transform || "move",
-      x: active.x, y: active.y, scale: active.scale, rotation: active.rotation,
-      startX: event.clientX, startY: event.clientY, centerX, centerY,
+      layers: selectedLayers, frame,
+      startX: event.clientX, startY: event.clientY,
+      centerX: bounds.left + bounds.width / 2, centerY: bounds.top + bounds.height / 2,
       scaleX: width / rect.width, scaleY: height / rect.height,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -318,28 +379,28 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
     const start = drag.current;
     if (!start || start.id !== event.pointerId) return;
     event.stopPropagation();
+    let transform;
     if (start.operation === "scale") {
       const initial = Math.hypot(start.startX - start.centerX, start.startY - start.centerY);
       const next = Math.hypot(event.clientX - start.centerX, event.clientY - start.centerY);
-      onChange({ scale: clampScale(start.scale * next / Math.max(1, initial)) }, start);
+      transform = { ratio: next / Math.max(1, initial) };
     } else if (start.operation === "rotate") {
       const initial = Math.atan2(start.startY - start.centerY, start.startX - start.centerX);
       const next = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
-      onChange({ rotation: wrapAngle(start.rotation + (next - initial) * 180 / Math.PI) }, start);
+      transform = { rotation: Math.round((next - initial) * 180 / Math.PI) };
     } else {
-      onChange({
-        x: Math.max(-width, Math.min(2 * width, Math.round(start.x + (event.clientX - start.startX) * start.scaleX))),
-        y: Math.max(-height, Math.min(2 * height, Math.round(start.y + (event.clientY - start.startY) * start.scaleY))),
-      }, start);
+      transform = { dx: (event.clientX - start.startX) * start.scaleX, dy: (event.clientY - start.startY) * start.scaleY };
     }
+    onChange(transformLayerSelection(start.layers, start.frame, transform, width, height), start);
   }
   function nudgeTransform(event) {
     if (!event.key.startsWith("Arrow")) return;
     event.preventDefault();
     event.stopPropagation();
     const step = (event.shiftKey ? 10 : 1) * (["ArrowLeft", "ArrowDown"].includes(event.key) ? -1 : 1);
-    onChange(event.currentTarget.dataset.transform === "scale"
-      ? { scale: clampScale(active.scale + step) } : { rotation: wrapAngle(active.rotation + step) });
+    const transform = event.currentTarget.dataset.transform === "scale"
+      ? { ratio: (active.scale + step) / active.scale } : { rotation: step };
+    onChange(transformLayerSelection(selectedLayers, frame, transform, width, height));
   }
   return <div ref={surface} className="ies-layer-surface" role="group" aria-label="Layer composition">
     <div className="ies-layer-pixels">{draft.layers.map(layer => {
@@ -347,10 +408,10 @@ export function LayerStackPreview({ stack, draft, disabled, onChange, activeCont
       return layer.url === draft.selected && activeContent
         ? <div className="ies-layer-active" key={layer.url} style={{ ...style(layer), opacity: visible ? layer.opacity / 100 : 0 }} inert={!visible || undefined}>{activeContent}</div>
         : visible && <img key={layer.url} src={(layer.url === draft.selected && previewUrl) || layer.replacement?.url || layer.url}
-          alt="" draggable={false} style={{ ...style(layer), opacity: layer.opacity / 100 }} />;
+          alt="" draggable={false} data-selected={selectedUrls.has(layer.url) || undefined} style={{ ...style(layer), opacity: layer.opacity / 100 }} />;
     })}</div>
-    {showTransform && !activeContent && isLayerVisible(active, draft.folders) && <div className="ies-layer-selection" role="group" aria-label="Layer transform"
-      style={{ ...style(active), "--ies-handle-scale": 100 / (active.scale * zoom) }}
+    {showTransform && !activeContent && selectedLayers.some(layer => isLayerVisible(layer, draft.folders)) && <div className="ies-layer-selection" role="group" aria-label={selectedLayers.length > 1 ? "Selected layers transform" : "Layer transform"}
+      style={{ ...style(frame), "--ies-handle-scale": 100 / (frame.scale * zoom) }}
       onPointerDown={startTransform} onPointerMove={updateTransform} onLostPointerCapture={() => { drag.current = null; }}>
       {["Top left", "Top right", "Bottom left", "Bottom right"].map((corner, index) =>
         <button key={corner} type="button" className="ies-transform-handle" data-transform="scale"
@@ -382,15 +443,11 @@ function layerBlocks(layers, folders) {
   return [...blocks, ...folders.filter(folder => !grouped.has(folder.id)).map(folder => ({ folder, layers: [] }))];
 }
 
-export function LayerStackControls({ stack, draft, disabled, showProperties, canUndo, canRedo, canSeparate, onSeparate, onRemove, onUndo, onRedo, onSelect, onDraft, onTransform }) {
+export function LayerStackControls({ stack, draft, disabled, showProperties, canUndo, canRedo, canSeparate, onSeparate, onRemove, onUndo, onRedo, selection, selectedUrls, onSelect, onDraft, onTransform }) {
   const { width, height } = compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
   const { layers, selected, folders = [] } = draft;
   const blocks = layerBlocks(layers, folders);
-  const [selection, setSelection] = React.useState(null);
   const selectionAnchor = React.useRef(null);
-  const selectedUrls = selection?.primary === selected
-    ? new Set(layers.filter(layer => selection.urls.has(layer.url)).map(layer => layer.url))
-    : new Set([selected]);
   const removeLabel = selectedUrls.size > 1 ? "Remove selected layers" : "Remove selected layer";
   const [rename, setRename] = React.useState(null);
   const [dropTarget, setDropTarget] = React.useState(null);
@@ -502,8 +559,7 @@ export function LayerStackControls({ stack, draft, disabled, showProperties, can
       } else urls.add(url);
     }
     selectionAnchor.current = event.shiftKey ? anchor : primary;
-    setSelection({ primary, urls });
-    onSelect(primary);
+    onSelect(primary, urls);
   }
   function layerRow(layer, nested = false) {
     const dropSide = dropTarget?.id === layer.url ? dropTarget.above ? " ies-drop-above" : " ies-drop-below" : "";
@@ -566,7 +622,7 @@ export function LayerStackControls({ stack, draft, disabled, showProperties, can
           aria-label={removeLabel}
           disabled={disabled || selectedUrls.size === layers.length} onClick={() => {
             onRemove(selectedUrls);
-            setSelection(null);
+            onSelect(selected, new Set([selected]));
             selectionAnchor.current = null;
           }}><Trash2 size={14} /></button>
         <button type="button" title="Undo layer change" aria-label="Undo layer change" disabled={disabled || !canUndo} onClick={onUndo}><Undo2 size={14} /></button>

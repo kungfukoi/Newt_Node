@@ -329,6 +329,60 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   await expect(selectedRows).toHaveCount(3);
   await expect(layerRows.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(layerRows.nth(2)).toHaveAttribute("data-active", "true");
+  await editor.getByRole("button", { name: "Move Layers", exact: true }).click();
+  const groupTransform = editor.getByRole("group", { name: "Selected layers transform" });
+  const groupImages = composition.locator('.ies-layer-pixels > img[data-selected="true"]');
+  const otherImages = composition.locator(".ies-layer-pixels > img:not([data-selected])");
+  const readGeometry = (images = groupImages) => images.evaluateAll(images => images.map(image => ({
+    x: parseFloat(image.style.left), y: parseFloat(image.style.top), transform: image.style.transform
+  })));
+  await expect(groupImages).toHaveCount(3);
+  const initialGeometry = await readGeometry();
+  const baseVisibility = layers.getByRole("button", { name: "Show Base image", exact: true });
+  await baseVisibility.click();
+  const otherGeometry = await readGeometry(otherImages);
+  expect(otherGeometry.length).toBeGreaterThan(0);
+  const groupBounds = await groupTransform.boundingBox();
+  const groupCenter = { x: groupBounds.x + groupBounds.width / 2, y: groupBounds.y + groupBounds.height / 2 };
+  await page.mouse.move(groupCenter.x, groupCenter.y);
+  await page.mouse.down();
+  await page.mouse.move(groupCenter.x + 25, groupCenter.y + 15, { steps: 5 });
+  await page.mouse.up();
+  const moved = await readGeometry();
+  const moveX = moved[0].x - initialGeometry[0].x;
+  const moveY = moved[0].y - initialGeometry[0].y;
+  expect(moveX).toBeGreaterThan(0);
+  expect(moveY).toBeGreaterThan(0);
+  moved.forEach((layer, index) => {
+    expect(layer.x - initialGeometry[index].x).toBeCloseTo(moveX, 3);
+    expect(layer.y - initialGeometry[index].y).toBeCloseTo(moveY, 3);
+  });
+  const undoTransform = editor.getByRole("button", { name: "Undo layer change" });
+  await undoTransform.click();
+  await expect.poll(readGeometry).toEqual(initialGeometry);
+  async function dragGroupHandle(name, transform) {
+    const bounds = await groupTransform.boundingBox();
+    const handle = await groupTransform.getByRole("button", { name }).boundingBox();
+    const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    const start = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+    const offset = transform(start.x - center.x, start.y - center.y);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(center.x + offset.x, center.y + offset.y, { steps: 5 });
+    await page.mouse.up();
+  }
+  await dragGroupHandle("Bottom right scale handle", (x, y) => ({ x: x * 1.15, y: y * 1.15 }));
+  const scaled = await readGeometry();
+  scaled.forEach((layer, index) => expect(layer.transform).not.toBe(initialGeometry[index].transform));
+  await dragGroupHandle("Rotate layer handle", (x, y) => ({ x: -y, y: x }));
+  const rotated = await readGeometry();
+  rotated.forEach((layer, index) => expect(layer.transform).not.toBe(scaled[index].transform));
+  expect(await readGeometry(otherImages)).toEqual(otherGeometry);
+  await undoTransform.click();
+  await expect.poll(readGeometry).toEqual(scaled);
+  await undoTransform.click();
+  await expect.poll(readGeometry).toEqual(initialGeometry);
+  await baseVisibility.click();
   const backdrop = layers.getByRole("button", { name: "Backdrop", exact: true });
   const providerBase = layers.getByRole("button", { name: "Base image", exact: true });
   await backdrop.click();

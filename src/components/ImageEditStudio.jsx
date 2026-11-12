@@ -86,11 +86,16 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const [versions, setVersions] = React.useState(restoredLayers.results);
   const [layerSession, setLayerSession] = React.useState(null);
   const [stackDraft, setStackDraft] = React.useState(null);
+  const [stackSelection, setStackSelection] = React.useState(null);
   const [moveLayers, setMoveLayers] = React.useState(true);
   const [selectionDestination, setSelectionDestination] = React.useState("");
   const layerTarget = Boolean(layerSession);
   const showComposition = layerTarget && moveLayers;
   const activeLayer = stackDraft?.layers.find(entry => entry.url === stackDraft.selected);
+  const layerSelection = stackSelection?.key === layerSession?.key && stackSelection?.primary === stackDraft?.selected
+    ? stackSelection : null;
+  const selectedLayerUrls = new Set(stackDraft?.layers.filter(entry =>
+    layerSelection ? layerSelection.urls.has(entry.url) : entry.url === stackDraft.selected).map(entry => entry.url));
   const sourceDraft = React.useRef(null);
   const layerToolDrafts = React.useRef(new Map());
   const stackHistory = React.useRef(new Map());
@@ -821,6 +826,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     restoreTools(source, saved?.base.url === source.url ? saved : !layerSession && sourceDraft.current?.base.url === source.url ? sourceDraft.current : null);
   }
   function enterLayerStack(stack, initialDraft) {
+    setStackSelection(null);
     if (layerSession) rememberLayerTools();
     else sourceDraft.current = captureTools();
     const next = initialDraft || initializeLayerStack(stack, layerDrafts.current.get(stack.key));
@@ -829,11 +835,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     loadLayerTools(stack, next);
   }
   function leaveLayerStack() {
+    setStackSelection(null);
     rememberLayerTools();
     setLayerSession(null); setStackDraft(null);
     if (sourceDraft.current) restoreTools(sourceDraft.current.base, sourceDraft.current);
   }
-  function selectStackLayer(url) {
+  function selectStackLayer(url, urls) {
+    setStackSelection({ key: layerSession.key, primary: url, urls });
     if (url !== stackDraft.selected) {
       rememberLayerTools();
       const next = { ...stackDraft, selected: url };
@@ -850,8 +858,15 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     recordLayerChange();
     enterLayerStack(stack, { ...stackDraft, layers, selected });
   }
+  function transformStackLayers(patches, gesture) {
+    const layers = stackDraft.layers.map(entry => {
+      const patch = patches.get(entry.url);
+      return patch && Object.entries(patch).some(([key, value]) => entry[key] !== value) ? { ...entry, ...patch } : entry;
+    });
+    if (layers.some((entry, index) => entry !== stackDraft.layers[index])) changeStackDraft({ ...stackDraft, layers }, gesture);
+  }
   function transformStackLayer(patch, gesture) {
-    changeStackDraft({ ...stackDraft, layers: stackDraft.layers.map(entry => entry.url === stackDraft.selected ? { ...entry, ...patch } : entry) }, gesture);
+    transformStackLayers(new Map([[stackDraft.selected, patch]]), gesture);
   }
   function separateSelectedLayer() {
     const source = layerEditSource(layerSession, activeLayer);
@@ -1000,7 +1015,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
             onPointerDown={previewOnly ? pointerDown : undefined} onPointerMove={previewOnly ? pointerMove : undefined}
             onPointerUp={previewOnly ? pointerUp : undefined} onPointerCancel={previewOnly ? pointerUp : undefined}>
             <LayerStackPreview stack={layerSession} draft={stackDraft} disabled={busy || saving} zoom={zoom}
-              onChange={transformStackLayer} showTransform={view === "result"} activeContent={showComposition ? null : imageSurface} previewUrl={showComposition ? result?.url : undefined} />
+              selectedUrls={selectedLayerUrls} onChange={transformStackLayers} showTransform={view === "result"} activeContent={showComposition ? null : imageSurface} previewUrl={showComposition ? result?.url : undefined} />
             {showComposition && <img style={{ display: "none" }} src={base.url} alt="" onLoad={readImageSize} />}
             {comparison}
           </div> : imageSurface}
@@ -1041,7 +1056,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           canUndo={Boolean(layerHistory?.past.length)} canRedo={Boolean(layerHistory?.future.length)}
           canSeparate={Boolean(atlasAvailable && size && !busy && !saving && !modelSaving && !restoringSelections)} onSeparate={separateSelectedLayer}
           onRemove={removeSelectedLayers} onUndo={() => restoreLayerHistory(false)} onRedo={() => restoreLayerHistory(true)}
-          onSelect={selectStackLayer} onDraft={changeStackDraft} onTransform={transformStackLayer} />}
+          selection={layerSelection} selectedUrls={selectedLayerUrls} onSelect={selectStackLayer} onDraft={changeStackDraft} onTransform={transformStackLayer} />}
         {!reviewing && (selectionBox || hasSelection) && <section className="ies-panel-section">
           <h3>Selection to layer</h3>
           <button type="button" disabled={busy || saving || !size} onClick={() => addSelectionToStack()}>Add to New Layer</button>
@@ -1051,11 +1066,12 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           <button type="button" disabled={busy || saving || !destination || !size} onClick={() => addSelectionToStack(destination)}>Add to Existing Layer</button>
         </section>}
         {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
-          <section className="ies-panel-section"><div className="ies-section-heading"><h3>Edit instructions</h3></div>
+          <details open className="ies-disclosure ies-panel-section ies-inspector-disclosure"><summary>Edit instructions</summary>
+          <div className="ies-instructions-fields">
           <label>Method<select aria-label="Edit method" disabled={boxes.length > 0 && !seedream} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch" disabled={boxes.length > 0}>Render sketch</option><option value="remove" disabled={boxes.length > 0}>Remove selected</option>{seedream && <option value="layers">Separate layers</option>}</select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={layerMode ? "Name the elements to separate (optional)" : mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
-          </section>
+          </div></details>
           {selectionSaved && <p className="ies-selection-notice" role="status">{selectionSaved}</p>}
           {tool !== "object" && objectStatus && <p className="ies-selection-notice" role="status">{objectStatus}</p>}
           {tool !== "object" && inheritedScan && <p className="ies-selection-notice" role="status">Using scan from before this edit. Boundaries may have changed; Scan image for objects updates them.</p>}
@@ -1083,7 +1099,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
           {layer === "drawing" && <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>}
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
           </div></details>}
-          <section className="ies-panel-section"><div className="ies-section-heading"><h3>Output</h3></div><div className="ies-output-grid">
+          <details open className="ies-disclosure ies-panel-section ies-inspector-disclosure"><summary>Output</summary><div className="ies-output-grid">
           {!layerMode && (imageEditUsesSelectionGuide(model) ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={e => setResolution(e.target.value)}>{resolutionOptions.map(value => <option key={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{(isIdeogram45Model(model) ? ideogram45QualityOptions : ["high", "xhigh", "max"]).map((value) => <option key={value} value={value}>{({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]}</option>)}</select></label>)}
           {seedream && <>
             {layerMode ? <>
@@ -1118,7 +1134,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
               {seedream55Formats.map(value => <option key={value} value={value} disabled={value === "jpeg" && seedreamSettings.background === "transparent"}>{value.toUpperCase()}</option>)}
             </select></label>}
           </>}
-          </div></section>
+          </div></details>
           {!layerMode && <details className="ies-disclosure ies-panel-section"><summary>Save selection draft</summary><div className="ies-section-body">
             <button type="button" onClick={saveSelections} disabled={!size || blank || namingBoxes.length > 0}>Save selections and boxes</button>
           <small>Create an Image Selection node to reuse this draft. Done applies the image edits and saves the selection draft.</small>

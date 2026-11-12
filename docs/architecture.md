@@ -520,6 +520,8 @@ Timeline Extract Frame uses the dedicated assembly-extract-frame route with fram
 
 ## Image editor inspector layout
 
+In Move Layers, Shift selects a range and Ctrl or Command toggles layers. The bounding box moves, scales uniformly and rotates the selected layers about their shared center. Each gesture saves one undo step using the existing layer geometry and persistence. Layer properties and pixel tools target the active layer.
+
 The layer stack resize grip sets the panel height independently of the number of rows and scrolls the inspector when dragged near its lower edge. Double-click the grip or press End while it is focused to fit the stack to its rows.
 
 Original, Compare, and Edit stay in the canvas footer for drafts, generated edits, and layer stacks. The comparison source is the image that opened the editor. The mouse wheel zooms around the pointer over the canvas. Shift-wheel pans the canvas, and the inspector retains its own wheel scrolling.
