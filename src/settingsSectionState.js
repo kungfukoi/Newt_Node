@@ -3,7 +3,8 @@ export const settingsGroups = [
   { label: "Providers & Models", sections: [
     ["credentials", "API Credentials"],
     ["providers", "Model Providers"],
-    ["models", "Enabled Models"]
+    ["models", "Enabled Models"],
+    ["librarySources", "Library Sources"]
   ] },
   { label: "Usage & Costs", sections: [["usage", "Feature Usage"], ["pricing", "API Pricing"]] },
   { label: "System", sections: [["comfy", "Comfy Engine"], ["repository", "Repository"], ["diagnostics", "Diagnostics"]] }

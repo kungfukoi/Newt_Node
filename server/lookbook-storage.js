@@ -5,8 +5,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import sharp from "sharp";
 import { createCustomLookStore,prepareCustomLook } from "./custom-looks.js";
 import { createCompactStyleFinderReader } from "./stylefinder-compact.js";
+import { createLibrarySources, registerLibrarySourceRoutes } from "./library-sources.js";
 import { selectStyleFinderPage } from "./stylefinder-catalog.js";
 import { normalizeLibraryStyle } from "../src/styleLibrary.js";
+import { builtinLibrarySources } from "../src/lookCatalogs.js";
+import { filmStillFilters } from "./film-still-filters.js";
 
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const digest=buffer=>createHash("sha256").update(buffer).digest("hex");
@@ -42,13 +45,14 @@ export async function removeOriginalLookImage(url,uploadsDirectory){
 export function createLookbookStorage({directory,cacheDirectory,readAsset,removeOriginal}){
   const local=createCustomLookStore({directory}),configPath=path.join(directory,"lookbook-storage.json"),aliasPath=path.join(directory,"lookbook-image-aliases.json"),assets=new Map();
   const readCatalog=createCompactStyleFinderReader({shared:true});
-  const readFilmCatalog=createCompactStyleFinderReader({shared:true,imageEndpoint:"/api/style-library/film-stills-image"});
+  const readFilmCatalog=createCompactStyleFinderReader({shared:true,imageEndpoint:"/api/style-library/film-stills-image",getFilters:filmStillFilters});
+  const librarySources=createLibrarySources();
   let queue=Promise.resolve(),aliasCache=null;
   function serial(action){const work=queue.then(action);queue=work.catch(()=>{});return work;}
   async function config(){try{const value=JSON.parse(await readFile(configPath,"utf8"));if(typeof value.directory!=="string"||(value.looksDirectory!==undefined&&typeof value.looksDirectory!=="string")||(value.filmStillsDirectory!==undefined&&typeof value.filmStillsDirectory!=="string"))throw Error("Invalid Lookbook storage setting.");return value;}catch(error){if(error.code==="ENOENT")return {directory:""};throw error;}}
   async function rootAvailable(root){
     try{if(!(await stat(root)).isDirectory())throw Error("Not a directory");}
-    catch{fail("The shared folder is unavailable. Mount the drive or update the path in Settings → User Preferences.",503);}
+    catch{fail("The shared folder is unavailable. Mount the drive or update the path in Settings → Library Sources.",503);}
   }
   async function resolveFolder(value,previous){
     if(typeof value!=="string"||value.length>4096)fail("Enter a folder path.");
@@ -202,7 +206,12 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     return images;
   }
   function add(source){return serial(async()=>{const location=lookLocation(await config());if(!location.root)return local.add(source);const saved=await sharedAdd(location,source);await retireImages([source],[saved]);return saved;});}
-  async function state(){const setting=await config(),looksDirectory=looksRoot(setting);return {directory:setting.directory,looksDirectory,filmStillsDirectory:setting.filmStillsDirectory??"",mode:looksDirectory?"shared":"local",localCount:(await local.read()).length,...(setting.format==="compact"?{format:setting.format}:{})};}
+  async function readSource(id, refresh){
+    const source=(await config()).sources?.find(entry=>entry.id===id);
+    if(!source)fail("This library source is no longer configured.",404);
+    return librarySources.open(source,refresh);
+  }
+  async function state(){const setting=await config(),looksDirectory=looksRoot(setting);return {directory:setting.directory,looksDirectory,filmStillsDirectory:setting.filmStillsDirectory??"",sources:setting.sources??[],sourceNames:setting.sourceNames??{},removedSources:setting.removedSources??[],mode:looksDirectory?"shared":"local",localCount:(await local.read()).length,...(setting.format==="compact"?{format:setting.format}:{})};}
   function configure(body={}){return serial(async()=>{
     const previous=await config();
     const root=await resolveFolder(body.directory,previous.directory);
@@ -214,13 +223,28 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
       try{await readFilmCatalog(filmStillsDirectory);}
       catch{fail("Choose a Film Stills folder containing a valid compact catalog.json.",503);}
     }
+    const sources=body.sources===undefined?previous.sources??[]:await librarySources.configure(body.sources,previous.sources??[]);
+    const sourceNames={...previous.sourceNames};
+    const removedSources=body.removedSources??previous.removedSources??[];
+    if(!Array.isArray(removedSources)||removedSources.some(id=>!Object.hasOwn(builtinLibrarySources,id)))fail("Choose valid library sources to remove.");
+    if(body.sourceNames!==undefined){
+      if(!body.sourceNames||typeof body.sourceNames!=="object"||Array.isArray(body.sourceNames))fail("Enter valid library source names.");
+      for(const id of Object.keys(builtinLibrarySources)){
+        if(!Object.hasOwn(body.sourceNames,id))continue;
+        const name=body.sourceNames[id];
+        if(typeof name!=="string"||name.trim().length>80||/[\r\n\0]/.test(name))fail("Enter a library source name of up to 80 characters.");
+        if(name.trim())sourceNames[id]=name.trim();
+        else delete sourceNames[id];
+      }
+    }
     const location=lookLocation({directory:root,looksDirectory});
     if(location.root){
       const copies=body.copyLocal===false?[]:await local.read();
       if(copies.length||(location.root!==looksRoot(previous)&&(looksDirectory!==undefined||!compact)))await checkWritable(location.root);
       for(const look of copies)await sharedAdd(location,look);
     }
-    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root,looksDirectory,...(filmStillsDirectory?{filmStillsDirectory}:{}),...(compact?{format:"compact"}:{})}),{mode:0o600});await rename(temporary,configPath);
+    await mkdir(directory,{recursive:true});const temporary=`${configPath}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify({version:1,directory:root,looksDirectory,sources,sourceNames,removedSources:[...new Set(removedSources)],...(filmStillsDirectory?{filmStillsDirectory}:{}),...(compact?{format:"compact"}:{})}),{mode:0o600});await rename(temporary,configPath);
+    librarySources.prune(sources);
     return state();
   });}
   function retireLocalCopies(){return serial(async()=>{
@@ -274,13 +298,14 @@ export function createLookbookStorage({directory,cacheDirectory,readAsset,remove
     }
     return {id,removed};
   });}
-  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,purgeSharedLook,readSharedCompact,readFilmStills,readSharedLooks,searchLocalLooks};
+  return {read,add,get,ensureAsset,assetAlias,state,configure,retireLocalCopies,remove,purgeSharedLook,readSharedCompact,readFilmStills,readSharedLooks,searchLocalLooks,readSource};
 }
 export function registerLookbookStorageRoutes(app,store){
+  registerLibrarySourceRoutes(app,store.readSource);
   async function filmStills(res, action){
     try{
       const catalog=await store.readFilmStills();
-      if(!catalog)fail("Set the Film Stills catalog folder in Settings → User Preferences.",404);
+      if(!catalog)fail("Set the Film Stills catalog folder in Settings → Library Sources.",404);
       await action(catalog);
     }catch(error){
       res.status(error.status||(error.code==="ENOENT"?404:503)).json({error:error.status?error.message:"This Film Stills example is unavailable. Check the shared folder and refresh."});

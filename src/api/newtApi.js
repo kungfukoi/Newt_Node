@@ -7,6 +7,8 @@ import { apiErrorMessage } from "../apiErrors.js";
 import { supportsDurableVideo } from "../remoteVideoJobs.js";
 import { waitForRemoteVideo } from "../remoteVideoJobClient.js";
 import { createRemoteVideoRequests } from "../remoteVideoRequests.js";
+import { lookSourceOptions } from "../lookCatalogs.js";
+import { filmStillFilterOptions } from "../filmStillFilterOptions.js";
 
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
@@ -29,7 +31,7 @@ export const styleLibraryApi = {
   async saveStorage(body){
     const {response,data}=await fetchJsonApi("/api/style-library/storage",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)},"Save Lookbook folder",{timeoutMs:300000,retryLocalApi:false});
     ensureOk(response,data,"Could not save the Lookbook folder.");
-    window.dispatchEvent(new Event("newtnode:lookbook-storage-updated"));return data;
+    window.dispatchEvent(new CustomEvent("newtnode:lookbook-storage-updated",{detail:data}));return data;
   },
   async create(style) {
     const { response, data } = await fetchJsonApi("/api/style-library/created", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(style) }, "Save created look", { timeoutMs: 20000, retryLocalApi: false });
@@ -59,17 +61,24 @@ export const styleLibraryApi = {
   },
   async catalog({ query = "", category = "", offset = 0, refresh = false, source = "library" } = {}) {
     const params = new URLSearchParams({ q: query, category, offset: String(offset), limit: "48", refresh: refresh ? "1" : "0", own: "1" });
-    const endpoint=["stylefinder","shared-user-looks","local-looks","film-stills"].includes(source)?source:"catalog";
+    if (source === "film-stills" && filmStillFilterOptions.some(option => option.value === category)) {
+      params.delete("category");
+      params.set("filter", category);
+    }
+    const endpoint=source.startsWith("source:") ? `sources/${encodeURIComponent(source.slice(7))}`
+      : ["stylefinder","shared-user-looks","local-looks","film-stills"].includes(source)?source:"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}?${params}`, {}, "Read look catalog", { timeoutMs: 60000, retryLocalApi: false });
     ensureOk(response, data, "Could not read the look catalog. Refresh and retry.");
     if (!Array.isArray(data.styles)) throw new Error("Restart NewtNode to activate the look catalog.");
     return data;
   },
-  async allCatalogs({query,category,refresh,includeLocal=false,includeFilmStills=false,offsets={library:0,stylefinder:0,"shared-user-looks":0,"local-looks":0,"film-stills":0}}) {
-    const sources=Object.entries(offsets).filter(([source])=>(source!=="local-looks"||includeLocal)&&(source!=="film-stills"||includeFilmStills));
+  async allCatalogs({query,category,refresh,includeLocal=false,includeFilmStills=false,customSources=[],sourceNames={},removedSources=[],offsets}) {
+    offsets ??= {library:0,stylefinder:0,"shared-user-looks":0,"local-looks":0,"film-stills":0,
+      ...Object.fromEntries(customSources.map(source=>[`source:${source.id}`,0]))};
+    const labels=Object.fromEntries(lookSourceOptions(includeLocal,includeFilmStills,customSources,sourceNames,removedSources).map(option=>[option.value,option.label]));
+    const sources=Object.entries(offsets).filter(([source])=>Object.hasOwn(labels,source));
     const results=await Promise.allSettled(sources.map(([source,offset])=>this.catalog({query,category,refresh,source,offset})));
     const nextOffsets={},styles=[],categories=new Set(),warnings=[];
-    const labels={library:"Commercial",stylefinder:"Looks Catalog","shared-user-looks":"User Looks","local-looks":"Local Looks","film-stills":"Film Stills"};
     let truncated=false;
     results.forEach((result,index)=>{
       const [source,offset]=sources[index];
@@ -87,7 +96,8 @@ export const styleLibraryApi = {
     return {ready:true,styles,categories:[...categories].sort(),nextOffsets,truncated,warning:warnings.join(" ")};
   },
   async detail(id) {
-    const endpoint=id.startsWith("film-stills-")?"film-stills":id.startsWith("stylefinder-")?"stylefinder":"catalog";
+    const sourceId=/^custom-([a-f0-9]{32})-[a-f0-9]{32}$/.exec(id)?.[1];
+    const endpoint=sourceId?`sources/${sourceId}/looks`:id.startsWith("film-stills-")?"film-stills":id.startsWith("stylefinder-")?"stylefinder":"catalog";
     const { response, data } = await fetchJsonApi(`/api/style-library/${endpoint}/${encodeURIComponent(id)}`, {}, "Read style details", { timeoutMs: 60000, retryLocalApi: false });
     return ensureOk(response, data, "Could not read this catalog look.");
   },

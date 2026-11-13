@@ -11,6 +11,7 @@ import CreateLookDialog from "./components/CreateLookDialog.jsx";
 import LookDetailExtras from "./components/LookDetailExtras.jsx";
 import LookDescription from "./components/LookDescription.jsx";
 import { lookSourceOptions, lookLibraryOptions, namedLookCollections, findStarredCatalog, shuffleCatalogLooks, uniqueCatalogLooks, allSavedCatalogLooks, sameLook } from "./lookCatalogs.js";
+import { filmStillFilterOptions } from "./filmStillFilterOptions.js";
 import { collectionRows, collectionRowHeight, collectionRowGap, collectionFrameChrome } from "./collectionFrame.js";
 import { uiGet, uiSet } from "./uiState.js";
 
@@ -38,6 +39,9 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const [selectedLooks,setSelectedLooks]=React.useState(()=>new Map());
   const [sharedCatalogRevision,setSharedCatalogRevision]=React.useState(0);
   const [showLocalLooks,setShowLocalLooks]=React.useState(false);
+  const [customSources,setCustomSources]=React.useState([]);
+  const [sourceNames,setSourceNames]=React.useState({});
+  const [removedSources,setRemovedSources]=React.useState([]);
   const [removeError,setRemoveError]=React.useState("");
   const [catalog,setCatalog]=React.useState(null), [catalogLoading,setCatalogLoading]=React.useState(false), [catalogFailure,setCatalogFailure]=React.useState(null);
   const [query,setQuery]=React.useState(""), [category,setCategory]=React.useState(""), [scope,setScope]=React.useState("stylefinder");
@@ -84,7 +88,8 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   const includeLocalInAll=allLooks&&showLocalLooks;
   const includeFilmStillsInAll=allLooks&&showFilmStills;
   const catalogRefresh=sharedCatalogRevision;
-  const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks||allLooks||scope==="local-looks"||scope==="film-stills";
+  const isCustomSource=scope.startsWith("source:");
+  const isSourceCatalog=scope==="library"||scope==="stylefinder"||sharedUserLooks||allLooks||scope==="local-looks"||scope==="film-stills"||isCustomSource;
   const catalogViewKey=JSON.stringify([scope,query,category]);
   const currentCatalog=catalog?.viewKey===catalogViewKey?catalog:null;
   const catalogError=catalogFailure?.viewKey===catalogViewKey?catalogFailure.message:"";
@@ -96,7 +101,8 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     : scope==="saved" ? allSavedCatalogLooks(library?.collections)
     : scope==="starred" ? (starredCollection?.styles||[]) : (browseCollection?.styles||[]);
   const browserValue=scope==="collection" ? `collection:${browseCollectionId}` : scope;
-  const sourceOptions=lookSourceOptions(showLocalLooks,showFilmStills);
+  const sourceOptions=lookSourceOptions(showLocalLooks,showFilmStills,customSources,sourceNames,removedSources);
+  const firstSource=sourceOptions.some(option=>option.value==="stylefinder")?"stylefinder":"all";
   const libraryOptions=lookLibraryOptions(library?.collections);
   const browserOptions=isSourceCatalog?sourceOptions:libraryOptions;
   const browserName=browserOptions.find(option=>option.value===browserValue)?.label || "Catalog";
@@ -108,7 +114,10 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     else setLastSource(value);
     if(value.startsWith("collection:")){setBrowseCollectionId(value.slice(11));setScope("collection");}else setScope(value);
   }
-  const filterCategories=isSourceCatalog?(catalog?.categories||[]):[...new Set(sourceStyles.map(style=>style.category).filter(Boolean))].sort();
+  const filterCategories=scope==="film-stills"?filmStillFilterOptions.map(option=>option.value)
+    :isSourceCatalog?(catalog?.categories||[]):[...new Set(sourceStyles.map(style=>style.category).filter(Boolean))].sort();
+  const filterOptions=scope==="film-stills"?[{value:"",label:"All filters"},...filmStillFilterOptions]
+    :[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))];
   const visibleStyles=isSourceCatalog ? sourceStyles : libraryStylesMatching(sourceStyles,query).filter(matchesCategory);
   React.useEffect(()=>{if(category&&(!isSourceCatalog||currentCatalog)&&!filterCategories.includes(category))setCategory("");},[category,isSourceCatalog,currentCatalog,filterCategories.join("\n")]);
   const isStarred = style => Boolean(starredCollection?.styles.some(saved => sameLook(saved, style)));
@@ -126,7 +135,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     if(!offset&&source==="shared-user-looks")setCatalog(current=>current&&{...current,viewKey:null,warning:""});
     try {
       const value=source==="all"
-        ? await styleLibraryApi.allCatalogs({query:search,category:filter,refresh,offsets,includeLocal:includeLocalInAll,includeFilmStills:includeFilmStillsInAll})
+        ? await styleLibraryApi.allCatalogs({query:search,category:filter,refresh,offsets,includeLocal:includeLocalInAll,includeFilmStills:includeFilmStillsInAll,customSources,sourceNames,removedSources})
         : await styleLibraryApi.catalog({query:search,category:filter,offset,refresh,source});
       if(version!==request.current)return;
       if(offset&&source==="shared-user-looks"&&value.looksDirectory!==directory){
@@ -155,17 +164,32 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       });
     }
     catch(e) { if(version===request.current)setCatalogFailure({viewKey,message:e.message}); } finally { if(version===request.current)setCatalogLoading(false); }
-  },[query,category,scope,includeLocalInAll,includeFilmStillsInAll]);
+  },[query,category,scope,includeLocalInAll,includeFilmStillsInAll,customSources,sourceNames,removedSources]);
   React.useEffect(()=>{loadLibrary();},[]);
   React.useEffect(()=>{
-    const update=()=>styleLibraryApi.storage().then(value=>{
+    let version=0;
+    const apply=value=>{
       setShowLocalLooks(value.mode==="local");
       setShowFilmStills(Boolean(value.filmStillsDirectory));
-      if(!value.filmStillsDirectory)setScope(current=>current==="film-stills"?"stylefinder":current);
-    }).catch(()=>{});
+      const sources=value.sources??[];
+      setCustomSources(sources);
+      setSourceNames(value.sourceNames??{});
+      const removed=value.removedSources??[];
+      setRemovedSources(removed);
+      const sourceAvailable=source=>!removed.includes(source)&&(source==="film-stills" ? Boolean(value.filmStillsDirectory)
+        : !source.startsWith("source:")||sources.some(entry=>`source:${entry.id}`===source));
+      const fallback=removed.includes("stylefinder")?"all":"stylefinder";
+      setScope(current=>sourceAvailable(current)?current:fallback);
+      setLastSource(current=>sourceAvailable(current)?current:fallback);
+    };
+    const update=event=>{
+      const current=++version;
+      if(event?.detail)apply(event.detail);
+      else styleLibraryApi.storage().then(value=>{if(current===version)apply(value);}).catch(()=>{});
+    };
     update();
     window.addEventListener("newtnode:lookbook-storage-updated",update);
-    return()=>window.removeEventListener("newtnode:lookbook-storage-updated",update);
+    return()=>{version++;window.removeEventListener("newtnode:lookbook-storage-updated",update);};
   },[]);
   React.useEffect(()=>{setSelectedLooks(new Map());setRemoveError("");},[scope,query,category,browseCollectionId,catalog?.looksDirectory]);
   React.useEffect(()=>{if(!active||!isSourceCatalog)return;const timer=setTimeout(()=>loadCatalog(),250);return()=>{clearTimeout(timer);request.current++;};},[active,isSourceCatalog,loadCatalog,catalogRefresh]);
@@ -190,11 +214,11 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
   React.useEffect(()=>{
     const storageChanged=()=>{
       if(!isSourceCatalog)return;
-      setSelectedLooks(new Map());closePreview();closeDetails();loadCatalog();
+      request.current++;setSelectedLooks(new Map());closePreview();closeDetails();setCatalog(null);setSharedCatalogRevision(current=>current+1);
     };
     window.addEventListener("newtnode:lookbook-storage-updated",storageChanged);
     return()=>window.removeEventListener("newtnode:lookbook-storage-updated",storageChanged);
-  },[scope,query,category]);
+  },[isSourceCatalog]);
   React.useEffect(()=>{if(activeStyle||detailLoading){if(!dialog.current?.open)dialog.current?.showModal();}},[activeStyle,detailLoading]);
   React.useEffect(()=>{
     if(collectionAction&&!collectionDialog.current?.open)collectionDialog.current?.showModal();
@@ -495,7 +519,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
     <section className="stylebuilder-browse" aria-label="Browse looks">
       <div className="stylebuilder-browse-toolbar">
         <nav className="lookbook-views" aria-label="Lookbook views">
-          <button type="button" aria-pressed={isSourceCatalog} onClick={()=>chooseCatalog(sourceOptions.some(item=>item.value===lastSource)?lastSource:"stylefinder")}>Sources</button>
+          <button type="button" aria-pressed={isSourceCatalog} onClick={()=>chooseCatalog(sourceOptions.some(item=>item.value===lastSource)?lastSource:firstSource)}>Sources</button>
           <button type="button" aria-pressed={!isSourceCatalog} onClick={()=>chooseCatalog(libraryOptions.some(item=>item.value===lastLibraryView)?lastLibraryView:"saved")}>My Library</button>
         </nav>
         <div className="stylebuilder-browse-controls">
@@ -505,7 +529,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
           <button className="stylebuilder-icon" aria-label={isSourceCatalog?"Refresh catalog":"Refresh library"} disabled={isSourceCatalog?catalogLoading:busy} onClick={()=>isSourceCatalog?loadCatalog({refresh:true}):loadLibrary()}><RefreshCw size={17} className={catalogLoading?"spin":""}/></button>
         </div>
       </div>
-      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${currentCatalog?.total??0} commercial looks${currentCatalog?.localCount?` · ${currentCatalog.localCount} custom`:""}`:scope==="stylefinder"||scope==="film-stills"?`${currentCatalog?.total??0} ${browserName} looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={[{value:"",label:"All categories"},...filterCategories.map(item=>({value:item,label:item}))]}/></div></div>
+      <div className="stylebuilder-catalog-meta"><span>{sharedUserLooks?`${sharedTotal} shared ${sharedTotal===1?"look":"looks"}`:scope==="library"?`${currentCatalog?.total??0} commercial looks${currentCatalog?.localCount?` · ${currentCatalog.localCount} custom`:""}`:scope==="stylefinder"||scope==="film-stills"?`${currentCatalog?.total??0} ${browserName} looks`:`${visibleStyles.length} ${visibleStyles.length===1?"look":"looks"}`}</span><div className="stylebuilder-category-filter"><span>Filter:</span><LookbookSelect label="Look category" value={category} onChange={setCategory} options={filterOptions}/></div></div>
       {(scope==="library"||allLooks)&&currentCatalog?.truncated&&<p className="library-muted">The commercial catalog has reached its browsing limit. Refine your search to explore more looks.</p>}
       {catalogError&&isSourceCatalog&&<p className="library-error" role="alert">{catalogError}</p>}
       {currentCatalog?.warning&&isSourceCatalog&&<p className="stylebuilder-notice" role="status">{currentCatalog.warning}</p>}
@@ -526,7 +550,7 @@ export default function LibraryWorkspace({ active = true, onCreateMoodBoard, onC
       </div>}
       <div key={`strip:${browserValue}`} ref={frameRef} data-row-count={frameRows} className={`stylebuilder-style-strip ${resizable ? `collection-grid ${!visibleStyles.length ? "collection-grid-empty" : ""}` : ""}`} style={resizable ? {"--collection-rows":frameRows,"--collection-row-height":`${collectionRowHeight}px`,"--collection-row-gap":`${collectionRowGap}px`,"--collection-frame-chrome":`${collectionFrameChrome}px`} : undefined} aria-label="Style previews" tabIndex={0}>
         {visibleStyles.map(style=><article className="stylebuilder-tile" key={keyOf(style)} onPointerEnter={()=>preloadMosaic(style)} onFocusCapture={()=>preloadMosaic(style)}><label className="stylebuilder-tile-selection"><input type="checkbox" aria-label={`Select ${style.name}`} checked={selectedLooks.has(keyOf(style))} disabled={busy} onChange={event=>{const checked=event.target.checked;setRemoveError("");setSelectedLooks(current=>{const next=new Map(current);if(checked)next.set(keyOf(style),style);else next.delete(keyOf(style));return next;});}}/></label><button className="stylebuilder-tile-open" onClick={()=>openDetails(style)} aria-label={`View ${style.name}`}><StyleMosaic style={mosaicDetails.has(style.id)?{...style,examples:mosaicDetails.get(style.id)}:style}/><span className="stylebuilder-tile-name">{style.sref?.replace(/^--sref\s+/,"")||style.name}</span></button><button className={`stylebuilder-tile-star ${isStarred(style)?"saved":""}`} aria-label={`${isStarred(style)?"Unstar look":"Star look"}: ${style.name}`} aria-pressed={isStarred(style)} title={isStarred(style)?"Remove from Starred":"Add to Starred"} disabled={busy||!library} onClick={()=>toggleStar(style)}><Star size={16} fill={isStarred(style)?"currentColor":"none"}/></button></article>)}
-        {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{waitingForCatalog?"Loading looks…":isSourceCatalog&&!currentCatalog?.ready?"The catalog is not available yet. Refresh to retry.":!isSourceCatalog&&!query&&!category?(scope==="starred"?"Star looks to find them here.":"No looks saved here yet."):"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog(sourceOptions.some(item=>item.value===lastSource)?lastSource:"stylefinder")}>Browse sources <ArrowRight size={15}/></button>}</div>}
+        {!visibleStyles.length&&<div className="stylebuilder-empty"><Layers size={27}/><p>{waitingForCatalog?"Loading looks…":isSourceCatalog&&!currentCatalog?.ready?"The catalog is not available yet. Refresh to retry.":!isSourceCatalog&&!query&&!category?(scope==="starred"?"Star looks to find them here.":"No looks saved here yet."):"No styles match this view."}</p>{!isSourceCatalog&&<button onClick={()=>chooseCatalog(sourceOptions.some(item=>item.value===lastSource)?lastSource:firstSource)}>Browse sources <ArrowRight size={15}/></button>}</div>}
       </div>
       <LookbookShuttle key={`shuttle:${browserValue}`} frameRef={frameRef} previewCount={visibleStyles.length} rows={frameRows}/>
       {resizable&&<CollectionResizeHandle key={`resize:${browserValue}`} rows={frameRows} frameRef={frameRef} label={browserName} onChange={changeFrameRows}/>}

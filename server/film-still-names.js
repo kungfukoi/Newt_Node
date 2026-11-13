@@ -19,7 +19,7 @@ export function filmStillLabel(filename) {
   return label.slice(0, 70);
 }
 
-function colorAppearance(hex) {
+export function filmStillColorAppearance(hex) {
   const [r, g, b] = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b), chroma = max - min;
   let hue = 0;
@@ -51,7 +51,7 @@ function familyName({ family, light, chroma }) {
 export function filmStillLookName(palette) {
   const valid = filmStillPalette(palette);
   if (!valid) return "Cinematic Tones";
-  const colors = valid.colors.map(colorAppearance), families = new Map();
+  const colors = valid.colors.map(filmStillColorAppearance), families = new Map();
   for (const color of colors) {
     const group = families.get(color.family) || { family: color.family, count: 0, score: 0, light: 0, chroma: 0 };
     group.count++; group.light += color.light; group.chroma += color.chroma;

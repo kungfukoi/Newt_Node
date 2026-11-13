@@ -54,6 +54,9 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   await assert.rejects(stat(path.join(f.shared,legacy.id)),{code:"ENOENT"});
   assert.deepEqual((await f.two.get(source.id)).examples,saved.examples);
   const reopened=f.store(f.a),current=await reopened.state();
+  const named=await reopened.configure({...current,copyLocal:false,sourceNames:{stylefinder:"  Studio Archive  ","film-stills":"Frames","shared-user-looks":"Team Looks"}});
+  assert.deepEqual(named.sourceNames,{stylefinder:"Studio Archive","film-stills":"Frames","shared-user-looks":"Team Looks"});
+  assert.equal((await f.store(f.a).state()).sourceNames.stylefinder,"Studio Archive");
   const styleFinder=createStyleFinderAudition({directory:f.a,readSharedCompact:reopened.readSharedCompact,readCreatedLooks:reopened.read,readSharedLooks:reopened.readSharedLooks});
   const first=await styleFinder.searchSharedUserLooks({limit:1});
   const second=await styleFinder.searchSharedUserLooks({offset:1,limit:1});
@@ -77,6 +80,7 @@ test("Shared Looks has its own destination and an empty path keeps new looks loc
   assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles.map(look=>look.id),[legacy.id]);
 
   await reopened.configure({directory:current.directory,looksDirectory:""});
+  assert.equal((await reopened.state()).sourceNames["shared-user-looks"],"Team Looks");
   assert.deepEqual((await styleFinder.searchSharedUserLooks()).styles,[]);
   assert.deepEqual((await reopened.read()).map(look=>look.id),[localLook.id]);
   assert.equal((await reopened.state()).format,"compact");
@@ -88,7 +92,7 @@ test("Film Stills keeps its own folder, detail identities and versioned image ro
   await mkdir(bucket,{recursive:true});
   await writeFile(path.join(bucket,blob),f.buffer);
   const example={url:"/api/style-library/stylefinder-image?file=img%2Fstill.png"};
-  const style={id:"still",name:"First frame",category:"Film Stills",tags:[],examples:[example]};
+  const style={id:"still",name:"First frame",category:"Film Stills",tags:[],examples:[example],colours:[{hex:"#102060"},{hex:"#243580"}]};
   await writeFile(path.join(film,"catalog.json"),JSON.stringify({version:1,styles:[style],categories:["Film Stills"],details:{},assets:{"img/still.png":blob}}));
   const saved=await f.one.configure({directory:"",looksDirectory:f.shared,filmStillsDirectory:film});
   await assert.rejects(f.one.configure({...saved,filmStillsDirectory:f.shared}),{status:503});
@@ -105,6 +109,9 @@ test("Film Stills keeps its own folder, detail identities and versioned image ro
   const endpoint=`${base}/api/style-library/film-stills`;
   const page=await (await fetch(`${endpoint}?q=first&category=Film%20Stills`)).json();
   assert.equal(page.total,1);
+  assert.equal((await (await fetch(`${endpoint}?q=first&filter=blue&limit=1`)).json()).total,1);
+  assert.equal((await (await fetch(`${endpoint}?q=first&filter=dark-moody&offset=1`)).json()).styles.length,0);
+  assert.equal((await (await fetch(`${endpoint}?q=first&filter=amber-gold`)).json()).total,0);
   const [card]=page.styles;
   assert.equal(card.catalogId,"film-stills-still");
   assert.deepEqual((await (await fetch(`${endpoint}/${card.id}`)).json()).style,card);
@@ -112,6 +119,45 @@ test("Film Stills keeps its own folder, detail identities and versioned image ro
   assert.equal(image.headers.get("content-type"),"image/png");
   assert.deepEqual(Buffer.from(await image.arrayBuffer()),f.buffer);
   assert.equal((await fetch(base+card.examples[0].url.replace(blob,"stale.png"))).status,404);
+});
+
+test("Custom catalog paths and hosted manifests retain independent look IDs and serve managed image references",async t=>{
+  const f=await fixture(t);
+  const hash=createHash("sha256").update(f.buffer).digest("hex"),blob=`${hash}.png`;
+  const bucket=path.join(f.shared,"images",hash.slice(0,2));
+  await mkdir(bucket,{recursive:true});
+  await writeFile(path.join(bucket,blob),f.buffer);
+  const style={id:"studio",name:"Studio ink",category:"Illustration",tags:[],
+    examples:[{url:"/api/style-library/stylefinder-image?file=img%2Fink.png"},{localUrl:"/uploads/other.png"}]};
+  await writeFile(path.join(f.shared,"catalog.json"),JSON.stringify({version:1,styles:[style],categories:["Illustration"],details:{},assets:{"img/ink.png":blob}}));
+  const app=express();
+  registerLookbookStorageRoutes(app,f.one);
+  app.use("/hosted",express.static(f.shared));
+  const server=app.listen(0,"127.0.0.1");
+  await new Promise(resolve=>server.once("listening",resolve));
+  t.after(()=>server.close());
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const setting=await f.one.configure({directory:"",sources:[{name:"Studio",location:f.shared},{name:"Hosted",location:`${base}/hosted`}]});
+  assert.deepEqual((await f.store(f.a).state()).sources,setting.sources);
+  const lookIds=[];
+  for (const source of setting.sources){
+    const endpoint=`${base}/api/style-library/sources/${source.id}`;
+    const {styles,total}=await (await fetch(`${endpoint}?q=ink&category=Illustration`)).json();
+    assert.equal(total,1);
+    const [card]=styles;
+    assert.equal(card.sourceProvider,source.name);
+    assert.equal(card.examples.length,1);
+    lookIds.push(card.id);
+    assert.deepEqual((await (await fetch(`${endpoint}/looks/${card.id}`)).json()).style,card);
+    const image=await fetch(base+card.examples[0].url);
+    assert.equal(image.headers.get("content-type"),"image/png");
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()),f.buffer);
+  }
+  assert.notEqual(...lookIds);
+  await assert.rejects(f.one.configure({...setting,sources:[{name:"Bad",location:`${base}/missing`}]}),{status:503});
+  assert.deepEqual((await f.one.state()).sources,setting.sources);
+  await f.one.configure({...setting,sources:setting.sources.slice(0,1)});
+  assert.equal((await fetch(`${base}/api/style-library/sources/${setting.sources[1].id}`)).status,404);
 });
 test("Independent concurrent writers retain both looks; identical Save retries are idempotent and conflicting ids reject",async t=>{
   const f=await fixture(t);await f.one.configure({directory:f.shared});await f.two.configure({directory:f.shared});const first=draft(),second={...draft(),name:"Second"};

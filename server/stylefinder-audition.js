@@ -70,7 +70,7 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
     const {looks=[],looksDirectory=""}=shared.value||{};
     const categories=browseCategories(catalog.status==="fulfilled"?catalog.value.categories:[],looks);
     return {...selectStyleFinderPage(looks,query),ready:true,source:"shared-user-looks",categories,looksDirectory,
-      warning:shared.value===null?"Set the Shared User Looks folder in Settings → User Preferences.":""};
+      warning:shared.value===null?"Set the Shared User Looks folder in Settings → Library Sources.":""};
   }
   async function detail(id){
     if(typeof id!=="string"||!id.startsWith(prefix)||!/^[a-z0-9-]{1,100}$/.test(id.slice(prefix.length)))fail("Choose a valid catalog look.",400);

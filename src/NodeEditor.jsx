@@ -1873,8 +1873,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
       if ((key === "i" || key === "v") && !commandKey && !event.altKey && !event.shiftKey && !event.repeat && !event.isComposing &&
         !document.querySelector("dialog[open], [aria-modal='true']")) {
-        const position = key === "v" ? currentCanvasPointerPosition() : undefined;
-        if (key === "v" && !position) return;
+        const position = currentCanvasPointerPosition();
+        if (!position) return;
         event.preventDefault();
         addNode(key === "v" ? "video" : "image", position);
         return;

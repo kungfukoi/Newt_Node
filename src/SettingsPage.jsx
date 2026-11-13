@@ -485,8 +485,8 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             </SettingsSection>
           )}
           {activeSection === "credentials" && (
-            <SettingsSection id="credentials" aside="One active key per service">
-              <div className="settings-credential-grid">
+            <SettingsSection id="credentials" className="settings-credentials-panel">
+              <div className="settings-credential-groups">
                 {providerDefinitions.map((provider) => (
                   <CredentialProviderCard
                     key={provider.id}
@@ -640,11 +640,16 @@ export default function SettingsPage({ onUserPreferencesSaved } = {}) {
             </SettingsSection>
           )}
 
+          {activeSection === "librarySources" && (
+            <SettingsSection id="librarySources">
+              <LookbookStorageSettings />
+            </SettingsSection>
+          )}
+
           {preferencesVisited && (
             <SettingsSection id="userPreferences" aside="Canvas and processing" hidden={activeSection !== "userPreferences"}>
               <div className="settings-preference-list">
                 <CanvasPreferences />
-                <LookbookStorageSettings />
                 <label className="settings-preference-model">
                   <span>
                     <strong>Image Editor Model</strong>
@@ -784,7 +789,6 @@ function CredentialProviderCard({
       <header>
         <div>
           <strong>{provider.label}</strong>
-          <small>{credentials.length ? `${credentials.length} saved` : "No credentials"}</small>
         </div>
         <button type="button" onClick={onAdd} title={`Add ${provider.label} key`}>
           <Plus size={14} />
@@ -794,7 +798,6 @@ function CredentialProviderCard({
       <label className={`settings-credential-off ${activeId ? "" : "active"}`}>
         <input type="radio" name={`${provider.id}-active-key`} checked={!activeId} onChange={() => onActivate("")} />
         <span>None</span>
-        <small>Service disabled</small>
       </label>
       <div className="settings-credential-list">
         {credentials.map((credential) => {
@@ -808,6 +811,7 @@ function CredentialProviderCard({
                   type="radio"
                   name={`${provider.id}-active-key`}
                   checked={activeId === credential.id}
+                  aria-label={`Use ${credential.label || provider.label}`}
                   onChange={() => onActivate(credential.id)}
                 />
               </label>
@@ -821,7 +825,6 @@ function CredentialProviderCard({
                   aria-label={`${provider.label} credential name`}
                 />
                 <div className="settings-input-row secret">
-                  <KeyRound size={15} />
                   <input
                     type={visible ? "text" : "password"}
                     value={credential.key}

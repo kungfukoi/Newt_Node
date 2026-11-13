@@ -2174,8 +2174,12 @@ async function installStagedDependencies(directory) {
     };
   }
 
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  return execFile(npmCommand, ["install", "--no-audit", "--no-fund"], {
+  const isWindows = process.platform === "win32";
+  const npmCommand = isWindows ? (process.env.ComSpec || "cmd.exe") : "npm";
+  const npmArgs = isWindows
+    ? ["/d", "/s", "/c", "npm.cmd install --no-audit --no-fund"]
+    : ["install", "--no-audit", "--no-fund"];
+  return execFile(npmCommand, npmArgs, {
     cwd: directory,
     timeout: 600000,
     maxBuffer: 8 * 1024 * 1024,

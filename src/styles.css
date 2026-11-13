@@ -1075,40 +1075,41 @@ textarea::placeholder {
   gap: 12px;
 }
 
-.settings-credential-grid {
+.settings-credential-groups {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .settings-credential-provider {
-  display: grid;
-  align-content: start;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
-  background: rgba(0, 0, 0, 0.22);
+  min-width: 0;
+  border: 1px solid #ddc63133;
+  border-radius: 8px;
+  background: #17171c;
 }
 
 .settings-credential-provider > header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  padding: 5px 8px;
 }
 
 .settings-credential-provider > header > div {
-  display: grid;
-  gap: 2px;
+  grid-column: 2;
+  text-align: center;
+}
+
+.settings-credential-provider > header > button {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .settings-credential-provider > header strong {
-  color: #f4f0e8;
-  font-size: 14px;
+  color: #ddc631;
+  font-size: 12px;
 }
 
-.settings-credential-provider > header small,
 .settings-provider-routing small {
   color: rgba(244, 240, 232, 0.46);
   font-size: 11px;
@@ -1119,61 +1120,43 @@ textarea::placeholder {
   line-height: 1.45;
 }
 
-.settings-credential-provider > header button {
+.settings-credential-provider > header button,
+.settings-credentials-panel .settings-actions button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 30px;
-  padding: 0 9px;
-  border-radius: 7px;
-  color: rgba(244, 240, 232, 0.68);
-  background: rgba(255, 255, 255, 0.06);
-  font-size: 11px;
-  font-weight: 760;
-}
-
-.settings-credential-list {
-  display: grid;
-  gap: 8px;
+  min-height: 27px;
+  padding: 3px 7px;
+  border: 1px solid #ddc63144;
+  border-radius: 5px;
+  color: #eeeef0;
+  background: #1c1c22;
+  font-size: 12px;
 }
 
 .settings-credential-off,
 .settings-credential-row {
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.2);
+  display: grid;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid #ddc63122;
+  min-height: 39px;
+  font-size: 12px;
 }
 
 .settings-credential-off {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 9px;
-  color: rgba(244, 240, 232, 0.58);
+  grid-template-columns: 18px minmax(0, 1fr);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 740;
-}
-
-.settings-credential-off small {
-  color: rgba(244, 240, 232, 0.36);
-  font-size: 10px;
 }
 
 .settings-credential-off.active,
 .settings-credential-row.active {
-  border-color: rgba(221, 198, 49, 0.44);
-  background: rgba(221, 198, 49, 0.07);
+  background: #ddc63112;
 }
 
 .settings-credential-row {
-  display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto 28px;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
 }
 
 .settings-credential-radio {
@@ -1190,28 +1173,52 @@ textarea::placeholder {
 
 .settings-credential-fields {
   display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
   min-width: 0;
   gap: 6px;
 }
 
-.settings-credential-name {
+.settings-credential-name,
+.settings-credential-fields .settings-input-row.secret {
   width: 100%;
   min-width: 0;
-  border: 0;
-  outline: 0;
-  color: #f4f0e8;
-  background: transparent;
+  min-height: 27px;
+  padding: 0 7px;
+  border: 1px solid #ddc63133;
+  border-radius: 5px;
+  color: #eeeef0;
+  background: #111115;
   font-size: 12px;
-  font-weight: 760;
+}
+
+.settings-credential-fields .settings-input-row.secret {
+  grid-template-columns: minmax(0, 1fr) 26px;
+  gap: 4px;
+  padding-right: 0;
+}
+
+.settings-credential-fields .settings-input-row input {
+  min-height: 25px;
+  font-size: 12px;
+}
+
+.settings-credential-fields .settings-secret-toggle {
+  width: 26px;
+  height: 25px;
+  min-height: 25px;
+}
+
+.settings-credential-fields :is(.settings-credential-name:focus-visible, .settings-input-row:focus-within) {
+  outline: 1px solid #ddc631;
+  outline-offset: 1px;
 }
 
 .settings-credential-status {
-  padding: 4px 7px;
-  border-radius: 999px;
-  color: rgba(244, 240, 232, 0.5);
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: rgba(244, 240, 232, 0.62);
   background: rgba(255, 255, 255, 0.06);
-  font-size: 9px;
-  font-weight: 800;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -2188,18 +2195,8 @@ textarea::placeholder {
   .stats-metrics,
   .stats-grid,
   .settings-form-grid,
-  .settings-credential-grid,
   .settings-model-grid {
     grid-template-columns: 1fr;
-  }
-
-  .settings-credential-row {
-    grid-template-columns: 18px minmax(0, 1fr) 28px;
-  }
-
-  .settings-credential-status {
-    grid-column: 2;
-    justify-self: start;
   }
 
   .settings-model-list.two-columns {
@@ -2295,4 +2292,16 @@ textarea::placeholder {
   .pricing-provider summary, .pricing-provider-row { grid-template-columns: minmax(0, 1fr) auto; }
   .pricing-provider summary > span:nth-child(2), .pricing-provider-row > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .pricing-settings-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+}
+
+@media (max-width: 650px) {
+  .settings-credential-row {
+    grid-template-columns: 18px minmax(0, 1fr) 28px;
+  }
+
+  .settings-credential-status {
+    grid-row: 2;
+    grid-column: 2;
+    justify-self: start;
+  }
 }

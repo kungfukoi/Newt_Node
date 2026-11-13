@@ -13,7 +13,7 @@ export default function LookbookSelect({ label, value, options, onChange }) {
     document.addEventListener("pointerdown", outside, true);
     return () => document.removeEventListener("pointerdown", outside, true);
   }, [open]);
-  React.useEffect(() => { if (open) list.current?.children[active]?.scrollIntoView({ block: "nearest" }); }, [active, open]);
+  React.useEffect(() => { if (open) list.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" }); }, [active, open]);
   function keyboard(event) {
     const key = event.key;
     if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", " ", "Escape"].includes(key)) event.preventDefault();
@@ -34,6 +34,9 @@ export default function LookbookSelect({ label, value, options, onChange }) {
   }
   return <div className="lookbook-select" ref={root} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <button type="button" role="combobox" aria-label={label} aria-expanded={open} aria-haspopup="listbox" aria-controls={open ? id : undefined} aria-activedescendant={open ? `${id}-${active}` : undefined} className={`lookbook-select-trigger ${open ? "open" : ""}`} onClick={() => open ? setOpen(false) : show()} onKeyDown={keyboard}><span>{options[selected]?.label}</span><ChevronDown size={16}/></button>
-    {open && <div ref={list} id={id} role="listbox" aria-label={`${label} options`} className="lookbook-select-options">{options.map((option, index) => <div key={option.value} id={`${id}-${index}`} role="option" aria-selected={value === option.value} data-active={index === active} className="lookbook-select-option" onPointerMove={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => choose(index)}><span>{option.label}</span>{value === option.value && <Check size={14} aria-hidden="true"/>}</div>)}</div>}
+    {open && <div ref={list} id={id} role="listbox" aria-label={`${label} options`} className="lookbook-select-options">{options.map((option, index) => <React.Fragment key={option.value}>
+      {option.group && option.group !== options[index - 1]?.group && <div role="presentation" className="lookbook-select-group">{option.group}</div>}
+      <div id={`${id}-${index}`} role="option" aria-selected={value === option.value} data-active={index === active} className="lookbook-select-option" onPointerMove={() => setActive(index)} onMouseDown={event => event.preventDefault()} onClick={() => choose(index)}><span>{option.label}</span>{value === option.value && <Check size={14} aria-hidden="true"/>}</div>
+    </React.Fragment>)}</div>}
   </div>;
 }

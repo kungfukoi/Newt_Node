@@ -12,7 +12,7 @@ export function compactStyleFinderBlob(directory, blob) {
   return path.join(directory, "images", blob.slice(0, 2), blob);
 }
 
-export function openCompactStyleFinder(directory, manifest, { shared = false, imageEndpoint = "/api/style-library/stylefinder-image" } = {}) {
+export function openCompactStyleFinder(directory, manifest, { shared = false, imageEndpoint = "/api/style-library/stylefinder-image", source, readBlob, getFilters } = {}) {
   const { version, styles, details, categories, assets } = manifest;
   if (version !== 1 || !Array.isArray(styles) || !styles.length || styles.length > 50000 ||
       !Array.isArray(categories) || !categories.every(value => typeof value === "string") ||
@@ -31,10 +31,13 @@ export function openCompactStyleFinder(directory, manifest, { shared = false, im
         key.includes("..") || /[\\:\x00]/.test(key) ||
         !/^[a-f0-9]{64}\.(?:jpg|png|webp)$/.test(blob)) throw Error("Invalid compact image entry");
   }
+  const publicIds = source && new Map(styles.map(style => [source.lookId(style.id), style.id]));
+  const filters = getFilters && new Map(styles.map(style => [style.id, getFilters(style)]));
 
   async function findAsset(key) {
     if (!Object.hasOwn(assets, key)) return null;
     const blob = assets[key];
+    if (readBlob) return { buffer: await readBlob(blob), mimeType: mimeTypes[path.extname(blob).slice(1)] };
     const filename = await realpath(compactStyleFinderBlob(directory, blob));
     const relative = path.relative(directory, filename);
     if (relative !== path.join("images", blob.slice(0, 2), blob) || !(await stat(filename)).isFile()) {
@@ -45,14 +48,18 @@ export function openCompactStyleFinder(directory, manifest, { shared = false, im
 
   function sharedStyle(style) {
     // Treat package images as catalog references so saving a Look imports local copies.
-    const examples = style.examples.map(image => {
+    const examples = style.examples.flatMap(image => {
       const url = image?.url;
-      const key = image?.localUrl || (typeof url === "string" && url.startsWith("/api/style-library/stylefinder-image?")
+      const key = image?.localUrl || (typeof url === "string" && /^\/api\/style-library\/(?:stylefinder|film-stills)-image\?/.test(url)
         ? new URL(url, "http://localhost").searchParams.get("file") : "");
-      if (!key || !Object.hasOwn(assets, key)) return image;
+      if (!key || !Object.hasOwn(assets, key)) return source ? [] : [image];
       const { localUrl, ...reference } = image;
-      return { ...reference, url: `${imageEndpoint}?file=${encodeURIComponent(key)}&v=${assets[key]}` };
+      return [{ ...reference, url: `${imageEndpoint}?file=${encodeURIComponent(key)}&v=${assets[key]}` }];
     });
+    if (source) {
+      const id = source.lookId(style.id);
+      return { ...style, id, catalogId:id, sourceProvider:source.name, examples, previewUrl:examples[0]?.url, similarStyles:undefined };
+    }
     return {
       ...style, examples, previewUrl: examples[0]?.url || style.previewUrl,
       ...(style.similarStyles ? { similarStyles: style.similarStyles.map(sharedStyle) } : {}),
@@ -60,12 +67,15 @@ export function openCompactStyleFinder(directory, manifest, { shared = false, im
   }
 
   return {
-    search(query) {
-      const page = selectStyleFinderPage(styles, query);
+    search(query = {}) {
+      const { filter, ...params } = query;
+      const candidates = filters && filter ? styles.filter(style => filters.get(style.id).includes(filter)) : styles;
+      const page = selectStyleFinderPage(candidates, params);
       if (shared) page.styles = page.styles.map(sharedStyle);
       return { ...page, ready: true, populating: false, categories };
     },
     detail(id) {
+      if (publicIds) id = publicIds.get(id);
       const style = Object.hasOwn(details, id) ? details[id] : byId.get(id);
       if (!style) fail("This style is not in the local catalog.", 404);
       return { style: shared ? sharedStyle(style) : style };

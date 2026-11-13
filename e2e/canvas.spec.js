@@ -1,19 +1,28 @@
 import { test, expect } from "@playwright/test";
 import { openFixture, wireGeometry, wireAttachmentErrors } from "./helpers.mjs";
 
-test("I adds an Image node without intercepting text entry", async ({ page }) => {
+test("I adds an Image node at the cursor without intercepting text entry", async ({ page }) => {
   const { errors } = await openFixture(page, { fixture: {
     nodes: [{ id: "shortcut-text", type: "plainText", x: 30, y: 30, data: { title: "Notes", text: "" } }],
-    edges: [], groups: [], viewport: { x: 20, y: 20, scale: 1 },
+    edges: [], groups: [], viewport: { x: 120, y: 80, scale: 0.5 },
   } });
+  const imageNode = page.locator('.react-flow__node[data-id^="image-"]');
   const text = page.locator('[data-node-card-id="shortcut-text"] textarea');
+  const cursor = { x: 800, y: 500 };
+  await page.mouse.move(1, 1);
+  await page.keyboard.press("i");
+  await expect(imageNode).toHaveCount(0);
+  await page.mouse.move(cursor.x, cursor.y);
   await text.press("i");
   await expect(text).toHaveValue("i");
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
   await text.blur();
   await page.keyboard.press("i");
-  await expect(page.locator('.react-flow__node[data-id^="image-"]')).toHaveCount(1);
+  await expect(imageNode).toHaveCount(1);
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  const box = await imageNode.boundingBox();
+  expect(Math.abs(box.x - cursor.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.y - cursor.y)).toBeLessThanOrEqual(1);
   expect(errors).toEqual([]);
 });
 

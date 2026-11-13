@@ -12,10 +12,19 @@ function lookIdentityKeys(style) {
   return keys;
 }
 
-export function lookSourceOptions(showLocal = false, showFilmStills = false) {
-  return [{ value: "all", label: "All Sources" }, { value: "library", label: "Commercial" }, { value: "stylefinder", label: "Looks Catalog" }, { value: "shared-user-looks", label: "User Looks" },
-    ...(showFilmStills ? [{value:"film-stills",label:"Film Stills"}] : []),
-    ...(showLocal ? [{value:"local-looks",label:"Local Looks"}] : [])];
+export const builtinLibrarySources = {
+  library: { settings: "Commercial", label: "Commercial" },
+  stylefinder: { settings: "Shared Looks Catalog", label: "Looks Catalog" },
+  "film-stills": { settings: "Film Stills Catalog", label: "Film Stills" },
+  "shared-user-looks": { settings: "Shared User Looks", label: "User Looks" }
+};
+
+export function lookSourceOptions(showLocal = false, showFilmStills = false, customSources = [], names = {}, removed = []) {
+  const builtin = value => ({ value, label: names[value] || builtinLibrarySources[value].label });
+  return [{ value: "all", label: "All Sources" }, builtin("library"), builtin("stylefinder"), builtin("shared-user-looks"),
+    ...(showFilmStills ? [builtin("film-stills")] : []),
+    ...(showLocal ? [{value:"local-looks",label:"Local Looks"}] : []),
+    ...customSources.map(source => ({value:`source:${source.id}`,label:source.name}))].filter(option=>!removed.includes(option.value));
 }
 
 export function namedLookCollections(collections = []) {
