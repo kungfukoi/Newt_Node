@@ -97,7 +97,7 @@ test("All combines paged catalog results and saved copies without repeats",async
   await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(0);
   await expect(strip).toContainText("No styles match this view.");
   expect(reads.slice(beforeCommercialSearch).map(read=>read.endpoint)).toEqual(["catalog","catalog","catalog"]);
-  await chooseLookbookSource(page,"StyleFinder");
+  await chooseLookbookSource(page,"Looks Catalog");
   await expect(page.getByRole("button",{name:"View Photo",exact:true})).toBeVisible();
   expect(reads.at(-1)).toEqual({endpoint:"stylefinder",offset:0,own:"1",query:"Photo"});
 });

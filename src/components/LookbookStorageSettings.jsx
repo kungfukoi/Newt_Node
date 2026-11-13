@@ -22,7 +22,7 @@ export default function LookbookStorageSettings(){
     const value=await styleLibraryApi.saveStorage({directory,looksDirectory,filmStillsDirectory,copyLocal});
     apply(value);
     const destination=value.mode==="shared"?"New Looks and their images will be saved to Shared User Looks.":"New Looks will be saved on this computer.";
-    const catalog=value.format==="compact"?" Browse the compact catalog in StyleFinder.":"";
+    const catalog=value.format==="compact"?" Browse it in Looks Catalog.":"";
     setNotice(`Lookbook folders saved. ${destination}${catalog}${value.filmStillsDirectory?" Browse the shared stills in Film Stills.":""}`);
   });}
   return <section className="lookbook-storage-preference" aria-label="Lookbook storage">

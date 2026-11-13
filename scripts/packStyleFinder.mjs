@@ -13,7 +13,7 @@ export async function packStyleFinder(checkout, output, { expectedCount, previou
   const index = JSON.parse(await readFile(path.join(dataDirectory, "stylefinder-audition.json"), "utf8"));
   const { sourceDirectory, snapshot } = index;
   if (index.version !== 1 || !path.isAbsolute(sourceDirectory) || !snapshot?.ready || !Array.isArray(snapshot.styles)) {
-    throw Error("Invalid StyleFinder mirror index");
+    throw Error("Invalid catalog mirror index");
   }
   const mirror = await realpath(sourceDirectory);
   const parent = await realpath(path.dirname(output));
@@ -34,9 +34,9 @@ export async function packStyleFinder(checkout, output, { expectedCount, previou
     root: mirror, cacheMs: Infinity, initialSnapshot: refresh ? undefined : snapshot,
     imageEndpoint: "/api/style-library/stylefinder-image", overrides,
   });
-  if (refresh) progress("Scanning the updated StyleFinder mirror");
+  if (refresh) progress("Scanning the updated catalog mirror");
   const first = await catalog.search({ limit: 96 });
-  if (!first.ready || !first.total) throw Error("The StyleFinder mirror contains no indexed looks");
+  if (!first.ready || !first.total) throw Error("The catalog mirror contains no indexed looks");
   if (expectedCount !== undefined && first.total !== expectedCount) {
     throw Error(`Expected ${expectedCount} styles, found ${first.total}`);
   }
@@ -67,7 +67,7 @@ export async function packStyleFinder(checkout, output, { expectedCount, previou
     }
     if (!offset || offset % (first.limit * 10) === 0) progress(`Resolved list and detail for ${manifest.styles.length}/${first.total} styles`);
   }
-  if (manifest.styles.length !== first.total) throw Error("Incomplete StyleFinder export");
+  if (manifest.styles.length !== first.total) throw Error("Incomplete catalog export");
   const nextIds = new Set(manifest.styles.map(style => style.id));
   const previousStyles = new Map((previous?.styles || []).map(style => [style.id, style]));
   const missing = [...previousStyles.keys()].filter(id => !nextIds.has(id));
@@ -132,12 +132,14 @@ export async function packStyleFinder(checkout, output, { expectedCount, previou
   const json = JSON.stringify(manifest);
   await writeFile(path.join(staged, "catalog.json"), json, { flag: "wx" });
   await rename(staged, output);
+  // Earlier packages stored the mirror page URL alongside its stable style ID.
+  const withoutSourceUrl = ({ sourceUrl, ...style }) => style;
   const updatedStyles = manifest.styles.filter(style => {
     const old = previousStyles.get(style.id);
     if (!old) return false;
     const detail = Object.hasOwn(manifest.details, style.id) ? manifest.details[style.id] : style;
     const oldDetail = Object.hasOwn(previous.details, style.id) ? previous.details[style.id] : old;
-    return !isDeepStrictEqual(style, old) || !isDeepStrictEqual(detail, oldDetail) ||
+    return !isDeepStrictEqual(style, withoutSourceUrl(old)) || !isDeepStrictEqual(detail, withoutSourceUrl(oldDetail)) ||
       [...style.examples, ...detail.examples].some(image => {
         const key = image.localUrl || new URL(image.url, "http://localhost").searchParams.get("file");
         return manifest.assets[key] !== previous.assets[key];

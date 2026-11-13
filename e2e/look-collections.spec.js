@@ -25,7 +25,7 @@ test("The details star persists changes and stays open after unstarring from a n
 test("Named local collections, bulk selection and save destinations persist independently", async ({ page }) => {
   const { errors } = await openFixture(page, { fixture: { nodes: [], edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 } }, uiState: { lookbookCollectionRows: 4 } });
   let library = { revision: 0, collections: [{ id: "first", name: "First", styles: [] }, { id: "second", name: "Second", styles: [] }] }, conflict = false;
-  const looks = ["Ink", "Wash"].map(name => ({ id: name.toLowerCase(), name, sourceUrl: `https://midlibrary.io/library/${name.toLowerCase()}`, examples: [{ id: "one", localUrl: "/outputs/e2e/example.png" }], prompt: "Paper and ink", styleAnalysis: { stylePrompt: "Fine ink contours on warm textured paper" } }));
+  const looks = ["Ink", "Wash"].map(name => ({ id: name.toLowerCase(), name, sourceUrl: `https://catalog.example/library/${name.toLowerCase()}`, examples: [{ id: "one", localUrl: "/outputs/e2e/example.png" }], prompt: "Paper and ink", styleAnalysis: { stylePrompt: "Fine ink contours on warm textured paper" } }));
   const json = (route, data) => route.fulfill({ contentType: "application/json", body: JSON.stringify(data) });
   await page.route("**/api/style-library", route => {
     if (route.request().method() === "PUT") {

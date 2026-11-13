@@ -1,7 +1,7 @@
 export const findStarredCatalog = (collections = []) => collections.find(item => item.name.toLowerCase() === "starred");
 
 export function lookCatalogOptions(collections = [], showLocal = false, showFilmStills = false) {
-  return [{ value: "all", label: "All" }, { value: "library", label: "Commercial" }, { value: "stylefinder", label: "StyleFinder" }, { value: "shared-user-looks", label: "User Looks" },
+  return [{ value: "all", label: "All" }, { value: "library", label: "Commercial" }, { value: "stylefinder", label: "Looks Catalog" }, { value: "shared-user-looks", label: "User Looks" },
     ...(showFilmStills ? [{value:"film-stills",label:"Film Stills"}] : []),
     ...(showLocal ? [{value:"local-looks",label:"Local Looks"}] : []), { value: "starred", label: "Starred" },
     ...collections.filter(item => item.name.toLowerCase() !== "starred").map(item => ({ value: `collection:${item.id}`, label: item.name }))];

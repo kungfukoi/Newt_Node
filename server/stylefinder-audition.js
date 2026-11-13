@@ -27,11 +27,15 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
       }
       const catalog=createStyleFinderCatalog({root:manifest.sourceDirectory,initialSnapshot:manifest.snapshot,imageEndpoint:"/api/style-library/stylefinder-image",overrides:overrides.styles});
       cached={key,catalog};return catalog;
-    }catch(error){if(error.status)throw error;fail("The local StyleFinder audition is unavailable. Index your mirror folder with scripts/indexStyleFinder.mjs, then refresh.");}
+    }catch(error){if(error.status)throw error;fail("The local catalog is unavailable. Index your mirror folder, then refresh.");}
   }
   function style(value){
     const id=prefix+value.id;
-    return {...value,id,catalogId:id,sourceProvider:value.sourceProvider||"Midlibrary",sourceAttribution:value.sourceAttribution||"Midlibrary.io · local StyleFinder mirror",
+    const {sourceProvider,sourceAttribution,sourceUrl,...look}=value;
+    const source=sourceProvider==="Newt"
+      ? {sourceProvider,sourceAttribution}
+      : {sourceProvider:"Local catalog",sourceAttribution:"Local catalog"};
+    return {...look,...source,id,catalogId:id,
       ...(value.similarStyles?{similarStyles:value.similarStyles.map(style)}:{})};
   }
   async function searchShared(query){
@@ -49,16 +53,16 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
     try{
       if(catalog.status==="rejected")throw catalog.reason;
       result=await catalog.value.search({...query,offset:Math.max(0,page.offset-page.total)});
-      if(!result.ready)fail("The local StyleFinder source folder is unavailable. Reconnect it and refresh.");
+      if(!result.ready)fail("The local catalog source folder is unavailable. Reconnect it and refresh.");
     }catch(error){
-      if(!created.length){if(error.status)throw error;fail("The local StyleFinder source folder is unavailable. Reconnect it and refresh.");}
-      warning.push(`StyleFinder catalog unavailable: ${error.message}`);
+      if(!created.length){if(error.status)throw error;fail("The local catalog source folder is unavailable. Reconnect it and refresh.");}
+      warning.push(`Looks Catalog unavailable: ${error.message}`);
       result={ready:true,populating:false,total:0,indexed:0,categories:[],styles:[]};
     }
     const categories=browseCategories(result.categories,created);
     const styles=[...page.styles,...result.styles.slice(0,page.limit-page.styles.length).map(style)];
     return {...result,offset:page.offset,limit:page.limit,total:result.total+page.total,indexed:result.indexed+page.indexed,
-      categories,source:"stylefinder",sourceLabel:"StyleFinder",styles,...(warning.length?{warning:warning.join(" ")}:{})};
+      categories,source:"stylefinder",sourceLabel:"Looks Catalog",styles,...(warning.length?{warning:warning.join(" ")}:{})};
   }
   async function searchSharedUserLooks(query={}){
     const [shared,catalog]=await Promise.allSettled([readSharedLooks(),read().then(value=>value.search({limit:1}))]);
@@ -69,9 +73,9 @@ export function createStyleFinderAudition({directory,readSharedCompact=async()=>
       warning:shared.value===null?"Set the Shared User Looks folder in Settings → User Preferences.":""};
   }
   async function detail(id){
-    if(typeof id!=="string"||!id.startsWith(prefix)||!/^[a-z0-9-]{1,100}$/.test(id.slice(prefix.length)))fail("Choose a valid StyleFinder look.",400);
+    if(typeof id!=="string"||!id.startsWith(prefix)||!/^[a-z0-9-]{1,100}$/.test(id.slice(prefix.length)))fail("Choose a valid catalog look.",400);
     try{return {style:style((await (await read()).detail(id.slice(prefix.length))).style)};}
-    catch(error){if(error.status)throw error;fail("This StyleFinder look is unavailable in the local source folder.");}
+    catch(error){if(error.status)throw error;fail("This catalog look is unavailable in the local source folder.");}
   }
   async function asset(file,version){
     if(version===undefined)return (await read()).asset(file);
@@ -92,12 +96,12 @@ export function registerStyleFinderCuratedImages(app, catalog) {
       if (!asset) return next();
       res.sendFile(asset.filename, {headers:{"Content-Type":asset.mimeType,"Cache-Control":"private, max-age=60","X-Content-Type-Options":"nosniff"}});
     } catch (error) {
-      res.status(error.status || 404).json({error:"This curated StyleFinder image is unavailable in the compact catalog."});
+      res.status(error.status || 404).json({error:"This curated image is unavailable in the compact catalog."});
     }
   });
 }
 export function registerStyleFinderAuditionRoutes(app,options,catalog=createStyleFinderAudition(options)){
-  const error=(res,e)=>res.status(e.status||503).json({error:e.status?e.message:"This image is unavailable in the local StyleFinder folder."});
+  const error=(res,e)=>res.status(e.status||503).json({error:e.status?e.message:"This image is unavailable in the local catalog folder."});
   app.get("/api/style-library/stylefinder",async(req,res)=>{try{res.json(await catalog.search({...req.query,refresh:req.query.refresh==="1",own:req.query.own==="1"}));}catch(e){error(res,e);}});
   app.get("/api/style-library/shared-user-looks",async(req,res)=>{
     try{res.json(await catalog.searchSharedUserLooks(req.query));}

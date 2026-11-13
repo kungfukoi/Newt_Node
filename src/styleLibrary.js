@@ -4,20 +4,21 @@ import { lookStyleText } from "./lookStyleText.js";
 import { filmStillPalette } from "./filmStillPalette.js";
 export const librarySchemaVersion = 1;
 const text = (value, max = 12000) => typeof value === "string" ? value.trim().slice(0, max) : "";
-export function midlibrarySearchUrl({ query = "", terms = [], colours = [], category = "" } = {}) {
-  const url = new URL("https://midlibrary.io/library");
-  if (text(query, 200)) url.searchParams.set("q", text(query, 200));
-  if (/^[a-z0-9-]+$/.test(category)) url.searchParams.set("category", category);
-  for (const term of terms) if (/^[a-z0-9-]+$/.test(term)) url.searchParams.append("term", term);
-  for (const colour of colours) if (/^[a-z0-9-]+$/.test(colour)) url.searchParams.append("colour", colour);
-  url.searchParams.set("sort", "popular");
-  return url.href;
-}
 export function normalizeLibraryStyle(value = {}) {
+  // Source URLs are stored as provenance and identity. Catalog media uses its own proxy.
   let sourceUrl = "";
-  try { const url = new URL(value.sourceUrl); if (url.protocol === "https:" && ["midlibrary.io","styleref.io"].includes(url.hostname) && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional source. */ }
+  let catalogId = text(value.catalogId, 80);
+  try {
+    const url = new URL(value.sourceUrl);
+    if (url.protocol === "https:" && !url.username && !url.password) {
+      sourceUrl = url.href;
+      // Older saved copies could carry only the original catalog page as their identity.
+      const mirrorSlug = url.pathname.match(/^\/library\/([a-z0-9-]{1,68})$/)?.[1];
+      if (!catalogId && mirrorSlug) catalogId = `stylefinder-${mirrorSlug}`;
+    }
+  } catch { /* Optional source. */ }
   return {
-    id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt), category: text(value.category, 80), catalogId: text(value.catalogId, 80),
+    id: text(value.id, 80), name: text(value.name, 120), prompt: text(value.prompt), category: text(value.category, 80), catalogId,
     ...(value.searchName ? { searchName: text(value.searchName, 200) } : {}),
     notes: value.sourceProvider==="Newt"?lookStyleText(text(value.notes,4000)):text(value.notes, 4000), sourceUrl, sourceProvider: text(value.sourceProvider,80), sourceAuthor: text(value.sourceAuthor,120), sourceAttribution: text(value.sourceAttribution,200),
     ...(Array.isArray(value.styleBlocks)?{styleBlocks:lookStyleBlocks(value.styleBlocks,{preserveLegacyPalette:true})}:{}),

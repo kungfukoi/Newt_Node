@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createStyleLibraryStore } from "../server/style-library.js";
-import { midlibrarySearchUrl, libraryStyleSnapshot, libraryPrompt, collectionExamples, libraryStylesMatching, normalizeLibraryStyle } from "../src/styleLibrary.js";
+import { libraryStyleSnapshot, libraryPrompt, collectionExamples, libraryStylesMatching, normalizeLibraryStyle } from "../src/styleLibrary.js";
 
 test("Legacy My styles displays as My Looks while retaining collection identity and custom names", async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "newt-collection-name-"));
@@ -16,18 +16,16 @@ test("Legacy My styles displays as My Looks while retaining collection identity 
   await store.save(read); assert.equal((await store.read()).collections[0].name, "My Looks");
 });
 
-test("Midlibrary links encode search text and repeated filters without inventing an API", () => {
-  const url = new URL(midlibrarySearchUrl({ query: "ink & paper", terms: ["dark", "vivid-colors"], colours: ["black", "vivid-red"] }));
-  assert.equal(url.origin, "https://midlibrary.io"); assert.equal(url.pathname, "/library");
-  assert.equal(url.searchParams.get("q"), "ink & paper");
-  assert.deepEqual(url.searchParams.getAll("term"), ["dark", "vivid-colors"]);
-  assert.deepEqual(url.searchParams.getAll("colour"), ["black", "vivid-red"]);
-});
 test("Style snapshots keep source identity and independent model-neutral directions", () => {
-  const original = { id: "ink", name: "Ink", prompt: "Graphic ink --sref 123 --v 7", sourceUrl: "https://midlibrary.io/library/ink", examples: [] };
+  const original = { id: "ink", name: "Ink", prompt: "Graphic ink --sref 123 --v 7", sourceUrl: "https://catalog.example/looks/ink", examples: [] };
   const snapshot = libraryStyleSnapshot(original); original.prompt = "changed";
   assert.equal(libraryPrompt({ libraryStyle: snapshot }), "Graphic ink");
-  assert.equal(snapshot.sourceUrl, "https://midlibrary.io/library/ink");
+  assert.equal(snapshot.sourceUrl, "https://catalog.example/looks/ink");
+  const legacy = normalizeLibraryStyle({...original,sourceUrl:"https://catalog.example/library/ink"});
+  assert.equal(legacy.catalogId, "stylefinder-ink");
+  assert.equal(legacy.sourceUrl, "https://catalog.example/library/ink");
+  assert.equal(normalizeLibraryStyle({...original,catalogId:"existing-id"}).catalogId, "existing-id");
+  assert.equal(normalizeLibraryStyle({ sourceUrl: "https://user:password@catalog.example/library/ink" }).sourceUrl, "");
   assert.equal(libraryPrompt({ libraryStyle: { prompt: "--sref 123 --v 7" } }), "");
   assert.equal(normalizeLibraryStyle({ sourceUrl: "javascript:alert(1)" }).sourceUrl, "");
   assert.equal(normalizeLibraryStyle({ examples: [{ localUrl: "https://example.com/remote.png" }, { localUrl: "/uploads/../private" }] }).examples.length, 0);

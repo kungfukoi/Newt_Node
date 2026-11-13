@@ -98,7 +98,7 @@ function parseStyleFinderDocument(document,relativeFile) {
       const grid=image(first(document,node=>node.nodeName==="img"&&hasClass(node,"sp-vq-pic"))||{});
       if(grid)examples.push(grid);
     }
-    return [{id:slug,name:clean(text(heading)),sourceUrl:`https://midlibrary.io/library/${slug}`,category:clean(text(first(document,node=>hasClass(node,"sp-kind")))),prompt:paragraphs(observations) || (rawPrompt.startsWith("--")?"":rawPrompt),midjourneyPrompt:rawPrompt,sref:rawPrompt.match(/--sref\s+\d+/)?.[0] || "",notes:paragraphs(about),tags:findAll(document,node=>hasClass(node,"sp-term")).map(node=>clean(text((node.childNodes||[]).find(child=>child.nodeName==="span")))),examples,colours,similarStyles,detailAvailable:true}];
+    return [{id:slug,name:clean(text(heading)),category:clean(text(first(document,node=>hasClass(node,"sp-kind")))),prompt:paragraphs(observations) || (rawPrompt.startsWith("--")?"":rawPrompt),midjourneyPrompt:rawPrompt,sref:rawPrompt.match(/--sref\s+\d+/)?.[0] || "",notes:paragraphs(about),tags:findAll(document,node=>hasClass(node,"sp-term")).map(node=>clean(text((node.childNodes||[]).find(child=>child.nodeName==="span")))),examples,colours,similarStyles,detailAvailable:true}];
   }
   const records=new Map();
   function walk(value) { if(!value || typeof value!=="object")return; if(typeof value.slug==="string" && typeof value.name==="string" && typeof value.prompt==="string")records.set(value.slug,value); for(const child of Object.values(value))if(child&&typeof child==="object")walk(child); }
@@ -108,8 +108,31 @@ function parseStyleFinderDocument(document,relativeFile) {
   }
   return findAll(document,node=>hasClass(node,"ml-style")&&attrs(node)["data-tile"]).map(card=>{
     const id=attrs(card)["data-tile"],record=records.get(id)||{};
-    return {id,name:record.name || clean(text(first(card,node=>hasClass(node,"ml-style-name")))),sourceUrl:`https://midlibrary.io/library/${id}`,category:record.category || clean(text(first(card,node=>hasClass(node,"ml-style-category")))),prompt:record.prompt?.startsWith("--")?"":record.prompt || "",midjourneyPrompt:record.prompt || "",sref:record.prompt?.match(/--sref\s+\d+/)?.[0] || "",tags:[],notes:"",examples:[image(first(card,node=>node.nodeName==="img"&&hasClass(node,"ml-style-preview"))||{})].filter(Boolean)};
+    return {id,name:record.name || clean(text(first(card,node=>hasClass(node,"ml-style-name")))),category:record.category || clean(text(first(card,node=>hasClass(node,"ml-style-category")))),prompt:record.prompt?.startsWith("--")?"":record.prompt || "",midjourneyPrompt:record.prompt || "",sref:record.prompt?.match(/--sref\s+\d+/)?.[0] || "",tags:[],notes:"",examples:[image(first(card,node=>node.nodeName==="img"&&hasClass(node,"ml-style-preview"))||{})].filter(Boolean)};
   }).filter(style=>style.name && /^[a-z0-9-]+$/.test(style.id));
+}
+
+// Accept the site folder itself or the parent folder created by a mirror tool.
+export async function resolveCatalogMirrorRoot(root) {
+  if (!root) fail("Choose a local catalog mirror folder.", 503);
+  const base = await realpath(root);
+  async function hasListing(directory) {
+    const listing = await stat(path.join(directory, "library.html")).catch(error => {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    });
+    return listing?.isFile();
+  }
+  if (await hasListing(base)) return base;
+
+  const entries = await readdir(base, { withFileTypes: true });
+  const candidates = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const directory = path.join(base, entry.name);
+    if (await hasListing(directory)) candidates.push(directory);
+  }
+  if (candidates.length === 1) return realpath(candidates[0]);
+  fail("Choose the mirror folder containing library.html.", 503);
 }
 
 export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initialSnapshot,imageEndpoint="/api/style-library/catalog-image",overrides={}}={}) {
@@ -128,14 +151,14 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initia
     const page={mtime:info.mtimeMs,size:info.size,styles,next};
     pages.set(file,page);return page;
   }
-  async function siteRoot() { if(!root)fail("Choose the local StyleFinder folder in your server configuration.",503); const absolute=path.resolve(root); try {await stat(path.join(absolute,"library.html"));return absolute;}catch{const child=path.join(absolute,"midlibrary.io");await stat(path.join(child,"library.html"));return child;} }
+  const siteRoot = () => resolveCatalogMirrorRoot(root);
   async function asset(file) {
-    return resolveImage(await realpath(await siteRoot()),file);
+    return resolveImage(await siteRoot(),file);
   }
   async function available(style,directory,includeRelated=false) {
     style=applyOverride(style);
     if (style.catalogId) {
-      const {fallbackExamples,similarStyles,...publicStyle}=style;
+      const {fallbackExamples,similarStyles,sourceUrl,...publicStyle}=style;
       return {...publicStyle,detailAvailable:true,previewUrl:style.examples[0]?.localUrl || "",...(includeRelated?{similarStyles:await Promise.all((similarStyles||[]).map(item=>available(item,directory)))}:{})};
     }
     async function resolveExamples(candidates) {
@@ -155,7 +178,8 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initia
     }
     let examples=await resolveExamples(style.examples||[]);
     if(!examples.length)examples=await resolveExamples(style.fallbackExamples||[]);
-    const {fallbackExamples,similarStyles,...publicStyle}=style;
+    // Older indexes include a fixed source URL. The local mirror uses stable catalog IDs.
+    const {fallbackExamples,similarStyles,sourceUrl,...publicStyle}=style;
     return {...publicStyle,examples,previewUrl:examples[0]?.url || "",...(includeRelated?{similarStyles:await Promise.all((similarStyles||[]).map(item=>available(item,directory)))}:{})};
   }
   async function index(refresh=false) {
@@ -199,7 +223,7 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initia
     const categories=new Set([...created,...data.styles].flatMap(style=>[style.category,...(style.catalogId?style.tags:[])]).filter(Boolean));
     if(styles.some(style=>style.tags.includes("Characters")))categories.add("Characters");
     const page=selectStyleFinderPage(styles,query);
-    const directory=data.ready ? await realpath(await siteRoot()) : null;
+    const directory=data.ready ? await siteRoot() : null;
     return {...page,ready:data.ready||created.length>0,populating:data.populating,categories:[...categories].sort(),styles:await Promise.all(page.styles.map(style=>available(style,directory)))};
   }
   async function detail(id,{includeRelated=true}={}) {
@@ -207,7 +231,7 @@ export function createStyleFinderCatalog({root,cacheMs=30000,createdStore,initia
     const created=createdStore ? (await createdStore.read()).find(item=>item.id===id) : null;
     if(created)return {style:await available(created)};
     const data=await index();let style=data.styles.find(item=>item.id===id)||data.styles.flatMap(item=>item.similarStyles||[]).find(item=>item.id===id);if(!style)fail("This style is not in the local catalog yet.",404);
-    const directory=await realpath(await siteRoot());
+    const directory=await siteRoot();
     try{const {styles:[detail]}=await pageStyles(directory,`library/${id}.html`);if(detail)style={...detail,fallbackExamples:style.fallbackExamples||style.examples};}catch{}
     return {style:await available(style,directory,includeRelated)};
   }

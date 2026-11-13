@@ -50,7 +50,7 @@ test("Curated StyleFinder stills and visual prompt agree in the tile, detail and
     });
     await page.getByRole("button",{name:"Looks",exact:true}).click();
     await page.getByRole("combobox",{name:"Looks source",exact:true}).click();
-    await page.getByRole("option",{name:"StyleFinder",exact:true}).click();
+    await page.getByRole("option",{name:"Looks Catalog",exact:true}).click();
     const index=JSON.parse(await readFile(path.join(directory,"stylefinder-audition.json"),"utf8"));
     const expectedCategories=new Set(index.snapshot.styles.map(item=>item.category).filter(Boolean));
     if(index.snapshot.styles.some(item=>(manifest.styles[item.id]?.tags??item.tags).includes("Characters")))expectedCategories.add("Characters");

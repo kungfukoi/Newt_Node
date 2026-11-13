@@ -62,8 +62,9 @@ test("The catalog follows the mirror's unfiltered paging links through filename 
 test("Catalog searches details, handles arriving/pruned files, and confines images",async()=>{
   const directory=await mkdtemp(path.join(os.tmpdir(),"newt-stylefinder-test-"));
   try{
-    const root=path.join(directory,"midlibrary.io");await mkdir(path.join(root,"img"),{recursive:true});await mkdir(path.join(root,"library"));
+    const root=path.join(directory,"catalog.example");await mkdir(path.join(root,"img"),{recursive:true});await mkdir(path.join(root,"library"));
     await writeFile(path.join(root,"library.html"),card());await writeFile(path.join(root,"library","ink.html"),detail);await writeFile(path.join(root,"img","ink.jpg"),jpeg);await writeFile(path.join(directory,"hts-in_progress.lock"),"");
+    await mkdir(path.join(directory,"unrelated"));
     const catalog=createStyleFinderCatalog({root:directory});const value=await catalog.search({q:"warm paper",category:"Techniques"});assert.equal(value.total,1);assert.equal(value.styles[0].examples.length,1);assert.equal(value.populating,true);
     assert.equal((await catalog.detail("ink")).style.name,"Ink drawing");
     await assert.rejects(catalog.asset("../private.jpg"));await assert.rejects(catalog.asset("img/../private.jpg"));await assert.rejects(catalog.asset("img/file.svg"));
@@ -79,5 +80,9 @@ test("Catalog searches details, handles arriving/pruned files, and confines imag
       assert.equal((await fetch(base+"/api/style-library/catalog-image?file=..%2Fsecret.jpg")).status,400);
       assert.equal((await (await fetch(base+"/api/style-library/catalog/ink")).json()).style.name,"Ink drawing");
     } finally {await new Promise(resolve=>server.close(resolve));}
+    await mkdir(path.join(directory,"other-catalog"));
+    await writeFile(path.join(directory,"other-catalog","library.html"),card("other"));
+    assert.equal((await catalog.search({refresh:true})).ready,false);
+    assert.equal((await createStyleFinderCatalog({root}).search()).total,1);
   }finally{await rm(directory,{recursive:true,force:true});}
 });

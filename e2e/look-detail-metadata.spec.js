@@ -3,7 +3,7 @@ import { chooseLookbookSource, openFixture } from "./helpers.mjs";
 test("Look details show the catalog palette without similar styles or recommendation copy",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   const ink={id:"ink",name:"Ink",prompt:"Ink on textured paper",examples:[{localUrl:"/outputs/e2e/ink.png"}],colours:[],similarStyles:[]};
-  const blade={id:"blade-runner",name:"Blade Runner",sourceUrl:"https://midlibrary.io/library/blade-runner",prompt:"Dark cinematic tones",examples:[{localUrl:"/outputs/e2e/blade.png"}],colours:[{name:"dark green",hex:"#23502a",percent:17},{name:"muted cyan",hex:"#568b9a",percent:9}],similarStyles:[ink]};
+  const blade={id:"blade-runner",name:"Blade Runner",sourceUrl:"https://catalog.example/library/blade-runner",prompt:"Dark cinematic tones",examples:[{localUrl:"/outputs/e2e/blade.png"}],colours:[{name:"dark green",hex:"#23502a",percent:17},{name:"muted cyan",hex:"#568b9a",percent:9}],similarStyles:[ink]};
   const json=(route,value)=>route.fulfill({contentType:"application/json",body:JSON.stringify(value)});
   await page.route("**/api/style-library",route=>json(route,{revision:0,collections:[{id:"saved",name:"Cinema",styles:[blade]}]}));
   await page.route("**/api/style-library/catalog?**",route=>json(route,{ready:true,total:1,indexed:1,categories:[],styles:[blade]}));

@@ -36,7 +36,7 @@ test("StyleFinder local audition has independent paging, search, categories, com
     });
     await page.getByRole("button",{name:"Looks",exact:true}).click();
     async function choose(label,name){await page.getByRole("combobox",{name:label,exact:true}).click();await page.getByRole("option",{name,exact:true}).click();}
-    const title="StyleFinder";
+    const title="Looks Catalog";
     await expect(page.getByRole("combobox",{name:"Looks source",exact:true})).toHaveText(title);
     const strip=page.getByLabel("Style previews",{exact:true});await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
     await choose("Looks source",title);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
@@ -49,7 +49,7 @@ test("StyleFinder local audition has independent paging, search, categories, com
     await expect(strip.locator(".stylebuilder-tile").first().getByRole("button",{name:`View ${first.name}`,exact:true})).toBeAttached();
     expect(await strip.evaluate(element=>element.scrollLeft)).toBeGreaterThan(0);
     const search=page.getByRole("textbox",{name:"Search looks",exact:true});await search.fill(first.name);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(48,(await catalog.search({q:first.name})).total));
-    await page.getByRole("button",{name:`View ${first.name}`,exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});await expect(details).toBeVisible();await expect(details.getByRole("link",{name:"Midlibrary.io",exact:true})).toHaveCount(0);
+    await page.getByRole("button",{name:`View ${first.name}`,exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});await expect(details).toBeVisible();await expect(details.getByRole("link")).toHaveCount(0);
     const example=details.getByRole("button",{name:`Enlarge ${first.name} example 1`,exact:true});
     await expect.poll(()=>example.locator("img").evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);
     await example.click();

@@ -38,7 +38,7 @@ export function openCompactStyleFinder(directory, manifest, { shared = false, im
     const filename = await realpath(compactStyleFinderBlob(directory, blob));
     const relative = path.relative(directory, filename);
     if (relative !== path.join("images", blob.slice(0, 2), blob) || !(await stat(filename)).isFile()) {
-      fail("Invalid compact StyleFinder image.", 404);
+      fail("Invalid compact catalog image.", 404);
     }
     return { filename, mimeType: mimeTypes[path.extname(blob).slice(1)] };
   }
@@ -114,13 +114,13 @@ export function createCompactStyleFinderSource(dataDirectory) {
       settings = await readFile(path.join(dataDirectory, compactStyleFinderSetting), "utf8");
     } catch (error) {
       if (error.code === "ENOENT") return null;
-      fail("Could not read the compact StyleFinder folder setting.");
+      fail("Could not read the compact catalog folder setting.");
     }
     try {
       const { directory } = JSON.parse(settings);
       return await readCatalog(directory);
     } catch {
-      fail("The compact StyleFinder catalog is unavailable. Check the folder in stylefinder-compact-source.json.");
+      fail("The compact catalog is unavailable. Check the folder in stylefinder-compact-source.json.");
     }
   };
 }

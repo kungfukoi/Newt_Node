@@ -27,7 +27,7 @@ test("Create Look analyzes once, allows new tags and description edits, saves to
   await expect(dialog.locator(".create-look-images img").first()).toHaveCSS("object-fit", "contain");
   await dialog.getByRole("button", { name: "Extract style", exact: true }).click();
   await expect(dialog.getByLabel("Look style description")).toHaveValue(description);
-  await expect(dialog.getByRole("button",{name:"Import from Midlibrary",exact:true})).toHaveCount(0);
+  await expect(dialog.getByRole("button",{name:/^Import from /})).toHaveCount(0);
   const palette=dialog.getByLabel("Extracted colour palette",{exact:true});await expect(palette).toBeVisible();
   expect(await palette.locator(".create-look-colour-bar").evaluate(element=>element.getBoundingClientRect().height)).toBeGreaterThan(100);
   expect(await palette.evaluate(element=>Boolean(element.previousElementSibling?.classList.contains("create-look-analyze")))).toBe(true);

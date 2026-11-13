@@ -146,7 +146,7 @@ test("Lookbook keeps details open, enlarges whole examples, clears search and re
   const {errors}=await openFixture(page,{count:1});
   let library={version:1,revision:0,collections:[]},analyses=0;
   const prompt="Preserve the requested subject. Use translucent ink washes, irregular fine contours, muted warm paper and sparse crimson accents.";
-  const style={id:"wash",name:"Ink wash",sourceUrl:"https://midlibrary.io/library/wash",prompt:"A woman beside a tree, in delicate ink washes",examples:[{localUrl:"/outputs/e2e/example.png"},{localUrl:"/outputs/e2e/reference.png"}]};
+  const style={id:"wash",name:"Ink wash",sourceUrl:"https://catalog.example/library/wash",prompt:"A woman beside a tree, in delicate ink washes",examples:[{localUrl:"/outputs/e2e/example.png"},{localUrl:"/outputs/e2e/reference.png"}]};
   await page.route("**/api/style-library",route=>{if(route.request().method()==="PUT")library={...route.request().postDataJSON(),revision:library.revision+1};return route.fulfill({contentType:"application/json",body:JSON.stringify(library)});});
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,total:1,indexed:1,categories:[],styles:[style]})}));
   await page.route("**/api/style-library/catalog/wash",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
@@ -209,7 +209,7 @@ async function mockAnalysis(page) {
 test("Library replaces media tabs and sends saved descriptions and complete examples to existing nodes", async ({ page }) => {
   const { errors } = await openFixture(page, { count: 1, uiState: { workspaceMode: "image" } });
   await mockAnalysis(page);
-  let library = { version: 1, revision: 0, collections: [{id:"film-look",name:"Film look",styles:[{id:"crimson-ink",name:"Crimson ink",sourceUrl:"https://midlibrary.io/library/crimson-ink",prompt:"Heavy ink, crimson accents, rough paper --sref 123",examples:[{id:"example",localUrl:"/outputs/e2e/example.png",fileName:"example.png",mimeType:"image/png"}]}]}] };
+  let library = { version: 1, revision: 0, collections: [{id:"film-look",name:"Film look",styles:[{id:"crimson-ink",name:"Crimson ink",sourceUrl:"https://catalog.example/library/crimson-ink",prompt:"Heavy ink, crimson accents, rough paper --sref 123",examples:[{id:"example",localUrl:"/outputs/e2e/example.png",fileName:"example.png",mimeType:"image/png"}]}]}] };
   await page.route("**/api/style-library", async route => {
     if (route.request().method() === "PUT") { library = { ...route.request().postDataJSON(), revision: library.revision + 1 }; }
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(library) });
@@ -272,7 +272,7 @@ test("Catalog looks open details, save examples and create a named Style without
   const {errors,requests}=await openFixture(page,{fixture});
   await mockAnalysis(page);
   let library={version:1,revision:0,collections:[]},uploads=0;
-  const style={id:"ink-catalog",name:"Ink drawing",sourceUrl:"https://midlibrary.io/library/ink-catalog",category:"Techniques",detailAvailable:true,prompt:"Fine ink lines on warm paper.",sref:"--sref 123",tags:["Fine lines"],examples:Array.from({length:4},(_,index)=>({id:`ref-${index}`,url:`/outputs/e2e/ref-${index}.png`,fileName:`ref-${index}.png`}))};
+  const style={id:"ink-catalog",name:"Ink drawing",sourceUrl:"https://catalog.example/library/ink-catalog",category:"Techniques",detailAvailable:true,prompt:"Fine ink lines on warm paper.",sref:"--sref 123",tags:["Fine lines"],examples:Array.from({length:4},(_,index)=>({id:`ref-${index}`,url:`/outputs/e2e/ref-${index}.png`,fileName:`ref-${index}.png`}))};
   await page.route("**/api/style-library",async route=>{if(route.request().method()==="PUT")library={...route.request().postDataJSON(),revision:library.revision+1};return route.fulfill({contentType:"application/json",body:JSON.stringify(library)});});
   await page.route("**/api/style-library/catalog?**",route=>{const query=new URL(route.request().url()).searchParams.get("q");return route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,populating:true,total:query==="missing"?0:1,indexed:1008,categories:["Techniques"],styles:query==="missing"?[]:[style]})});});
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
@@ -332,7 +332,7 @@ test("A catalog look must save before its node is created, with retry after a co
     }
     return route.fulfill({contentType:"application/json",body:JSON.stringify(library)});
   });
-  const style={id:"warm-ink",name:"Warm ink",sourceUrl:"https://midlibrary.io/library/warm-ink",prompt:"Warm paper and soft ink",examples:[{localUrl:"/outputs/e2e/example.png"}]};
+  const style={id:"warm-ink",name:"Warm ink",sourceUrl:"https://catalog.example/library/warm-ink",prompt:"Warm paper and soft ink",examples:[{localUrl:"/outputs/e2e/example.png"}]};
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,styles:[style],total:1,categories:[],indexed:1})}));
   await page.route("**/api/style-library/catalog/warm-ink",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
@@ -376,7 +376,7 @@ test("Library style reaches image generation and remains independent of later co
 });
 
 test("Unstarring removes only the Starred copy and preserves named copies and workflow snapshots",async({page})=>{
-  const look={id:"ink-catalog",name:"Ink drawing",sourceUrl:"https://midlibrary.io/library/ink-drawing",prompt:"Fine ink on warm paper",examples:[],detailAvailable:true};
+  const look={id:"ink-catalog",name:"Ink drawing",sourceUrl:"https://catalog.example/library/ink-drawing",prompt:"Fine ink on warm paper",examples:[],detailAvailable:true};
   const saved={...look,id:"saved-ink"};
   const other={id:"other",name:"Other look",prompt:"Pastel shapes",examples:[]};
   let library={version:1,revision:0,collections:[{id:"first",name:"First",styles:[saved,other]},{id:"second",name:"Second",styles:[{...saved,id:"second-copy"}]},{id:"stars",name:"Starred",styles:[saved]}]},conflict=true;

@@ -21,13 +21,13 @@ export async function readStyleFinderOverrides(directory) {
       styles[id] = {
         catalogId: id, prompt: normalized.prompt, notes: normalized.notes,
         examples: normalized.examples, colours: normalized.colours, tags: normalized.tags,
-        sourceProvider: "Newt", sourceAttribution: normalized.sourceAttribution || "Locally curated StyleFinder reference",
+        sourceProvider: "Newt", sourceAttribution: normalized.sourceAttribution || "Locally curated catalog reference",
         // Source render parameters and cached analyses do not describe replacement stills.
         sref: "", midjourneyPrompt: "", styleAnalysis: null,
       };
     }
     return { key: `${info.mtimeMs}:${info.size}`, styles };
   } catch {
-    throw Object.assign(new Error("The local StyleFinder overrides file is invalid. Correct stylefinder-overrides.json and refresh."), { status: 503 });
+    throw Object.assign(new Error("The local catalog overrides file is invalid. Correct stylefinder-overrides.json and refresh."), { status: 503 });
   }
 }

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { parse } from "parse5";
+import { resolveCatalogMirrorRoot } from "./stylefinder-catalog.js";
 
 const attrs = node => Object.fromEntries((node?.attrs || []).map(item => [item.name, item.value]));
 const has = (node, name) => (attrs(node).class || "").split(/\s+/).includes(name);
@@ -16,7 +17,7 @@ export const editorialSections = [
   { id: "compilations", title: "Compilations", description: "Curated collections of styles and visual ideas.", file: "midguide/midjounrey-styles-and-sref-codes-compilations.html" },
   { id: "in-focus", title: "In Focus", description: "Explore the character and possibilities of a style.", file: "midguide/midjourney-styles-in-focus-series.html" }
 ];
-const articlePath = /^(midguide|tops|focus|midlibrary-recommends)\/[a-z0-9-]+\.html$/;
+const articlePath = /^(?:midguide|tops|focus|[a-z0-9-]+-recommends)\/[a-z0-9-]+\.html$/;
 function localPath(value, file) {
   if (!value || /^(?:[a-z]+:|\/\/)/i.test(value) || /[\\\x00]/.test(value)) return "";
   let decoded; try { decoded = decodeURIComponent(value.split(/[?#]/)[0]); } catch { return ""; }
@@ -82,12 +83,7 @@ export function parseEditorialArticle(html, file) {
 export function createStyleFinderEditorial({ root, cacheMs = 30000 }) {
   let snapshot = null, expires = 0, pending;
   const articles = new Map();
-  async function siteRoot() {
-    if (!root) fail("The local catalog is not configured.", 503);
-    const base = path.resolve(root);
-    try { await stat(path.join(base, "library.html")); return realpath(base); }
-    catch { return realpath(path.join(base, "midlibrary.io")); }
-  }
+  const siteRoot = () => resolveCatalogMirrorRoot(root);
   async function source(directory, file) {
     if (!articlePath.test(file)) fail("Choose a valid local article.");
     const target = await realpath(path.join(directory, file));

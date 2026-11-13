@@ -16,7 +16,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
     }
     return json(route,library);
   });
-  await page.route("**/api/style-library/catalog?**",route=>offline?route.fulfill({status:503,contentType:"application/json",body:JSON.stringify({error:"Could not connect to StyleRef"})}):json(route,{ready:true,source:"styleref",remoteCount:1,localCount:0,indexed:1,total:1,styles:[look],categories:["Illustration"]}));
+  await page.route("**/api/style-library/catalog?**",route=>offline?route.fulfill({status:503,contentType:"application/json",body:JSON.stringify({error:"Could not connect to the commercial catalog"})}):json(route,{ready:true,source:"styleref",remoteCount:1,localCount:0,indexed:1,total:1,styles:[look],categories:["Illustration"]}));
   await page.route("**/api/style-library/catalog/styleref-watercolor",route=>{detailRequests++;return offline?route.fulfill({status:503,body:"Offline"}):json(route,{style:look});});
   const referenceImage=await readFile(new URL("./.generated/landscape.png",import.meta.url));
   await page.route("**/api/style-library/styleref-image?**",route=>route.fulfill({contentType:"image/png",body:referenceImage}));
@@ -29,7 +29,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   });
   await page.getByRole("button",{name:"Looks",exact:true}).click();
   await chooseLookbookSource(page,"Commercial");
-  await expect(page.getByText("1 StyleRef looks",{exact:true})).toBeVisible();
+  await expect(page.getByText("1 commercial looks",{exact:true})).toBeVisible();
   await expect(page.getByText("Guides",{exact:true})).toHaveCount(0);
   await expect(page.getByText("local styles",{exact:false})).toHaveCount(0);
   await page.getByRole("button",{name:"View Paper washes",exact:true}).click();
@@ -38,10 +38,10 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   await expect(details.getByText("Source specification and examples")).toHaveCount(0);await expect(details.getByLabel("Look colours")).toContainText("#f4f0e6");
   await expect(details.getByLabel("Similar styles")).toHaveCount(0);
   await expect(details.getByText("StyleRef does not supply similar-style recommendations.",{exact:true})).toHaveCount(0);
-  await expect(details.getByLabel("StyleRef prompt").getByRole("heading",{name:"Rendering",exact:true})).toBeVisible();
-  await expect(details.getByLabel("StyleRef prompt").getByRole("listitem")).toHaveCount(2);
+  await expect(details.getByLabel("Catalog prompt").getByRole("heading",{name:"Rendering",exact:true})).toBeVisible();
+  await expect(details.getByLabel("Catalog prompt").getByRole("listitem")).toHaveCount(2);
   expect(await details.evaluate(root=>{
-    const images=root.querySelector('.library-detail-examples'),colours=root.querySelector('[aria-label="Look colours"]'),prompt=root.querySelector('[aria-label="StyleRef prompt"]');
+    const images=root.querySelector('.library-detail-examples'),colours=root.querySelector('[aria-label="Look colours"]'),prompt=root.querySelector('[aria-label="Catalog prompt"]');
     return Boolean(images.compareDocumentPosition(colours)&Node.DOCUMENT_POSITION_FOLLOWING)&&Boolean(colours.compareDocumentPosition(prompt)&Node.DOCUMENT_POSITION_FOLLOWING);
   })).toBe(true);
   await expect(details.locator(".look-description-label")).toHaveText("Palette:");
@@ -61,7 +61,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   expect(library.collections[0].styles[0].examples[0].localUrl).toBe("/outputs/e2e/style-1.png");
   await expect(details.getByLabel("Style description",{exact:true})).toContainText("Transparent watercolor washes");
   await expect(details.getByLabel("Style description",{exact:true})).not.toContainText("Preserve the");
-  await expect(details.getByLabel("StyleRef prompt",{exact:true})).toContainText("Translucent warm washes");
+  await expect(details.getByLabel("Catalog prompt",{exact:true})).toContainText("Translucent warm washes");
   await details.getByRole("button",{name:"Create Mood Board node",exact:true}).click();
   await expect(details.getByRole("status")).toContainText("Created Mood Board");
   await details.getByRole("button",{name:"Close style details",exact:true}).click();
@@ -69,10 +69,10 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   await expect(page.locator(".custom-palette-preview")).toHaveAttribute("data-full-resolution-url","/outputs/e2e/style-1.png");
   await page.getByRole("button",{name:"Looks",exact:true}).click();
   const onlineDetailRequests=detailRequests;
-  offline=true;await page.getByRole("button",{name:"Refresh catalog",exact:true}).click();await expect(page.getByRole("alert")).toContainText("Could not connect to StyleRef");
+  offline=true;await page.getByRole("button",{name:"Refresh catalog",exact:true}).click();await expect(page.getByRole("alert")).toContainText("Could not connect to the commercial catalog");
   await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Starred",exact:true}).click();
   await page.getByRole("button",{name:"View Paper washes",exact:true}).click();
-  await expect(details.getByLabel("StyleRef prompt",{exact:true})).toContainText("Translucent warm washes");
+  await expect(details.getByLabel("Catalog prompt",{exact:true})).toContainText("Translucent warm washes");
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();await expect(details.getByRole("status")).toContainText("description is saved");expect(analyses).toBe(1);expect(detailRequests).toBe(onlineDetailRequests);
   expect(requests.some(item=>item.path.startsWith("/api/style-library/editorial"))).toBe(false);expect(errors).toEqual([]);
   await page.screenshot({path:test.info().outputPath("styleref-look-details.png"),fullPage:true});

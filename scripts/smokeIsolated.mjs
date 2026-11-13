@@ -137,7 +137,7 @@ try {
   assert.equal(health.routes.lookbookSharedCompact,true);
   const missingStyleFinder=await fetch(`${api}/api/style-library/stylefinder`);
   assert.equal(missingStyleFinder.status,503);
-  assert.match((await missingStyleFinder.json()).error,/local StyleFinder audition is unavailable/);
+  assert.match((await missingStyleFinder.json()).error,/local catalog is unavailable/);
   const compactFolder = path.join(sandbox, "Shared catalog");
   const compactImage = await readFile(path.join(sandbox, "outputs", "panel.png"));
   const compactBlob = createHash("sha256").update(compactImage).digest("hex") + ".png";

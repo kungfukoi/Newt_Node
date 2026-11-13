@@ -44,6 +44,12 @@ test("Compact StyleFinder serves curated URLs after moving with the source offli
   const stats = await packStyleFinder(f.root, output, { expectedCount: 2 });
   assert.equal(stats.imagePaths, 5);
   assert.equal(stats.imageFiles, 1);
+  const previousFile = path.join(output, "catalog.json");
+  const previous = JSON.parse(await readFile(previousFile, "utf8"));
+  for (const style of [...previous.styles, ...Object.values(previous.details)]) {
+    style.sourceUrl = `https://catalog.example/library/${style.id}`;
+  }
+  await writeFile(previousFile, JSON.stringify(previous));
   const listing = path.join(f.source, "library.html");
   await writeFile(listing, (await readFile(listing, "utf8")) + '<div class="ml-style" data-tile="new"><div class="ml-style-name">New</div><img class="ml-style-preview" src="img/card.html"></div>');
   await writeFile(path.join(f.directory, "stylefinder-overrides.json"), JSON.stringify(localOverride("New cinematic description")));
@@ -78,12 +84,13 @@ test("Compact StyleFinder serves curated URLs after moving with the source offli
   assert.equal((await f.catalog.search()).total, 3);
   assert.equal((await f.catalog.detail("stylefinder-ink")).style.prompt, "New cinematic description");
   await writeFile(setting, JSON.stringify({ directory: output }));
-  await assert.rejects(f.catalog.search(), /compact StyleFinder catalog is unavailable/);
+  await assert.rejects(f.catalog.search(), /compact catalog is unavailable/);
 });
 test("StyleFinder audition reads a local index, keeps identities distinct and materializable image routes, and preserves source files",async t=>{
   const f=await fixture(t),files=await readdir(f.source),page=await f.catalog.search({limit:1});
-  assert.equal(page.source,"stylefinder");assert.equal(page.sourceLabel,"StyleFinder");assert.equal(page.total,2);assert.equal(page.styles[0].id,"stylefinder-ink");assert.equal(page.styles[0].catalogId,"stylefinder-ink");
-  assert.equal(page.styles[0].sourceProvider,"Midlibrary");assert.match(page.styles[0].examples[0].url,/stylefinder-image/);
+  assert.equal(page.source,"stylefinder");assert.equal(page.sourceLabel,"Looks Catalog");assert.equal(page.total,2);assert.equal(page.styles[0].id,"stylefinder-ink");assert.equal(page.styles[0].catalogId,"stylefinder-ink");
+  assert.equal(page.styles[0].sourceUrl,undefined);
+  assert.equal(page.styles[0].sourceProvider,"Local catalog");assert.match(page.styles[0].examples[0].url,/stylefinder-image/);
   assert.equal(page.styles[0].previewUrl,page.styles[0].examples[0].url);
   assert.equal((await f.catalog.search({q:"warm paper",category:"Techniques"})).total,1);
   const [wash]=(await f.catalog.search({offset:1,limit:1})).styles;
@@ -124,7 +131,7 @@ test("Local curation replaces listing and detail together, survives reindexing a
   assert.equal(listed.previewUrl,listed.examples[0].localUrl);assert.equal(listed.sourceProvider,"Newt");
   assert.equal(listed.styleAnalysis,null);assert.equal(listed.sref,"");assert.equal(listed.midjourneyPrompt,"");
   assert.equal(listed.fallbackExamples,undefined);assert.equal(listed.similarStyles,undefined);
-  assert.equal((await f.catalog.detail("stylefinder-wash")).style.sourceProvider,"Midlibrary");
+  assert.equal((await f.catalog.detail("stylefinder-wash")).style.sourceProvider,"Local catalog");
   await indexStyleFinder(f.source,f.directory);
   assert.equal((await f.catalog.detail("stylefinder-ink")).style.prompt,detail.prompt);
   const replacement=localOverride("Monochrome architectural silhouettes against a luminous evening sky.");

@@ -69,7 +69,7 @@ export const styleLibraryApi = {
     const sources=Object.entries(offsets).filter(([source])=>(source!=="local-looks"||includeLocal)&&(source!=="film-stills"||includeFilmStills));
     const results=await Promise.allSettled(sources.map(([source,offset])=>this.catalog({query,category,refresh,source,offset})));
     const nextOffsets={},styles=[],categories=new Set(),warnings=[];
-    const labels={library:"Commercial",stylefinder:"StyleFinder","shared-user-looks":"User Looks","local-looks":"Local Looks","film-stills":"Film Stills"};
+    const labels={library:"Commercial",stylefinder:"Looks Catalog","shared-user-looks":"User Looks","local-looks":"Local Looks","film-stills":"Film Stills"};
     let truncated=false;
     results.forEach((result,index)=>{
       const [source,offset]=sources[index];
