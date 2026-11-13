@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {chooseLookbookSource,openFixture} from "./helpers.mjs";
+import {chooseLookbookCollection,chooseLookbookSource,openFixture} from "./helpers.mjs";
 async function setup(page){
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});let deleted=false,deleteCalls=0,failDelete=false,detailCalls=0;
   const images=Array.from({length:4},(_,index)=>({id:String(index),localUrl:`/outputs/e2e/look-${index}.png`}));
@@ -17,11 +17,25 @@ async function setup(page){
   const choose=async(label,name)=>{await page.getByRole("combobox",{name:label,exact:true}).click();await page.getByRole("option",{name,exact:true}).click();};
   return {errors,requests,choose,deleteCalls:()=>deleteCalls,detailCalls:()=>detailCalls,setFail:value=>{failDelete=value;},library:()=>library};
 }
+test("Source previews shuffle on load and refresh while saved collections keep their order", async ({page}) => {
+  await page.addInitScript(() => { Math.random = () => 0; });
+  await setup(page);
+  const names = page.locator(".stylebuilder-tile-name");
+  await expect(names).toHaveText(["Photo", "Custom Ink"]);
+
+  await page.evaluate(() => { Math.random = () => 0.75; });
+  await page.getByRole("button", {name:"Refresh catalog",exact:true}).click();
+  await expect(names).toHaveText(["Custom Ink", "Photo"]);
+
+  await page.evaluate(() => { Math.random = () => 0; });
+  await chooseLookbookCollection(page,"Saved");
+  await expect(names).toHaveText(["Custom Ink", "Photo"]);
+});
 test("Category filters remain available and filter Catalog, Starred, named and empty collections",async({page})=>{
   const f=await setup(page);await f.choose("Look category","Illustration");await expect(page.getByRole("button",{name:"View Custom Ink",exact:true})).toBeVisible();await expect(page.getByRole("button",{name:"View Photo",exact:true})).toHaveCount(0);
-  await f.choose("Looks source","Starred");await expect(page.getByRole("combobox",{name:"Look category",exact:true})).toHaveText("All categories");await f.choose("Look category","Photography");await expect(page.getByRole("button",{name:"View Photo",exact:true})).toBeVisible();await expect(page.getByRole("button",{name:"View Custom Ink",exact:true})).toHaveCount(0);
-  await f.choose("Looks source","Saved");await f.choose("Look category","Illustration");await expect(page.getByRole("button",{name:"View Custom Ink",exact:true})).toBeVisible();
-  await f.choose("Looks source","Empty");await expect(page.getByRole("combobox",{name:"Look category",exact:true})).toHaveText("All categories");await expect(page.getByText("Filter:",{exact:true})).toBeVisible();expect(f.errors).toEqual([]);
+  await chooseLookbookCollection(page,"Starred");await expect(page.getByRole("combobox",{name:"Look category",exact:true})).toHaveText("All categories");await f.choose("Look category","Photography");await expect(page.getByRole("button",{name:"View Photo",exact:true})).toBeVisible();await expect(page.getByRole("button",{name:"View Custom Ink",exact:true})).toHaveCount(0);
+  await chooseLookbookCollection(page,"Saved");await f.choose("Look category","Illustration");await expect(page.getByRole("button",{name:"View Custom Ink",exact:true})).toBeVisible();
+  await chooseLookbookCollection(page,"Empty");await expect(page.getByRole("combobox",{name:"Look category",exact:true})).toHaveText("All categories");await expect(page.getByText("Filter:",{exact:true})).toBeVisible();expect(f.errors).toEqual([]);
 });
 test("Thumbnails show the first example until hover or keyboard focus reveals the four-up preview",async({page})=>{
   const f=await setup(page),tile=page.locator(".stylebuilder-tile").filter({has:page.getByRole("button",{name:"View Photo",exact:true})}),cover=tile.locator(".stylebuilder-cover"),grid=tile.locator(".stylebuilder-mosaic-grid");
@@ -60,7 +74,7 @@ test("User Looks removes only checked looks and retains failed selections for re
   const remove=page.getByRole("button",{name:"Remove Look",exact:true});
   await expect(remove).toHaveCount(0);
   await chooseLookbookSource(page,"User Looks");
-  await expect(remove).toBeDisabled();
+  await expect(remove).toHaveCount(0);
   await page.getByRole("checkbox",{name:"Select Ink",exact:true}).check();
   await page.getByRole("checkbox",{name:"Select Wash",exact:true}).check();
   await expect(remove).toBeEnabled();

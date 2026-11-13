@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {chooseLookbookSource,openFixture} from "./helpers.mjs";
+import {chooseLookbookCollection,chooseLookbookSource,openFixture} from "./helpers.mjs";
 import {createStyleRefCatalog} from "../server/styleref-catalog.js";
 
 test("User Looks shows only shared-store looks, supports search, and reports unavailable storage",async({page})=>{
@@ -32,7 +32,7 @@ test("User Looks shows only shared-store looks, supports search, and reports una
   expect(requests.some(item=>item.path==="/api/style-library/analyze")).toBe(false);expect(errors).toEqual([]);
 });
 
-test("All combines paged catalog results and saved copies without repeats",async({page})=>{
+test("All Sources and All Saved each deduplicate their own looks",async({page})=>{
   await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   const ink={id:"styleref-ink",catalogId:"styleref-ink",name:"Ink",category:"Illustration",examples:[]};
   const photo={id:"stylefinder-photo",name:"Photo",category:"Photography",examples:[]};
@@ -55,11 +55,12 @@ test("All combines paged catalog results and saved copies without repeats",async
     });
   }
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await chooseLookbookSource(page,"All");
+  await chooseLookbookSource(page,"All Sources");
   await expect(page.getByRole("button",{name:"View Wash",exact:true})).toBeVisible();
-  for(const name of ["Ink","Photo","Pencil"]){
+  for(const name of ["Ink","Photo"]){
     await expect(page.getByRole("button",{name:`View ${name}`,exact:true})).toHaveCount(1);
   }
+  await expect(page.getByRole("button",{name:"View Pencil",exact:true})).toHaveCount(0);
   expect(reads).toContainEqual({endpoint:"shared-user-looks",offset:1,own:"1",query:""});
   const commercialReads=reads.filter(({endpoint})=>endpoint==="catalog").length;
   await page.getByRole("button",{name:"Refresh catalog",exact:true}).click();
@@ -70,7 +71,11 @@ test("All combines paged catalog results and saved copies without repeats",async
   await page.getByRole("option",{name:"Photography",exact:true}).click();
   await expect(page.getByRole("button",{name:"View Photo",exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(0);
-  await chooseLookbookSource(page,"Starred");
+  await chooseLookbookCollection(page,"All Saved");
+  await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("button",{name:"View Pencil",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("button",{name:"View Photo",exact:true})).toHaveCount(0);
+  await chooseLookbookCollection(page,"Starred");
   await expect(page.getByRole("button",{name:"View Ink",exact:true})).toHaveCount(1);
   await expect(page.getByRole("button",{name:"View Pencil",exact:true})).toHaveCount(0);
 
@@ -79,11 +84,11 @@ test("All combines paged catalog results and saved copies without repeats",async
   const beforeSavedSearch=reads.length;
   await search.fill("Wash");
   await expect(strip).toContainText("No styles match this view.");
-  await chooseLookbookSource(page,"Cinema");
+  await chooseLookbookCollection(page,"Cinema");
   await expect(strip).toContainText("No styles match this view.");
   expect(reads).toHaveLength(beforeSavedSearch);
 
-  await chooseLookbookSource(page,"All");
+  await chooseLookbookSource(page,"All Sources");
   await expect(page.getByRole("button",{name:"View Wash",exact:true})).toBeVisible();
   expect(reads.filter(read=>read.query==="Wash").map(read=>read.endpoint).sort())
     .toEqual(["catalog","shared-user-looks","stylefinder"]);

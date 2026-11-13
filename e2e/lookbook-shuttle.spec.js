@@ -21,8 +21,10 @@ test("Lookbook shuttle varies speed, stays the same size through paging, and sto
   await page.getByRole("button", { name: "Looks", exact: true }).click();
   await chooseLookbookSource(page, "Commercial");
   const strip = page.getByLabel("Style previews", { exact: true });
+  const previewNames = strip.locator(".stylebuilder-tile-name");
   const shuttle = page.getByRole("button", { name: "Preview scroll shuttle" });
   await expect(shuttle).toBeEnabled();
+  const firstPageNames = await previewNames.allTextContents();
   await shuttle.scrollIntoViewIfNeeded();
   const box = await shuttle.boundingBox();
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -55,6 +57,9 @@ test("Lookbook shuttle varies speed, stays the same size through paging, and sto
     await expect(page.getByRole("status").filter({ hasText: "Loading looks" })).toBeVisible();
     releasePage();
     await expect(strip.locator(".stylebuilder-tile")).toHaveCount(looks.length);
+    const loadedNames = await previewNames.allTextContents();
+    expect(loadedNames.slice(0, pageSize)).toEqual(firstPageNames);
+    expect(loadedNames.toSorted()).toEqual(looks.map(look => look.name).toSorted());
     await expect.poll(scrollLeft).toBeGreaterThan(firstEnd);
     expect((await shuttle.boundingBox()).width).toBe(box.width);
 

@@ -2,7 +2,7 @@ import React from "react";
 import { X } from "lucide-react";
 import { styleLibraryApi } from "../api/newtApi.js";
 import { lookSelectionPatch, releaseLookGrade } from "../lookGrade.js";
-import { allSavedCatalogLooks } from "../lookCatalogs.js";
+import { allSavedCatalogLooks, sameLook } from "../lookCatalogs.js";
 import "../LibraryWorkspace.css";
 
 export default function LibraryStylePicker({ data, onChange, onEditStart, onEditPrompt }) {
@@ -22,7 +22,8 @@ export default function LibraryStylePicker({ data, onChange, onEditStart, onEdit
       let style = library.collections.find(item => item.id === collectionId)?.styles.find(item => item.id === id);
       if (!style) throw new Error("This look is no longer in your collection.");
       if (!style.styleAnalysis?.stylePrompt) {
-        const styleAnalysis = await styleLibraryApi.analyze(style);
+        const existing = allSavedCatalogLooks(library.collections).find(saved => sameLook(saved, style) && saved.styleAnalysis?.stylePrompt);
+        const styleAnalysis = existing?.styleAnalysis || await styleLibraryApi.analyze(style);
         style = { ...style, styleAnalysis };
         await styleLibraryApi.save({ ...library, collections: library.collections.map(item => item.id === collectionId ? { ...item, styles: item.styles.map(saved => saved.id === id ? style : saved) } : item) });
         if (styleAnalysis.warning) setError(styleAnalysis.warning);
@@ -53,15 +54,15 @@ export default function LibraryStylePicker({ data, onChange, onEditStart, onEdit
   const selected=rows.find(({style})=>current&&style.id===current.id);
   const value = selected ? `${selected.owner.id}:${current.id}` : current ? "workflow-style" : "";
   return <section className="library-style-picker nodrag nowheel" onPointerDown={event => event.stopPropagation()}>
-    <div className="style-preset-row"><span>Catalog</span><select aria-label="Look catalog" title="Choose All saved looks or a catalog" value={catalogValue} disabled={analyzing} onFocus={load} onChange={event=>{setError("");onChange({...releaseLookGrade(data),libraryStyle:null,lookCatalogId:["none","all"].includes(event.target.value)?event.target.value:event.target.value.slice(11)});}}>{catalogs.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
+    <div className="style-preset-row"><span>Collection</span><select aria-label="Look collection" title="Choose all saved looks or a collection" value={catalogValue} disabled={analyzing} onFocus={load} onChange={event=>{setError("");onChange({...releaseLookGrade(data),libraryStyle:null,lookCatalogId:["none","all"].includes(event.target.value)?event.target.value:event.target.value.slice(11)});}}>{catalogs.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
     <div className="style-preset-row"><span>Look</span>
-      <select aria-label="Look" title={catalogValue==="none"?"Choose a catalog first":"Choose a look from this catalog"} value={value} disabled={analyzing||catalogValue==="none"||(!rows.length&&!current)} onFocus={load} onChange={event => choose(event.target.value)}>
+      <select aria-label="Look" title={catalogValue==="none"?"Choose a collection first":"Choose a look from this collection"} value={value} disabled={analyzing||catalogValue==="none"||(!rows.length&&!current)} onFocus={load} onChange={event => choose(event.target.value)}>
         <option value="">None</option>
         {current && !selected && <optgroup label="Saved with workflow"><option value="workflow-style">{current.name || "Custom style"}</option></optgroup>}
         {rows.map(({style,owner})=><option key={`${owner.id}:${style.id}`} value={`${owner.id}:${style.id}`} title={!style.styleAnalysis?.stylePrompt ? "First use: paid Astra image analysis, saved for reuse" : "Saved Astra style description"} disabled={!style.styleAnalysis?.stylePrompt && !style.examples?.length}>{style.name}</option>)}
       </select>
     </div>
-    {!error&&!analyzing&&<small className="library-muted">{catalogValue==="none"?"Choose a catalog, then a look.":loading&&!collections.length?"Loading saved looks…":!rows.length&&!current?"No looks saved here yet.":""}</small>}
+    {!error&&!analyzing&&<small className="library-muted">{catalogValue==="none"?"Choose a collection, then a look.":loading&&!collections.length?"Loading saved looks…":!rows.length&&!current?"No looks saved here yet.":""}</small>}
     {error && <small role="alert">{error}</small>}
     {analyzing && <small role="status">Astra is analyzing this look. Paid analysis runs once; the description is saved for reuse.</small>}
     {current && (

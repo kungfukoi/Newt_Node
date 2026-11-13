@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-import {chooseLookbookSource,openFixture} from "./helpers.mjs";
+import {chooseLookbookCollection,chooseLookbookSource,openFixture} from "./helpers.mjs";
 import {readFile} from "node:fs/promises";
 
 test("StyleRef supplies the catalog, palette and managed imports while preserving first-use analysis and offline saved looks",async({page})=>{
@@ -49,7 +49,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   await expect(details.getByRole("button",{name:"Star look",exact:true})).toHaveAttribute("aria-pressed","false");
   await details.getByRole("button",{name:"Star look",exact:true}).click();
   await expect(details).toBeVisible();await expect(details.getByRole("button",{name:"Unstar look",exact:true})).toHaveAttribute("aria-pressed","true");
-  await expect(details.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
+  await expect(details.getByRole("button",{name:"Add to collection…",exact:true})).toBeEnabled();
   expect(uploads).toBe(4);expect(analyses).toBe(0);
   expect(library.collections[0].styles[0].sourceProvider).toBe("StyleRef");expect(library.collections[0].styles[0].sourceUrl).toBe(look.sourceUrl);
   expect(library.collections[0].styles[0].prompt).toBe(look.prompt);
@@ -70,7 +70,7 @@ test("StyleRef supplies the catalog, palette and managed imports while preservin
   await page.getByRole("button",{name:"Looks",exact:true}).click();
   const onlineDetailRequests=detailRequests;
   offline=true;await page.getByRole("button",{name:"Refresh catalog",exact:true}).click();await expect(page.getByRole("alert")).toContainText("Could not connect to the commercial catalog");
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Starred",exact:true}).click();
+  await chooseLookbookCollection(page,"Starred");
   await page.getByRole("button",{name:"View Paper washes",exact:true}).click();
   await expect(details.getByLabel("Catalog prompt",{exact:true})).toContainText("Translucent warm washes");
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();await expect(details.getByRole("status")).toContainText("description is saved");expect(analyses).toBe(1);expect(detailRequests).toBe(onlineDetailRequests);

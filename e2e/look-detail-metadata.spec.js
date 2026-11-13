@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { chooseLookbookSource, openFixture } from "./helpers.mjs";
+import { chooseLookbookCollection, chooseLookbookSource, openFixture } from "./helpers.mjs";
 test("Look details show the catalog palette without similar styles or recommendation copy",async({page})=>{
   const {errors,requests}=await openFixture(page,{fixture:{nodes:[],edges:[],groups:[],viewport:{x:0,y:0,scale:1}}});
   const ink={id:"ink",name:"Ink",prompt:"Ink on textured paper",examples:[{localUrl:"/outputs/e2e/ink.png"}],colours:[],similarStyles:[]};
@@ -18,7 +18,7 @@ test("Look details show the catalog palette without similar styles or recommenda
   await expect(details.getByLabel("Similar styles")).toHaveCount(0);
   await expect(details.getByRole("button",{name:"View similar look Ink",exact:true})).toHaveCount(0);
   await details.getByRole("button",{name:"Close style details",exact:true}).click();
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click();await page.getByRole("option",{name:"Cinema",exact:true}).click();
+  await chooseLookbookCollection(page,"Cinema");
   await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
   await expect(details.getByRole("button",{name:"View similar look Ink",exact:true})).toHaveCount(0);
   await expect(details.getByText(/No similar styles|does not supply similar-style/)).toHaveCount(0);

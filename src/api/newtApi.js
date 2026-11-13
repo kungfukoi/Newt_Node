@@ -100,6 +100,9 @@ export const styleLibraryApi = {
   },
   async save(library) {
     const { response, data } = await fetchJsonApi("/api/style-library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(library) }, "Save style library", { timeoutMs: 15000, retryLocalApi: false });
+    if (response.status === 409) {
+      throw Object.assign(new Error(apiErrorMessage(data?.error, "The library changed in another window.")), { status: 409 });
+    }
     ensureOk(response, data, "Could not save the style library.");
     if (typeof window !== "undefined") window.dispatchEvent(new Event("newtnode:style-library-updated"));
     return data;
