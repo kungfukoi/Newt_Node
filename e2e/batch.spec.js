@@ -1,5 +1,68 @@
 import { test, expect } from "@playwright/test";
 import { openFixture, wireAttachmentErrors } from "./helpers.mjs";
+import { gradePresetPrompts } from "../src/colorLook.js";
+
+test("Style and Mood Board selections create typed batches that run matching pairs after reload", async ({ page }) => {
+  const nodes = [
+    ...["A", "B"].map((name, index) => ({ id: `style-${name}`, type: "style", x: 20, y: 30 + index * 260,
+      data: { title: `Style ${name}`, gradePreset: name === "A" ? "Warm" : "Cool", libraryStyle: { id: name, name, prompt: `Distinct treatment ${name}` } } })),
+    ...["A", "B"].map((name, index) => ({ id: `board-${name}`, type: "transfer", x: 20, y: 560 + index * 260,
+      data: { title: `Board ${name}`, locked: true, activated: true, resultUrl: `/outputs/e2e/board-${name}.png`, libraryBoardPrompt: `Board direction ${name}` } })),
+    { id: "model", type: "imageModel", x: 800, y: 100, data: { title: "Image Model", model: "Nano Banana Pro", aspectRatio: "1:1", resolution: "1K", prompt: "A house on a hill", batchCount: "1", settingsOpen: true } }
+  ];
+  await page.addInitScript(nodes => {
+    const key = "seedance-node-editor-draft-v1";
+    if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify({ nodes, edges: [], groups: [], viewport: { x: 30, y: 30, scale: .75 } }));
+  }, nodes);
+  const { errors } = await openFixture(page, { count: nodes.length, settings: { falKeyConfigured: true, modelProviderPreferences: { imageGeneration: "fal" } } });
+  const title = id => page.locator(`[data-node-card-id="${id}"] .node-title-label > svg`);
+  const makeBatch = async (prefix, label) => {
+    await title(`${prefix}-B`).click();
+    await title(`${prefix}-A`).click({ modifiers: ["Shift"] });
+    await page.locator(".selection-action-bar").getByRole("button", { name: "Batch", exact: true }).click();
+    const batch = page.locator(".batch-body").filter({ hasText: `${label} Batch output` });
+    const entry = prefix === "style" ? "Style" : "Board";
+    await expect(batch.locator(".batch-entry strong")).toHaveText([`${entry} A`, `${entry} B`]);
+    await batch.getByRole("button", { name: `Move ${entry} B up` }).click();
+    await expect(batch.locator(".batch-entry strong")).toHaveText([`${entry} B`, `${entry} A`]);
+    return batch;
+  };
+  const styles = await makeBatch("style", "Style");
+  const boards = await makeBatch("board", "Mood Board");
+  const model = page.locator('[data-node-card-id="model"]');
+  async function connect(batch, input) {
+    const from = await batch.locator('[data-port-role="output"]').boundingBox({ timeout: 10000 });
+    const to = await model.locator(`[data-port-role="input"][data-port-id="${input}"]`).boundingBox({ timeout: 10000 });
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 15 });
+    await page.mouse.up();
+  }
+  await connect(styles, "styleIn");
+  await connect(boards, "transferIn");
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).edges
+    .filter(edge => edge.to.nodeId === "model").map(edge => edge.to.port).sort())).toEqual(["styleIn", "transferIn"]);
+  await page.reload();
+  const submitted = [];
+  await page.route("**/api/node/generate-image", route => {
+    const request = route.request().postDataJSON();
+    submitted.push(request);
+    return route.fulfill({ json: { images: [{ localUrl: `/outputs/e2e/result-${submitted.length}.png`, mimeType: "image/png" }] } });
+  });
+  await model.getByRole("button", { name: /^Run Batch/ }).click();
+  await expect.poll(() => submitted.length).toBe(2);
+  await expect(model.getByRole("button", { name: /^Run Batch/ })).toBeEnabled();
+  for (const name of ["A", "B"]) {
+    const request = submitted.find(item => item.imagePromptUrls.includes(`/outputs/e2e/board-${name}.png`));
+    expect(request.imagePromptUrls).toEqual([`/outputs/e2e/board-${name}.png`]);
+    expect(request.prompt).toContain("A house on a hill");
+    expect(request.prompt).toContain(`Distinct treatment ${name}`);
+    expect(request.prompt).toContain(`Board direction ${name}`);
+    expect(request.prompt).toContain(gradePresetPrompts[name === "A" ? "Warm" : "Cool"]);
+    expect(request.prompt).not.toContain(`Distinct treatment ${name === "A" ? "B" : "A"}`);
+  }
+  expect(errors).toEqual([]);
+});
 
 test("Batch keeps live sources and entry prompts, runs in parallel and survives reload", async ({ page }, testInfo) => {
   const nodes = [

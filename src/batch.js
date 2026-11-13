@@ -3,15 +3,29 @@ export function batchConnectionKey(connection) {
   return `${connection.source.id}:${connection.edge.from.port}`;
 }
 
+export const batchInputPorts = { image: "imageIn", video: "videoIn", style: "styleIn", transfer: "transferIn" };
+
+export function isReferenceBatchKind(kind) {
+  return kind === "style" || kind === "transfer";
+}
+
+export function batchLinkedInputs(incoming = {}) {
+  return Object.values(batchInputPorts).flatMap(port => incoming[port] || []);
+}
+
 export function batchEntries(node, connections = [], resolve = source => source.data?.resultUrl || source.data?.assetUrl || "") {
   if (node.type !== "batch" && Array.isArray(node.data?.batchResults)) return node.data.batchResults;
   const settings = node.data?.batchSettings || {};
   const linked = connections.map(connection => {
     const id = batchConnectionKey(connection);
     const item = resolve(connection.source, connection.edge);
+    const reference = isReferenceBatchKind(connection.source.type) ? {
+      type: connection.source.type,
+      sourceData: connection.source.data
+    } : null;
     return { ...(item && typeof item === "object" ? item : {}), id, sourceNodeId: connection.source.id, sourcePort: connection.edge.from.port,
       url: typeof item === "string" ? item : item?.url || "", type: item?.type || (connection.edge.to?.port === "videoIn" ? "video" : "image"), label: connection.source.data?.title || "Linked media",
-      ...settings[id], linked: true };
+      ...reference, ...settings[id], linked: true };
   });
   const files = (node.data?.batchFiles || []).map(item => ({ ...item, ...settings[item.id], linked: false }));
   const order = node.data?.batchOrder || [];
@@ -23,15 +37,22 @@ export function batchEntries(node, connections = [], resolve = source => source.
 
 export function validateBatchEntries(entries, source) {
   if (!entries.length) {
-    if (!source || source.type === "batch") throw new Error("Add media to the Batch before running.");
+    if (!source || source.type === "batch") throw new Error(isReferenceBatchKind(source?.data?.batchMediaType) ? "Connect matching reference nodes before running the Batch." : "Add media to the Batch before running.");
     const name = source.data?.title ? `“${source.data.title}”` : "the connected node";
     const output = source.type === "textAgent" ? "batch prompts" : "batch results";
     throw new Error(`Run ${name} to produce ${output}, then run this node again.`);
   }
   if (entries.length > 100) throw new Error("This audition supports up to 100 batch entries.");
-  const missing = entries.find(item => !item.url);
-  if (missing) throw new Error(`Batch source “${missing.label}” has no media. Generate or reconnect it before running.`);
-  if (new Set(entries.map(item => item.type || "image")).size > 1) throw new Error("A Batch must contain images or videos, not both.");
+  const kinds = new Set(entries.map(item => item.type || "image"));
+  if (kinds.size > 1) throw new Error(kinds.has("style") || kinds.has("transfer") ? "A Batch must contain entries of the same type." : "A Batch must contain images or videos, not both.");
+  for (const item of entries) {
+    if (item.type === "style") {
+      if (!item.ready) throw new Error(`Choose a Style or Grade on “${item.label}” before running the Batch.`);
+    } else if (!item.url) {
+      if (item.type === "transfer") throw new Error(`Lock Mood Board “${item.label}” before running the Batch.`);
+      throw new Error(`Batch source “${item.label}” has no media. Generate or reconnect it before running.`);
+    }
+  }
   return entries;
 }
 
@@ -61,7 +82,7 @@ export function representativeBatchIncoming(incoming = {}) {
 }
 
 export function batchInputEntries(source, incomingByNode, resolve) {
-  return batchEntries(source, [...(incomingByNode[source.id]?.imageIn || []), ...(incomingByNode[source.id]?.videoIn || [])], resolve);
+  return batchEntries(source, batchLinkedInputs(incomingByNode[source.id]), resolve);
 }
 
 export function batchMediaType(node) {
@@ -157,10 +178,18 @@ export function upstreamBatchTextAgents(targetId, nodes, edges) {
 }
 
 export function batchEntrySource(batch, entry) {
+  if (isReferenceBatchKind(entry.type)) {
+    return { id: `${batch.id}:entry:${entry.id}`, type: entry.type, x: batch.x, y: batch.y, data: entry.sourceData };
+  }
   return { id: `${batch.id}:entry:${entry.id}`, type: entry.type || "image", x: batch.x, y: batch.y,
     data: { title: entry.label || batch.data?.title, resultUrl: entry.url || "", resultType: entry.type || "image",
       metadata: entry.metadata, duration: entry.duration, width: entry.width, height: entry.height, thumbnailUrl: entry.thumbnailUrl, fileName: entry.fileName, mimeType: entry.mimeType,
       resultText: entry.prompt || "", resultItems: entry.url ? [{ ...entry, type: entry.type || "image" }] : [], selectedResultIndex: 0 } };
+}
+
+export function batchEntryOutputPort(entry) {
+  if (isReferenceBatchKind(entry.type)) return entry.sourcePort;
+  return entry.type === "video" ? "videoOut" : "imageOut";
 }
 
 export function buildBatchPlan(connections, incomingByNode, resolve) {
@@ -176,7 +205,9 @@ export function buildBatchPlan(connections, incomingByNode, resolve) {
 
 export function materializeBatchGraph(nodes, edges, targetId, inputs, mediaInputPort = () => "") {
   const nodeMap = new Map(nodes.map(node => [node.id, node]));
-  const replacements = new Map(inputs.map(({ batchId, entry }) => [batchId, batchEntrySource(nodeMap.get(batchId), entry)]));
+  const replacements = new Map(inputs.map(({ batchId, entry }) => [batchId, {
+    node: batchEntrySource(nodeMap.get(batchId), entry), port: batchEntryOutputPort(entry)
+  }]));
   // A paired text processor's promptOut is the aggregate display text. Its
   // matching entry prompt is supplied separately by the batch runner.
   const pairedTextIds = new Set(inputs.filter(({ batchId }) => ["text", "textAgent", "skillDirector"].includes(nodeMap.get(batchId)?.type)).map(({ batchId }) => batchId));
@@ -187,15 +218,15 @@ export function materializeBatchGraph(nodes, edges, targetId, inputs, mediaInput
     if (pairedTextIds.has(edge.from.nodeId) && edge.from.port === "promptOut") {
       // The matching prompt is supplied by the runner. Carry its original media
       // through the consumer's normal media input only in this private graph.
-      const port = mediaInputPort(nodeMap.get(targetId), replacement.type, edge.batchMediaInputPort);
+      const port = mediaInputPort(nodeMap.get(targetId), replacement.node.type, edge.batchMediaInputPort);
       if (port && !edges.some(other => other.to.nodeId === targetId && other.to.port === port && replacements.has(other.from.nodeId))) {
-        materialized.push({ ...edge, to: { ...edge.to, port }, from: { nodeId: replacement.id, port: replacement.type === "video" ? "videoOut" : "imageOut" } });
+        materialized.push({ ...edge, to: { ...edge.to, port }, from: { nodeId: replacement.node.id, port: replacement.port } });
       }
       continue;
     }
-    materialized.push({ ...edge, from: { nodeId: replacement.id, port: replacement.type === "video" ? "videoOut" : "imageOut" } });
+    materialized.push({ ...edge, from: { nodeId: replacement.node.id, port: replacement.port } });
   }
-  return { nodes: [...nodes, ...replacements.values()], edges: materialized };
+  return { nodes: [...nodes, ...Array.from(replacements.values(), replacement => replacement.node)], edges: materialized };
 }
 
 // Saved special outputs become the node's established output, retaining edge IDs.

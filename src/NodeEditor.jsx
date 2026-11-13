@@ -13,7 +13,7 @@ import CanvasMenuBar from "./components/CanvasMenuBar.jsx";
 import VideoThumbnail from "./components/VideoThumbnail.jsx";
 import { Kling4Controls } from "./components/Kling4Controls.jsx";
 import BatchNodeBody from "./components/BatchNodeBody.jsx";
-import { migrateBatchOutputEdge, batchEntries, batchInputEntries, batchInputEntryCount, batchInputConnections, batchMediaType, isBatchConnection, batchEntrySource, batchChildNode, initializeTextAgentBatches, resolveTextAgentBatchOutputs, standaloneTextAgentPrompt, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
+import { migrateBatchOutputEdge, batchInputEntries, batchInputEntryCount, batchInputConnections, batchInputPorts, batchMediaType, isBatchConnection, isReferenceBatchKind, batchEntrySource, batchEntryOutputPort, batchChildNode, initializeTextAgentBatches, resolveTextAgentBatchOutputs, standaloneTextAgentPrompt, buildBatchPlan, materializeBatchGraph, representativeBatchIncoming, runBatchEntries } from "./batch.js";
 import { runMediaBatch } from "./nodeRunners/batch.js";
 import { BatchRunContext } from "./components/BatchRunContext.js";
 import { isKling4Model, kling4SelectionPatch, kling4UnsupportedPorts } from "./kling4.js";
@@ -2712,31 +2712,35 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
   function selectedBatchSources() {
     return nodesRef.current.filter(node => selectedNodeIds.includes(node.id) && node.type !== "batch")
-      .map(node => ({ node, port: outputPortDefinitionsForNode(node).find(port => ["image", "video"].includes(portKindForNodePort(node, port.id, "output")) && !port.disabled) }))
-      .filter(item => item.port);
+      .flatMap(node => {
+        for (const port of outputPortDefinitionsForNode(node)) {
+          const kind = portKindForNodePort(node, port.id, "output");
+          if (Object.hasOwn(batchInputPorts, kind) && !port.disabled) return [{ node, port, kind }];
+        }
+        return [];
+      });
   }
 
   function canBatchSelection() {
     const sources = selectedBatchSources();
     if (sources.length < 2 || sources.length !== selectedNodeIds.length) return false;
-    const kind = portKindForNodePort(sources[0].node, sources[0].port.id, "output");
-    return sources.every(item => portKindForNodePort(item.node, item.port.id, "output") === kind);
+    return sources.every(item => item.kind === sources[0].kind);
   }
 
   function createBatchFromSelection() {
     const sources = selectedBatchSources();
-    if (sources.length < 2 || sources.length !== selectedNodeIds.length) { setSaveStatus("Select multiple image or video nodes to create a Batch."); return; }
-    const kind = portKindForNodePort(sources[0].node, sources[0].port.id, "output");
-    if (sources.some(item => portKindForNodePort(item.node, item.port.id, "output") !== kind)) { setSaveStatus("Create separate batches for images and videos."); return; }
+    if (sources.length < 2 || sources.length !== selectedNodeIds.length) { setSaveStatus("Select two or more nodes with matching Batch outputs."); return; }
+    const { kind } = sources[0];
+    if (sources.some(item => item.kind !== kind)) { setSaveStatus("Create a separate Batch for each type."); return; }
     pushUndoSnapshot();
     const node = { id: createNodeId("batch"), type: "batch", x: Math.max(...sources.map(item => item.node.x)) + 380,
       y: Math.min(...sources.map(item => item.node.y)), data: { ...createDefaultNodeData("batch", "Batch", 1), batchMediaType: kind } };
     setNodes(current => [...current, node]);
     setEdges(current => [...current, ...sources.map(({ node: source, port }) => ({ id: crypto.randomUUID(),
-      from: { nodeId: source.id, port: port.id }, to: { nodeId: node.id, port: kind === "video" ? "videoIn" : "imageIn" }, color: portColors[kind] }))]);
+      from: { nodeId: source.id, port: port.id }, to: { nodeId: node.id, port: batchInputPorts[kind] }, color: portColors[kind] }))]);
     setSelectedNodeIds([node.id]);
     setContextMenu(null);
-    setSaveStatus(`Created Batch with ${sources.length} linked ${kind === "video" ? "videos" : "images"}`);
+    setSaveStatus(`Created Batch with ${sources.length} linked entries`);
   }
 
   function createGroupFromSelection() {
@@ -2887,12 +2891,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       patch = lookGradeEditPatch(gradeNode.data, patch);
       if (!patch) return;
     }
-    if (["image", "video"].includes(patch.batchMediaType)) {
+    if (Object.hasOwn(batchInputPorts, patch.batchMediaType)) {
       const previous = nodesRef.current.find(node => node.id === nodeId);
-      if (previous?.data.batchMediaType !== patch.batchMediaType) setEdges(current => current.filter(edge => {
+      if (previous && previous.data.batchMediaType !== patch.batchMediaType) setEdges(current => current.filter(edge => {
         if (edge.from.nodeId !== nodeId || edge.from.port !== "batchOut") return true;
         const target = nodesRef.current.find(node => node.id === edge.to.nodeId);
-        return acceptedInputPortKinds(target, edge.to.port).includes(patch.batchMediaType);
+        return portsAreCompatible({ ...previous, data: { ...previous.data, batchMediaType: patch.batchMediaType } }, edge.from.port, target, edge.to.port);
       }));
     }
     if (patch.batchRemoveEntry) {
@@ -2902,7 +2906,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       const batch = nodesRef.current.find(node => node.id === nodeId);
       const files = (batch?.data.batchFiles || []).filter(item => item.id !== id);
       const linked = edgesRef.current.some(edge => edge.to.nodeId === nodeId && `${edge.from.nodeId}:${edge.from.port}` !== id);
-      patch = { batchFiles: files, batchOrder: (batch?.data.batchOrder || []).filter(key => key !== id), ...(!files.length && !linked ? { batchMediaType: "" } : {}) };
+      const resetType = !files.length && !linked && !isReferenceBatchKind(batch?.data.batchMediaType);
+      patch = { batchFiles: files, batchOrder: (batch?.data.batchOrder || []).filter(key => key !== id), ...(resetType ? { batchMediaType: "" } : {}) };
     }
     let nextUtilityData = null;
     let nextEditData = null;
@@ -2975,10 +2980,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     }
 
     if (nextStyleData && styleOutputMaybeChanged && !styleOutputEnabled(nextStyleData)) {
-      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && edge.from.port === "styleOut")));
+      const keepEdge = edge => edge.from.nodeId !== nodeId || edge.from.port !== "styleOut"
+        || nodesRef.current.some(node => node.id === edge.to.nodeId && node.type === "batch");
+      setEdges((current) => current.filter(keepEdge));
       setSelectedEdgeId((current) => {
         const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
-        return selectedEdge?.from.nodeId === nodeId && selectedEdge?.from.port === "styleOut" ? null : current;
+        return selectedEdge && !keepEdge(selectedEdge) ? null : current;
       });
     }
 
@@ -5930,7 +5937,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     event.preventDefault();
     event.stopPropagation();
     const targetNode = nodesRef.current.find((node) => node.id === nodeId);
-    if (targetNode?.type === "batch" && !(targetNode.data.batchFiles || []).length) updateNode(nodeId, { batchMediaType: "" });
+    if (targetNode?.type === "batch" && !isReferenceBatchKind(targetNode.data.batchMediaType) && !(targetNode.data.batchFiles || []).length) updateNode(nodeId, { batchMediaType: "" });
     const resetsNodeOutput = ["autoAspect", "coverage"].includes(targetNode?.type) && port === "imageIn";
     pushUndoSnapshot({ nodeDataIds: resetsNodeOutput ? [nodeId] : [], restoreStructure: true });
     setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
@@ -6249,7 +6256,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         }
 
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
-        if (targetNodeForConnection?.type === "batch") updateNode(to.nodeId, { batchMediaType: to.port === "videoIn" ? "video" : "image" });
+        if (targetNodeForConnection?.type === "batch") updateNode(to.nodeId, { batchMediaType: portKindForNodePort(targetNodeForConnection, to.port, "input") });
         const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
         pushUndoSnapshot({
@@ -6297,7 +6304,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     if (nodesRef.current.find(node => node.id === to.nodeId)?.type === "batch") {
       const error = getConnectionError(from, to);
       if (error) { setSaveStatus(error); return; }
-      updateNode(to.nodeId, { batchMediaType: to.port === "videoIn" ? "video" : "image" });
+      const target = nodesRef.current.find(node => node.id === to.nodeId);
+      updateNode(to.nodeId, { batchMediaType: portKindForNodePort(target, to.port, "input") });
     }
     if (!from?.nodeId || !from?.port || !to?.nodeId || !to?.port || from.nodeId === to.nodeId) return false;
     const connectionError = getConnectionError(from, to, nodesRef.current);
@@ -6368,6 +6376,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
 
   function preferredAutoInputPorts(source, from, target) {
     const outputKind = autoConnectionOutputKind(source, from);
+    if (target.type === "batch" && Object.hasOwn(batchInputPorts, outputKind)) return [batchInputPorts[outputKind]];
     if (isOutpaintNode(target) && outputKind === "image") return outpaintImagePortIds.filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
     if (isKeyerNode(target)) return outputKind === "video" ? ["videoIn"] : outputKind === "image" && target.data.keyerMode === "first" ? ["firstHintIn"] : [];
     if (target.type === "videoModel" && isFlux3MaxModel(target.data?.model) && outputKind === "image") return flux3MaxKeyframePorts(target.data, portColors.image).map(port => port.id).filter(port => !edgesRef.current.some(edge => edge.to.nodeId === target.id && edge.to.port === port));
@@ -6469,6 +6478,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
   }
 
   function autoConnectionOutputKind(source, from) {
+    if (source.type === "batch") return batchMediaType(source);
     if (isKeyerNode(source)) return "video";
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
@@ -6513,7 +6523,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     if (target.type === "batch") {
       if (source.type === "batch" || from.port === "batchOut") return "Connect media sources directly to Batch.";
       const kind = portKindForNodePort(source, from.port, "output");
-      return !target.data.batchMediaType || target.data.batchMediaType === kind ? "" : "Create separate batches for images and videos.";
+      return !target.data.batchMediaType || target.data.batchMediaType === kind ? "" : "Create a separate Batch for each type.";
     }
     if (source.type === "batch" || from.port === "batchOut") return activeInputPortIdsForNode(target).includes(to.port) ? "" : "Enable the matching input before connecting Batch.";
     if (isKeyerNode(target)) return activeInputPortIdsForNode(target).includes(to.port) ? "" : "Choose the matching CorridorKey hint mode first";
@@ -7277,7 +7287,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     const incoming = raw[node.id] || {};
     const batchVideo = [...(incoming.referenceVideoIn || []), ...(incoming.canvasVideoIn || [])].some(isBatchConnection);
     if (request.rawVideoUrl || !batchVideo) return prepareSingleOutpaintCanvas(node, request, preferredOutputTarget);
-    const plan = buildBatchPlan(batchInputConnections(incoming), raw, connectedOutputItem);
+    const plan = buildBatchPlan(batchInputConnections(incoming), raw, resolveBatchItem);
     const batchPreparation = await runCanvasAction(node, async token => {
       token.groupId = createGenerationGroupId("batch-prepare");
       const prepared = { ...(node.data.batchPreparations || {}) };
@@ -7539,11 +7549,12 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
     try {
       const retry = node.data.batchRetryEntry;
       const plan = retry ? [{ ...retry, inputs: retry.inputs || [{ batchId: connections[0].source.id, entry: retry }] }]
-        : buildBatchPlan(connections, rawIncoming, connectedOutputItem);
+        : buildBatchPlan(connections, rawIncoming, resolveBatchItem);
       const groupId = createGenerationGroupId("batch");
       token.groupId = groupId;
       let outputTarget;
       const outcome = await runMediaBatch({ node, plan, stopped: () => token.stopped,
+        keepImagePreview: node.type === "imageModel" && hasConnectedPreview(node.id, graphNodes, graphEdges),
         selectedResultUrl: () => nodesRef.current.find(item => item.id === node.id)?.data.resultUrl,
         concurrency: nodeBatchConcurrency(node, modelProviderPreferences),
         update: patch => { if (!token.stopped) actions.updateNode(node.id, patch); },
@@ -8404,15 +8415,20 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         const successes = fulfilledRunValues(settled, { flatten: true });
         const failures = rejectedRunResults(settled);
         ensureRunSuccesses(successes, failures, "Image generation failed.");
-        const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
+        const keepPreview = !runOptions.batchGroupId && hasConnectedPreview(currentNode.id, nodesRef.current, edgesRef.current);
+        const { resultItems, firstNewIndex } = appendedNodeResultState(keepPreview ? previousImageResults : [], successes, "image");
+        const selectedUrl = keepPreview && nodesRef.current.find(item => item.id === currentNode.id)?.data.resultUrl;
+        const previousSelection = previousImageResults.findIndex(item => item.url === selectedUrl);
+        const selectedResultIndex = previousSelection >= 0 ? previousSelection : firstNewIndex;
 
         updateNode(currentNode.id, {
           status: "complete",
-          resultUrl: successes[0].url,
+          resultUrl: resultItems[selectedResultIndex].url,
           resultItems,
-          selectedResultIndex: firstNewIndex,
+          selectedResultIndex,
           resultText: resultTextFromItems(successes),
-          error: batchRunError("image", batchCount, successes, failures)
+          error: batchRunError("image", batchCount, successes, failures),
+          ...(!runOptions.batchGroupId ? { batchResults: undefined, batchFailedEntries: [], batchRetryEntry: null } : {})
         });
         markOutputTargetSaved(outputTarget, successes, "image");
         loadOutputHistory();
@@ -9796,7 +9812,7 @@ function NodeCard({
         </span>
       </div>
 
-      <BatchRunContext.Provider value={isRunnableNode(node) && node.type !== "assembly" ? batchInputConnections(incoming).reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, connectedOutputItem)), 1) : 1}>
+      <BatchRunContext.Provider value={isRunnableNode(node) && node.type !== "assembly" ? batchInputConnections(incoming).reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, resolveBatchItem)), 1) : 1}>
       <NodeBody
         node={renderedNode}
         defaultOutputPath={defaultOutputPath}
@@ -12433,7 +12449,7 @@ function NodeBody({
 
   if (node.type === "batch") {
     return <BatchNodeBody node={node} incoming={incoming} config={config} onUpdate={onUpdate} onUpload={onUpload} onOutputImport={onOutputImport} parseOutputDrop={outputItemFromDataTransfer}
-      resolve={connectedOutputItem}
+      resolve={resolveBatchItem}
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />;
   }
 
@@ -16752,7 +16768,7 @@ function NodeBody({
       { includeComposerCharacterBindings: !isZImage }
     );
     const connectedBatches = batchInputConnections(incoming);
-    const batchEntryCount = connectedBatches.reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, connectedOutputItem)), 0);
+    const batchEntryCount = connectedBatches.reduce((count, item) => Math.max(count, batchInputEntryCount(item.source, incomingByNode, resolveBatchItem)), 0);
     const batchRunCount = batchEntryCount * nodeBatchCount(node, 9);
     const imageReferenceCount = imageReferenceItems.length;
     const imageProviderPreference = normalizeModelProviderPreferences(modelProviderPreferences, modelProviderAvailability).imageGeneration;
@@ -18825,7 +18841,7 @@ function formatFrameTimeDisplay(value) {
 }
 
 function getNodeConfig(type) {
-  if (type === "batch") return { icon: Box, input: [{ id: "imageIn", label: "Images", color: portColors.image }, { id: "videoIn", label: "Videos", color: portColors.video }], output: [{ id: "batchOut", label: "Batch", color: portColors.image }] };
+  if (type === "batch") return { icon: Box, input: Object.entries(batchInputPorts).map(([kind, id]) => ({ id, label: `${humanPortKindLabel(kind)}s`, color: portColors[kind] })), output: [{ id: "batchOut", label: "Batch", color: portColors.image }] };
   if (type === "keyer") return { icon: Wrench, input: [
     { id: "videoIn", label: "Source video", color: portColors.video },
     { id: "firstHintIn", label: "Frame 1 matte", color: portColors.image },
@@ -21009,7 +21025,7 @@ function visiblePortIdsForNode(node) {
 function inputPortDefinitionsForNode(node) {
   if (isKeyerNode(node)) return getNodeConfig("keyer").input;
   const basePorts = getNodeConfig(node?.type)?.input || [];
-  if (node?.type === "batch" && node.data?.batchMediaType) return basePorts.filter(port => port.id === (node.data.batchMediaType === "video" ? "videoIn" : "imageIn"));
+  if (node?.type === "batch" && node.data?.batchMediaType) return basePorts.filter(port => port.id === batchInputPorts[batchMediaType(node)]);
   if (node?.type === "videoModel" && isFlux3MaxModel(node.data?.model)) return [...basePorts.filter(port => !["referenceImageIn", "startFrameIn", "endFrameIn"].includes(port.id)), ...flux3MaxKeyframePorts(node.data, portColors.image)];
   if (node?.type === "utility" && node.data?.utilityMode === "video" && isUtilityCompositeVideoModel(node.data?.utilityVideoModel)) return compositeInputPorts(node.data, portColors.preview);
   return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
@@ -21020,7 +21036,10 @@ function outputPortDefinitionsForNode(node) {
 }
 
 function baseOutputPortDefinitionsForNode(node) {
-  if (node?.type === "batch") return [{ id: "batchOut", label: batchMediaType(node) === "video" ? "Video" : "Image", color: portColors[batchMediaType(node)], disabled: node.data?.batchMediaType === "", disabledReason: "Add images or videos first" }];
+  if (node?.type === "batch") {
+    const kind = batchMediaType(node);
+    return [{ id: "batchOut", label: humanPortKindLabel(kind), color: portColors[kind], disabled: node.data?.batchMediaType === "", disabledReason: "Add Batch entries first" }];
+  }
   if (isKeyerNode(node)) return getNodeConfig("keyer").output;
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "frameIt") return basePorts.map((port) => ({
@@ -21149,6 +21168,7 @@ function acceptedInputPortKinds(node, portId) {
 
 function portsAreCompatible(source, fromPort, target, toPort) {
   const outputKind = portKindForNodePort(source, fromPort, "output");
+  if (fromPort === "batchOut" && isReferenceBatchKind(outputKind)) return target?.type === "imageModel" && toPort === batchInputPorts[outputKind];
   const acceptedKinds = acceptedInputPortKinds(target, toPort);
   if (outputKind === "prompt" && isBatchConnection({ source }) && acceptedKinds.includes(batchMediaType(source))) return true;
   return Boolean(outputKind && acceptedKinds.includes(outputKind));
@@ -21438,9 +21458,10 @@ function buildIncomingByNode(nodes, edges, { expandBatches = true } = {}) {
   return Object.fromEntries(Object.entries(raw).map(([id, incoming]) => [id, Object.fromEntries(Object.entries(incoming).map(([port, connections]) => [port,
     connections.flatMap(connection => {
       if (!isBatchConnection(connection) || nodeMap.get(id)?.type === "batch") return [connection];
-      const entries = batchInputEntries(connection.source, raw, connectedOutputItem);
+      const entries = batchInputEntries(connection.source, raw, resolveBatchItem);
       if (!entries.length) return [connection];
-      return entries.map(entry => ({ ...connection, edge: { ...connection.edge, id: `${connection.edge.id}:entry:${entry.id}` },
+      return entries.map(entry => ({ ...connection, edge: { ...connection.edge, id: `${connection.edge.id}:entry:${entry.id}`,
+        ...(isReferenceBatchKind(entry.type) ? { from: { nodeId: `${connection.source.id}:entry:${entry.id}`, port: batchEntryOutputPort(entry) } } : {}) },
         source: { ...batchEntrySource(connection.source, entry), ...(connection.edge.from.port === "promptOut" ? { type: "textAgent" } : {}) },
         batchSource: connection.source, batchEntry: entry }));
     })
@@ -22162,6 +22183,12 @@ function nodeReferenceTargetPortForPromptReference(targetNode, source, edge) {
   }
 
   return "";
+}
+
+function resolveBatchItem(source, edge) {
+  if (source.type === "style") return { ready: styleOutputEnabled(source.data) };
+  if (source.type === "transfer" && (!source.data.locked || !source.data.activated)) return null;
+  return connectedOutputItem(source, edge);
 }
 
 function connectedOutputItem(source, edge) {
@@ -23453,6 +23480,11 @@ async function createBrushInpaintMaskBlob(maskDataUrl) {
     width,
     height
   };
+}
+
+function hasConnectedPreview(nodeId, nodes, edges) {
+  return edges.some(edge => edge.from.nodeId === nodeId && edge.to.port === "sourceIn"
+    && nodes.some(node => node.id === edge.to.nodeId && node.type === "preview"));
 }
 
 function connectedPreviewSources(items = []) {

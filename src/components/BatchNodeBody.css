@@ -14,6 +14,12 @@
 .batch-body .batch-entry small { margin-top: 4px; color: #8f8d87; font-size: 11px; line-height: 1.4; }
 .batch-body .batch-entry-remove { display: grid; place-items: center; width: 24px; height: 28px; padding: 0; border: 0; border-radius: 4px; color: #878580; background: transparent; font-size: 19px; cursor: pointer; }
 .batch-body .batch-entry-remove:hover { color: #f3d9d6; background: #cf595922; }
+.batch-body .batch-reference-entry { grid-template-columns: minmax(0, 1fr) auto; }
+.batch-body .batch-entry-actions { display: flex; gap: 2px; }
+.batch-body .batch-entry-actions button { display: grid; place-items: center; width: 22px; height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #bdb9b0; cursor: pointer; }
+.batch-body .batch-entry-actions button:hover:not(:disabled) { background: #ffffff14; }
+.batch-body .batch-entry-actions button:disabled { opacity: .35; cursor: default; }
+.batch-body .batch-entry-actions button:focus-visible { outline: 2px solid #ddc631; }
 .batch-body .batch-prompt-editor { display: grid; gap: 8px; font-size: 12px; }
 .batch-body .batch-prompt-editor textarea { width: 100%; min-height: 90px; padding: 8px; resize: vertical; box-sizing: border-box; font-size: 12px; }
 .batch-body > .output-row { margin: 0; color: #aaa69f; font-size: 12px; }

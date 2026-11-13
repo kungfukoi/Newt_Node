@@ -4,11 +4,14 @@ import { appendUniqueVideoResults } from "../remoteVideoJobs.js";
 
 // Each entry gets isolated runner state and graph inputs. Only the collected
 // results are published to the real node; workers never swap the live graph.
-export async function runMediaBatch({ node, plan, execute, update, stopped, selectedResultUrl = () => node.data.resultUrl, concurrency = 3 }) {
+export async function runMediaBatch({ node, plan, execute, update, stopped, keepImagePreview = false, selectedResultUrl = () => node.data.resultUrl, concurrency = 3 }) {
   const retry = Boolean(node.data.batchRetryEntry);
   const keepVideoPreview = node.type === "videoModel";
   const previousVideos = keepVideoPreview ? existingResultItemsForNode(node, "video") : [];
-  const retained = retry ? (node.data.resultItems || []).filter(item => item.batchRunIndex !== plan[0].runIndex) : [];
+  const previousImages = keepImagePreview ? existingResultItemsForNode(node, "image") : [];
+  const previousImageUrls = new Set(previousImages.map(item => item.url));
+  const retryItems = keepImagePreview ? node.data.batchResults : node.data.resultItems;
+  const retained = retry ? (retryItems || []).filter(item => item.batchRunIndex !== plan[0].runIndex) : [];
   const retainedBatch = retry ? (node.data.batchResults || []).filter(item => item.batchRunIndex !== plan[0].runIndex) : [];
   const retainedFailures = retry ? (node.data.batchFailedEntries || []).filter(item => item.runIndex !== plan[0].runIndex) : [];
   const states = plan.map(entry => ({ entry, data: {}, finished: false }));
@@ -35,6 +38,13 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, sele
     collection.sort((a, b) => (a.batchRunIndex || 0) - (b.batchRunIndex || 0));
     return { items, collection };
   }
+  function imagePreviewPatch(items) {
+    const resultItems = [...previousImages, ...items.filter(item => !previousImageUrls.has(item.url))];
+    const selectedUrl = selectedResultUrl();
+    const selectedResultIndex = Math.max(0, resultItems.findIndex(item => item.url === selectedUrl));
+    const item = resultItems[selectedResultIndex];
+    return item ? { resultItems, resultUrl: item.url, resultType: item.type, selectedResultIndex } : {};
+  }
   function publish() {
     if (stopped()) return;
     const { items, collection } = collect();
@@ -46,13 +56,13 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, sele
     const previewItem = previewItems[previewIndex];
     update({ status: "running", batchProgress: `${completed} / ${plan.length}`, batchResults: collection, ...(collection.length ? { batchMediaType: collection[0].type } : {}),
       ...Object.fromEntries(["keyerProgress", "keyerJobId", "videoOutpaintStage"].filter(key => active[key] !== undefined).map(key => [key, active[key]])),
-      ...(items.length && previewItem ? { resultItems: previewItems, resultUrl: previewItem.url, resultType: previewItem.type, selectedResultIndex: previewIndex } : {}),
+      ...(keepImagePreview ? imagePreviewPatch(items) : items.length && previewItem ? { resultItems: previewItems, resultUrl: previewItem.url, resultType: previewItem.type, selectedResultIndex: previewIndex } : {}),
       ...(textMode ? { resultText: batchPromptSummary(collection) } : {}),
       remoteVideoRunIds: [...new Set(states.flatMap(state => state.data.remoteVideoRunIds || []))] });
   }
   update({ status: "running", error: "", batchRunActive: true, batchProgress: `0 / ${plan.length}`, batchFailedEntries: retainedFailures,
     batchResults: retainedBatch,
-    ...(!keepVideoPreview ? { resultItems: retained, resultUrl: retained[0]?.url || "", selectedResultIndex: 0 } : {}),
+    ...(!keepVideoPreview && !keepImagePreview ? { resultItems: retained, resultUrl: retained[0]?.url || "", selectedResultIndex: 0 } : {}),
     ...(textMode ? { resultText: batchPromptSummary(retainedBatch) } : {}) });
   await runBatchEntries(plan, { concurrency, stopped, run: async (entry, index) => {
     const state = states[index];
@@ -80,7 +90,7 @@ export async function runMediaBatch({ node, plan, execute, update, stopped, sele
   const replacePreview = items.length > (keepVideoPreview ? retained.length : 0);
   update({ ...lastPatch, status: failures.length ? "error" : "complete", error: message, batchRunActive: false, batchProgress: "", batchRetryEntry: null,
     batchFailedEntries: [...retainedFailures, ...failures], batchResults: collection,
-    ...(replacePreview ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
+    ...(keepImagePreview ? imagePreviewPatch(items) : replacePreview ? { resultItems: items, resultUrl: items[0].url, resultType: items[0].type, selectedResultIndex: 0 } : {}),
     ...(textMode ? { resultText: batchPromptSummary(collection) } : {}) });
   return { status: failures.length ? "error" : "complete", ...(failures.length ? { error: new Error(message) } : {}), resultItems: items };
 }
