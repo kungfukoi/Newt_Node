@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { chooseLookbookSource, openFixture } from "./helpers.mjs";
+import { chooseLookbookCollection, chooseLookbookSource, openFixture } from "./helpers.mjs";
 import sharp from "sharp";
 
 test("Look defaults to its first example, permits grade overrides and replaces the default on switch", async ({page}) => {
@@ -24,9 +24,9 @@ test("Look defaults to its first example, permits grade overrides and replaces t
   await expect(grade.getByRole("option",{name:"Warm (legacy)",exact:true})).toBeDisabled();
   await grade.selectOption("None");
   await expect(grade.getByRole("option",{name:/^(Warm|Cool|Spiky Nike|Classy Kubric|Coney Color)( \(legacy\))?$/})).toHaveCount(0);
-  await node.getByLabel("Look catalog",{exact:true}).focus();
-  await expect(node.getByLabel("Look catalog",{exact:true}).getByRole("option",{name:"Looks",exact:true})).toHaveCount(1);
-  await node.getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
+  await node.getByLabel("Look collection",{exact:true}).focus();
+  await expect(node.getByLabel("Look collection",{exact:true}).getByRole("option",{name:"Looks",exact:true})).toHaveCount(1);
+  await node.getByLabel("Look collection",{exact:true}).selectOption({label:"All"});
   await picker.focus();
   await expect(picker.getByRole("option",{name:"Red",exact:true})).toHaveCount(1);
   await picker.selectOption({label:"Red"});
@@ -124,7 +124,7 @@ test("Rejected look analysis clears the progress notice and preserves the open d
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,total:0,indexed:0,categories:[],styles:[]})}));
   await page.route("**/api/style-library/analyze",route=>{paidCalls++;return route.fulfill({status:502,contentType:"application/json",body:JSON.stringify({error:"Atlas Cloud: The model produced invalid content."})});});
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Looks",exact:true}).click();
+  await chooseLookbookCollection(page,"Looks");
   await page.getByRole("button",{name:"View Blade Runner",exact:true}).click();
   const details=page.getByRole("dialog",{name:"Style details",exact:true});
   await details.getByRole("button",{name:"Use in Style",exact:true}).click();
@@ -173,8 +173,11 @@ test("Lookbook keeps details open, enlarges whole examples, clears search and re
   await page.screenshot({path:test.info().outputPath("lookbook-preview.png"),fullPage:true});
   await preview.press("Escape");
   await expect(preview).not.toBeVisible();await expect(details).toBeVisible();
-  await details.getByRole("button",{name:"Save to my collection",exact:true}).click();
-  await expect(details).toBeVisible();expect(analyses).toBe(0);
+  await details.getByRole("button",{name:"Add to collection…",exact:true}).click();
+  const collectionDialog=page.getByRole("dialog",{name:"New collection",exact:true});
+  await collectionDialog.getByLabel("Collection name",{exact:true}).fill("Ink references");
+  await collectionDialog.getByRole("button",{name:"Create and add",exact:true}).click();
+  await expect(collectionDialog).not.toBeVisible();await expect(details).toBeVisible();expect(analyses).toBe(0);
   await details.getByRole("button",{name:"Create Mood Board node",exact:true}).click();
   await expect(details.getByRole("status")).toContainText("Created Mood Board");
   await expect(details).toBeVisible();expect(analyses).toBe(0);
@@ -221,11 +224,11 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await expect(nav.getByRole("button", { name: "Video", exact: true })).toHaveCount(0);
   await nav.getByRole("button", { name: "Looks", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Lookbook", exact: true })).toBeVisible();
-  await expect(page.locator(".lookbook-hero").getByRole("button")).toHaveCount(0);
+  await expect(page.locator(".lookbook-hero").getByRole("button",{name:"Create Look",exact:true})).toBeVisible();
   await expect(page.getByLabel("Style direction",{exact:true})).toHaveCount(0);
   await expect(page.getByLabel("Visual description",{exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Add style references",exact:true})).toHaveCount(0);
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Film look",exact:true}).click();
+  await chooseLookbookCollection(page,"Film look");
   await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
   await expect(page.locator(".library-detail-examples img")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("stylebuilder.png"), fullPage: true });
@@ -239,7 +242,7 @@ test("Library replaces media tabs and sends saved descriptions and complete exam
   await expect(page.locator(".library-style-picker").getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
   await expect(page.locator('.react-flow__node').filter({ has: page.getByLabel("Look",{exact:true}) }).locator('[data-port-key$=":styleOut"]')).toHaveCount(1);
   const rows=await page.locator('.react-flow__node').filter({has:page.getByLabel("Look",{exact:true})}).locator('.style-preset-row > span').allTextContents();
-  expect(rows).toEqual(["Style","Grade","Catalog","Look"]);
+  expect(rows).toEqual(["Style","Grade","Collection","Look"]);
   await nav.getByRole("button", { name: "Looks", exact: true }).click();
   await expect(page.getByRole("checkbox",{name:"Select Crimson ink",exact:true})).toBeVisible();
   await page.getByRole("button",{name:"View Crimson ink",exact:true}).click();
@@ -285,16 +288,16 @@ test("Catalog looks open details, save examples and create a named Style without
   await expect(page.getByRole("dialog",{name:"Style details"})).toBeVisible();
   await expect(page.locator(".library-detail-examples img")).toHaveCount(4);
   await expect(page.getByRole("button",{name:"Select style",exact:true})).toHaveCount(0);
-  await page.getByRole("button",{name:"Save to my collection",exact:true}).click();
+  await page.getByRole("button",{name:"Star look",exact:true}).click();
   await expect.poll(()=>library.collections[0]?.styles.length||0).toBe(1);
   expect(library.collections[0].styles[0].examples).toHaveLength(4);
   expect(library.collections[0].styles[0].examples.every(image=>image.localUrl.startsWith("/outputs/"))).toBe(true);
-  await expect(page.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"Unstar look",exact:true})).toBeEnabled();
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await expect(page.getByRole("button",{name:"Unstar look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","true");
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("missing");
   await expect(page.locator(".stylebuilder-tile")).toHaveCount(0);
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"Starred",exact:true}).click();
+  await chooseLookbookCollection(page,"Starred");
   await page.getByRole("textbox",{name:"Search looks",exact:true}).fill("");
   await expect(page.locator(".stylebuilder-tile")).toHaveCount(1);
   await expect(page.getByLabel("Style direction",{exact:true})).toHaveCount(0);
@@ -311,8 +314,8 @@ test("Catalog looks open details, save examples and create a named Style without
   await expect(page.getByRole("textbox", {name:"Look style description", exact:true})).toHaveValue(/^Defining visual feature: Build silhouettes/);
   await expect(page.getByRole("group",{name:"Look examples for Grade"}).getByRole("button")).toHaveCount(4);
   const existingPicker=page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look",{exact:true});
-  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).focus();
-  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look catalog",{exact:true}).selectOption({label:"All"});
+  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look collection",{exact:true}).focus();
+  await page.locator('.react-flow__node[data-id="existing-style"]').getByLabel("Look collection",{exact:true}).selectOption({label:"All"});
   await expect(existingPicker.getByRole("option",{name:"Ink drawing",exact:true})).toHaveCount(1);
   await existingPicker.selectOption({label:"Ink drawing"});
   await expect(existingPicker.locator("option:checked")).toHaveText("Ink drawing");
@@ -396,7 +399,7 @@ test("Unstarring removes only the Starred copy and preserves named copies and wo
   await page.route("**/api/style-library/catalog?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({ready:true,indexed:1,total:1,categories:[],styles:[look]})}));
   await page.route("**/api/style-library/catalog/ink-catalog",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({style:look})}));
   await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await chooseLookbookSource(page,"Starred");
+  await chooseLookbookCollection(page,"Starred");
   const remove=page.getByRole("button",{name:"Unstar look: Ink drawing",exact:true});
   await remove.click();
   await expect(page.getByRole("alert")).toContainText("Library changed in another window");
@@ -410,13 +413,15 @@ test("Unstarring removes only the Starred copy and preserves named copies and wo
   await chooseLookbookSource(page,"Commercial");
   await expect(page.getByRole("button",{name:"Star look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"View Ink drawing",exact:true}).click();
-  await page.getByRole("button",{name:"Save to my collection",exact:true}).click();
-  await expect(page.getByRole("button",{name:"Remove from my collection",exact:true})).toBeEnabled();
-  await page.getByRole("button",{name:"Remove from my collection",exact:true}).click();
-  await expect(page.getByRole("button",{name:"Save to my collection",exact:true})).toHaveAttribute("aria-pressed","false");
+  await page.getByRole("button",{name:"Manage collections…",exact:true}).click();
+  const picker=page.getByRole("dialog",{name:"Manage collections",exact:true});
+  await expect(picker.getByRole("checkbox",{name:"First",exact:true})).toBeChecked();
+  await expect(picker.getByRole("checkbox",{name:"Second",exact:true})).toBeChecked();
+  await expect(picker.getByRole("checkbox",{name:"Starred",exact:true})).toHaveCount(0);
+  await picker.getByRole("button",{name:"Cancel",exact:true}).click();
   await page.getByRole("button",{name:"Close style details",exact:true}).click();
   await page.reload();await page.getByRole("button",{name:"Looks",exact:true}).click();
-  await page.getByRole("combobox",{name:"Looks source",exact:true}).click(); await page.getByRole("option",{name:"First",exact:true}).click();
+  await chooseLookbookCollection(page,"First");
   await expect(page.getByRole("button",{name:"View Ink drawing",exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"Star look: Ink drawing",exact:true})).toHaveAttribute("aria-pressed","false");
   await page.getByRole("button",{name:"Nodes",exact:true}).click();

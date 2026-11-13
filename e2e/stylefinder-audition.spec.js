@@ -44,9 +44,10 @@ test("StyleFinder local audition has independent paging, search, categories, com
     await expect.poll(()=>strip.locator("img").first().evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);
     await page.screenshot({path:test.info().outputPath("stylefinder-audition.png"),fullPage:true});
     await expect(strip.getByRole("button",{name:"More Styles",exact:true})).toHaveCount(0);
+    const firstPreview = await strip.locator(".stylebuilder-tile-open").first().getAttribute("aria-label");
     await strip.evaluate(element=>{element.scrollLeft=element.scrollWidth;});
     await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(96,initial.total));
-    await expect(strip.locator(".stylebuilder-tile").first().getByRole("button",{name:`View ${first.name}`,exact:true})).toBeAttached();
+    await expect(strip.locator(".stylebuilder-tile-open").first()).toHaveAttribute("aria-label",firstPreview);
     expect(await strip.evaluate(element=>element.scrollLeft)).toBeGreaterThan(0);
     const search=page.getByRole("textbox",{name:"Search looks",exact:true});await search.fill(first.name);await expect(strip.locator(".stylebuilder-tile")).toHaveCount(Math.min(48,(await catalog.search({q:first.name})).total));
     await page.getByRole("button",{name:`View ${first.name}`,exact:true}).click();const details=page.getByRole("dialog",{name:"Style details",exact:true});await expect(details).toBeVisible();await expect(details.getByRole("link",{name:"Midlibrary.io",exact:true})).toHaveCount(0);

@@ -6,10 +6,10 @@ test("Style filters saved looks by catalog and retains the chosen catalog across
   const look=(id,name)=>({id,name,styleAnalysis:{stylePrompt:`Transferable visual treatment for ${name}`},examples:[]});
   const collections=[{id:"ink",name:"Inks",styles:[look("wash","Ink wash")]},{id:"film",name:"Cinema",styles:[look("noir","Noir")]},{id:"empty",name:"Empty",styles:[]}];
   await page.route("**/api/style-library",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({revision:0,collections})}));
-  const node=page.locator('.react-flow__node[data-id="style"]'),catalog=node.getByLabel("Look catalog",{exact:true}),picker=node.getByLabel("Look",{exact:true});
+  const node=page.locator('.react-flow__node[data-id="style"]'),catalog=node.getByLabel("Look collection",{exact:true}),picker=node.getByLabel("Look",{exact:true});
   await catalog.focus();await expect(catalog.getByRole("option",{name:"Cinema",exact:true})).toHaveCount(1);
   await expect(catalog).toHaveValue("none");await expect(picker).toBeDisabled();await expect(picker).toHaveValue("");
-  await expect(node).toContainText("Choose a catalog, then a look.");
+  await expect(node).toContainText("Choose a collection, then a look.");
   await catalog.selectOption({label:"Inks"});
   await expect(picker.getByRole("option",{name:"Ink wash",exact:true})).toHaveCount(1);
   await expect(picker.getByRole("option",{name:"Noir",exact:true})).toHaveCount(0);

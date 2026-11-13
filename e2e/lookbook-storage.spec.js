@@ -49,7 +49,7 @@ test("User Preferences can swap a compact Lookbook between a Windows network pat
   const looks=panel.getByLabel("Shared User Looks",{exact:true}),save=panel.getByRole("button",{name:"Save folders",exact:true});
   const uncPath="\\\\server\\Company\\Newt_Node_Lib";
   await field.fill(uncPath);await save.click();
-  await expect(panel.getByRole("status")).toContainText("New Looks will be saved on this computer");expect(last).toEqual({directory:uncPath,looksDirectory:"",copyLocal:true});
+  await expect(panel.getByRole("status")).toContainText("New Looks will be saved on this computer");expect(last).toEqual({directory:uncPath,looksDirectory:"",filmStillsDirectory:"",copyLocal:true});
   fail=true;await field.fill("/Volumes/Company/Newt_Node_Lib");await save.click();await expect(panel.getByRole("alert")).toContainText("previous setting unchanged");expect(state.directory).toBe(uncPath);
   fail=false;await looks.fill("/Volumes/Company/Newt_Shared_Looks");await save.click();await expect(panel.getByRole("status")).toContainText("Browse the compact catalog in StyleFinder");expect(state.directory).toBe("/Volumes/Company/Newt_Node_Lib");
   await page.reload();await page.getByRole("button",{name:"Settings",exact:true}).click();

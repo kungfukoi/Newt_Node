@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openFixture } from "./helpers.mjs";
+import { chooseLookbookCollection, chooseLookbookSource, openFixture } from "./helpers.mjs";
 import sharp from "sharp";
 
 const description = "Fine ink contours, translucent overlapping washes, softly feathered edges and spare highlights over subtle paper grain.";
@@ -61,10 +61,12 @@ test("Create Look analyzes once, allows new tags and description edits, saves to
   await details.getByRole("button", { name: "Use in Style", exact: true }).click();
   await expect(details.getByRole("status")).toContainText("description is saved");
   expect(f.count()).toBe(1); expect(f.uploaded()).toBe(2);
-  await expect(details.getByRole("button", { name: "Remove from my collection", exact: true })).toBeVisible();
-  await details.getByRole("button", { name: "Remove from my collection", exact: true }).click();
-  await expect(details.getByRole("button", { name: "Save to my collection", exact: true })).toBeVisible();
   await details.getByRole("button", { name: "Close style details", exact: true }).click();
+  await chooseLookbookCollection(page,"My Looks");
+  await page.getByRole("checkbox",{name:"Select Golden paper",exact:true}).check();
+  await page.getByRole("button",{name:"Remove from collection",exact:true}).click();
+  await expect(page.getByRole("button",{name:"View Golden paper",exact:true})).toHaveCount(0);
+  await chooseLookbookSource(page,"Local Looks");
   await expect(page.getByRole("button", { name: "View Golden paper", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create Look", exact: true }).click();
   await expect(dialog.locator(".create-look-images img")).toHaveCount(0);

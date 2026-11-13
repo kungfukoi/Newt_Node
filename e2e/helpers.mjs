@@ -83,7 +83,14 @@ export async function openFixture(page, options = {}) {
 }
 
 export async function chooseLookbookSource(page, name) {
+  await page.getByRole("button", { name: "Sources", exact: true }).click();
   await page.getByRole("combobox", { name: "Looks source", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
+export async function chooseLookbookCollection(page, name) {
+  await page.getByRole("button", { name: "My Library", exact: true }).click();
+  await page.getByRole("combobox", { name: "Collection", exact: true }).click();
   await page.getByRole("option", { name, exact: true }).click();
 }
 

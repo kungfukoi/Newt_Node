@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { chooseLookbookSource, openFixture } from "./helpers.mjs";
+import { chooseLookbookCollection, chooseLookbookSource, openFixture } from "./helpers.mjs";
 import { collectionFrameHeight, collectionRowHeight, collectionRowGap } from "../src/collectionFrame.js";
 
 test("Starred supports drag and keyboard row resizing, persistence and yellow dropdown highlights", async ({page}) => {
@@ -20,7 +20,7 @@ test("Starred supports drag and keyboard row resizing, persistence and yellow dr
   await expect(page.getByRole("option",{name:"Architects",exact:true})).toBeVisible();
   await category.press("ArrowDown");await category.press("Enter");await expect(category).toContainText("Architects");
   await category.click();await category.press("Escape");await expect(page.getByRole("listbox")).toHaveCount(0);
-  const source=name=>chooseLookbookSource(page,name);
+  const source=name=>name==="Starred"?chooseLookbookCollection(page,name):chooseLookbookSource(page,name);
   await source("Starred");await expect(handle).toHaveAttribute("aria-valuenow","1");await expect(handle).toHaveText("");
   await expect(strip.locator(".stylebuilder-tile")).toHaveCount(48);
   async function namesClearScrollbar(){
