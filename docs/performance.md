@@ -135,7 +135,7 @@ Validate canvas changes with a production build, the complete Node test suite, a
 
 ## September Reliability Optimizations
 
-- `workflowState.js` reuses serialization for unchanged immutable objects while producing the same persisted-content fingerprint, including undo-to-saved correctness.
+- `workflowState.js` reuses serialized graph objects and the joined JSON for lists with the same objects in the same order. Fingerprints retain exact persisted-content equality, including undo-to-saved correctness.
 - `flowNodeConnections.js` caches topology until node IDs or edges change. Input data references still refresh connected viewers immediately; unrelated arrays retain identity.
 - `flowNodeGeometry.js` coalesces real card/port changes into one animation-frame measurement and ignores progress-only mutations. No nodes are hidden to achieve this.
 - The rail requests permanent catalog pages and cached video posters. It preserves older pages and proportional single-column layout on refresh. Rail-only virtualization remains a possible later optimization, not an enabled behavior.

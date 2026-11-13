@@ -48,21 +48,34 @@ export function restoreGraphHistorySnapshot(snapshot, currentState, { nodeDataId
 }
 
 export function createWorkflowFingerprint() {
-  const nodeCache = new WeakMap();
-  const edgeCache = new WeakMap();
-  const groupCache = new WeakMap();
-  function serialized(item, cache, prepare) {
-    if (!cache.has(item)) cache.set(item, JSON.stringify(prepare(item)));
-    return cache.get(item);
+  function serializeList(prepare) {
+    const itemCache = new WeakMap();
+    let previousItems = [];
+    let previousJson = "";
+    return (items = []) => {
+      if (items.length === previousItems.length && items.every((item, index) => item === previousItems[index])) {
+        return previousJson;
+      }
+      const json = items.map((item) => {
+        if (!itemCache.has(item)) itemCache.set(item, JSON.stringify(prepare(item)));
+        return itemCache.get(item);
+      }).join(",");
+      previousItems = [...items];
+      previousJson = json;
+      return json;
+    };
   }
+  const serializeNodes = serializeList((node) => ({ ...node, data: persistedNodeData(node) }));
+  const serializeEdges = serializeList(cloneEdge);
+  const serializeGroups = serializeList(cloneGroup);
   return (state = {}) => {
-    const nodes = (state.nodes || []).map((node) => serialized(node, nodeCache, (value) => ({ ...value, data: persistedNodeData(value) })));
-    const edges = (state.edges || []).map((edge) => serialized(edge, edgeCache, cloneEdge));
-    const groups = (state.groups || []).map((group) => serialized(group, groupCache, cloneGroup));
+    const nodes = serializeNodes(state.nodes || undefined);
+    const edges = serializeEdges(state.edges || undefined);
+    const groups = serializeGroups(state.groups || undefined);
     const projectName = JSON.stringify(String(state.projectName || "Untitled node project").trim() || "Untitled node project");
     const projectPackagePath = JSON.stringify(state.projectPackagePath || "");
     // Exact JSON equality, not a lossy hash; immutable graph objects reuse their serialization.
-    return `{"nodes":[${nodes.join(",")}],"edges":[${edges.join(",")}],"groups":[${groups.join(",")}],"canvases":${JSON.stringify((state.canvases || []).map(({id,name})=>({id,name})))},"projectName":${projectName},"projectPackagePath":${projectPackagePath}}`;
+    return `{"nodes":[${nodes}],"edges":[${edges}],"groups":[${groups}],"canvases":${JSON.stringify((state.canvases || []).map(({id,name})=>({id,name})))},"projectName":${projectName},"projectPackagePath":${projectPackagePath}}`;
   };
 }
 
