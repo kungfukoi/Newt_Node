@@ -131,6 +131,14 @@ test("Selected looks create a collection atomically and keep existing collection
   await ink.check();await wash.check();await add.click();
   const picker=page.getByRole("dialog",{name:"Add to collection",exact:true});
   await expect(picker.getByRole("radio",{name:"First 1 already saved"})).toBeVisible();
+  const firstName = picker.getByText("First", { exact: true });
+  await expect(firstName).toBeVisible();
+  const nameLines = await firstName.evaluate(element => {
+    const text = document.createRange();
+    text.selectNodeContents(element);
+    return text.getClientRects().length;
+  });
+  expect(nameLines).toBe(1);
   await expect(picker.getByRole("radio",{name:"Starred"})).toHaveCount(0);
   await picker.getByRole("button",{name:"New collection…",exact:true}).click();
   const create=page.getByRole("dialog",{name:"New collection",exact:true});

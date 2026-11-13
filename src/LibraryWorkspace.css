@@ -63,7 +63,7 @@
 .stylebuilder-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
 .stylebuilder-section-title > span { color:var(--sb-muted); font-size:12px; }
 .library-workspace label { display:grid; gap:8px; margin:15px 0; font-size:13px; color:#bdbecb; }
-.library-workspace input:not([type=checkbox]):not(.stylebuilder-composer input):not(.stylebuilder-search input),.library-workspace textarea,.library-workspace select:not(.stylebuilder-browse-controls select):not(.stylebuilder-catalog-meta select) { width:100%; box-sizing:border-box; border:1px solid #3b3b48; border-radius:8px; padding:11px; background:#101015; color:#efeff4; font:inherit; }
+.library-workspace input:not([type=checkbox]):not([type=radio]):not(.stylebuilder-composer input):not(.stylebuilder-search input),.library-workspace textarea,.library-workspace select:not(.stylebuilder-browse-controls select):not(.stylebuilder-catalog-meta select) { width:100%; box-sizing:border-box; border:1px solid #3b3b48; border-radius:8px; padding:11px; background:#101015; color:#efeff4; font:inherit; }
 .library-workspace textarea { min-height:100px; resize:vertical; }
 .library-workspace fieldset { min-width:0; border:0; padding:0; margin:0; }
 .library-inline { display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
@@ -186,7 +186,7 @@
 .lookbook-collection-choices label:has(input:checked) { border-color:#ddc631; background:#ddc6311c; }
 .lookbook-collection-choices label span { flex:1; overflow-wrap:anywhere; }
 .lookbook-collection-choices label small { color:#bfbab0; text-align:right; }
-.lookbook-collection-choices input { accent-color:#ddc631; }
+.lookbook-collection-choices input { flex:none; margin:0; accent-color:#ddc631; }
 .lookbook-collection-name { display:grid; gap:6px; }
 .lookbook-collection-dialog-actions { justify-content:flex-end; margin-top:18px; }
 .stylebuilder-tile-selection { position:absolute; z-index:1; top:8px; right:8px; }
